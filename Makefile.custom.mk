@@ -1592,11 +1592,14 @@ verify-mcp-backend-netpol: ## Assert the in-cluster MCP backends' ingress (netwo
 	@python3 tests/verify-mcp-backend-netpol.py --muster-egress $(VERIFY_TMP)/vmbn-muster.out
 
 .PHONY: verify-kagent-netpol
-verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, no AOF; an installation's own fragment reaches the release verbatim.
+verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, no AOF; an installation's own fragment reaches the release verbatim. Its readers (giantswarm/agent-platform#851): ciliumNetworkPolicy.ingress.clients names exactly muster and klaus-gateway, by the pod labels the connectivity chart's muster-to-* and klausgateway-store-egress policies select.
 	@echo "====> $@ ($(CHART_DIR))"
-	@echo "--> default render: the fragment, the bound, the policy"
+	@echo "--> default render: the fragment, the bound, the policy, the clients"
 	@$(HELM) template t $(CHART_DIR) $(VM) >$(VERIFY_TMP)/vv-meta.out 2>&1 || { cat $(VERIFY_TMP)/vv-meta.out; exit 1; }
 	@python3 tests/verify-valkey.py $(VERIFY_TMP)/vv-meta.out
+	@echo "--> the client labels are the ones the connectivity chart selects muster and klaus-gateway by"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) -f $(CHART_DIR)/ci/test-klausgateway-valkey-values.yaml >$(VERIFY_TMP)/vv-conn.out 2>&1 || { cat $(VERIFY_TMP)/vv-conn.out; exit 1; }
+	@python3 tests/verify-valkey.py --selectors $(VERIFY_TMP)/vv-conn.out
 	@echo "--> an installation's own valkeyConfig replaces the fragment whole"
 	@$(HELM) template t $(CHART_DIR) $(VM) -f $(CHART_DIR)/ci/test-valkey-override-values.yaml >$(VERIFY_TMP)/vv-meta-override.out 2>&1 || { cat $(VERIFY_TMP)/vv-meta-override.out; exit 1; }
 	@python3 tests/verify-valkey.py --override $(VERIFY_TMP)/vv-meta-override.out

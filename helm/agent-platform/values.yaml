@@ -2277,6 +2277,22 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
   # policy). An explicit true / false wins.
   ciliumNetworkPolicy:
     enabled: auto  # auto | true | false
+    # The store's readers, admitted on the Valkey port: muster (its OAuth token
+    # store) and klaus-gateway (its routing store), by the pod labels the
+    # connectivity chart's muster-to-* and klausgateway-store-egress policies
+    # select. The wrapper's default admits every pod of the release namespace.
+    # The kubelet's probes (the host entity) and the exporter's collectors
+    # (ingress.metricsScrapers, alloy-metrics) stay the wrapper's. A further
+    # reader goes into ingress.additionalPeers; an installation's own clients
+    # list replaces this one whole.
+    ingress:
+      clients:
+        - namespace: ""
+          matchLabels:
+            app.kubernetes.io/name: muster
+        - namespace: ""
+          matchLabels:
+            app.kubernetes.io/name: klaus-gateway
   vpa:
     enabled: false
   # PodDisruptionBudget on the muster-valkey pod, rendered by the connectivity
