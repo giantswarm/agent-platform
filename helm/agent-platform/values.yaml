@@ -892,7 +892,9 @@ components:  # @schema additionalProperties: true
     # (giantswarm/agent-manager#86). 1.10.0 reads and composes the
     # api.kagent.dev Agent of this kagent line and migrates Generic chart 1.x
     # releases to 2.x (giantswarm/agent-manager#100).
-    versionRange: ">=1.10.0 <2.0.0"
+    # 1.11.0 takes kagent.controllerTarget, the kagent controller its session
+    # tools call (giantswarm/agent-manager#101).
+    versionRange: ">=1.11.0 <2.0.0"
     valuesFrom: agent-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)

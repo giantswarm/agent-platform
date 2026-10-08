@@ -77,7 +77,9 @@ components:
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "1.10.2" }
-  agent-manager:                 { versionRange: "1.4.0" }
+  # 1.11.0 takes kagent.controllerTarget, which the meta chart forwards while
+  # the kagent controller route is on (giantswarm/agent-manager#101).
+  agent-manager:                 { versionRange: "1.11.0" }
   vm-manager:                    { versionRange: "0.24.0" }
   # The cluster write surface (components.cluster-manager, off by default).
   cluster-manager:               { versionRange: "0.22.0" }

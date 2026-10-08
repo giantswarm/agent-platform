@@ -123,7 +123,12 @@ overwrite would hide a values file that still spells the old key.
     default ca.crt) while muster names no CA Secret of its own — the issuer's
     private CA its OAuth server verifies the provider against.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
-                 muster.url from the muster Service (agent-platform.musterMcpUrl).
+                 muster.url from the muster Service (agent-platform.musterMcpUrl);
+                 kagent.controllerTarget, the kagent controller its session
+                 tools call, from the agentgateway data plane
+                 (agent-platform.kagentControllerTarget). Empty while the
+                 controller route is off, which turns the session tools off
+                 over the chart's own default.
   klaus-gateway: with klausGateway.routing.store: valkey, the platform's own
     Valkey fills in what the routing.valkey block leaves unset — url from the
     valkey release's Service (agent-platform.valkeyAddress), existingSecret and
@@ -198,6 +203,12 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- fail (printf "agent-manager.muster.url (%s) differs from the platform's muster MCP URL (%s): agent-manager composes every agent's RemoteMCPServer against the muster this chart installs — the URL follows muster.fullnameOverride and muster.service.port; leave agent-manager.muster.url unset" $ownUrl $url) -}}
 {{- end -}}
 {{- $_ := set $derived "muster" (dict "url" $url) -}}
+{{- $target := include "agent-platform.kagentControllerTarget" .root -}}
+{{- $ownTarget := dig "kagent" "controllerTarget" "" (index .root.Values "agent-manager" | default dict) -}}
+{{- if and $ownTarget (ne $ownTarget $target) -}}
+{{- fail (printf "agent-manager.kagent.controllerTarget (%s) differs from the platform's kagent controller target (%q): agent-manager's session tools reach the controller through the agentgateway data plane this chart installs, on kagent.controllerRoute; the target follows gateway.name and gateway.listeners[0].port; leave agent-manager.kagent.controllerTarget unset" $ownTarget $target) -}}
+{{- end -}}
+{{- $_ := set $derived "kagent" (dict "controllerTarget" $target) -}}
 {{- end -}}
 {{- if eq .name "cluster-manager" -}}
 {{- /* model-manager's namespace: where the model-manager component lands — the
@@ -1168,6 +1179,24 @@ Usage: include "agent-platform.musterMcpUrl" .
 {{- define "agent-platform.musterMcpUrl" -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
 {{- printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) .Release.Namespace (include "agent-platform.musterServicePort" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The in-cluster gRPC target of the kagent controller through the agentgateway
+data plane, the one agent-manager's session tools call as the caller:
+grpc://<gateway.name>.<target namespace>.svc.cluster.local:<gateway.listeners[0].port>
+while the kagent and agentgateway components are on and kagent.controllerRoute
+is enabled (the GRPCRoute that carries SessionService and lf.a2a.v1.A2AService),
+"" otherwise. The data plane lands with the connectivity release, in the
+platform's target namespace.
+Usage: include "agent-platform.kagentControllerTarget" .
+*/}}
+{{- define "agent-platform.kagentControllerTarget" -}}
+{{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") -}}
+{{- $gatewayOn := include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway") -}}
+{{- if and $kagentOn $gatewayOn (dig "controllerRoute" "enabled" false (.Values.kagent | default dict)) -}}
+{{- printf "grpc://%s.%s.svc.cluster.local:%v" .Values.gateway.name (include "agent-platform.targetNamespace" .) (index .Values.gateway.listeners 0).port -}}
 {{- end -}}
 {{- end -}}
 

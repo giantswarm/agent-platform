@@ -2339,6 +2339,14 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 		grep -A3 '^kind: NetworkPolicy$$' $(VERIFY_TMP)/vmg-k8s.out | grep -q "^  name: agent-platform-connectivity-$$n$$" || { echo "FAIL: NetworkPolicy agent-platform-connectivity-$$n missing from the kubernetes render"; exit 1; }; \
 	done
 	@echo "ok: kubernetes flavor"
+	@echo "--> agent-manager's session tools (giantswarm/agent-manager#3): with kagent.controllerRoute on, its egress admits the agentgateway data plane on the listener port in both flavors; with the route off, no such rule"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set kagent.controllerRoute.enabled=true >$(VERIFY_TMP)/vmg-sess-cilium.out 2>&1 || { cat $(VERIFY_TMP)/vmg-sess-cilium.out; exit 1; }
+	@awk '/^  name: agent-platform-connectivity-agent-manager-egress$$/,/^---/' $(VERIFY_TMP)/vmg-sess-cilium.out | grep -A6 'gateway.networking.k8s.io/gateway-name: agentgateway' | grep -q 'port: "8080"' || { echo "FAIL: cilium agent-manager egress lacks the data plane on 8080 with the controller route on"; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set kagent.controllerRoute.enabled=true --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vmg-sess-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vmg-sess-k8s.out; exit 1; }
+	@awk '/^  name: agent-platform-connectivity-agent-manager-egress$$/,/^---/' $(VERIFY_TMP)/vmg-sess-k8s.out | grep -A4 'gateway.networking.k8s.io/gateway-name: agentgateway' | grep -q 'port: 8080' || { echo "FAIL: kubernetes agent-manager egress lacks the data plane on 8080 with the controller route on"; exit 1; }
+	@if awk '/^  name: agent-platform-connectivity-agent-manager-egress$$/,/^---/' $(VERIFY_TMP)/vmg-k8s.out | grep -q 'gateway-name'; then echo "FAIL: agent-manager egress admits the data plane with the controller route off"; exit 1; fi
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set kagent.controllerRoute.enabled=true --set agent-manager.oauth.enabled=false 2>/dev/null | awk '/^  name: agent-platform-connectivity-agent-manager-egress$$/,/^---/' | grep -q 'gateway-name'; then echo "FAIL: agent-manager egress admits the data plane with its OAuth off (no caller token, no session tools)"; exit 1; fi
+	@echo "ok: session tools egress"
 	@echo "--> networkPolicy.enabled=false renders no policy for either component"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set networkPolicy.enabled=false >$(VERIFY_TMP)/vmg-nonp.out 2>&1 || { cat $(VERIFY_TMP)/vmg-nonp.out; exit 1; }
 	@if grep -qE 'kind: (CiliumNetworkPolicy|NetworkPolicy)' $(VERIFY_TMP)/vmg-nonp.out; then echo "FAIL: network policies render with networkPolicy.enabled=false"; exit 1; else echo "ok: policy master switch"; fi
@@ -2488,6 +2496,14 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	elif ! grep -q "leave agent-manager.muster.url unset" $(VERIFY_TMP)/vid-url-guard.out; then \
 		echo "FAIL: the muster.url guard failed for the wrong reason"; cat $(VERIFY_TMP)/vid-url-guard.out; exit 1; \
 	else echo "ok: muster.url guard"; fi
+	@echo "--> agent-manager receives the kagent controller target of its session tools (kagent.controllerTarget) from the same derivation (agent-platform.kagentControllerTarget): the data plane's in-cluster address with kagent.controllerRoute on, empty with it off (over the chart's own default); a disagreeing agent-manager.kagent.controllerTarget fails naming the source"
+	@grep -q '^      controllerTarget: ""$$' $(VERIFY_TMP)/vid-meta-am-url.out || { echo "FAIL: agent-manager's kagent.controllerTarget is not empty with the controller route off"; grep -n -A4 '^    kagent:' $(VERIFY_TMP)/vid-meta-am-url.out; exit 1; }
+	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.controllerRoute.enabled=true 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' | grep -q '^      controllerTarget: grpc://agentgateway.default.svc.cluster.local:8080$$' || { echo "FAIL: agent-manager's kagent.controllerTarget is not the data plane's address with the controller route on"; exit 1; }
+	@if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.controllerRoute.enabled=true --set agent-manager.kagent.controllerTarget=grpc://other:8080 >$(VERIFY_TMP)/vid-target-guard.out 2>&1; then \
+		echo "FAIL: a disagreeing agent-manager.kagent.controllerTarget was accepted"; exit 1; \
+	elif ! grep -q "leave agent-manager.kagent.controllerTarget unset" $(VERIFY_TMP)/vid-target-guard.out; then \
+		echo "FAIL: the controllerTarget guard failed for the wrong reason"; cat $(VERIFY_TMP)/vid-target-guard.out; exit 1; \
+	else echo "ok: controllerTarget guard"; fi
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.muster.url=http://muster.default.svc.cluster.local:8090/mcp >/dev/null 2>&1 || { echo "FAIL: an agreeing agent-manager.muster.url must pass"; exit 1; }
 	@grep -q 'define "agent-platform.musterMcpUrl"' $(CONNECTIVITY_DIR)/templates/_helpers.tpl || { echo "FAIL: the connectivity chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
 	@grep -q 'define "agent-platform.musterMcpUrl"' $(CHART_DIR)/templates/_helpers.tpl || { echo "FAIL: the meta chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
