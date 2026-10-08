@@ -102,6 +102,7 @@ kubectl --kubeconfig <kubeconfig> --context <context> -n kagent get configmap ag
 
 Expected: `run.path: 1.x -> 2.x`, no release `failed`, phase `wait` until Flux upgrades the releases and the Agents are Ready, then `complete`. A run that ended in `wait` is re-run once the Agents are Ready, which deletes the leftover `kagent.dev` AgentTemplates no release renders: `kubectl -n kagent create job --from=cronjob/agent-platform-connectivity-agent-manager-migrate agent-manager-migrate-rerun-1`. A release's `warnings` name a sub-agent `templateRef` with no `api.kagent.dev` AgentTemplate in the namespace; the parent Agent stays `ResolvedRefs=False` until one exists.
 
+- [ ] Hand-written kagent objects in the installation's gitops repository (ModelConfigs, ModelProviderConfigs, RemoteMCPServers, AgentTemplates the charts do not render) move to `apiVersion: api.kagent.dev/v1alpha3` in the same change: the line's controller resolves only that group, so an Agent naming a `kagent.dev` ModelConfig stays `ResolvedRefs=False` (ModelConfig not found). The schemas are the same; `api.kagent.dev` adds `stream`.
 - [ ] The connectivity release re-rendered the catalog at `api.kagent.dev` (ModelConfigs, RemoteMCPServers) and the kagent release its Harness:
 
 ```sh
