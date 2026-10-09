@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=1.5.0 <1.6.0"
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=1.6.1 <1.7.0"
-SUBSTRATE_PIN = "1.6.1"  # the range's floor, the BOM pin and the worker image's tag: the line on kagent-dev/substrate v0.4.0-alpha1 (giantswarm/substrate#210, the 2026-10-08 re-pin) with the sandbox resolver fix in the worker (giantswarm/substrate#216); the 1.0 and 1.3 lines stay on release-1.0 and release-1.3
+SUBSTRATE_RANGE = ">=1.6.3 <1.7.0"
+SUBSTRATE_PIN = "1.6.3"  # the range's floor, the BOM pin and the worker image's tag: the line on kagent-dev/substrate v0.4.0-alpha1 (giantswarm/substrate#210, the 2026-10-08 re-pin) with the sandbox resolver fix in the worker (giantswarm/substrate#216) and the sandbox's pause image as a value, defaulting to its gsoci copy (giantswarm/substrate#224); the 1.0 and 1.3 lines stay on release-1.0 and release-1.3
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
