@@ -144,6 +144,10 @@ WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valk
 # and not on a golden from before; it is left out of both sides. Drop it once
 # GOLDEN_REF carries #840.
 WIRING_PG_GOLDEN_DROP := $(DASHBOARDS_GOLDEN_DROP) muster-mcp-egress
+# The Cluster's resources and ephemeralVolumesSizeLimit render here
+# (giantswarm/agent-platform#875) and not on a golden from before; the head's
+# side renders without them. Empty it once GOLDEN_REF carries #875.
+WIRING_PG_GOLDEN_HEAD := --set postgres.resources=null --set postgres.ephemeralVolumesSizeLimit=null
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
 # golden diff (by metadata.name): the v1alpha2 agent Deployments' seccomp
 # PolicyException is gone with them, the kagent controller's ingress policy
@@ -3035,7 +3039,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@if [ -n "$(GOLDEN_REF)" ] && git rev-parse --verify -q $(GOLDEN_REF) >/dev/null; then \
 		rm -rf $(VERIFY_TMP)/vw-pg-ref && git worktree add -q --detach $(VERIFY_TMP)/vw-pg-ref $(GOLDEN_REF) && \
 		for flavor in cilium kubernetes; do \
-			$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-new-$$flavor.out; \
+			$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) $(WIRING_PG_GOLDEN_HEAD) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-new-$$flavor.out; \
 			$(HELM) template t $(VERIFY_TMP)/vw-pg-ref/$(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-old-$$flavor.out; \
 			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-new-$$flavor.out "$(WIRING_PG_GOLDEN_DROP)"; \
 			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-old-$$flavor.out "$(WIRING_PG_GOLDEN_DROP)"; \
@@ -3564,6 +3568,17 @@ verify-postgres-kagent-v2: ## Assert the kagent_v2 database entry (#346): the CN
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >$(VERIFY_TMP)/vpv2-off.out 2>&1 || { cat $(VERIFY_TMP)/vpv2-off.out; exit 1; }
 	@if grep -q 'kagent-pg-kagent-v2' $(VERIFY_TMP)/vpv2-off.out; then echo "FAIL: the kagent-v2 Database renders with postgres off"; exit 1; fi
 	@echo "ok: enabled, component, postgres off"
+	@echo "ok: $@"
+
+.PHONY: verify-postgres-ephemeral-storage
+verify-postgres: verify-postgres-ephemeral-storage
+verify-postgres-ephemeral-storage: ## Assert the CNPG instance pods bound their emptyDirs (#875, Kyverno's require-emptydir-requests-and-limits): the Cluster carries resources with ephemeral-storage requests and limits and ephemeralVolumesSizeLimit (shm, temporaryData), the plugin backup's ObjectStore gives its sidecar ephemeral-storage requests and limits for the operator's plugins emptyDir, the pod the operator builds from them passes the rule without and with the plugin backup and fails it with both knobs null; the meta chart forwards the same defaults. Needs PyYAML.
+	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_ON) >$(VERIFY_TMP)/vpes-off.out 2>&1 || { cat $(VERIFY_TMP)/vpes-off.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_MINIO) >$(VERIFY_TMP)/vpes-plugin.out 2>&1 || { cat $(VERIFY_TMP)/vpes-plugin.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_MINIO) --set postgres.resources=null --set postgres.ephemeralVolumesSizeLimit=null --set postgres.backup.objectStore.sidecar.resources=null >$(VERIFY_TMP)/vpes-null.out 2>&1 || { cat $(VERIFY_TMP)/vpes-null.out; exit 1; }
+	@python3 tests/verify-postgres-ephemeral-storage.py $(VERIFY_TMP)/vpes-off.out $(VERIFY_TMP)/vpes-plugin.out $(VERIFY_TMP)/vpes-null.out $(CONNECTIVITY_DIR)/values.yaml $(CHART_DIR)/values.yaml
 	@echo "ok: $@"
 
 .PHONY: verify-identity-migration

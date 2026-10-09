@@ -1781,6 +1781,18 @@
                 "enabled": {
                     "type": "boolean"
                 },
+                "ephemeralVolumesSizeLimit": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "shm": {
+                            "type": "string"
+                        },
+                        "temporaryData": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "image": {
                     "type": "object",
                     "additionalProperties": false,
@@ -1807,6 +1819,10 @@
                 },
                 "namespace": {
                     "type": "string"
+                },
+                "resources": {
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "sessionsDatabase": {
                     "type": "object",

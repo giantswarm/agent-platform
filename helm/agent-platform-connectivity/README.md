@@ -1427,6 +1427,14 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | postgres.image.name | string | `""` |  |
 | postgres.imagePullSecrets | list | `[]` |  |
 | postgres.affinity | object | `{}` |  |
+| postgres.resources.requests.cpu | string | `"100m"` |  |
+| postgres.resources.requests.memory | string | `"512Mi"` |  |
+| postgres.resources.requests.ephemeral-storage | string | `"256Mi"` |  |
+| postgres.resources.limits.cpu | string | `"1"` |  |
+| postgres.resources.limits.memory | string | `"2Gi"` |  |
+| postgres.resources.limits.ephemeral-storage | string | `"2Gi"` |  |
+| postgres.ephemeralVolumesSizeLimit.shm | string | `"256Mi"` |  |
+| postgres.ephemeralVolumesSizeLimit.temporaryData | string | `"1Gi"` |  |
 | postgres.vector.enabled | bool | `false` |  |
 | postgres.vector.extensionImage.reference | string | `""` |  |
 | postgres.applicationDatabase.name | string | `"kagent"` |  |
@@ -1474,7 +1482,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | postgres.backup.objectStore.azure.storageAccount.key | string | `""` |  |
 | postgres.backup.objectStore.azure.storageKey.name | string | `""` |  |
 | postgres.backup.objectStore.azure.storageKey.key | string | `""` |  |
-| postgres.backup.objectStore.sidecar.resources | object | `{}` |  |
+| postgres.backup.objectStore.sidecar.resources.requests.cpu | string | `"10m"` |  |
+| postgres.backup.objectStore.sidecar.resources.requests.memory | string | `"64Mi"` |  |
+| postgres.backup.objectStore.sidecar.resources.requests.ephemeral-storage | string | `"16Mi"` |  |
+| postgres.backup.objectStore.sidecar.resources.limits.memory | string | `"256Mi"` |  |
+| postgres.backup.objectStore.sidecar.resources.limits.ephemeral-storage | string | `"256Mi"` |  |
 | postgres.backup.volumeSnapshot.className | string | `""` |  |
 | postgres.backup.volumeSnapshot.walClassName | string | `""` |  |
 | postgres.backup.volumeSnapshot.online | bool | `true` |  |

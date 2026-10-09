@@ -1251,7 +1251,14 @@ spec:
               key: ACCESS_SECRET_KEY
               name: ""
           sidecar:
-            resources: {}
+            resources:
+              limits:
+                ephemeral-storage: 256Mi
+                memory: 256Mi
+              requests:
+                cpu: 10m
+                ephemeral-storage: 16Mi
+                memory: 64Mi
           wal:
             compression: gzip
             maxParallel: 1
@@ -1283,11 +1290,23 @@ spec:
           secretNamespaces:
           - ate-system
       enabled: false
+      ephemeralVolumesSizeLimit:
+        shm: 256Mi
+        temporaryData: 1Gi
       image:
         name: ""
       imagePullSecrets: []
       instances: 3
       namespace: kagent
+      resources:
+        limits:
+          cpu: "1"
+          ephemeral-storage: 2Gi
+          memory: 2Gi
+        requests:
+          cpu: 100m
+          ephemeral-storage: 256Mi
+          memory: 512Mi
       sessionsDatabase:
         enabled: false
         name: sessions
