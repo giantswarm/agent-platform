@@ -69,11 +69,13 @@ Usage of the Job include (a dict):
 {{- end -}}
 
 {{/*
-The ephemeral-storage request and limit of every hook container, and the
-sizeLimit of the /tmp emptyDir it mounts (the limit). Kyverno's
-require-emptydir-requests-and-limits refuses a container mounting an emptyDir
-without them. /tmp holds kubectl's discovery and HTTP cache and a script's
-few small files; nothing in it scales with the cluster.
+The ephemeral-storage request and limit of every hook container and of the
+agent-manager migrate run, and the sizeLimit of the /tmp emptyDir each mounts
+(the limit). Kyverno's require-emptydir-requests-and-limits refuses a
+container mounting an emptyDir without them. /tmp holds kubectl's discovery
+and HTTP cache and a script's few small files; migrate keeps its chart schema
+and skill lookups in memory and writes nothing there. Nothing in it scales
+with the cluster.
 */}}
 {{- define "agent-platform.hooks.tmpRequest" -}}16Mi{{- end -}}
 {{- define "agent-platform.hooks.tmpLimit" -}}256Mi{{- end -}}

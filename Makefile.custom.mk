@@ -3770,7 +3770,7 @@ verify-hooks-memory: ## Assert the connectivity hook Jobs' memory (#513): every 
 	@echo "ok: $@"
 
 .PHONY: verify-hooks-ephemeral-storage
-verify-hooks-ephemeral-storage: ## Assert every hook Job of both charts bounds its emptyDirs (#780, Kyverno's require-emptydir-requests-and-limits): each container mounting an emptyDir requests and limits ephemeral-storage, each emptyDir carries a sizeLimit — the connectivity chart's four hook Jobs, the Backstage config-reload and the migrate start, the meta chart's hooks with the engine on (self-management's included) and the serving teardown with it off. Needs PyYAML.
+verify-hooks-ephemeral-storage: ## Assert every hook Job and CronJob of both charts bounds its emptyDirs (#780, #866, Kyverno's require-emptydir-requests-and-limits): each container mounting an emptyDir requests and limits ephemeral-storage, each emptyDir carries a sizeLimit — the connectivity chart's four hook Jobs, the Backstage config-reload, the migrate start and the migrate CronJob, the meta chart's hooks with the engine on (self-management's included) and the serving teardown with it off. Needs PyYAML.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >$(VERIFY_TMP)/vhe-conn.out 2>&1 || { cat $(VERIFY_TMP)/vhe-conn.out; exit 1; }
@@ -3781,7 +3781,7 @@ verify-hooks-ephemeral-storage: ## Assert every hook Job of both charts bounds i
 	@python3 tests/verify-hooks-ephemeral-storage.py \
 		$(VERIFY_TMP)/vhe-conn.out=t-substrate-bootstrap,t-postgres-databases,t-model-serving-cache,t-model-serving-prepull-cleanup \
 		$(VERIFY_TMP)/vhe-backstage.out=agent-platform-connectivity-backstage-config-reload \
-		$(VERIFY_TMP)/vhe-migrate.out=t-agent-manager-migrate-start \
+		$(VERIFY_TMP)/vhe-migrate.out=t-agent-manager-migrate-start,agent-platform-connectivity-agent-manager-migrate \
 		$(VERIFY_TMP)/vhe-meta.out=t-flux-operator-crds,t-kagent-namespace,t-self-stop-resumer,t-self-suspend,t-self-values,t-teardown-engine,t-teardown-operator,t-teardown-releases \
 		$(VERIFY_TMP)/vhe-serving.out=t-serving-teardown
 	@echo "ok: $@"

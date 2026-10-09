@@ -90,14 +90,17 @@ spec:
         requests:
           cpu: 50m
           memory: 64Mi
+          ephemeral-storage: {{ include "agent-platform.hooks.tmpRequest" .root }}
         limits:
           memory: 256Mi
+          ephemeral-storage: {{ include "agent-platform.hooks.tmpLimit" .root }}
       volumeMounts:
         - name: tmp
           mountPath: /tmp
   volumes:
     - name: tmp
-      emptyDir: {}
+      emptyDir:
+        sizeLimit: {{ include "agent-platform.hooks.tmpLimit" .root }}
 {{- end -}}
 
 {{/*
