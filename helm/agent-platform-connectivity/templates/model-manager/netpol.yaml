@@ -26,6 +26,7 @@ rendered as one more ingress peer in the flavor's own dialect. */ -}}
 {{- end }}
 {{- end }}
 {{- $hf := $mm.networkPolicy.huggingFace }}
+{{- $reg := $mm.networkPolicy.registry }}
 {{- $egress := $mm.networkPolicy.egress }}
 {{- /* Backends registered at runtime (modelManager.networkPolicy.registeredBackends):
 {cidr | fqdn, port} entries, each one more egress rule on its port in the
@@ -118,8 +119,9 @@ spec:
 # (model-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
 # Dex issuer by name, or the three Google hosts for the google provider), for
 # every ollama, lemonade and lmstudio backend its host model server's endpoint, for the
-# kserve backend the Hugging Face Hub, with commit mode (model-manager.github)
-# GitHub's API, and the names and blocks of modelManager.networkPolicy.egress.
+# kserve backend the Hugging Face Hub and the model registry, with commit mode
+# (model-manager.github) GitHub's API, and the names and blocks of
+# modelManager.networkPolicy.egress.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -154,6 +156,26 @@ spec:
     {{- end }}
     {{- with $hf.cidrs }}
     # Hugging Face by address (a mirror, a proxy, an S3 endpoint).
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    {{- with $reg.fqdns }}
+    # The kserve backend reads model images itself (fit checks of a preset
+    # served from oci://): the registry and the blob storage it redirects to,
+    # by name (modelManager.networkPolicy.registry).
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    {{- with $reg.cidrs }}
+    # The registry by address (a mirror, a proxy).
     - toCIDR:
         {{- toYaml . | nindent 8 }}
       toPorts:
@@ -371,8 +393,9 @@ spec:
 ---
 # Egress from model-manager: DNS, the Kubernetes API, and — vanilla
 # NetworkPolicy has no FQDN selector — every public destination on 443 (the
-# identity provider, Dex or Google; the Hugging Face Hub for the kserve
-# backend; modelManager.networkPolicy.huggingFace.cidrs narrows the latter),
+# identity provider, Dex or Google; the Hugging Face Hub and the model registry
+# for the kserve backend; modelManager.networkPolicy.huggingFace.cidrs and
+# .registry.cidrs together narrow the latter),
 # plus for every ollama, lemonade and lmstudio backend its host model server's endpoint. A private identity
 # provider needs its address in modelManager.networkPolicy.egress.cidrs or
 # networkPolicy.additionalEgressCIDRs.
@@ -462,7 +485,18 @@ spec:
           protocol: TCP
         {{- end }}
     {{- end }}
-    {{- if or $oauthOn (and $kserveOn (not $hf.cidrs)) }}
+    {{- if and $kserveOn $reg.cidrs }}
+    # The model registry by address (registry.cidrs): these blocks only.
+    - to:
+        {{- range $reg.cidrs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+    {{- if or $oauthOn (and $kserveOn (not (and $hf.cidrs $reg.cidrs))) }}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
