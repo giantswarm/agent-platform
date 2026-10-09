@@ -14,6 +14,14 @@
 {{- $hasStorageInitializer := printf "{{ length(request.object.spec.initContainers[?name=='storage-initializer'] || %s[]%s) }}" $backtick $backtick }}
 {{- $podMatch := include "agent-platform.modelServing.kyvernoMatch" (dict "root" .) | trim }}
 {{- $modelName := printf "{{ %s }}" (include "agent-platform.modelServing.modelNamePath" .) }}
+{{- /* The claim a model pod mounts: model-manager names it on the pod when a
+       node's cache claim is outside another node's reach (a node-local
+       volume; giantswarm/model-manager#294) — a split's worker pods read
+       model-manager.giantswarm.io/worker-cache-claim, every pod
+       model-manager.giantswarm.io/cache-claim after it, and a pod naming
+       neither (or an empty value) mounts the base claim. */ -}}
+{{- $workers := list "llminferenceservice-workload-worker" "llminferenceservice-workload-worker-prefill" }}
+{{- $claimName := printf "{{ (contains(['%s'], request.object.metadata.labels.\"app.kubernetes.io/component\" || '') && request.object.metadata.annotations.\"model-manager.giantswarm.io/worker-cache-claim\") || request.object.metadata.annotations.\"model-manager.giantswarm.io/cache-claim\" || '%s' }}" (join "','" $workers) (include "agent-platform.modelServing.claimName" .) }}
 {{- /* vLLM's cache: a directory of the claim's own at the claim root, mounted
        on the runtime container next to the model's directory — never a path
        under /mnt/models (#541); Triton's kernel cache a directory of it (#572).
@@ -33,7 +41,12 @@
 #                              ephemeral emptyDir KServe mounts: a model
 #                              downloads once, a restart skips the download
 #                              (the storage-initializer detects the files).
-#                              The pod carries the claim's fsGroup
+#                              The claim is the one the pod's
+#                              model-manager.giantswarm.io/cache-claim (a
+#                              split's worker pods: worker-cache-claim)
+#                              annotation names, else the base claim: a node
+#                              outside a node-local claim's reach gets a claim
+#                              of its own. The pod carries the claim's fsGroup
 #                              (modelServing.cache.fsGroup): the kubelet makes
 #                              the claim's contents group-owned, group-writable
 #                              and setgid on every mount and creates a missing
@@ -157,7 +170,7 @@ spec:
             volumes:
               - name: hf-cache
                 persistentVolumeClaim:
-                  claimName: {{ include "agent-platform.modelServing.claimName" $ }}
+                  claimName: {{ $claimName | quote }}
             # volumeMounts merge on mountPath: the /mnt/models entries replace
             # KServe's emptyDir mounts and keep their other fields; the
             # runtime writes nothing into the model's directory. The runtime's

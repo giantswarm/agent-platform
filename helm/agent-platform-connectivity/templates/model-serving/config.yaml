@@ -68,6 +68,11 @@ data:
         # Whether the Kyverno policies redirect the KServe storage-initializer
         # into that claim at admission (no LLMInferenceService change needed).
         redirectPolicy: {{ if (include "agent-platform.modelServingPolicies" .) }}true{{ else }}false{{ end }}
+        # Whether that redirect mounts the claim a model pod names in its
+        # model-manager.giantswarm.io/cache-claim (worker pods:
+        # worker-cache-claim) annotation, a claim per node in the serving
+        # namespace; model-manager creates node claims only when true.
+        nodeClaims: {{ if (include "agent-platform.modelServingPolicies" .) }}true{{ else }}false{{ end }}
         {{- end }}
       # The models Gateway every LLMInferenceService route attaches to, and the
       # path convention a served model answers on (#326).
