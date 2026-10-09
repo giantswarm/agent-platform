@@ -5,7 +5,7 @@ render of this chart on its own says the same.
 */ -}}
 {{- if include "agent-platform.substrate.enabled" . }}
   {{- if not (include "agent-platform.substrate.postgresMode" .) }}
-    {{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster — the postgres.databases entry postgres.substrateDatabase names renders the Database and the post-install hook derives the connection Secret), or substrate.postgres.enabled (the chart's bundled StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionStringSecretRef (a Secret in ate-system holding the connection string) or substrate.postgres.connectionString" }}
+    {{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster — the postgres.databases entry postgres.substrateDatabase names renders the Database and the post-install hook derives the connection Secret), or substrate.postgres.enabled (the chart's bundled StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionStringSecretRef (a Secret in ate-system holding the connection string) or substrate.postgres.readWriteConnectionString" }}
   {{- end }}
   {{- if eq (include "agent-platform.substrate.postgresMode" .) "cnpg" }}
     {{- include "agent-platform.substrate.validateDatabaseKey" . }}

@@ -1339,8 +1339,8 @@ spec:
       podLabels:
         observability.giantswarm.io/tenant: giantswarm
       postgres:
-        connectionString: ""
         enabled: true
+        readWriteConnectionString: ""
         schema: public
       rustfs:
         enabled: false
@@ -1917,7 +1917,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.5.0
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.6.0
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -2376,8 +2376,8 @@ spec:
     podLabels:
       observability.giantswarm.io/tenant: giantswarm
     postgres:
-      connectionString: ""
       enabled: true
+      readWriteConnectionString: ""
       schema: public
     rustfs:
       enabled: false
@@ -2779,7 +2779,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.4.0 <1.5.0"
+    semver: ">=1.5.0 <1.6.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2802,7 +2802,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.4.0 <1.5.0"
+    semver: ">=1.5.0 <1.6.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2894,7 +2894,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.5.0 <1.6.0"
+    semver: ">=1.6.0 <1.7.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2917,7 +2917,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.5.0 <1.6.0"
+    semver: ">=1.6.0 <1.7.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

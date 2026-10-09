@@ -553,7 +553,7 @@ components:  # @schema additionalProperties: true
     # chart takes its OTel settings in the SDK-spec shape kagent.otel below
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
     # ignores them and exports nothing.
-    versionRange: ">=1.4.0 <1.5.0"
+    versionRange: ">=1.5.0 <1.6.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -663,7 +663,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.4.0 <1.5.0"
+    versionRange: ">=1.5.0 <1.6.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -714,7 +714,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.5.0 <1.6.0"
+    versionRange: ">=1.6.0 <1.7.0"
     # Stable releases only, also where gitops.prereleases admits the
     # platform's release candidates: the worker image above follows the
     # floor, and a candidate's atelet next to the floor's worker fails every
@@ -743,7 +743,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.5.0 <1.6.0"
+    versionRange: ">=1.6.0 <1.7.0"
     # Stable releases only, the range of substrate-crds above.
     prereleases: false
     valuesFrom: substrate
@@ -5095,14 +5095,19 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # <postgres.clusterName>-substrate-app in ate-system — the meta chart
     # derives postgres.connectionStringSecretRef from those values
     # (agent-platform.componentDerivedValues; a disagreeing explicit value
-    # fails the render) — and the chart's bundled single-instance StatefulSet
-    # stays off; without the Cluster the bundled StatefulSet runs (a lab, a
-    # quick start), as kagent's own bundled Postgres does. `true` forces the
-    # bundled one, `false` refuses it — then the Cluster or connectionString
-    # (an external database) must hold, or the render fails. The chart itself
-    # takes a boolean; the meta chart resolves `auto` before forwarding.
+    # fails the render), and readWriteRole and ownerRole, the role that
+    # Secret logs in as (postgres.applicationDatabase.owner): ate-api-server
+    # runs SET ROLE on every connection — and the chart's bundled
+    # single-instance StatefulSet stays off; without the Cluster the bundled
+    # StatefulSet runs (a lab, a quick start), as kagent's own bundled
+    # Postgres does. `true` forces the bundled one, `false` refuses it — then
+    # the Cluster or readWriteConnectionString (an external database) must
+    # hold, or the render fails. An external database sets readWriteRole and
+    # ownerRole itself (the chart's default is `postgres`) to roles its DSN's
+    # user may assume. The chart itself takes a boolean; the meta chart
+    # resolves `auto` before forwarding.
     enabled: auto  # auto | true | false
-    connectionString: ""
+    readWriteConnectionString: ""
     # The PostgreSQL schema ate-api-server keeps its tables in.
     schema: public
   rustfs:

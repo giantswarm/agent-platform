@@ -1551,8 +1551,8 @@ spec:
       podLabels:
         observability.giantswarm.io/tenant: giantswarm
       postgres:
-        connectionString: ""
         enabled: true
+        readWriteConnectionString: ""
         schema: public
       rustfs:
         enabled: false

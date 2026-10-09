@@ -15,6 +15,18 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.121.x → \<next\> (kagent 1.5.0 and Substrate 1.6.0)
+
+`components.kagent{,-crds}.versionRange` selects kagent 1.5 (the kagent line on upstream `v1.0.0-alpha9`) and `components.substrate{,-crds}.versionRange` Substrate 1.6 (the line on kagent-dev/substrate `v0.4.0-alpha1`). kagent 1.5.0 fetches private git skill and plugin sources again (giantswarm/kagent-upstream#252). Both releases install over their predecessors in place: the kagent and Substrate CRDs change only in their descriptions.
+
+- **Substrate's database.** ate-api-server 1.6.0 runs `SET ROLE` on every connection. On the platform Cluster (the fleet) the meta chart sets both roles to `postgres.applicationDatabase.owner`, the role the derived DSN logs in as; nothing to do. On its first start against a 1.5 database, ate-api-server moves the line's own migration into a ledger of its own (`fork_schema_migrations`), once, in one transaction.
+- **kubectl-ate.** A 1.5 kubectl-ate refuses a 1.6 server (the egress-policy contract is `v0.4.0-alpha1`); use the 1.6 one.
+
+### Operator action
+
+- **An installation whose Substrate uses an external database by value** (`substrate.postgres.connectionString`): rename the key to `substrate.postgres.readWriteConnectionString`. The render fails until it is renamed.
+- **An installation whose Substrate uses an external database** (by value or by `substrate.postgres.connectionStringSecretRef`): set `substrate.postgres.readWriteRole` and `substrate.postgres.ownerRole` to roles the connection's user may assume, usually its own. The chart's default, `postgres`, fails every connection unless that user is a member of `postgres`.
+
 ## 4.120.x → 4.121.0 and later (the kagent line crosses to `api.kagent.dev` on a fresh database)
 
 giantswarm/agent-platform#857: from 4.121.0, `components.kagent{,-crds}.versionRange` selects kagent 1.4 (the `api.kagent.dev` line). Its controller refuses a database that holds the 1.x schema. The meta chart therefore refuses the upgrade while the running `kagent-controller` is on 1.x and the Secret behind `kagent.database.postgres.urlFile` is still the one it runs on. The refusal comes before any component release moves. `docs/kagent-v1alpha3-cutover.md` is the full checklist (announcement, backup, verification, cleanup); this section is the values change.

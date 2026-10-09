@@ -2013,7 +2013,7 @@ controller, not the subchart (#421). The port is the tools Service's targetPort.
 {{/*
 Where Substrate's control-plane database lives: "bundled" (the substrate chart's
 StatefulSet — substrate.postgres.enabled true, or `auto` while neither of the
-other two applies), "external" (an explicit substrate.postgres.connectionString,
+other two applies), "external" (an explicit substrate.postgres.readWriteConnectionString,
 or connectionStringSecretRef naming the Secret that holds one),
 "cnpg" (the platform's CNPG Cluster, through the postgres.databases entry
 postgres.substrateDatabase names and its derived Secret), or "" for none — the meta chart refuses the last and resolves
@@ -2023,7 +2023,10 @@ same on its own render.
 {{- define "agent-platform.substrate.postgresMode" -}}
 {{- $sub := .Values.substrate | default dict -}}
 {{- $bundled := dig "postgres" "enabled" "auto" $sub | toString -}}
-{{- $conn := dig "postgres" "connectionString" "" $sub -}}
+{{- if dig "postgres" "connectionString" "" $sub -}}
+{{- fail "substrate.postgres.connectionString is gone from the Substrate chart since 1.6.0, which reads substrate.postgres.readWriteConnectionString (and ownerConnectionString, defaulting to it): rename the key" -}}
+{{- end -}}
+{{- $conn := dig "postgres" "readWriteConnectionString" "" $sub -}}
 {{- $ref := dig "postgres" "connectionStringSecretRef" dict $sub -}}
 {{- $refOn := or (dig "enabled" false $ref) (dig "name" "" $ref) -}}
 {{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" (include "agent-platform.substrate.databaseKey" .) "enabled" true .Values.postgres) false) -}}
