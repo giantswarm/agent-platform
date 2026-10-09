@@ -4168,6 +4168,12 @@ e2e: ## Run one ATS scenario against any cluster (KUBECONFIG=… [SCENARIO=smoke
 	E2E_IDP_CA_SECRET="$(E2E_IDP_CA_SECRET)" \
 	uv run pytest -m $(SCENARIO) --log-cli-level info -o log_cli=true
 
+.PHONY: verify-fixture-images
+verify-fixture-images: ## Assert every container image a test fixture names (tests/fixtures, giantswarm/agent-platform#882) is a gsoci.azurecr.io reference the registry publishes — its manifest read by digest where it carries one, else by tag — so a fixture pod is one the image-verification policy admits and the kubelet can pull; a renamed repository or an unpublished tag fails naming the fixture and the container. Network: gsoci.azurecr.io. Needs PyYAML.
+	@echo "====> $@ (tests/fixtures)"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-fixture-images.py tests/fixtures
+
 .PHONY: verify-images
 verify-images: ## Assert every image reference in the rendered defaults of both charts is on gsoci.azurecr.io (giantswarm/agent-platform#575): the meta chart with its defaults and with the engine and every component on under the fleet's API groups, the connectivity chart with its defaults and with every component and model serving on — every container image of every pod template (a ClusterServingRuntime's included), every OCIRepository url, every registry / imageRegistry value the meta chart forwards, every oci:// reference and every string naming a public registry with a path; a reference whose gsoci copy is not published yet is tolerated by name (tests/verify-images.py PENDING, each with the issue that lands it) and a stale entry fails. Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
