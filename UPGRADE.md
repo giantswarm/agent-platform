@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.122.x → \<next\> (the capz snapshot-store identity holds one assignment, on the storage account)
+
+With `kagent.harness.snapshotStore.crossplane.provider: capz` the s3proxy identity's role assignments change from Storage Blob Data Contributor on the container plus Storage Blob Delegator on the account to one Storage Blob Data Contributor on the storage account (`<identity>-account-role-assignment`, wrapping the RoleAssignment `<identity>-account`). Storage Blob Data Contributor carries `generateUserDelegationKey`, the action the golden tag's server-side copy needs, when it is assigned at the account; a Crossplane identity whose role-assignment right is bound to the data roles by an ABAC condition (a customer's management identity under Role Based Access Control Administrator with constrained delegation) could not assign the Delegator role, and the store never served a copy there.
+
+### Operator action
+
+- None: Helm removes the two Objects `<identity>-role-assignment` and `<identity>-delegator-role-assignment` and creates the new one; Crossplane deletes the two role assignments and creates the one. Azure propagates the change within minutes; a snapshot read or write the façade answers with 403 in that window is retried by Substrate. A Delegator Object that never synced (the 403 above) is removed with no external resource to delete.
+- A customer's Crossplane identity must be allowed to assign Storage Blob Data Contributor (`ba92f5b4-2d11-453d-a403-e96b0029c9fe`) on the platform's storage account; nothing else is assigned for the store.
+
 ## 4.121.x → \<next\> (kagent 1.5.0 and Substrate 1.6.1)
 
 `components.kagent{,-crds}.versionRange` selects kagent 1.5 (the kagent line on upstream `v1.0.0-alpha9`) and `components.substrate{,-crds}.versionRange` Substrate 1.6 from 1.6.1 (the line on kagent-dev/substrate `v0.4.0-alpha1`; 1.6.1's worker keeps only the cluster's search domains in the sandbox's resolv.conf, giantswarm/substrate#216). kagent 1.5.0 fetches private git skill and plugin sources again (giantswarm/kagent-upstream#252). Both releases install over their predecessors in place: the kagent and Substrate CRDs change only in their descriptions.
