@@ -360,7 +360,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.4.0 <1.5.0"` |  |
+| components.kagent.versionRange | string | `">=1.5.0 <1.6.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -383,20 +383,20 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.4.0 <1.5.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.5.0 <1.6.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.5.0 <1.6.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.6.1 <1.7.0"` |  |
 | components.substrate-crds.prereleases | bool | `false` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.5.0 <1.6.0"` |  |
+| components.substrate.versionRange | string | `">=1.6.1 <1.7.0"` |  |
 | components.substrate.prereleases | bool | `false` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
@@ -1346,7 +1346,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.credentialProvider.namespacePolicies[1].atespace | string | `"ate-golden"` |  |
 | substrate.credentialProvider.namespacePolicies[1].allowedNamespaces[0] | string | `"kagent"` |  |
 | substrate.postgres.enabled | string | `"auto"` |  |
-| substrate.postgres.connectionString | string | `""` |  |
+| substrate.postgres.readWriteConnectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |
 | substrate.rustfs.enabled | bool | `false` |  |
 | substrate.otel.endpoint | string | `"auto"` |  |

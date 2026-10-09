@@ -179,7 +179,7 @@ spec:
             - port: "5432"
               protocol: TCP
     {{- else }}
-    # An external database: wherever substrate.postgres.connectionString points.
+    # An external database: wherever substrate.postgres.readWriteConnectionString points.
     - toEntities:
         - cluster
         - world

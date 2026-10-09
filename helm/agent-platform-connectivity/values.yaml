@@ -3073,7 +3073,7 @@ kagent-crds: {}  # @schema skipProperties: true; additionalProperties: true
 # The substrate component's values — the Giant Swarm Substrate line's chart,
 # Agent Substrate's control plane in ate-system — forwarded by the meta chart.
 # This chart reads them for the wiring it renders around Substrate
-# (templates/substrate/): postgres.enabled / postgres.connectionString decide
+# (templates/substrate/): postgres.enabled / postgres.readWriteConnectionString decide
 # whether the CNPG connection Secret of postgres.databases.substrate is
 # derived and which Postgres the network policies open; rustfs.enabled opens
 # the in-cluster store; the Substrate namespaces are fixed (ate-system,
@@ -3085,7 +3085,7 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # exactly as the meta chart resolves it (bundled without the platform
     # Cluster, the Cluster's Database with it; explicit values win).
     enabled: auto
-    connectionString: ""
+    readWriteConnectionString: ""
     schema: public
   rustfs:
     enabled: false

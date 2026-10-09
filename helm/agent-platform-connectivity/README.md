@@ -1705,7 +1705,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent-crds | object | `{}` |  |
 | substrate.createNamespace | bool | `false` |  |
 | substrate.postgres.enabled | string | `"auto"` |  |
-| substrate.postgres.connectionString | string | `""` |  |
+| substrate.postgres.readWriteConnectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |
 | substrate.rustfs.enabled | bool | `false` |  |
 | substrate.atelet.storageBackend | string | `"s3"` |  |
