@@ -3511,6 +3511,29 @@ postgres:
   # Affinity: any other key, a core `podAffinity` / `podAntiAffinity` among
   # them, fails the connectivity render. Empty renders no field.
   affinity: {}  # @schema type: object; additionalProperties: true
+  # Resources of the postgres container (and the operator's bootstrap init
+  # container), rendered verbatim as Cluster.spec.resources. Kyverno's
+  # require-emptydir-requests-and-limits wants ephemeral-storage requests and
+  # limits on every container that mounts an emptyDir without a sizeLimit, and
+  # the operator's plugins emptyDir (backup.method plugin) has none. The memory
+  # limit covers the shm emptyDir below, which is memory-backed. Changing these
+  # rolls the instances, replicas first, then a switchover.
+  resources:  # @schema skipProperties: true; additionalProperties: true
+    requests:
+      cpu: 100m
+      memory: 512Mi
+      ephemeral-storage: 256Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+      ephemeral-storage: 2Gi
+  # sizeLimit of the operator's two emptyDirs, rendered as
+  # Cluster.spec.ephemeralVolumesSizeLimit: shm (/dev/shm, memory-backed,
+  # PostgreSQL's dynamic shared memory) and temporaryData (scratch-data: the
+  # instance manager's /controller and /run). Empty renders no field.
+  ephemeralVolumesSizeLimit:
+    shm: 256Mi
+    temporaryData: 1Gi
   # pgvector — required for kagent Memory API (RAG / semantic retrieval).
   # pgvector is NOT a trusted extension (C functions), so CREATE EXTENSION runs
   # as superuser. Two modes:
@@ -3663,7 +3686,17 @@ postgres:
           key: ""
       # The plugin sidecar that runs in every instance pod.
       sidecar:
-        resources: {}  # @schema skipProperties: true; additionalProperties: true
+        # The sidecar mounts the operator's plugins emptyDir, which carries no
+        # sizeLimit, so Kyverno's require-emptydir-requests-and-limits wants
+        # its ephemeral-storage requests and limits.
+        resources:  # @schema skipProperties: true; additionalProperties: true
+          requests:
+            cpu: 10m
+            memory: 64Mi
+            ephemeral-storage: 16Mi
+          limits:
+            memory: 256Mi
+            ephemeral-storage: 256Mi
     # method: volumeSnapshot
     volumeSnapshot:
       className: ""

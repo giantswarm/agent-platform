@@ -3565,6 +3565,17 @@ verify-postgres-kagent-v2: ## Assert the kagent_v2 database entry (#346): the CN
 	@echo "ok: enabled, component, postgres off"
 	@echo "ok: $@"
 
+.PHONY: verify-postgres-ephemeral-storage
+verify-postgres: verify-postgres-ephemeral-storage
+verify-postgres-ephemeral-storage: ## Assert the CNPG instance pods bound their emptyDirs (#875, Kyverno's require-emptydir-requests-and-limits): the Cluster carries resources with ephemeral-storage requests and limits and ephemeralVolumesSizeLimit (shm, temporaryData), the plugin backup's ObjectStore gives its sidecar ephemeral-storage requests and limits for the operator's plugins emptyDir, the pod the operator builds from them passes the rule without and with the plugin backup and fails it with both knobs null; the meta chart forwards the same defaults. Needs PyYAML.
+	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_ON) >$(VERIFY_TMP)/vpes-off.out 2>&1 || { cat $(VERIFY_TMP)/vpes-off.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_MINIO) >$(VERIFY_TMP)/vpes-plugin.out 2>&1 || { cat $(VERIFY_TMP)/vpes-plugin.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_MINIO) --set postgres.resources=null --set postgres.ephemeralVolumesSizeLimit=null --set postgres.backup.objectStore.sidecar.resources=null >$(VERIFY_TMP)/vpes-null.out 2>&1 || { cat $(VERIFY_TMP)/vpes-null.out; exit 1; }
+	@python3 tests/verify-postgres-ephemeral-storage.py $(VERIFY_TMP)/vpes-off.out $(VERIFY_TMP)/vpes-plugin.out $(VERIFY_TMP)/vpes-null.out $(CONNECTIVITY_DIR)/values.yaml $(CHART_DIR)/values.yaml
+	@echo "ok: $@"
+
 .PHONY: verify-identity-migration
 verify-identity: verify-identity-migration
 verify-identity-migration: ## Assert the migration holds no cluster-scoped right: the 1.x -> 2.x run deletes no CRD, so no ClusterRole or ClusterRoleBinding renders with the migration on, off, or with agent-manager off; the per-GitOps-namespace Roles follow a renamed identity.

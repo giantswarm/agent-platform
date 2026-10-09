@@ -55,6 +55,19 @@ spec:
   affinity:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- with .Values.postgres.resources }}
+  # The postgres container's and the bootstrap init container's resources.
+  # Kyverno's require-emptydir-requests-and-limits wants ephemeral-storage
+  # requests and limits on every container mounting an emptyDir without a
+  # sizeLimit: the operator's plugins volume (backup plugin) has none.
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.postgres.ephemeralVolumesSizeLimit }}
+  # sizeLimit of the operator's scratch-data (temporaryData) and shm emptyDirs.
+  ephemeralVolumesSizeLimit:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   storage:
     size: {{ .Values.postgres.storage.size | default "20Gi" | quote }}
     {{- if .Values.postgres.storage.storageClass }}
