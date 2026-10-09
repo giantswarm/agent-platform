@@ -1284,6 +1284,11 @@ spec:
         ingress:
           additionalPeers: []
         registeredBackends: []
+        registry:
+          cidrs: []
+          fqdns:
+          - matchName: gsoci.azurecr.io
+          - matchPattern: '*.blob.core.windows.net'
         workloadClusters: {}
     muster:
       crds:

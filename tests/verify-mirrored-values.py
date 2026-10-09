@@ -61,7 +61,7 @@ import sys
 
 import yaml
 
-REQUIRED = {"modelServing.networkPolicy.huggingFace.fqdns", "modelManager.networkPolicy.huggingFace.fqdns",
+REQUIRED = {"modelServing.networkPolicy.huggingFace.fqdns", "modelManager.networkPolicy.huggingFace.fqdns", "modelManager.networkPolicy.registry.fqdns",
             "modelServing.networkPolicy.llmisvcWorkload.port",
             "modelServing.cache.storageClass.provisioner", "modelServing.policies.env", "clusterManager.prewarmPriorityClass.name",
             "modelServing.prepull.images", "modelServing.prepull.modelPresets", "modelServing.prepull.nodeSelector", "modelServing.modelImages.registry",

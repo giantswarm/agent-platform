@@ -13711,8 +13711,9 @@ spec:
 # (model-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
 # Dex issuer by name, or the three Google hosts for the google provider), for
 # every ollama, lemonade and lmstudio backend its host model server's endpoint, for the
-# kserve backend the Hugging Face Hub, with commit mode (model-manager.github)
-# GitHub's API, and the names and blocks of modelManager.networkPolicy.egress.
+# kserve backend the Hugging Face Hub and the model registry, with commit mode
+# (model-manager.github) GitHub's API, and the names and blocks of
+# modelManager.networkPolicy.egress.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

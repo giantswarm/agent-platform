@@ -2355,7 +2355,8 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
   # Egress: DNS, the Kubernetes API, the identity provider (oauth on: the Dex
   # issuer by name, or for model-manager.oauth.provider google its discovery,
   # JWKS/userinfo and token hosts), the Ollama endpoint (ollama backend) or the
-  # Hugging Face Hub (kserve backend), plus the names and blocks of egress.
+  # Hugging Face Hub and the model registry (kserve backend), plus the names
+  # and blocks of egress.
   networkPolicy:
     ingress:
       # Callers admitted on the Service port next to the platform's own (the
@@ -2392,6 +2393,24 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.kubernetes.worldExcludedCIDRs. A list here narrows the
       # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
       # adds them next to the names.
+      cidrs: []
+    registry:
+      # cilium flavor: Cilium FQDN selectors for the kserve backend's reads of
+      # a model image (fit checks of a preset served from oci://: the
+      # manifest, the config blob and the layer holding config.json), on 443.
+      # The defaults cover an anonymous read of gsoci.azurecr.io: the registry
+      # itself (token, /v2/, manifests) and the Azure blob storage it
+      # redirects blob reads to (<region>replstore<n>.blob.core.windows.net).
+      # The node's container runtime pulls the image for the model pod outside
+      # this policy. A mirror (modelServing.modelImages.registry) replaces the
+      # list. Ignored by the kubernetes flavor (see cidrs).
+      fqdns:
+        - matchName: gsoci.azurecr.io
+        - matchPattern: "*.blob.core.windows.net"
+      # IP blocks of the registry and its storage. kubernetes flavor: empty,
+      # the default, opens 443 to every public destination, as for
+      # huggingFace.cidrs; a list narrows the registry egress to these blocks.
+      # The cilium flavor adds them next to the names.
       cidrs: []
     # The workload clusters' API servers the kserve backend calls as the caller:
     # a backend cluster-manager registers targets a workload cluster's apiserver
