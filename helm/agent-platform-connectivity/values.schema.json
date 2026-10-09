@@ -83,6 +83,56 @@
                     }
                 }
             }
+        },
+        "rate-limit.schema.json": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "One rate-limit entry (llmRouting.rateLimits, llmRouting.external.rateLimits): an item of AgentgatewayPolicy traffic.rateLimit.local",
+            "required": [
+                "unit"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "burst": {
+                    "type": "integer",
+                    "maximum": 2147483647,
+                    "minimum": 0
+                },
+                "key": {
+                    "type": "string",
+                    "maxLength": 16384,
+                    "minLength": 1
+                },
+                "requests": {
+                    "type": "integer",
+                    "maximum": 2147483647,
+                    "minimum": 1
+                },
+                "tokens": {
+                    "type": "integer",
+                    "maximum": 2147483647,
+                    "minimum": 1
+                },
+                "unit": {
+                    "type": "string",
+                    "enum": [
+                        "Seconds",
+                        "Minutes",
+                        "Hours"
+                    ]
+                }
+            },
+            "oneOf": [
+                {
+                    "required": [
+                        "tokens"
+                    ]
+                },
+                {
+                    "required": [
+                        "requests"
+                    ]
+                }
+            ]
         }
     },
     "type": "object",
@@ -1166,6 +1216,13 @@
                                     "type": "integer"
                                 }
                             }
+                        },
+                        "rateLimits": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/$defs/rate-limit.schema.json"
+                            },
+                            "maxItems": 16
                         }
                     }
                 },
@@ -1259,6 +1316,13 @@
                         }
                     },
                     "minItems": 1
+                },
+                "rateLimits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/rate-limit.schema.json"
+                    },
+                    "maxItems": 16
                 }
             }
         },

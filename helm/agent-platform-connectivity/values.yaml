@@ -578,6 +578,38 @@ llmRouting:
       provider: Anthropic
       baseURL: https://api.anthropic.com/v1
       match: claude-*
+  # Token (or request) rate limits on the LLM listener: each entry is one
+  # item of an AgentgatewayPolicy's traffic.rateLimit.local, on the data-plane
+  # Gateway's `llm` listener (sectionName). Empty (the default) renders no
+  # policy. An entry sets exactly one of `tokens` (LLM tokens, input and
+  # output) or `requests` per `unit` (Seconds, Minutes, Hours), optionally
+  # `burst`, and optionally `key`: a CEL expression through tpl that gives
+  # each distinct value a bucket of its own (a request whose key cannot be
+  # evaluated shares one bucket). A request is charged against every entry.
+  #   - Without a key, one bucket is shared by every caller and every model on
+  #     the listener: agents, coding agents and served models alike. Pair it
+  #     with a keyed entry so one caller cannot drain it for the rest.
+  #   - Key by agent with the predicate the metric labels use: the kagent
+  #     runtime's identity headers count only when the call comes through the
+  #     Substrate egress, so no other pod picks its own bucket by sending them.
+  #   - Local: each data-plane replica keeps its own buckets, so the effective
+  #     limit is the value times the replicas.
+  #   - Tokens are counted once a response completes, so requests already in
+  #     flight can overshoot; a `requests` entry bounds how many.
+  #   - An empty bucket answers 429 until it refills. A per-second bucket is
+  #     drained by one long completion and an hourly one can refuse calls for
+  #     up to an hour, hence Minutes.
+  #   - It works alongside the per-turn limits of a claude Harness
+  #     (kagent.harnesses[].limits) and the provider's own workspace limits.
+  rateLimits: []  # @schema type: array; maxItems: 16; itemRef: files/llm/rate-limit.schema.json
+  # - tokens: 2000000          # the whole listener
+  #   unit: Minutes
+  # - tokens: 400000           # each agent
+  #   unit: Minutes
+  #   key: >-
+  #     {{ include "agent-platform.substrate.egressCall" . }}
+  #     ? request.headers["x-kagent-agent-namespace"] + "/" + request.headers["x-kagent-agent"]
+  #     : source.unverifiedWorkload.namespace + "/" + source.unverifiedWorkload.serviceAccount
   # The LLM endpoint outside the cluster (llmRouting.external): a public
   # hostname, <hostPrefix>.<global.domain>, with a route of its own on the
   # data plane that every model of the endpoint also attaches to, behind API
@@ -610,6 +642,14 @@ llmRouting:
     listener:
       name: llm-external
       port: 8082
+    # Rate limits on the external route, the same entries as
+    # llmRouting.rateLimits (a policy of its own, its own buckets): the
+    # listener's limits do not reach this route. Key by API key with
+    # `apiKey.name`, the key entry's metadata.name.
+    rateLimits: []  # @schema type: array; maxItems: 16; itemRef: files/llm/rate-limit.schema.json
+    # - tokens: 200000
+    #   unit: Minutes
+    #   key: apiKey.name
     apiKeys:
       secretRef:
         name: ""

@@ -1179,6 +1179,7 @@ spec:
         listener:
           name: llm-external
           port: 8082
+        rateLimits: []
       listener:
         name: llm
         port: 8081
@@ -1194,6 +1195,7 @@ spec:
         match: claude-*
         name: anthropic
         provider: Anthropic
+      rateLimits: []
     mcp-kubernetes:
       fullnameOverride: mcp-kubernetes
       grafanaDashboards:

@@ -623,10 +623,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | llmRouting.models[0].provider | string | `"Anthropic"` |  |
 | llmRouting.models[0].baseURL | string | `"https://api.anthropic.com/v1"` |  |
 | llmRouting.models[0].match | string | `"claude-*"` |  |
+| llmRouting.rateLimits | list | `[]` |  |
 | llmRouting.external.enabled | bool | `false` |  |
 | llmRouting.external.hostPrefix | string | `"llm"` |  |
 | llmRouting.external.listener.name | string | `"llm-external"` |  |
 | llmRouting.external.listener.port | int | `8082` |  |
+| llmRouting.external.rateLimits | list | `[]` |  |
 | llmRouting.external.apiKeys.secretRef.name | string | `""` |  |
 | llmRouting.external.apiKeys.secretSelector.matchLabels | object | `{}` |  |
 | llmRouting.external.apiKeys.configMapSelector.matchLabels | object | `{}` |  |
