@@ -261,6 +261,10 @@ ALL_ON_INPUTS = [
     "--set", "mcp-kubernetes.mcpKubernetes.oauth.dex.clientSecret=x",
 ]
 
+# Components without a toggle of their own: each follows its switch, and a
+# toggle set beside it is refused by the meta chart's guard.
+SWITCHED = {"workspace-manager": "workspaces.enabled"}
+
 API_VERSIONS = [
     "--api-versions", "cilium.io/v2",
     "--api-versions", "monitoring.coreos.com/v1",
@@ -582,7 +586,7 @@ def main(meta: str) -> int:
         fail(f"examples/customer-bom.yaml pins components.{', components.'.join(stray)}, which values.yaml does not know — the BOM and the roster have drifted apart")
     if pinned_released := sorted(set(pins) & released):
         fail(f"examples/customer-bom.yaml pins components.{', components.'.join(pinned_released)}, a chart released with the meta chart: its version is the meta chart's own, a pin here lags the moment the meta chart moves")
-    on = [f"--set=components.{n}.enabled=true" for n in components]
+    on = [f"--set={SWITCHED.get(n, f'components.{n}.enabled')}=true" for n in components]
     base = [*QUICKSTART, *ALL_ON_INPUTS, *on]
     bom = ["-f", f"{meta}/examples/customer-bom.yaml"]
     # shape -> (the defaults' render, the BOM's render)

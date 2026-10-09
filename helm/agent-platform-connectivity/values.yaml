@@ -111,6 +111,10 @@ components:  # @schema additionalProperties: true
     enabled: false
   cluster-manager:  # @schema additionalProperties: true
     enabled: false
+  # Follows workspaces.enabled in the meta chart, which forwards the entry only
+  # while it is on: absent, it is this default.
+  workspace-manager:  # @schema additionalProperties: true
+    enabled: false
   # The components the agent-platform-standalone umbrella carried on top of the
   # fleet's roster, forwarded by the meta chart like the rest so the wiring this
   # chart renders for them gates on the same answer: the Backstage app-config and
@@ -2945,6 +2949,96 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
       # policy already opens every public destination while oauth is on, so
       # this is where a private address (one of
       # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
+      cidrs: []
+
+# === Workspaces (workspaces, workspace-manager) ===
+# The one switch of the platform's workspaces: an Organization's repositories
+# mirrored on one shared read-write-many volume in the kagent namespace, a
+# directory per Session, and the provider sign-ins. On, it turns on the
+# workspace-manager component (components.workspace-manager follows it; an
+# explicit value that disagrees fails the render) and gates every later
+# workspace piece. Off, the default, the render is exactly that of a chart
+# without workspaces: no release, and nothing of the three blocks below
+# reaches the connectivity release.
+workspaces:
+  enabled: false
+
+# The workspace-manager component chart's values (giantswarm/workspace-manager),
+# as the meta chart forwards them to that release; this chart reads
+# fullnameOverride, service, oauth, muster and providers from them for the
+# wiring it renders (workspaceManager below), and the component release the
+# rest. Tools appear as x_workspace-manager_<tool> through the chart's own
+# MCPServer CR, unpinned, like every manager's. The meta chart's copy of this
+# block documents every key.
+workspace-manager:  # @schema skipProperties: true; additionalProperties: true
+  fullnameOverride: workspace-manager
+  oauth:
+    enabled: true
+    dex:
+      allowPrivateURLs: true
+    sso:
+      allowPrivateIPs: true
+  muster:
+    mcpServer:
+      enabled: true
+      auth:
+        forwardToken: true
+  # The installation's provider instances, several at once: each a unique
+  # `name` (a DNS label: the name workspaces and sign-ins refer to), a `kind`
+  # and the kind's `values`, whose credentials (the sync credential, the OAuth
+  # client's secret) are Secret references. Kind `github` (github.com or a
+  # GitHub Enterprise Server) takes `url` (default https://github.com),
+  # `apiURL` (derived from url), `app.id`, `app.privateKey`, `oauth.clientID`
+  # and `oauth.clientSecret`, e.g.
+  #   providers:
+  #     - name: github
+  #       kind: github
+  #       values:
+  #         app:
+  #           id: "123"
+  #           privateKey: {name: workspace-github, key: private-key}
+  #         oauth:
+  #           clientID: Iv1.abc
+  #           clientSecret: {name: workspace-github, key: client-secret}
+  # The connectivity chart opens the manager's egress to each instance's hosts
+  # (url and apiURL; github.com and api.github.com for a github instance
+  # without url). Empty, the default, configures none.
+  providers: []
+
+# The wiring the connectivity chart renders for the workspace-manager
+# component (it reads this block, not the chart's). Inert while
+# workspaces.enabled is false. No route here: the tools reach muster
+# in-cluster, and the provider sign-in's callback is routed on its own.
+workspaceManager:  # @schema skipProperties: true; additionalProperties: true
+  # Network policy inputs; the policies render under networkPolicy (enabled +
+  # flavor). Ingress: muster (MCPServer on), kagent's controller (the token and
+  # JWKS endpoints a Session's credential is exchanged at, kagent on) and the
+  # kubelet's probes. Egress: DNS, the Kubernetes API (the workspace objects,
+  # volumes and Jobs it writes in the kagent namespace), the identity provider
+  # (oauth on: the Dex issuer by name, or for workspace-manager.oauth.provider
+  # google its discovery, JWKS/userinfo and token hosts), each provider
+  # instance's hosts (workspace-manager.providers) and the names and blocks of
+  # egress.
+  networkPolicy:
+    ingress:
+      # Callers admitted on the Service port next to muster and kagent's
+      # controller: a list of pod label maps (matchLabels), every one a
+      # workload in the release namespace. Empty, the default, admits no one
+      # else.
+      additionalPeers: []
+    # Further destinations of the service on 443: a provider's host the
+    # instance list does not name (a proxy, a mirror), a private identity
+    # provider.
+    egress:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
+      # resolved through the DNS proxy rule the policy renders. Ignored by the
+      # kubernetes flavor (see cidrs).
+      fqdns: []
+      # IP blocks, opened on 443 in both flavors. kubernetes flavor: vanilla
+      # NetworkPolicy selects addresses, never names, so an empty list (the
+      # default) opens 443 to every public destination for the providers —
+      # 0.0.0.0/0 minus networkPolicy.kubernetes.worldExcludedCIDRs; a list
+      # here narrows the providers' egress to exactly these blocks.
       cidrs: []
 
 # === The standalone chart's extras: component chart values and their wiring ===

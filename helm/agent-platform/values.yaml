@@ -971,6 +971,31 @@ components:  # @schema additionalProperties: true
     # component is on (see components.yaml, gatedValues): nothing reads them
     # while it is off.
     gatedValues: [cluster-manager, clusterManager]
+  workspace-manager:  # @schema additionalProperties: true
+    chart: workspace-manager
+    # The workspace surface of the Agent Platform (giantswarm/workspace-manager):
+    # an Organization's repositories mirrored on one shared volume, a directory
+    # per Session, and the provider sign-ins, MCP only through muster (tools
+    # appear as x_workspace-manager_<tool>). No `enabled` here: the component
+    # follows the one switch workspaces.enabled (below), and an explicit value
+    # that disagrees with it fails the render (agent-platform.validateWorkspaces).
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # 0.1.0 is the first release line; the ceiling stays the next major, so
+    # minor releases roll on their own. Until 0.1.0 is published the range
+    # admits its release candidates through gitops.prereleases only.
+    versionRange: ">=0.1.0 <1.0.0"
+    valuesFrom: workspace-manager
+    # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
+    # the reference is dropped at render time when the component is off.
+    dependsOn: [muster]
+    # The component's blocks reach the connectivity release only while the
+    # component is on (see components.yaml, gatedValues), and so does its
+    # roster entry (gatedRoster): with the switch off the connectivity
+    # release's values are exactly those of a chart that predates it.
+    gatedValues: [workspace-manager, workspaceManager, workspaces]
+    gatedRoster: true
+    # An empty key takes the chart's own default instead of overriding it.
+    omitEmptyKeys: [providers, signInStore.encryptionKey, grant.signingKey, sync.cycle, sessions.cleanupAfter, storage.sizing.factor, storage.sizing.headroom, storage.sizing.maxSize]
   # --- The standalone chart's extras -------------------------------------------
   # The components the agent-platform-standalone umbrella carried as Helm
   # dependencies on top of the fleet's roster: Backstage, mcp-kubernetes, the
@@ -4824,6 +4849,157 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
       # policy already opens every public destination while oauth is on, so
       # this is where a private address (one of
       # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
+      cidrs: []
+
+# === Workspaces (workspaces, workspace-manager) ===
+# The one switch of the platform's workspaces: an Organization's repositories
+# mirrored on one shared read-write-many volume in the kagent namespace, a
+# directory per Session, and the provider sign-ins. On, it turns on the
+# workspace-manager component (components.workspace-manager follows it; an
+# explicit value that disagrees fails the render) and gates every later
+# workspace piece. Off, the default, the render is exactly that of a chart
+# without workspaces: no release, and nothing of the three blocks below
+# reaches the connectivity release.
+workspaces:
+  enabled: false
+
+# Values forwarded verbatim to the workspace-manager component release
+# (giantswarm/workspace-manager), MCP only: tools appear as
+# x_workspace-manager_<tool> through the chart's own MCPServer CR, unpinned and
+# labelled for the agent-platform tool group, like every manager's; no second
+# MCPServer for any provider (a provider sign-in is the workspace-manager's
+# own). The pinned Service name is what the wiring below (network policies)
+# targets.
+#
+# Identity as for cluster-manager above: an OAuth 2.1 resource server
+# validating the session's id_token muster forwards (the MCPServer CR's auth
+# block); the issuer, client, secret and CA fall back to global.identity and
+# the OAuth base URL to global.domain inside the chart. The manager writes the
+# workspace objects with its own ServiceAccount, so muster requests no extra
+# audience at login. The chart's own network policy stays off: the
+# connectivity chart renders the policies (workspaceManager below).
+#
+# workspaces.namespace — where the workspaces, their volume, their sync and
+# cleanup Jobs and every Session live — is NOT set here: templates/components.yaml
+# derives it from the kagent namespace (kagent.namespaceOverride), so the two
+# can never disagree (a value set here must equal it or the render fails).
+#
+# Every credential is a Secret reference {name, key} of a Secret in the
+# platform's namespace, never a value: with workspaces on the render fails on
+# an inline one, naming its path. The keys left empty below take the chart's
+# own default and are not forwarded (components.workspace-manager.omitEmptyKeys).
+workspace-manager:  # @schema skipProperties: true; additionalProperties: true
+  fullnameOverride: workspace-manager
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
+  oauth:
+    enabled: true
+    dex:
+      allowPrivateURLs: true
+    sso:
+      allowPrivateIPs: true
+  muster:
+    mcpServer:
+      enabled: true
+      auth:
+        forwardToken: true
+  # The installation's provider instances, several at once: each a unique
+  # `name` (a DNS label: the name workspaces and sign-ins refer to), a `kind`
+  # and the kind's `values`, whose credentials (the sync credential, the OAuth
+  # client's secret) are Secret references. Kind `github` (github.com or a
+  # GitHub Enterprise Server) takes `url` (default https://github.com),
+  # `apiURL` (derived from url), `app.id`, `app.privateKey`, `oauth.clientID`
+  # and `oauth.clientSecret`, e.g.
+  #   providers:
+  #     - name: github
+  #       kind: github
+  #       values:
+  #         app:
+  #           id: "123"
+  #           privateKey: {name: workspace-github, key: private-key}
+  #         oauth:
+  #           clientID: Iv1.abc
+  #           clientSecret: {name: workspace-github, key: client-secret}
+  # The connectivity chart opens the manager's egress to each instance's hosts
+  # (url and apiURL; github.com and api.github.com for a github instance
+  # without url). Empty, the default, configures none.
+  providers: []
+  # The key the sign-in store encrypts the person's provider tokens with:
+  # {name, key} of a Secret. Empty takes the chart's default.
+  signInStore:
+    encryptionKey: {}
+  # The key the workspace grant a Session carries is signed with: {name, key}
+  # of a Secret. Empty takes the chart's default.
+  grant:
+    signingKey: {}
+  # How often a workspace's mirrors are fetched (a Go duration). Empty takes
+  # the chart's default.
+  sync:
+    cycle: ""
+  # How long a Session's directory outlives the Session's last turn (a Go
+  # duration; 30 days, 720h, is the chart's default): then it is deleted, at
+  # once when the Session is. Empty takes the chart's default.
+  sessions:
+    cleanupAfter: ""
+  # The size a workspace volume is created with where the StorageClass
+  # provisions a size: the mirrors' measured size times factor, plus headroom,
+  # capped at maxSize. Empty takes the chart's defaults; maxSize unset sets no
+  # ceiling.
+  storage:
+    sizing:
+      factor: ""
+      headroom: ""
+      maxSize: ""
+  # `auto` (the default) follows the resolved
+  # global.observability.metrics.serviceMonitor.enabled, like every other
+  # monitor of this platform; `true` / `false` force it.
+  serviceMonitor:
+    enabled: auto  # auto | true | false
+    interval: 60s
+    # Routes the scrape to the right Mimir instance in the GS Observability
+    # Platform.
+    labels:
+      observability.giantswarm.io/tenant: giantswarm
+
+# The wiring the connectivity chart renders for the workspace-manager
+# component (it reads this block, not the chart's). Inert while
+# workspaces.enabled is false. No route here: the tools reach muster
+# in-cluster, and the provider sign-in's callback is routed on its own.
+workspaceManager:  # @schema skipProperties: true; additionalProperties: true
+  # Network policy inputs; the policies render under networkPolicy (enabled +
+  # flavor). Ingress: muster (MCPServer on), kagent's controller (the token and
+  # JWKS endpoints a Session's credential is exchanged at, kagent on) and the
+  # kubelet's probes. Egress: DNS, the Kubernetes API (the workspace objects,
+  # volumes and Jobs it writes in the kagent namespace), the identity provider
+  # (oauth on: the Dex issuer by name, or for workspace-manager.oauth.provider
+  # google its discovery, JWKS/userinfo and token hosts), each provider
+  # instance's hosts (workspace-manager.providers) and the names and blocks of
+  # egress.
+  networkPolicy:
+    ingress:
+      # Callers admitted on the Service port next to muster and kagent's
+      # controller: a list of pod label maps (matchLabels), every one a
+      # workload in the release namespace. Empty, the default, admits no one
+      # else.
+      additionalPeers: []
+    # Further destinations of the service on 443: a provider's host the
+    # instance list does not name (a proxy, a mirror), a private identity
+    # provider.
+    egress:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
+      # resolved through the DNS proxy rule the policy renders. Ignored by the
+      # kubernetes flavor (see cidrs).
+      fqdns: []
+      # IP blocks, opened on 443 in both flavors. kubernetes flavor: vanilla
+      # NetworkPolicy selects addresses, never names, so an empty list (the
+      # default) opens 443 to every public destination for the providers —
+      # 0.0.0.0/0 minus networkPolicy.kubernetes.worldExcludedCIDRs; a list
+      # here narrows the providers' egress to exactly these blocks.
       cidrs: []
 
 # === The standalone chart's extras: values blocks ===

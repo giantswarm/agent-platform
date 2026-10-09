@@ -58,6 +58,8 @@ The defaults carry no filter: a release selects releases. agentlab follows a bra
 | model-manager | `components.model-manager.enabled` | `false` |
 | agent-manager | `components.agent-manager.enabled` | `false` |
 | cluster-manager | `components.cluster-manager.enabled` | `false` |
+| `workspaces.enabled` | `false` | The one switch of the platform's workspaces: install [workspace-manager](https://github.com/giantswarm/workspace-manager) (`components.workspace-manager` follows the switch; an explicit value that disagrees fails the render) and gate every later workspace piece. MCP only (`x_workspace-manager_*` through muster). See [Workspaces](#workspaces). |
+| workspace-manager | `workspaces.enabled` (the one switch; `components.workspace-manager` follows it) | `false` |
 | Backstage (the portal) | `components.backstage.enabled` | `false` |
 | mcp-kubernetes | `components.mcp-kubernetes.enabled` | `false` |
 | CloudNativePG operator | `components.cloudnative-pg.enabled` | `false` |
@@ -333,6 +335,33 @@ The same shape as the two managers above: `components.cluster-manager` (the cata
 **The prewarm placeholder's PriorityClass.** A pool created with `prewarm: true` launches its first node with the release — the pool chart's placeholder Job holds one GPU at negative priority until the first predictor preempts it — and a pool release, delivered as the organisation's tenant ServiceAccount, cannot create the cluster-scoped `PriorityClass` that needs ([#539](https://github.com/giantswarm/agent-platform/issues/539)). The connectivity chart ships it with the cluster-manager component: `PriorityClass agent-platform-prewarm-placeholder` (`value: -1000`, `preemptionPolicy: Never`, not the global default; `clusterManager.prewarmPriorityClass`, mirrored in this chart), the name the pool chart's `pool.prewarm.priorityClassName` defaults to. One owner per installation — the platform's release, where cluster-manager runs; the serving slice never carries it. See the connectivity chart's README, "The prewarm placeholder's PriorityClass".
 
 `make verify-cluster-manager` covers the component, the wiring in both flavors, the prewarm placeholder's PriorityClass and every guard.
+
+### Workspaces
+
+A workspace is an Organization's set of repositories, mirrored on one shared read-write-many volume in the kagent namespace, with a directory per Session that borrows the mirrors' objects. The **[workspace-manager](https://github.com/giantswarm/workspace-manager)** serves workspaces and the person's provider sign-ins as MCP tools through muster (`x_workspace-manager_*`).
+
+**One switch**: `workspaces.enabled` (default `false`) turns on the component `components.workspace-manager` (the catalog's `workspace-manager` chart, `dependsOn: [muster]`) and gates every later workspace piece. The roster entry has no `enabled` of its own. It follows the switch, and an explicit value that disagrees with it fails the render either way round. With the switch off the render is byte-identical to a chart without workspaces: no release, and neither the roster entry (`gatedRoster`) nor the `workspaces`, `workspace-manager` and `workspaceManager` blocks (`gatedValues`) reach the connectivity release. `make verify-workspace-manager` diffs the off render against the previous release.
+
+The `workspace-manager:` block is forwarded verbatim to the component release, in cluster-manager's shape: the pinned Service name, the OAuth resource server (issuer, client, secret and base URL fall back to `global.identity` / `global.domain`), and the chart's own `MCPServer` CR, unpinned with `forwardToken`. No `muster.*` value changes, and no second `MCPServer` renders for any provider. Two inputs are the platform's own:
+
+- `workspace-manager.workspaces.namespace` is derived from the kagent namespace (`kagent.namespaceOverride`), where every Session runs. A value set in the block must agree with it.
+- `workspace-manager.providers` lists the **provider instances**, several at once, each `{name, kind, values}`, e.g. a GitHub one and a GitLab one side by side.
+
+Every credential is a Secret reference `{name, key}` and never a value. That covers each instance's sync credential and OAuth client secret (any key named `privateKey`, `clientSecret`, `secret`, `token`, `password` or `apiKey`), the sign-in store's `signInStore.encryptionKey` and the grant's `grant.signingKey`. With the switch on, an inline value fails the render and names its path. The same goes for a duplicate or non-DNS instance name and an instance without a kind. Four values are left empty, which takes the chart's own default, and are not forwarded:
+
+- `sync.cycle`, the mirror fetch interval;
+- `sessions.cleanupAfter`, how long a session directory outlives its Session's last turn (the chart's default is 30 days);
+- `storage.sizing.factor` and `storage.sizing.headroom`;
+- the optional ceiling `storage.sizing.maxSize`.
+
+The connectivity chart renders the network policies from the `workspaceManager:` block, in both flavors:
+
+- ingress from muster (the MCP endpoint), from kagent's controller (the token and JWKS endpoints) and from the kubelet's probes;
+- egress to DNS, the Kubernetes API and the identity provider;
+- egress to each provider instance's hosts on their ports: the hosts of `values.url` and `values.apiURL`, or `github.com` and `api.github.com` for a GitHub instance without a URL. An instance of another kind without a URL fails the render.
+- the extra names and blocks of `workspaceManager.networkPolicy.egress` on 443.
+
+Under the kubernetes flavor, the providers' egress is every public destination unless `egress.cidrs` narrows it. The muster-to and kagent-controller-to policies are additive to those components' own. The guards refuse muster off while the `MCPServer` is on, a missing identity input, a provider host the policy cannot name and a bad CIDR.
 
 ### The kagent line
 

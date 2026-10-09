@@ -1,0 +1,27 @@
+# Workspaces on with two provider instances, a GitHub one and a second kind:
+# every credential a Secret reference (tests/verify-workspace-manager.py).
+workspaces:
+  enabled: true
+workspace-manager:
+  providers:
+    - name: github
+      kind: github
+      values:
+        app:
+          id: "123"
+          privateKey: {name: workspace-github, key: private-key}
+        oauth:
+          clientID: Iv1.abc
+          clientSecret: {name: workspace-github, key: client-secret}
+    - name: gitlab
+      kind: gitlab
+      values:
+        url: https://gitlab.example.com:8443
+        token: {name: workspace-gitlab, key: token}
+        oauth:
+          clientID: abc
+          clientSecret: {name: workspace-gitlab, key: client-secret}
+  signInStore:
+    encryptionKey: {name: workspace-manager-keys, key: sign-in-store}
+  grant:
+    signingKey: {name: workspace-manager-keys, key: grant}
