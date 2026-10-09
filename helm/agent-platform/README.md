@@ -338,7 +338,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.muster.ownedCrds[0] | string | `"mcpservers.muster.giantswarm.io"` |  |
 | components.agentgateway.chart | string | `"agentgateway"` |  |
 | components.agentgateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agentgateway.versionRange | string | `">=2.4.0 <3.0.0"` |  |
+| components.agentgateway.versionRange | string | `">=2.8.0 <3.0.0"` |  |
 | components.agentgateway.valuesFrom | string | `"agentgateway"` |  |
 | components.agentgateway.enabled | bool | `true` |  |
 | components.agentgateway.ownedCrds[0] | string | `"agentgatewaypolicies.agentgateway.dev"` |  |
