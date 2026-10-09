@@ -83,7 +83,7 @@ No Gateway to prepare: the agentgateway data plane becomes the edge. It needs th
 - **A database**, one of three:
   - the bundled single-instance Postgres of kagent and of Substrate (the defaults; a lab or a trial);
   - the platform's CloudNativePG Cluster: `components.cloudnative-pg.enabled: true` and `postgres.enabled: true` ([Reference: Backstage, mcp-kubernetes, CloudNativePG and KServe](reference.md#backstage-mcp-kubernetes-cloudnativepg-and-kserve));
-  - an external Postgres with the `pgvector` extension available (managed-cloud): the connection URL in Secret `kagent-postgres` (key `uri`) in the `kagent` namespace and the connection string in Secret `substrate-postgres` (key `connectionString`) in `ate-system`, both created before the install.
+  - an external Postgres with the `pgvector` extension available (managed-cloud): the connection URL in Secret `kagent-postgres` (key `uri`) in the `kagent` namespace and the connection string in Secret `substrate-postgres` (key `connectionString`) in `ate-system`, both created before the install. Set `substrate.postgres.readWriteRole` and `ownerRole` to a role that connection's user may assume (`examples/managed-cloud.yaml`).
 - The portal (Backstage) keeps its database in SQLite, or in a CloudNativePG Cluster with `backstage.database.engine: postgresql` and the `cloudnative-pg` component; it takes no external database.
 
 ### Pod Security

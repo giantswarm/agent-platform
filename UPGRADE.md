@@ -15,6 +15,87 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.122.x → \<next\> (the capz snapshot-store identity holds one assignment, on the storage account)
+
+With `kagent.harness.snapshotStore.crossplane.provider: capz` the s3proxy identity's role assignments change from Storage Blob Data Contributor on the container plus Storage Blob Delegator on the account to one Storage Blob Data Contributor on the storage account (`<identity>-account-role-assignment`, wrapping the RoleAssignment `<identity>-account`). Storage Blob Data Contributor carries `generateUserDelegationKey`, the action the golden tag's server-side copy needs, when it is assigned at the account; a Crossplane identity whose role-assignment right is bound to the data roles by an ABAC condition (a customer's management identity under Role Based Access Control Administrator with constrained delegation) could not assign the Delegator role, and the store never served a copy there.
+
+### Operator action
+
+- None: Helm removes the two Objects `<identity>-role-assignment` and `<identity>-delegator-role-assignment` and creates the new one; Crossplane deletes the two role assignments and creates the one. Azure propagates the change within minutes; a snapshot read or write the façade answers with 403 in that window is retried by Substrate. A Delegator Object that never synced (the 403 above) is removed with no external resource to delete.
+- A customer's Crossplane identity must be allowed to assign Storage Blob Data Contributor (`ba92f5b4-2d11-453d-a403-e96b0029c9fe`) on the platform's storage account; nothing else is assigned for the store.
+
+## 4.121.x → \<next\> (kagent 1.5.0 and Substrate 1.6.1)
+
+`components.kagent{,-crds}.versionRange` selects kagent 1.5 (the kagent line on upstream `v1.0.0-alpha9`) and `components.substrate{,-crds}.versionRange` Substrate 1.6 from 1.6.1 (the line on kagent-dev/substrate `v0.4.0-alpha1`; 1.6.1's worker keeps only the cluster's search domains in the sandbox's resolv.conf, giantswarm/substrate#216). kagent 1.5.0 fetches private git skill and plugin sources again (giantswarm/kagent-upstream#252). Both releases install over their predecessors in place: the kagent and Substrate CRDs change only in their descriptions.
+
+- **Substrate's database.** ate-api-server 1.6 runs `SET ROLE` on every connection. On the platform Cluster (the fleet) the meta chart sets both roles to `postgres.applicationDatabase.owner`, the role the derived DSN logs in as; nothing to do. On its first start against a 1.5 database, ate-api-server moves the line's own migration into a ledger of its own (`fork_schema_migrations`), once, in one transaction.
+- **kubectl-ate.** A 1.5 kubectl-ate refuses a 1.6 server (the egress-policy contract is `v0.4.0-alpha1`); use the 1.6 one.
+
+### Operator action
+
+- **An installation whose Substrate uses an external database by value** (`substrate.postgres.connectionString`): rename the key to `substrate.postgres.readWriteConnectionString`. The render fails until it is renamed.
+- **An installation whose Substrate uses an external database** (by value or by `substrate.postgres.connectionStringSecretRef`): set `substrate.postgres.readWriteRole` and `substrate.postgres.ownerRole` to roles the connection's user may assume, usually its own. The chart's default, `postgres`, fails every connection unless that user is a member of `postgres`.
+
+## 4.120.x → 4.121.0 and later (the kagent line crosses to `api.kagent.dev` on a fresh database)
+
+giantswarm/agent-platform#857: from 4.121.0, `components.kagent{,-crds}.versionRange` selects kagent 1.4 (the `api.kagent.dev` line). Its controller refuses a database that holds the 1.x schema. The meta chart therefore refuses the upgrade while the running `kagent-controller` is on 1.x and the Secret behind `kagent.database.postgres.urlFile` is still the one it runs on. The refusal comes before any component release moves. `docs/kagent-v1alpha3-cutover.md` is the full checklist (announcement, backup, verification, cleanup); this section is the values change.
+
+### Operator action
+
+- **Every installation that runs kagent 1.2.x.** In the values that move it to 4.121.0 or later, add the fresh database and mount its derived Secret in place of the old one:
+
+  ```yaml
+  postgres:
+    databases:
+      kagent-v3:
+        enabled: true
+        name: kagent_v3
+        extensions: [vector]
+        reclaimPolicy: retain
+        component: kagent
+        secretNamespaces: []
+  kagent:
+    controller:
+      volumes:
+        - name: cnpg-dsn
+          secret:
+            secretName: <postgres.clusterName>-kagent-v3-app   # was <postgres.clusterName>-kagent-v2-app
+            items: [{ key: uri, path: uri }]
+  ```
+
+  The connectivity release creates the database and derives its Secret before the kagent release upgrades (kagent depends on it), so the 1.4 controller starts on the empty database and lays its own schema. The 1.x database `kagent_v2` stays (`reclaimPolicy: retain`) for the retention period. Every session is lost; Agents come back with their producers.
+- **Every installation whose Substrate runs the 1.3.x line on the platform's CNPG Cluster.** Substrate 1.5 does not migrate the 1.3 schema (ate-api-server crash-loops on `relation tuple already exists`). On a meta chart release that carries `postgres.substrateDatabase`, add a fresh Substrate database in the same values and name it there; the `substrate` database stays (`reclaimPolicy: retain`):
+
+  ```yaml
+  postgres:
+    substrateDatabase: substrate-v2
+    databases:
+      substrate-v2:
+        enabled: true
+        name: substrate_v2
+        component: substrate
+        reclaimPolicy: retain
+        secretNamespaces: [ate-system]
+  ```
+- **An installation on the kagent chart's bundled Postgres** (`kagent.database.postgres.bundled.enabled: true`, no CNPG Cluster): point the controller at another database of the same instance, so the bundled instance stays and the 1.x database `kagent` stays beside it. The instance's maintenance database `postgres` is empty:
+
+  ```yaml
+  kagent:
+    database:
+      postgres:
+        url: "postgres://kagent:$(POSTGRES_PASSWORD)@kagent-postgresql.<kagent namespace>.svc:5432/postgres?sslmode=disable"
+    controller:
+      envFrom:
+        - secretRef:
+            name: kagent-postgresql   # the bundled instance's password Secret; with url set the chart no longer injects POSTGRES_PASSWORD itself
+  ```
+
+  The meta chart treats a changed `kagent.database.postgres.url` as the fresh database, as it does a new Secret behind `urlFile`.
+- **Hand-written kagent objects** in the installation's gitops repository (a ModelConfig, ModelProviderConfig, RemoteMCPServer or AgentTemplate no chart renders) move to `apiVersion: api.kagent.dev/v1alpha3` with the crossing. The line's controller resolves only that group, so an Agent naming a `kagent.dev` ModelConfig stays `ResolvedRefs=False`.
+- **To stay on 1.2 for now:** pin the meta chart below 4.121.0. Holding only `components.kagent{,-crds}` below 1.3.0 is not a supported shape: the rest of the line moves with 4.121.0 (Substrate 1.5, agent-manager 1.10, klaus-gateway on the Session API), and kagent 1.2 has not run agents on it.
+- **An installation that already took 4.121.0 on its 1.x database** (kagent HelmRelease looping between `context deadline exceeded`, `no Harness with the name "kagent" found` and `no ConfigMap with the name "kagent-ui" found`; the 1.2 controller still serving): apply the values above. They change the kagent HelmRelease's spec, so helm-controller starts a new upgrade with fresh remediation counters. That upgrade starts the 1.4 controller on the fresh database and adopts the half-applied objects (the `kagent-ui` ConfigMap, the `api.kagent.dev` Harness), which carry the release's own labels. Do not roll Helm back. The kagent release's rollback attempts can starve the meta chart release's interval, so request its reconcile once the values have merged (`flux reconcile helmrelease <meta release> -n <gitops namespace>`, or the `reconcile.fluxcd.io/requestedAt` annotation).
+- **Recognising it worked**: the kagent HelmRelease is Ready on 1.4.x; `kubectl -n kagent logs deploy/kagent-controller | grep -i migrat` shows migrations on the empty database, not the 1.x refusal; `kubectl -n kagent get harnesses.api.kagent.dev kagent` exists.
+
 ## \<current\> → \<next\> (the Substrate floor is `1.3.1`: worker and atelet move together)
 
 giantswarm/substrate#105: `components.substrate{,-crds}.versionRange` is `>=1.3.1 <1.4.0`. 1.3.1 bounds the golden actor's crash restarts during a pool roll (a template's golden is re-snapshotted instead of lost) and reaps the `runsc` children a worker leaves behind. The kagent WorkerPool's worker image follows the floor, so a `1.3.1` atelet resolved by the old range ran beside a `1.3.0` worker until this release.
@@ -44,7 +125,7 @@ giantswarm/backstage-catalogs#705: the Dev Portal creates agents through agent-m
 - Nothing else. The app-config changes, so the config-reload hook rolls the Backstage pod once.
 ## \<current\> → \<next\> (the kagent line on `api.kagent.dev`)
 
-The kagent line moves to the API group `api.kagent.dev` (version `v1alpha3` unchanged): an agent is an `Agent` that names its `Harness` by `spec.harnessRef` and carries its `AgentTemplate` inline or by `templateRef`; the `Harness` has no `allowedAgentTemplates` selector and the admission label `agent-platform.giantswarm.io/harness` means nothing to the platform; a conversation is a `Session` of an `Agent` (the controller's `SessionService`, in place of `AgentInstanceService`). The connectivity chart renders its catalog (`kagent.modelConfigs[]`, `kagent.remoteMcpServers[]`) at `api.kagent.dev/v1alpha3`, and the controller GRPCRoute carries `kagent.api.v1alpha1.AgentService` and `SessionService`. The line's controller does not migrate a 1.x kagent database: the cut-over of an installation is a fresh database, and every session is lost (Operator action below).
+The kagent line moves to the API group `api.kagent.dev` (version `v1alpha3` unchanged): an agent is an `Agent` that names its `Harness` by `spec.harnessRef` and carries its `AgentTemplate` inline or by `templateRef`; the `Harness` has no `allowedAgentTemplates` selector and the admission label `agent-platform.giantswarm.io/harness` means nothing to the platform; a conversation is a `Session` of an `Agent` (the controller's `SessionService`, in place of `AgentInstanceService`). The connectivity chart renders its catalog (`kagent.modelConfigs[]`, `kagent.remoteMcpServers[]`) at `api.kagent.dev/v1alpha3`, and the controller GRPCRoute carries `kagent.api.v1alpha1.AgentService` and `SessionService`. The line's controller does not migrate a 1.x kagent database: the cut-over of an installation is a fresh database, and every session is lost. `docs/kagent-v1alpha3-cutover.md` is the full checklist (order, verification, rollback); the Operator action below is its summary.
 
 The `kagent.dev` CRDs are no longer rendered by the kagent-crds chart of the line. The installed ones carry `helm.sh/resource-policy: keep` (the previous kagent-crds release rendered them so), so they stay after the upgrade, their objects with them, until the operator deletes the six by hand (below) once model-manager 1.14.0 runs and no GitOps-owned ModelConfig is left at `kagent.dev`. The storage-version hook pair of the 3.x → 4.x cut-over (giantswarm/agent-platform#396) is retired with them: the restore hook waited on `modelconfigs.kagent.dev`, which no longer exists after the cut-over, and would have failed every later upgrade. The meta chart renders no hook with the engine off any more (a cluster's own Flux gets a pure app-of-apps render; the serving slice's teardown aside), and the hook identity exists at `pre-install,pre-upgrade,pre-delete,post-delete` with the engine on.
 
@@ -52,7 +133,7 @@ The `kagent.dev` CRDs are no longer rendered by the kagent-crds chart of the lin
 
 - **Plan downtime and back up the kagent database** (a CNPG `Backup` of `kagent-pg`). Every session, session share, scheduled-run execution and klaus-gateway Slack thread binding is lost; agents, templates, ModelConfigs and schedules are Kubernetes objects and come back with their producers (agent-manager, the Generic agent chart, Backstage, klaus-gateway). Agents are unavailable until the controller runs on the new database.
 - **Point the kagent controller at a fresh database** (a new CNPG `Database` in `postgres.databases` and `KAGENT_POSTGRES_DATABASE_URL` naming it); suspend the kagent HelmRelease while switching, so the old controller does not lay its schema on the new database. The controller refuses a database that holds the 1.x schema. Keep the old database until you no longer need a rollback.
-- **Substrate from the 1.3 line needs a fresh substrate schema** too: ate-api-server crash-loops on the existing one (`relation tuple already exists`; giantswarm/agent-platform#819).
+- **Substrate from the 1.3 line needs a fresh substrate database** too: ate-api-server crash-loops on the existing schema (`relation tuple already exists`). On the CNPG Cluster, add a new `postgres.databases` entry and name it in `postgres.substrateDatabase` (giantswarm/agent-platform#819); on the bundled Postgres, recreate the schema by hand.
 - **Delete the six `kagent.dev` CRDs by hand** once every agent is Ready on `api.kagent.dev`. The components' `versionRange`s of this release select the line; do not raise them by hand on an installation.
 - **Remove `kagent.harness.allowedAgentTemplates` and `kagent.controller.substrate.defaultWorkerPool`** from the installation's values if they are set: the line's Harness has no selector and its chart no `defaultWorkerPool` key.
 - **`kagent.controller.auth.mode`** is `insecure` or `trusted-proxy` on the line (the spelling `unsecure` is gone); the platform's default `trusted-proxy` is unchanged.

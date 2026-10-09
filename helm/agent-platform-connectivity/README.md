@@ -1437,6 +1437,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | postgres.sessionsDatabase.enabled | bool | `false` |  |
 | postgres.sessionsDatabase.name | string | `"sessions"` |  |
 | postgres.sessionsDatabase.owner | string | `"sessions"` |  |
+| postgres.substrateDatabase | string | `"substrate"` |  |
 | postgres.databases.substrate.enabled | bool | `true` |  |
 | postgres.databases.substrate.name | string | `"substrate"` |  |
 | postgres.databases.substrate.component | string | `"substrate"` |  |
@@ -1530,10 +1531,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.3.0"` |  |
+| agentgateway.controller.image.tag | string | `"2.3.3"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.3.0"` |  |
+| agentgateway.proxy.image.tag | string | `"2.3.3"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1581,6 +1582,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelManager.networkPolicy.huggingFace.fqdns[3].matchPattern | string | `"*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[4].matchPattern | string | `"*.*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.cidrs | list | `[]` |  |
+| modelManager.networkPolicy.registry.fqdns[0].matchName | string | `"gsoci.azurecr.io"` |  |
+| modelManager.networkPolicy.registry.fqdns[1].matchPattern | string | `"*.blob.core.windows.net"` |  |
+| modelManager.networkPolicy.registry.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.workloadClusters | object | `{}` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
@@ -1702,7 +1706,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent-crds | object | `{}` |  |
 | substrate.createNamespace | bool | `false` |  |
 | substrate.postgres.enabled | string | `"auto"` |  |
-| substrate.postgres.connectionString | string | `""` |  |
+| substrate.postgres.readWriteConnectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |
 | substrate.rustfs.enabled | bool | `false` |  |
 | substrate.atelet.storageBackend | string | `"s3"` |  |

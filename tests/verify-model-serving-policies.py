@@ -16,7 +16,11 @@ agent-platform.modelServing.podShape); this check holds what that buys:
     model URI): the hf-cache claim is mounted at /mnt/models with the model's
     name as subPath on the storage-initializer and on the shape's runtime
     container (its readOnly as KServe declared it: the runtime writes nothing
-    into the model's directory); the runtime container mounts the claim a
+    into the model's directory) — the claim the pod's
+    model-manager.giantswarm.io/cache-claim annotation names instead (a
+    split's worker pods: worker-cache-claim first), an absent or empty value
+    the base claim, and the discovery document's nodeClaims true beside
+    redirectPolicy (#868); the runtime container mounts the claim a
     second time at /mnt/vllm-cache from the claim-wide subPath .vllm-cache and
     carries VLLM_CACHE_ROOT naming that path and TRITON_CACHE_DIR naming its
     triton/ directory (a preset that serves eager never compiles, so vLLM's
@@ -156,6 +160,9 @@ KYVERNO = os.environ.get("KYVERNO", "kyverno")
 HERE = pathlib.Path(__file__).resolve().parent
 NS = "model-serving"
 CLAIM = "hf-cache"
+# The annotations model-manager names a pod's cache claim with (#868; giantswarm/model-manager#294).
+LEADER_CLAIM = "model-manager.giantswarm.io/cache-claim"
+WORKER_CLAIM = "model-manager.giantswarm.io/worker-cache-claim"
 FSGROUP = 1000
 MEMORY = "8Gi"
 # modelServing.policies.env, as the chart ships it (#520).
@@ -501,6 +508,55 @@ def check_mutations(pods_policy: dict, shape: str) -> None:
         if set(VLLM_ENV) & set(env_of(nameless_runtime)) or VLLM_CACHE["mountPath"] in mounts(nameless_runtime):
             fail(f"{shape}: a pod without {name_label} got a cache env or vLLM's cache mount without the claim")
         ok(f"{shape}: a pod without {name_label} gets the limit and the env, no cache mount, neither cache env, no fsGroup")
+
+
+def check_cache_claims(pods_policy: dict, shape: str) -> None:
+    """The claim a model pod names (giantswarm/agent-platform#868): a split's worker pods mount the worker annotation's
+    claim, every pod the cache-claim annotation's after it, and a pod naming neither (or an empty value) the base claim."""
+    _, runtime, name_label, _ = SHAPES[shape]
+    model = fixture(shape)["metadata"]["labels"][name_label]
+    cases = [  # (component, annotations, the claim the pod mounts)
+        ("llminferenceservice-workload", {}, CLAIM),
+        ("llminferenceservice-workload", {LEADER_CLAIM: "node-b"}, "node-b"),
+        ("llminferenceservice-workload", {LEADER_CLAIM: ""}, CLAIM),
+        ("llminferenceservice-workload-leader", {LEADER_CLAIM: "node-a", WORKER_CLAIM: "node-b"}, "node-a"),
+        ("llminferenceservice-workload-leader", {WORKER_CLAIM: "node-b"}, CLAIM),
+        ("llminferenceservice-workload-worker", {LEADER_CLAIM: "node-a", WORKER_CLAIM: "node-b"}, "node-b"),
+        ("llminferenceservice-workload-worker-prefill", {WORKER_CLAIM: "node-b"}, "node-b"),
+        ("llminferenceservice-workload-worker", {LEADER_CLAIM: "node-a"}, "node-a"),
+        ("llminferenceservice-workload-worker", {LEADER_CLAIM: "node-a", WORKER_CLAIM: ""}, "node-a"),
+        ("llminferenceservice-workload-worker", {}, CLAIM),
+    ]
+    for component, annotations, want in cases:
+        pod = fixture(shape)
+        pod["metadata"]["labels"]["app.kubernetes.io/component"] = component
+        if annotations:
+            pod["metadata"]["annotations"] = dict(annotations)
+        out = apply([pods_policy], pod)
+        if out is None:
+            fail(f"{shape}: no rule applied to a {component} pod annotated {annotations}")
+        spec = out["spec"]
+        got = {v["name"]: v for v in spec["volumes"]}.get(CLAIM, {}).get("persistentVolumeClaim", {}).get("claimName")
+        if got != want:
+            fail(f"{shape}: a {component} pod annotated {annotations} mounts claim {got!r}; expected {want!r}")
+        for label, container in (("storage-initializer", init_of(spec, "storage-initializer")), (runtime, runtime_of(spec, runtime))):
+            if mounts(container).get(MODEL_DIR, {}).get("subPath") != model:
+                fail(f"{shape}: a {component} pod annotated {annotations}: {label}'s {MODEL_DIR} lost the subPath {model}")
+        again = apply([pods_policy], out)
+        if again is not None and again["spec"] != spec:
+            fail(f"{shape}: the policy over a {component} pod annotated {annotations} is no no-op on its own output")
+        ok(f"{shape}: a {component} pod annotated {annotations or 'with neither'} mounts claim {want} (<claim>/{model}), a no-op on reinvocation")
+
+
+def check_discovery(connectivity: str) -> None:
+    """The discovery document publishes nodeClaims beside redirectPolicy (#868): model-manager creates node claims only
+    when the policy honours the annotations."""
+    for flags, want in (([], True), (["--set", "modelServing.policies.enabled=false"], False)):
+        cm = one(render(connectivity, flags), "ConfigMap", "agent-platform-model-serving")
+        cache = yaml.safe_load(next(iter(cm["data"].values())))["spec"]["cache"]
+        if cache.get("redirectPolicy") is not want or cache.get("nodeClaims") is not want:
+            fail(f"discovery with {flags or 'the defaults'}: redirectPolicy={cache.get('redirectPolicy')}, nodeClaims={cache.get('nodeClaims')}; expected both {want}")
+    ok("the discovery document carries nodeClaims beside redirectPolicy: true with the policies on, false with them off")
 
 
 def selector_of(shape: str, policy: dict) -> list[dict]:
@@ -1206,8 +1262,10 @@ def main(connectivity: str, meta: str) -> int:
     ok("the pods policy's rules: the redirect rules, the env rules, the limit, the emptyDir bounds; an empty modelServing.policies.env renders no env rule")
     for shape in SHAPES:
         check_mutations(pods_policy, shape)
+        check_cache_claims(pods_policy, shape)
         check_pod_security(pods_policy, exception, shape)
     check_deployments(deployments_policy)
+    check_discovery(connectivity)
     check_emptydir_bounds(connectivity, meta, pods_policy, deployments_policy)
     check_image_verification(connectivity, docs)
     cilium = render(connectivity, CILIUM)

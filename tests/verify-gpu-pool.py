@@ -18,24 +18,25 @@ onto the pool and published for model-manager. Each case below pins one property
 - a taint value: operator Equal with the value, in the runtime and the
   discovery ConfigMap;
 - an empty taint key (an untainted pool): no toleration anywhere, no taint in
-  the discovery ConfigMap, and the serving render byte-identical to GOLDEN_REF
-  (origin/main; GOLDEN_REF= opts out) but for the discovery block itself and
-  the image references (a dependency bump re-pins those) --
-  against a golden that already carries this change the override goes to both
-  sides, since a tainted golden could never equal an untainted head;
+  the discovery ConfigMap, and the parsed serving render equal, object for
+  object, to the default render with the pool's toleration taken out, but for
+  the discovery block (both renders are the head's, so a preset or default
+  change moves both sides; a mismatch prints a unified diff of the object);
 - the guards: the effect, the key, string label values (a number must be
   quoted; --set-string passes);
 - the meta chart forwards the block to the connectivity release.
 
-Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
+PyYAML parses the renders (the CI job installs it). HELM selects the binary.
 """
 
 import glob
 import os
+import difflib
 import re
 import subprocess
 import sys
-import tempfile
+
+import yaml
 
 HELM = os.environ.get("HELM", "helm")
 META, CONN = sys.argv[1], sys.argv[2]
@@ -55,40 +56,14 @@ SERVING = [
     "--set", "components.agentgateway.enabled=false",
 ]
 UNTAINTED = ["--set", "modelServing.gpuPool.taint.key="]
-# The cache claim is applied by a hook Job since #483 (a chart from before
-# rendered a PersistentVolumeClaim, and no hook identity); the byte-identity
-# check is about the pool input, so both sides render without the claim.
-NO_CACHE = ["--set", "modelServing.cache.enabled=false"]
 POOL_TOL = {"effect": "NoSchedule", "key": "nvidia.com/gpu", "operator": "Exists"}
 LABEL = {"giantswarm.io/machine-pool": "ci-gpu00"}
-# The classic path's documents on a golden from before giantswarm/agent-platform#574:
-# the ClusterServingRuntime and the predictor-shaped policies, left out of the
-# comparison while GOLDEN_REF carries them.
+# The classic path's runtime, removed by giantswarm/agent-platform#574.
 CLASSIC_RUNTIME = ("ClusterServingRuntime", "kserve-vllm")
 DISCOVERY = ("ConfigMap", "agent-platform-model-serving")
 PRESET = re.compile(r"^agent-platform-serving-preset-(.+)$")
 # The presets the connectivity chart ships (one file each; #481 added two).
 SHIPPED = len(glob.glob(os.path.join(CONN, "files", "model-serving", "presets", "*.yaml")))
-# The 24 GB presets of the September 2026 line-up and the ones they replaced (#591).
-LINEUP_24GB = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b")
-RETIRED_24GB = ("qwen3-4b-instruct", "qwen3-8b-fp8", "qwen3-14b")
-# The two four-GPU presets (giantswarm/agent-platform#591): tensor parallel across four L40S.
-FOUR_GPU = ("mistral-small-4", "gpt-oss-120b")
-OCI_PRESETS = ("gpt-oss-20b", "gemma-4-12b", "qwen3-5-9b-fp8", "qwen3-5-4b", "gemma-4-31b", "qwen3-6-35b-a3b", "qwen3-8-27b-l40s", "mistral-small-4", "gpt-oss-120b", "qwen3-8-flash-next-nvfp4", "muse-glimmer-30b", "kolibri-1")
-# The discovery block this change adds, cut out for the byte-identity check.
-GPU_POOL_BLOCK = re.compile(
-    r"      # The GPU node pool \(modelServing\.gpuPool\).*?(?=      # Whether this chart renders network policies)", re.S
-)
-# The model-images block of the discovery ConfigMap (#551), cut out while GOLDEN_REF predates it.
-MODEL_IMAGES_BLOCK = re.compile(r"      # Models as OCI images \(modelServing\.modelImages\).*?(?=      presets:\n)", re.S)
-# An image reference, masked on both sides of the GOLDEN_REF comparison: a
-# dependency bump re-pins it by design (the committed renders of tests/golden/
-# show that move), while the pool's scheduling is what this comparison guards.
-IMAGE_REF = re.compile(r"^( *(?:- )?image: ).+$", re.M)
-# A preset ConfigMap's chart-version annotation, cut out of both sides of the
-# GOLDEN_REF comparison: it names the chart's version, which moves every
-# release, and a golden from before it carries none.
-CHART_VERSION = re.compile(r'^  annotations:\n    agent-platform\.giantswarm\.io/chart-version: ".*"\n', re.M)
 
 
 def fail(msg: str) -> None:
@@ -184,6 +159,68 @@ def expect(what: str, got, want) -> None:
         fail(f"{what}: got {got!r}, expected {want!r}")
 
 
+def nested(node):
+    """A parsed object with every multi-line string that holds a YAML mapping or
+    list (a ConfigMap's preset, the discovery config) parsed in place."""
+    if isinstance(node, dict):
+        return {k: nested(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [nested(v) for v in node]
+    if isinstance(node, str) and "\n" in node:
+        try:
+            parsed = yaml.safe_load(node)
+        except yaml.YAMLError:
+            return node
+        if isinstance(parsed, (dict, list)):
+            return nested(parsed)
+    return node
+
+
+def objects(render: str) -> dict:
+    """(kind, namespace, name) -> the parsed object, nested YAML parsed too."""
+    out = {}
+    for obj in yaml.safe_load_all(render):
+        if isinstance(obj, dict) and obj.get("kind"):
+            meta = obj.get("metadata") or {}
+            key = (obj["kind"], meta.get("namespace", ""), meta.get("name", ""))
+            if key in out:
+                fail(f"the render carries {key} twice")
+            out[key] = nested(obj)
+    return out
+
+
+def unpooled(node):
+    """node with the pool's toleration taken out of every tolerations list; a
+    list or mapping that leaves empty is dropped, as the untainted render
+    renders none."""
+    if isinstance(node, list):
+        return [unpooled(v) for v in node]
+    if not isinstance(node, dict):
+        return node
+    out = {}
+    for k, v in node.items():
+        w = unpooled(v)
+        if k == "tolerations" and isinstance(w, list):
+            w = [t for t in w if t != POOL_TOL]
+        if w in ([], {}) and v not in ([], {}):
+            continue
+        out[k] = w
+    return out
+
+
+def compare(what: str, got: dict, against: str, want: dict) -> None:
+    """Fail with a unified diff of every object that differs (key order and
+    document order never count)."""
+    diffs = []
+    for key in sorted(set(got) | set(want)):
+        if got.get(key) == want.get(key):
+            continue
+        dump = lambda side: [] if key not in side else yaml.safe_dump(side[key], sort_keys=True, width=200).splitlines(keepends=True)
+        diffs.append("".join(difflib.unified_diff(dump(want), dump(got), f"{'/'.join(key)} ({against})", f"{'/'.join(key)} ({what})")))
+    if diffs:
+        fail(f"{what} vs {against}: {len(diffs)} object(s) differ:\n" + "\n".join(diffs))
+
+
 # --- default: the taint tolerated everywhere, no selector, published ---------
 docs = documents(helm(CONN, SERVING))
 if CLASSIC_RUNTIME in docs:
@@ -226,8 +263,8 @@ for name, doc in presets(docs).items():
 expect("discovery taint (value)", mapping(block(gpu_pool(docs), "taint")), {"key": "nvidia.com/gpu", "value": "present", "effect": "NoSchedule"})
 ok("a taint value narrows the toleration to Equal and is published")
 
-# --- untainted: nothing rendered, byte-identical to GOLDEN_REF but for the block
-untainted = helm(CONN, [*SERVING, *UNTAINTED, *NO_CACHE])
+# --- untainted: the pool's toleration is all an empty taint key takes away --
+untainted = helm(CONN, [*SERVING, *UNTAINTED])
 docs = documents(untainted)
 for name, doc in presets(docs).items():
     if block(doc, "scheduling") is not None:
@@ -237,468 +274,21 @@ expect("discovery taint (untainted)", block(gp, "taint"), None)
 expect("discovery nodeSelector (untainted)", block(gp, "nodeSelector"), [])
 ok("an empty taint key renders no toleration and no taint")
 
-ref = os.environ.get("GOLDEN_REF", "origin/main")
-if ref == "":
-    print("skip: GOLDEN_REF is empty (explicit opt-out)")
-elif subprocess.run(["git", "rev-parse", "--verify", "-q", ref], capture_output=True).returncode != 0:
-    fail(f"GOLDEN_REF={ref} does not resolve; fetch it, point GOLDEN_REF at another ref, or run with GOLDEN_REF= to opt out")
-else:
-    tree = tempfile.mkdtemp(prefix="ap-gpu-pool-golden-")
-    subprocess.run(["git", "worktree", "add", "-q", "--detach", tree, ref], check=True)
-    try:
-        # Once GOLDEN_REF carries this change -- which it does from the commit
-        # that merges it -- the golden's own default render is TAINTED, and a
-        # tainted golden can never equal an untainted head: the assertion is
-        # that equal inputs render alike, so the golden takes the same
-        # UNTAINTED override and the discovery block comes out of both sides.
-        # A golden from before the change has neither the flag nor the block.
-        carries = "gpuPool:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
-        # A golden from before giantswarm/agent-platform#574 renders the classic
-        # path too and takes the classic components as its prerequisite; the
-        # llm-d components stand in for them on that side.
-        classic = os.path.exists(f"{tree}/{CONN}/templates/model-serving/clusterservingruntime.yaml")
-        golden_serving = [f.replace("kserve-llmisvc-crd", "kserve-crd").replace("kserve-llmisvc-resources", "kserve-resources") for f in SERVING] if classic else SERVING
-        golden = documents(helm(f"{tree}/{CONN}", [*golden_serving, *UNTAINTED, *NO_CACHE] if carries else [*golden_serving, *NO_CACHE]))
-        shaped = "podShapes" in open(f"{tree}/{CONN}/templates/model-serving/_helpers.tpl", encoding="utf-8").read()
-        ported = "llmisvcWorkload:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
-        sized = "weightsGiB: 25" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b.yaml", encoding="utf-8").read()
-        kept = "$ms.namespace.keep" in open(f"{tree}/{CONN}/templates/model-serving/namespace.yaml", encoding="utf-8").read()
-        added = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-27b-l40s.yaml")
-        prepulled = "prepull:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
-        fastimaged = "llm-d-fast/" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
-        hooked = "helm.sh/hook" in open(f"{tree}/{CONN}/templates/model-serving/prepull.yaml", encoding="utf-8").read()
-        imaged = "modelImages:" in open(f"{tree}/{CONN}/templates/model-serving/config.yaml", encoding="utf-8").read()
-        flashnext = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml")
-        flashsized = flashnext and "memory: 118Gi" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml", encoding="utf-8").read()
-        flashweighed = flashnext and "weightsGiB: 100" in open(f"{tree}/{CONN}/files/model-serving/presets/qwen3-8-flash-next-nvfp4.yaml", encoding="utf-8").read()
-        lineup24 = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml")
-        lineup = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml")
-        fourgpu = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/mistral-small-4.yaml")
-        uidenv = lineup24 and "TORCHINDUCTOR_CACHE_DIR" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
-        ctx48 = lineup and "--max-model-len=8192" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
-        fp8kv = lineup and "--kv-cache-dtype=fp8" in open(f"{tree}/{CONN}/files/model-serving/presets/gemma-4-31b.yaml", encoding="utf-8").read()
-        muse = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/muse-glimmer-30b.yaml")
-        kolibri = os.path.exists(f"{tree}/{CONN}/files/model-serving/presets/kolibri-1.yaml")
-        tiktoken = lineup24 and "TIKTOKEN_ENCODINGS_BASE" in open(f"{tree}/{CONN}/files/model-serving/presets/gpt-oss-20b.yaml", encoding="utf-8").read()
-        parsed = os.path.exists(f"{tree}/{CONN}/files/model-serving/model-families.yaml")
-        graphs = parsed and "--enforce-eager" not in open(f"{tree}/{CONN}/files/model-serving/presets/nemotron-3-super-nvfp4.yaml", encoding="utf-8").read()
-        l40sfit = "--gpu-memory-utilization=0.90" in open(f"{tree}/{CONN}/files/model-serving/presets/devstral-small-2.yaml", encoding="utf-8").read()
-        splitenv = graphs and "VLLM_ENABLE_ROCE_ALLREDUCE" in open(f"{tree}/{CONN}/files/model-serving/presets/nemotron-3-super-nvfp4.yaml", encoding="utf-8").read()
-        mmread = "$servingOn" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
-        routed = os.path.exists(f"{tree}/{CONN}/templates/model-manager/route.yaml")
-        metered = "componentMetricsPort" in open(f"{tree}/{CONN}/templates/model-manager/netpol.yaml", encoding="utf-8").read()
-        drainable = "enablePDB" in open(f"{tree}/{CONN}/templates/postgres/cluster.yaml", encoding="utf-8").read()
-        gated = "gpuReadyLabel" in open(f"{tree}/{CONN}/templates/model-serving/prepull.yaml", encoding="utf-8").read()
-        initialized = "giantswarm/storage-initializer:" in open(f"{tree}/{CONN}/values.yaml", encoding="utf-8").read()
-        hookpolicy = os.path.exists(f"{tree}/{CONN}/templates/substrate/hooks-netpol.yaml")
-        musteregress = os.path.exists(f"{tree}/{CONN}/templates/networkpolicy-muster-mcp-egress-kubernetes.yaml")
-        resident = "residentWeightsGiB" in open(f"{tree}/{CONN}/files/model-serving/serving-preset.schema.json", encoding="utf-8").read()
-        floored = "minComputeCapability" in open(f"{tree}/{CONN}/files/model-serving/serving-preset.schema.json", encoding="utf-8").read()
-        bounded = "agent-platform.hooks.tmpLimit" in open(f"{tree}/{CONN}/templates/_hooks.tpl", encoding="utf-8").read()
-    finally:
-        subprocess.run(["git", "worktree", "remove", "--force", tree], check=False)
-    head = dict(docs)
-    head[DISCOVERY], cuts = GPU_POOL_BLOCK.subn("", head[DISCOVERY])
-    expect("the discovery block cut out once", cuts, 1)
-    if carries:
-        golden[DISCOVERY], gcuts = GPU_POOL_BLOCK.subn("", golden[DISCOVERY])
-        expect(f"the discovery block cut out of {ref} once", gcuts, 1)
-    # The classic InferenceService path is removed on this side
-    # (giantswarm/agent-platform#574); a golden from before renders the
-    # ClusterServingRuntime, the discovery ConfigMap's runtime keys and classic
-    # defaults, the predictor-shaped policies beside the workload's, a
-    # two-shape PolicyException and agents' egress, the classic controller's
-    # network policy beside the llm-d controller's, and every published preset
-    # with the runtime it defaulted to — so those documents are left out of
-    # the comparison on both sides (the presets' pool scheduling is asserted
-    # above without the golden). Drop this once GOLDEN_REF carries #574.
-    if classic:
-        for side in (head, golden):
-            side.pop(CLASSIC_RUNTIME, None)
-            side.pop(DISCOVERY, None)
-            side.pop(("Namespace", "model-serving"), None)  # its comment names the LLMInferenceServices now
-            side.pop(("PolicyException", "model-serving-predictors"), None)
-            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy", "ClusterPolicy")
-                        and ("model-serving" in k[1] or k[1].endswith(("-kserve-controller", "-llmisvc-controller")))]:
-                side.pop(key)
-            for key in [k for k in side if k[0] == "ConfigMap" and PRESET.match(k[1])]:
-                side.pop(key)
-        print(f"note: the classic serving path is removed on this side (#574) and not on {ref}: its runtime, the discovery ConfigMap, the serving policies and the published presets (which carried the defaulted runtime) are left out of the comparison")
-    # Two presets declare the Hub's weight size (giantswarm/agent-platform#535:
-    # qwen3-8-27b 25 GiB, devstral-small-2 25 GiB, their descriptions say so); a
-    # golden from before carries 15 and 48, so those two preset documents are
-    # left out of the comparison on both sides. Drop this once GOLDEN_REF
-    # carries #535.
-    if not sized:
-        for name in ("qwen3-8-27b", "devstral-small-2"):
-            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-        print(f"note: two presets declare the Hub's weight size on this side (#535) and not on {ref}: their ConfigMaps are left out of the comparison")
-    # The Flash-Next preset's memory limit covers the B12X stack's mlock()ed
-    # resident weights (giantswarm/agent-platform#567: limits.memory 118Gi, the
-    # comment in the preset says why); a golden from before carries 64Gi, so
-    # that preset document is left out of the comparison on both sides. Drop
-    # this once GOLDEN_REF carries #567.
-    if flashnext and not flashsized:
-        head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
-        golden.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
-        print(f"note: the Flash-Next preset's memory limit is 118Gi on this side (#567) and not on {ref}: its ConfigMap is left out of the comparison")
-    # The Flash-Next checkpoint grew to 99.03 GiB on the Hub, so its preset
-    # declares weightsGiB 100 on this side (make verify-preset-weights); a
-    # golden from before declares 99, so that preset document is left out of
-    # the comparison on both sides. Drop this once GOLDEN_REF carries it.
-    if flashnext and not flashweighed:
-        head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
-        golden.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
-        print(f"note: the Flash-Next preset declares 100 GiB of weights on this side and not on {ref}: its ConfigMap is left out of the comparison")
-    # The two four-GPU presets ship on this side (giantswarm/agent-platform#591)
-    # and not on a golden from before: their ConfigMaps and discovery entries are
-    # left out of the head. Drop this once GOLDEN_REF carries #591.
-    if not fourgpu:
-        for name in FOUR_GPU:
-            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-            if DISCOVERY in head:
-                head[DISCOVERY], ncuts = re.subn(rf"^ +- {re.escape(name)}\n", "", head[DISCOVERY], flags=re.M)
-                expect(f"the preset {name}'s name cut out of the discovery list once", ncuts, 1)
-        print(f"note: the four-GPU presets ship on this side (#591) and not on {ref}: their ConfigMaps and discovery entries are left out of the comparison")
-    # The serving namespace's policies select both pod shapes — the classic
-    # predictor and the LLMInferenceService workload pod — and render per shape
-    # (giantswarm/agent-platform#506); a golden from before knows the classic
-    # predictor only, so those policies are left out of the comparison on both
-    # sides. Drop this once GOLDEN_REF carries #506.
-    if not shaped:
-        policies = ("NetworkPolicy", "CiliumNetworkPolicy", "ClusterPolicy", "PolicyException")
-        for side in (head, golden):
-            for key in [k for k in side if k[0] in policies and "model-serving" in k[1]]:
-                side.pop(key)
-        print(f"note: the serving policies select both pod shapes on this side (#506) and not on {ref}: they are left out of the comparison")
-    # The preset qwen3-8-27b-l40s ships on this side (giantswarm/agent-platform#544);
-    # a golden from before has no such file, so its ConfigMap is left out of the
-    # comparison, and so is its name in the discovery ConfigMap's presets list.
-    # Drop this once GOLDEN_REF carries #544.
-    if not added:
-        head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-27b-l40s"), None)
-        head[DISCOVERY], ncuts = re.subn(r"^ +- qwen3-8-27b-l40s\n", "", head[DISCOVERY], flags=re.M)
-        expect("the new preset's name cut out of the discovery list once", ncuts, 1)
-        print(f"note: the preset qwen3-8-27b-l40s ships on this side (#544) and not on {ref}: its ConfigMap and its name in the discovery list are left out of the comparison")
-    # The preset qwen3-8-flash-next-nvfp4 ships on this side (giantswarm/agent-platform#553);
-    # a golden from before has no such file, so its ConfigMap is left out of the
-    # comparison, and so is its name in the discovery ConfigMap's presets list.
-    # Drop this once GOLDEN_REF carries #553.
-    if not flashnext:
-        head.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-flash-next-nvfp4"), None)
-        head[DISCOVERY], ncuts = re.subn(r"^ +- qwen3-8-flash-next-nvfp4\n", "", head[DISCOVERY], flags=re.M)
-        expect("the OCI preset's name cut out of the discovery list once", ncuts, 1)
-        print(f"note: the preset qwen3-8-flash-next-nvfp4 ships on this side (#553) and not on {ref}: its ConfigMap and its name in the discovery list are left out of the comparison")
-    # Every preset served from a model image carries USER, LOGNAME and
-    # TORCHINDUCTOR_CACHE_DIR on this side (giantswarm/agent-platform#591: the
-    # predictor runs as the modelcar uid, which the runtime image's passwd does
-    # not know); a golden from before renders the same ConfigMaps without them,
-    # so those ConfigMaps are left out of the comparison on both sides. Drop this
-    # once GOLDEN_REF carries the change.
-    if not uidenv:
-        for name in OCI_PRESETS:
-            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-        print(f"note: the model-image presets carry the modelcar uid environment on this side (#591) and not on {ref}: their ConfigMaps are left out of the comparison")
-    # gemma-4-31b and qwen3-6-35b-a3b carry the context lengths a 48 GB card
-    # holds next to their weights on this side (giantswarm/agent-platform#591);
-    # a golden from before renders them at 64k/32k, so both ConfigMaps are left
-    # out of the comparison. Drop this once GOLDEN_REF carries the change.
-    if not ctx48:
-        for name in ("gemma-4-31b", "qwen3-6-35b-a3b"):
-            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-        print(f"note: the 48 GB presets carry their fitted context lengths on this side (#591) and not on {ref}: their ConfigMaps are left out of the comparison")
-    # gemma-4-31b serves 32k with an fp8 KV cache on this side
-    # (giantswarm/agent-platform#611); a golden from before renders it at 8k
-    # with a bf16 cache, so its ConfigMap is left out of the comparison. Drop
-    # this once GOLDEN_REF carries the change.
-    if not fp8kv:
-        head.pop(("ConfigMap", "agent-platform-serving-preset-gemma-4-31b"), None)
-        golden.pop(("ConfigMap", "agent-platform-serving-preset-gemma-4-31b"), None)
-        print(f"note: gemma-4-31b serves 32k with an fp8 KV cache on this side (#611) and not on {ref}: its ConfigMap is left out of the comparison")
-    # The four 24 GB presets of the September 2026 line-up ship on this side
-    # (giantswarm/agent-platform#591) and the three Qwen3 small presets they
-    # replace do not; a golden from before has it the other way round, so the
-    # new presets' ConfigMaps and discovery entries are left out of the head and
-    # the retired ones' out of the golden. Drop this once GOLDEN_REF carries #591.
-    if not lineup24:
-        for side, names in ((head, LINEUP_24GB), (golden, RETIRED_24GB)):
-            for name in names:
-                side.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-                if DISCOVERY in side:
-                    side[DISCOVERY], ncuts = re.subn(rf"^ +- {re.escape(name)}\n", "", side[DISCOVERY], flags=re.M)
-                    expect(f"the preset {name}'s name cut out of the discovery list once", ncuts, 1)
-        print(f"note: the 24 GB line-up ships on this side (#591) and not on {ref}: the new presets' ConfigMaps and discovery entries, and the retired ones' on {ref}, are left out of the comparison")
-    # The 48 GB line-up (giantswarm/agent-platform#591): gemma-4-31b (with its
-    # chat-template ConfigMap) and qwen3-6-35b-a3b ship on this side,
-    # qwen3-5-27b, qwen3-coder-next and qwen3-5-35b-a3b no longer do, and
-    # qwen3-8-27b-l40s moved to NVIDIA's model image. A golden from before
-    # carries the retired three and neither new one, so each side's own preset
-    # ConfigMaps and discovery names are left out of the comparison, and the
-    # L40S preset's ConfigMap on both sides. Drop this once GOLDEN_REF carries
-    # #591.
-    if not lineup:
-        for name in ("gemma-4-31b", "qwen3-6-35b-a3b"):
-            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-            if DISCOVERY in head:
-                head[DISCOVERY], ncuts = re.subn(rf"^ +- {name}\n", "", head[DISCOVERY], flags=re.M)
-                expect(f"the new preset {name} cut out of the discovery list once", ncuts, 1)
-        head.pop(("ConfigMap", "agent-platform-chat-template-gemma-4-31b"), None)
-        for name in ("qwen3-5-27b", "qwen3-coder-next", "qwen3-5-35b-a3b"):
-            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-            if DISCOVERY in golden:
-                golden[DISCOVERY], ncuts = re.subn(rf"^ +- {name}\n", "", golden[DISCOVERY], flags=re.M)
-                expect(f"the retired preset {name} cut out of the golden's discovery list once", ncuts, 1)
-        for side in (head, golden):
-            side.pop(("ConfigMap", "agent-platform-serving-preset-qwen3-8-27b-l40s"), None)
-        print(f"note: the 48 GB line-up ships on this side (#591) and not on {ref}: the new presets' ConfigMaps and discovery names, the retired presets' on the golden, and the L40S preset's ConfigMap on both sides are left out of the comparison")
-    # muse-glimmer-30b and its chat template ship on this side
-    # (giantswarm/agent-platform#597) and not on a golden from before, so its
-    # ConfigMaps and discovery name are left out of the head. Drop this once
-    # GOLDEN_REF carries #597.
-    if not muse:
-        head.pop(("ConfigMap", "agent-platform-serving-preset-muse-glimmer-30b"), None)
-        head.pop(("ConfigMap", "agent-platform-chat-template-muse-glimmer-30b"), None)
-        if DISCOVERY in head:
-            head[DISCOVERY], ncuts = re.subn(r"^ +- muse-glimmer-30b\n", "", head[DISCOVERY], flags=re.M)
-            expect("the new preset muse-glimmer-30b cut out of the discovery list once", ncuts, 1)
-        print(f"note: muse-glimmer-30b ships on this side (#597) and not on {ref}: its ConfigMaps and discovery name are left out of the comparison")
-    # kolibri-1 ships on this side (giantswarm/agent-platform#804) and not on
-    # a golden from before, so its ConfigMap and discovery name are left out
-    # of the head. Drop this once GOLDEN_REF carries #804.
-    if not kolibri:
-        head.pop(("ConfigMap", "agent-platform-serving-preset-kolibri-1"), None)
-        if DISCOVERY in head:
-            head[DISCOVERY], ncuts = re.subn(r"^ +- kolibri-1\n", "", head[DISCOVERY], flags=re.M)
-            expect("the new preset kolibri-1 cut out of the discovery list once", ncuts, 1)
-        print(f"note: kolibri-1 ships on this side (#804) and not on {ref}: its ConfigMap and discovery name are left out of the comparison")
-    # The gpt-oss presets serve the model images that carry the tiktoken
-    # encodings and name them in TIKTOKEN_ENCODINGS_BASE on this side
-    # (giantswarm/agent-platform#606); a golden from before renders the older
-    # tags without the variable, so both ConfigMaps are left out of the
-    # comparison. Drop this once GOLDEN_REF carries #606.
-    if not tiktoken:
-        for name in ("gpt-oss-20b", "gpt-oss-120b"):
-            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-        print(f"note: the gpt-oss presets carry their tiktoken encodings on this side (#606) and not on {ref}: their ConfigMaps are left out of the comparison")
-    # The serving namespace is kept whatever the cache switch says
-    # (giantswarm/agent-platform#565; modelServing.namespace.keep) and its
-    # template's comment says so; the untainted render has the cache off, so a
-    # golden from before renders the namespace without the policy and with the
-    # old comment — the namespace document is left out of the comparison on
-    # both sides. Drop this once GOLDEN_REF carries #565.
-    if not kept:
-        for side in (head, golden):
-            side.pop(("Namespace", "model-serving"), None)
-        print(f"note: the serving namespace is kept with the cache off on this side (#565) and not on {ref}: its document is left out of the comparison")
-    # The llm-d workload's ingress admits the workload's own port, 8000, instead
-    # of the classic predictor's 8080 (giantswarm/agent-platform#525); a golden
-    # from before renders the old port, so that one policy is left out of the
-    # comparison on both sides. Drop this once GOLDEN_REF carries #525.
-    if not ported:
-        for side in (head, golden):
-            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy")
-                        and k[1].endswith(("-model-serving-llmisvc-workload", "-model-serving-llmisvc-workload-ingress"))]:
-                side.pop(key)
-        print(f"note: the llm-d workload's ingress admits the workload's port on this side (#525) and not on {ref}: that policy is left out of the comparison")
-    # devstral-small-2 and nemotron-3-super-nvfp4 carry their family's tool-call
-    # (and reasoning) parsers on this side (giantswarm/agent-platform#313,
-    # files/model-serving/model-families.yaml); a golden from before renders
-    # them without, so both preset ConfigMaps are left out of the comparison on
-    # both sides. Drop this once GOLDEN_REF carries #313.
-    if not parsed:
-        for name in ("devstral-small-2", "nemotron-3-super-nvfp4"):
-            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-        print(f"note: two presets carry their family's parsers on this side (#313) and not on {ref}: their ConfigMaps are left out of the comparison")
-    # nemotron-3-super-nvfp4 serves with CUDA graphs on this side (no
-    # --enforce-eager, giantswarm/giantswarm#37941); a golden from before
-    # renders it eager, so its ConfigMap is left out of the comparison. Drop
-    # this once GOLDEN_REF carries the change.
-    elif not graphs:
-        head.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
-        golden.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
-        print(f"note: nemotron-3-super-nvfp4 serves with CUDA graphs on this side and not on {ref}: its ConfigMap is left out of the comparison")
-    # devstral-small-2 is sized for one 48 GB L40S on this side
-    # (giantswarm/agent-platform#718: --gpu-memory-utilization=0.90,
-    # overheadGiB 16); a golden from before renders 0.50 and 30, so its
-    # ConfigMap is left out of the comparison. Drop this once GOLDEN_REF
-    # carries #718.
-    if not l40sfit:
-        head.pop(("ConfigMap", "agent-platform-serving-preset-devstral-small-2"), None)
-        golden.pop(("ConfigMap", "agent-platform-serving-preset-devstral-small-2"), None)
-        print(f"note: devstral-small-2 is sized for one L40S on this side (#718) and not on {ref}: its ConfigMap is left out of the comparison")
-    # nemotron-3-super-nvfp4 carries the RoCE all-reduce for a split on this
-    # side (spec.split.env, giantswarm/agent-platform#743); a golden from
-    # before renders it without, so its ConfigMap is left out of the
-    # comparison. Drop this once GOLDEN_REF carries the change.
-    elif not splitenv:
-        head.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
-        golden.pop(("ConfigMap", "agent-platform-serving-preset-nemotron-3-super-nvfp4"), None)
-        print(f"note: nemotron-3-super-nvfp4 carries a split environment on this side and not on {ref}: its ConfigMap is left out of the comparison")
-    # The unified-memory fit check holds a claim to the resident weights plus
-    # the overhead (giantswarm/model-manager#240): on this side Flash-Next
-    # declares residentWeightsGiB 74 and nemotron-3-super-nvfp4 an overheadGiB
-    # of 12; a golden from before renders neither, so both ConfigMaps are left
-    # out of the comparison. Drop this once GOLDEN_REF carries the change.
-    if not resident:
-        for name in ("qwen3-8-flash-next-nvfp4", "nemotron-3-super-nvfp4"):
-            head.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-            golden.pop(("ConfigMap", f"agent-platform-serving-preset-{name}"), None)
-        print(f"note: the GB10 presets declare their unified-memory need on this side (model-manager#240) and not on {ref}: their ConfigMaps are left out of the comparison")
-    # Every shipped preset declares the GPU generation it runs natively on,
-    # requirements.minComputeCapability (giantswarm/agent-platform#832); a
-    # golden from before declares none, so every preset ConfigMap is left out
-    # of the comparison on both sides (the presets' pool scheduling is asserted
-    # above without the golden). Drop this once GOLDEN_REF carries #832.
-    if not floored:
-        for side in (head, golden):
-            for key in [k for k in side if k[0] == "ConfigMap" and PRESET.match(k[1])]:
-                side.pop(key)
-        print(f"note: every shipped preset declares its GPU generation on this side (#832) and not on {ref}: the preset ConfigMaps are left out of the comparison")
-    # model-manager's egress reaches the serving namespace's workload pods on the
-    # workload port with the slice on (giantswarm/agent-platform#602: the route
-    # list it reads a served model's API interfaces from); a golden from before
-    # renders that policy without the rule, so model-manager's egress policy is
-    # left out of the comparison on both sides. Drop this once GOLDEN_REF
-    # carries #602.
-    if not mmread:
-        for side in (head, golden):
-            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-egress")]:
-                side.pop(key)
-        print(f"note: model-manager's egress reaches the served models' runtimes on this side (#602) and not on {ref}: its policy is left out of the comparison")
-    # model-manager's REST route is retired on this side
-    # (giantswarm/agent-platform#271): its ingress policy names muster and the
-    # additional peers only, and says so; a golden from before still names the
-    # data plane in it, so that policy is left out of the comparison on both
-    # sides. Drop this once GOLDEN_REF carries #271.
-    if routed:
-        for side in (head, golden):
-            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-ingress")]:
-                side.pop(key)
-        print(f"note: model-manager has no route on this side (#271) and does on {ref}: its ingress policy is left out of the comparison")
-    # model-manager's ingress admits its metrics port on this side
-    # (giantswarm/giantswarm#36711, agent-platform.componentMetricsPort); a
-    # golden from before admits the Service port only, so that policy is left
-    # out of the comparison on both sides. Drop this once GOLDEN_REF carries it.
-    if not metered:
-        for side in (head, golden):
-            for key in [k for k in side if k[0] in ("NetworkPolicy", "CiliumNetworkPolicy") and k[1].endswith("-model-manager-ingress")]:
-                side.pop(key)
-        print(f"note: model-manager's ingress admits its metrics port on this side (#36711) and not on {ref}: its policy is left out of the comparison")
-    # The pre-pull DaemonSet and its deny-all policy (giantswarm/agent-platform#545)
-    # are new documents of the serving render; a golden from before has neither,
-    # so both are left out of the comparison on both sides. Drop this once
-    # GOLDEN_REF carries #545.
-    if not prepulled:
-        for side in (head, golden):
-            for key in [k for k in side if k[1].endswith("-model-serving-prepull")]:
-                side.pop(key)
-        print(f"note: the pre-pull DaemonSet and its policy render on this side (#545) and not on {ref}: they are left out of the comparison")
-    # The discovery ConfigMap publishes the model-images registry
-    # (giantswarm/agent-platform#551, spec.modelImages.registry); a golden from
-    # before has no such block, so it is cut out of the head's discovery
-    # document. Drop this once GOLDEN_REF carries #551.
-    if not imaged and DISCOVERY in head:
-        head[DISCOVERY], icuts = MODEL_IMAGES_BLOCK.subn("", head[DISCOVERY])
-        expect("the model-images block cut out of the discovery ConfigMap once", icuts, 1)
-        print(f"note: the discovery ConfigMap publishes the model-images registry on this side (#551) and not on {ref}: that block is left out of the comparison")
-    # The pre-pull DaemonSet names the re-layered llm-d-fast/ runtime image
-    # (giantswarm/agent-platform#568); a golden from before names the mirror's,
-    # so the DaemonSet document is left out of the comparison on both sides.
-    # Drop this once GOLDEN_REF carries #568.
-    if prepulled and not fastimaged:
-        for side in (head, golden):
-            for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
-                side.pop(key)
-        print(f"note: the pre-pull DaemonSet names the llm-d-fast/ runtime image on this side (#568) and not on {ref}: its document is left out of the comparison")
-    # The pre-pull DaemonSet is a post-install/post-upgrade hook object with a
-    # pre-delete cleanup Job, for which the hook identity renders, and its
-    # selector default is the template's (giantswarm/agent-platform#562, #563);
-    # a golden from before renders it as a release resource and — the cache
-    # off — no hook object at all, so the DaemonSet is left out of the
-    # comparison on both sides and the head's Job and identity are left out.
-    # Drop this once GOLDEN_REF carries #563.
-    if prepulled and not hooked:
-        for side in (head, golden):
-            for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
-                side.pop(key)
-        for key in [k for k in head if k[1] in ("t-model-serving-prepull-cleanup", "t-hooks")]:
-            head.pop(key)
-        print(f"note: the pre-pull DaemonSet is a hook object with a pre-delete cleanup Job on this side (#563) and not on {ref}: its document, the Job and the hook identity are left out of the comparison")
-    # The pre-pull pods wait for the GPU feature discovery label on this side
-    # (giantswarm/agent-platform#737, a required node affinity); a golden from
-    # before schedules them on the selector alone, so the DaemonSet is left out
-    # of the comparison on both sides. Drop this once GOLDEN_REF carries #737.
-    if prepulled and not gated:
-        for side in (head, golden):
-            for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
-                side.pop(key)
-        print(f"note: the pre-pull pods wait for the GPU feature discovery label on this side (#737) and not on {ref}: the DaemonSet is left out of the comparison")
-    # The pre-pull pulls the storage-initializer ahead of the runtime image on
-    # this side (giantswarm/agent-platform#807); a golden from before pulls the
-    # runtime image alone, so the DaemonSet is left out of the comparison on
-    # both sides. Drop this once GOLDEN_REF carries #807.
-    if prepulled and not initialized:
-        for side in (head, golden):
-            for key in [k for k in side if k[0] == "DaemonSet" and k[1].endswith("-model-serving-prepull")]:
-                side.pop(key)
-        print(f"note: the pre-pull pulls the storage-initializer first on this side (#807) and not on {ref}: the DaemonSet is left out of the comparison")
-    # The single-replica budgets are maxUnavailable: 1 and a lone Postgres
-    # instance renders enablePDB: false on this side (giantswarm/agent-platform#697);
-    # a golden from before renders minAvailable: 1 and the operator's budgets,
-    # so the budgets and the Postgres Cluster are left out of the comparison on
-    # both sides. Drop this once GOLDEN_REF carries #697.
-    if not drainable:
-        for side in (head, golden):
-            for key in [k for k in side if k[0] in ("PodDisruptionBudget", "Cluster")]:
-                side.pop(key)
-        print(f"note: the single-replica budgets are drainable on this side (#697) and not on {ref}: the budgets and the Postgres Cluster are left out of the comparison")
-    # The hook identity's network policy renders on this side
-    # (giantswarm/agent-platform#367) and not on a golden from before, so it is
-    # left out of the head. Drop this once GOLDEN_REF carries #367.
-    if not hookpolicy:
-        for kind in ("NetworkPolicy", "CiliumNetworkPolicy"):
-            head.pop((kind, "t-hooks"), None)
-        print(f"note: the hook Jobs' network policy renders on this side (#367) and not on {ref}: it is left out of the comparison")
-    # Every hook Job bounds its emptyDirs with ephemeral-storage requests,
-    # limits and sizeLimits on this side (giantswarm/agent-platform#780); a
-    # golden from before renders them unbounded, so the hook Jobs are left out
-    # of the comparison on both sides. Drop this once GOLDEN_REF carries #780.
-    if not bounded:
-        for side in (head, golden):
-            for key in [k for k in side if k[0] == "Job" and k[1].startswith("t-model-serving-")]:
-                side.pop(key)
-        print(f"note: the hook Jobs bound their emptyDirs on this side (#780) and not on {ref}: they are left out of the comparison")
-    # muster's kubernetes-flavour egress policy renders on this side
-    # (giantswarm/agent-platform#840) and not on a golden from before, so it is
-    # left out of the head. Drop this once GOLDEN_REF carries #840.
-    if not musteregress:
-        head.pop(("NetworkPolicy", "muster-mcp-egress"), None)
-        print(f"note: muster's kubernetes-flavour egress policy renders on this side (#840) and not on {ref}: it is left out of the comparison")
-    # A preset added to or retired from the shipped line-up renders its preset
-    # ConfigMap on one side only: a line-up change, not the pool's scheduling,
-    # so it is left out of the comparison (the presets both sides ship are
-    # still compared).
-    lineup = sorted(k for k in set(head) ^ set(golden) if k[0] == "ConfigMap" and k[1].startswith("agent-platform-serving-preset-"))
-    for key in lineup:
-        head.pop(key, None)
-        golden.pop(key, None)
-        name = re.escape(key[1].removeprefix("agent-platform-serving-preset-"))
-        for side in (head, golden):
-            if DISCOVERY in side:
-                side[DISCOVERY] = re.sub(rf"^ +- {name}\n", "", side[DISCOVERY], flags=re.M)
-    if lineup:
-        print(f"note: the preset line-up differs from {ref} ({', '.join(k[1].removeprefix('agent-platform-serving-preset-') for k in lineup)}): those preset ConfigMaps are left out of the comparison")
-    if set(head) != set(golden):
-        fail(f"untainted render vs {ref}: documents differ: {sorted(set(head) ^ set(golden))}")
-    for key in sorted(head):
-        if IMAGE_REF.sub(r"\1<image>", CHART_VERSION.sub("", head[key])) != IMAGE_REF.sub(r"\1<image>", CHART_VERSION.sub("", golden[key])):
-            fail(f"untainted render vs {ref}: {key[0]}/{key[1]} differs:\n{head[key]}\n--- {ref}:\n{golden[key]}")
-    ok(f"an empty taint key leaves the serving render (cache claim off on both sides) byte-identical to {ref} but for the discovery block, the image references and the presets' chart version")
+# The same head rendered twice, with the default taint and with an empty key,
+# parsed: the tainted render with the pool's toleration taken out of every
+# tolerations list (and a list or block that leaves empty dropped) must equal
+# the untainted render object for object, but for the discovery ConfigMap's
+# spec.gpuPool (asserted above). No other ref is read, so a preset, a serving
+# default or the discovery block changes on both sides alike.
+tainted = objects(helm(CONN, SERVING))
+want = {key: unpooled(obj) for key, obj in tainted.items()}
+got = objects(untainted)
+for side in (want, got):
+    config = side.get(("ConfigMap", "agent-platform", DISCOVERY[1]), {}).get("data", {}).get("config.yaml")
+    if not isinstance(config, dict) or config.get("spec", {}).pop("gpuPool", None) is None:
+        fail("the discovery ConfigMap carries no spec.gpuPool to leave out of the comparison")
+compare("an empty taint key", got, "the default taint, its toleration taken out", want)
+ok(f"an empty taint key changes the serving render ({len(got)} objects) by the pool's toleration alone, but for the discovery block")
 
 # --- the guards --------------------------------------------------------------
 for flags, needle in [

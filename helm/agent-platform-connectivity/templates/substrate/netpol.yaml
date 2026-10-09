@@ -161,7 +161,7 @@ spec:
             - port: "8443"
               protocol: TCP
     {{- if eq $pgMode "cnpg" }}
-    # The platform's CNPG Cluster (postgres.databases.substrate).
+    # The platform's CNPG Cluster (postgres.substrateDatabase).
     - toEndpoints:
         - matchLabels:
             cnpg.io/cluster: {{ .Values.postgres.clusterName }}
@@ -179,7 +179,7 @@ spec:
             - port: "5432"
               protocol: TCP
     {{- else }}
-    # An external database: wherever substrate.postgres.connectionString points.
+    # An external database: wherever substrate.postgres.readWriteConnectionString points.
     - toEntities:
         - cluster
         - world

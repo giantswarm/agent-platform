@@ -553,7 +553,7 @@ components:  # @schema additionalProperties: true
     # chart takes its OTel settings in the SDK-spec shape kagent.otel below
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
     # ignores them and exports nothing.
-    versionRange: ">=1.4.0 <1.5.0"
+    versionRange: ">=1.5.0 <1.6.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -663,7 +663,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.4.0 <1.5.0"
+    versionRange: ">=1.5.0 <1.6.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -714,7 +714,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.5.0 <1.6.0"
+    versionRange: ">=1.6.1 <1.7.0"
     # Stable releases only, also where gitops.prereleases admits the
     # platform's release candidates: the worker image above follows the
     # floor, and a candidate's atelet next to the floor's worker fails every
@@ -743,7 +743,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.5.0 <1.6.0"
+    versionRange: ">=1.6.1 <1.7.0"
     # Stable releases only, the range of substrate-crds above.
     prereleases: false
     valuesFrom: substrate
@@ -2277,6 +2277,22 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
   # policy). An explicit true / false wins.
   ciliumNetworkPolicy:
     enabled: auto  # auto | true | false
+    # The store's readers, admitted on the Valkey port: muster (its OAuth token
+    # store) and klaus-gateway (its routing store), by the pod labels the
+    # connectivity chart's muster-to-* and klausgateway-store-egress policies
+    # select. The wrapper's default admits every pod of the release namespace.
+    # The kubelet's probes (the host entity) and the exporter's collectors
+    # (ingress.metricsScrapers, alloy-metrics) stay the wrapper's. A further
+    # reader goes into ingress.additionalPeers; an installation's own clients
+    # list replaces this one whole.
+    ingress:
+      clients:
+        - namespace: ""
+          matchLabels:
+            app.kubernetes.io/name: muster
+        - namespace: ""
+          matchLabels:
+            app.kubernetes.io/name: klaus-gateway
   vpa:
     enabled: false
   # PodDisruptionBudget on the muster-valkey pod, rendered by the connectivity
@@ -3125,7 +3141,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         # capz — Azure storage Account (TLS only, no public blob access) and
         #        Container with a lifecycle ManagementPolicy, a
         #        UserAssignedIdentity federated for the s3proxy ServiceAccount
-        #        and assigned Storage Blob Data Contributor on the container;
+        #        and assigned Storage Blob Data Contributor on the account;
         #        the s3proxy façade below is on with it.
         # Bucket, account and container are created but never deleted by
         # Crossplane and carry helm.sh/resource-policy: keep.
@@ -3158,7 +3174,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           replicationType: LRS
           # The UserAssignedIdentity s3proxy runs as: federated against the
           # cluster's OIDC issuer for the s3proxy ServiceAccount, assigned
-          # Storage Blob Data Contributor on the container.
+          # Storage Blob Data Contributor on the storage account (the one
+          # assignment; the account holds nothing but the container).
           workloadIdentity:
             # The cluster's service-account issuer, as the CAPZ cluster's
             # apiserver spells it (--service-account-issuer).
@@ -3530,6 +3547,13 @@ postgres:
     enabled: false
     name: sessions
     owner: sessions
+  # The postgres.databases key of Agent Substrate's control-plane database:
+  # ate-api-server reads the entry's derived Secret <clusterName>-<key>-app in
+  # ate-system (the entry needs ate-system among its secretNamespaces). A
+  # Substrate line that cannot migrate the previous schema starts on a fresh
+  # database by naming a new entry here; the previous entry's database stays
+  # while its reclaimPolicy is retain.
+  substrateDatabase: substrate
   # Further databases on this Cluster, one CNPG Database per entry — named
   # <clusterName>-<key>, spec.name from `name` (immutable once created), owned
   # by applicationDatabase.owner, the role whose credentials CNPG writes into
@@ -3915,7 +3939,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.3.0"
+      tag: "2.3.3"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -3949,7 +3973,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.3.0"
+      tag: "2.3.3"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -4178,7 +4202,8 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
   # Egress: DNS, the Kubernetes API, the identity provider (oauth on: the Dex
   # issuer by name, or for model-manager.oauth.provider google its discovery,
   # JWKS/userinfo and token hosts), the Ollama endpoint (ollama backend) or the
-  # Hugging Face Hub (kserve backend), plus the names and blocks of egress.
+  # Hugging Face Hub and the model registry (kserve backend), plus the names
+  # and blocks of egress.
   networkPolicy:
     ingress:
       # Callers admitted on the Service port next to the platform's own (the
@@ -4215,6 +4240,24 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.kubernetes.worldExcludedCIDRs. A list here narrows the
       # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
       # adds them next to the names.
+      cidrs: []
+    registry:
+      # cilium flavor: Cilium FQDN selectors for the kserve backend's reads of
+      # a model image (fit checks of a preset served from oci://: the
+      # manifest, the config blob and the layer holding config.json), on 443.
+      # The defaults cover an anonymous read of gsoci.azurecr.io: the registry
+      # itself (token, /v2/, manifests) and the Azure blob storage it
+      # redirects blob reads to (<region>replstore<n>.blob.core.windows.net).
+      # The node's container runtime pulls the image for the model pod outside
+      # this policy. A mirror (modelServing.modelImages.registry) replaces the
+      # list. Ignored by the kubernetes flavor (see cidrs).
+      fqdns:
+        - matchName: gsoci.azurecr.io
+        - matchPattern: "*.blob.core.windows.net"
+      # IP blocks of the registry and its storage. kubernetes flavor: empty,
+      # the default, opens 443 to every public destination, as for
+      # huggingFace.cidrs; a list narrows the registry egress to these blocks.
+      # The cilium flavor adds them next to the names.
       cidrs: []
     # The workload clusters' API servers the kserve backend calls as the caller:
     # a backend cluster-manager registers targets a workload cluster's apiserver
@@ -5053,14 +5096,19 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # <postgres.clusterName>-substrate-app in ate-system — the meta chart
     # derives postgres.connectionStringSecretRef from those values
     # (agent-platform.componentDerivedValues; a disagreeing explicit value
-    # fails the render) — and the chart's bundled single-instance StatefulSet
-    # stays off; without the Cluster the bundled StatefulSet runs (a lab, a
-    # quick start), as kagent's own bundled Postgres does. `true` forces the
-    # bundled one, `false` refuses it — then the Cluster or connectionString
-    # (an external database) must hold, or the render fails. The chart itself
-    # takes a boolean; the meta chart resolves `auto` before forwarding.
+    # fails the render), and readWriteRole and ownerRole, the role that
+    # Secret logs in as (postgres.applicationDatabase.owner): ate-api-server
+    # runs SET ROLE on every connection — and the chart's bundled
+    # single-instance StatefulSet stays off; without the Cluster the bundled
+    # StatefulSet runs (a lab, a quick start), as kagent's own bundled
+    # Postgres does. `true` forces the bundled one, `false` refuses it — then
+    # the Cluster or readWriteConnectionString (an external database) must
+    # hold, or the render fails. An external database sets readWriteRole and
+    # ownerRole itself (the chart's default is `postgres`) to roles its DSN's
+    # user may assume. The chart itself takes a boolean; the meta chart
+    # resolves `auto` before forwarding.
     enabled: auto  # auto | true | false
-    connectionString: ""
+    readWriteConnectionString: ""
     # The PostgreSQL schema ate-api-server keeps its tables in.
     schema: public
   rustfs:

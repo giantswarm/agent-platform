@@ -1142,7 +1142,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         # capz — Azure storage Account (TLS only, no public blob access) and
         #        Container with a lifecycle ManagementPolicy, a
         #        UserAssignedIdentity federated for the s3proxy ServiceAccount
-        #        and assigned Storage Blob Data Contributor on the container;
+        #        and assigned Storage Blob Data Contributor on the account;
         #        the s3proxy façade below is on with it.
         # Bucket, account and container are created but never deleted by
         # Crossplane and carry helm.sh/resource-policy: keep.
@@ -1175,7 +1175,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           replicationType: LRS
           # The UserAssignedIdentity s3proxy runs as: federated against the
           # cluster's OIDC issuer for the s3proxy ServiceAccount, assigned
-          # Storage Blob Data Contributor on the container.
+          # Storage Blob Data Contributor on the storage account (the one
+          # assignment; the account holds nothing but the container).
           workloadIdentity:
             # The cluster's service-account issuer, as the CAPZ cluster's
             # apiserver spells it (--service-account-issuer).
@@ -1880,6 +1881,13 @@ postgres:
     enabled: false
     name: sessions
     owner: sessions
+  # The postgres.databases key of Agent Substrate's control-plane database:
+  # ate-api-server reads the entry's derived Secret <clusterName>-<key>-app in
+  # ate-system (the entry needs ate-system among its secretNamespaces). A
+  # Substrate line that cannot migrate the previous schema starts on a fresh
+  # database by naming a new entry here; the previous entry's database stays
+  # while its reclaimPolicy is retain.
+  substrateDatabase: substrate
   # Further databases on this Cluster, one CNPG Database per entry — named
   # <clusterName>-<key>, spec.name from `name` (immutable once created), owned
   # by applicationDatabase.owner, the role whose credentials CNPG writes into
@@ -2200,12 +2208,12 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.3.0"
+      tag: "2.3.3"
   proxy:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.3.0"
+      tag: "2.3.3"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -2355,7 +2363,8 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
   # Egress: DNS, the Kubernetes API, the identity provider (oauth on: the Dex
   # issuer by name, or for model-manager.oauth.provider google its discovery,
   # JWKS/userinfo and token hosts), the Ollama endpoint (ollama backend) or the
-  # Hugging Face Hub (kserve backend), plus the names and blocks of egress.
+  # Hugging Face Hub and the model registry (kserve backend), plus the names
+  # and blocks of egress.
   networkPolicy:
     ingress:
       # Callers admitted on the Service port next to the platform's own (the
@@ -2392,6 +2401,24 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.kubernetes.worldExcludedCIDRs. A list here narrows the
       # egress to exactly these blocks (a mirror, a proxy). The cilium flavor
       # adds them next to the names.
+      cidrs: []
+    registry:
+      # cilium flavor: Cilium FQDN selectors for the kserve backend's reads of
+      # a model image (fit checks of a preset served from oci://: the
+      # manifest, the config blob and the layer holding config.json), on 443.
+      # The defaults cover an anonymous read of gsoci.azurecr.io: the registry
+      # itself (token, /v2/, manifests) and the Azure blob storage it
+      # redirects blob reads to (<region>replstore<n>.blob.core.windows.net).
+      # The node's container runtime pulls the image for the model pod outside
+      # this policy. A mirror (modelServing.modelImages.registry) replaces the
+      # list. Ignored by the kubernetes flavor (see cidrs).
+      fqdns:
+        - matchName: gsoci.azurecr.io
+        - matchPattern: "*.blob.core.windows.net"
+      # IP blocks of the registry and its storage. kubernetes flavor: empty,
+      # the default, opens 443 to every public destination, as for
+      # huggingFace.cidrs; a list narrows the registry egress to these blocks.
+      # The cilium flavor adds them next to the names.
       cidrs: []
     # The workload clusters' API servers the kserve backend calls as the caller:
     # a backend cluster-manager registers targets a workload cluster's apiserver
@@ -3047,7 +3074,7 @@ kagent-crds: {}  # @schema skipProperties: true; additionalProperties: true
 # The substrate component's values — the Giant Swarm Substrate line's chart,
 # Agent Substrate's control plane in ate-system — forwarded by the meta chart.
 # This chart reads them for the wiring it renders around Substrate
-# (templates/substrate/): postgres.enabled / postgres.connectionString decide
+# (templates/substrate/): postgres.enabled / postgres.readWriteConnectionString decide
 # whether the CNPG connection Secret of postgres.databases.substrate is
 # derived and which Postgres the network policies open; rustfs.enabled opens
 # the in-cluster store; the Substrate namespaces are fixed (ate-system,
@@ -3059,7 +3086,7 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # exactly as the meta chart resolves it (bundled without the platform
     # Cluster, the Cluster's Database with it; explicit values win).
     enabled: auto
-    connectionString: ""
+    readWriteConnectionString: ""
     schema: public
   rustfs:
     enabled: false

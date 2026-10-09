@@ -273,7 +273,7 @@ spec:
               protocol: TCP
     {{- if eq (include "agent-platform.substrate.postgresMode" .) "cnpg" }}
     # Agent Substrate's control plane keeps its database on this Cluster
-    # (postgres.databases.substrate).
+    # (postgres.substrateDatabase).
     - fromEndpoints:
         - matchLabels:
             app: ate-api-server

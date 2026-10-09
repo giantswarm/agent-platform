@@ -53,8 +53,14 @@ therefore checked against this list before the merge, not after the rollout.
 ## The Valkey stores
 
 The Valkey charts (valkey-app v0.3.3 and later) admit the store's consumers on
-the Valkey port through `valkey.ciliumNetworkPolicy.ingress.clients`, every pod
-of the release namespace by default. Least privilege names the consumers: for
-the platform's Valkey, muster (`app.kubernetes.io/name: muster`) and
-klaus-gateway (`app.kubernetes.io/name: klaus-gateway`) in the release
-namespace; for an mcp-* server's store, that server's pods.
+the Valkey port through `ciliumNetworkPolicy.ingress.clients`, every pod of the
+release namespace by default. Least privilege names the consumers; the kubelet's
+probes (the host entity, every port) and the metrics collectors
+(`ingress.metricsScrapers`, alloy-metrics on the exporter port) are the
+wrapper's own and stay admitted.
+
+| Store | Clients (Valkey port) | Why they read it | Value |
+|---|---|---|---|
+| muster-valkey (this chart) | muster (`app.kubernetes.io/name: muster`) and klaus-gateway (`app.kubernetes.io/name: klaus-gateway`), release namespace | muster's OAuth token and session store; klaus-gateway's routing store (`klausGateway.routing.store: valkey`) | `valkey.ciliumNetworkPolicy.ingress.clients`, set by default; a further reader goes into `valkey.ciliumNetworkPolicy.ingress.additionalPeers` |
+
+For an mcp-* server's store, the clients are that server's pods.

@@ -360,7 +360,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.4.0 <1.5.0"` |  |
+| components.kagent.versionRange | string | `">=1.5.0 <1.6.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -383,20 +383,20 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.4.0 <1.5.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.5.0 <1.6.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.5.0 <1.6.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.6.1 <1.7.0"` |  |
 | components.substrate-crds.prereleases | bool | `false` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.5.0 <1.6.0"` |  |
+| components.substrate.versionRange | string | `">=1.6.1 <1.7.0"` |  |
 | components.substrate.prereleases | bool | `false` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
@@ -718,6 +718,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.muster.observability.grafanaDashboard.giantswarm.enabled | bool | `true` |  |
 | muster.muster.observability.grafanaDashboard.giantswarm.organization | string | `"Shared Org"` |  |
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
+| valkey.ciliumNetworkPolicy.ingress.clients[0].namespace | string | `""` |  |
+| valkey.ciliumNetworkPolicy.ingress.clients[0].matchLabels."app.kubernetes.io/name" | string | `"muster"` |  |
+| valkey.ciliumNetworkPolicy.ingress.clients[1].namespace | string | `""` |  |
+| valkey.ciliumNetworkPolicy.ingress.clients[1].matchLabels."app.kubernetes.io/name" | string | `"klaus-gateway"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.podDisruptionBudget.enabled | bool | `true` |  |
 | valkey.podDisruptionBudget.minAvailable | string | `nil` |  |
@@ -976,6 +980,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | postgres.sessionsDatabase.enabled | bool | `false` |  |
 | postgres.sessionsDatabase.name | string | `"sessions"` |  |
 | postgres.sessionsDatabase.owner | string | `"sessions"` |  |
+| postgres.substrateDatabase | string | `"substrate"` |  |
 | postgres.databases.substrate.enabled | bool | `true` |  |
 | postgres.databases.substrate.name | string | `"substrate"` |  |
 | postgres.databases.substrate.component | string | `"substrate"` |  |
@@ -1083,12 +1088,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.3.0"` |  |
+| agentgateway.controller.image.tag | string | `"2.3.3"` |  |
 | agentgateway.controller.replicaCount | int | `2` |  |
 | agentgateway.inferenceExtension.enabled | bool | `true` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.3.0"` |  |
+| agentgateway.proxy.image.tag | string | `"2.3.3"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1151,6 +1156,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | modelManager.networkPolicy.huggingFace.fqdns[3].matchPattern | string | `"*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.fqdns[4].matchPattern | string | `"*.*.*.hf.co"` |  |
 | modelManager.networkPolicy.huggingFace.cidrs | list | `[]` |  |
+| modelManager.networkPolicy.registry.fqdns[0].matchName | string | `"gsoci.azurecr.io"` |  |
+| modelManager.networkPolicy.registry.fqdns[1].matchPattern | string | `"*.blob.core.windows.net"` |  |
+| modelManager.networkPolicy.registry.cidrs | list | `[]` |  |
 | modelManager.networkPolicy.workloadClusters | object | `{}` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
@@ -1338,7 +1346,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.credentialProvider.namespacePolicies[1].atespace | string | `"ate-golden"` |  |
 | substrate.credentialProvider.namespacePolicies[1].allowedNamespaces[0] | string | `"kagent"` |  |
 | substrate.postgres.enabled | string | `"auto"` |  |
-| substrate.postgres.connectionString | string | `""` |  |
+| substrate.postgres.readWriteConnectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |
 | substrate.rustfs.enabled | bool | `false` |  |
 | substrate.otel.endpoint | string | `"auto"` |  |

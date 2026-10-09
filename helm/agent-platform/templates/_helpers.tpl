@@ -178,11 +178,17 @@ overwrite would hide a values file that still spells the old key.
     S3 environment of the s3proxy façade (capz, or the façade alone) next to
     an installation's own entries (one of the derived names fails the render);
     postgres.connectionStringSecretRef, on the platform Cluster —
-    the derived CNPG connection Secret <postgres.clusterName>-substrate-app
-    (key uri) the connectivity release's hook writes into ate-system for
-    postgres.databases.substrate (agent-platform.substrate.postgresMode; the
+    the derived CNPG connection Secret <postgres.clusterName>-<key>-app
+    (key uri) the connectivity release's hook writes into ate-system for the
+    postgres.databases entry postgres.substrateDatabase names
+    (agent-platform.substrate.postgresMode; the
     `auto` of substrate.postgres.enabled itself is resolved by
-    agent-platform.shape.apply, with the other cluster-shape knobs). Its
+    agent-platform.shape.apply, with the other cluster-shape knobs), and
+    postgres.readWriteRole and postgres.ownerRole, both the role that Secret
+    logs in as (postgres.applicationDatabase.owner): ate-api-server runs
+    SET ROLE on every connection, and the chart's default `postgres` is a
+    role the Cluster's application role is not a member of (a differing
+    explicit role fails the render). Its
     atelet.imageCache.pinnedImages is NOT derived here: the kagent release's
     ConfigMap kagent-images feeds it through the HelmRelease's valuesFrom
     (components.substrate.valuesFromRefs), so no copy of a digest lives here.
@@ -320,9 +326,16 @@ and muster never turns Ready (giantswarm/agent-platform#309). */ -}}
 {{- $ownName := dig "name" "" $own -}}
 {{- $ownKey := dig "key" "" $own -}}
 {{- if or (and $ownName (ne $ownName $ref.name)) (and $ownKey (ne $ownKey $ref.key)) -}}
-{{- fail (printf "substrate.postgres.connectionStringSecretRef (%s/%s) differs from the Secret the connectivity release derives for postgres.databases.substrate (%s/%s): leave it unset — it follows postgres.clusterName — or name an external database in substrate.postgres.connectionString" $ownName $ownKey $ref.name $ref.key) -}}
+{{- fail (printf "substrate.postgres.connectionStringSecretRef (%s/%s) differs from the Secret the connectivity release derives for postgres.databases.%s (%s/%s): leave it unset — it follows postgres.clusterName and postgres.substrateDatabase — or name an external database in substrate.postgres.readWriteConnectionString" $ownName $ownKey (include "agent-platform.substrate.databaseKey" .root) $ref.name $ref.key) -}}
 {{- end -}}
-{{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref) -}}
+{{- $role := .root.Values.postgres.applicationDatabase.owner | default "kagent" -}}
+{{- range $key := list "readWriteRole" "ownerRole" -}}
+{{- $ownRole := dig "postgres" $key "" ($.root.Values.substrate | default dict) -}}
+{{- if and $ownRole (ne $ownRole $role) -}}
+{{- fail (printf "substrate.postgres.%s (%s) differs from the role the derived DSN logs in as, postgres.applicationDatabase.owner (%s): ate-api-server runs SET ROLE on every connection and the Cluster's application role is not a member of another — leave it unset" $key $ownRole $role) -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref "readWriteRole" $role "ownerRole" $role) -}}
 {{- end -}}
 {{- if and (eq .name "kserve-llmisvc-resources") (include "agent-platform.componentEnabled" (dict "root" .root "name" "modelServing")) -}}
 {{- /* The models Gateway (modelServing.modelsGateway, rendered by the
@@ -395,9 +408,10 @@ Usage: include "agent-platform.omitPath" (dict "vals" $vals "path" "a.b")
 Where Agent Substrate's control-plane database lives: "bundled" (the substrate
 chart's single-instance StatefulSet — substrate.postgres.enabled true, or `auto`
 while neither of the other two applies), "external" (an explicit
-substrate.postgres.connectionString, or substrate.postgres.connectionStringSecretRef
+substrate.postgres.readWriteConnectionString, or substrate.postgres.connectionStringSecretRef
 naming a Secret that holds one), "cnpg" (the platform's CNPG Cluster,
-postgres.enabled, through postgres.databases.substrate and the derived Secret),
+postgres.enabled, through the postgres.databases entry postgres.substrateDatabase
+names and its derived Secret),
 or "" when none of the three holds (substrate.postgres.enabled false without a
 Cluster or a connection string) — which validateSubstrate refuses. The
 connectivity chart carries the same helper and resolves `auto` the same way.
@@ -406,10 +420,13 @@ Usage: include "agent-platform.substrate.postgresMode" .
 {{- define "agent-platform.substrate.postgresMode" -}}
 {{- $sub := .Values.substrate | default dict -}}
 {{- $bundled := dig "postgres" "enabled" "auto" $sub | toString -}}
-{{- $conn := dig "postgres" "connectionString" "" $sub -}}
+{{- if dig "postgres" "connectionString" "" $sub -}}
+{{- fail "substrate.postgres.connectionString is gone from the Substrate chart since 1.6.0, which reads substrate.postgres.readWriteConnectionString (and ownerConnectionString, defaulting to it): rename the key" -}}
+{{- end -}}
+{{- $conn := dig "postgres" "readWriteConnectionString" "" $sub -}}
 {{- $ref := dig "postgres" "connectionStringSecretRef" dict $sub -}}
 {{- $refOn := or (dig "enabled" false $ref) (dig "name" "" $ref) -}}
-{{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" "substrate" "enabled" true .Values.postgres) false) -}}
+{{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" (include "agent-platform.substrate.databaseKey" .) "enabled" true .Values.postgres) false) -}}
 {{- if not (has $bundled (list "auto" "true" "false")) -}}
 {{- fail (printf "substrate.postgres.enabled must be one of auto, true, false (got %s)" $bundled) -}}
 {{- end -}}
@@ -421,11 +438,29 @@ Usage: include "agent-platform.substrate.postgresMode" .
 {{- end -}}
 
 {{/*
-The derived CNPG connection Secret of postgres.databases.substrate, as the
-connectivity release names it: <postgres.clusterName>-substrate-app.
+The derived CNPG connection Secret of the Substrate database entry, as the
+connectivity release names it: <postgres.clusterName>-<postgres.substrateDatabase>-app.
 */}}
 {{- define "agent-platform.substrate.databaseSecretName" -}}
-{{- printf "%s-substrate-app" .Values.postgres.clusterName -}}
+{{- printf "%s-%s-app" .Values.postgres.clusterName (include "agent-platform.substrate.databaseKey" .) -}}
+{{- end -}}
+
+{{/*
+The postgres.databases key of Substrate's control-plane database
+(postgres.substrateDatabase).
+*/}}
+{{- define "agent-platform.substrate.databaseKey" -}}
+{{- .Values.postgres.substrateDatabase | default "substrate" -}}
+{{- end -}}
+
+{{/*
+Refuse a postgres.substrateDatabase that names no postgres.databases entry.
+*/}}
+{{- define "agent-platform.substrate.validateDatabaseKey" -}}
+{{- $key := include "agent-platform.substrate.databaseKey" . -}}
+{{- if not (hasKey (.Values.postgres.databases | default dict) $key) -}}
+{{- fail (printf "postgres.substrateDatabase (%s) names no postgres.databases entry: add postgres.databases.%s (name, component substrate, secretNamespaces [ate-system]) or name an existing key" $key $key) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -666,8 +701,10 @@ run it.
     with its endpoint in substrate.atelet.extraEnv, a lab's in-cluster store —
     and has no default.
   * Substrate on with no control-plane database: neither the bundled
-    StatefulSet, nor an explicit connectionString, nor the platform's CNPG
-    Cluster with postgres.databases.substrate.
+    StatefulSet, nor an explicit readWriteConnectionString, nor the platform's CNPG
+    Cluster with the postgres.databases entry postgres.substrateDatabase names.
+  * Substrate on the platform's CNPG Cluster with postgres.substrateDatabase
+    naming no postgres.databases entry.
   * Substrate on under a LIVE render (the Helm CLI, --dry-run=server,
     helm-controller: .Capabilities.APIVersions then lists kinds, which Helm's
     offline set never does — so `helm template` and CI, which see no cluster,
@@ -697,7 +734,10 @@ run it.
 {{- include "agent-platform.substrate.validateRange" . -}}
 {{- end -}}
 {{- if and $substrate (not (include "agent-platform.substrate.postgresMode" .)) -}}
-{{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster; postgres.databases.substrate renders the Database and the connectivity release derives the connection Secret), or substrate.postgres.enabled (the chart's bundled single-instance StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionStringSecretRef (a Secret in ate-system holding the connection string) or substrate.postgres.connectionString" -}}
+{{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster; the postgres.databases entry postgres.substrateDatabase names renders the Database and the connectivity release derives the connection Secret), or substrate.postgres.enabled (the chart's bundled single-instance StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionStringSecretRef (a Secret in ate-system holding the connection string) or substrate.postgres.readWriteConnectionString" -}}
+{{- end -}}
+{{- if and $substrate (eq (include "agent-platform.substrate.postgresMode" .) "cnpg") -}}
+{{- include "agent-platform.substrate.validateDatabaseKey" . -}}
 {{- end -}}
 {{- if and $substrate (.Capabilities.APIVersions.Has "v1/Namespace") -}}
 {{- if not (.Capabilities.APIVersions.Has "certificates.k8s.io/v1beta1/PodCertificateRequest") -}}
@@ -979,6 +1019,82 @@ at render time instead.
 {{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true")
            (ne (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds")) "true") -}}
 {{- fail "components.kagent.enabled is true but components.kagent-crds.enabled is not: the kagent line ships its CRDs as the kagent-crds chart, which the kagent release and the connectivity release's kagent CRs depend on; turn both on" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The api.kagent.dev line (kagent 1.3 and later) refuses a database that holds the
+1.x schema: its controller exits at start-up, the kagent upgrade times out with
+the line's resources half applied, and Helm's rollback cannot undo that in
+either direction (giantswarm/agent-platform#857). So the render refuses the
+crossing before any component moves while all three hold:
+- components.kagent.versionRange admits a release of 1.3 or later (probed at
+  1.3.0 and at the start and end of every minor its literals name from 1.3 on,
+  so a floor, an exact pin, ~ and ^ are all read);
+- the running controller (the Deployment <kagent.fullnameOverride>-controller
+  in the kagent namespace) carries a 1.x helm.sh/chart label;
+- the controller's database is the one it runs on: the same Secret volume
+  mounted at the directory of kagent.database.postgres.urlFile (read from the
+  values and from the running Deployment alike; none on either side counts as
+  the same) and the same kagent.database.postgres.url (read from the values
+  and from the kagent HelmRelease's current spec.values; the URL is compared,
+  never printed).
+The documented crossings are a fresh postgres.databases entry whose derived
+Secret replaces the old one, or, with the bundled Postgres, a
+kagent.database.postgres.url naming another database of the instance
+(UPGRADE.md, docs/kagent-v1alpha3-cutover.md).
+A first install and an installation already on the line render as before.
+Skipped with gitops.target set (the lookups see the installation, not the
+target); `lookup` is empty under `helm template`, where the guard is silent.
+*/}}
+{{- define "agent-platform.validateKagentLineCrossing" -}}
+{{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
+{{- $range := index .Values.components "kagent" "versionRange" | default "" -}}
+{{- $probes := list "1.3.0" -}}
+{{- range (regexFindAll "[0-9]+\\.[0-9]+" $range -1) -}}
+{{- if semverCompare ">=1.3.0-0" (printf "%s.0" .) -}}
+{{- $probes = append (append $probes (printf "%s.0" .)) (printf "%s.99999" .) -}}
+{{- end -}}
+{{- end -}}
+{{- $crosses := false -}}
+{{- range $probes }}{{ if semverCompare $range . }}{{ $crosses = true }}{{ end }}{{ end -}}
+{{- if $crosses -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- $urlFile := dig "database" "postgres" "urlFile" "" $kagent -}}
+{{- $ns := include "agent-platform.kagent.namespace" . -}}
+{{- $name := printf "%s-controller" ($kagent.fullnameOverride | default "kagent") -}}
+{{- with (lookup "apps/v1" "Deployment" $ns $name) -}}
+{{- $running := regexFind "^[0-9]+\\.[0-9]+\\.[0-9]+" (trimPrefix "kagent-" (dig "metadata" "labels" "helm.sh/chart" "" .)) -}}
+{{- if and $running (semverCompare "<1.3.0-0" $running) -}}
+{{- $pod := .spec.template.spec -}}
+{{- $mounts := list -}}
+{{- range $pod.containers }}{{ $mounts = concat $mounts (.volumeMounts | default list) }}{{ end -}}
+{{- $old := include "agent-platform.kagent.databaseSecret" (dict "urlFile" $urlFile "volumes" ($pod.volumes | default list) "mounts" $mounts) -}}
+{{- $new := include "agent-platform.kagent.databaseSecret" (dict "urlFile" $urlFile "volumes" (dig "controller" "volumes" list $kagent) "mounts" (dig "controller" "volumeMounts" list $kagent)) -}}
+{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" ($.Values.gitops.namespace | default $.Release.Namespace) (include "agent-platform.childName" (dict "root" $ "name" (index $.Values.components "kagent" "chart"))) -}}
+{{- $oldUrl := dig "spec" "values" "database" "postgres" "url" "" ($release | default dict) -}}
+{{- $newUrl := dig "database" "postgres" "url" "" $kagent -}}
+{{- if and (eq $old $new) (eq $oldUrl $newUrl) -}}
+{{- fail (printf "components.kagent selects the api.kagent.dev line (%s) while %s/%s runs kagent %s on its 1.x database (Secret %s, kagent.database.postgres.url unchanged): the line's controller refuses the 1.x schema and the upgrade would half-apply. Cross with a fresh database: add a postgres.databases entry for it (e.g. kagent-v3, name kagent_v3, component kagent) and mount its derived Secret <postgres.clusterName>-<key>-app in kagent.controller.volumes in place of %s, or with the bundled Postgres point kagent.database.postgres.url at another database of the instance; then upgrade (UPGRADE.md, docs/kagent-v1alpha3-cutover.md). Or pin agent-platform below 4.121.0" $range $ns $name $running ($old | default "none") ($old | default "the current one")) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The Secret behind the kagent controller's database URL file: the secretName of
+the Secret volume whose mount path is the directory of urlFile. Empty without a
+urlFile or without such a volume.
+Usage: include "agent-platform.kagent.databaseSecret" (dict "urlFile" <path> "volumes" <list> "mounts" <list>)
+*/}}
+{{- define "agent-platform.kagent.databaseSecret" -}}
+{{- if .urlFile -}}
+{{- $dir := dir .urlFile -}}
+{{- $volume := "" -}}
+{{- range .mounts }}{{ if eq (trimSuffix "/" .mountPath) $dir }}{{ $volume = .name }}{{ end }}{{ end -}}
+{{- range .volumes }}{{ if and $volume (eq .name $volume) .secret }}{{ .secret.secretName }}{{ end }}{{ end -}}
 {{- end -}}
 {{- end -}}
 
