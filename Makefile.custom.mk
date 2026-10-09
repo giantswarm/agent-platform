@@ -144,10 +144,6 @@ WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valk
 # and not on a golden from before; it is left out of both sides. Drop it once
 # GOLDEN_REF carries #840.
 WIRING_PG_GOLDEN_DROP := $(DASHBOARDS_GOLDEN_DROP) muster-mcp-egress
-# The Cluster's resources and ephemeralVolumesSizeLimit render here
-# (giantswarm/agent-platform#875) and not on a golden from before; the head's
-# side renders without them. Empty it once GOLDEN_REF carries #875.
-WIRING_PG_GOLDEN_HEAD := --set postgres.resources=null --set postgres.ephemeralVolumesSizeLimit=null
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
 # golden diff (by metadata.name): the v1alpha2 agent Deployments' seccomp
 # PolicyException is gone with them, the kagent controller's ingress policy
@@ -3039,7 +3035,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@if [ -n "$(GOLDEN_REF)" ] && git rev-parse --verify -q $(GOLDEN_REF) >/dev/null; then \
 		rm -rf $(VERIFY_TMP)/vw-pg-ref && git worktree add -q --detach $(VERIFY_TMP)/vw-pg-ref $(GOLDEN_REF) && \
 		for flavor in cilium kubernetes; do \
-			$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) $(WIRING_PG_GOLDEN_HEAD) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-new-$$flavor.out; \
+			$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-new-$$flavor.out; \
 			$(HELM) template t $(VERIFY_TMP)/vw-pg-ref/$(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-old-$$flavor.out; \
 			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-new-$$flavor.out "$(WIRING_PG_GOLDEN_DROP)"; \
 			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-old-$$flavor.out "$(WIRING_PG_GOLDEN_DROP)"; \
