@@ -1,0 +1,14 @@
+# A coding agent's Harness, the entry an installation copies from
+# kagent.harnesses in values.yaml (verify-kagent-harness,
+# verify-components-charts).
+kagent:
+  harnesses:
+    - name: claude
+      runtime: claude
+      snapshotLocation: s3://ci-agent-snapshots/claude
+      env:
+        - name: KAGENT_PROPAGATE_TOKEN
+          value: "true"
+      limits:
+        budgetUSD: "2.00"
+        maxTurns: 40

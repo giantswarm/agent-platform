@@ -106,6 +106,7 @@ in roster order that fails ends the run with its FAIL, as before.
 
 import concurrent.futures
 import hashlib
+import importlib.util
 import io
 import json
 import pathlib
@@ -164,6 +165,9 @@ STRICT = False
 UNRELEASED_ANNOTATION = "agent-platform.giantswarm.io/unreleased"
 WAITS: dict[str, dict[str, str]] = {}
 WRITE = False
+# A coding agent's Harness on top of the reference shape: the kagent block it
+# forwards is rendered at the range with the others.
+CODING_AGENTS = "coding agents (ci/test-coding-agents-values.yaml)"
 
 
 def floor(constraint: str) -> str:
@@ -491,19 +495,63 @@ def pull(url: str, version: str, dest: str) -> str:
     fail(f"could not pull {url} --version {version!r}\n{err}")
 
 
-def check_harness_selector(manifest: str, what: str) -> None:
-    """The platform Harness the kagent chart renders carries no admission
-    selector: an Agent names its Harness by spec.harnessRef, and the line's
-    Harness CRD (api.kagent.dev) has no allowedAgentTemplates. Proven here on
-    the rendered object of the chart the range resolves to."""
-    harness = [d for d in manifest.split("\n---") if re.search(r"^kind: Harness$", d, re.M)]
-    if len(harness) != 1:
-        fail(f"{what} renders {len(harness)} Harness objects, expected the one platform Harness")
-    if not re.search(r"^apiVersion: api\.kagent\.dev/v1alpha3$", harness[0], re.M):
-        fail(f"{what} renders the platform Harness outside api.kagent.dev/v1alpha3, the group the line serves")
-    if re.search(r"^  allowedAgentTemplates:", harness[0], re.M):
-        fail(f"{what} renders the platform Harness with an admission selector; the line's Harness has none (an Agent names it by spec.harnessRef)")
-    print(f"ok: {what} renders the platform Harness at api.kagent.dev/v1alpha3 with no admission selector")
+_KAGENT_CRDS: dict[str, dict] = {}
+_KAGENT_CRDS_LOCK = threading.Lock()
+
+
+def kagent_crds() -> tuple[object, dict[str, dict]]:
+    """verify-kagent-crds.py (its structural validator) and the Harness CRD at
+    the floor of components.kagent-crds.versionRange, loaded once."""
+    with _KAGENT_CRDS_LOCK:
+        if not _KAGENT_CRDS:
+            spec = importlib.util.spec_from_file_location("kagent_crds", REPO_ROOT / "tests" / "verify-kagent-crds.py")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _KAGENT_CRDS["module"] = module
+            _KAGENT_CRDS["crds"] = module.load_crds()
+        return _KAGENT_CRDS["module"], _KAGENT_CRDS["crds"]
+
+
+def check_harnesses(manifest: str, values: str, what: str) -> None:
+    """The kagent chart renders the platform Harness plus one per forwarded
+    kagent.harnesses entry, each valid against the pinned Harness CRD. The
+    platform Harness carries no admission selector: an Agent names its Harness
+    by spec.harnessRef, and the line's CRD has no allowedAgentTemplates. A
+    claude entry reaches its Harness as forwarded (snapshot location, env,
+    limits) and takes the chart's claude-harness image at its digest."""
+    entries = (yaml.safe_load(values) or {}).get("harnesses") or []
+    rendered = [d for d in yaml.safe_load_all(manifest) if isinstance(d, dict) and d.get("kind") == "Harness"]
+    if len(rendered) != 1 + len(entries):
+        fail(f"{what} renders {len(rendered)} Harness objects, expected the platform Harness and {len(entries)} from kagent.harnesses")
+    if any(h.get("apiVersion") != "api.kagent.dev/v1alpha3" for h in rendered):
+        fail(f"{what} renders a Harness outside api.kagent.dev/v1alpha3, the group the line serves")
+    by_name = {h["metadata"]["name"]: h for h in rendered}
+    platform = [h for name, h in by_name.items() if name not in {e["name"] for e in entries}]
+    if len(platform) != 1 or "allowedAgentTemplates" in platform[0]["spec"]:
+        fail(f"{what} renders the platform Harness with an admission selector, or not at all; the line's Harness has none (an Agent names it by spec.harnessRef)")
+    for entry in entries:
+        spec = by_name.get(entry["name"], {}).get("spec")
+        if spec is None:
+            fail(f"{what} renders no Harness for the kagent.harnesses entry {entry['name']!r}")
+        if entry.get("runtime", "claude") != "claude":
+            continue
+        got = {
+            "claude": "claude" in spec,
+            "snapshotLocation": spec.get("substrate", {}).get("snapshotPolicy", {}).get("location"),
+            "env": spec.get("env"),
+            "limits": spec.get("claude", {}).get("limits"),
+        }
+        want = {"claude": True, "snapshotLocation": entry.get("snapshotLocation"), "env": entry.get("env"), "limits": entry.get("limits")}
+        if got != want:
+            fail(f"{what} renders the claude Harness {entry['name']!r} off its entry:\n  got      {got}\n  expected {want}")
+        image = spec.get("workload", {}).get("image", "")
+        if "image" not in entry and not re.search(r"/claude-harness@sha256:[0-9a-f]{64}$", image):
+            fail(f"{what} renders the claude Harness {entry['name']!r} with image {image!r}, not the chart's claude-harness at its digest")
+    module, crds = kagent_crds()
+    if errors := [e for h in rendered for e in module.validate(h, crds, what)]:
+        fail("a rendered Harness does not validate against the pinned Harness CRD:\n  " + "\n  ".join(errors))
+    print(f"ok: {what} renders the platform Harness (no admission selector) and {len(entries)} from kagent.harnesses, "
+          f"valid against the Harness CRD at {module.KAGENT_LINE_REF}")
 
 
 def render_component(name: str, chart_dir: str, values: str, what: str, tmp: str) -> None:
@@ -518,7 +566,7 @@ def render_component(name: str, chart_dir: str, values: str, what: str, tmp: str
     if name in MANAGERS and f"--kagent-api-version={KAGENT_API_VERSION}" not in r.stdout:
         fail(f"{what} does not render the forwarded kagent.apiVersion as its --kagent-api-version={KAGENT_API_VERSION} argument")
     if name == "kagent":
-        check_harness_selector(r.stdout, what)
+        check_harnesses(r.stdout, values, what)
     print(f"ok: {what} renders the forwarded values ({r.stdout.count(chr(10) + 'kind: ')} objects)")
 
 
@@ -540,7 +588,9 @@ def main(meta: str) -> int:
     # shape -> (the defaults' render, the BOM's render)
     with concurrent.futures.ThreadPoolExecutor(WORKERS) as pool:
         meta_renders = [pool.submit(render_meta, meta, [*values, *base, *flags]) for flags in SHAPES.values() for values in ([], bom)]
+        coding_render = pool.submit(render_meta, meta, [*base, "-f", f"{meta}/ci/test-coding-agents-values.yaml"])
         manifests = iter([docs(f.result()) for f in meta_renders])
+        coding = docs(coding_render.result())
     renders = {shape: (next(manifests), next(manifests)) for shape in SHAPES}
     wide, pinned = next(iter(renders.values()))
     # The OCIRepository and the HelmRelease are named after the entry's chart.
@@ -573,6 +623,8 @@ def main(meta: str) -> int:
         for shape, (w, p) in renders.items():
             blocks.setdefault(("range", hr_values(w[("HelmRelease", chart)])), []).append(shape)
             blocks.setdefault(("BOM pin", hr_values(p[("HelmRelease", chart)])), []).append(shape)
+        if name == "kagent":
+            blocks.setdefault(("range", hr_values(coding[("HelmRelease", chart)])), []).append(CODING_AGENTS)
         if name in released:
             # One version matters, the working tree's: every distinct block of
             # both renders against it, once.
