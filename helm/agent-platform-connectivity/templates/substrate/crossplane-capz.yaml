@@ -6,7 +6,7 @@
 {{- $identity := include "agent-platform.substrateStore.capzIdentityName" . }}
 {{- $pk := $capz.workloadIdentity.providerKubernetes }}
 {{- $tags := include "agent-platform.crossplane.tags" (dict "xp" $xp "app" "agent-platform-substrate" "name" $container) | fromYaml }}
-{{- $containerId := printf "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Storage/storageAccounts/%s/blobServices/default/containers/%s" $capz.subscriptionId $capz.resourceGroup $account $container }}
+{{- $accountId := printf "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Storage/storageAccounts/%s" $capz.subscriptionId $capz.resourceGroup $account }}
 ---
 # The storage account Agent Substrate keeps the actors' snapshots in, behind
 # the s3proxy façade (templates/substrate/s3proxy.yaml): TLS only, no public
@@ -119,14 +119,27 @@ spec:
   providerConfigRef:
     name: {{ $xp.providerConfigRef }}
 ---
-# Storage Blob Data Contributor on the container only. The upbound
-# RoleAssignment takes no principalId selector and the identity's principalId
-# exists only once it has reconciled: provider-kubernetes manages the
-# RoleAssignment as a wrapped manifest and patches the id in from the identity.
+# Storage Blob Data Contributor on the storage account: the identity's one
+# role assignment. The account holds nothing but the container above, and the
+# scope matters: s3proxy signs the source of a server-side copy with a user
+# delegation SAS, and Substrate's golden tag copies the golden snapshot's
+# objects that way; the key comes from generateUserDelegationKey, an action
+# the role carries at the account's blob service, which an assignment on the
+# container does not reach (every copy then fails with
+# AuthorizationPermissionMismatch and no AgentTemplate reaches Ready). One
+# data role on the account grants it; a second role (Storage Blob Delegator)
+# would need its own admission from a Crossplane identity whose
+# role-assignment right is bound to the data roles by an ABAC condition, as a
+# customer's management identity may be.
+#
+# The upbound RoleAssignment takes no principalId selector and the identity's
+# principalId exists only once it has reconciled: provider-kubernetes manages
+# the RoleAssignment as a wrapped manifest and patches the id in from the
+# identity.
 apiVersion: kubernetes.crossplane.io/v1alpha2
 kind: Object
 metadata:
-  name: {{ $identity }}-role-assignment
+  name: {{ $identity }}-account-role-assignment
   labels:
     {{- include "labels.common" . | nindent 4 }}
     app.kubernetes.io/component: identity
@@ -147,57 +160,14 @@ spec:
       apiVersion: authorization.azure.upbound.io/v1beta1
       kind: RoleAssignment
       metadata:
-        name: {{ $identity }}
+        name: {{ $identity }}-account
         labels:
           {{- include "labels.common" . | nindent 10 }}
           app.kubernetes.io/component: identity
       spec:
         forProvider:
           roleDefinitionName: Storage Blob Data Contributor
-          scope: {{ $containerId | quote }}
-          principalType: ServicePrincipal
-        providerConfigRef:
-          name: {{ $xp.providerConfigRef }}
----
-# Storage Blob Delegator on the storage account: the one action the role
-# grants, generateUserDelegationKey, is account-level, and the container-scoped
-# Data Contributor above cannot grant it. s3proxy signs the source of a
-# server-side copy with a user delegation SAS, and Substrate's golden tag
-# copies the golden snapshot's objects that way (the Substrate line from
-# 1.1.0); without the key every copy fails with AuthorizationPermissionMismatch
-# and no AgentTemplate reaches Ready.
-apiVersion: kubernetes.crossplane.io/v1alpha2
-kind: Object
-metadata:
-  name: {{ $identity }}-delegator-role-assignment
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-    app.kubernetes.io/component: identity
-spec:
-  managementPolicies:
-    - "*"
-  providerConfigRef:
-    name: {{ $pk.providerConfigRef }}
-  references:
-    - patchesFrom:
-        apiVersion: managedidentity.azure.upbound.io/v1beta1
-        kind: UserAssignedIdentity
-        name: {{ $identity }}
-        fieldPath: status.atProvider.principalId
-      toFieldPath: spec.forProvider.principalId
-  forProvider:
-    manifest:
-      apiVersion: authorization.azure.upbound.io/v1beta1
-      kind: RoleAssignment
-      metadata:
-        name: {{ $identity }}-delegator
-        labels:
-          {{- include "labels.common" . | nindent 10 }}
-          app.kubernetes.io/component: identity
-      spec:
-        forProvider:
-          roleDefinitionName: Storage Blob Delegator
-          scope: {{ printf "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Storage/storageAccounts/%s" $capz.subscriptionId $capz.resourceGroup $account | quote }}
+          scope: {{ $accountId | quote }}
           principalType: ServicePrincipal
         providerConfigRef:
           name: {{ $xp.providerConfigRef }}
