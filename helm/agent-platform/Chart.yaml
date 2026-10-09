@@ -24,6 +24,7 @@ annotations:
   io.giantswarm.application.audience: all
   io.giantswarm.application.managed: "true"
   io.giantswarm.application.team: bumblebee
+  agent-platform.giantswarm.io/unreleased: '{"substrate":{"versionRange":">=1.6.3 <1.7.0","waitsFor":"1.6.3"},"substrate-crds":{"versionRange":">=1.6.3 <1.7.0","waitsFor":"1.6.3"}}'
 # META-PACKAGE (app-of-apps): the ONLY dependency is the engine, never a component.
 #
 # Previously this was a Helm umbrella that pinned each component (muster,

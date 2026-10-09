@@ -142,7 +142,11 @@ KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
-UNRELEASED: dict[str, str] = {}
+UNRELEASED: dict[str, str] = {
+    # The sandbox's pause image as a value, defaulting to its gsoci copy (giantswarm/substrate#224).
+    "substrate": "1.6.3",
+    "substrate-crds": "1.6.3",
+}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
