@@ -1,481 +1,93 @@
 # Authentication flow
 
-How a request authenticates against the Agent Platform. This document covers
-**only authentication** — TLS termination details and the broader
-networking/NetworkPolicy model are described elsewhere (`README.md` →
-*Ingress topology* and the `networkpolicy-dataplane-*` templates).
-
-The request topology is selected by `ingress.mode` (see `README.md` →
-*Ingress topology*):
-
-- **`agentgateway-muster`** (default) / **`agentgateway-direct`** — client → agentgateway
-  `/mcp` → muster (or, in `agentgateway-direct`, the servers). Here a second
-  Gateway API hop (agentgateway) sits in front of muster.
-- **`muster-direct`** (deprecated) — client → muster directly. There is **one** hop:
-  the public Gateway → muster. No agentgateway data plane exists.
-
-This document narrates the **`agentgateway-*`** topology, where agentgateway is
-present. In `muster-direct` mode, drop the agentgateway hop: the client reaches
-muster directly over the public hop and muster enforces OAuth exactly as
-described below.
-
-Each section is one slice of the story with its own diagram:
-
-1. [The request path (who terminates what)](#1-the-request-path)
-2. [OAuth discovery — how an unauthenticated client finds the auth server](#2-oauth-discovery)
-3. [Token handling at muster — `forward` vs `exchange`](#3-token-handling-at-muster)
-4. [Edge JWT validation (`oauthMode: validate`) and JWKS](#4-edge-jwt-validation-and-jwks)
-5. [The kagent controller route — two authentication layers](#5-the-kagent-controller-route)
-
-In the `agentgateway-*` modes, the only URL a client is ever given is
-**`agentgateway.<cluster>.<base>/mcp`**; muster is a backend implementation
-detail and clients never address it for `/mcp`. In `muster-direct` mode the
-client is given muster's own `/mcp` URL directly.
-
----
+How a request authenticates against the Agent Platform. Every person signs in at one OIDC provider (Dex, `global.identity`); muster is the OAuth resource server and authorization server for MCP clients; agentgateway verifies tokens at the edge only on the routes listed in [4](#4-edge-jwt-validation-and-jwks). Install and registration steps are in [install.md](install.md); every value is in [reference.md](reference.md).
 
 ## 1. The request path
 
-In the `agentgateway-*` modes, two Gateway API hops sit in front of muster. The
-**public** hop terminates TLS and owns the hostname; the **agentgateway** hop is
-the observability and policy choke point. Authentication itself is still
-enforced by muster at the end. (In `muster-direct` mode only the public hop
-exists, routing straight to muster.)
+A client is given one URL: **`https://muster.<domain>/mcp`** (`ingress.hostnames` overrides the hostname). `ingress.mode` decides what sits behind it:
+
+| `ingress.mode` | Behind `muster.<domain>` |
+|---|---|
+| `agentgateway-muster` (default) | Two routes on the same hostname: `/mcp` goes to the agentgateway data plane (`:8080`), which forwards it to muster; every other path (`/.well-known/*`, `/oauth/*`, registration) goes straight to muster. Gateway API path specificity (`/mcp` beats `/`) splits them. |
+| `muster-direct` (deprecated) | One route, `/` to muster. No agentgateway. Needs `components.agentgateway.enabled: false` and `agent-platform-mcps.agentgateway.viaMuster: false` too. The kind example uses it. |
+| `agentgateway-direct` | Refused at render: it needs an IdP with dynamic client registration (RFC 7591/8707). |
 
 ```mermaid
 flowchart LR
-    client["MCP client<br/>(Claude.ai, Claude Code, any SDK)"]
-
-    subgraph envoy["envoy giantswarm-default · envoy-gateway-system"]
-        tls["TLS termination<br/>public hostname"]
-        btp["route-scoped BackendTrafficPolicy<br/>preserves WWW-Authenticate · requestTimeout 0s"]
-    end
-
-    subgraph ns["release namespace"]
-        agw["agentgateway proxy :8080<br/>observability choke point<br/>auth.passthrough by default"]
-        muster["muster :8090/mcp<br/>OAuth enforcement + MCP aggregation"]
-    end
-
-    client -->|"HTTPS  /mcp"| tls
-    tls --> btp
-    btp -->|"HTTPRoute → Service :8080"| agw
-    agw -->|"AgentgatewayBackend"| muster
+    client["MCP client"] -->|"HTTPS muster.&lt;domain&gt;"| gw["public Gateway<br/>TLS"]
+    gw -->|"/mcp"| agw["agentgateway :8080"]
+    gw -->|"/ (OAuth, discovery)"| muster["muster :8090"]
+    agw --> muster
 ```
 
-What each component is responsible for, in auth terms:
+With the chart-owned edge (`gatewayApi.gateway.create: true`) the agentgateway data plane *is* the public Gateway, and the separate `/mcp` route is not rendered: muster's hostname-specific route serves `/mcp` too. The client URL is the same.
 
-| Hop | Template | Auth responsibility |
-|---|---|---|
-| envoy `giantswarm-default` | (cluster ingress, not this chart) | Terminates TLS, owns the public hostname. |
-| `HTTPRoute` (`/mcp`) | `templates/agentgateway/httproute.yaml` | Routes `/mcp` to the agentgateway Service:8080. Rendered in the `agentgateway-*` modes (`ingress.mode`); reads `ingress.parentRefs` / `ingress.hostnames`. Without it the agentgateway `/mcp` route does not exist. (muster's public `/` route, `templates/ingress/muster-httproute.yaml`, is always rendered.) |
-| `BackendTrafficPolicy` | `templates/agentgateway/backendtrafficpolicy.yaml` (agentgateway `/mcp` route) and `templates/ingress/muster-backendtrafficpolicy.yaml` (muster `/` route) | **Critical for auth:** a cluster-wide error-pages `BackendTrafficPolicy` rewrites 4xx/5xx to branded HTML and strips upstream headers — including `WWW-Authenticate`. A route-scoped policy (enabled via `ingress.backendTrafficPolicy.enabled`) takes precedence and preserves muster's `401 … WWW-Authenticate` challenge, without which clients cannot discover where to authenticate. The umbrella renders one over the agentgateway `/mcp` route (`agentgateway-*` modes only) and a complementary one over muster's `/` route (**all** modes) — the latter matters in `muster-direct`, where muster serves `/mcp` directly. Both also set `requestTimeout: 0s` (`ingress.backendTrafficPolicy.timeout`) so long-lived MCP/SSE streams are not killed. |
-| agentgateway proxy | `gateway.yaml` + `agentgatewayparameters.yaml` | By default `auth.passthrough` — forwards the bearer token to muster unvalidated. Optionally validates at the edge (§4). |
-| muster | `muster` sub-chart | Enforces OAuth, validates the token, aggregates downstream MCP servers, and performs token exchange where needed (§3). |
-
----
+muster validates every token itself. agentgateway on the MCP path passes the bearer through unverified.
 
 ## 2. OAuth discovery
 
-A fresh client arrives with no token. It must discover the authorization server
-before it can authenticate. In the `agentgateway-*` modes the challenge is
-served by muster but must survive the journey back through both gateway hops —
-that is what the route-scoped `BackendTrafficPolicy` (`ingress.backendTrafficPolicy`)
-guarantees. (In `muster-direct` mode the challenge travels only the single
-public hop, but muster's `/` route still carries its own route-scoped
-`BackendTrafficPolicy` so the same cluster-wide error-pages policy cannot strip
-`WWW-Authenticate` from the `401` muster serves on `/mcp`.)
+All of it happens on muster's hostname:
 
-The keystone is `muster.oauth.server.resourceIdentifier`, set in shared-configs
-to `agentgateway-host/mcp`. It makes muster advertise the **agentgateway**
-resource in its own OAuth metadata, so discovery is consistent regardless of
-which hostname the client actually reached muster through.
+1. `GET /mcp` without a token returns `401` with `WWW-Authenticate: Bearer resource_metadata=…/.well-known/oauth-protected-resource`.
+2. The protected-resource metadata names muster as the authorization server; `/.well-known/oauth-authorization-server` gives its registration and token endpoints.
+3. The client registers (gated: [install.md §5](install.md#5-after-the-install)), signs the person in at Dex through `https://muster.<domain>/oauth/callback`, and retries `/mcp` with the token.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as MCP client
-    participant A as agentgateway /mcp
-    participant M as muster
-
-    C->>A: GET /mcp (no token)
-    A->>M: forward
-    M-->>A: 401 WWW-Authenticate: Bearer<br/>resource_metadata=muster-host/.well-known/oauth-protected-resource
-    A-->>C: 401 (header preserved by route-scoped BTP)
-
-    C->>M: GET /.well-known/oauth-protected-resource
-    M-->>C: resource = agentgateway-host/mcp  ← matches the URL dialled
-
-    C->>A: GET /.well-known/oauth-authorization-server
-    A->>M: proxied (standard HTTPRoute, agent-platform-mcps)
-    M-->>C: auth-server metadata (DCR endpoint, token endpoint, …)
-
-    C->>M: DCR / CIMD directly at muster-host
-    M-->>C: client credentials
-
-    C->>A: GET /mcp + Bearer token
-    A->>M: forward token
-    M-->>C: 200 — tools served
-```
-
-Notes:
-
-- muster's OAuth endpoints (`/.well-known/*`, DCR, token) remain publicly
-  reachable on `muster-host`. agentgateway only proxies `/mcp` — Gateway API
-  path-specificity (`/mcp` beats `/`) keeps every other path on muster directly.
-- Step 5 (`oauth-authorization-server` via agentgateway) is the proxy route
-  added by [agent-platform-mcps](https://github.com/giantswarm/agent-platform-mcps),
-  so the client can do the whole flow against the single agentgateway hostname.
-
----
+A Gateway that rewrites error responses can strip `WWW-Authenticate`, and clients then cannot find the authorization server. On Envoy Gateway, `ingress.backendTrafficPolicy.enabled: true` renders route-scoped `BackendTrafficPolicy` objects that keep the header and lift the request timeout for streams (`timeout: "0s"`). It is off by default. It covers muster's route in every mode, and the `/mcp` route when that route is rendered.
 
 ## 3. Token handling at muster
 
-Once a valid token reaches muster, muster aggregates many downstream MCP servers
-behind one endpoint. Each server entry declares **how** its token is obtained.
-This is per-server config in the `agent-platform-mcps` `mcpServers` list, not a
-gateway concern.
-
-```mermaid
-flowchart TD
-    in["inbound Dex token<br/>(validated by muster)"]
-
-    in --> mode{"per-server<br/>auth.mode"}
-
-    mode -->|forward| fwd["token forwarded as-is"]
-    mode -->|exchange| exch["RFC 8693 token exchange<br/>via the spoke's Dex<br/>(identityProviders ref)"]
-
-    fwd --> same["same-cluster MCP server<br/>e.g. mcp-kubernetes on this cluster<br/>caller's Dex token already valid"]
-    exch --> remote["remote / spoke MCP server<br/>e.g. mcp-kubernetes on a spoke cluster<br/>needs a cluster-specific token"]
-```
+muster aggregates many MCP servers behind `/mcp`. Each server entry in `agent-platform-mcps.mcpServers` declares how muster obtains the token it sends there (the [agent-platform-mcps](https://github.com/giantswarm/agent-platform-mcps) values: `auth`, `identityProviders`):
 
 | `auth.mode` | When | Mechanism |
 |---|---|---|
-| `forward` | Downstream server trusts the **same** issuer the caller authenticated with (typically same-cluster). | muster passes the inbound bearer token through unchanged. No exchange. |
-| `exchange` | Downstream server lives behind a **different** issuer (a spoke/remote cluster). | muster performs an [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) token exchange against the spoke's Dex `tokenEndpoint`, using credentials from the `identityProviders.<provider>` entry, to mint a token the downstream server accepts. |
+| `forward` | The server trusts the issuer the caller signed in with (typically the same cluster). | The person's bearer goes through unchanged. |
+| `exchange` | The server sits behind a different issuer (another cluster's Dex). | muster performs an [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) token exchange at that issuer's token endpoint, with the client credentials of the `identityProviders.<provider>` entry. |
 
-Example (`exchange` against a spoke cluster's Dex):
-
-```yaml
-agent-platform-mcps:
-  mcpServers:
-    - cluster: <spoke>
-      group: kubernetes
-      url: https://mcp-kubernetes.<spoke>.<base>/mcp
-      auth:
-        mode: exchange
-        provider: <spoke>          # ref into identityProviders
-  identityProviders:
-    <spoke>:
-      tokenEndpoint: https://dex.<spoke>.<base>/token
-      connectorId: giantswarm-simple-oidc
-      credentialsSecret:
-        name: <spoke>-token-exchange-credentials
-        clientIdKey: client-id
-        clientSecretKey: client-secret
-```
-
-### On behalf of a user: the user's Dex token, forwarded
-
-A kagent agent acts on behalf of the human who invoked it. kagent propagates the
-human's Dex-issued token (`KAGENT_PROPAGATE_TOKEN`) as the only `Authorization`
-reaching muster — no static per-agent header, no separate actor token. muster
-validates that token and, per the downstream server's `auth.mode`, either
-forwards it unchanged (`forward`) or exchanges it at the spoke's Dex (`exchange`,
-above). muster never signs a token of its own: Dex is the sole SSO authority
-(muster v1.0.0 removed JWT mode), so every downstream server validates against
-Dex's JWKS, never muster's. The token carries the human only; the agent's own
-identity is not asserted downstream.
-
-For mcp-kubernetes the token is a Dex token with `aud=dex-k8s-authenticator`,
-which mcp-kubernetes forwards to the kube-apiserver via downstream OAuth — so
-Kubernetes RBAC and the audit log reflect the human directly. No muster-issued
-token and no impersonation `ClusterRole` are involved.
-
-### The per-agent muster server, and tool discovery by the kagent controller
-
-On kagent API v2 an `AgentTemplate` binds a `RemoteMCPServer` of its **own
-namespace** (`spec.tools[].mcp.server` is a local reference) and the binding
-carries no headers, so the connectivity chart renders no shared muster server.
-The **Generic agent chart 1.x** renders one `RemoteMCPServer` per agent — named
-after the agent, in the agent's namespace — with muster's in-cluster URL
-(`spec.url`, the chart value `muster.url`), `STREAMABLE_HTTP`, the toolset
-header `X-Muster-Toolset` in `spec.headersFrom` (the selectors the agent was
-created with; no toolset, no header, implicit full access) and the discovery
-opt-out label below, and binds it. That server is the agent's toolset carrier:
-agent-manager and the Dev Portal read an agent's toolset from it.
-
-**Where muster is comes from one helper.** The URL every per-agent server
-targets is the platform's — `agent-platform.musterMcpUrl`, defined in both
-charts: `http://<muster.fullnameOverride>.<release namespace>.svc.cluster.local:<muster.service.port>/mcp`
-while the muster component is on. The meta chart derives agent-manager's chart
-value `muster.url` from it (next to `flux.helmReleaseServiceAccount`; a
-differing `agent-manager.muster.url` fails the render naming the source), and
-agent-manager passes it to the agent chart as `muster.url` on every agent it
-composes and reports it in `get_info`. The Dev Portal sends no muster URL — it
-creates agents through agent-manager's tools, and `create_agent` takes no muster
-argument — so the app-config the connectivity chart renders carries none. Chart
-1.x defaults `muster.url` to the same URL on a default install
-(`http://muster.agent-platform.svc.cluster.local:8090/mcp`), so agent-manager
-may omit it; the value exists for an installation whose muster answers under
-another name, namespace or port.
-
-**Never a static `Authorization` header on a muster server.** The person's
-token propagated by the Harness (`KAGENT_PROPAGATE_TOKEN` in its environment)
-is the only `Authorization` that reaches muster (above). The Go ADK applies
-`headersFrom` values **last** on every MCP call (`headerRoundTripper.RoundTrip`
-in `go/adk/pkg/mcp/registry.go`: static headers take precedence over every
-dynamic source), so a static `Authorization` there would replace the propagated
-token and make every user of that agent act as one identity. The agent chart
-renders only the toolset header. The operator extras
-`kagent.remoteMcpServers[].tokenSecret` render a static header on purpose — for
-a server that has no notion of the caller — and every agent reaches that server
-as that credential, not as the person.
-
-**Tool discovery by the controller: no identity, opted out.** The kagent
-controller reconciles a `RemoteMCPServer` by connecting to it and listing its
-tools for the CR status. That request is the controller's own: there is no
-human behind it, so it carries no bearer. muster is an OAuth resource server
-and answers `401`, and the controller would report `Accepted=False
-(ReconcileFailed … Unauthorized)` on every agent's server — a permanent red
-condition with no effect on agents, which resolve their tool list at run time
-as the person. The agent chart therefore labels the per-agent server
-`kagent.dev/discovery: disabled` by default (its value
-`muster.discovery.enabled` turns the label off for a muster without OAuth); the
-kagent line's controller honours the label — `Accepted=True`, reason
-`DiscoveryDisabled`, an empty inventory — an opt-out the line carries as a
-patch until upstream merges kagent-dev/kagent#2752. With discovery off a
-Harness cannot narrow the server to `muster.tools`; it exposes the server and
-may report a warning in the `Agent`'s `status.warnings` — the toolset header is
-the enforced narrowing, applied by muster per request.
-
-**Why the controller gets no credential of its own.** muster accepts Dex ID
-tokens only; it does not trust Kubernetes ServiceAccount tokens. A credential
-in `spec.headersFrom` would not help either: it is not a discovery credential,
-the runtime applies it on every agent call, so every agent would call muster
-as one identity and the per-caller model of this section would be gone. The
-controller's discovery has no identity by design; the label makes the status
-say so instead of failing.
-
----
+muster signs no tokens of its own: every downstream server validates against Dex. A kagent agent acts as the person who invoked it: the Harness propagates that person's token (`KAGENT_PROPAGATE_TOKEN`) as the only `Authorization` reaching muster. model-manager, agent-manager and mcp-kubernetes receive the person's token with the audience `dex-k8s-authenticator` and act on the cluster with that person's RBAC (install.md, [The identity provider](install.md#the-identity-provider)).
 
 ## 4. Edge JWT validation and JWKS
 
-This section applies only to the `agentgateway-*` modes (in `muster-direct` mode
-there is no agentgateway and muster is the sole validator). By default
-agentgateway runs `auth.passthrough`: it forwards the token to muster
-without inspecting it, and muster is the only validator. Optionally, agentgateway
-can validate the JWT **at the edge** (`oauthMode: validate`) as a first layer —
-muster still validates downstream as a second layer. Edge JWT validation is the
-relevant model for `agentgateway-direct`, where agentgateway must gate traffic
-on its own. Token exchange (§3) is
-unaffected: agentgateway only ever sees the inbound token; muster's internal
-RFC 8693 exchanges happen behind it.
+agentgateway verifies the JWT itself (`Strict`, against `global.identity.issuerUrl`) on three routes: the kagent controller route ([5](#5-the-kagent-controller-route)), the agent-manager route (`agentManager.route`, off by default) and the models Gateway ([6](#6-the-models-gateway)). Each takes its key set from its own `jwtAuthentication.jwks` (`host`, `port`, `path`, `tls`). The agentgateway controller fetches it and pushes the keys to the data plane. A failed fetch refuses every caller with `401 token uses the unknown key`.
 
-### Edge validation validates against Dex, not muster
-
-The default is `oauthMode: passthrough`: agentgateway forwards the token to
-muster unchanged, and muster is the sole validator. muster issues only opaque
-tokens — v1.0.0 removed `enableJWTMode`/`jwtSigningKey` and the chart schema now
-rejects both — and must never be trusted as an issuer.
-
-If an install turns on edge validation (`oauthMode: validate`), agentgateway
-verifies the JWT against the issuer that signed it — **Dex** — by fetching Dex's
-`/.well-known/jwks.json`. There is no muster JWT mode and no muster JWKS. muster
-still validates downstream as the second layer, and token exchange in §3 is
-untouched. `resourceIdentifier` (`agentgateway-host/mcp`) remains the audience
-the token is bound to, so agentgateway can check `aud` matches the hostname the
-client actually dialled.
-
-Edge validation fetches the JWKS from Dex (the token's issuer), which typically
-runs in another namespace on a non-standard port, so it needs an explicit
-data-plane egress rule.
-
-```mermaid
-flowchart TD
-    agw["agentgateway :8080<br/>oauthMode: validate"]
-    dex["Dex (the token issuer)<br/>JWKS on a non-standard port<br/>e.g. :5556 in another namespace"]
-    agw -->|"cross-namespace, non-80/443 port"| dex
-    note["needs gateway.jwksEgress.enabled: true"]
-```
-
-### When `gateway.jwksEgress` is required
-
-`gateway.jwksEgress` is an `agentgateway-*` data-plane knob (most relevant to
-`agentgateway-direct`, where agentgateway validates JWTs at the edge against an
-external key set).
-
-The data-plane NetworkPolicy
-(`networkpolicy-dataplane-{cilium,kubernetes}.yaml`) allows the proxy egress to
-muster:8090 and the agentgateway controller:9978 by default. Fetching JWKS from
-anywhere else is blocked unless you open it explicitly:
-
-- **Default (`oauthMode: passthrough`):** no JWKS fetch — muster is the sole
-  validator. Leave `gateway.jwksEgress.enabled: false`.
-- **Edge validation (`oauthMode: validate`) against Dex:** Dex's JWKS (typically
-  on `:5556`) runs in another namespace on a port the default cluster egress
-  rules (80/443) don't cover. Enable the rule:
-
-  ```yaml
-  gateway:
-    jwksEgress:
-      enabled: true
-      namespace: giantswarm     # where Dex lives
-      port: 5556                # Dex's JWKS port
-      podSelector: {}           # optional: narrow beyond namespace
-  ```
-
-### Enabling edge validation
-
-For the muster `/mcp` path edge validation is optional and off by default:
-
-1. `oauthMode: validate` on agentgateway, with `jwt.jwksBackendRef` pointing at
-   the Dex that issued the tokens (set in shared-configs).
-2. `gateway.jwksEgress.enabled: true` with Dex's namespace and JWKS port, so the
-   data plane may reach it (see above).
-
-For the **kagent controller route** edge validation is the default shape, not an
-option: `kagent.controllerRoute.jwtAuthentication` is on, `Strict`, and takes
-the issuer from `global.identity.issuerUrl` and the JWKS from
-`jwtAuthentication.jwks` (`host`, `port`, `path`, `tls`), so an installation
-with the route on needs `gateway.jwksEgress` open too — the render fails
-otherwise. §5 describes why that layer is not optional there.
-
-> muster is not involved in edge validation and signs nothing: v1.0.0 removed
-> `enableJWTMode`/`jwtSigningKey` and the chart schema rejects them.
-
----
+An in-cluster issuer (for example Dex on `:5556` in another namespace) needs `gateway.jwksEgress.enabled: true` with that `namespace` and `port`; the render fails when a route names an in-cluster JWKS host the egress rule does not open. An external issuer on 443 needs no rule.
 
 ## 5. The kagent controller route
 
-The kagent controller (kagent API v2, `api.kagent.dev/v1alpha3`) is the second
-protected API of the platform, next to muster. It serves native gRPC, gRPC-Web
-and A2A v1 on one port (`:8083`, unencrypted HTTP/2) and authorizes nothing on
-its own: it takes the caller from the `x-user-id` header (falling back to its
-default user), or — with the trusted-proxy authenticator of the kagent line —
-from a claim of the bearer it decodes **without verifying the signature**. Any
-client that reaches the controller with a chosen header or token impersonates
-anyone, so the controller is reachable only through two doors, each an
-authentication boundary, and the platform runs **two authentication layers**
-(bumblebee-plans#51 D4).
+`kagent.controllerRoute.enabled` (off by default; rendered with `components.kagent` on) exposes the kagent controller's API: the kagent API v2 gRPC services and A2A v1, native gRPC or gRPC-Web. The controller authorizes nothing on its own, so it is reachable only through two authentication boundaries:
 
-```mermaid
-flowchart LR
-    portal["Dev Portal backend<br/>Connect client · gRPC"]
-    swarm["klaus-gateway (Swarmgeist)<br/>a2a-go v2 · gRPC"]
-    cli["grpcurl / a CLI<br/>gRPC or gRPC-Web"]
-    browser["browser"]
+- **agentgateway** (`GRPCRoute kagent-controller`, `kagent-controller-public`), with `AgentgatewayPolicy kagent-controller-jwt`. JWT validation is on by default (`kagent.controllerRoute.jwtAuthentication`). A token is required and must carry the identity claim, `kagent.controller.auth.userIdClaim` (`email`). The policy **sets** `x-user-id` from the verified claim, which replaces any value the client sent, and passes the bearer through.
+- **the kagent UI** (`kagent.uiRoute` behind `kagent.oauth2-proxy`). Its route removes `x-user-id`, and the bearer comes from the oauth2-proxy session.
 
-    subgraph edge["public Gateway · TLS"]
-        pub["GRPCRoute kagent-controller-public<br/>agentgateway.&lt;domain&gt;<br/>→ agentgateway Service :8080 over HTTP/2"]
-        ui["HTTPRoute &lt;release&gt;-ui<br/>kagent.&lt;domain&gt;<br/>RequestHeaderModifier remove x-user-id"]
-    end
+The controller (`kagent.controller.auth.mode: trusted-proxy`) takes the caller from the bearer's `email` claim. It never verifies a signature, so its network policy admits only the agentgateway data plane and the UI pods on `:8083`.
 
-    subgraph ns["release namespace"]
-        agw["agentgateway :8080 — layer 1<br/>GRPCRoute kagent-controller (no hostname)<br/>AgentgatewayPolicy kagent-controller-jwt:<br/>JWT Strict against Dex JWKS<br/>require claim · set x-user-id = jwt.email<br/>bearer passed through"]
-    end
-
-    subgraph kns["kagent namespace"]
-        o2p["oauth2-proxy → kagent UI (nginx)<br/>bearer from the session"]
-        ctrl["kagent controller :8083 — layer 2<br/>h2c · gRPC + gRPC-Web + A2A<br/>identity from the bearer's email claim<br/>(x-user-id until the line carries the patch)"]
-    end
-
-    portal -->|"https + bearer"| pub
-    cli -->|"https + bearer"| pub
-    pub --> agw
-    swarm -->|"grpc://agentgateway.&lt;ns&gt;.svc:8080 + bearer"| agw
-    agw -->|"AgentgatewayBackend kagent · HTTP2"| ctrl
-    browser --> ui --> o2p --> ctrl
-```
-
-### Layer 1 — agentgateway on the controller route
-
-`kagent.controllerRoute` renders (`templates/kagent/controller-route.yaml`,
-`controller-jwt-policy.yaml`):
-
-| Object | What it does |
+| Request | At the gateway |
 |---|---|
-| `AgentgatewayBackend kagent` | The controller Service with `policies.auth.passthrough` (the validated bearer is re-injected so the controller and, through `KAGENT_PROPAGATE_TOKEN` on the Harness, the actor see the person's token). No protocol pin: agentgateway infers HTTP/2 (h2c) for gRPC and keeps HTTP/1.1 for gRPC-Web, and the controller needs that split — it serves both on `:8083` and hands every HTTP/2 request whose content-type starts with `application/grpc` to its native gRPC server, so gRPC-Web pinned onto HTTP/2 is answered `415`. |
-| `GRPCRoute kagent-controller` | Matched by gRPC service — one rule per service, one service-only match each for `kagent.api.v1alpha1.{AgentService, AgentTemplateService, ModelService, SessionService, SystemService}` and `lf.a2a.v1.A2AService` (`kagent.controllerRoute.grpc.services`), which the agentgateway controller (chart ≥ 2.1.1 running the line's release) translates into the path prefix `/<service>/`; a service with RPCs listed gets one exact service/method match per RPC instead (the shape an older controller needs, or a way to expose a subset). Either outranks the MCP catch-all's `PathPrefix: /`. On the data-plane Gateway, without a hostname so the in-cluster authority `agentgateway.<ns>.svc.cluster.local:8080` matches. No path prefix: the controller has no REST. gRPC-Web rides the same route (same `/<service>/<method>` paths over HTTP/1.1). |
-| `GRPCRoute kagent-controller-public` | The same matches on the public Gateway for `kagent.controllerRoute.hostname` (`agentgateway.<domain>`), forwarding to the agentgateway Service (Envoy Gateway carries HTTP/2 to a GRPCRoute backend); a `BackendTrafficPolicy` lifts Envoy's route timeout for streaming turns (`ingress.backendTrafficPolicy`). Not rendered when the chart-owned Gateway is the edge. |
-| `HTTPRoute kagent-mcp` + `MCPServer kagent` | `kagent.controllerRoute.mcp` (on with muster): the controller's MCP server (`/mcp`: `list_agent_instances`, `invoke_agent_instance`, the checkpoint and fork tools; `timeout: 300`, since an invoke answers when the receiving turn ends) at `/kagent/mcp` on the data plane's plaintext listener only (`sectionName: http`, in-cluster), rewritten to `/mcp` on `AgentgatewayBackend kagent`, and registered with muster in the `agent-platform` tool group with `forwardToken`. muster forwards the session's IdP token, `kagent-mcp-jwt` below validates it, and the controller acts as the person who ran the turn: a session lists and messages only the sessions its person may see. |
-| `AgentgatewayPolicy kagent-controller-jwt`, `kagent-mcp-jwt` | One per route, the CRD takes one kind of target per policy: the first on the GRPCRoute, its twin on the `kagent-mcp` HTTPRoute. Each: `jwtAuthentication` in `Strict` mode against `global.identity.issuerUrl` with the JWKS fetched from `jwtAuthentication.jwks` (a static `AgentgatewayBackend`, TLS-verified when `jwks.tls.enabled`); an `authorization` rule requiring the identity claim (`has(jwt.email)`); a `transformation` that **sets** `x-user-id` to `jwt.email`. `set` replaces every inbound value of the header, so a forged `x-user-id` never reaches the controller. |
+| no token, foreign issuer, expired or bad signature | `401` |
+| valid token without the identity claim | `403` |
+| valid token | passed through, `x-user-id` = the claim |
 
-The identity claim is **one value**, `kagent.controller.auth.userIdClaim`
-(`email`): the gateway copies it into the header and the controller's
-`AUTH_USER_ID_CLAIM` reads the same claim from the bearer. `email` rather than
-`sub` because Dex subjects are opaque connector-prefixed identifiers and
-`email` is what muster keys sessions by, so the UI, the portal and Swarmgeist
-attribute a person identically.
+No audience is required: every Dex client a person signs in with is accepted.
 
-The header contract every client of the route follows:
+Before turning the route on, set `kagent.controllerRoute.parentRef` (its default names a Giant Swarm Gateway; clear `name` to fall back to the chart-owned edge or `global.gatewayApi.parentRefs`) and `kagent.controllerRoute.jwtAuthentication.jwks` with `gateway.jwksEgress` for your issuer ([4](#4-edge-jwt-validation-and-jwks)).
 
-| Header / metadata | Who sets it | At the controller |
-|---|---|---|
-| `authorization: Bearer <Dex id_token>` | the client — the person's own token (the portal's per-installation login, Swarmgeist's forwarded token, a CLI's password grant) | validated and passed through unchanged |
-| `x-user-id` | **agentgateway only**, from the verified claim | the identity the controller acts as (`UnsecureAuthenticator`), or ignored in favour of the bearer's claim (trusted-proxy) |
-| `x-kagent-agent-instance-id` | the client, on every A2A call | routes the call to the instance; untouched by the gateway |
-
-A request without a token is refused at the gateway (`401`); a token from
-another issuer, expired or with a bad signature likewise; a valid token without
-the identity claim is refused (`403`) instead of reaching the controller as its
-default user. No audience is required: Dex mints the caller's client id as
-`aud`, which differs per client, and every one of them is a person.
-
-### Layer 2 — the controller
-
-With the kagent line's trusted-proxy authenticator (`kagent.controller.auth.mode:
-trusted-proxy`, a carried patch of `giantswarm/kagent-upstream` tracked in
-giantswarm/giantswarm#37010) the controller derives the caller from the bearer's
-`email` claim itself and ignores `x-user-id` on the API path — a header
-presented at the controller directly is worthless. Until the line the platform
-runs carries it, the controller reads `x-user-id`, which is exactly the header
-layer 1 controls. Either way the identity the controller acts as is the one a
-**verified** token carried; the controller never verifies a signature, so
-agentgateway must stay the only path to it.
-
-### The UI path (D16)
-
-The kagent UI is the admin console, on `kagent.<domain>` behind oauth2-proxy
-(`kagent.uiRoute`, `kagent.oauth2-proxy`). Its nginx proxies `/api/` and `/a2a/`
-to the controller and forwards request headers, `x-user-id` included (it clears
-only the `x-auth-request-*` / `x-forwarded-*` family). The identity on this path
-is the bearer oauth2-proxy sets from the session, which the controller verifies
-as above; a client-supplied identity header is removed **at the route**
-(`RequestHeaderModifier` with `remove: [x-user-id]` on the UI `HTTPRoute`,
-`templates/kagent/ui-httproute.yaml`) before nginx can forward it. The UI is
-therefore the second door, and the only one besides agentgateway.
-
-### Why nothing else may reach the controller
-
-The controller's network policy (`templates/kagent/netpol.yaml`, both flavours)
-admits the agentgateway data-plane pods of the release namespace and the kagent
-UI pods on `:8083` and nobody else — no intra-namespace `app: kagent` admission
-(agents run as Substrate actors and do not call the controller from inside the
-namespace; an actor that needs it is admitted through Substrate's egress, not
-by a namespace-wide rule). `make verify-kagent-route` asserts the route, the
-policy, the header transformation, the UI filter and the ingress admission;
-`make verify-kagent-netpol` the rest of the kagent policies.
-
-### Reaching the controller
+Reaching the controller:
 
 | From | Target | Transport |
 |---|---|---|
-| the Dev Portal backend, a CLI, the browser | `https://agentgateway.<domain>` (the app-config's `agentPlatform.kagent.installations.<inst>.apiBaseUrl`) | native gRPC over HTTP/2 (ALPN), or gRPC-Web |
-| klaus-gateway and other in-cluster clients | `grpc://agentgateway.<release namespace>.svc.cluster.local:8080` (the meta chart's `klausGateway.a2a.url` default) | plaintext HTTP/2 (h2c) |
+| the portal backend, a CLI | `https://agentgateway.<domain>` (`kagent.controllerRoute.hostname`; the portal's `apiBaseUrl`) | gRPC over HTTP/2, or gRPC-Web |
+| klaus-gateway and other in-cluster clients | `grpc://agentgateway.<release namespace>.svc.cluster.local:8080` (the `klausGateway.a2a.url` default) | plaintext HTTP/2 (h2c) |
 
-The controller's `/mcp` and `/health` endpoints are not exposed through the
-route. An installation whose issuer is external to the cluster points
-`jwtAuthentication.jwks` and `gateway.jwksEgress` at it (#312).
-`kagent.controllerRoute.jwtAuthentication.enabled: false` is the off switch for
-local development without a front proxy: no policy, no transformation, the
-controller trusts `x-user-id` as sent — never the fleet shape.
+`kagent.controllerRoute.jwtAuthentication.enabled: false` removes the policy, and the controller then trusts `x-user-id` as sent. Use it only for local development.
 
 ## 6. The models Gateway
 
-A model served by the serving slice (`examples/serving-slice.yaml`, giantswarm/agent-platform#326) is reached through its own edge, the `models` Gateway on `models.<cluster>.<base domain>`, never through muster or the platform's edge. Its one boundary is the `AgentgatewayPolicy` `models-jwt` on the Gateway itself — `Strict`, `strategy.inheritance: Override`, so every `LLMInferenceService` route KServe attaches inherits it and none can weaken it:
+A model served by the serving slice ([reference](reference.md#the-serving-slice-and-the-models-gateway)) is reached through its own Gateway, `models.<domain>` (`modelServing.modelsGateway.hostPrefix` + `global.domain`). It is never reached through muster. One `AgentgatewayPolicy`, `models-jwt`, sits on the Gateway itself with `Strict` validation and `strategy.inheritance: Override`, so no model route can weaken it:
 
-- **Issuer**: the platform's Dex (`global.identity.issuerUrl`), the JWKS fetched from the issuer's public host on 443 by default (`modelServing.modelsGateway.jwtAuthentication.jwks`; TLS implied by the port, no `gateway.jwksEgress` needed). The fetch is the **agentgateway controller's**, not the data plane's: the controller resolves the `models-jwks` backend, fetches the key set and pushes the keys to the data plane over xDS, so the controller's network policy admits the issuer's host on 443 by name in every release that runs the controller — the platform's release beside the slice on the installation's own cluster, the slice's own on a workload cluster (giantswarm/agent-platform#505). A failed fetch pushes an empty key set and every token is refused `401 token uses the unknown key`; the signal is the `models-jwt` policy's `Accepted` condition (`reason: Valid`; `PartiallyValid` names the JWKS URL) and the controller's `error fetching jwks` line — `make live-serving-slice` reads both. An in-cluster host and port follow the rules of section 4.
-- **Audience**: `dex-k8s-authenticator` only — the installation's login client, whose id_token a person holds after the Dex login (kubectl, the portal). Unlike the agent-manager route (section 5), which accepts any audience because its callers hold tokens of their own clients, a model is called by people and by the platform on their behalf with the login token; a token minted for another client is refused.
-- **Outcome**: `200` with a valid id_token, `401` without one or with an expired, foreign-issuer or wrong-audience token — at the edge, before the request reaches the predictor. The data plane strips the `Authorization` header once verified: the model server logs no bearer.
+- **Issuer**: `global.identity.issuerUrl`. The JWKS comes from `modelServing.modelsGateway.jwtAuthentication.jwks` (port 443 by default).
+- **Audience**: `dex-k8s-authenticator` only (`jwtAuthentication.audiences`), the login client whose ID token a person holds.
+- **Outcome**: `200` with a valid token. `401` without one, or with an expired, foreign-issuer or wrong-audience token, before the request reaches the model. The verified `Authorization` header is stripped before the request reaches the model server.
 
-`POST https://models.<cluster>.<base domain>/<namespace>/<model>/v1/chat/completions` with `Authorization: Bearer <id_token>` is the whole contract.
+```text
+POST https://models.<domain>/<namespace>/<model>/v1/chat/completions
+Authorization: Bearer <id_token>
+```

@@ -7,10 +7,12 @@
 # :443 listener for *.<global.domain> (the wildcard certificate in
 # gatewayApi.gateway.tls.secretName), every public route pins to it, and its
 # Service becomes a LoadBalancer — point the DNS wildcard *.<global.domain> at
-# that Service's address. MCP traffic (/mcp) goes through agentgateway to
-# muster; OAuth, discovery and client registration stay on muster's own route
-# (ingress.mode agentgateway-muster). docs/install.md walks through it, the
-# certificate and the DNS record included.
+# that Service's address. Clients use https://muster.<global.domain>/mcp: on
+# this edge muster's own route (hostname-specific) serves /mcp, OAuth,
+# discovery and client registration, and the separate /mcp route to the data
+# plane is not rendered. The bundled MCP servers sit behind muster, which
+# reaches them through agentgateway (agent-platform-mcps.agentgateway.viaMuster).
+# docs/install.md walks through it, the certificate and the DNS record included.
 #
 #   helm install agent-platform oci://gsoci.azurecr.io/charts/giantswarm/agent-platform \
 #     --namespace agent-platform --create-namespace \
