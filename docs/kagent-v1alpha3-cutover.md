@@ -127,7 +127,21 @@ kubectl --kubeconfig <kubeconfig> --context <context> -n kagent logs deployment/
 
 A controller that logs the 1.x refusal is still pointed at the old database; fix the URL before anything else.
 
-- [ ] Substrate 1.5.x from a 1.3.x line needs a fresh substrate database too: ate-api-server crash-loops on the existing schema (`relation tuple already exists`). Recreate the schema (`DROP SCHEMA public CASCADE; CREATE SCHEMA public; ALTER SCHEMA public OWNER TO kagent; GRANT ALL ON SCHEMA public TO public;` on the `substrate` database), delete the crash-looping pod and wait for the substrate HelmRelease Ready. giantswarm/agent-platform#819 tracks a values knob for this.
+- [ ] Substrate 1.5.x from a 1.3.x line needs a fresh substrate database too: on the existing schema ate-api-server crash-loops (`relation tuple already exists`). On the platform's CNPG Cluster, add the fresh database and name it in `postgres.substrateDatabase` in the same values change as the kagent database; the previous `substrate` database stays (`reclaimPolicy: retain`) for the retention period:
+
+```yaml
+postgres:
+  substrateDatabase: substrate-v2
+  databases:
+    substrate-v2:
+      enabled: true
+      name: substrate_v2
+      component: substrate
+      reclaimPolicy: retain
+      secretNamespaces: [ate-system]
+```
+
+The connectivity release derives `<postgres.clusterName>-substrate-v2-app` into `ate-system` and the meta chart hands it to ate-api-server, which lays its schema on the empty database. An installation on Substrate's bundled Postgres (no CNPG Cluster) recreates the schema by hand instead (`DROP SCHEMA public CASCADE; CREATE SCHEMA public; ALTER SCHEMA public OWNER TO kagent; GRANT ALL ON SCHEMA public TO public;` on the `substrate` database), deletes the crash-looping pod and waits for the substrate HelmRelease Ready.
 
 - [ ] Bring klaus-gateway back (undo step 1's scale to zero) once the controller is Ready.
 

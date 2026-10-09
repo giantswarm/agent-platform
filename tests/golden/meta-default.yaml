@@ -458,7 +458,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.3.0
+          tag: 2.3.3
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -489,7 +489,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.3.0
+          tag: 2.3.3
       resources:
         limits:
           cpu: 500m
@@ -1507,6 +1507,7 @@ spec:
       storage:
         size: 20Gi
         storageClass: ""
+      substrateDatabase: substrate
       vector:
         enabled: false
         extensionImage:
@@ -1550,8 +1551,8 @@ spec:
       podLabels:
         observability.giantswarm.io/tenant: giantswarm
       postgres:
-        connectionString: ""
         enabled: true
+        readWriteConnectionString: ""
         schema: public
       rustfs:
         enabled: false
@@ -1668,7 +1669,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.3.0
+        tag: 2.3.3
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1721,7 +1722,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.3.0
+        tag: 2.3.3
     resources:
       limits:
         cpu: 500m

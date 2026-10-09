@@ -107,7 +107,9 @@ kagent:
         value: http://kagent-ui:8080
 
 # Substrate's control plane on the same external Postgres: the connection string
-# in Secret substrate-postgres (key connectionString) in ate-system.
+# in Secret substrate-postgres (key connectionString) in ate-system. ate-api-server
+# runs SET ROLE on every connection, so both roles name one the connection's user
+# may assume (here its own, substrate).
 substrate:
   postgres:
     enabled: false
@@ -115,3 +117,5 @@ substrate:
       enabled: true
       name: substrate-postgres
       key: connectionString
+    readWriteRole: substrate
+    ownerRole: substrate
