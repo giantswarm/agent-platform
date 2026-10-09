@@ -178,9 +178,10 @@ overwrite would hide a values file that still spells the old key.
     S3 environment of the s3proxy façade (capz, or the façade alone) next to
     an installation's own entries (one of the derived names fails the render);
     postgres.connectionStringSecretRef, on the platform Cluster —
-    the derived CNPG connection Secret <postgres.clusterName>-substrate-app
-    (key uri) the connectivity release's hook writes into ate-system for
-    postgres.databases.substrate (agent-platform.substrate.postgresMode; the
+    the derived CNPG connection Secret <postgres.clusterName>-<key>-app
+    (key uri) the connectivity release's hook writes into ate-system for the
+    postgres.databases entry postgres.substrateDatabase names
+    (agent-platform.substrate.postgresMode; the
     `auto` of substrate.postgres.enabled itself is resolved by
     agent-platform.shape.apply, with the other cluster-shape knobs). Its
     atelet.imageCache.pinnedImages is NOT derived here: the kagent release's
@@ -320,7 +321,7 @@ and muster never turns Ready (giantswarm/agent-platform#309). */ -}}
 {{- $ownName := dig "name" "" $own -}}
 {{- $ownKey := dig "key" "" $own -}}
 {{- if or (and $ownName (ne $ownName $ref.name)) (and $ownKey (ne $ownKey $ref.key)) -}}
-{{- fail (printf "substrate.postgres.connectionStringSecretRef (%s/%s) differs from the Secret the connectivity release derives for postgres.databases.substrate (%s/%s): leave it unset — it follows postgres.clusterName — or name an external database in substrate.postgres.connectionString" $ownName $ownKey $ref.name $ref.key) -}}
+{{- fail (printf "substrate.postgres.connectionStringSecretRef (%s/%s) differs from the Secret the connectivity release derives for postgres.databases.%s (%s/%s): leave it unset — it follows postgres.clusterName and postgres.substrateDatabase — or name an external database in substrate.postgres.connectionString" $ownName $ownKey (include "agent-platform.substrate.databaseKey" .root) $ref.name $ref.key) -}}
 {{- end -}}
 {{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref) -}}
 {{- end -}}
@@ -397,7 +398,8 @@ chart's single-instance StatefulSet — substrate.postgres.enabled true, or `aut
 while neither of the other two applies), "external" (an explicit
 substrate.postgres.connectionString, or substrate.postgres.connectionStringSecretRef
 naming a Secret that holds one), "cnpg" (the platform's CNPG Cluster,
-postgres.enabled, through postgres.databases.substrate and the derived Secret),
+postgres.enabled, through the postgres.databases entry postgres.substrateDatabase
+names and its derived Secret),
 or "" when none of the three holds (substrate.postgres.enabled false without a
 Cluster or a connection string) — which validateSubstrate refuses. The
 connectivity chart carries the same helper and resolves `auto` the same way.
@@ -409,7 +411,7 @@ Usage: include "agent-platform.substrate.postgresMode" .
 {{- $conn := dig "postgres" "connectionString" "" $sub -}}
 {{- $ref := dig "postgres" "connectionStringSecretRef" dict $sub -}}
 {{- $refOn := or (dig "enabled" false $ref) (dig "name" "" $ref) -}}
-{{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" "substrate" "enabled" true .Values.postgres) false) -}}
+{{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" (include "agent-platform.substrate.databaseKey" .) "enabled" true .Values.postgres) false) -}}
 {{- if not (has $bundled (list "auto" "true" "false")) -}}
 {{- fail (printf "substrate.postgres.enabled must be one of auto, true, false (got %s)" $bundled) -}}
 {{- end -}}
@@ -421,11 +423,29 @@ Usage: include "agent-platform.substrate.postgresMode" .
 {{- end -}}
 
 {{/*
-The derived CNPG connection Secret of postgres.databases.substrate, as the
-connectivity release names it: <postgres.clusterName>-substrate-app.
+The derived CNPG connection Secret of the Substrate database entry, as the
+connectivity release names it: <postgres.clusterName>-<postgres.substrateDatabase>-app.
 */}}
 {{- define "agent-platform.substrate.databaseSecretName" -}}
-{{- printf "%s-substrate-app" .Values.postgres.clusterName -}}
+{{- printf "%s-%s-app" .Values.postgres.clusterName (include "agent-platform.substrate.databaseKey" .) -}}
+{{- end -}}
+
+{{/*
+The postgres.databases key of Substrate's control-plane database
+(postgres.substrateDatabase).
+*/}}
+{{- define "agent-platform.substrate.databaseKey" -}}
+{{- .Values.postgres.substrateDatabase | default "substrate" -}}
+{{- end -}}
+
+{{/*
+Refuse a postgres.substrateDatabase that names no postgres.databases entry.
+*/}}
+{{- define "agent-platform.substrate.validateDatabaseKey" -}}
+{{- $key := include "agent-platform.substrate.databaseKey" . -}}
+{{- if not (hasKey (.Values.postgres.databases | default dict) $key) -}}
+{{- fail (printf "postgres.substrateDatabase (%s) names no postgres.databases entry: add postgres.databases.%s (name, component substrate, secretNamespaces [ate-system]) or name an existing key" $key $key) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -667,7 +687,9 @@ run it.
     and has no default.
   * Substrate on with no control-plane database: neither the bundled
     StatefulSet, nor an explicit connectionString, nor the platform's CNPG
-    Cluster with postgres.databases.substrate.
+    Cluster with the postgres.databases entry postgres.substrateDatabase names.
+  * Substrate on the platform's CNPG Cluster with postgres.substrateDatabase
+    naming no postgres.databases entry.
   * Substrate on under a LIVE render (the Helm CLI, --dry-run=server,
     helm-controller: .Capabilities.APIVersions then lists kinds, which Helm's
     offline set never does — so `helm template` and CI, which see no cluster,
@@ -697,7 +719,10 @@ run it.
 {{- include "agent-platform.substrate.validateRange" . -}}
 {{- end -}}
 {{- if and $substrate (not (include "agent-platform.substrate.postgresMode" .)) -}}
-{{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster; postgres.databases.substrate renders the Database and the connectivity release derives the connection Secret), or substrate.postgres.enabled (the chart's bundled single-instance StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionStringSecretRef (a Secret in ate-system holding the connection string) or substrate.postgres.connectionString" -}}
+{{- fail "components.substrate is on but Agent Substrate's control plane has no database: turn postgres.enabled on (the platform's CNPG Cluster; the postgres.databases entry postgres.substrateDatabase names renders the Database and the connectivity release derives the connection Secret), or substrate.postgres.enabled (the chart's bundled single-instance StatefulSet, a lab's shape), or name an external database in substrate.postgres.connectionStringSecretRef (a Secret in ate-system holding the connection string) or substrate.postgres.connectionString" -}}
+{{- end -}}
+{{- if and $substrate (eq (include "agent-platform.substrate.postgresMode" .) "cnpg") -}}
+{{- include "agent-platform.substrate.validateDatabaseKey" . -}}
 {{- end -}}
 {{- if and $substrate (.Capabilities.APIVersions.Has "v1/Namespace") -}}
 {{- if not (.Capabilities.APIVersions.Has "certificates.k8s.io/v1beta1/PodCertificateRequest") -}}

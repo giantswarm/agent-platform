@@ -980,6 +980,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | postgres.sessionsDatabase.enabled | bool | `false` |  |
 | postgres.sessionsDatabase.name | string | `"sessions"` |  |
 | postgres.sessionsDatabase.owner | string | `"sessions"` |  |
+| postgres.substrateDatabase | string | `"substrate"` |  |
 | postgres.databases.substrate.enabled | bool | `true` |  |
 | postgres.databases.substrate.name | string | `"substrate"` |  |
 | postgres.databases.substrate.component | string | `"substrate"` |  |
