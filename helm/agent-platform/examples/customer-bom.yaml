@@ -42,7 +42,7 @@
 # substrate and substrate-crds pin the SAME release of the Substrate line
 # (stable semver like kagent's; the floor of components.substrate.versionRange
 # — 1.4.0, the line on kagent-dev/substrate v0.3.0-alpha3, the upstream Substrate the
-# kagent line's own pin names; its egress gateway runs the agentgateway line's 2.3.0). The agentgateway pin is the floor of
+# kagent line's own pin names; its egress gateway runs the agentgateway line's 2.3.3). The agentgateway pin is the floor of
 # components.agentgateway.versionRange: 2.4.0 is the first packaging release
 # whose values schema admits the monitoring block the agentgateway component
 # turns on (the tenant label on both monitors, the discovery label and the
