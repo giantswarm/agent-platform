@@ -1522,7 +1522,7 @@ verify-release-floors: ## Assert, on a release tag, that every component range a
 	@echo "every component floor and BOM pin is published; the release is installable."
 
 .PHONY: verify-components-charts
-verify-components-charts: ## Render every component chart with the values the meta chart forwards to it — the roster is values.yaml's, the BOM must pin all of it (both ways) — at the range's resolution and at the BOM pin, in every shape (vanilla and fleet --api-versions, the CNPG Cluster and the bundled Postgres), resolved the way Flux does (the tag and the layer the OCIRepository selects); a chart released with the meta chart (releasedWithChart) from the working tree. A forwarded key a closed schema does not declare fails the release on every installation, which a meta-only render cannot see. A range rendered against a fallback (UNRELEASED) must be named in Chart.yaml's agent-platform.giantswarm.io/unreleased, and nothing else (`make sync-unreleased`): a dev build of the branch says what it waits for and refuses its install. Network: gsoci.azurecr.io (ghcr.io for the CloudNativePG chart).
+verify-components-charts: ## Render every component chart with the values the meta chart forwards to it — the roster is values.yaml's, the BOM must pin all of it (both ways) — at the range's resolution and at the BOM pin, in every shape (vanilla and fleet --api-versions, the CNPG Cluster and the bundled Postgres), resolved the way Flux does (the tag and the layer the OCIRepository selects); a chart released with the meta chart (releasedWithChart) from the working tree. The kagent chart also renders the coding-agents block (ci/test-coding-agents-values.yaml): one Harness per kagent.harnesses entry, a claude one carrying its snapshot location, env and limits at the chart's claude-harness digest, every Harness valid against the pinned Harness CRD. A forwarded key a closed schema does not declare fails the release on every installation, which a meta-only render cannot see. A range rendered against a fallback (UNRELEASED) must be named in Chart.yaml's agent-platform.giantswarm.io/unreleased, and nothing else (`make sync-unreleased`): a dev build of the branch says what it waits for and refuses its install. Network: gsoci.azurecr.io (ghcr.io for the CloudNativePG chart).
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."
@@ -2158,7 +2158,7 @@ verify-kagent-crds: ## Assert every api.kagent.dev object the connectivity chart
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-harness
-verify-kagent-harness: ## Assert the platform Harness is the kagent chart's since 4.8.0: the connectivity chart renders none, the meta chart forwards the GS policy only (create, snapshot location, KAGENT_PROPAGATE_TOKEN, the admission label; no image by default, an override digest when set).
+verify-kagent-harness: ## Assert the platform Harness is the kagent chart's since 4.8.0: the connectivity chart renders none, the meta chart forwards the GS policy only (create, snapshot location, KAGENT_PROPAGATE_TOKEN, the admission label; no image by default, an override digest when set) and kagent.harnesses reaches the kagent release unchanged (empty by default: no further Harness).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-harness.py $(CONNECTIVITY_DIR) $(CHART_DIR)

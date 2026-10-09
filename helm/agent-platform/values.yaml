@@ -714,7 +714,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.6.1 <1.7.0"
+    versionRange: ">=1.6.3 <1.7.0"
     # Stable releases only, also where gitops.prereleases admits the
     # platform's release candidates: the worker image above follows the
     # floor, and a candidate's atelet next to the floor's worker fails every
@@ -743,7 +743,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.6.1 <1.7.0"
+    versionRange: ">=1.6.3 <1.7.0"
     # Stable releases only, the range of substrate-crds above.
     prereleases: false
     valuesFrom: substrate
@@ -5216,6 +5216,13 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # move; before that its immutable pod template failed every upgrade that
     # changed it.
     awsCli: gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+    # The root container of every gVisor sandbox (spec.pauseImage of the
+    # SandboxConfig gvisor-default; a value of the Substrate line from 1.6.3):
+    # upstream's registry.k8s.io pin under its gsoci copy, the same digest,
+    # which each snapshot's manifest records. An installation whose egress
+    # admits only gsoci boots its sandboxes; registry.k8s.io redirects every
+    # pull to a Google Artifact Registry host.
+    pause: gsoci.azurecr.io/giantswarm/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4
   atelet:
     # The snapshot store's API: s3 (AWS S3 and S3-compatible stores) or gcs.
     storageBackend: s3

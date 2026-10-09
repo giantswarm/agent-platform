@@ -25,12 +25,14 @@ by spec.harnessRef; the Harness has no admission selector. This test asserts:
     digest) reaches the kagent release's harness.image verbatim;
   - kagent.substrateWorkerPool.name follows an override (the Harness's
     workerPoolRef defaults to it in the chart);
+  - kagent.harnesses (a coding agent's claude Harness, ci/test-coding-agents-values.yaml)
+    reaches the kagent release's harnesses unchanged, with no null; by default
+    the release carries no further Harness (harnesses empty or absent);
   - kagent off forwards nothing.
 
-The rendered object itself is the kagent chart's (verify-components-charts
-renders the chart the range resolves to with these values and asserts the
-Harness it emits carries no selector); structural validation against the
-Harness CRD is verify-kagent-crds.
+The rendered objects are the kagent chart's: verify-components-charts renders
+the chart the range resolves to with these values, the coding-agents block
+included, and asserts every Harness it emits against the pinned Harness CRD.
 
 Usage: verify-kagent-harness.py <connectivity chart dir> <meta chart dir>
 """
@@ -159,6 +161,17 @@ def main(connectivity: str, meta: str) -> int:
         fail(f"the kagent release's values carry a null at {', '.join(paths)}; a null is removed — not stored — by the merge patch "
              "of a HelmRelease that already exists, so whatever it was meant to delete comes back on that installation (#418)")
     print("ok: the kagent release's values carry no null")
+
+    if values.get("harnesses"):
+        fail(f"the kagent release carries harnesses {values['harnesses']} by default; an empty kagent.harnesses renders no further Harness")
+    coding = f"{meta}/ci/test-coding-agents-values.yaml"
+    entries = yaml.safe_load(open(coding))["kagent"]["harnesses"]
+    values = kagent_values(render(meta, [*base, "-f", coding]))
+    if values.get("harnesses") != entries:
+        fail(f"kagent.harnesses does not reach the kagent release unchanged:\n  got      {values.get('harnesses')}\n  expected {entries}")
+    if paths := nulls(values):
+        fail(f"the kagent release's values carry a null at {', '.join(paths)} with kagent.harnesses set (#418)")
+    print("ok: kagent.harnesses reaches the kagent release unchanged, with no null; by default the release carries no further Harness")
 
     values = kagent_values(render(meta, [*base, "--set", f"kagent.harness.image={DIGEST}", "--set", "kagent.substrateWorkerPool.name=pool-b"]))
     if values["harness"].get("image") != DIGEST:

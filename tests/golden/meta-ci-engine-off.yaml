@@ -1344,6 +1344,7 @@ spec:
         repository: giantswarm/substrate
       images:
         awsCli: gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+        pause: gsoci.azurecr.io/giantswarm/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4
         postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
         rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
       metrics:
@@ -1936,7 +1937,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.6.1
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.6.3
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -2381,6 +2382,7 @@ spec:
       repository: giantswarm/substrate
     images:
       awsCli: gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+      pause: gsoci.azurecr.io/giantswarm/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4
       postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
       rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
     metrics:
@@ -2913,7 +2915,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.6.1 <1.7.0"
+    semver: ">=1.6.3 <1.7.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2936,7 +2938,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.6.1 <1.7.0"
+    semver: ">=1.6.3 <1.7.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

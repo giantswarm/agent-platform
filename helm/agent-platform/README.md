@@ -389,14 +389,14 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.6.1 <1.7.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.6.3 <1.7.0"` |  |
 | components.substrate-crds.prereleases | bool | `false` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.6.1 <1.7.0"` |  |
+| components.substrate.versionRange | string | `">=1.6.3 <1.7.0"` |  |
 | components.substrate.prereleases | bool | `false` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
@@ -1367,6 +1367,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.images.postgres | string | `"gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"` |  |
 | substrate.images.rustfs | string | `"gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358"` |  |
 | substrate.images.awsCli | string | `"gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73"` |  |
+| substrate.images.pause | string | `"gsoci.azurecr.io/giantswarm/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4"` |  |
 | substrate.atelet.storageBackend | string | `"s3"` |  |
 | substrate.atelet.nodeSelector | object | `{}` |  |
 | substrate.atelet.tolerations | list | `[]` |  |
