@@ -1042,7 +1042,7 @@ crossing before any component moves while all three hold:
 The documented crossings are a fresh postgres.databases entry whose derived
 Secret replaces the old one, or, with the bundled Postgres, a
 kagent.database.postgres.url naming another database of the instance
-(UPGRADE.md, docs/kagent-v1alpha3-cutover.md).
+(UPGRADE.md).
 A first install and an installation already on the line render as before.
 Skipped with gitops.target set (the lookups see the installation, not the
 target); `lookup` is empty under `helm template`, where the guard is silent.
@@ -1075,7 +1075,7 @@ target); `lookup` is empty under `helm template`, where the guard is silent.
 {{- $oldUrl := dig "spec" "values" "database" "postgres" "url" "" ($release | default dict) -}}
 {{- $newUrl := dig "database" "postgres" "url" "" $kagent -}}
 {{- if and (eq $old $new) (eq $oldUrl $newUrl) -}}
-{{- fail (printf "components.kagent selects the api.kagent.dev line (%s) while %s/%s runs kagent %s on its 1.x database (Secret %s, kagent.database.postgres.url unchanged): the line's controller refuses the 1.x schema and the upgrade would half-apply. Cross with a fresh database: add a postgres.databases entry for it (e.g. kagent-v3, name kagent_v3, component kagent) and mount its derived Secret <postgres.clusterName>-<key>-app in kagent.controller.volumes in place of %s, or with the bundled Postgres point kagent.database.postgres.url at another database of the instance; then upgrade (UPGRADE.md, docs/kagent-v1alpha3-cutover.md). Or pin agent-platform below 4.121.0" $range $ns $name $running ($old | default "none") ($old | default "the current one")) -}}
+{{- fail (printf "components.kagent selects the api.kagent.dev line (%s) while %s/%s runs kagent %s on its 1.x database (Secret %s, kagent.database.postgres.url unchanged): the line's controller refuses the 1.x schema and the upgrade would half-apply. Cross with a fresh database: add a postgres.databases entry for it (e.g. kagent-v3, name kagent_v3, component kagent) and mount its derived Secret <postgres.clusterName>-<key>-app in kagent.controller.volumes in place of %s, or with the bundled Postgres point kagent.database.postgres.url at another database of the instance; then upgrade (UPGRADE.md). Or pin agent-platform below 4.121.0" $range $ns $name $running ($old | default "none") ($old | default "the current one")) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
