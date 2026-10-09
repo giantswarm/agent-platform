@@ -1835,6 +1835,9 @@
                         }
                     }
                 },
+                "substrateDatabase": {
+                    "type": "string"
+                },
                 "vector": {
                     "type": "object",
                     "additionalProperties": false,

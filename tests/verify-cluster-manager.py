@@ -274,6 +274,20 @@ def main(meta: str, connectivity: str) -> int:
         fail("model-manager's egress opens the Hugging Face Hub with neither a static kserve backend nor cluster-manager")
     ok("model-manager's egress: the Hugging Face Hub by name with cluster-manager on, not without a kserve backend")
 
+    # --- model-manager reads model images for the fit check of an oci:// preset (#871) ---
+    must_have(mm_egress, ("matchName: gsoci.azurecr.io\n", "matchPattern: '*.blob.core.windows.net'\n"),
+              "model-manager's egress with cluster-manager on (check_fit reads the model image's manifest, config and config.json)")
+    if "gsoci.azurecr.io" in mm_off or "blob.core.windows.net" in mm_off:
+        fail("model-manager's egress opens the model registry with neither a static kserve backend nor cluster-manager")
+    mirror = documents(helm(connectivity, [*CONN, "--set", "networkPolicy.flavor=cilium",
+                                           "--set", "modelManager.networkPolicy.registry.fqdns[0].matchName=registry.mirror.example",
+                                           "--set", "modelManager.networkPolicy.registry.cidrs[0]=203.0.113.0/24"], ci_values=False))
+    mm_mirror = mirror[("CiliumNetworkPolicy", "agent-platform-connectivity-model-manager-egress")]
+    must_have(mm_mirror, ("matchName: registry.mirror.example\n", "- 203.0.113.0/24\n"), "model-manager's egress with a registry mirror")
+    if "gsoci.azurecr.io" in mm_mirror or "blob.core.windows.net" in mm_mirror:
+        fail("a modelManager.networkPolicy.registry.fqdns mirror does not replace the gsoci list")
+    ok("model-manager's egress: gsoci.azurecr.io and its blob storage by name on 443 with cluster-manager on, not without a kserve backend; a mirror replaces the list")
+
     # --- model-manager reaches the workload clusters' API servers its kserve backends target (#687) ---
     # Nothing set on model-manager: its egress follows clusterManager.networkPolicy.workloadClusters (the
     # cilium render above sets fqdns api.*.example.com and cidrs 198.51.100.0/24), on the same ports.
@@ -311,6 +325,23 @@ def main(meta: str, connectivity: str) -> int:
     mm_narrowed = documents(helm(connectivity, [*CONN, "--set", "networkPolicy.flavor=kubernetes",
                                                 "--set", f"{WIRING}.networkPolicy.workloadClusters.cidrs[0]=198.51.100.0/24"], ci_values=False))[("NetworkPolicy", "agent-platform-connectivity-model-manager-egress")]
     must_have(mm_narrowed, ('cidr: "198.51.100.0/24"\n', "- port: 6443\n"), "model-manager's kubernetes egress with cluster-manager's workload cidrs")
+    # The registry follows the Hugging Face cidrs convention (#871): the world on 443 stays open until both
+    # lists narrow it; with registry.cidrs set its blocks render on 443.
+    def mm_k8s(*flags: str) -> str:
+        return documents(helm(connectivity, [*CONN, "--set", "networkPolicy.flavor=kubernetes", "--set", "model-manager.oauth.enabled=false", *flags],
+                              ci_values=False))[("NetworkPolicy", "agent-platform-connectivity-model-manager-egress")]
+    # The world rule on 443 is the unquoted 0.0.0.0/0 (the workload clusters' rule quotes its block); without
+    # oauth only the hub and the registry hold it open.
+    world = "cidr: 0.0.0.0/0\n"
+    hf_only = mm_k8s("--set", "modelManager.networkPolicy.huggingFace.cidrs[0]=192.0.2.0/24")
+    if world not in hf_only:
+        fail("kubernetes: model-manager's egress with only huggingFace.cidrs no longer opens every public destination on 443 for the registry")
+    both = mm_k8s("--set", "modelManager.networkPolicy.huggingFace.cidrs[0]=192.0.2.0/24",
+                  "--set", "modelManager.networkPolicy.registry.cidrs[0]=203.0.113.0/24")
+    must_have(both, ('cidr: "203.0.113.0/24"\n', 'cidr: "192.0.2.0/24"\n'), "model-manager's kubernetes egress with hub and registry cidrs")
+    if world in both:
+        fail("kubernetes: model-manager's egress with hub and registry cidrs still opens every public destination on 443")
+    ok("kubernetes: model-manager's registry egress is every public destination on 443 until registry.cidrs and huggingFace.cidrs both narrow it")
     ok("kubernetes: the three policies; the apiserver CIDR; every public destination on the workload ports, narrowed by cidrs; the IdP on 443; model-manager follows the workload cidrs")
 
     # --- the guards -------------------------------------------------------------------------

@@ -1284,6 +1284,11 @@ spec:
         ingress:
           additionalPeers: []
         registeredBackends: []
+        registry:
+          cidrs: []
+          fqdns:
+          - matchName: gsoci.azurecr.io
+          - matchPattern: '*.blob.core.windows.net'
         workloadClusters: {}
     muster:
       crds:
@@ -1502,6 +1507,7 @@ spec:
       storage:
         size: 20Gi
         storageClass: ""
+      substrateDatabase: substrate
       vector:
         enabled: false
         extensionImage:
@@ -1545,8 +1551,8 @@ spec:
       podLabels:
         observability.giantswarm.io/tenant: giantswarm
       postgres:
-        connectionString: ""
         enabled: true
+        readWriteConnectionString: ""
         schema: public
       rustfs:
         enabled: false

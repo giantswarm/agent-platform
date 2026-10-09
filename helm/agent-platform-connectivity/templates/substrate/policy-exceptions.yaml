@@ -7,12 +7,13 @@ that workload violates — `make verify-kyverno` computes the violations from
 the substrate chart's rendered pod specs (and from the worker pod ate-controller
 renders for a WorkerPool) and holds the lists to them:
 
-  * atelet, the per-node agent (DaemonSet, ate-system): privileged, hostPorts
-    8085 (its gRPC API for ate-api-server) and 9090 (metrics), hostPath mounts of
-    /var/lib/ateom-gvisor (the sandboxes' state), /var/lib/kubelet/plugins and
-    /var/lib/kubelet/device-plugins (the CSI and device plugins it registers)
-    and /dev, no securityContext beyond privileged (no drop ALL, no runAsNonRoot,
-    no allowPrivilegeEscalation: false, no seccompProfile).
+  * atelet, the per-node agent (DaemonSet, ate-system): root (runAsUser 0), all
+    capabilities dropped but DAC_OVERRIDE (beyond the restricted's
+    NET_BIND_SERVICE), hostPorts 8085 (its gRPC API for ate-api-server) and 9090
+    (metrics), hostPath mounts of /var/lib/ateom-gvisor (the sandboxes' state),
+    /var/lib/kubelet/plugins and /var/lib/kubelet/device-plugins (the CSI and
+    device plugins it registers) and /dev, no allowPrivilegeEscalation: false, no
+    seccompProfile.
   * the worker pods of every WorkerPool (Deployments ate-controller renders in
     the kagent namespace, label ate.dev/worker-pool): root, the capabilities an
     unprivileged gVisor sandbox needs (NET_ADMIN, SYS_ADMIN, SYS_CHROOT,
@@ -59,7 +60,7 @@ metadata:
     agent-platform.giantswarm.io/substrate-workload: atelet
 spec:
   exceptions:
-  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "privileged-containers" "host-ports-none" "host-path" "restricted-volumes" "require-drop-all" "run-as-non-root" "privilege-escalation" "check-seccomp-strict")) | nindent 2 }}
+  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "host-ports-none" "host-path" "restricted-volumes" "adding-capabilities-strict" "run-as-non-root" "run-as-non-root-user" "privilege-escalation" "check-seccomp-strict")) | nindent 2 }}
   match:
     any:
     - resources:
