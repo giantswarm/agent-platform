@@ -3141,7 +3141,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         # capz — Azure storage Account (TLS only, no public blob access) and
         #        Container with a lifecycle ManagementPolicy, a
         #        UserAssignedIdentity federated for the s3proxy ServiceAccount
-        #        and assigned Storage Blob Data Contributor on the container;
+        #        and assigned Storage Blob Data Contributor on the account;
         #        the s3proxy façade below is on with it.
         # Bucket, account and container are created but never deleted by
         # Crossplane and carry helm.sh/resource-policy: keep.
@@ -3174,7 +3174,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           replicationType: LRS
           # The UserAssignedIdentity s3proxy runs as: federated against the
           # cluster's OIDC issuer for the s3proxy ServiceAccount, assigned
-          # Storage Blob Data Contributor on the container.
+          # Storage Blob Data Contributor on the storage account (the one
+          # assignment; the account holds nothing but the container).
           workloadIdentity:
             # The cluster's service-account issuer, as the CAPZ cluster's
             # apiserver spells it (--service-account-issuer).
