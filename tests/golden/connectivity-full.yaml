@@ -13711,8 +13711,9 @@ spec:
 # (model-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
 # Dex issuer by name, or the three Google hosts for the google provider), for
 # every ollama, lemonade and lmstudio backend its host model server's endpoint, for the
-# kserve backend the Hugging Face Hub, with commit mode (model-manager.github)
-# GitHub's API, and the names and blocks of modelManager.networkPolicy.egress.
+# kserve backend the Hugging Face Hub and the model registry, with commit mode
+# (model-manager.github) GitHub's API, and the names and blocks of
+# modelManager.networkPolicy.egress.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -14758,8 +14759,8 @@ spec:
   exceptions:
   - policyName: disallow-capabilities-strict
     ruleNames:
-      - require-drop-all
-      - autogen-require-drop-all
+      - adding-capabilities-strict
+      - autogen-adding-capabilities-strict
   - policyName: disallow-host-path
     ruleNames:
       - host-path
@@ -14772,10 +14773,10 @@ spec:
     ruleNames:
       - privilege-escalation
       - autogen-privilege-escalation
-  - policyName: disallow-privileged-containers
+  - policyName: require-run-as-non-root-user
     ruleNames:
-      - privileged-containers
-      - autogen-privileged-containers
+      - run-as-non-root-user
+      - autogen-run-as-non-root-user
   - policyName: require-run-as-nonroot
     ruleNames:
       - run-as-non-root
