@@ -774,6 +774,23 @@ The public hostname of the external LLM endpoint: <llmRouting.external.hostPrefi
 {{- end -}}
 
 {{/*
+A rate-limit list (dict "root" . "limits" <list>) as YAML, each entry's key
+rendered through tpl so it may name the chart's own predicates
+(agent-platform.substrate.egressCall).
+*/}}
+{{- define "agent-platform.llmRouting.rateLimits" -}}
+{{- $out := list -}}
+{{- range .limits -}}
+{{- $entry := deepCopy . -}}
+{{- with $entry.key -}}
+{{- $_ := set $entry "key" (tpl . $.root) -}}
+{{- end -}}
+{{- $out = append $out $entry -}}
+{{- end -}}
+{{- toYaml $out -}}
+{{- end -}}
+
+{{/*
 What a model of the LLM endpoint attaches to, as a YAML list of parent
 references: the data-plane Gateway's LLM listener directly (no path prefix: a
 listener-attached model matches the serving endpoints, /v1/messages,

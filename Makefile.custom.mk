@@ -2154,6 +2154,12 @@ verify-kagent-crds: ## Assert every api.kagent.dev object the connectivity chart
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-harness
+verify-llm-rate-limit: ## Assert the LLM endpoint's rate limits (giantswarm/giantswarm#38004): llmRouting.rateLimits empty renders no policy; entries render one <name>-llm-rate-limit AgentgatewayPolicy on the data-plane Gateway's LLM listener (sectionName) with traffic.rateLimit.local as written, a key through tpl (the per-agent key behind the Substrate egress predicate); llmRouting.external.rateLimits renders <name>-llm-external-rate-limit on the external HTTPRoute alone, none with the endpoint off; llmRouting off renders neither; the schema refuses both or neither of tokens and requests, a zero, an unknown unit, an empty key and an unknown field; the entry schema's fields are those of agentgateway.dev_agentgatewaypolicies at the floor of components.agentgateway.versionRange, and both policies validate against that CRD; the meta chart forwards both lists as written. Network: gsoci.azurecr.io.
+	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-llm-rate-limit.py $(CONNECTIVITY_DIR) $(CHART_DIR)
+	@echo "ok: $@"
+
 verify-kagent-harness: ## Assert the platform Harness is the kagent chart's since 4.8.0: the connectivity chart renders none, the meta chart forwards the GS policy only (create, snapshot location, KAGENT_PROPAGATE_TOKEN, the admission label; no image by default, an override digest when set) and kagent.harnesses reaches the kagent release unchanged (empty by default: no further Harness).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }

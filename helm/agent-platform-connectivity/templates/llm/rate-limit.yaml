@@ -1,0 +1,43 @@
+{{- /* The LLM endpoint's rate limits: one AgentgatewayPolicy on the data-plane
+Gateway's LLM listener (llmRouting.rateLimits) and one on the external route
+(llmRouting.external.rateLimits), each carrying its list as
+traffic.rateLimit.local. Each entry is one bucket per data-plane replica, or one
+per distinct value of its key; a key is a CEL expression through tpl. */ -}}
+{{- if and (include "agent-platform.llmRouting" .) .Values.llmRouting.rateLimits }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ include "name" . }}-llm-rate-limit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gateway.name }}
+      sectionName: {{ .Values.llmRouting.listener.name }}
+  traffic:
+    rateLimit:
+      local:
+        {{- include "agent-platform.llmRouting.rateLimits" (dict "root" . "limits" .Values.llmRouting.rateLimits) | nindent 8 }}
+{{- end }}
+{{- if and (include "agent-platform.llmRouting.external" .) .Values.llmRouting.external.rateLimits }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ include "name" . }}-llm-external-rate-limit
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ include "name" . }}-llm-external
+  traffic:
+    rateLimit:
+      local:
+        {{- include "agent-platform.llmRouting.rateLimits" (dict "root" . "limits" .Values.llmRouting.external.rateLimits) | nindent 8 }}
+{{- end }}
