@@ -1507,6 +1507,7 @@ spec:
       storage:
         size: 20Gi
         storageClass: ""
+      substrateDatabase: substrate
       vector:
         enabled: false
         extensionImage:

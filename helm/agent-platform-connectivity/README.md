@@ -1436,6 +1436,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | postgres.sessionsDatabase.enabled | bool | `false` |  |
 | postgres.sessionsDatabase.name | string | `"sessions"` |  |
 | postgres.sessionsDatabase.owner | string | `"sessions"` |  |
+| postgres.substrateDatabase | string | `"substrate"` |  |
 | postgres.databases.substrate.enabled | bool | `true` |  |
 | postgres.databases.substrate.name | string | `"substrate"` |  |
 | postgres.databases.substrate.component | string | `"substrate"` |  |

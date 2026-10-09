@@ -2015,8 +2015,8 @@ Where Substrate's control-plane database lives: "bundled" (the substrate chart's
 StatefulSet — substrate.postgres.enabled true, or `auto` while neither of the
 other two applies), "external" (an explicit substrate.postgres.connectionString,
 or connectionStringSecretRef naming the Secret that holds one),
-"cnpg" (the platform's CNPG Cluster, through postgres.databases.substrate and its
-derived Secret), or "" for none — the meta chart refuses the last and resolves
+"cnpg" (the platform's CNPG Cluster, through the postgres.databases entry
+postgres.substrateDatabase names and its derived Secret), or "" for none — the meta chart refuses the last and resolves
 `auto` to the boolean the substrate chart takes; this chart's guard says the
 same on its own render.
 */}}
@@ -2026,7 +2026,7 @@ same on its own render.
 {{- $conn := dig "postgres" "connectionString" "" $sub -}}
 {{- $ref := dig "postgres" "connectionStringSecretRef" dict $sub -}}
 {{- $refOn := or (dig "enabled" false $ref) (dig "name" "" $ref) -}}
-{{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" "substrate" "enabled" true .Values.postgres) false) -}}
+{{- $cnpg := and .Values.postgres.enabled (ne (dig "databases" (include "agent-platform.substrate.databaseKey" .) "enabled" true .Values.postgres) false) -}}
 {{- if not (has $bundled (list "auto" "true" "false")) -}}
 {{- fail (printf "substrate.postgres.enabled must be one of auto, true, false (got %s)" $bundled) -}}
 {{- end -}}
@@ -2038,11 +2038,29 @@ same on its own render.
 {{- end -}}
 
 {{/*
-The derived CNPG connection Secret of postgres.databases.substrate, the DSN the
-meta chart hands ate-api-server: <postgres.clusterName>-substrate-app.
+The derived CNPG connection Secret of the Substrate database entry, the DSN the
+meta chart hands ate-api-server: <postgres.clusterName>-<postgres.substrateDatabase>-app.
 */}}
 {{- define "agent-platform.substrate.databaseSecretName" -}}
-{{- printf "%s-substrate-app" .Values.postgres.clusterName -}}
+{{- printf "%s-%s-app" .Values.postgres.clusterName (include "agent-platform.substrate.databaseKey" .) -}}
+{{- end -}}
+
+{{/*
+The postgres.databases key of Substrate's control-plane database
+(postgres.substrateDatabase).
+*/}}
+{{- define "agent-platform.substrate.databaseKey" -}}
+{{- .Values.postgres.substrateDatabase | default "substrate" -}}
+{{- end -}}
+
+{{/*
+Refuse a postgres.substrateDatabase that names no postgres.databases entry.
+*/}}
+{{- define "agent-platform.substrate.validateDatabaseKey" -}}
+{{- $key := include "agent-platform.substrate.databaseKey" . -}}
+{{- if not (hasKey (.Values.postgres.databases | default dict) $key) -}}
+{{- fail (printf "postgres.substrateDatabase (%s) names no postgres.databases entry: add postgres.databases.%s (name, component substrate, secretNamespaces [ate-system]) or name an existing key" $key $key) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

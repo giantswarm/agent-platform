@@ -43,6 +43,19 @@ giantswarm/agent-platform#857: from 4.121.0, `components.kagent{,-crds}.versionR
   ```
 
   The connectivity release creates the database and derives its Secret before the kagent release upgrades (kagent depends on it), so the 1.4 controller starts on the empty database and lays its own schema. The 1.x database `kagent_v2` stays (`reclaimPolicy: retain`) for the retention period. Every session is lost; Agents come back with their producers.
+- **Every installation whose Substrate runs the 1.3.x line on the platform's CNPG Cluster.** Substrate 1.5 does not migrate the 1.3 schema (ate-api-server crash-loops on `relation tuple already exists`). On a meta chart release that carries `postgres.substrateDatabase`, add a fresh Substrate database in the same values and name it there; the `substrate` database stays (`reclaimPolicy: retain`):
+
+  ```yaml
+  postgres:
+    substrateDatabase: substrate-v2
+    databases:
+      substrate-v2:
+        enabled: true
+        name: substrate_v2
+        component: substrate
+        reclaimPolicy: retain
+        secretNamespaces: [ate-system]
+  ```
 - **An installation on the kagent chart's bundled Postgres** (`kagent.database.postgres.bundled.enabled: true`, no CNPG Cluster): point the controller at another database of the same instance, so the bundled instance stays and the 1.x database `kagent` stays beside it. The instance's maintenance database `postgres` is empty:
 
   ```yaml

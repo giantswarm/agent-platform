@@ -3546,6 +3546,13 @@ postgres:
     enabled: false
     name: sessions
     owner: sessions
+  # The postgres.databases key of Agent Substrate's control-plane database:
+  # ate-api-server reads the entry's derived Secret <clusterName>-<key>-app in
+  # ate-system (the entry needs ate-system among its secretNamespaces). A
+  # Substrate line that cannot migrate the previous schema starts on a fresh
+  # database by naming a new entry here; the previous entry's database stays
+  # while its reclaimPolicy is retain.
+  substrateDatabase: substrate
   # Further databases on this Cluster, one CNPG Database per entry — named
   # <clusterName>-<key>, spec.name from `name` (immutable once created), owned
   # by applicationDatabase.owner, the role whose credentials CNPG writes into
