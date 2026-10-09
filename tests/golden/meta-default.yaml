@@ -1554,6 +1554,14 @@ spec:
     valkey:
       ciliumNetworkPolicy:
         enabled: false
+        ingress:
+          clients:
+          - matchLabels:
+              app.kubernetes.io/name: muster
+            namespace: ""
+          - matchLabels:
+              app.kubernetes.io/name: klaus-gateway
+            namespace: ""
       podDisruptionBudget:
         enabled: true
         maxUnavailable: 1
@@ -2038,6 +2046,14 @@ spec:
   values:
     ciliumNetworkPolicy:
       enabled: false
+      ingress:
+        clients:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+          namespace: ""
+        - matchLabels:
+            app.kubernetes.io/name: klaus-gateway
+          namespace: ""
     global:
       domain: ""
       gatewayApi:

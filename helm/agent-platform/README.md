@@ -718,6 +718,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.muster.observability.grafanaDashboard.giantswarm.enabled | bool | `true` |  |
 | muster.muster.observability.grafanaDashboard.giantswarm.organization | string | `"Shared Org"` |  |
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
+| valkey.ciliumNetworkPolicy.ingress.clients[0].namespace | string | `""` |  |
+| valkey.ciliumNetworkPolicy.ingress.clients[0].matchLabels."app.kubernetes.io/name" | string | `"muster"` |  |
+| valkey.ciliumNetworkPolicy.ingress.clients[1].namespace | string | `""` |  |
+| valkey.ciliumNetworkPolicy.ingress.clients[1].matchLabels."app.kubernetes.io/name" | string | `"klaus-gateway"` |  |
 | valkey.vpa.enabled | bool | `false` |  |
 | valkey.podDisruptionBudget.enabled | bool | `true` |  |
 | valkey.podDisruptionBudget.minAvailable | string | `nil` |  |
