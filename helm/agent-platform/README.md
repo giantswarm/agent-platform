@@ -413,6 +413,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.klaus-gateway.versionRange | string | `">=3.3.0 <5.0.0"` |  |
 | components.klaus-gateway.valuesFrom | string | `"klausGateway"` |  |
 | components.klaus-gateway.omitKeys[0] | string | `"observability.enabled"` |  |
+| components.klaus-gateway.omitEmptyKeys[0] | string | `"slack.contextBotIDs"` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
 | components.agent-sandbox.chart | string | `"agent-sandbox"` |  |
 | components.agent-sandbox.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
@@ -433,6 +434,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agent-manager.versionRange | string | `">=1.10.0 <2.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
+| components.agent-manager.omitEmptyKeys[0] | string | `"harness.egress"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
@@ -1097,6 +1099,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.slack.secretName | string | `""` |  |
 | klausGateway.slack.dmMode | string | `""` |  |
 | klausGateway.slack.channelMode | string | `""` |  |
+| klausGateway.slack.contextBotIDs | list | `[]` | contextBotIDs lists the Slack bot_ids (B…) whose posts a thread read hands to the agent: the installation's alerting integrations a conversation is opened under (Alertmanager, PagerDuty). Every human's message is shared; any other bot's post is left out. Empty (the default) shares no bot's post and is not forwarded; a list needs klaus-gateway 4.2.0 or later. Rendered as SLACK_CONTEXT_BOT_IDS. |
 | klausGateway.slack.channelAllowlist | list | `[]` |  |
 | klausGateway.slack.botToken | string | `""` |  |
 | klausGateway.slack.signingSecret | string | `""` |  |
@@ -1226,6 +1229,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.observability.otel.headers | string | `"auto"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
 | agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
+| agent-manager.harness.egress | object | `{}` | The origins a coding agent on a claude Harness reaches, by Harness name ({claude: [https://github.com, …]}): the installation's forge and git hosts plus the toolchain's registries. agent-manager writes the list into the Agent's spec.egress and refuses any other origin; a claude Harness without an entry reaches none. Empty (the default) is not forwarded and the agent-manager chart's own list applies: GitHub plus the Go and npm registries for claude-go and claude-node. An installation whose forge is not GitHub sets every Harness it serves here: Helm merges the map into the chart's, so a Harness left out keeps the GitHub list. Needs agent-manager 1.11.0 or later. |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
 | agent-manager.agentChart.semver | string | `">=2.0.0 <3.0.0"` |  |
 | agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
