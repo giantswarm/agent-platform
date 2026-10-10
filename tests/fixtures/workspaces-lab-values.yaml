@@ -1,0 +1,18 @@
+# The workspaces block as the lab renders it with its storage on (agentlab's
+# values template): the switch beside the storage and Substrate keys of the
+# storage slices (tests/verify-workspace-manager.py).
+workspaces:
+  enabled: true
+  storage:
+    storageClassName: agentlab-workspaces
+    storageClass:
+      create: false
+  substrate:
+    csiDriver:
+      name: nfs.csi.k8s.io
+      controllerEndpoint: dns:///csi-nfs-controller.kube-system.svc:9443
+      nodeSocketOverride: /var/lib/kubelet/plugins/csi-nfsplugin/csi.sock
+      tls:
+        enabled: true
+        usePodIdentity: true
+        serverName: csi-nfs-controller.kube-system.svc

@@ -1044,6 +1044,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | components.agent-manager.enabled | bool | `false` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
+| components.workspace-manager.enabled | bool | `false` |  |
 | components.backstage.enabled | bool | `false` |  |
 | components.mcp-kubernetes.enabled | bool | `false` |  |
 | components.cloudnative-pg.enabled | bool | `false` |  |
@@ -1684,6 +1685,19 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| workspaces.enabled | bool | `false` |  |
+| workspaces.storage | object | `{}` |  |
+| workspaces.substrate | object | `{}` |  |
+| workspace-manager.fullnameOverride | string | `"workspace-manager"` |  |
+| workspace-manager.oauth.enabled | bool | `true` |  |
+| workspace-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| workspace-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
+| workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| workspace-manager.providers | list | `[]` |  |
+| workspaceManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
+| workspaceManager.networkPolicy.egress.fqdns | list | `[]` |  |
+| workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | backstage.hostname | string | `""` |  |
 | backstage.parentRefs | list | `[]` |  |
 | backstage.installationName | string | `"agent-platform"` |  |

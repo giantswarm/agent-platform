@@ -123,6 +123,11 @@ knowledge:
       and the switch rule closes for a switch's block, closed here for a new
       component without a follow-up release: an installation turns the
       component on when both charts know it.
+  gatedRoster   — the component's own roster entry travels to a forwardAllValues
+      release only while the component is on, like its gatedValues: the
+      connectivity chart reads a missing entry as off, so a component added
+      off leaves the forwarded values exactly those of a chart that predates
+      it (workspace-manager).
   feature switch — an entry WITHOUT `chart:` is a switch, not a component: the
       loop renders no OCIRepository / HelmRelease for it and forwards its
       `enabled` in the roster like every other entry, so a subchart condition
@@ -216,6 +221,7 @@ knowledge:
 {{- include "agent-platform.validateRemovedComponents" . -}}
 {{- include "agent-platform.validateRemovedBackstageKeys" . -}}
 {{- include "agent-platform.validateKagentCrds" . -}}
+{{- include "agent-platform.validateWorkspaces" . -}}
 {{- include "agent-platform.validateKagentLineCrossing" . -}}
 {{- include "agent-platform.validateSubstrate" . -}}
 {{- include "agent-platform.validateWorkerPool" . -}}
@@ -303,6 +309,8 @@ connectivity chart's migrate Job read the same range and filter. */ -}}
 {{- /* A component's gated blocks travel only while the component is on (see gatedValues above). */ -}}
 {{- range $gated, $gc := $root.Values.components }}
 {{- if not (index $roster $gated).enabled }}{{- range ($gc.gatedValues | default list) }}{{- $vals = omit $vals . }}{{- end }}{{- end }}
+{{- /* ...and so does its roster entry, with gatedRoster (see gatedValues above). */ -}}
+{{- if and $gc.gatedRoster (not (index $roster $gated).enabled) }}{{- $_ := set $vals "components" (omit $vals.components $gated) }}{{- end }}
 {{- end }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}

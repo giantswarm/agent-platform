@@ -1432,6 +1432,12 @@ verify-cluster-manager: ## Assert the cluster-manager component (giantswarm/agen
 	@python3 tests/verify-cluster-manager.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "cluster-manager component verified."
 
+.PHONY: verify-workspace-manager
+verify-workspace-manager: ## Assert the workspace-manager component behind the one switch workspaces.enabled (giantswarm/agent-platform#884): off by default no release, neither its roster entry (gatedRoster) nor its three blocks reach connectivity, and the meta (default, CI, kagent) and connectivity (default, CI) renders are byte-identical to GOLDEN_REF; a components.workspace-manager.enabled that disagrees with the switch fails either way; on with a GitHub and a second provider instance (tests/fixtures/workspaces-values.yaml) ONE OCIRepository + ONE HelmRelease dependsOn muster with the block forwarded (the Service name, OAuth, the chart's own unpinned muster registration, the provider instances, the sign-in store's and the grant's keys), every credential a Secret reference, workspaces.namespace derived from kagent's, empty keys not forwarded, nothing else moved (muster.* included) and no MCPServer of the platform's; inline credentials, duplicate or non-DNS names and a missing kind fail naming the path; the connectivity chart's ingress (muster, kagent's controller, probes), egress (DNS, the Kubernetes API, the issuer, each provider instance's hosts on their ports), muster-to and kagent-controller-to policies in both flavors and its guards; the schema; the BOM pin. HELM selects the binary, GOLDEN_REF the reference.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@GOLDEN_REF=$(GOLDEN_REF) python3 tests/verify-workspace-manager.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "workspace-manager component verified."
+
 .PHONY: verify-mcp-kubernetes-registration
 verify-mcp-kubernetes-registration: ## Assert the bundled mcp-kubernetes registration's three shapes (giantswarm/agent-platform#403): the family-less singleton mcp-kubernetes by default; with mcp-kubernetes.mcpServer.managementCluster a member of muster's kubernetes family as agent-platform-mcps renders one (<name>-mcp-kubernetes, the management-cluster label, spec.family {kubernetes, management_cluster}, url and auth unchanged); none with enabled false or with the component or muster off; a managementCluster that is not a DNS label fails naming the key; the meta chart forwards the block to connectivity and drops it from the mcp-kubernetes release. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"

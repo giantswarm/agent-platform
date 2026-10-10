@@ -981,6 +981,45 @@
                             "type": "string"
                         }
                     }
+                },
+                "workspace-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
+                        },
+                        "gatedValues": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
                 }
             }
         },
@@ -2729,6 +2768,31 @@
         "vmManager": {
             "type": "object",
             "additionalProperties": true
+        },
+        "workspace-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "workspaceManager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "workspaces": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "storage": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "substrate": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            }
         }
     }
 }

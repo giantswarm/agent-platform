@@ -311,6 +311,15 @@
                             "type": "boolean"
                         }
                     }
+                },
+                "workspace-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
                 }
             }
         },
@@ -1899,6 +1908,31 @@
         "vmManager": {
             "type": "object",
             "additionalProperties": true
+        },
+        "workspace-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "workspaceManager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "workspaces": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "storage": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "substrate": {
+                    "type": "object",
+                    "additionalProperties": true
+                }
+            }
         }
     }
 }

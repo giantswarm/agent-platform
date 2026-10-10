@@ -1,0 +1,395 @@
+{{- if and (include "agent-platform.workspaceManager.enabled" .) .Values.networkPolicy.enabled }}
+{{- $wm := .Values.workspaceManager }}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson }}
+{{- $port := include "agent-platform.workspaceManager.servicePort" . }}
+{{- $metricsPort := include "agent-platform.componentMetricsPort" $chart }}
+{{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
+{{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
+{{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") }}
+{{- $kagentNs := include "agent-platform.workspaceManager.kagentNamespace" . }}
+{{- $oauthOn := include "agent-platform.workspaceManager.oauthEnabled" . }}
+{{- $peers := $wm.networkPolicy.ingress.additionalPeers }}
+{{- $egress := $wm.networkPolicy.egress }}
+{{- /* The provider instances' hosts, grouped by port: one rule per port. */ -}}
+{{- $byPort := dict }}
+{{- range (include "agent-platform.workspaceManager.providerHosts" . | fromJsonArray) }}
+{{- $_ := set $byPort .port (append (index $byPort .port | default list) .host) }}
+{{- end }}
+
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+# Ingress to workspace-manager on the Service port: muster (the MCP endpoint)
+# in the release namespace and kagent's controller in the kagent namespace
+# (the token and JWKS endpoints a Session's workspace credential is exchanged
+# at) — plus the kubelet's probes (host entity), which a policy that selects
+# the pod would otherwise deny.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-workspace-manager-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "agent-platform.workspaceManager.podSelector" . | nindent 6 }}
+  ingress:
+    - fromEndpoints:
+        {{- if $mcpOn }}
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+        {{- end }}
+        {{- if $kagentOn }}
+        - matchLabels:
+            app.kubernetes.io/component: controller
+            app.kubernetes.io/name: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+        {{- end }}
+        {{- range $peers }}
+        - matchLabels:
+            {{- toYaml . | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ $.Release.Namespace }}
+        {{- end }}
+        {{- if not (or $mcpOn $kagentOn $peers) }}
+        # No platform caller is on: nothing reaches the API but the probes.
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+            app.kubernetes.io/component: none
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+    # The kubelet's liveness and readiness probes arrive from the host entity.
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+    {{- if $metricsPort }}
+    # The metrics port serves no API and is admitted from the cluster entity,
+    # as the platform's other metrics ports are.
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: {{ $metricsPort | quote }}
+              protocol: TCP
+    {{- end }}
+---
+# Egress from workspace-manager: DNS (with Cilium's proxy clause so the FQDN
+# selectors below resolve), the Kubernetes API (the workspace objects, their
+# volume and Jobs in the kagent namespace), the identity provider
+# (workspace-manager.oauth), each provider instance's hosts on their ports
+# (workspace-manager.providers: url and apiURL) and the names and blocks of
+# workspaceManager.networkPolicy.egress on 443.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-workspace-manager-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "agent-platform.workspaceManager.podSelector" . | nindent 6 }}
+  egress:
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "workspace-manager's traces go to" "flavor" "cilium") }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    - toEntities:
+        - kube-apiserver
+    {{- if $oauthOn }}
+    {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.workspaceManager.oauthProvider" .) "issuerUrl" (include "agent-platform.workspaceManager.issuerUrl" .)) | trim | nindent 4 }}
+    {{- end }}
+    {{- range $p := keys $byPort | sortAlpha }}
+    # The provider instances' hosts on {{ $p }}.
+    - toFQDNs:
+        {{- range index $byPort $p }}
+        - matchName: {{ . | quote }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: {{ $p | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- with $egress.fqdns }}
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    {{- with $egress.cidrs }}
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressCIDRs }}
+    - toCIDR:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.additionalEgressFQDNs }}
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+{{- if $mcpOn }}
+---
+# Egress from muster to the workspace-manager MCP endpoint. muster's own policy
+# admits cluster egress on 80/443 (plus networkPolicy.musterInClusterMcpPorts);
+# this names the exact pods and port, independent of that list.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-muster-to-workspace-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            {{- include "agent-platform.workspaceManager.podSelector" . | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+{{- end }}
+{{- if $kagentOn }}
+---
+# Egress from kagent's controller to the workspace-manager's token and JWKS
+# endpoints (additive to the controller's own egress policy).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-kagent-controller-to-workspace-manager
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/name: kagent
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            {{- include "agent-platform.workspaceManager.podSelector" . | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+{{- end }}
+
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+# Ingress to workspace-manager on the Service port: muster (the MCP endpoint)
+# and kagent's controller (the token and JWKS endpoints).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-workspace-manager-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agent-platform.workspaceManager.podSelector" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- if $mcpOn }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: muster
+        {{- end }}
+        {{- if $kagentOn }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $kagentNs }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: controller
+              app.kubernetes.io/name: kagent
+        {{- end }}
+        {{- range $peers }}
+        - podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+        {{- end }}
+        {{- if not (or $mcpOn $kagentOn $peers) }}
+        # No platform caller is on: nothing reaches the API but the probes.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: none
+        {{- end }}
+      ports:
+        - port: {{ $port | int }}
+          protocol: TCP
+    {{- if $metricsPort }}
+    # The metrics port serves no API and is admitted from anywhere, as the
+    # platform's other metrics ports are.
+    - ports:
+        - port: {{ $metricsPort | int }}
+          protocol: TCP
+    {{- end }}
+---
+# Egress from workspace-manager: DNS, the Kubernetes API, and on the provider
+# instances' ports (443 at least) workspaceManager.networkPolicy.egress.cidrs
+# when set, else every public destination — vanilla NetworkPolicy has no FQDN
+# selector — which also covers the identity provider (a private one needs its
+# address in workspaceManager.networkPolicy.egress.cidrs or
+# networkPolicy.additionalEgressCIDRs).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-workspace-manager-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "agent-platform.workspaceManager.podSelector" . | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "workspace-manager's traces go to" "flavor" "kubernetes") }}
+    {{- . | nindent 4 }}
+    {{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchExpressions:
+              - key: k8s-app
+                operator: In
+                values: [kube-dns, coredns, k8s-dns-node-cache]
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+        - port: 1053
+          protocol: UDP
+        - port: 1053
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubernetes.apiServerCIDR | quote }}
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    {{- $ports := keys (merge (dict "443" true) $byPort) | sortAlpha }}
+    {{- $hostsRule := or (not (empty $byPort)) (not (empty $oauthOn)) }}
+    {{- if $hostsRule }}
+    # The provider instances' hosts and the identity provider.
+    - to:
+        {{- with $egress.cidrs }}
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+        {{- else }}
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: {{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+        {{- end }}
+      ports:
+        {{- range $ports }}
+        - port: {{ . | int }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- with concat (ternary list ($egress.cidrs | default list) $hostsRule) (.Values.networkPolicy.additionalEgressCIDRs | default list) }}
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+{{- if $mcpOn }}
+---
+# Egress from muster to the workspace-manager MCP endpoint (additive to
+# muster's own policy when it is on).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-muster-to-workspace-manager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "agent-platform.workspaceManager.podSelector" . | nindent 14 }}
+      ports:
+        - port: {{ $port | int }}
+          protocol: TCP
+{{- end }}
+{{- if $kagentOn }}
+---
+# Egress from kagent's controller to the workspace-manager's token and JWKS
+# endpoints (additive to the controller's own egress policy).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-kagent-controller-to-workspace-manager
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/name: kagent
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              {{- include "agent-platform.workspaceManager.podSelector" . | nindent 14 }}
+      ports:
+        - port: {{ $port | int }}
+          protocol: TCP
+{{- end }}
+{{- end }}
+{{- end }}

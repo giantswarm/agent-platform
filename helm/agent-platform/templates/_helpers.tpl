@@ -90,6 +90,11 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
        its runtime (an explicit false with kagent on is refused by
        agent-platform.validateKagentCrds / agent-platform.validateSubstrate). */ -}}
 {{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true" }}
+{{- else if eq .name "workspace-manager" }}
+{{- /* The workspace-manager follows the one switch workspaces.enabled
+       (agent-platform.validateWorkspaces refuses an explicit value that
+       disagrees with it). */ -}}
+{{- $on = ($root.Values.workspaces | default dict).enabled | default false }}
 {{- end }}
 {{- if $on }}true{{- end -}}
 {{- else -}}
@@ -227,6 +232,17 @@ runtime-registration contract there. */ -}}
 {{- fail (printf "cluster-manager.modelManager.namespace (%s) differs from the platform's namespace (%s), where the model-manager component lands: cluster-manager registers a serving cluster's kserve backend through model-manager's ConfigMap there — leave cluster-manager.modelManager.namespace unset" $own $ns) -}}
 {{- end -}}
 {{- $_ := set $derived "modelManager" (dict "namespace" $ns) -}}
+{{- end -}}
+{{- if eq .name "workspace-manager" -}}
+{{- /* The workspaces' namespace: kagent's, where every Session runs and its
+Harness mounts the workspace volume, so each workspace object, its volume and
+its sync and cleanup Jobs live there too. */ -}}
+{{- $ns := include "agent-platform.kagent.namespace" .root -}}
+{{- $own := dig "workspaces" "namespace" "" (index .root.Values "workspace-manager" | default dict) -}}
+{{- if and $own (ne $own $ns) -}}
+{{- fail (printf "workspace-manager.workspaces.namespace (%s) differs from the kagent namespace (%s), where every Session runs and mounts its workspace: leave workspace-manager.workspaces.namespace unset" $own $ns) -}}
+{{- end -}}
+{{- $_ := set $derived "workspaces" (dict "namespace" $ns) -}}
 {{- end -}}
 {{- if eq .name "klaus-gateway" -}}
 {{- $kg := .root.Values.klausGateway | default dict -}}
@@ -1023,6 +1039,73 @@ at render time instead.
 {{- end -}}
 
 {{/*
+Workspaces are one switch, workspaces.enabled: the workspace-manager component
+follows it, and so does every later workspace piece. An explicit
+components.workspace-manager.enabled that disagrees with the switch fails the
+render, either way round. With the switch on, every credential of the
+workspace-manager block is a Secret reference ({name, key}), never a value:
+the provider instances' (any key of a provider's values named privateKey,
+clientSecret, secret, token, password or apiKey, at any depth), the sign-in
+store's encryption key and the grant signing key.
+*/}}
+{{- define "agent-platform.validateWorkspaces" -}}
+{{- $on := (.Values.workspaces | default dict).enabled | default false -}}
+{{- $c := index .Values.components "workspace-manager" | default dict -}}
+{{- if and (hasKey $c "enabled") (ne (toString $c.enabled) (toString $on)) -}}
+{{- fail (printf "components.workspace-manager.enabled is %v but workspaces.enabled is %v: workspaces are one switch — set workspaces.enabled and leave components.workspace-manager.enabled unset" $c.enabled $on) -}}
+{{- end -}}
+{{- if $on -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $names := dict -}}
+{{- range $i, $p := ($wm.providers | default list) -}}
+{{- if not (kindIs "map" $p) -}}
+{{- fail (printf "workspace-manager.providers[%d] is not a map: a provider instance is {name, kind, values}" $i) -}}
+{{- end -}}
+{{- $name := toString ($p.name | default "") -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" $name) -}}
+{{- fail (printf "workspace-manager.providers[%d].name %q is not a DNS label: it is the name workspaces and sign-ins refer to" $i $name) -}}
+{{- end -}}
+{{- if hasKey $names $name -}}
+{{- fail (printf "workspace-manager.providers[%d].name %q is a duplicate: every provider instance has a name of its own" $i $name) -}}
+{{- end -}}
+{{- $_ := set $names $name true -}}
+{{- if not $p.kind -}}
+{{- fail (printf "workspace-manager.providers[%d] (%s) names no kind" $i $name) -}}
+{{- end -}}
+{{- include "agent-platform.workspaces.secretRefs" (dict "node" ($p.values | default dict) "at" (printf "workspace-manager.providers[%d].values" $i)) -}}
+{{- end -}}
+{{- range $path := list (list "signInStore" "encryptionKey") (list "grant" "signingKey") -}}
+{{- $ref := dig (first $path) (last $path) dict $wm -}}
+{{- if $ref -}}
+{{- include "agent-platform.workspaces.secretRef" (dict "ref" $ref "at" (printf "workspace-manager.%s" (join "." $path))) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Walk a provider's values: every key that names a credential holds a Secret
+reference. Emits nothing; fails naming the path.
+*/}}
+{{- define "agent-platform.workspaces.secretRefs" -}}
+{{- $at := .at -}}
+{{- range $k, $v := .node -}}
+{{- if has (lower $k) (list "privatekey" "clientsecret" "secret" "token" "password" "apikey") -}}
+{{- include "agent-platform.workspaces.secretRef" (dict "ref" $v "at" (printf "%s.%s" $at $k)) -}}
+{{- else if kindIs "map" $v -}}
+{{- include "agent-platform.workspaces.secretRefs" (dict "node" $v "at" (printf "%s.%s" $at $k)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "agent-platform.workspaces.secretRef" -}}
+{{- $r := .ref -}}
+{{- if not (and (kindIs "map" $r) $r.name $r.key (eq (len (keys $r)) 2)) -}}
+{{- fail (printf "%s is a credential: it takes a Secret reference {name, key} of a Secret in the platform's namespace, never the value (the value would land in clear text in the workspace-manager HelmRelease and in Helm release storage)" .at) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The api.kagent.dev line (kagent 1.3 and later) refuses a database that holds the
 1.x schema: its controller exits at start-up, the kagent upgrade times out with
 the line's resources half applied, and Helm's rollback cannot undo that in
@@ -1132,7 +1215,8 @@ by anyone allowed to get HelmReleases there.
       (list "model-manager" (list "oauth" "dex" "clientSecret"))
       (list "agent-manager" (list "oauth" "dex" "clientSecret"))
       (list "vm-manager" (list "oauth" "dex" "clientSecret"))
-      (list "cluster-manager" (list "oauth" "dex" "clientSecret")) -}}
+      (list "cluster-manager" (list "oauth" "dex" "clientSecret"))
+      (list "workspace-manager" (list "oauth" "dex" "clientSecret")) -}}
 {{- range $paths -}}
 {{- $cur := index $v (first .) | default dict -}}
 {{- $ok := kindIs "map" $cur -}}
@@ -1169,7 +1253,7 @@ The message names the key paths only.
 {{- define "agent-platform.validateInlineSecrets" -}}
 {{- if .Values.gitops.forbidInlineSecrets -}}
 {{- with (include "agent-platform.inlineSecretPaths" .) -}}
-{{- fail (printf "gitops.forbidInlineSecrets is true but these values carry credentials inline, which would land in clear text in the component HelmReleases and in Helm release storage: %s. Move each into a pre-created Secret and reference it (kagent providers.<name>.apiKeySecretRef with an empty apiKey, kagent.oauth2-proxy.config.existingSecret, muster.muster.oauth.server.existingSecret and .storage.valkey.existingSecret, valkey.valkey.auth.usersExistingSecret, klausGateway.slack.secretName with an empty botToken, klausGateway.obo.existingSecret, model-manager/agent-manager/vm-manager oauth.existingSecret), or set gitops.forbidInlineSecrets: false" .) -}}
+{{- fail (printf "gitops.forbidInlineSecrets is true but these values carry credentials inline, which would land in clear text in the component HelmReleases and in Helm release storage: %s. Move each into a pre-created Secret and reference it (kagent providers.<name>.apiKeySecretRef with an empty apiKey, kagent.oauth2-proxy.config.existingSecret, muster.muster.oauth.server.existingSecret and .storage.valkey.existingSecret, valkey.valkey.auth.usersExistingSecret, klausGateway.slack.secretName with an empty botToken, klausGateway.obo.existingSecret, model-manager/agent-manager/vm-manager/cluster-manager/workspace-manager oauth.existingSecret), or set gitops.forbidInlineSecrets: false" .) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -1599,6 +1683,7 @@ answers, but only where the leaf is left at `auto`:
                                model-manager.serviceMonitor.enabled,
                                agent-manager.serviceMonitor.enabled,
                                cluster-manager.serviceMonitor.enabled,
+                               workspace-manager.serviceMonitor.enabled,
                                kserve-llmisvc-resources.kserve.llmisvc
                                .controller.serviceMonitor.enabled,
                                substrate.metrics.podMonitor.enabled (the six
@@ -1678,6 +1763,7 @@ connectivity release both read the resolved value. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "model-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "agent-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "cluster-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "workspace-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kserve-llmisvc-resources" "kserve" "llmisvc" "controller" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- /* valkey PodMonitor: the chart's own default is on, so only "off" is written. */ -}}
 {{- if not $monitors -}}
@@ -1735,7 +1821,8 @@ klaus-gateway gates read the endpoints. Emits nothing.
               modelServing.networkPolicy.otlpEndpoint from that preset's
               resolved endpoint (the model pods' egress);
               <manager>.observability.otel.endpoint (model-manager,
-              agent-manager, vm-manager, cluster-manager, backstage);
+              agent-manager, vm-manager, cluster-manager, workspace-manager,
+              backstage);
               mcp-kubernetes.mcpKubernetes.instrumentation.otlpEndpoint as
               host:port (the scheme and path dropped, the port the scheme's or
               protocol's default when it names none), with .otlpInsecure false for an
@@ -1820,7 +1907,7 @@ is turned off, where the chart would export to the SDK's localhost default. */ -
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" $path "value" $protocol) -}}
 {{- end -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "otel" "headers") "value" $joined) -}}
-{{- range $name := list "model-manager" "agent-manager" "vm-manager" "cluster-manager" "backstage" -}}
+{{- range $name := list "model-manager" "agent-manager" "vm-manager" "cluster-manager" "workspace-manager" "backstage" -}}
 {{- $base := list $name "observability" "otel" -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "endpoint") "value" $endpoint) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "protocol") "value" $protocol) -}}
@@ -2006,7 +2093,7 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
 {{- $login = dict "issuerURL" (dig "dex" "issuerUrl" "" $server) "clientID" (dig "dex" "clientId" "" $server) "existingSecret" (dig "existingSecret" "" $server) -}}
 {{- end -}}
-{{- range $name, $wiring := dict "model-manager" "modelManager" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" -}}
+{{- range $name, $wiring := dict "model-manager" "modelManager" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" "workspace-manager" "" -}}
 {{- $block := index $v $name -}}
 {{- if and (kindIs "map" $block) (kindIs "map" (index $block "oauth")) (dig "oauth" "enabled" false $block) -}}
 {{- $oauth := index $block "oauth" -}}
