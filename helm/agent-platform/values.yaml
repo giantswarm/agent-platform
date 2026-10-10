@@ -980,12 +980,13 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.1.0-rc.13, the first release whose schema declares every
-    # key this chart forwards: the browser's provider sign-in (signin.keys,
-    # rc.10) and the workspace StorageClass (storage.storageClassName, rc.13),
-    # which the earlier charts' closed schemas refuse; the ceiling stays the
-    # next major, so later candidates and minor releases roll on their own.
-    versionRange: ">=0.1.0-rc.13 <1.0.0"
+    # The floor is 0.1.0, the first stable release; its schema declares every
+    # key this chart forwards: the browser's provider sign-in (signin.keys)
+    # and the workspace StorageClass (storage.storageClassName), which the
+    # earlier candidates' closed schemas refuse. A stable never pins a
+    # prerelease; the ceiling stays the next major, so later minor releases
+    # roll on their own.
+    versionRange: ">=0.1.0 <1.0.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off.
