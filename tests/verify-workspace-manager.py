@@ -21,11 +21,11 @@ muster. Each case below pins one property of its wiring:
   tests/fixtures/workspaces-values.yaml): ONE OCIRepository and ONE HelmRelease that
   dependsOn muster, the block forwarded — the pinned Service name, the OAuth resource
   server, the chart's own unpinned muster registration (forwardToken, no audience,
-  no authorization server), the provider instances, the sign-in store's and the
-  grant's keys — every credential a Secret reference {key, name} and nothing else;
-  workspaces.namespace derived from kagent's; the keys left empty are not forwarded,
-  and nothing of workspaces.storage is (verify-workspace-storage covers the class; the
-  component chart declares no key for it yet);
+  no authorization server), the provider instances, the grant's key — every
+  credential a Secret reference {key, name} and nothing else; workspaces.namespace
+  derived from kagent's, storage.storageClassName from workspaces.storage
+  (verify-workspace-storage covers the class); the keys left empty are not
+  forwarded; a signInStore block fails naming signin.keys (the chart's key);
   nothing under muster.* moves (the muster release and the muster block forwarded
   to connectivity are unchanged) and no MCPServer renders anywhere for the
   component or a provider;
@@ -66,7 +66,7 @@ IDENTITY = [
     "--set", "global.identity.clientId=platform",
     "--set", "global.identity.existingSecret=platform-oauth",
 ]
-CREDENTIALS = ("privateKey", "clientSecret", "token", "encryptionKey", "signingKey")
+CREDENTIALS = ("privateKey", "clientSecret", "token", "signingKey")
 
 
 def fail(msg: str) -> None:
@@ -188,11 +188,11 @@ def main(meta: str, connectivity: str) -> int:
         "    - kind: github\n      name: github\n",
         "    - kind: gitlab\n      name: gitlab\n",
         "        url: https://gitlab.example.com:8443\n",
-        "    signInStore:\n      encryptionKey:\n        key: sign-in-store\n        name: workspace-manager-keys\n",
         "    grant:\n      signingKey:\n        key: grant\n        name: workspace-manager-keys\n",
+        "    storage:\n      storageClassName: workspaces-rwx\n",
         "\n    global:\n",
     ), "the HelmRelease")
-    for absent in ("requiredAudiences", "authorizationServer", "\n    sync:", "\n    sessions:", "\n    storage:", "\n    networkPolicy:"):
+    for absent in ("requiredAudiences", "authorizationServer", "\n    sync:", "\n    sessions:", "sizing:", "signInStore", "\n    networkPolicy:"):
         if absent in hr:
             fail(f"the HelmRelease carries {absent.strip()!r}")
     refs = 0
@@ -203,8 +203,8 @@ def main(meta: str, connectivity: str) -> int:
         if rest or not all(line.startswith(e) for line, e in zip(after, expect)) or len(after) < 2:
             fail(f"{key} in the HelmRelease is not a Secret reference {{key, name}}: {m.group(0)!r} {after}")
         refs += 1
-    if refs != 6:
-        fail(f"expected the 6 credentials of the fixture as Secret references in the HelmRelease, found {refs}")
+    if refs != 5:
+        fail(f"expected the 5 credentials of the fixture as Secret references in the HelmRelease, found {refs}")
     conn_on = on_docs[("HelmRelease", "agent-platform-connectivity")]
     if f"      {NAME}:\n        enabled: true\n" not in conn_on:
         fail(f"the roster forwarded to connectivity does not say {NAME}: enabled: true")
@@ -222,7 +222,7 @@ def main(meta: str, connectivity: str) -> int:
     if any(kind == "MCPServer" for kind, _ in on_docs):
         fail("the meta chart renders an MCPServer: the registration is the component chart's own")
     ok(f"on: one OCIRepository ({rng.group(1)}) + one HelmRelease dependsOn muster with the block forwarded "
-       "(Service name, OAuth, the unpinned muster registration, two provider instances, the keys), "
+       "(Service name, OAuth, the unpinned muster registration, two provider instances, the grant's key, the class), "
        f"{refs} credentials all Secret references, the namespace kagent's, empty keys not forwarded; nothing else moved, muster.* included; no MCPServer")
 
     # --- the storage slices' keys beside the switch ----------------------------------------
@@ -241,8 +241,10 @@ def main(meta: str, connectivity: str) -> int:
               f"{NAME}.providers[0].values.app.privateKey is a credential", "an inline private key")
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[1].values.token=abc"],
               f"{NAME}.providers[1].values.token is a credential", "an inline token")
-    must_fail(meta, [*ON, "--set", f"{NAME}.signInStore.encryptionKey=abc"],
-              f"{NAME}.signInStore.encryptionKey is a credential", "an inline sign-in store key")
+    must_fail(meta, [*ON, "--set", f"{NAME}.grant.signingKey=abc"],
+              f"{NAME}.grant.signingKey is a credential", "an inline grant signing key")
+    must_fail(meta, [*ON, "--set", f"{NAME}.signInStore.encryptionKey.name=k", "--set", f"{NAME}.signInStore.encryptionKey.key=k"],
+              f"{NAME}.signInStore is not a key of the workspace-manager chart", "a signInStore block (the chart's key is signin.keys)")
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[1].name=github"], "is a duplicate", "a duplicate provider name")
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[1].name=Git_Lab"], "is not a DNS label", "a non-DNS provider name")
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[1].kind="], "names no kind", "a provider without kind")

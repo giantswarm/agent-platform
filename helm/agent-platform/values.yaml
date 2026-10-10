@@ -980,12 +980,12 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.1.0-rc.10, the first release that serves a provider
-    # sign-in in the browser (/signin, /connect/<instance>,
-    # /callback/<instance>) and takes the sign-in keys (signin.keys), which
-    # the earlier charts' schemas refuse; the ceiling stays the next major, so
-    # later candidates and minor releases roll on their own.
-    versionRange: ">=0.1.0-rc.10 <1.0.0"
+    # The floor is 0.1.0-rc.13, the first release whose schema declares every
+    # key this chart forwards: the browser's provider sign-in (signin.keys,
+    # rc.10) and the workspace StorageClass (storage.storageClassName, rc.13),
+    # which the earlier charts' closed schemas refuse; the ceiling stays the
+    # next major, so later candidates and minor releases roll on their own.
+    versionRange: ">=0.1.0-rc.13 <1.0.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off.
@@ -997,7 +997,7 @@ components:  # @schema additionalProperties: true
     gatedValues: [workspace-manager, workspaceManager, workspaces]
     gatedRoster: true
     # An empty key takes the chart's own default instead of overriding it.
-    omitEmptyKeys: [providers, oauth.baseURL, signInStore.encryptionKey, grant.signingKey, sync.cycle, sessions.cleanupAfter, storage.sizing.factor, storage.sizing.headroom, storage.sizing.maxSize]
+    omitEmptyKeys: [providers, oauth.baseURL, grant.signingKey, sync.cycle, sessions.cleanupAfter, storage.sizing.factor, storage.sizing.headroom, storage.sizing.maxSize]
   # --- The standalone chart's extras -------------------------------------------
   # The components the agent-platform-standalone umbrella carried as Helm
   # dependencies on top of the fleet's roster: Backstage, mcp-kubernetes, the
@@ -4875,11 +4875,10 @@ workspaces:
   # cluster rarely has such a class by default.
   storage:
     # The class's name. REQUIRED while the switch is on: the render fails
-    # without it. The workspace-manager release takes it as
-    # storage.storageClassName, the class every workspace's
-    # PersistentVolumeClaim names, once its chart declares the key
-    # (giantswarm/workspace-manager#18): the forward and the floor that
-    # accepts it land together; the floor's schema refuses an unknown key.
+    # without it. The meta chart forwards it to the workspace-manager release
+    # as storage.storageClassName, the class every workspace's
+    # PersistentVolumeClaim names (a workspace-manager.storage.storageClassName
+    # of its own must agree with it).
     # kagent takes no value: a Session gets its workspace volume's reference
     # (the CSI driver and the volume handle) from the grant the
     # workspace-manager issues, and workspaces.substrate names the driver
@@ -5027,16 +5026,15 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   # (url and apiURL; github.com and api.github.com for a github instance
   # without url). Empty, the default, configures none.
   providers: []
-  # The key the sign-in store encrypts the person's provider tokens with:
-  # {name, key} of a Secret. Empty takes the chart's default.
-  signInStore:
-    encryptionKey: {}
   # The key the workspace grant a Session carries is signed with: {name, key}
   # of a Secret. Empty takes the chart's default.
   grant:
     signingKey: {}
-  # How often a workspace's mirrors are fetched (a Go duration). Empty takes
-  # the chart's default.
+  # The controller's reconcile period (a Go duration; 10m is the chart's
+  # default): how often it reconciles every Workspace without an event, so a
+  # claim deleted out from under a Workspace is made again by then. It is not
+  # how often mirrors are fetched: each Workspace's own spec.sync (nightly,
+  # weekly or custom) says that. Empty takes the chart's default.
   sync:
     cycle: ""
   # How long a Session's directory outlives the Session's last turn (a Go
