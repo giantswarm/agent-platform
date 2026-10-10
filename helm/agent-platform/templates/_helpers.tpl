@@ -994,6 +994,57 @@ Usage: include "agent-platform.substrate.workerPoolAteletAffinity" $root | fromJ
 {{- end -}}
 
 {{/*
+The first release of the Substrate line whose chart bounds the egress
+gateway's ephemeral storage itself: atenetEgress.resources,
+atenetEgress.extProc.resources and atenetEgress.drainSignal.sizeLimit
+(giantswarm/substrate#255). From it on the substrate: block's keys reach the
+chart; below it agent-platform.substrate.egressStoragePatch applies the same
+bound as a postRenderer (giantswarm/agent-platform#880). One line, no comment
+inside the define: tests/verify-substrate-egress-ephemeral-storage.py reads
+the value from this file.
+*/}}
+{{- define "agent-platform.substrate.egressStorageFloor" -}}1.8.0{{- end -}}
+
+{{/*
+The Flux postRenderer that bounds the atenet-egress Deployment's ephemeral
+storage while the pinned Substrate release predates
+agent-platform.substrate.egressStorageFloor, as JSON ({} from the floor on,
+and with every knob of substrate.atenetEgress null): one kustomize
+strategic-merge patch on the Deployment the substrate release renders — its
+containers agentgateway and ext-proc merged by name with
+substrate.atenetEgress.resources and .extProc.resources, its volume
+drain-signal with substrate.atenetEgress.drainSignal.sizeLimit. Those names
+are upstream's canonical ate-system render, unchanged across the line's
+releases, and components.substrate.versionRange confines one minor
+(agent-platform.substrate.validateRange), so a Substrate patch within it keeps
+them; a re-pin past the floor retires the patch and the chart renders the
+bound from the forwarded keys. Kyverno's require-emptydir-requests-and-limits
+skips a volume that carries a sizeLimit and otherwise requires
+ephemeral-storage requests and limits on every container mounting it; the
+patch sets both, as the hook Jobs do.
+Usage: include "agent-platform.substrate.egressStoragePatch" $root | fromJson
+*/}}
+{{- define "agent-platform.substrate.egressStoragePatch" -}}
+{{- $pin := regexReplaceAll "-.*$" (include "agent-platform.substrate.pinnedVersion" .) "" -}}
+{{- $egress := dig "atenetEgress" dict (.Values.substrate | default dict) | default dict -}}
+{{- $gateway := dig "resources" dict $egress | default dict -}}
+{{- $extProc := dig "resources" dict (dig "extProc" dict $egress | default dict) | default dict -}}
+{{- $sizeLimit := dig "sizeLimit" "" (dig "drainSignal" dict $egress | default dict) | default "" -}}
+{{- $spec := dict -}}
+{{- $containers := list -}}
+{{- with $gateway }}{{ $containers = append $containers (dict "name" "agentgateway" "resources" .) }}{{ end -}}
+{{- with $extProc }}{{ $containers = append $containers (dict "name" "ext-proc" "resources" .) }}{{ end -}}
+{{- with $containers }}{{ $_ := set $spec "containers" . }}{{ end -}}
+{{- with $sizeLimit }}{{ $_ := set $spec "volumes" (list (dict "name" "drain-signal" "emptyDir" (dict "sizeLimit" .))) }}{{ end -}}
+{{- if or (not $spec) (ge ((semver $pin).Compare (semver (include "agent-platform.substrate.egressStorageFloor" .))) 0) -}}
+{{- dict | toJson -}}
+{{- else -}}
+{{- $patch := dict "apiVersion" "apps/v1" "kind" "Deployment" "metadata" (dict "name" "atenet-egress") "spec" (dict "template" (dict "spec" $spec)) -}}
+{{- dict "kustomize" (dict "patches" (list (dict "target" (dict "kind" "Deployment" "name" "atenet-egress") "patch" (toYaml $patch)))) | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Fail the render when kagent.substrateWorkerPool.template would not reach the
 cluster as written (giantswarm/agent-platform#457, #472). The kagent chart
 forwards the template verbatim into WorkerPool.spec.template (toYaml), and the

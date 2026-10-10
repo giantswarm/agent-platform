@@ -4201,6 +4201,20 @@ verify-substrate-images: ## Assert the substrate chart's third-party images (gia
 	@python3 tests/verify-substrate-images.py $(CHART_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-substrate-egress-ephemeral-storage
+verify-substrate-egress-ephemeral-storage: ## Assert the Substrate egress gateway's ephemeral storage is bounded on the release components.substrate.versionRange pins (giantswarm/agent-platform#880, Kyverno's require-emptydir-requests-and-limits): the substrate chart at the range's floor, rendered with the values the meta chart forwards, passes the rule on its atenet-egress pod template — by itself from the release agent-platform.substrate.egressStorageFloor names (the forwarded substrate.atenetEgress keys), below it with the one kustomize strategic-merge patch the substrate HelmRelease's postRenderers carry merged by name (every container and volume the patch names rendered by the release; the chart's own render fails the rule there, so the floor is not stale); the three knobs null render no patch; the forwarded block carries values.yaml's substrate.atenetEgress verbatim. Network: gsoci.azurecr.io. Needs PyYAML.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-substrate-egress-ephemeral-storage.py $(CHART_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-kagent-oauth2-proxy-image
+verify-kagent-oauth2-proxy-image: ## Assert kagent's oauth2-proxy runs the gsoci copy of its subchart's default image (giantswarm/agent-platform#880, the fleet's restrict-image-registries): kagent.oauth2-proxy.image reaches the kagent HelmRelease verbatim and names gsoci.azurecr.io, giantswarm/<the default's image name> and v<appVersion> of the oauth2-proxy subchart the kagent chart at the range's floor bundles — so a kagent re-pin that bumps the subchart moves the pin — and the copy is published. Network: gsoci.azurecr.io. Needs PyYAML.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-kagent-oauth2-proxy-image.py $(CHART_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-scenarios
 verify-scenarios: ## Assert the ATS scenario inputs (tests/ats/scenarios.py) and the `make e2e` values overlay (tests/e2e_overlay.py) offline: the kind and eks defaults, every refusal naming its variable, the derived muster base URL, the base-URL --set, and the overlay's shapes.
 	@echo "====> $@"

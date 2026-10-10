@@ -457,6 +457,14 @@ spec:
   {{- end }}
   {{- $postRenderers = append $postRenderers (dict "kustomize" (dict "patches" $patches)) }}
   {{- end }}
+  {{- /* The egress gateway's ephemeral-storage bound, while the pinned
+  Substrate release predates the one whose chart renders it from the
+  forwarded keys (agent-platform.substrate.egressStoragePatch). */ -}}
+  {{- if eq $key "substrate" }}
+  {{- with include "agent-platform.substrate.egressStoragePatch" $root | fromJson }}
+  {{- $postRenderers = append $postRenderers . }}
+  {{- end }}
+  {{- end }}
   {{- with $postRenderers }}
   postRenderers:
     {{- toYaml . | nindent 4 }}
