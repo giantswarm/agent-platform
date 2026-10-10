@@ -1686,6 +1686,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | workspaces.enabled | bool | `false` |  |
+| workspaces.storage | object | `{}` |  |
+| workspaces.substrate | object | `{}` |  |
 | workspace-manager.fullnameOverride | string | `"workspace-manager"` |  |
 | workspace-manager.oauth.enabled | bool | `true` |  |
 | workspace-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |

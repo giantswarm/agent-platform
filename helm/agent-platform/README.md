@@ -1296,6 +1296,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | workspaces.enabled | bool | `false` |  |
+| workspaces.storage | object | `{}` |  |
+| workspaces.substrate | object | `{}` |  |
 | workspace-manager.fullnameOverride | string | `"workspace-manager"` |  |
 | workspace-manager.observability.otel.endpoint | string | `"auto"` |  |
 | workspace-manager.observability.otel.protocol | string | `"auto"` |  |

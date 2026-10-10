@@ -2783,6 +2783,14 @@
             "properties": {
                 "enabled": {
                     "type": "boolean"
+                },
+                "storage": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "substrate": {
+                    "type": "object",
+                    "additionalProperties": true
                 }
             }
         }

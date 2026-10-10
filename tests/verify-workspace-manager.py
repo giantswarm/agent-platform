@@ -11,7 +11,9 @@ muster. Each case below pins one property of its wiring:
   previous release; default, CI and kagent shapes of the meta chart, the connectivity
   chart's default and CI renders): the connectivity release receives neither the
   roster entry (gatedRoster) nor the three blocks (gatedValues);
-- the switch: workspaces.enabled turns the component on; an explicit
+- the switch: workspaces.enabled turns the component on, beside the storage
+  slices' workspaces.storage and workspaces.substrate (the lab's block,
+  tests/fixtures/workspaces-lab-values.yaml), which both schemas take; an explicit
   components.workspace-manager.enabled that disagrees fails the render either way
   round, one that agrees passes;
 - on with two provider instances (a GitHub one and a second kind,
@@ -231,6 +233,17 @@ def main(meta: str, connectivity: str) -> int:
     ok(f"on: one OCIRepository ({rng.group(1)}) + one HelmRelease dependsOn muster with the block forwarded "
        "(Service name, OAuth, the unpinned muster registration, two provider instances, the keys), "
        f"{refs} credentials all Secret references, the namespace kagent's, empty keys not forwarded; nothing else moved, muster.* included; no MCPServer")
+
+    # --- the storage slices' keys beside the switch ----------------------------------------
+    lab = "tests/fixtures/workspaces-lab-values.yaml"
+    lab_docs = documents(helm(meta, ["-f", lab]))
+    lab_conn = lab_docs[("HelmRelease", "agent-platform-connectivity")]
+    must_have(lab_conn, ("      storageClassName: agentlab-workspaces\n", "        name: nfs.csi.k8s.io\n"),
+              "the workspaces block forwarded to connectivity with the storage slices' keys")
+    if ("HelmRelease", NAME) not in lab_docs:
+        fail("the lab's workspaces block (the switch with storage and substrate) rendered no workspace-manager release")
+    helm(connectivity, ["--set", "ingress.parentRefs[0].name=x", "--set", f"components.{NAME}.enabled=true", "-f", lab, *IDENTITY], ci_values=False)
+    ok("the switch beside workspaces.storage and workspaces.substrate (the lab's block): both schemas take it, the component renders, connectivity takes the forwarded block")
 
     # --- inline credentials and bad instances -----------------------------------------
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[0].values.app.privateKey=abc"],

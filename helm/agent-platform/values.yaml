@@ -4863,6 +4863,16 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # reaches the connectivity release.
 workspaces:
   enabled: false
+  # The workspace storage: the read-write-many StorageClass the workspace
+  # volumes are claimed from (storageClassName) and whether the chart renders
+  # it (storageClass.create), giantswarm/agent-platform#900. Declared open
+  # here; its keys are that slice's.
+  storage: {}  # @schema additionalProperties: true
+  # Substrate's side of a Session's workspace mount: the CSI driver it drives
+  # for the workspace volumes (csiDriver: name, controllerEndpoint,
+  # nodeSocketOverride, tls), giantswarm/agent-platform#888. Declared open
+  # here; its keys are that slice's.
+  substrate: {}  # @schema additionalProperties: true
 
 # Values forwarded verbatim to the workspace-manager component release
 # (giantswarm/workspace-manager), MCP only: tools appear as
