@@ -6,10 +6,10 @@
 # an LLMInferenceService with spec.parallelism.tensor, which model-manager
 # never sets, so the preset's flag is the only one on the command line. A 119B
 # mixture of experts with 6.5B active (128 experts, 4 routed plus 1 shared,
-# MLA attention), tools, reasoning on request, vision. Ada has no native FP4:
-# vLLM runs the NVFP4 weights (W4A16) through Marlin, the path the
-# qwen3-8-27b-l40s preset runs on today, and the MLA attention through
-# TRITON_MLA (FlashMLA is Hopper-only).
+# MLA attention), tools, reasoning on request; served text only (see the args).
+# Ada has no native FP4: vLLM runs the NVFP4 weights (W4A16) through Marlin,
+# the path the qwen3-8-27b-l40s preset runs on today, and the MLA attention
+# through TRITON_MLA (FlashMLA is Hopper-only).
 apiVersion: agent-platform.giantswarm.io/v1alpha1
 kind: ServingPreset
 metadata:
@@ -20,8 +20,15 @@ spec:
     Mistral Small 4: a 119B-parameter mixture of experts with 6.5B active
     (128 experts, 4 routed per token plus 1 shared, MLA attention), the
     successor of the Instruct, Magistral and Devstral lines in one
-    checkpoint — tool calling, reasoning on request (reasoning_effort=high;
-    none by default) and vision (Pixtral encoder, images up to 1540 px).
+    checkpoint — tool calling and reasoning on request (reasoning_effort=high;
+    none by default).
+    Text only: the model's vision (Pixtral encoder) is switched off with
+    --limit-mm-per-prompt.image=0, and a request with an image is refused.
+    The vLLM in llm-d-cuda v0.8.0 lacks fetch_images on its Mistral image
+    processor, which the image's transformers calls while profiling, so with
+    images on the predictor crash-loops before serving. Image inputs come
+    back once the runtime's vLLM carries vllm-project/vllm#45180
+    (giantswarm/llm-d#37).
     Served as Mistral's own NVFP4 checkpoint (66 GiB of weights, the mistral
     format: params.json and consolidated safetensors, hence --tokenizer-mode,
     --config-format and --load-format mistral) across four 48 GB GPUs of the
@@ -58,7 +65,7 @@ spec:
     storageUri: oci://gsoci.azurecr.io/giantswarm/models/mistral-small-4-nvfp4:45331841b631
     format: vLLM
     contextLength: 131072
-    capabilities: [chat, tools, reasoning, vision, coding]
+    capabilities: [chat, tools, reasoning, coding]
     license: apache-2.0
   env:
     # The modelcar path runs the runtime as the platform KServe's modelcar uid
@@ -100,6 +107,11 @@ spec:
     - --enable-auto-tool-choice
     - --tool-call-parser=mistral
     - --gpu-memory-utilization=0.90
+    # Text only: no image per prompt, so vLLM skips the Pixtral processor the
+    # v0.8.0 runtime's vLLM cannot run with its transformers (giantswarm/llm-d#37).
+    # The dotted form: the JSON form's quotes do not survive the llm-d
+    # container's shell wrapper.
+    - --limit-mm-per-prompt.image=0
   resources:
     gpus: 4
     requests:

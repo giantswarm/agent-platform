@@ -730,6 +730,16 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
         checked += json_values(preset_name, "the llm-d template", eval_argv(preset_args), expected)
     if checked == 0:
         sys.exit("FAIL: no JSON value among the shipped presets' arguments; the eval check has nothing to prove")
+    # mistral-small-4 is published text only: the v0.8.0 runtime's vLLM crash-loops in the Pixtral
+    # processor with images on (giantswarm/llm-d#37), so the rendered preset turns images off in the
+    # dotted form the entrypoint's eval keeps as one word, and declares no vision.
+    published = yaml.safe_load(yaml.safe_load(docs[("ConfigMap", "agent-platform-serving-preset-mistral-small-4")])["data"]["preset.yaml"])
+    text_only = "--limit-mm-per-prompt.image=0"
+    if text_only not in published["spec"]["args"] or text_only not in eval_argv([str(a) for a in published["spec"]["args"]]):
+        sys.exit(f"FAIL: the rendered preset mistral-small-4 does not carry {text_only} through the llm-d template's eval; "
+                 "with images on it crash-loops on llm-d-cuda v0.8.0 (giantswarm/llm-d#37)")
+    if "vision" in published["spec"]["model"]["capabilities"]:
+        sys.exit("FAIL: the rendered preset mistral-small-4 declares vision while its arguments turn images off")
     # A values preset that still carries a classic field fails the render naming it.
     for field in CLASSIC_PRESET_FIELDS:
         doc = {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "ServingPreset", "metadata": {"name": "old"},
@@ -818,7 +828,7 @@ def check_preset_args(connectivity: str, base: list[str]) -> None:
             sys.exit(f"FAIL: shipped preset {os.path.basename(name)} declares no quoted major.minor requirements.minComputeCapability ({floor!r}); "
                      "every shipped preset names the GPU generation it runs natively on (giantswarm/agent-platform#832)")
     ok(f"{len(files)} shipped presets' arguments survive the llm-d template's eval ({checked} JSON values parse), none carries a classic field, "
-       f"each one's resources.gpus equals its tensor-parallel size, "
+       f"each one's resources.gpus equals its tensor-parallel size, mistral-small-4 is published text only (--limit-mm-per-prompt.image=0, no vision), "
        f"the render carries no classic serving object; a values preset with spec.runtime or spec.predictor fails the render naming the field; "
        f"none carries --disable-fastapi-docs and a values preset with it fails the render naming the flag (the route list model-manager reads the interfaces from); "
        f"a values preset's spec.router.scheduler is published unchanged and any other router key or a non-boolean fails the render; "

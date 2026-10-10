@@ -9705,12 +9705,20 @@ data:
       - --enable-auto-tool-choice
       - --tool-call-parser=mistral
       - --gpu-memory-utilization=0.90
+      - --limit-mm-per-prompt.image=0
       description: |
         Mistral Small 4: a 119B-parameter mixture of experts with 6.5B active
         (128 experts, 4 routed per token plus 1 shared, MLA attention), the
         successor of the Instruct, Magistral and Devstral lines in one
-        checkpoint — tool calling, reasoning on request (reasoning_effort=high;
-        none by default) and vision (Pixtral encoder, images up to 1540 px).
+        checkpoint — tool calling and reasoning on request (reasoning_effort=high;
+        none by default).
+        Text only: the model's vision (Pixtral encoder) is switched off with
+        --limit-mm-per-prompt.image=0, and a request with an image is refused.
+        The vLLM in llm-d-cuda v0.8.0 lacks fetch_images on its Mistral image
+        processor, which the image's transformers calls while profiling, so with
+        images on the predictor crash-loops before serving. Image inputs come
+        back once the runtime's vLLM carries vllm-project/vllm#45180
+        (giantswarm/llm-d#37).
         Served as Mistral's own NVFP4 checkpoint (66 GiB of weights, the mistral
         format: params.json and consolidated safetensors, hence --tokenizer-mode,
         --config-format and --load-format mistral) across four 48 GB GPUs of the
@@ -9757,7 +9765,6 @@ data:
         - chat
         - tools
         - reasoning
-        - vision
         - coding
         contextLength: 131072
         format: vLLM
