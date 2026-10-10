@@ -998,8 +998,12 @@ components:  # @schema additionalProperties: true
     versionRange: ">=0.1.1 <1.0.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
-    # the reference is dropped at render time when the component is off.
-    dependsOn: [muster]
+    # the reference is dropped at render time when the component is off. With
+    # providers and oauth.enabled its pod starts against the sign-in keys
+    # Secret the connectivity release renders (a plain object, no hook) and
+    # exits while that Secret is missing, so the connectivity release comes
+    # first; connectivity orders nothing after this release, so no cycle.
+    dependsOn: [muster, agent-platform-connectivity]
     # The component's blocks reach the connectivity release only while the
     # component is on (see components.yaml, gatedValues), and so does its
     # roster entry (gatedRoster): with the switch off the connectivity

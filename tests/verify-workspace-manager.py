@@ -19,7 +19,8 @@ muster. Each case below pins one property of its wiring:
   round, one that agrees passes;
 - on with two provider instances (a GitHub one and a second kind,
   tests/fixtures/workspaces-values.yaml): ONE OCIRepository and ONE HelmRelease that
-  dependsOn muster, the block forwarded — the pinned Service name, the OAuth resource
+  dependsOn muster and the connectivity release (the sign-in keys Secret first),
+  the block forwarded — the pinned Service name, the OAuth resource
   server, the chart's own unpinned muster registration (forwardToken, no audience,
   no authorization server), the provider instances, the grant's key — every
   credential a Secret reference {key, name} and nothing else; workspaces.namespace
@@ -180,7 +181,7 @@ def main(meta: str, connectivity: str) -> int:
     hr = on_docs[("HelmRelease", NAME)]
     must_have(hr, (
         f"releaseName: {NAME}",
-        "  dependsOn:\n    - name: muster\n",
+        "  dependsOn:\n    - name: muster\n    - name: agent-platform-connectivity\n",
         f"    fullnameOverride: {NAME}\n",
         "    oauth:\n      baseURL: https://workspaces.ci.example.com\n      dex:\n        allowPrivateURLs: true\n      enabled: true\n      sso:\n        allowPrivateIPs: true\n",
         "    muster:\n      mcpServer:\n        auth:\n          forwardToken: true\n        enabled: true\n",
@@ -221,7 +222,7 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"switching workspaces on changed {key} (muster.* included)")
     if any(kind == "MCPServer" for kind, _ in on_docs):
         fail("the meta chart renders an MCPServer: the registration is the component chart's own")
-    ok(f"on: one OCIRepository ({rng.group(1)}) + one HelmRelease dependsOn muster with the block forwarded "
+    ok(f"on: one OCIRepository ({rng.group(1)}) + one HelmRelease dependsOn muster and connectivity with the block forwarded "
        "(Service name, OAuth, the unpinned muster registration, two provider instances, the grant's key, the class), "
        f"{refs} credentials all Secret references, the namespace kagent's, empty keys not forwarded; nothing else moved, muster.* included; no MCPServer")
 
