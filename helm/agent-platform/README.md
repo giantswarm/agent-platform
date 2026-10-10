@@ -360,7 +360,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.5.0 <1.6.0"` |  |
+| components.kagent.versionRange | string | `">=1.6.0 <1.7.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -383,20 +383,20 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.5.0 <1.6.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.6.0 <1.7.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.6.3 <1.7.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.7.0 <1.8.0"` |  |
 | components.substrate-crds.prereleases | bool | `false` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.6.3 <1.7.0"` |  |
+| components.substrate.versionRange | string | `">=1.7.0 <1.8.0"` |  |
 | components.substrate.prereleases | bool | `false` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
@@ -1297,7 +1297,18 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | workspaces.enabled | bool | `false` |  |
-| workspaces.storage | object | `{}` |  |
+| workspaces.storage.storageClassName | string | `""` |  |
+| workspaces.storage.storageClass.create | bool | `false` |  |
+| workspaces.storage.storageClass.preset | string | `""` |  |
+| workspaces.storage.storageClass.efs.fileSystemId | string | `""` |  |
+| workspaces.storage.storageClass.efs.basePath | string | `"/workspaces"` |  |
+| workspaces.storage.storageClass.efs.directoryPerms | string | `"700"` |  |
+| workspaces.storage.storageClass.azureFiles.skuName | string | `"PremiumV2_LRS"` |  |
+| workspaces.storage.storageClass.azureFiles.networkEndpointType | string | `"privateEndpoint"` |  |
+| workspaces.storage.storageClass.nfs.server | string | `""` |  |
+| workspaces.storage.storageClass.nfs.share | string | `"/"` |  |
+| workspaces.storage.storageClass.parameters | object | `{}` |  |
+| workspaces.storage.storageClass.mountOptions | list | `[]` |  |
 | workspaces.substrate | object | `{}` |  |
 | workspace-manager.fullnameOverride | string | `"workspace-manager"` |  |
 | workspace-manager.observability.otel.endpoint | string | `"auto"` |  |

@@ -15,6 +15,14 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.123.x → \<next\> (kagent 1.6.0 and Substrate 1.7.0)
+
+`components.kagent{,-crds}.versionRange` selects kagent 1.6 and `components.substrate{,-crds}.versionRange` Substrate 1.7 from 1.7.0. kagent 1.6 is built against Substrate 1.7: on a 1.6 Substrate every agent reports `Ready=False ActorTemplateRejected` (`unknown field with protobuf tag 10001`), so the two ranges move in one release and an installation that pins them moves both pins together. Both install over their predecessors in place: the kagent CRDs are unchanged, the Substrate control plane and the kagent WorkerPool roll to `ateom-gvisor:1.7.0`, and every AgentTemplate re-snapshots once on the new worker and Harness image. The Go ADK's bash tool runs commands on an allowlisted environment: a skill that read a provider key or a `KAGENT_*` value from its environment no longer sees it.
+
+### Operator action
+
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.6.0` and `substrate` and `substrate-crds` to `1.7.0` in the same change.
+
 ## 4.122.x → \<next\> (the capz snapshot-store identity holds one assignment, on the storage account)
 
 With `kagent.harness.snapshotStore.crossplane.provider: capz` the s3proxy identity's role assignments change from Storage Blob Data Contributor on the container plus Storage Blob Delegator on the account to one Storage Blob Data Contributor on the storage account (`<identity>-account-role-assignment`, wrapping the RoleAssignment `<identity>-account`). Storage Blob Data Contributor carries `generateUserDelegationKey`, the action the golden tag's server-side copy needs, when it is assigned at the account; a Crossplane identity whose role-assignment right is bound to the data roles by an ABAC condition (a customer's management identity under Role Based Access Control Administrator with constrained delegation) could not assign the Delegator role, and the store never served a copy there.

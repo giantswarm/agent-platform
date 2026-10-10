@@ -2963,10 +2963,28 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 workspaces:
   enabled: false
   # The workspace storage: the read-write-many StorageClass the workspace
-  # volumes are claimed from (storageClassName) and whether the chart renders
-  # it (storageClass.create), giantswarm/agent-platform#900. Declared open
-  # here; its keys are that slice's.
-  storage: {}  # @schema additionalProperties: true
+  # volumes are claimed from (storageClassName, required while the switch is
+  # on) and whether this chart renders it from a preset
+  # (storageClass.create; templates/workspaces/storageclass.yaml). The meta
+  # chart's copy of this block documents every key; it forwards the block
+  # while workspaces are on.
+  storage:
+    storageClassName: ""
+    storageClass:
+      create: false
+      preset: ""  # @schema enum: ["", efs, azureFiles, nfs]
+      efs:
+        fileSystemId: ""
+        basePath: /workspaces
+        directoryPerms: "700"
+      azureFiles:
+        skuName: PremiumV2_LRS
+        networkEndpointType: privateEndpoint
+      nfs:
+        server: ""
+        share: /
+      parameters: {}  # @schema additionalProperties: true
+      mountOptions: []  # @schema item: string
   # Substrate's side of a Session's workspace mount: the CSI driver it drives
   # for the workspace volumes (csiDriver: name, controllerEndpoint,
   # nodeSocketOverride, tls), giantswarm/agent-platform#888. Declared open
