@@ -35,8 +35,10 @@ Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
 
 import base64
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -88,12 +90,21 @@ def helm(chart: str, flags: list, expect_fail: bool = False) -> str:
 
 
 def notes(chart: str, flags: list) -> str:
-    """The rendered NOTES.txt: a client-only dry run against an empty kubeconfig."""
-    with tempfile.NamedTemporaryFile("w", suffix=".kubeconfig") as kc:
-        kc.write("apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers: []\n")
-        kc.flush()
-        out = run([HELM, "install", "t", chart, "--dry-run=client", "--kubeconfig", kc.name, *flags])
-    return out.split("\nNOTES:\n", 1)[1] if "\nNOTES:\n" in out else ""
+    """The rendered NOTES.txt: `helm template` skips NOTES, and a dry-run install needs
+    a cluster on older Helm, so a copy of the chart renders it inside a ConfigMap."""
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = os.path.join(tmp, os.path.basename(os.path.normpath(chart)))
+        shutil.copytree(chart, copy)
+        templates = os.path.join(copy, "templates")
+        with open(os.path.join(templates, "NOTES.txt"), encoding="utf-8") as f:
+            text = f.read()
+        os.remove(os.path.join(templates, "NOTES.txt"))
+        with open(os.path.join(templates, "_zz_notes.tpl"), "w", encoding="utf-8") as f:
+            f.write('{{- define "zz.notes" -}}\n' + text + "{{- end -}}\n")
+        with open(os.path.join(templates, "zz-notes.yaml"), "w", encoding="utf-8") as f:
+            f.write('apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: zz-notes\ndata:\n  notes: {{ include "zz.notes" . | toJson }}\n')
+        out = helm(copy, [*flags, "--show-only", "templates/zz-notes.yaml"])
+    return json.loads(re.search(r"^  notes: (.*)$", out, re.M).group(1)) + "\n"
 
 
 def must_fail(chart: str, flags: list, needle: str, what: str) -> None:
