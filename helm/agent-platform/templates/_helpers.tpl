@@ -243,6 +243,16 @@ its sync and cleanup Jobs live there too. */ -}}
 {{- fail (printf "workspace-manager.workspaces.namespace (%s) differs from the kagent namespace (%s), where every Session runs and mounts its workspace: leave workspace-manager.workspaces.namespace unset" $own $ns) -}}
 {{- end -}}
 {{- $_ := set $derived "workspaces" (dict "namespace" $ns) -}}
+{{- /* The workspace StorageClass, one value for every consumer:
+workspaces.storage.storageClassName, the class every workspace's
+PersistentVolumeClaim names. */ -}}
+{{- with dig "storage" "storageClassName" "" (.root.Values.workspaces | default dict) -}}
+{{- $ownClass := dig "storage" "storageClassName" "" (index $.root.Values "workspace-manager" | default dict) -}}
+{{- if and $ownClass (ne $ownClass .) -}}
+{{- fail (printf "workspace-manager.storage.storageClassName (%s) differs from workspaces.storage.storageClassName (%s), the class every workspace volume is claimed from: leave workspace-manager.storage.storageClassName unset" $ownClass .) -}}
+{{- end -}}
+{{- $_ := set $derived "storage" (dict "storageClassName" .) -}}
+{{- end -}}
 {{- /* The public base URL the connectivity release routes the browser's
 provider sign-in on, so the manager's callback URLs are the routed ones. */ -}}
 {{- with (include "agent-platform.workspaceManager.baseURL" .root) -}}
@@ -1118,8 +1128,9 @@ components.workspace-manager.enabled that disagrees with the switch fails the
 render, either way round. With the switch on, every credential of the
 workspace-manager block is a Secret reference ({name, key}), never a value:
 the provider instances' (any key of a provider's values named privateKey,
-clientSecret, secret, token, password or apiKey, at any depth), the sign-in
-store's encryption key and the grant signing key.
+clientSecret, secret, token, password or apiKey, at any depth) and the grant
+signing key. A signInStore block fails the render: the chart takes its sign-in
+keys as signin.keys {secretName, current} and its closed schema refuses the key.
 */}}
 {{- define "agent-platform.validateWorkspaces" -}}
 {{- $on := (.Values.workspaces | default dict).enabled | default false -}}
@@ -1148,11 +1159,11 @@ store's encryption key and the grant signing key.
 {{- end -}}
 {{- include "agent-platform.workspaces.secretRefs" (dict "node" ($p.values | default dict) "at" (printf "workspace-manager.providers[%d].values" $i)) -}}
 {{- end -}}
-{{- range $path := list (list "signInStore" "encryptionKey") (list "grant" "signingKey") -}}
-{{- $ref := dig (first $path) (last $path) dict $wm -}}
-{{- if $ref -}}
-{{- include "agent-platform.workspaces.secretRef" (dict "ref" $ref "at" (printf "workspace-manager.%s" (join "." $path))) -}}
+{{- if $wm.signInStore -}}
+{{- fail "workspace-manager.signInStore is not a key of the workspace-manager chart, whose schema refuses it: the sign-in keys are workspace-manager.signin.keys {secretName, current}, a Secret the connectivity release creates (workspaceManager.signinKeys.create); remove signInStore" -}}
 {{- end -}}
+{{- with dig "grant" "signingKey" dict $wm -}}
+{{- include "agent-platform.workspaces.secretRef" (dict "ref" . "at" "workspace-manager.grant.signingKey") -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
