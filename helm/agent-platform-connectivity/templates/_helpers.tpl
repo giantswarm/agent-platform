@@ -1158,17 +1158,47 @@ Usage: include "agent-platform.idpHosts" (dict "provider" "dex" "issuerUrl" $url
 {{- end -}}
 
 {{/*
-True when the portal's route attaches to the chart-owned data plane, in the
-precedence agent-platform.parentRefs resolves the route's parents with:
-`backstage.parentRefs` wins over gatewayApi.gateway.create, so a pinned route
-keeps the front Gateway as its peer even while the chart owns the edge.
+True when a public route that proxies straight to its Service attaches to the
+chart-owned data plane, in the precedence agent-platform.parentRefs resolves
+the route's parents with: the route's own parentRefs win over
+gatewayApi.gateway.create, so a pinned route keeps the front Gateway as its
+peer even while the chart owns the edge.
+Usage: include "agent-platform.route.toDataPlane" (dict "ctx" . "parentRefs" $refs)
+*/}}
+{{- define "agent-platform.route.toDataPlane" -}}
+{{- if not .parentRefs -}}
+{{- include "agent-platform.edgeIsDataPlane" .ctx -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The namespaces of the front Gateway such a route attaches to, as a JSON list,
+in the order the route names its parents: its own parentRefs when pinned, else
+`global.gatewayApi.parentRefs`. A parentRef without a namespace attaches to a
+Gateway of the route's own namespace (Gateway API), so that is what an absent
+key means here too. Empty when the route attaches to the chart-owned data
+plane — the data plane is then the peer, selected by the Gateway's own name.
+Usage: include "agent-platform.route.edgeNamespaces" (dict "ctx" . "parentRefs" $refs) | fromJsonArray
+*/}}
+{{- define "agent-platform.route.edgeNamespaces" -}}
+{{- $ctx := .ctx -}}
+{{- $refs := .parentRefs | default $ctx.Values.global.gatewayApi.parentRefs | default list -}}
+{{- $namespaces := list -}}
+{{- if not (include "agent-platform.route.toDataPlane" .) -}}
+{{- range $refs -}}
+{{- $namespaces = append $namespaces (dig "namespace" $ctx.Release.Namespace .) -}}
+{{- end -}}
+{{- end -}}
+{{- $namespaces | uniq | toJson -}}
+{{- end -}}
+
+{{/*
+True when the portal's route attaches to the chart-owned data plane
+(agent-platform.route.toDataPlane with `backstage.parentRefs`).
 Usage: include "agent-platform.backstage.routeToDataPlane" .
 */}}
 {{- define "agent-platform.backstage.routeToDataPlane" -}}
-{{- $backstage := .Values.backstage | default dict -}}
-{{- if not $backstage.parentRefs -}}
-{{- include "agent-platform.edgeIsDataPlane" . -}}
-{{- end -}}
+{{- include "agent-platform.route.toDataPlane" (dict "ctx" . "parentRefs" (dig "parentRefs" list (.Values.backstage | default dict))) -}}
 {{- end -}}
 
 {{/*
@@ -1210,25 +1240,12 @@ Usage: include "agent-platform.backstage.appConfigEdge" . | fromJson
 {{- end -}}
 
 {{/*
-The namespaces of the front Gateway the portal's route attaches to, as a JSON
-list, in the order the route names its parents: `backstage.parentRefs` when the
-route is pinned, else `global.gatewayApi.parentRefs`. A parentRef without a
-namespace attaches to a Gateway of the route's own namespace (Gateway API), so
-that is what an absent key means here too. Empty when the route attaches to the
-chart-owned data plane — the data plane is then the peer, selected by the
-Gateway's own name.
+The namespaces of the front Gateway the portal's route attaches to
+(agent-platform.route.edgeNamespaces with `backstage.parentRefs`).
 Usage: include "agent-platform.backstage.edgeNamespaces" . | fromJsonArray
 */}}
 {{- define "agent-platform.backstage.edgeNamespaces" -}}
-{{- $backstage := .Values.backstage | default dict -}}
-{{- $refs := $backstage.parentRefs | default .Values.global.gatewayApi.parentRefs | default list -}}
-{{- $namespaces := list -}}
-{{- if not (include "agent-platform.backstage.routeToDataPlane" .) -}}
-{{- range $refs -}}
-{{- $namespaces = append $namespaces (dig "namespace" $.Release.Namespace .) -}}
-{{- end -}}
-{{- end -}}
-{{- $namespaces | uniq | toJson -}}
+{{- include "agent-platform.route.edgeNamespaces" (dict "ctx" . "parentRefs" (dig "parentRefs" list (.Values.backstage | default dict))) -}}
 {{- end -}}
 
 {{/*

@@ -78,3 +78,17 @@ Next steps (docs/install.md "After the install"):
     kagent UI's client:     https://{{ .Values.kagent.uiRoute.hostname | default (printf "kagent.%s" $domain) }}/oauth2/callback
 {{- end }}
 {{- end }}
+{{- $wm := index .Values "workspace-manager" | default dict }}
+{{- $wmBase := include "agent-platform.workspaceManager.baseURL" . }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager")) $wmBase }}
+
+Workspace provider sign-in, base URL {{ $wmBase }} (routed: /signin, /connect/<instance>, /callback/<instance>):
+  Redirect URI to register on the workspace-manager's Dex client {{ dig "oauth" "dex" "clientID" "" $wm | default .Values.global.identity.clientId | default "<global.identity.clientId>" }} (the browser signs in there before a connect):
+    {{ $wmBase }}/signin
+{{- with $wm.providers }}
+  Callback URL to register with each provider instance's OAuth client (a GitHub App's callback URL):
+{{- range . }}
+    {{ .name }}: {{ $wmBase }}/callback/{{ .name }}
+{{- end }}
+{{- end }}
+{{- end }}

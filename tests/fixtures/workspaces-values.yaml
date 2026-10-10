@@ -25,3 +25,8 @@ workspace-manager:
     encryptionKey: {name: workspace-manager-keys, key: sign-in-store}
   grant:
     signingKey: {name: workspace-manager-keys, key: grant}
+  # The public base URL of the browser's provider sign-in: an instance with an
+  # OAuth client needs one (tests/verify-workspace-manager-route.py); set here
+  # rather than global.domain, which would move every other release.
+  oauth:
+    baseURL: https://workspaces.ci.example.com

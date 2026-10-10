@@ -191,7 +191,7 @@ def main(meta: str, connectivity: str) -> int:
         f"releaseName: {NAME}",
         "  dependsOn:\n    - name: muster\n",
         f"    fullnameOverride: {NAME}\n",
-        "    oauth:\n      dex:\n        allowPrivateURLs: true\n      enabled: true\n      sso:\n        allowPrivateIPs: true\n",
+        "    oauth:\n      baseURL: https://workspaces.ci.example.com\n      dex:\n        allowPrivateURLs: true\n      enabled: true\n      sso:\n        allowPrivateIPs: true\n",
         "    muster:\n      mcpServer:\n        auth:\n          forwardToken: true\n        enabled: true\n",
         "    workspaces:\n      namespace: kagent\n",
         "    - kind: github\n      name: github\n",

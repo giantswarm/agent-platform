@@ -980,11 +980,12 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.1.0-rc.7, the first release whose chart renders its own
-    # muster MCPServer (muster.mcpServer) and takes the provider instances
-    # (providers); the ceiling stays the next major, so later candidates and
-    # minor releases roll on their own.
-    versionRange: ">=0.1.0-rc.7 <1.0.0"
+    # The floor is 0.1.0-rc.10, the first release that serves a provider
+    # sign-in in the browser (/signin, /connect/<instance>,
+    # /callback/<instance>) and takes the sign-in keys (signin.keys), which
+    # the earlier charts' schemas refuse; the ceiling stays the next major, so
+    # later candidates and minor releases roll on their own.
+    versionRange: ">=0.1.0-rc.10 <1.0.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off.
@@ -996,7 +997,7 @@ components:  # @schema additionalProperties: true
     gatedValues: [workspace-manager, workspaceManager, workspaces]
     gatedRoster: true
     # An empty key takes the chart's own default instead of overriding it.
-    omitEmptyKeys: [providers, signInStore.encryptionKey, grant.signingKey, sync.cycle, sessions.cleanupAfter, storage.sizing.factor, storage.sizing.headroom, storage.sizing.maxSize]
+    omitEmptyKeys: [providers, oauth.baseURL, signInStore.encryptionKey, grant.signingKey, sync.cycle, sessions.cleanupAfter, storage.sizing.factor, storage.sizing.headroom, storage.sizing.maxSize]
   # --- The standalone chart's extras -------------------------------------------
   # The components the agent-platform-standalone umbrella carried as Helm
   # dependencies on top of the fleet's roster: Backstage, mcp-kubernetes, the
@@ -4910,6 +4911,17 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
       headers: auto
   oauth:
     enabled: true
+    # The manager's public base URL: the browser's sign-in at <baseURL>/signin
+    # and each provider instance's <baseURL>/connect/<name> and
+    # <baseURL>/callback/<name>, the URL the instance's OAuth client is
+    # registered with. Empty, the default, derives
+    # https://<fullnameOverride>.<global.domain>; the meta chart forwards the
+    # resolved URL and NOTES prints it. The connectivity release routes those
+    # three paths, and only those, on the URL's host
+    # (workspaceManager.route); a provider instance with an OAuth client and
+    # no such host fails the render. A URL with a port (a lab's gateway port)
+    # is taken as it is: the route matches the host.
+    baseURL: ""
     dex:
       allowPrivateURLs: true
     sso:
@@ -4919,6 +4931,19 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       auth:
         forwardToken: true
+  # The keys that seal each person's provider sign-ins and the sign-in flow's
+  # state: a Secret in the platform's namespace whose data entries are key ids
+  # (a lower-case DNS label of at most 32 characters), each 32 random bytes.
+  # With providers and oauth.enabled the connectivity release creates it
+  # (workspaceManager.signinKeys.create) and generates the key named
+  # `current` when the Secret lacks it, keeping every key it already holds:
+  # a key rotates by naming a new id here; the old one still opens what it
+  # sealed until it is removed from the Secret by hand. No value ever passes
+  # through these values.
+  signin:
+    keys:
+      secretName: workspace-manager-signin-keys
+      current: key-1
   # The installation's provider instances, several at once: each a unique
   # `name` (a DNS label: the name workspaces and sign-ins refer to), a `kind`
   # and the kind's `values`, whose credentials (the sync credential, the OAuth
@@ -4979,12 +5004,38 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
 
 # The wiring the connectivity chart renders for the workspace-manager
 # component (it reads this block, not the chart's). Inert while
-# workspaces.enabled is false. No route here: the tools reach muster
-# in-cluster, and the provider sign-in's callback is routed on its own.
+# workspaces.enabled is false. The tools reach muster in-cluster; only the
+# browser's provider sign-in is public (route below).
 workspaceManager:  # @schema skipProperties: true; additionalProperties: true
+  # The public route of the browser's provider sign-in, on the host of
+  # workspace-manager.oauth.baseURL (https://workspace-manager.<global.domain>
+  # unless set): /signin (Exact; the person's Dex sign-in, whose redirect URI
+  # <baseURL>/signin the manager's Dex client lists), /connect/<instance> and
+  # /callback/<instance> (PathPrefix), straight to the manager's Service, with
+  # the TLS and route conventions of the platform's other public routes. Every
+  # other path of the host — MCP, the token exchange, JWKS, the manager's own
+  # OAuth server — is not routed: those stay cluster-internal.
+  route:
+    # Off leaves the three paths to a route the installation provides on the
+    # same host; a provider instance with an OAuth client then needs
+    # workspace-manager.oauth.baseURL set (the render fails otherwise).
+    enabled: true
+    # The route's parents. Empty: muster's (ingress.parentRefs), else the
+    # chart-owned edge (gatewayApi.gateway.create), else
+    # global.gatewayApi.parentRefs.
+    parentRefs: []
+  # The sign-in keys Secret workspace-manager.signin.keys names, created in
+  # the platform's namespace with providers and oauth.enabled: the key named
+  # `current` is generated (32 random bytes) when the Secret lacks it and every
+  # key it holds is kept, also across an uninstall. false leaves the Secret to
+  # the installation.
+  signinKeys:
+    create: true
   # Network policy inputs; the policies render under networkPolicy (enabled +
   # flavor). Ingress: muster (MCPServer on), kagent's controller (the token and
-  # JWKS endpoints a Session's credential is exchanged at, kagent on) and the
+  # JWKS endpoints a Session's credential is exchanged at, kagent on), the
+  # public Gateway the route attaches to (route.enabled; the edge's Envoy
+  # pods, or the agentgateway data plane when it is the edge) and the
   # kubelet's probes. Egress: DNS, the Kubernetes API (the workspace objects,
   # volumes and Jobs it writes in the kagent namespace), the identity provider
   # (oauth on: the Dex issuer by name, or for workspace-manager.oauth.provider
