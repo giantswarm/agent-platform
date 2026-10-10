@@ -15,6 +15,14 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.125.x → \<next\> (kagent 1.8.0)
+
+`components.kagent{,-crds}.versionRange` selects kagent 1.8 from 1.8.0; `components.substrate{,-crds}.versionRange` stays on Substrate 1.7, the release kagent 1.8.0 is built against. The release installs over 1.7.0 in place: the kagent CRDs are unchanged, the Substrate control plane and the kagent WorkerPool stay on `ateom-gvisor:1.7.0`, the controller and UI roll to 1.8.0 and every AgentTemplate re-snapshots once on the new Harness image. A Session's egress policy no longer carries the template's artifact credentials: a skill or plugin source's credential reaches its host on the golden boot's fetch only.
+
+### Operator action
+
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.8.0`; `substrate` and `substrate-crds` stay at `1.7.0`.
+
 ## 4.124.x → \<next\> (kagent 1.7.0)
 
 `components.kagent{,-crds}.versionRange` selects kagent 1.7 from 1.7.0; `components.substrate{,-crds}.versionRange` stays on Substrate 1.7, the release kagent 1.7.0 is built against. The release installs over 1.6.0 in place: the kagent CRDs are unchanged, the Substrate control plane and the kagent WorkerPool stay on `ateom-gvisor:1.7.0`, the controller and UI roll to 1.7.0 and every AgentTemplate re-snapshots once on the new Harness image. A Vertex AI ModelConfig (`AnthropicVertexAI`, `GeminiVertexAI`) with `apiKeySecret` now compiles for the Substrate runtime, binding a Google access token the Substrate egress gateway mints from the service account key in that Secret; the provider that mints it ships with the Substrate line from 1.8.0, so a Vertex agent on Substrate waits for the Substrate range's next move.
