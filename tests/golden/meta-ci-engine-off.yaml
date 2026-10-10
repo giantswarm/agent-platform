@@ -1937,7 +1937,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.6.3
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.7.0
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -2915,7 +2915,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.6.3 <1.7.0"
+    semver: ">=1.7.0 <1.8.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2938,7 +2938,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.6.3 <1.7.0"
+    semver: ">=1.7.0 <1.8.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
