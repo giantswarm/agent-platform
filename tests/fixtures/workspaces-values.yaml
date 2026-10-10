@@ -1,7 +1,10 @@
 # Workspaces on with two provider instances, a GitHub one and a second kind:
-# every credential a Secret reference (tests/verify-workspace-manager.py).
+# every credential a Secret reference (tests/verify-workspace-manager.py); the
+# installation's read-write-many class named, not rendered.
 workspaces:
   enabled: true
+  storage:
+    storageClassName: workspaces-rwx
 workspace-manager:
   providers:
     - name: github

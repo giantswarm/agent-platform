@@ -1,0 +1,12 @@
+# The workspace StorageClass rendered from the nfs preset: a directory per
+# volume on an NFS server's export through the NFS CSI driver, the lab's
+# in-cluster server (tests/verify-workspace-storage.py).
+workspaces:
+  enabled: true
+  storage:
+    storageClassName: workspaces-rwx
+    storageClass:
+      create: true
+      preset: nfs
+      nfs:
+        server: nfs-server.agentlab-workspaces.svc.cluster.local

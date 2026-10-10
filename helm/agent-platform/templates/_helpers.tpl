@@ -1055,6 +1055,7 @@ store's encryption key and the grant signing key.
 {{- fail (printf "components.workspace-manager.enabled is %v but workspaces.enabled is %v: workspaces are one switch — set workspaces.enabled and leave components.workspace-manager.enabled unset" $c.enabled $on) -}}
 {{- end -}}
 {{- if $on -}}
+{{- include "agent-platform.workspaces.storage.validate" . -}}
 {{- $wm := index .Values "workspace-manager" | default dict -}}
 {{- $names := dict -}}
 {{- range $i, $p := ($wm.providers | default list) -}}
@@ -1102,6 +1103,38 @@ reference. Emits nothing; fails naming the path.
 {{- $r := .ref -}}
 {{- if not (and (kindIs "map" $r) $r.name $r.key (eq (len (keys $r)) 2)) -}}
 {{- fail (printf "%s is a credential: it takes a Secret reference {name, key} of a Secret in the platform's namespace, never the value (the value would land in clear text in the workspace-manager HelmRelease and in Helm release storage)" .at) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The template-time guards of the workspace storage (workspaces.storage,
+giantswarm/agent-platform#900), run while workspaces are on, by this chart and
+by the connectivity chart alike (its templates/workspaces/_helpers.tpl carries
+the same definition): the class is named; a rendered class names a preset and
+the preset's required input; the azureFiles preset keeps protocol nfs, since
+an SMB share does not serve git. Emits nothing; fails naming the key.
+*/}}
+{{- define "agent-platform.workspaces.storage.validate" -}}
+{{- $storage := dig "storage" dict (.Values.workspaces | default dict) -}}
+{{- if not ($storage.storageClassName | default "") -}}
+{{- fail "workspaces.enabled is true but workspaces.storage.storageClassName is empty: a workspace is one read-write-many volume (bare mirrors and a directory per Session, used by git), claimed from a StorageClass that keeps POSIX semantics — Amazon EFS, Azure Files over NFS 4.1, an NFS server — which a cluster rarely has by default; name the class the installation provides, or name a new one and set workspaces.storage.storageClass.create with a preset to render it" -}}
+{{- end -}}
+{{- $sc := $storage.storageClass | default dict -}}
+{{- if $sc.create -}}
+{{- $preset := toString ($sc.preset | default "") -}}
+{{- if not (has $preset (list "efs" "azureFiles" "nfs")) -}}
+{{- fail (printf "workspaces.storage.storageClass.create is true but workspaces.storage.storageClass.preset is %q: the presets are efs (Amazon EFS, an access point per volume), azureFiles (Azure Files over NFS 4.1) and nfs (an NFS server through the NFS CSI driver)" $preset) -}}
+{{- end -}}
+{{- if and (eq $preset "efs") (not (dig "efs" "fileSystemId" "" $sc)) -}}
+{{- fail "workspaces.storage.storageClass.preset is efs but workspaces.storage.storageClass.efs.fileSystemId is empty: every volume is an access point on that file system (fs-…), which the installation provides" -}}
+{{- end -}}
+{{- if and (eq $preset "nfs") (not (dig "nfs" "server" "" $sc)) -}}
+{{- fail "workspaces.storage.storageClass.preset is nfs but workspaces.storage.storageClass.nfs.server is empty: every volume is a directory of that server's export (nfs.share)" -}}
+{{- end -}}
+{{- $protocol := toString (dig "parameters" "protocol" "nfs" $sc) -}}
+{{- if and (eq $preset "azureFiles") (ne $protocol "nfs") -}}
+{{- fail (printf "workspaces.storage.storageClass.parameters.protocol is %q on the azureFiles preset: an Azure Files share over SMB fixes every file's mode at mount and has no symbolic links, so git does not work on it; the workspaces need protocol nfs, the preset's own" $protocol) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

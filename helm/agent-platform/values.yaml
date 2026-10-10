@@ -4864,10 +4864,72 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 workspaces:
   enabled: false
   # The workspace storage: the read-write-many StorageClass the workspace
-  # volumes are claimed from (storageClassName) and whether the chart renders
-  # it (storageClass.create), giantswarm/agent-platform#900. Declared open
-  # here; its keys are that slice's.
-  storage: {}  # @schema additionalProperties: true
+  # volumes are claimed from, and whether the connectivity release renders it.
+  # The volumes hold git repositories (bare mirrors, a clone per Session), so
+  # the class must keep POSIX semantics — file modes and symbolic links:
+  # Amazon EFS (efs.csi.aws.com), Azure Files over NFS 4.1
+  # (file.csi.azure.com with protocol nfs; an SMB share fixes every file's
+  # mode at mount and has no symbolic links, so it does not serve git) or an
+  # NFS server through the NFS CSI driver (nfs.csi.k8s.io, the lab's). A
+  # cluster rarely has such a class by default.
+  storage:
+    # The class's name. REQUIRED while the switch is on: the render fails
+    # without it. The workspace-manager release takes it as
+    # storage.storageClassName, the class every workspace's
+    # PersistentVolumeClaim names, once its chart declares the key
+    # (giantswarm/workspace-manager#18): the forward and the floor that
+    # accepts it land together; the floor's schema refuses an unknown key.
+    # kagent takes no value: a Session gets its workspace volume's reference
+    # (the CSI driver and the volume handle) from the grant the
+    # workspace-manager issues, and workspaces.substrate names the driver
+    # Substrate mounts it with.
+    storageClassName: ""
+    # Whether the connectivity release renders the class from a preset below
+    # (create: true), or the installation provides it (create: false, the
+    # default: the class exists before the first workspace). A rendered class
+    # has reclaimPolicy Delete (a workspace's volume goes with the workspace),
+    # volumeBindingMode Immediate (network storage has no topology) and
+    # allowVolumeExpansion true (the workspace-manager grows a provisioned
+    # share). A StorageClass's parameters are immutable: a change of preset or
+    # parameters is a new class under a new name. On a cluster the render
+    # refuses to replace a class of that name another owner created (set
+    # create: false to use it as it is) and refuses, created or provided, an
+    # Azure Files class that is not protocol nfs.
+    storageClass:
+      create: false
+      # efs: Amazon EFS, an access point per volume (provisioningMode efs-ap)
+      #   on the file system efs.fileSystemId under efs.basePath, each
+      #   directory created with efs.directoryPerms, mounted over TLS. The
+      #   installation provides the EFS CSI driver and its IAM role, and the
+      #   file system (encrypted, mount targets in the nodes' subnets and NFS
+      #   2049 admitted from them, a lifecycle policy to Infrequent Access).
+      # azureFiles: Azure Files over NFS 4.1 on a FileStorage account the
+      #   driver creates (azureFiles.skuName, provisioned v2 SSD by default),
+      #   reached through azureFiles.networkEndpointType (a private endpoint by
+      #   default; empty leaves the account's network rules, e.g. a service
+      #   endpoint of the nodes' subnets, to the installation), mounted with
+      #   nconnect=4 and actimeo=30. The driver ships with every Azure cluster.
+      # nfs: an NFS server (nfs.server, exporting nfs.share) through the NFS
+      #   CSI driver, a directory per volume, mounted NFS 4.1 hard — the lab's
+      #   in-cluster server; the installation provides the driver.
+      preset: ""  # @schema enum: ["", efs, azureFiles, nfs]
+      efs:
+        # The EFS file system id (fs-…). REQUIRED with the efs preset.
+        fileSystemId: ""
+        basePath: /workspaces
+        directoryPerms: "700"
+      azureFiles:
+        skuName: PremiumV2_LRS
+        networkEndpointType: privateEndpoint
+      nfs:
+        # The server's host name. REQUIRED with the nfs preset.
+        server: ""
+        share: /
+      # Parameters merged over the preset's (a key here wins): an EFS
+      # gidRangeStart, an Azure storageAccount or resourceGroup, …
+      parameters: {}  # @schema additionalProperties: true
+      # Mount options replacing the preset's when set.
+      mountOptions: []  # @schema item: string
   # Substrate's side of a Session's workspace mount: the CSI driver it drives
   # for the workspace volumes (csiDriver: name, controllerEndpoint,
   # nodeSocketOverride, tls), giantswarm/agent-platform#888. Declared open

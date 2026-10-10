@@ -23,7 +23,9 @@ muster. Each case below pins one property of its wiring:
   server, the chart's own unpinned muster registration (forwardToken, no audience,
   no authorization server), the provider instances, the sign-in store's and the
   grant's keys — every credential a Secret reference {key, name} and nothing else;
-  workspaces.namespace derived from kagent's; the keys left empty are not forwarded;
+  workspaces.namespace derived from kagent's; the keys left empty are not forwarded,
+  and nothing of workspaces.storage is (verify-workspace-storage covers the class; the
+  component chart declares no key for it yet);
   nothing under muster.* moves (the muster release and the muster block forwarded
   to connectivity are unchanged) and no MCPServer renders anywhere for the
   component or a provider;

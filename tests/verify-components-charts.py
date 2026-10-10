@@ -259,6 +259,10 @@ ALL_ON_INPUTS = [
     # valkey's ACL users need their passwords from somewhere (its own guard).
     "--set", "valkey.valkey.auth.usersExistingSecret=x",
     "--set", "mcp-kubernetes.mcpKubernetes.oauth.dex.clientSecret=x",
+    # The read-write-many class the workspace volumes are claimed from: an
+    # installation names it, and the meta chart refuses the workspaces switch
+    # without it (giantswarm/agent-platform#900).
+    "--set", "workspaces.storage.storageClassName=workspaces-rwx",
 ]
 
 # Components without a toggle of their own: each follows its switch, and a
