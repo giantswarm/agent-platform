@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Assert every Helm hook Job of a render bounds its emptyDirs.
+"""Assert every Helm hook Job and CronJob of a render bounds its emptyDirs.
 
 Kyverno's require-emptydir-requests-and-limits refuses a container mounting an
 emptyDir without ephemeral-storage requests and limits. For every Job carrying
-helm.sh/hook in each rendered file given:
+helm.sh/hook and every CronJob (the agent-manager migrate run's template) in
+each rendered file given:
 
   * every container and init container that mounts an emptyDir requests and
     limits ephemeral-storage;
   * every emptyDir of the pod carries a sizeLimit.
 
-Usage: verify-hooks-ephemeral-storage.py <render>=<expected Job names, comma-separated> ...
-The hook Jobs of each render must be exactly the expected set, so a render
-that stops producing a hook fails instead of passing vacuously.
+Usage: verify-hooks-ephemeral-storage.py <render>=<expected Job and CronJob names, comma-separated> ...
+The hook Jobs and CronJobs of each render must be exactly the expected set, so
+a render that stops producing one fails instead of passing vacuously.
 Needs PyYAML.
 """
 import sys
@@ -19,8 +20,22 @@ import sys
 import yaml
 
 
+def pod_spec(obj):
+    if obj["kind"] == "CronJob":
+        return obj["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+    return obj["spec"]["template"]["spec"]
+
+
+def bounded(d):
+    if not d:
+        return False
+    if d.get("kind") == "CronJob":
+        return True
+    return d.get("kind") == "Job" and "helm.sh/hook" in d["metadata"].get("annotations", {})
+
+
 def problems(job):
-    spec = job["spec"]["template"]["spec"]
+    spec = pod_spec(job)
     empty = {v["name"] for v in spec.get("volumes", []) if "emptyDir" in v}
     out = []
     for v in spec.get("volumes", []):
@@ -42,11 +57,10 @@ def main(args):
         path, _, names = arg.partition("=")
         want = set(filter(None, names.split(",")))
         bad = False
-        jobs = [d for d in yaml.safe_load_all(open(path))
-                if d and d.get("kind") == "Job" and "helm.sh/hook" in d["metadata"].get("annotations", {})]
+        jobs = [d for d in yaml.safe_load_all(open(path)) if bounded(d)]
         got = {j["metadata"]["name"] for j in jobs}
         if got != want:
-            print("FAIL: %s: hook Jobs %s, want %s" % (path, sorted(got), sorted(want)))
+            print("FAIL: %s: hook Jobs and CronJobs %s, want %s" % (path, sorted(got), sorted(want)))
             bad = True
         for j in jobs:
             for p in problems(j):
@@ -54,7 +68,7 @@ def main(args):
                 bad = True
         failed = failed or bad
         if not bad:
-            print("ok: %s: %d hook Jobs bound their emptyDirs: %s" % (path, len(jobs), ", ".join(sorted(got))))
+            print("ok: %s: %d hook Jobs and CronJobs bound their emptyDirs: %s" % (path, len(jobs), ", ".join(sorted(got))))
     return 1 if failed else 0
 
 
