@@ -1701,11 +1701,17 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspaces.substrate | object | `{}` |  |
 | workspace-manager.fullnameOverride | string | `"workspace-manager"` |  |
 | workspace-manager.oauth.enabled | bool | `true` |  |
+| workspace-manager.oauth.baseURL | string | `""` |  |
 | workspace-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
 | workspace-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| workspace-manager.signin.keys.secretName | string | `"workspace-manager-signin-keys"` |  |
+| workspace-manager.signin.keys.current | string | `"key-1"` |  |
 | workspace-manager.providers | list | `[]` |  |
+| workspaceManager.route.enabled | bool | `true` |  |
+| workspaceManager.route.parentRefs | list | `[]` |  |
+| workspaceManager.signinKeys.create | bool | `true` |  |
 | workspaceManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |

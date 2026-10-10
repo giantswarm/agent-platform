@@ -1,0 +1,36 @@
+{{- /*
+The keys that seal each person's provider sign-ins and the sign-in flow's
+state, the Secret workspace-manager.signin.keys names: each data entry a key id
+and its 32 random bytes. The manager requires it with providers and
+oauth.enabled and never renders it. Every key the Secret already holds is kept
+(a lookup of the live object); only the key named `current` is generated, and
+only when the Secret lacks it, so a rotation is naming a new id and a render
+never replaces a key that sealed something. No value passes through values.
+Kept on uninstall: a lost key loses every sign-in it sealed.
+*/ -}}
+{{- if (include "agent-platform.workspaceManager.signinKeysEnabled" .) }}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson }}
+{{- $name := dig "signin" "keys" "secretName" "" $chart }}
+{{- $current := dig "signin" "keys" "current" "" $chart }}
+{{- $data := dict }}
+{{- with (lookup "v1" "Secret" .Release.Namespace $name) }}
+{{- $data = .data | default dict }}
+{{- end }}
+{{- if not (hasKey $data $current) }}
+{{- $_ := set $data $current (randBytes 32) }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  {{- range $id := keys $data | sortAlpha }}
+  {{ $id }}: {{ index $data $id }}
+  {{- end }}
+{{- end }}

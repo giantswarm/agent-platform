@@ -1,0 +1,47 @@
+{{- /*
+The browser's provider sign-in, the workspace-manager's only public surface.
+A provider redirects the browser back to <baseURL>/callback/<instance>, which
+carries no bearer token, so the manager first signs the browser in to Dex at
+<baseURL>/signin and starts a connect at <baseURL>/connect/<instance>. Those
+three paths, and only those, are routed on the base URL's host; MCP, the token
+exchange, JWKS and the manager's own OAuth server are not, and stay reachable
+in-cluster only. Without a host (no workspace-manager.oauth.baseURL and no
+global.domain) nothing renders: a route without hostnames would take the paths
+on every host of the Gateway. validate.yaml fails a provider instance with an
+OAuth client that would then have no callback.
+*/ -}}
+{{- $host := include "agent-platform.workspaceManager.routeHost" . }}
+{{- if $host }}
+# Proxies straight to the manager's Service: the paths carry no JWT for the
+# agentgateway policy, and the manager checks the browser's Dex sign-in and the
+# flow's sealed state itself.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: workspace-manager-public
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "agent-platform.parentRefs" (dict "ctx" . "override" (include "agent-platform.workspaceManager.routeParentRefs" . | fromJsonArray) "key" "workspaceManager.route.parentRefs") | nindent 4 }}
+  hostnames:
+    - {{ $host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /signin
+        - path:
+            type: PathPrefix
+            value: /connect
+        - path:
+            type: PathPrefix
+            value: /callback
+      {{- with (include "agent-platform.routeTimeouts" .) }}
+      {{- . | nindent 6 }}
+      {{- end }}
+      backendRefs:
+        - name: {{ include "agent-platform.workspaceManager.fullname" . }}
+          port: {{ include "agent-platform.workspaceManager.servicePort" . }}
+{{- end }}

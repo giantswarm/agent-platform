@@ -3002,6 +3002,10 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: workspace-manager
   oauth:
     enabled: true
+    # The manager's public base URL; empty derives
+    # https://<fullnameOverride>.<global.domain>. The route
+    # (workspaceManager.route) serves its host.
+    baseURL: ""
     dex:
       allowPrivateURLs: true
     sso:
@@ -3011,6 +3015,12 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       auth:
         forwardToken: true
+  # The sign-in keys Secret (workspaceManager.signinKeys creates it): its name
+  # and the id of the key that seals.
+  signin:
+    keys:
+      secretName: workspace-manager-signin-keys
+      current: key-1
   # The installation's provider instances, several at once: each a unique
   # `name` (a DNS label: the name workspaces and sign-ins refer to), a `kind`
   # and the kind's `values`, whose credentials (the sync credential, the OAuth
@@ -3035,13 +3045,28 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
 
 # The wiring the connectivity chart renders for the workspace-manager
 # component (it reads this block, not the chart's). Inert while
-# workspaces.enabled is false. No route here: the tools reach muster
-# in-cluster, and the provider sign-in's callback is routed on its own.
+# workspaces.enabled is false. The tools reach muster in-cluster; only the
+# browser's provider sign-in is public (route below).
 workspaceManager:  # @schema skipProperties: true; additionalProperties: true
+  # The public route of the browser's provider sign-in on the host of
+  # workspace-manager.oauth.baseURL: /signin (Exact), /connect/<instance> and
+  # /callback/<instance> (PathPrefix) to the manager's Service, nothing else
+  # (templates/workspace-manager/route.yaml). parentRefs empty: muster's
+  # (ingress.parentRefs), else the chart-owned edge, else
+  # global.gatewayApi.parentRefs.
+  route:
+    enabled: true
+    parentRefs: []
+  # Create the sign-in keys Secret workspace-manager.signin.keys names, with
+  # providers and oauth.enabled: the current key generated when missing, every
+  # key kept (templates/workspace-manager/signin-keys.yaml).
+  signinKeys:
+    create: true
   # Network policy inputs; the policies render under networkPolicy (enabled +
   # flavor). Ingress: muster (MCPServer on), kagent's controller (the token and
-  # JWKS endpoints a Session's credential is exchanged at, kagent on) and the
-  # kubelet's probes. Egress: DNS, the Kubernetes API (the workspace objects,
+  # JWKS endpoints a Session's credential is exchanged at, kagent on), the
+  # public Gateway the route attaches to (route.enabled) and the kubelet's
+  # probes. Egress: DNS, the Kubernetes API (the workspace objects,
   # volumes and Jobs it writes in the kagent namespace), the identity provider
   # (oauth on: the Dex issuer by name, or for workspace-manager.oauth.provider
   # google its discovery, JWKS/userinfo and token hosts), each provider

@@ -454,7 +454,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.workspace-manager.chart | string | `"workspace-manager"` |  |
 | components.workspace-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.workspace-manager.versionRange | string | `">=0.1.0-rc.7 <1.0.0"` |  |
+| components.workspace-manager.versionRange | string | `">=0.1.0-rc.10 <1.0.0"` |  |
 | components.workspace-manager.valuesFrom | string | `"workspace-manager"` |  |
 | components.workspace-manager.dependsOn[0] | string | `"muster"` |  |
 | components.workspace-manager.gatedValues[0] | string | `"workspace-manager"` |  |
@@ -462,13 +462,14 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.workspace-manager.gatedValues[2] | string | `"workspaces"` |  |
 | components.workspace-manager.gatedRoster | bool | `true` |  |
 | components.workspace-manager.omitEmptyKeys[0] | string | `"providers"` |  |
-| components.workspace-manager.omitEmptyKeys[1] | string | `"signInStore.encryptionKey"` |  |
-| components.workspace-manager.omitEmptyKeys[2] | string | `"grant.signingKey"` |  |
-| components.workspace-manager.omitEmptyKeys[3] | string | `"sync.cycle"` |  |
-| components.workspace-manager.omitEmptyKeys[4] | string | `"sessions.cleanupAfter"` |  |
-| components.workspace-manager.omitEmptyKeys[5] | string | `"storage.sizing.factor"` |  |
-| components.workspace-manager.omitEmptyKeys[6] | string | `"storage.sizing.headroom"` |  |
-| components.workspace-manager.omitEmptyKeys[7] | string | `"storage.sizing.maxSize"` |  |
+| components.workspace-manager.omitEmptyKeys[1] | string | `"oauth.baseURL"` |  |
+| components.workspace-manager.omitEmptyKeys[2] | string | `"signInStore.encryptionKey"` |  |
+| components.workspace-manager.omitEmptyKeys[3] | string | `"grant.signingKey"` |  |
+| components.workspace-manager.omitEmptyKeys[4] | string | `"sync.cycle"` |  |
+| components.workspace-manager.omitEmptyKeys[5] | string | `"sessions.cleanupAfter"` |  |
+| components.workspace-manager.omitEmptyKeys[6] | string | `"storage.sizing.factor"` |  |
+| components.workspace-manager.omitEmptyKeys[7] | string | `"storage.sizing.headroom"` |  |
+| components.workspace-manager.omitEmptyKeys[8] | string | `"storage.sizing.maxSize"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.backstage.versionRange | string | `">=2.68.0 <3.0.0"` |  |
@@ -1314,10 +1315,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspace-manager.observability.otel.protocol | string | `"auto"` |  |
 | workspace-manager.observability.otel.headers | string | `"auto"` |  |
 | workspace-manager.oauth.enabled | bool | `true` |  |
+| workspace-manager.oauth.baseURL | string | `""` |  |
 | workspace-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
 | workspace-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| workspace-manager.signin.keys.secretName | string | `"workspace-manager-signin-keys"` |  |
+| workspace-manager.signin.keys.current | string | `"key-1"` |  |
 | workspace-manager.providers | list | `[]` |  |
 | workspace-manager.signInStore.encryptionKey | object | `{}` |  |
 | workspace-manager.grant.signingKey | object | `{}` |  |
@@ -1329,6 +1333,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspace-manager.serviceMonitor.enabled | string | `"auto"` |  |
 | workspace-manager.serviceMonitor.interval | string | `"60s"` |  |
 | workspace-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
+| workspaceManager.route.enabled | bool | `true` |  |
+| workspaceManager.route.parentRefs | list | `[]` |  |
+| workspaceManager.signinKeys.create | bool | `true` |  |
 | workspaceManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |

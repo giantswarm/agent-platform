@@ -222,6 +222,7 @@ knowledge:
 {{- include "agent-platform.validateRemovedBackstageKeys" . -}}
 {{- include "agent-platform.validateKagentCrds" . -}}
 {{- include "agent-platform.validateWorkspaces" . -}}
+{{- include "agent-platform.validateWorkspaceSignIn" . -}}
 {{- include "agent-platform.validateKagentLineCrossing" . -}}
 {{- include "agent-platform.validateSubstrate" . -}}
 {{- include "agent-platform.validateWorkerPool" . -}}

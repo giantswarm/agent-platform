@@ -9,6 +9,13 @@
 {{- $kagentNs := include "agent-platform.workspaceManager.kagentNamespace" . }}
 {{- $oauthOn := include "agent-platform.workspaceManager.oauthEnabled" . }}
 {{- $peers := $wm.networkPolicy.ingress.additionalPeers }}
+{{- /* The public sign-in route's Gateway (route.yaml): the agentgateway data
+       plane when the chart owns the edge and the route names no parent, else
+       the Envoy edge pods of the route's parents' namespaces. */ -}}
+{{- $routed := include "agent-platform.workspaceManager.routeHost" . }}
+{{- $routeRefs := include "agent-platform.workspaceManager.routeParentRefs" . | fromJsonArray }}
+{{- $edgeIsDataPlane := include "agent-platform.route.toDataPlane" (dict "ctx" . "parentRefs" $routeRefs) }}
+{{- $edgeNamespaces := include "agent-platform.route.edgeNamespaces" (dict "ctx" . "parentRefs" $routeRefs) | fromJsonArray }}
 {{- $egress := $wm.networkPolicy.egress }}
 {{- /* The provider instances' hosts, grouped by port: one rule per port. */ -}}
 {{- $byPort := dict }}
@@ -21,8 +28,9 @@
 # Ingress to workspace-manager on the Service port: muster (the MCP endpoint)
 # in the release namespace and kagent's controller in the kagent namespace
 # (the token and JWKS endpoints a Session's workspace credential is exchanged
-# at) — plus the kubelet's probes (host entity), which a policy that selects
-# the pod would otherwise deny.
+# at), the public Gateway of the browser's provider sign-in (route on) — plus
+# the kubelet's probes (host entity), which a policy that selects the pod
+# would otherwise deny.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -62,6 +70,27 @@ spec:
         - ports:
             - port: {{ $port | quote }}
               protocol: TCP
+    {{- if $routed }}
+    # The public Gateway of the browser's provider sign-in (route.yaml), which
+    # proxies straight to the Service; the route admits only /signin,
+    # /connect/<instance> and /callback/<instance>.
+    - fromEndpoints:
+        {{- if $edgeIsDataPlane }}
+        - matchLabels:
+            gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+        {{- else }}
+        {{- range $ns := $edgeNamespaces }}
+        - matchLabels:
+            app.kubernetes.io/name: envoy
+            io.kubernetes.pod.namespace: {{ $ns }}
+        {{- end }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: {{ $port | quote }}
+              protocol: TCP
+    {{- end }}
     # The kubelet's liveness and readiness probes arrive from the host entity.
     - fromEntities:
         - host
@@ -206,8 +235,9 @@ spec:
 
 {{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
 ---
-# Ingress to workspace-manager on the Service port: muster (the MCP endpoint)
-# and kagent's controller (the token and JWKS endpoints).
+# Ingress to workspace-manager on the Service port: muster (the MCP endpoint),
+# kagent's controller (the token and JWKS endpoints) and the public Gateway of
+# the browser's sign-in (route on).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -250,6 +280,27 @@ spec:
       ports:
         - port: {{ $port | int }}
           protocol: TCP
+    {{- if $routed }}
+    # The public Gateway of the browser's provider sign-in (route.yaml).
+    - from:
+        {{- if $edgeIsDataPlane }}
+        - podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+        {{- else }}
+        {{- range $ns := $edgeNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: envoy
+        {{- end }}
+        {{- end }}
+      ports:
+        - port: {{ $port | int }}
+          protocol: TCP
+    {{- end }}
     {{- if $metricsPort }}
     # The metrics port serves no API and is admitted from anywhere, as the
     # platform's other metrics ports are.
