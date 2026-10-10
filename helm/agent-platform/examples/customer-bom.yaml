@@ -86,7 +86,7 @@ components:
   cluster-manager:               { versionRange: "0.22.0" }
   # The workspace surface (components.workspace-manager, follows
   # workspaces.enabled, off by default).
-  workspace-manager:             { versionRange: "0.1.0-rc.13" }
+  workspace-manager:             { versionRange: "0.1.1" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08, backstage and mcp-kubernetes at their

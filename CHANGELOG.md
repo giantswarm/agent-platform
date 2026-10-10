@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The workspace-manager floor is its first published stable, 0.1.1** (`>=0.1.1 <1.0.0`, like the other 0.x components' ranges): a stable release of this chart no longer pins a prerelease. 0.1.1 is the candidate the previous floor named plus dependency updates (0.1.0's pipeline published no artifacts); the BOM pins 0.1.1.
+
 ### Fixed
 
 - **`mistral-small-4` serves text only** (giantswarm/agent-platform#591, giantswarm/llm-d#37). The shipped preset crash-looped before serving on `llm-d-cuda` v0.8.0: the image's vLLM lacks `fetch_images` on its Mistral image processor, which the image's transformers calls during multimodal profiling. The preset now carries `--limit-mm-per-prompt.image=0` (the dotted form; the JSON form's quotes do not survive the llm-d container's shell wrapper) and no longer declares `vision`; a request with an image is refused by the engine. Image inputs return once the runtime's vLLM carries vllm-project/vllm#45180.
