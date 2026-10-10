@@ -201,8 +201,10 @@ def main(meta: str, connectivity: str) -> int:
     for chart, flags, ci in ((meta, [], True), (connectivity, [*CONN], False)):
         must_fail(chart, [*flags, *ON, "--set", "workspaces.storage.storageClass.create=true"],
                   'workspaces.storage.storageClass.preset is "": the presets are efs', "create without a preset", ci_values=ci)
-        must_fail(chart, [*flags, *ON, "--set", "workspaces.storage.storageClass.create=true", "--set", "workspaces.storage.storageClass.preset=bogus"],
-                  "storageClass/preset': value must be one of '', 'efs', 'azureFiles', 'nfs'", "an unknown preset (the schema)", ci_values=ci)
+        # Helm 3 and 4 word the schema's enum refusal differently; both name the key and "must be one of".
+        err = must_fail(chart, [*flags, *ON, "--set", "workspaces.storage.storageClass.create=true", "--set", "workspaces.storage.storageClass.preset=bogus"],
+                        "must be one of", "an unknown preset (the schema)", ci_values=ci)
+        must_have(err, ("preset",), "the schema's refusal of an unknown preset")
         must_fail(chart, [*flags, *ON, "--set", "workspaces.storage.storageClass.create=true", "--set", "workspaces.storage.storageClass.preset=bogus", "--skip-schema-validation"],
                   'workspaces.storage.storageClass.preset is "bogus": the presets are efs', "an unknown preset (the guard behind the schema)", ci_values=ci)
         must_fail(chart, [*flags, "-f", PRESETS["efs"][0], "--set", "workspaces.storage.storageClass.efs.fileSystemId="],
