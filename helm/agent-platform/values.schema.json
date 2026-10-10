@@ -175,6 +175,12 @@
                         "enabled": {
                             "type": "boolean"
                         },
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "repository": {
                             "type": "string"
                         },
@@ -601,6 +607,12 @@
                         },
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "omitKeys": {
                             "type": "array",

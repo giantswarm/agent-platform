@@ -806,6 +806,10 @@ components:  # @schema additionalProperties: true
     # observability block is closed and takes the endpoint and headers only.
     omitKeys:
       - observability.enabled
+    # slack.contextBotIDs travels only when set: the key is new in
+    # klaus-gateway 4.2.0, and an older chart's closed slack block refuses it.
+    omitEmptyKeys:
+      - slack.contextBotIDs
     enabled: false
   agent-sandbox:  # @schema additionalProperties: true
     chart: agent-sandbox
@@ -900,6 +904,11 @@ components:  # @schema additionalProperties: true
     # tools call (giantswarm/agent-manager#101).
     versionRange: ">=1.10.0 <2.0.0"
     valuesFrom: agent-manager
+    # harness.egress travels only when set: the key is new in agent-manager
+    # 1.11.0, and an older chart's closed harness block refuses it; unset, the
+    # chart's own default applies.
+    omitEmptyKeys:
+      - harness.egress
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
     # and manages agents in the kagent namespace; both references are dropped
@@ -3898,6 +3907,13 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     # channelAllowlist), or "none" (DM-only, e.g. the OBO gateway). Empty uses
     # the binary default. Rendered as SLACK_CHANNEL_MODE.
     channelMode: ""
+    # -- contextBotIDs lists the Slack bot_ids (B…) whose posts a thread read
+    # hands to the agent: the installation's alerting integrations a
+    # conversation is opened under (Alertmanager, PagerDuty). Every human's
+    # message is shared; any other bot's post is left out. Empty (the default)
+    # shares no bot's post and is not forwarded; a list needs klaus-gateway
+    # 4.2.0 or later. Rendered as SLACK_CONTEXT_BOT_IDS.
+    contextBotIDs: []
     # channelAllowlist lists the Slack channel IDs served when channelMode is
     # "allowlist". Rendered as SLACK_CHANNEL_ALLOWLIST.
     channelAllowlist: []
@@ -4528,6 +4544,18 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # Pinned as model-manager's: the one version the 4.x line serves, and the
     # values change that rolls agent-manager on the cut-over.
     apiVersion: v1alpha3
+  harness:
+    # -- The origins a coding agent on a claude Harness reaches, by Harness name
+    # ({claude: [https://github.com, …]}): the installation's forge and git
+    # hosts plus the toolchain's registries. agent-manager writes the list into
+    # the Agent's spec.egress and refuses any other origin; a claude Harness
+    # without an entry reaches none. Empty (the default) is not forwarded and
+    # the agent-manager chart's own list applies: GitHub plus the Go and npm
+    # registries for claude-go and claude-node. An installation whose forge is
+    # not GitHub sets every Harness it serves here: Helm merges the map into the
+    # chart's, so a Harness left out keeps the GitHub list. Needs agent-manager
+    # 1.11.0 or later.
+    egress: {}  # @schema additionalProperties: true
   agentChart:
     ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
     # The Generic agent chart line agent-manager composes into every agent's

@@ -141,6 +141,8 @@ spec:
         ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
         semver: '>=2.0.0 <3.0.0'
       fullnameOverride: agent-manager
+      harness:
+        egress: {}
       kagent:
         apiVersion: v1alpha3
         namespace: kagent
@@ -917,6 +919,7 @@ spec:
         botToken: ""
         channelAllowlist: []
         channelMode: ""
+        contextBotIDs: []
         dmMode: ""
         enabled: false
         mode: events
