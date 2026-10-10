@@ -22,7 +22,9 @@ muster. Each case below pins one property of its wiring:
   server, the chart's own unpinned muster registration (forwardToken, no audience,
   no authorization server), the provider instances, the sign-in store's and the
   grant's keys — every credential a Secret reference {key, name} and nothing else;
-  workspaces.namespace derived from kagent's; the keys left empty are not forwarded;
+  workspaces.namespace derived from kagent's, storage.storageClassName from the
+  platform's workspaces.storage.storageClassName (verify-workspace-storage covers the
+  class); the keys left empty are not forwarded;
   nothing under muster.* moves (the muster release and the muster block forwarded
   to connectivity are unchanged) and no MCPServer renders anywhere for the
   component or a provider;
@@ -194,6 +196,7 @@ def main(meta: str, connectivity: str) -> int:
         "    oauth:\n      dex:\n        allowPrivateURLs: true\n      enabled: true\n      sso:\n        allowPrivateIPs: true\n",
         "    muster:\n      mcpServer:\n        auth:\n          forwardToken: true\n        enabled: true\n",
         "    workspaces:\n      namespace: kagent\n",
+        "    storage:\n      storageClassName: workspaces-rwx\n",
         "    - kind: github\n      name: github\n",
         "    - kind: gitlab\n      name: gitlab\n",
         "        url: https://gitlab.example.com:8443\n",
@@ -201,7 +204,7 @@ def main(meta: str, connectivity: str) -> int:
         "    grant:\n      signingKey:\n        key: grant\n        name: workspace-manager-keys\n",
         "\n    global:\n",
     ), "the HelmRelease")
-    for absent in ("requiredAudiences", "authorizationServer", "\n    sync:", "\n    sessions:", "\n    storage:", "\n    networkPolicy:"):
+    for absent in ("requiredAudiences", "authorizationServer", "\n    sync:", "\n    sessions:", "\n      sizing:", "\n    networkPolicy:"):
         if absent in hr:
             fail(f"the HelmRelease carries {absent.strip()!r}")
     refs = 0

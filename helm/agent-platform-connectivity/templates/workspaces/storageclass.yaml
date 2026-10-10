@@ -1,0 +1,50 @@
+{{- /*
+The workspaces' read-write-many StorageClass (giantswarm/agent-platform#900):
+rendered from a preset while workspaces are on and
+workspaces.storage.storageClass.create is set; provided by the installation
+otherwise (create: false, the default). Its parameters are immutable once
+created: a change of preset or parameters is a new class under a new name.
+Two guards need the cluster (`lookup`, empty offline; README "Workspaces"): a
+class of that name another owner created is never replaced, and a provided
+class is refused when it is Azure Files over SMB, which does not serve git.
+*/ -}}
+{{- if include "agent-platform.workspaces.enabled" . }}
+{{- include "agent-platform.workspaces.storage.validate" . }}
+{{- $storage := include "agent-platform.workspaces.storage" . | fromJson }}
+{{- $name := $storage.storageClassName }}
+{{- $sc := $storage.storageClass | default dict }}
+{{- $live := lookup "storage.k8s.io/v1" "StorageClass" "" $name }}
+{{- if $sc.create }}
+{{- if $live }}
+{{- $owner := dig "metadata" "annotations" "meta.helm.sh/release-name" "" $live }}
+{{- $ownerNs := dig "metadata" "annotations" "meta.helm.sh/release-namespace" "" $live }}
+{{- if or (ne $owner .Release.Name) (ne $ownerNs .Release.Namespace) }}
+{{- fail (printf "StorageClass %q (workspaces.storage.storageClassName) exists and is not this release's (%s): the render never replaces another owner's class; set workspaces.storage.storageClass.create: false to use it as it is, or name a new class" $name (ternary (printf "Helm release %s/%s" $ownerNs $owner) "no Helm release" (ne $owner ""))) }}
+{{- end }}
+{{- end }}
+{{- $spec := include "agent-platform.workspaces.storageClass.spec" . | fromJson }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ $name }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+    application.giantswarm.io/team: {{ index .Chart.Annotations "io.giantswarm.application.team" | quote }}
+provisioner: {{ $spec.provisioner }}
+parameters:
+  {{- range $k, $v := $spec.parameters }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- with $spec.mountOptions }}
+mountOptions:
+  {{- range . }}
+  - {{ . | quote }}
+  {{- end }}
+{{- end }}
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+{{- else if and $live (eq (toString $live.provisioner) "file.csi.azure.com") (ne (toString (dig "parameters" "protocol" "" $live)) "nfs") }}
+{{- fail (printf "StorageClass %q (workspaces.storage.storageClassName) is Azure Files over SMB (provisioner file.csi.azure.com, parameters.protocol %q): an SMB share fixes every file's mode at mount and has no symbolic links, so git does not work on it; the workspaces need a class with protocol nfs (workspaces.storage.storageClass.create with the azureFiles preset renders one)" $name (toString (dig "parameters" "protocol" "" $live))) }}
+{{- end }}
+{{- end }}

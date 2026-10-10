@@ -1,0 +1,12 @@
+# The workspace StorageClass rendered from the efs preset: Amazon EFS, an
+# access point per volume on the installation's file system
+# (tests/verify-workspace-storage.py).
+workspaces:
+  enabled: true
+  storage:
+    storageClassName: workspaces-rwx
+    storageClass:
+      create: true
+      preset: efs
+      efs:
+        fileSystemId: fs-0123456789abcdef0

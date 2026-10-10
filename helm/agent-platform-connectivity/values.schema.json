@@ -1926,7 +1926,79 @@
                 },
                 "storage": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": false,
+                    "properties": {
+                        "storageClass": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "azureFiles": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "networkEndpointType": {
+                                            "type": "string"
+                                        },
+                                        "skuName": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "create": {
+                                    "type": "boolean"
+                                },
+                                "efs": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "basePath": {
+                                            "type": "string"
+                                        },
+                                        "directoryPerms": {
+                                            "type": "string"
+                                        },
+                                        "fileSystemId": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "mountOptions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "nfs": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "server": {
+                                            "type": "string"
+                                        },
+                                        "share": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "parameters": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                },
+                                "preset": {
+                                    "type": "string",
+                                    "enum": [
+                                        "",
+                                        "efs",
+                                        "azureFiles",
+                                        "nfs"
+                                    ]
+                                }
+                            }
+                        },
+                        "storageClassName": {
+                            "type": "string"
+                        }
+                    }
                 },
                 "substrate": {
                     "type": "object",
