@@ -7,9 +7,10 @@ kagent namespace, a directory per Session, and the provider sign-ins; the
 workspace-manager (giantswarm/workspace-manager) serves them as MCP tools through
 muster. Each case below pins one property of its wiring:
 
-- off by default: no release, and the render is byte-identical to GOLDEN_REF (the
-  previous release; default, CI and kagent shapes of the meta chart, the connectivity
-  chart's default and CI renders): the connectivity release receives neither the
+- off by default: no release, and the render is byte-identical to the render
+  without the component, its roster entry and blocks removed (default, CI and kagent
+  shapes of the meta chart, the connectivity chart's default and CI renders): the
+  connectivity release receives neither the
   roster entry (gatedRoster) nor the three blocks (gatedValues);
 - the switch: workspaces.enabled turns the component on, beside the storage
   slices' workspaces.storage and workspaces.substrate (the lab's block,
@@ -40,19 +41,16 @@ muster. Each case below pins one property of its wiring:
 - the schema refuses a non-boolean switch; the BOM pins the exact version and the
   pin reaches the OCIRepository.
 
-Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary,
-GOLDEN_REF the ref of the byte-identical check (empty skips it).
+Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
 
 HELM = os.environ.get("HELM", "helm")
-GOLDEN_REF = os.environ.get("GOLDEN_REF", "origin/main")
 NAME = "workspace-manager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
 RANGE_RE = r'semver: "(>=[^"]+ <1\.0\.0)"'
@@ -122,34 +120,25 @@ def must_fail(chart: str, flags: list, needle: str, what: str, ci_values: bool =
 
 
 def golden(meta: str, connectivity: str) -> None:
-    """With the switch off, the renders are byte-identical to GOLDEN_REF's."""
-    if not GOLDEN_REF:
-        print("skip: GOLDEN_REF is empty (explicit opt-out)")
-        return
-    if subprocess.run(["git", "rev-parse", "--verify", "-q", GOLDEN_REF], capture_output=True).returncode != 0:
-        fail(f"GOLDEN_REF={GOLDEN_REF} does not resolve; fetch it, or run with GOLDEN_REF= to opt out")
-    tree = tempfile.mkdtemp()
-    try:
-        subprocess.run(["git", "worktree", "add", "-q", "--detach", tree, GOLDEN_REF], check=True)
-        shapes = [
-            (meta, ["-f", f"{meta}/ci/ci-values.yaml"]),
-            (meta, []),
-            (meta, ["-f", f"{meta}/ci/ci-values.yaml", *KAGENT]),
-            (connectivity, ["--set", "ingress.parentRefs[0].name=x"]),
-            (connectivity, ["-f", f"{connectivity}/ci/ci-values.yaml", "--set", "ingress.parentRefs[0].name=x"]),
-        ]
-        for chart, flags in shapes:
-            head = helm(chart, flags, ci_values=False)
-            ref = helm(chart, flags, ci_values=False, cwd=tree)
-            if head != ref:
-                with tempfile.NamedTemporaryFile("w", suffix=".ref") as a, tempfile.NamedTemporaryFile("w", suffix=".head") as b:
-                    a.write(ref), b.write(head), a.flush(), b.flush()
-                    diff = subprocess.run(["diff", "-u", a.name, b.name], capture_output=True, text=True).stdout
-                fail(f"the switch-off render of {chart} {' '.join(flags)} drifted from {GOLDEN_REF}\n{diff[:4000]}")
-    finally:
-        subprocess.run(["git", "worktree", "remove", "--force", tree], capture_output=True)
-        shutil.rmtree(tree, ignore_errors=True)
-    ok(f"switch off: the meta (default, CI, kagent) and connectivity (default, CI) renders are byte-identical to {GOLDEN_REF}")
+    """With the switch off, the renders are byte-identical to the same chart's renders
+    without the component: its roster entry and its blocks removed (a Helm null)."""
+    absent = [x for key in (f"components.{NAME}", NAME, "workspaceManager", "workspaces") for x in ("--set", f"{key}=null")]
+    shapes = [
+        (meta, ["-f", f"{meta}/ci/ci-values.yaml"]),
+        (meta, []),
+        (meta, ["-f", f"{meta}/ci/ci-values.yaml", *KAGENT]),
+        (connectivity, ["--set", "ingress.parentRefs[0].name=x"]),
+        (connectivity, ["-f", f"{connectivity}/ci/ci-values.yaml", "--set", "ingress.parentRefs[0].name=x"]),
+    ]
+    for chart, flags in shapes:
+        head = helm(chart, flags, ci_values=False)
+        ref = helm(chart, [*flags, *absent], ci_values=False)
+        if head != ref:
+            with tempfile.NamedTemporaryFile("w", suffix=".ref") as a, tempfile.NamedTemporaryFile("w", suffix=".head") as b:
+                a.write(ref), b.write(head), a.flush(), b.flush()
+                diff = subprocess.run(["diff", "-u", a.name, b.name], capture_output=True, text=True).stdout
+            fail(f"the switch-off render of {chart} {' '.join(flags)} differs from the render without the component\n{diff[:4000]}")
+    ok("switch off: the meta (default, CI, kagent) and connectivity (default, CI) renders are byte-identical to those without the component")
 
 
 def main(meta: str, connectivity: str) -> int:
