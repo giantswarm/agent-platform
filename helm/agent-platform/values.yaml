@@ -3311,8 +3311,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Expose the kagent controller API through agentgateway: an AgentgatewayBackend
   # (h2c to the controller) and a GRPCRoute in the release namespace, matched by
   # gRPC service (controllerRoute.grpc.services) —
-  # kagent.api.v1alpha1.{AgentService, AgentTemplateService, ModelService,
-  # SessionService, SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
+  # kagent.api.v1alpha1.{AgentService, AgentTemplateService, HarnessService,
+  # ModelService, SessionService, SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
   # controller has no REST). Native gRPC over HTTP/2 from the public hostname
   # and from the in-cluster agentgateway Service
   # (grpc://agentgateway.<release namespace>.svc.cluster.local:8080, h2c), and
@@ -3342,6 +3342,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       services:
         kagent.api.v1alpha1.AgentService: []
         kagent.api.v1alpha1.AgentTemplateService: []
+        kagent.api.v1alpha1.HarnessService: []
         kagent.api.v1alpha1.ModelService: []
         kagent.api.v1alpha1.SessionService: []
         kagent.api.v1alpha1.SystemService: []
