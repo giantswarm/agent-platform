@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The workspace-manager floor is its first stable, 0.1.0** (`>=0.1.0 <1.0.0`, like the other 0.x components' ranges): a stable release of this chart no longer pins a prerelease. 0.1.0 is the candidate the previous floor named plus dependency updates; the BOM pins 0.1.0.
+- **The workspace-manager floor is its first published stable, 0.1.1** (`>=0.1.1 <1.0.0`, like the other 0.x components' ranges): a stable release of this chart no longer pins a prerelease. 0.1.1 is the candidate the previous floor named plus dependency updates (0.1.0's pipeline published no artifacts); the BOM pins 0.1.1.
 
 ### Fixed
 
