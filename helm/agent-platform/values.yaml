@@ -980,10 +980,11 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # 0.1.0 is the first release line; the ceiling stays the next major, so
-    # minor releases roll on their own. Until 0.1.0 is published the range
-    # admits its release candidates through gitops.prereleases only.
-    versionRange: ">=0.1.0 <1.0.0"
+    # The floor is 0.1.0-rc.7, the first release whose chart renders its own
+    # muster MCPServer (muster.mcpServer) and takes the provider instances
+    # (providers); the ceiling stays the next major, so later candidates and
+    # minor releases roll on their own.
+    versionRange: ">=0.1.0-rc.7 <1.0.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off.
