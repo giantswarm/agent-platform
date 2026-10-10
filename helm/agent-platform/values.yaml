@@ -2988,6 +2988,17 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # documented above before flipping this to true.
     enabled: false
     fullnameOverride: kagent-oauth2-proxy
+    # The proxy's image: the gsoci copy of the subchart's default
+    # (quay.io/oauth2-proxy/oauth2-proxy at the subchart's appVersion), the
+    # same digest, since the fleet's restrict-image-registries admits gsoci
+    # only (giantswarm/agent-platform#880). The tag holds the appVersion of the
+    # oauth2-proxy subchart the kagent release at the range's floor bundles;
+    # `make verify-kagent-oauth2-proxy-image` moves it with the floor and
+    # requires the copy to be published.
+    image:
+      registry: gsoci.azurecr.io
+      repository: giantswarm/oauth2-proxy
+      tag: v7.15.5
     # Co-locate with kagent resources so the templates ConfigMap (created in
     # kagent namespace by the kagent chart) is reachable.
     namespaceOverride: kagent
@@ -5522,6 +5533,38 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # admits only gsoci boots its sandboxes; registry.k8s.io redirects every
     # pull to a Google Artifact Registry host.
     pause: gsoci.azurecr.io/giantswarm/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4
+  # The egress gateway's ephemeral storage (giantswarm/agent-platform#880).
+  # Kyverno's require-emptydir-requests-and-limits reports a container that
+  # mounts an emptyDir without a sizeLimit unless it requests and limits
+  # ephemeral-storage, and the Substrate chart rendered atenet-egress's two
+  # containers without resources and its drain-signal emptyDir unbounded. The
+  # line takes these three keys from the release
+  # agent-platform.substrate.egressStorageFloor names and renders the bound
+  # itself; an older release prunes them in silence, so while the range's
+  # floor is below it the meta chart applies the same bound as a kustomize
+  # patch on the substrate release's Deployment (a Flux postRenderer, built
+  # from these values; agent-platform.substrate.egressStoragePatch) and drops
+  # the patch the moment the floor reaches that release. Only the ephemeral
+  # storage is bounded: both containers write nothing but their logs and the
+  # drain marker; CPU and memory are the installation's to size, merged over
+  # the chart's defaults. A null key bounds nothing: the chart's own default
+  # from the floor on, no patch for it below.
+  atenetEgress:
+    # The agentgateway container.
+    resources:
+      requests:
+        ephemeral-storage: 16Mi
+      limits:
+        ephemeral-storage: 256Mi
+    extProc:
+      resources:
+        requests:
+          ephemeral-storage: 16Mi
+        limits:
+          ephemeral-storage: 256Mi
+    # The emptyDir the ext-proc writes its drain marker to: one small file.
+    drainSignal:
+      sizeLimit: 16Mi
   atelet:
     # The snapshot store's API: s3 (AWS S3 and S3-compatible stores) or gcs.
     storageBackend: s3

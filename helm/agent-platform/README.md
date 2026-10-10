@@ -851,6 +851,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.otel.logs.enabled | string | `"auto"` |  |
 | kagent.oauth2-proxy.enabled | bool | `false` |  |
 | kagent.oauth2-proxy.fullnameOverride | string | `"kagent-oauth2-proxy"` |  |
+| kagent.oauth2-proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
+| kagent.oauth2-proxy.image.repository | string | `"giantswarm/oauth2-proxy"` |  |
+| kagent.oauth2-proxy.image.tag | string | `"v7.15.5"` |  |
 | kagent.oauth2-proxy.namespaceOverride | string | `"kagent"` |  |
 | kagent.oauth2-proxy.redis.enabled | bool | `false` |  |
 | kagent.oauth2-proxy.sessionStorage.type | string | `"cookie"` |  |
@@ -1427,6 +1430,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.images.rustfs | string | `"gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358"` |  |
 | substrate.images.awsCli | string | `"gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73"` |  |
 | substrate.images.pause | string | `"gsoci.azurecr.io/giantswarm/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4"` |  |
+| substrate.atenetEgress.resources.requests.ephemeral-storage | string | `"16Mi"` |  |
+| substrate.atenetEgress.resources.limits.ephemeral-storage | string | `"256Mi"` |  |
+| substrate.atenetEgress.extProc.resources.requests.ephemeral-storage | string | `"16Mi"` |  |
+| substrate.atenetEgress.extProc.resources.limits.ephemeral-storage | string | `"256Mi"` |  |
+| substrate.atenetEgress.drainSignal.sizeLimit | string | `"16Mi"` |  |
 | substrate.atelet.storageBackend | string | `"s3"` |  |
 | substrate.atelet.nodeSelector | object | `{}` |  |
 | substrate.atelet.tolerations | list | `[]` |  |

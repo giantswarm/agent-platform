@@ -778,6 +778,10 @@ spec:
             name: kagent-oauth2-proxy-templates
           name: custom-templates
         fullnameOverride: kagent-oauth2-proxy
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/oauth2-proxy
+          tag: v7.15.5
         metrics:
           enabled: true
           serviceMonitor:
@@ -1330,6 +1334,20 @@ spec:
           preemptionPolicy: Never
         storageBackend: s3
         tolerations: []
+      atenetEgress:
+        drainSignal:
+          sizeLimit: 16Mi
+        extProc:
+          resources:
+            limits:
+              ephemeral-storage: 256Mi
+            requests:
+              ephemeral-storage: 16Mi
+        resources:
+          limits:
+            ephemeral-storage: 256Mi
+          requests:
+            ephemeral-storage: 16Mi
       createNamespace: false
       credentialProvider:
         namespacePolicies:
@@ -1864,6 +1882,10 @@ spec:
           name: kagent-oauth2-proxy-templates
         name: custom-templates
       fullnameOverride: kagent-oauth2-proxy
+      image:
+        registry: gsoci.azurecr.io
+        repository: giantswarm/oauth2-proxy
+        tag: v7.15.5
       metrics:
         enabled: true
         serviceMonitor:
@@ -2354,6 +2376,37 @@ spec:
   dependsOn:
     - name: substrate-crds
     - name: agent-platform-connectivity
+  postRenderers:
+    - kustomize:
+        patches:
+        - patch: |-
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: atenet-egress
+            spec:
+              template:
+                spec:
+                  containers:
+                  - name: agentgateway
+                    resources:
+                      limits:
+                        ephemeral-storage: 256Mi
+                      requests:
+                        ephemeral-storage: 16Mi
+                  - name: ext-proc
+                    resources:
+                      limits:
+                        ephemeral-storage: 256Mi
+                      requests:
+                        ephemeral-storage: 16Mi
+                  volumes:
+                  - emptyDir:
+                      sizeLimit: 16Mi
+                    name: drain-signal
+          target:
+            kind: Deployment
+            name: atenet-egress
   valuesFrom:
     - kind: ConfigMap
       name: kagent-images
@@ -2368,6 +2421,20 @@ spec:
         preemptionPolicy: Never
       storageBackend: s3
       tolerations: []
+    atenetEgress:
+      drainSignal:
+        sizeLimit: 16Mi
+      extProc:
+        resources:
+          limits:
+            ephemeral-storage: 256Mi
+          requests:
+            ephemeral-storage: 16Mi
+      resources:
+        limits:
+          ephemeral-storage: 256Mi
+        requests:
+          ephemeral-storage: 16Mi
     createNamespace: false
     credentialProvider:
       namespacePolicies:
