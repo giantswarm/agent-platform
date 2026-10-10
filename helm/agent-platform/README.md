@@ -459,6 +459,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.workspace-manager.versionRange | string | `">=0.1.1 <1.0.0"` |  |
 | components.workspace-manager.valuesFrom | string | `"workspace-manager"` |  |
 | components.workspace-manager.dependsOn[0] | string | `"muster"` |  |
+| components.workspace-manager.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
 | components.workspace-manager.gatedValues[0] | string | `"workspace-manager"` |  |
 | components.workspace-manager.gatedValues[1] | string | `"workspaceManager"` |  |
 | components.workspace-manager.gatedValues[2] | string | `"workspaces"` |  |
