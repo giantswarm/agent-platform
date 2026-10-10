@@ -243,14 +243,6 @@ its sync and cleanup Jobs live there too. */ -}}
 {{- fail (printf "workspace-manager.workspaces.namespace (%s) differs from the kagent namespace (%s), where every Session runs and mounts its workspace: leave workspace-manager.workspaces.namespace unset" $own $ns) -}}
 {{- end -}}
 {{- $_ := set $derived "workspaces" (dict "namespace" $ns) -}}
-{{- /* The class every workspace volume is claimed from: the platform's
-workspaces.storage.storageClassName (giantswarm/agent-platform#900). */ -}}
-{{- $class := dig "storage" "storageClassName" "" (.root.Values.workspaces | default dict) -}}
-{{- $ownClass := dig "storage" "storageClassName" "" (index .root.Values "workspace-manager" | default dict) -}}
-{{- if and $ownClass (ne $ownClass $class) -}}
-{{- fail (printf "workspace-manager.storage.storageClassName (%s) differs from workspaces.storage.storageClassName (%s), the class every workspace volume is claimed from: leave workspace-manager.storage.storageClassName unset" $ownClass $class) -}}
-{{- end -}}
-{{- $_ := set $derived "storage" (dict "storageClassName" $class) -}}
 {{- end -}}
 {{- if eq .name "klaus-gateway" -}}
 {{- $kg := .root.Values.klausGateway | default dict -}}

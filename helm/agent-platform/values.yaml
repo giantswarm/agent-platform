@@ -4874,13 +4874,15 @@ workspaces:
   # cluster rarely has such a class by default.
   storage:
     # The class's name. REQUIRED while the switch is on: the render fails
-    # without it. Forwarded to the workspace-manager release as
-    # storage.storageClassName — every workspace's PersistentVolumeClaim names
-    # it; a value set in the workspace-manager block must agree. kagent takes
-    # no value: a Session gets its workspace volume's reference (the CSI
-    # driver and the volume handle) from the grant the workspace-manager
-    # issues, and workspaces.substrate names the driver Substrate mounts it
-    # with.
+    # without it. The workspace-manager release takes it as
+    # storage.storageClassName, the class every workspace's
+    # PersistentVolumeClaim names, once its chart declares the key
+    # (giantswarm/workspace-manager#18): the forward and the floor that
+    # accepts it land together; the floor's schema refuses an unknown key.
+    # kagent takes no value: a Session gets its workspace volume's reference
+    # (the CSI driver and the volume handle) from the grant the
+    # workspace-manager issues, and workspaces.substrate names the driver
+    # Substrate mounts it with.
     storageClassName: ""
     # Whether the connectivity release renders the class from a preset below
     # (create: true), or the installation provides it (create: false, the

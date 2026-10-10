@@ -8,10 +8,10 @@ and workspaces.storage.storageClass.create renders it in the connectivity releas
 from a preset. Each case below pins one property:
 
 - the name is required: the switch on without it fails both charts naming the key;
-  the meta chart forwards it to the workspace-manager release as
-  storage.storageClassName (an own value must agree) and the whole block to the
-  connectivity release; with the switch off a preset renders nothing anywhere
-  (the off render's byte-identity is verify-workspace-manager's);
+  the meta chart forwards the block to the connectivity release and nothing of it
+  to the workspace-manager release, whose chart declares no key for the class yet;
+  with the switch off a preset renders nothing anywhere (the off render's
+  byte-identity is verify-workspace-manager's);
 - the three presets (tests/fixtures/workspaces-storage-*-values.yaml) render ONE
   StorageClass of that name, Delete / Immediate / expandable, with the preset's
   provisioner, parameters and mount options: efs (efs.csi.aws.com, an access
@@ -160,18 +160,16 @@ def main(meta: str, connectivity: str) -> int:
     must_fail(connectivity, [*CONN, "--set", "workspaces.enabled=true"], "workspaces.storage.storageClassName is empty",
               "the connectivity chart: the switch on without a class", ci_values=False)
     on_docs = documents(helm(meta, ON))
-    must_have(on_docs[("HelmRelease", "workspace-manager")], (f"    storage:\n      storageClassName: {NAME}\n",), "the workspace-manager HelmRelease")
     must_have(on_docs[("HelmRelease", "agent-platform-connectivity")], (f"    workspaces:\n      enabled: true\n      storage:\n", f"        storageClassName: {NAME}\n"),
               "the connectivity HelmRelease")
-    helm(meta, [*ON, "--set", f"workspace-manager.storage.storageClassName={NAME}"])
-    must_fail(meta, [*ON, "--set", "workspace-manager.storage.storageClassName=other"],
-              f"workspace-manager.storage.storageClassName (other) differs from workspaces.storage.storageClassName ({NAME})", "a disagreeing own class")
+    if "\n    storage:" in on_docs[("HelmRelease", "workspace-manager")]:
+        fail("the workspace-manager HelmRelease carries a storage block: its chart declares no key for the class yet")
     for chart, flags in ((meta, []), (connectivity, [*CONN])):
         off = helm(chart, [*flags, "-f", PRESETS["efs"][0], "--set", "workspaces.enabled=false"], ci_values=chart == meta)
         if storage_classes(off) or (chart == meta and re.search(r"^    workspaces:", off, re.M)):
             fail(f"{chart}: a preset with the switch off rendered a class or forwarded the block")
-    ok("the class is required with the switch on in both charts; the meta chart forwards it to workspace-manager as storage.storageClassName "
-       "(an own value must agree) and the block to connectivity; off, a preset renders nothing")
+    ok("the class is required with the switch on in both charts; the meta chart forwards the block to connectivity and nothing of it "
+       "to workspace-manager; off, a preset renders nothing")
 
     # --- the presets --------------------------------------------------------------------------
     for preset, (fixture, provisioner, params, mount) in PRESETS.items():
