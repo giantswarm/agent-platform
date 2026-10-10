@@ -241,8 +241,6 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) >$(VERIFY_TMP)/vm-pe-img.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-img.out; exit 1; }
 	@if ! grep -q "name: kagent-pg-image-volume" $(VERIFY_TMP)/vm-pe-img.out; then \
 		echo "FAIL: no volume-types exception for the ImageVolume pgvector path; CNPG instance pods would be denied admission"; exit 1; \
-	elif ! grep -q "cnpg.io/cluster: kagent-pg" $(VERIFY_TMP)/vm-pe-img.out; then \
-		echo "FAIL: the exception is not scoped to the Cluster's own pods"; exit 1; \
 	else echo "ok: ImageVolume exception scoped to cnpg.io/cluster"; fi
 	@echo "--> a rule with no ClusterPolicy in kyvernoPolicies.rules must fail (an exception naming no policy matches nothing)"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) --set kyvernoPolicies.rules.restricted-volumes=null >$(VERIFY_TMP)/vm-pe-rule.out 2>&1; then \
@@ -4261,3 +4259,9 @@ verify-all: ## Run every verify-* target of this file, the set CI runs, each wit
 		echo "<==== $$target: $$(( ($$(date +%s%N) - start) / 1000000 )) ms"; \
 	done
 	@echo "all $(words $(VERIFY_TARGETS)) verify targets passed."
+
+.PHONY: verify-postgres-restore
+verify-postgres: verify-postgres-restore
+verify-modes: verify-postgres-restore
+verify-postgres-restore: ## Assert the ImageVolume exception covers the source and its exact restore name.
+	@HELM="$(HELM)" python3 tests/verify-postgres-restore.py $(CONNECTIVITY_DIR)
