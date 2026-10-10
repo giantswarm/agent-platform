@@ -1394,6 +1394,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controllerRoute.parentRef.namespace | string | `"envoy-gateway-system"` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.AgentTemplateService" | list | `[]` |  |
+| kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.HarnessService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.ModelService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SessionService" | list | `[]` |  |
 | kagent.controllerRoute.grpc.services."kagent.api.v1alpha1.SystemService" | list | `[]` |  |
