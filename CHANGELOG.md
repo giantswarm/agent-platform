@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The chart registers the workspaces' CSI driver with Substrate** (giantswarm/agent-platform#888). With `workspaces.enabled` and `workspaces.substrate.csiDriver.name` set, the connectivity release renders the cluster-scoped `CSIDriverConfig` (`ate.dev/v1alpha1`) named after the driver from `csiDriver` (`controllerEndpoint`, `nodeSocketOverride`, `tls` with Substrate's pod identity), once Substrate's CRDs are there (`components.substrate` on, or a cluster that serves the API), so a Session mounts its workspace's volume without a hand-applied object. In the Cilium flavour ate-api-server's egress admits the cluster on the controller endpoint's port. The render fails naming the key on driver keys without a name, an endpoint without a port, `tls` without the pod identity, and a driver that is not the workspace StorageClass's provisioner (the preset's, or the provided class's on the cluster). No `--preview` argument is passed: the Substrate line carries no preview gate. `make verify-workspace-substrate`.
+
 ### Changed
 
 - **`components.kagent{,-crds}.versionRange` is `>=1.8.0 <1.9.0` (was `>=1.7.0 <1.8.0`), and the customer BOM pins kagent 1.8.0.** kagent 1.8.0 is built against the same Substrate 1.7 as 1.7.0 (`components.substrate{,-crds}.versionRange` stays `>=1.7.0 <1.8.0`; the WorkerPool's worker image stays `ateom-gvisor:1.7.0`), and its CRDs are unchanged, so the controller, UI and Harness images roll in place. A Session's egress policy is compiled without the template's artifact credentials (giantswarm/kagent-upstream#286): the credential goes with the golden boot's fetch only, never with a session's requests. A new Actor's inherited template allowlist is replaced instead of merged, and the execute path no longer writes dead revisions.

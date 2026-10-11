@@ -1,0 +1,19 @@
+# Substrate's workspace driver registered from the chart: the nfs preset's
+# class and the NFS CSI driver's controller behind an mTLS proxy, as the lab
+# runs it (tests/verify-workspace-substrate.py).
+workspaces:
+  enabled: true
+  storage:
+    storageClassName: workspaces-rwx
+    storageClass:
+      create: true
+      preset: nfs
+      nfs:
+        server: nfs-server.agentlab-workspaces.svc.cluster.local
+  substrate:
+    csiDriver:
+      name: nfs.csi.k8s.io
+      controllerEndpoint: tcp://csi-nfs-controller.agentlab-workspaces.svc.cluster.local:50051
+      nodeSocketOverride: unix:///var/lib/kubelet/plugins/csi-nfsplugin/csi.sock
+      tls:
+        serverName: csi-nfs-controller.agentlab-workspaces.svc
