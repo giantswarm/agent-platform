@@ -30,6 +30,13 @@ muster. Each case below pins one property of its wiring:
   nothing under muster.* moves (the muster release and the muster block forwarded
   to connectivity are unchanged) and no MCPServer renders anywhere for the
   component or a provider;
+- the Organizations (#886): workspaces.organizations [{name, memberGroups}] reaches
+  the release as the chart's organizations map and moves nothing else; the
+  component chart, rendered at the BOM's pin with the forwarded block, gives the
+  manager's ServiceAccount one Role and RoleBinding in kagent, nothing
+  cluster-wide and no binding of a member or group; a duplicate, groupless,
+  empty-group or non-DNS Organization, an own workspace-manager.organizations and
+  workspace-manager.rbac.create false fail the render;
 - inline credentials, a duplicate or non-DNS provider name, a provider without a
   kind fail the render naming the path; a workspaces.namespace that differs from
   kagent's fails naming the key, kagent.namespaceOverride moves it;
@@ -58,6 +65,8 @@ NAME = "workspace-manager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
 RANGE_RE = r'semver: "(>=[^"]+ <1\.0\.0)"'
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
+ORGS = "tests/fixtures/workspaces-organizations-values.yaml"
+BOM = "helm/agent-platform/examples/customer-bom.yaml"
 CI = ["--set", "components.flux.enabled=false"]
 ON = ["-f", FIXTURE]
 KAGENT = ["--set", "components.kagent.enabled=true", "--set", "kagent.harness.snapshotLocation=s3://ci/agents"]
@@ -120,6 +129,40 @@ def must_fail(chart: str, flags: list, needle: str, what: str, ci_values: bool =
     err = helm(chart, flags, expect_fail=True, ci_values=ci_values)
     if needle not in err:
         fail(f"{what} failed for another reason (expected {needle!r}):\n{err}")
+
+
+def component_rbac(hr: str) -> dict:
+    """Render the workspace-manager chart, at the BOM's pin, with the values block the
+    HelmRelease forwards, and return its RBAC: the Roles and RoleBindings as
+    `namespace/name`, the cluster-wide ones, and the kinds of every binding's subjects."""
+    with open(BOM, encoding="utf-8") as f:
+        pin = re.search(rf'^\s*{re.escape(NAME)}:\s*\{{\s*versionRange:\s*"([^"]+)"', f.read(), re.M).group(1)
+    values = block(hr, "values", 2)
+    if not values:
+        fail(f"the HelmRelease carries no values block:\n{hr}")
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(f"{tmp}/values.yaml", "w", encoding="utf-8") as f:
+            f.write("".join(line[4:] + "\n" for line in values.splitlines()[1:]))
+        r = subprocess.run([HELM, "pull", f"{REPOSITORY}/{NAME}", "--version", pin, "--untar", "-d", tmp], capture_output=True, text=True)
+        if r.returncode != 0:
+            fail(f"helm pull {NAME} {pin}: {r.stderr}")
+        r = subprocess.run([HELM, "template", NAME, f"{tmp}/{NAME}", "-n", "default", "-f", f"{tmp}/values.yaml"], capture_output=True, text=True)
+        if r.returncode != 0:
+            fail(f"the {NAME} chart {pin} refuses the forwarded values:\n{r.stderr}")
+    out = {"version": pin, "Role": [], "RoleBinding": [], "ClusterRole": [], "ClusterRoleBinding": [], "subjects": set()}
+    for doc in r.stdout.split("\n---\n"):
+        kind = re.search(r"^kind: (\S+)", doc, re.M)
+        if not kind or kind.group(1) not in ("Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding"):
+            continue
+        name = re.search(r"^  name: (\S+)", doc, re.M).group(1)
+        ns = re.search(r"^  namespace: (\S+)", doc, re.M)
+        if kind.group(1).startswith("Cluster"):
+            out[kind.group(1)].append(name)
+            continue
+        if not name.endswith(("-sync", "-signin")):
+            out[kind.group(1)].append(f"{ns.group(1) if ns else ''}/{name}")
+        out["subjects"] |= set(re.findall(r"^  - kind: (\S+)", doc, re.M))
+    return out
 
 
 def golden(meta: str, connectivity: str) -> None:
@@ -236,6 +279,40 @@ def main(meta: str, connectivity: str) -> int:
         fail("the lab's workspaces block (the switch with storage and substrate) rendered no workspace-manager release")
     helm(connectivity, ["--set", "ingress.parentRefs[0].name=x", "--set", f"components.{NAME}.enabled=true", "-f", lab, *IDENTITY], ci_values=False)
     ok("the switch beside workspaces.storage and workspaces.substrate (the lab's block): both schemas take it, the component renders, connectivity takes the forwarded block")
+
+    # --- the Organizations and the manager's RBAC (#886) --------------------------------------
+    orgs = documents(helm(meta, [*ON, "-f", ORGS, *IDENTITY]))
+    org_hr = orgs[("HelmRelease", NAME)]
+    must_have(org_hr, (
+        "    organizations:\n"
+        "      acme:\n        memberGroups:\n        - acme-ad:developers\n        - acme-ad:sre\n"
+        "      globex:\n        memberGroups:\n        - globex:engineers\n",
+    ), "the HelmRelease with two Organizations")
+    on_id = documents(helm(meta, [*ON, *IDENTITY]))
+    if "organizations:" in on_id[("HelmRelease", NAME)]:
+        fail("the HelmRelease forwards organizations without workspaces.organizations")
+    for key, doc in on_id.items():
+        if key not in {("HelmRelease", NAME), ("HelmRelease", "agent-platform-connectivity")} and orgs.get(key) != doc:
+            fail(f"workspaces.organizations changed {key}")
+    if any(kind in ("Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding") for kind, _ in orgs):
+        fail("the meta chart renders RBAC of its own: the manager's Role and RoleBinding are the component chart's")
+    rbac = component_rbac(org_hr)
+    if rbac["Role"] != [f"kagent/{NAME}"] or rbac["RoleBinding"] != [f"kagent/{NAME}"]:
+        fail(f"the component chart's manager RBAC in kagent is not one Role and one RoleBinding named {NAME}: {rbac}")
+    if rbac["ClusterRole"] or rbac["ClusterRoleBinding"]:
+        fail(f"the component chart renders cluster-wide RBAC: {rbac}")
+    if rbac["subjects"] - {"ServiceAccount"}:
+        fail(f"a binding of the component chart names a subject other than a ServiceAccount (a member, a group): {sorted(rbac['subjects'])}")
+    must_fail(meta, [*ON, "-f", ORGS, "--set", "workspaces.organizations[1].name=acme"], "is a duplicate", "a duplicate Organization")
+    must_fail(meta, [*ON, "-f", ORGS, "--set-json", "workspaces.organizations[1].memberGroups=[]"], "has no memberGroups", "an empty group list")
+    must_fail(meta, [*ON, "-f", ORGS, "--set-json", 'workspaces.organizations[1].memberGroups=[""]'], "memberGroups[0] is empty", "an empty group")
+    must_fail(meta, [*ON, "-f", ORGS, "--set", "workspaces.organizations[1].name=Glo_bex"], "is not a DNS label", "a non-DNS Organization name")
+    must_fail(meta, [*ON, "--set", f"{NAME}.organizations.acme.memberGroups[0]=g"], f"{NAME}.organizations is set", "an own organizations map")
+    must_fail(meta, [*ON, "--set", f"{NAME}.rbac.create=false"], f"{NAME}.rbac.create is false", "the manager's RBAC off")
+    helm(connectivity, ["--set", "ingress.parentRefs[0].name=x", "--set", f"components.{NAME}.enabled=true", "-f", FIXTURE, "-f", ORGS, *IDENTITY], ci_values=False)
+    ok(f"two Organizations forwarded as the organizations map, nothing else moved; the component chart {rbac['version']} renders one Role and RoleBinding "
+       "in kagent for the manager's ServiceAccount, nothing cluster-wide, no member binding; a duplicate, groupless, empty-group or non-DNS "
+       "Organization, an own organizations map and rbac.create false fail; connectivity takes the key")
 
     # --- inline credentials and bad instances -----------------------------------------
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[0].values.app.privateKey=abc"],

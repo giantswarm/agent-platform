@@ -168,7 +168,7 @@ def main(meta: str, connectivity: str) -> int:
     must_fail(connectivity, [*CONN, *EMPTIED], "workspaces.storage.storageClassName is empty",
               "the connectivity chart: the switch on with the class emptied", ci_values=False)
     on_docs = documents(helm(meta, ON))
-    must_have(on_docs[("HelmRelease", "agent-platform-connectivity")], (f"    workspaces:\n      enabled: true\n      storage:\n", f"        storageClassName: {NAME}\n"),
+    must_have(on_docs[("HelmRelease", "agent-platform-connectivity")], (f"    workspaces:\n      enabled: true\n      organizations: []\n      storage:\n", f"        storageClassName: {NAME}\n"),
               "the connectivity HelmRelease")
     wm = on_docs[("HelmRelease", "workspace-manager")]
     must_have(wm, (f"    storage:\n      storageClassName: {NAME}\n",), "the workspace-manager HelmRelease")

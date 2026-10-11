@@ -2790,6 +2790,28 @@
                 "enabled": {
                     "type": "boolean"
                 },
+                "organizations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "name",
+                            "memberGroups"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "memberGroups": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "name": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
                 "storage": {
                     "type": "object",
                     "additionalProperties": false,

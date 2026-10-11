@@ -1314,6 +1314,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaces.storage.storageClass.parameters | object | `{}` |  |
 | workspaces.storage.storageClass.mountOptions | list | `[]` |  |
 | workspaces.substrate | object | `{}` |  |
+| workspaces.organizations | list | `[]` |  |
 | workspace-manager.fullnameOverride | string | `"workspace-manager"` |  |
 | workspace-manager.observability.otel.endpoint | string | `"auto"` |  |
 | workspace-manager.observability.otel.protocol | string | `"auto"` |  |

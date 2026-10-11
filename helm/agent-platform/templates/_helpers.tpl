@@ -253,6 +253,11 @@ PersistentVolumeClaim names. */ -}}
 {{- end -}}
 {{- $_ := set $derived "storage" (dict "storageClassName" .) -}}
 {{- end -}}
+{{- /* The Organizations whose members manage workspaces, from
+workspaces.organizations: the manager checks a caller's groups against them. */ -}}
+{{- with (include "agent-platform.workspaces.organizations" .root | fromJson) -}}
+{{- $_ := set $derived "organizations" . -}}
+{{- end -}}
 {{- /* The public base URL the connectivity release routes the browser's
 provider sign-in on, so the manager's callback URLs are the routed ones. */ -}}
 {{- with (include "agent-platform.workspaceManager.baseURL" .root) -}}
@@ -1216,7 +1221,67 @@ keys as signin.keys {secretName, current} and its closed schema refuses the key.
 {{- with dig "grant" "signingKey" dict $wm -}}
 {{- include "agent-platform.workspaces.secretRef" (dict "ref" . "at" "workspace-manager.grant.signingKey") -}}
 {{- end -}}
+{{- include "agent-platform.workspaces.organizations.validate" . -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+The guards of workspaces.organizations, the Organizations whose members manage
+workspaces, run while workspaces are on: each entry a map with a DNS-label name
+(the Organization's) that no other entry has, and at least one member group,
+each a non-empty string. The list is the one source the workspace-manager's
+organizations map is derived from: an own workspace-manager.organizations fails.
+The manager writes every workspace object as its own ServiceAccount, through
+the component chart's Role and RoleBinding in the kagent namespace, so
+workspace-manager.rbac.create false fails too. Emits nothing; fails naming the
+path.
+*/}}
+{{- define "agent-platform.workspaces.organizations.validate" -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- if $wm.organizations -}}
+{{- fail "workspace-manager.organizations is set: the Organizations and their member groups are workspaces.organizations [{name, memberGroups}], which the meta chart forwards as the workspace-manager's organizations map; move them there and leave workspace-manager.organizations unset" -}}
+{{- end -}}
+{{- if eq (toString (dig "rbac" "create" true $wm)) "false" -}}
+{{- fail "workspace-manager.rbac.create is false: the workspace-manager writes every Workspace, its volume and its sync Jobs in the kagent namespace as its own ServiceAccount, which only the component chart's Role and RoleBinding there allow, and members are bound to nothing; leave workspace-manager.rbac.create unset" -}}
+{{- end -}}
+{{- $names := dict -}}
+{{- range $i, $o := ((.Values.workspaces | default dict).organizations | default list) -}}
+{{- if not (kindIs "map" $o) -}}
+{{- fail (printf "workspaces.organizations[%d] is not a map: an Organization is {name, memberGroups}" $i) -}}
+{{- end -}}
+{{- $name := toString ($o.name | default "") -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" $name) -}}
+{{- fail (printf "workspaces.organizations[%d].name %q is not a DNS label: it is the Organization's name, which every workspace records" $i $name) -}}
+{{- end -}}
+{{- if hasKey $names $name -}}
+{{- fail (printf "workspaces.organizations[%d].name %q is a duplicate: an Organization is listed once, with every group of its members" $i $name) -}}
+{{- end -}}
+{{- $_ := set $names $name true -}}
+{{- $groups := $o.memberGroups | default list -}}
+{{- if not $groups -}}
+{{- fail (printf "workspaces.organizations[%d] (%s) has no memberGroups: an Organization without a group has no members, so nobody could manage its workspaces; name the groups of the forwarded identity that make a caller a member, or remove the entry" $i $name) -}}
+{{- end -}}
+{{- range $j, $g := $groups -}}
+{{- if not (toString ($g | default "")) -}}
+{{- fail (printf "workspaces.organizations[%d] (%s).memberGroups[%d] is empty: a member group is a group name of the forwarded identity" $i $name $j) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The workspace-manager's organizations map, {<name>: {memberGroups}}, from
+workspaces.organizations, as JSON; empty ({}) without Organizations. For a
+validated list only.
+*/}}
+{{- define "agent-platform.workspaces.organizations" -}}
+{{- $out := dict -}}
+{{- range ((.Values.workspaces | default dict).organizations | default list) -}}
+{{- $groups := list -}}
+{{- range .memberGroups -}}{{- $groups = append $groups (toString .) -}}{{- end -}}
+{{- $_ := set $out (toString .name) (dict "memberGroups" $groups) -}}
+{{- end -}}
+{{- $out | toJson -}}
 {{- end -}}
 
 {{/*
