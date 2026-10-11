@@ -1518,6 +1518,7 @@ spec:
       imagePullSecrets: []
       instances: 3
       namespace: kagent
+      primaryUpdateMethod: switchover
       resources:
         limits:
           cpu: "1"
