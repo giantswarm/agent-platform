@@ -32,6 +32,7 @@ spec:
   # primary over when its node is drained, and its budgets stay on.
   enablePDB: false
   {{- end }}
+  {{- with .Values.postgres.primaryUpdateMethod }}
   # A change that rolls the instances (resources, image, extensions) restarts
   # the replicas first, then updates the primary without waiting for a person
   # (unsupervised). switchover promotes an updated replica and restarts the old
@@ -40,7 +41,8 @@ spec:
   # instance there is no replica to promote: the primary restarts in place
   # either way.
   primaryUpdateStrategy: unsupervised
-  primaryUpdateMethod: {{ .Values.postgres.primaryUpdateMethod | default "switchover" }}
+  primaryUpdateMethod: {{ . }}
+  {{- end }}
   {{- with include "agent-platform.postgres.serviceAccountAnnotations" . }}
   # The operator creates a ServiceAccount named after the Cluster; these
   # annotations bind it to a cloud identity (IRSA role, Azure workload identity)

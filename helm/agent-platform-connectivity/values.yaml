@@ -1824,6 +1824,7 @@ postgres:
   # primary in place, and writes fail until it is Ready again (minutes). With
   # instances: 1 there is no replica to switch over to, so the primary
   # restarts in place either way and writes fail for that time.
+  # null renders neither field: the operator's defaults (restart) apply.
   primaryUpdateMethod: switchover  # @schema enum: [switchover, restart]
   storage:
     size: 20Gi
