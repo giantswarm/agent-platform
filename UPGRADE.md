@@ -15,6 +15,20 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.127.x → \<next\> (Substrate 1.8.1: snapshots migrate on the roll)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.8 from 1.8.1 (giantswarm/agent-platform#918). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.8.1 (`ateom-gvisor:1.8.1`); the kagent CRDs and the kagent release are unchanged. Substrate 1.8 lays a snapshot out as one tar per container and one per durable volume (giantswarm/substrate#260), and 1.8.1 migrates what 1.7 wrote by itself:
+
+- **Each actor's durable snapshot in the 1.7 layout is converted on its first resume** (giantswarm/substrate#277): a suspended agent resumes with its conversation and its volumes.
+- **Every ActorTemplate's golden written in the old layout is re-taken on the new workers** (giantswarm/substrate#282). A new conversation created while its golden is re-taken answers `Unavailable` and succeeds on retry.
+
+1.8 also brings the egress gateway's Google access token provider, which a Vertex AI agent on the Substrate runtime needs (giantswarm/substrate#250), and the egress gateway's bounded ephemeral storage: the chart renders the bound itself, so the substrate HelmRelease's postRenderer patch is gone.
+
+### Operator action
+
+- **None.** No snapshot reset and no manual step: the conversion and the re-take run on the roll.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.8.1`, never `1.8.0`, which refuses a 1.7 snapshot on restore and re-takes no golden; `kagent` and `kagent-crds` stay at `1.8.0`.
+
 ## 4.127.x → \<next\> (the workspace grant signing key)
 
 giantswarm/agent-platform#935: with `workspaces.enabled`, provider instances and `oauth.enabled`, the connectivity release creates its own grant signing key Secret, `workspaceManager.grantKey.secretName` (`workspace-manager-grant-keys`) with the entry `workspaceManager.grantKey.key` (`key-1`), kept across upgrades and on uninstall, and the meta chart names it in `workspace-manager.grant.signingKey` for the manager, which then serves `authorize_workspace` and its key set. An installation that references a Secret of its own there keeps it: the release creates nothing for a reference to another Secret than its own, and never replaces a Secret it does not own (giantswarm/agent-platform#944).

@@ -71,8 +71,11 @@ FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # Substrate minors released on the upstream pin of an earlier minor: a minor of
 # the line is a re-pin except these. 1.2 and 1.3 are the line on
 # kagent-dev/substrate v0.2.0-beta5, 1.1's upstream (giantswarm/agentlab#284,
-# giantswarm/agent-platform#756); the next re-pin is 1.4.
-SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}}
+# giantswarm/agent-platform#756); the next re-pin is 1.4. 1.8 is the line on
+# kagent-dev/substrate v0.4.0-alpha1, 1.7's upstream (the snapshot layout and
+# its restore conversion are the line's own), so kagent 1.8, published against
+# 1.7.0, speaks its ate-api contract.
+SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}, (1, 8): {(1, 7)}}
 
 
 def tuple_of(version: str) -> str:

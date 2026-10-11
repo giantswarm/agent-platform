@@ -1964,7 +1964,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.7.0
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.8.1
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -2381,37 +2381,6 @@ spec:
   dependsOn:
     - name: substrate-crds
     - name: agent-platform-connectivity
-  postRenderers:
-    - kustomize:
-        patches:
-        - patch: |-
-            apiVersion: apps/v1
-            kind: Deployment
-            metadata:
-              name: atenet-egress
-            spec:
-              template:
-                spec:
-                  containers:
-                  - name: agentgateway
-                    resources:
-                      limits:
-                        ephemeral-storage: 256Mi
-                      requests:
-                        ephemeral-storage: 16Mi
-                  - name: ext-proc
-                    resources:
-                      limits:
-                        ephemeral-storage: 256Mi
-                      requests:
-                        ephemeral-storage: 16Mi
-                  volumes:
-                  - emptyDir:
-                      sizeLimit: 16Mi
-                    name: drain-signal
-          target:
-            kind: Deployment
-            name: atenet-egress
   valuesFrom:
     - kind: ConfigMap
       name: kagent-images
@@ -2987,7 +2956,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.7.0 <1.8.0"
+    semver: ">=1.8.1 <1.9.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3010,7 +2979,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.7.0 <1.8.0"
+    semver: ">=1.8.1 <1.9.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
