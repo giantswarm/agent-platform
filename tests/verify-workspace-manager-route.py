@@ -250,8 +250,11 @@ def main(meta: str, connectivity: str) -> int:
     rotated = documents(helm(connectivity, [*CONN, "--set", f"{NAME}.signin.keys.current=key-2"]))[("Secret", "workspace-manager-signin-keys")]
     if "  key-2: " not in rotated:
         fail("signin.keys.current does not name the generated key")
-    for flags, what in ((["--set", f"{NAME}.providers=null"], "without providers"),
-                        (["--set", f"{NAME}.oauth.enabled=false"], "with oauth off"),
+    # The fixture's own grant signing key goes with the providers and OAuth: the manager
+    # refuses it without them, and so does the render (verify-workspace-grant-key).
+    no_grant = ["--set", f"{NAME}.grant.signingKey=null"]
+    for flags, what in ((["--set", f"{NAME}.providers=null", *no_grant], "without providers"),
+                        (["--set", f"{NAME}.oauth.enabled=false", *no_grant], "with oauth off"),
                         (["--set", "workspaceManager.signinKeys.create=false"], "with signinKeys.create false")):
         if any(k == "Secret" and "signin" in n for k, n in documents(helm(connectivity, [*CONN, *flags]))):
             fail(f"the sign-in keys Secret renders {what}")

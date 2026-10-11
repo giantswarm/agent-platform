@@ -91,4 +91,9 @@ Workspace provider sign-in, base URL {{ $wmBase }} (routed: /signin, /connect/<i
     {{ .name }}: {{ $wmBase }}/callback/{{ .name }}
 {{- end }}
 {{- end }}
+{{- with (include "agent-platform.workspaceManager.grantSigningKey" . | fromJson) }}
+{{- if .name }}
+  Workspace grants: signed with the key {{ .name }}/{{ .key }} (a Secret in the platform's namespace), published at {{ $wmBase }}/.well-known/jwks.json
+{{- end }}
+{{- end }}
 {{- end }}

@@ -5129,7 +5129,15 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   # without url). Empty, the default, configures none.
   providers: []
   # The key the workspace grant a Session carries is signed with: {name, key}
-  # of a Secret. Empty takes the chart's default.
+  # of a Secret in the platform's namespace whose entry is a PEM private key
+  # (EC P-256 or P-384, or RSA of at least 2048 bits); the manager publishes
+  # every other entry of that Secret beside it at <baseURL>/.well-known/jwks.json.
+  # Empty, the default: with providers and oauth.enabled the connectivity
+  # release creates the Secret workspaceManager.grantKey names and this chart
+  # forwards that reference; without them it forwards none, since the manager
+  # refuses a key without providers and OAuth (a reference set here without
+  # them fails the render). Set it to sign with a Secret of the installation's
+  # own.
   grant:
     signingKey: {}
   # The controller's reconcile period (a Go duration; 10m is the chart's
@@ -5195,6 +5203,21 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
   # the installation.
   signinKeys:
     create: true
+  # The grant signing key Secret workspace-manager.grant.signingKey names when
+  # the installation sets none, created in the platform's namespace with
+  # providers and oauth.enabled: the entry named `key` is generated (an EC
+  # P-256 private key, PEM) when the Secret lacks it and every entry it holds
+  # is kept, also across an uninstall, since the manager publishes every entry
+  # at /.well-known/jwks.json and a grant signed before a rotation verifies
+  # until it expires (grant.ttl). A key rotates by naming the next id in `key`;
+  # the old entry goes by hand once its last grant expired. A Secret of the
+  # name another owner holds fails the render. false creates nothing and
+  # forwards nothing: the installation names its own Secret in
+  # workspace-manager.grant.signingKey.
+  grantKey:
+    create: true
+    secretName: workspace-manager-grant-keys
+    key: key-1
   # Network policy inputs; the policies render under networkPolicy (enabled +
   # flavor). Ingress: muster (MCPServer on), kagent's controller (the token and
   # JWKS endpoints a Session's credential is exchanged at, kagent on), the
