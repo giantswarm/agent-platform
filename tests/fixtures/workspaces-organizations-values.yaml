@@ -1,0 +1,9 @@
+# Two Organizations whose members manage workspaces, on top of
+# tests/fixtures/workspaces-values.yaml: forwarded to the workspace-manager
+# release as its organizations map (tests/verify-workspace-manager.py).
+workspaces:
+  organizations:
+    - name: acme
+      memberGroups: [acme-ad:developers, acme-ad:sre]
+    - name: globex
+      memberGroups: [globex:engineers]

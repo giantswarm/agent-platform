@@ -1700,6 +1700,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspaces.storage.storageClass.parameters | object | `{}` |  |
 | workspaces.storage.storageClass.mountOptions | list | `[]` |  |
 | workspaces.substrate | object | `{}` |  |
+| workspaces.organizations | list | `[]` |  |
 | workspace-manager.fullnameOverride | string | `"workspace-manager"` |  |
 | workspace-manager.oauth.enabled | bool | `true` |  |
 | workspace-manager.oauth.baseURL | string | `""` |  |

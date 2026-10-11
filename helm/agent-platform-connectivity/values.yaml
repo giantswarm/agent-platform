@@ -2991,6 +2991,10 @@ workspaces:
   # nodeSocketOverride, tls), giantswarm/agent-platform#888. Declared open
   # here; its keys are that slice's.
   substrate: {}  # @schema additionalProperties: true
+  # The Organizations whose members manage workspaces ({name, memberGroups}),
+  # which the meta chart forwards to the workspace-manager release; this chart
+  # renders nothing of them. The meta chart's copy documents the key.
+  organizations: []  # @schema item: object; itemRequired: [name, memberGroups]; itemProperties: {"name": {"type": "string"}, "memberGroups": {"type": "array", "items": {"type": "string"}}}
 
 # The workspace-manager component chart's values (giantswarm/workspace-manager),
 # as the meta chart forwards them to that release; this chart reads

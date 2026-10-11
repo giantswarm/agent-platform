@@ -4976,6 +4976,28 @@ workspaces:
   # nodeSocketOverride, tls), giantswarm/agent-platform#888. Declared open
   # here; its keys are that slice's.
   substrate: {}  # @schema additionalProperties: true
+  # The Organizations whose members manage workspaces: each its name (a DNS
+  # label, the Organization's) and memberGroups, the groups of the forwarded
+  # identity that make a caller a member. A member creates, edits, deletes and
+  # selects the workspaces of their Organization, through the
+  # workspace-manager only; an Organization not listed has no members. The
+  # meta chart forwards the list to the workspace-manager release as its
+  # organizations map ({<name>: {memberGroups}}); a
+  # workspace-manager.organizations of its own fails the render. An empty
+  # memberGroups or a duplicate name fails the render. Nothing by default: the
+  # installation lists its Organizations, e.g.
+  #   organizations:
+  #     - name: acme
+  #       memberGroups: [acme-ad:developers, acme-ad:sre]
+  #
+  # Every workspace, its volume, its sync Jobs and every Session live in the
+  # kagent namespace, where Organization membership cannot be namespace RBAC:
+  # the workspace-manager checks the caller's groups itself and writes every
+  # object as its own ServiceAccount, bound by the component chart's Role and
+  # RoleBinding in the kagent namespace (workspace-manager.rbac.create, which
+  # the render keeps on). No member and no group is bound to anything, and
+  # nothing is granted cluster-wide.
+  organizations: []  # @schema item: object; itemRequired: [name, memberGroups]; itemProperties: {"name": {"type": "string"}, "memberGroups": {"type": "array", "items": {"type": "string"}}}
 
 # Values forwarded verbatim to the workspace-manager component release
 # (giantswarm/workspace-manager), MCP only: tools appear as
