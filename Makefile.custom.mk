@@ -140,11 +140,15 @@ endef
 # and minAvailable: 1 on a golden from before; both sides render it the same.
 # Drop the valkey pair once GOLDEN_REF carries #697.
 WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valkey.podDisruptionBudget.minAvailable=null --set valkey.podDisruptionBudget.maxUnavailable=1
-# The Cluster's primaryUpdateStrategy and primaryUpdateMethod render here
-# (giantswarm/agent-platform#904) and not on a golden from before, whose schema
-# refuses the key; null renders neither, so only this side's render holds it.
-# Drop it once GOLDEN_REF carries #904.
-WIRING_PG_GOLDEN_HOLD_NEW := --set postgres.primaryUpdateMethod=null
+# Keys this side's schema declares and a golden from before refuses (held null,
+# which renders nothing): the golden's render tries them first and falls back to
+# a render without them where its schema refuses them, so the hold is applied on
+# both sides as soon as GOLDEN_REF carries the key. A hold applied to this side
+# alone turns red the moment its change merges: origin/main then renders the key
+# and the held side does not (giantswarm/agent-platform#904's hold did, on the
+# merge commit's pipeline). Drop an entry once GOLDEN_REF carries it, so the
+# comparison covers the key again. Empty: GOLDEN_REF carries #904.
+WIRING_PG_GOLDEN_HOLD_NEW :=
 # muster's kubernetes-flavour egress policy renders here (giantswarm/agent-platform#840)
 # and not on a golden from before; it is left out of both sides. Drop it once
 # GOLDEN_REF carries #840.
@@ -3067,6 +3071,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		rm -rf $(VERIFY_TMP)/vw-pg-ref && git worktree add -q --detach $(VERIFY_TMP)/vw-pg-ref $(GOLDEN_REF) && \
 		for flavor in cilium kubernetes; do \
 			$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) $(WIRING_PG_GOLDEN_HOLD_NEW) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-new-$$flavor.out; \
+			$(HELM) template t $(VERIFY_TMP)/vw-pg-ref/$(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) $(WIRING_PG_GOLDEN_HOLD_NEW) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-old-$$flavor.out || \
 			$(HELM) template t $(VERIFY_TMP)/vw-pg-ref/$(CONNECTIVITY_DIR) $(WIRING_PG) $(WIRING_PG_GOLDEN_HOLD) --set networkPolicy.flavor=$$flavor 2>/dev/null >$(VERIFY_TMP)/vw-pg-old-$$flavor.out; \
 			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-new-$$flavor.out "$(WIRING_PG_GOLDEN_DROP)"; \
 			$(GOLDEN_DROP) $(VERIFY_TMP)/vw-pg-old-$$flavor.out "$(WIRING_PG_GOLDEN_DROP)"; \
