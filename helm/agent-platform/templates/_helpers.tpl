@@ -263,6 +263,14 @@ provider sign-in on, so the manager's callback URLs are the routed ones. */ -}}
 {{- with (include "agent-platform.workspaceManager.baseURL" .root) -}}
 {{- $_ := set $derived "oauth" (dict "baseURL" .) -}}
 {{- end -}}
+{{- /* The grant signing key: the block's own Secret reference, else the one
+the connectivity release creates with providers and oauth.enabled
+(workspaceManager.grantKey) — none without them, which the manager refuses. */ -}}
+{{- with (include "agent-platform.workspaceManager.grantSigningKey" .root | fromJson) -}}
+{{- if .name -}}
+{{- $_ := set $derived "grant" (dict "signingKey" (dict "name" .name "key" .key)) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "klaus-gateway" -}}
 {{- $kg := .root.Values.klausGateway | default dict -}}
@@ -409,17 +417,44 @@ receives it as oauth.baseURL, NOTES prints it. Empty when neither is set.
 {{- end -}}
 
 {{/*
+The key the workspace-manager signs its workspace grants with, as the
+component release receives it (workspace-manager.grant.signingKey, a Secret
+reference {name, key}): the block's own when it names one; else, with
+provider instances, oauth.enabled and workspaceManager.grantKey.create, the
+Secret the connectivity release creates (workspaceManager.grantKey.secretName
+and .key); else empty — the manager refuses a key without providers and
+OAuth. The connectivity chart derives the same reference for the Secret it
+creates (templates/workspace-manager/_helpers.tpl, grantSigningKey), so both
+name one Secret. Emits JSON: {name, key}, or {}.
+*/}}
+{{- define "agent-platform.workspaceManager.grantSigningKey" -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $own := dig "grant" "signingKey" dict $wm | default dict -}}
+{{- $gk := dig "grantKey" dict (.Values.workspaceManager | default dict) -}}
+{{- $out := dict -}}
+{{- if and (kindIs "map" $own) (or $own.name $own.key) -}}
+{{- $out = dict "name" (toString ($own.name | default "")) "key" (toString ($own.key | default "")) -}}
+{{- else if and $wm.providers (dig "oauth" "enabled" false $wm) (dig "create" true $gk) -}}
+{{- $out = dict "name" (toString (dig "secretName" "" $gk)) "key" (toString (dig "key" "" $gk)) -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
 The guards of the browser's provider sign-in, while workspaces are on, as the
 connectivity chart runs them (templates/workspace-manager/_helpers.tpl,
-validateCallback and validateSigninKeys) but here, where a failure is seen
-instead of inside the connectivity release:
+validateCallback, validateSigninKeys and validateGrantKey) but here, where a
+failure is seen instead of inside the connectivity release:
 - a provider instance with an OAuth client (values.oauth.clientID) needs a
   callback a browser reaches: a base URL (workspace-manager.oauth.baseURL or
   global.domain), routed by the chart (workspaceManager.route.enabled) or set
   explicitly for a route of the installation's own, https (http only on a
   loopback host) on a host that is not a cluster name;
 - with providers and oauth.enabled, workspace-manager.signin.keys names the
-  Secret and a key id (a lower-case DNS label of at most 32 characters).
+  Secret and a key id (a lower-case DNS label of at most 32 characters);
+- workspace-manager.grant.signingKey, when set, only with providers and
+  oauth.enabled (the manager refuses to start with a key without them), and
+  the reference the manager gets names a Secret and a data key.
 Emits nothing; fails naming the instance or key and the fix.
 */}}
 {{- define "agent-platform.validateWorkspaceSignIn" -}}
@@ -454,6 +489,20 @@ Emits nothing; fails naming the instance or key and the fix.
 {{- end -}}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,30}[a-z0-9])?$" (toString ($keys.current | default ""))) -}}
 {{- fail (printf "workspace-manager.signin.keys.current %q is not a key id: a lower-case DNS label of at most 32 characters, the data key of the sealing key in Secret %s" (toString ($keys.current | default "")) $keys.secretName) -}}
+{{- end -}}
+{{- end -}}
+{{- $grant := dig "grant" "signingKey" dict $wm | default dict -}}
+{{- if and (kindIs "map" $grant) (or $grant.name $grant.key) (not (and $wm.providers (dig "oauth" "enabled" false $wm))) -}}
+{{- fail (printf "workspace-manager.grant.signingKey names %s/%s but the manager refuses a grant signing key without provider instances and oauth.enabled (--grant-signing-key needs providers and --enable-oauth): add workspace-manager.providers, or leave the key empty" (toString ($grant.name | default "")) (toString ($grant.key | default ""))) -}}
+{{- end -}}
+{{- with (include "agent-platform.workspaceManager.grantSigningKey" . | fromJson) -}}
+{{- if .name -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" .name) -}}
+{{- fail (printf "workspace-manager.grant.signingKey.name %q is not a Secret name (a DNS subdomain)" .name) -}}
+{{- end -}}
+{{- if not (regexMatch "^[-._a-zA-Z0-9]+$" .key) -}}
+{{- fail (printf "workspace-manager.grant.signingKey.key %q is not a Secret data key (letters, digits, -, _ and .): the entry of Secret %s holding the PEM private key" .key .name) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

@@ -3088,6 +3088,15 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
   # key kept (templates/workspace-manager/signin-keys.yaml).
   signinKeys:
     create: true
+  # Create the grant signing key Secret workspace-manager.grant.signingKey
+  # names, with providers and oauth.enabled: the entry named key generated
+  # when missing (an EC P-256 private key, PEM), every entry kept
+  # (templates/workspace-manager/grant-key.yaml). The Secret and entry are the
+  # installation's own reference when it sets one, else secretName and key.
+  grantKey:
+    create: true
+    secretName: workspace-manager-grant-keys
+    key: key-1
   # Network policy inputs; the policies render under networkPolicy (enabled +
   # flavor). Ingress: muster (MCPServer on), kagent's controller (the token and
   # JWKS endpoints a Session's credential is exchanged at, kagent on), the

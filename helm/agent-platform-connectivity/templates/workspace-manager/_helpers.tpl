@@ -177,6 +177,70 @@ case in which the manager requires signin.keys.
 {{- end -}}
 
 {{/*
+The key the manager signs its workspace grants with, as the component takes it
+(workspace-manager.grant.signingKey: {name, key} of a Secret in the release
+namespace whose entry is a PEM private key): the block's own reference when it
+names one; else, with provider instances, oauth.enabled and
+workspaceManager.grantKey.create, the Secret and entry this chart creates
+(workspaceManager.grantKey.secretName and .key); else empty, and the manager
+serves no grant — it refuses a key without providers and OAuth. The meta
+chart derives the same reference for the component release. Emits JSON:
+{name, key}, or {}.
+*/}}
+{{- define "agent-platform.workspaceManager.grantSigningKey" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- $own := dig "grant" "signingKey" dict $chart | default dict -}}
+{{- $out := dict -}}
+{{- if and (kindIs "map" $own) (or $own.name $own.key) -}}
+{{- $out = dict "name" (toString ($own.name | default "")) "key" (toString ($own.key | default "")) -}}
+{{- else if and (dig "providers" list $chart) (include "agent-platform.workspaceManager.oauthEnabled" .) (dig "grantKey" "create" true .Values.workspaceManager) -}}
+{{- $out = dict "name" (toString (dig "grantKey" "secretName" "" .Values.workspaceManager)) "key" (toString (dig "grantKey" "key" "" .Values.workspaceManager)) -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+Truthy when this chart creates the grant signing key Secret: the component on
+with provider instances, oauth.enabled and workspaceManager.grantKey.create,
+and a Secret to name (grantSigningKey).
+*/}}
+{{- define "agent-platform.workspaceManager.grantKeyEnabled" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- $ref := include "agent-platform.workspaceManager.grantSigningKey" . | fromJson -}}
+{{- if and (include "agent-platform.workspaceManager.enabled" .) (dig "providers" list $chart) (include "agent-platform.workspaceManager.oauthEnabled" .) (dig "grantKey" "create" true .Values.workspaceManager) $ref.name }}true{{ end -}}
+{{- end -}}
+
+{{/*
+The grant signing key guard: workspace-manager.grant.signingKey, when set, is
+a Secret reference with both name and key, and only with provider instances
+and oauth.enabled, without which the manager refuses to start with a key; the
+reference the manager gets (grantSigningKey) names a Secret and a data key.
+Emits nothing; fails naming the key and the fix.
+*/}}
+{{- define "agent-platform.workspaceManager.validateGrantKey" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- $own := dig "grant" "signingKey" dict $chart | default dict -}}
+{{- if not (kindIs "map" $own) -}}
+{{- fail "workspace-manager.grant.signingKey is a credential: it takes a Secret reference {name, key} of a Secret in the platform's namespace whose entry is a PEM private key, never the value; leave it empty and the connectivity release creates the key (workspaceManager.grantKey)" -}}
+{{- end -}}
+{{- if and (or $own.name $own.key) (not (and $own.name $own.key)) -}}
+{{- fail (printf "workspace-manager.grant.signingKey %s is not a Secret reference: it takes {name, key}, both set — or nothing, and the connectivity release creates the key (workspaceManager.grantKey)" ($own | toJson)) -}}
+{{- end -}}
+{{- $ref := include "agent-platform.workspaceManager.grantSigningKey" . | fromJson -}}
+{{- if $ref.name -}}
+{{- if not (and (dig "providers" list $chart) (include "agent-platform.workspaceManager.oauthEnabled" .)) -}}
+{{- fail (printf "workspace-manager.grant.signingKey names %s/%s but the manager refuses a grant signing key without provider instances and oauth.enabled (--grant-signing-key needs providers and --enable-oauth): add workspace-manager.providers, or leave the key empty" $ref.name $ref.key) -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $ref.name) -}}
+{{- fail (printf "workspace-manager.grant.signingKey.name %q is not a Secret name (a DNS subdomain)" $ref.name) -}}
+{{- end -}}
+{{- if not (regexMatch "^[-._a-zA-Z0-9]+$" $ref.key) -}}
+{{- fail (printf "workspace-manager.grant.signingKey.key %q is not a Secret data key (letters, digits, -, _ and .): the entry of Secret %s holding the PEM private key" $ref.key $ref.name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The callback guard: a provider instance whose OAuth client is set
 (values.oauth.clientID) needs a callback a browser reaches —
 <baseURL>/callback/<instance> on a public host this chart routes

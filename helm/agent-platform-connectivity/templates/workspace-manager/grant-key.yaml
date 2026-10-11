@@ -1,0 +1,42 @@
+{{- /*
+The key the workspace-manager signs its workspace grants with, the Secret
+workspace-manager.grant.signingKey names (the installation's own reference,
+else workspaceManager.grantKey.secretName and .key): its entry a PEM private
+key, EC P-256, generated when the Secret lacks the entry (a lookup of the live
+object). Every entry the Secret already holds is kept: the manager publishes
+each of them at /.well-known/jwks.json, so a grant signed before a rotation
+verifies until it expires; a rotation names the next id and removes the old
+entry by hand once its last grant expired. No value passes through values.
+Kept on uninstall: a lost key invalidates every grant in flight. A Secret of
+the name another owner holds is never replaced: the render fails naming
+workspaceManager.grantKey.create: false.
+*/ -}}
+{{- if (include "agent-platform.workspaceManager.grantKeyEnabled" .) }}
+{{- $ref := include "agent-platform.workspaceManager.grantSigningKey" . | fromJson }}
+{{- $data := dict }}
+{{- with (lookup "v1" "Secret" .Release.Namespace $ref.name) }}
+{{- $owner := dig "metadata" "annotations" "meta.helm.sh/release-name" "" . }}
+{{- $ownerNs := dig "metadata" "annotations" "meta.helm.sh/release-namespace" "" . }}
+{{- if or (ne $owner $.Release.Name) (ne $ownerNs $.Release.Namespace) }}
+{{- fail (printf "Secret %s/%s (workspace-manager.grant.signingKey) exists and is not this release's (%s): the render never replaces another owner's key; set workspaceManager.grantKey.create: false to sign with it as it is, or name another Secret" $.Release.Namespace $ref.name (ternary (printf "Helm release %s/%s" $ownerNs $owner) "no Helm release" (ne $owner ""))) }}
+{{- end }}
+{{- $data = .data | default dict }}
+{{- end }}
+{{- if not (hasKey $data $ref.key) }}
+{{- $_ := set $data $ref.key (genPrivateKey "ecdsa" | b64enc) }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $ref.name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  {{- range $id := keys $data | sortAlpha }}
+  {{ $id }}: {{ index $data $id }}
+  {{- end }}
+{{- end }}

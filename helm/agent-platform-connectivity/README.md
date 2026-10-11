@@ -1720,6 +1720,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspaceManager.route.enabled | bool | `true` |  |
 | workspaceManager.route.parentRefs | list | `[]` |  |
 | workspaceManager.signinKeys.create | bool | `true` |  |
+| workspaceManager.grantKey.create | bool | `true` |  |
+| workspaceManager.grantKey.secretName | string | `"workspace-manager-grant-keys"` |  |
+| workspaceManager.grantKey.key | string | `"key-1"` |  |
 | workspaceManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |

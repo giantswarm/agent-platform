@@ -11,6 +11,7 @@ provider's hosts.
   {{- $_ := include "agent-platform.workspaceManager.providerHosts" . }}
   {{- include "agent-platform.workspaceManager.validateCallback" . }}
   {{- include "agent-platform.workspaceManager.validateSigninKeys" . }}
+  {{- include "agent-platform.workspaceManager.validateGrantKey" . }}
 
   {{- /* The MCP endpoint is the server's only surface: without muster nothing
          calls the tools (the MCPServer CRD ships with muster). */ -}}

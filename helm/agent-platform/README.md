@@ -1346,6 +1346,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaceManager.route.enabled | bool | `true` |  |
 | workspaceManager.route.parentRefs | list | `[]` |  |
 | workspaceManager.signinKeys.create | bool | `true` |  |
+| workspaceManager.grantKey.create | bool | `true` |  |
+| workspaceManager.grantKey.secretName | string | `"workspace-manager-grant-keys"` |  |
+| workspaceManager.grantKey.key | string | `"key-1"` |  |
 | workspaceManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |
