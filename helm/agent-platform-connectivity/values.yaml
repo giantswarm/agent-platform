@@ -1816,6 +1816,15 @@ postgres:
   namespace: kagent
   clusterName: kagent-pg
   instances: 3
+  # How the operator updates the primary when a change rolls the instances
+  # (resources, image, extensions), rendered as Cluster.spec.primaryUpdateMethod
+  # with primaryUpdateStrategy unsupervised. switchover promotes an
+  # already-updated replica and restarts the old primary as a replica, so
+  # writes pause for the switchover only (seconds); restart restarts the
+  # primary in place, and writes fail until it is Ready again (minutes). With
+  # instances: 1 there is no replica to switch over to, so the primary
+  # restarts in place either way and writes fail for that time.
+  primaryUpdateMethod: switchover  # @schema enum: [switchover, restart]
   storage:
     size: 20Gi
     # EKS: gp3. Azure: managed-premium. on-prem: rook-ceph or local-path.

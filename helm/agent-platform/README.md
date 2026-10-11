@@ -986,6 +986,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | postgres.namespace | string | `"kagent"` |  |
 | postgres.clusterName | string | `"kagent-pg"` |  |
 | postgres.instances | int | `3` |  |
+| postgres.primaryUpdateMethod | string | `"switchover"` |  |
 | postgres.storage.size | string | `"20Gi"` |  |
 | postgres.storage.storageClass | string | `""` |  |
 | postgres.image.name | string | `""` |  |

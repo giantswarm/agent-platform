@@ -2674,6 +2674,13 @@
                 "namespace": {
                     "type": "string"
                 },
+                "primaryUpdateMethod": {
+                    "type": "string",
+                    "enum": [
+                        "switchover",
+                        "restart"
+                    ]
+                },
                 "resources": {
                     "type": "object",
                     "additionalProperties": true

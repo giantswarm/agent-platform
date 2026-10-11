@@ -3603,6 +3603,26 @@ verify-postgres-ephemeral-storage: ## Assert the CNPG instance pods bound their 
 	@python3 tests/verify-postgres-ephemeral-storage.py $(VERIFY_TMP)/vpes-off.out $(VERIFY_TMP)/vpes-plugin.out $(VERIFY_TMP)/vpes-null.out $(CONNECTIVITY_DIR)/values.yaml $(CHART_DIR)/values.yaml
 	@echo "ok: $@"
 
+.PHONY: verify-postgres-primary-update
+verify-postgres: verify-postgres-primary-update
+verify-postgres-primary-update: ## Assert the CNPG Cluster updates its primary by switchover (giantswarm/agent-platform#904): by default the Cluster carries primaryUpdateStrategy unsupervised and primaryUpdateMethod switchover, postgres.primaryUpdateMethod=restart renders restart, a single-instance Cluster carries the same fields, both charts refuse any other method, and the meta chart forwards the same default. Needs PyYAML.
+	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@for c in "switchover:" "switchover:--set postgres.instances=1" "restart:--set postgres.primaryUpdateMethod=restart"; do \
+	  want=$${c%%:*}; args=$${c#*:}; \
+	  $(HELM) template t $(CONNECTIVITY_DIR) $(PG_ON) $$args >$(VERIFY_TMP)/vppu.out 2>&1 || { cat $(VERIFY_TMP)/vppu.out; exit 1; }; \
+	  got=$$(python3 -c 'import sys,yaml; c=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Cluster"]; s=c[0]["spec"]; print(s.get("primaryUpdateStrategy"), s.get("primaryUpdateMethod"))' $(VERIFY_TMP)/vppu.out); \
+	  [ "$$got" = "unsupervised $$want" ] || { echo "FAIL: $$args: Cluster renders '$$got', want 'unsupervised $$want'"; exit 1; }; \
+	  echo "ok: $${args:-default}: unsupervised $$want"; \
+	done
+	@for d in $(CONNECTIVITY_DIR) $(CHART_DIR); do \
+	  if $(HELM) template t $$d $(PG_ON) --set postgres.primaryUpdateMethod=rolling >$(VERIFY_TMP)/vppu-bad.out 2>&1; then echo "FAIL: $$d accepts postgres.primaryUpdateMethod=rolling"; exit 1; fi; \
+	  grep -q 'primaryUpdateMethod' $(VERIFY_TMP)/vppu-bad.out || { echo "FAIL: $$d refuses rolling without naming the key"; cat $(VERIFY_TMP)/vppu-bad.out; exit 1; }; \
+	done
+	@echo "ok: both charts refuse another method"
+	@python3 -c 'import sys,yaml; v=[yaml.safe_load(open(p))["postgres"]["primaryUpdateMethod"] for p in sys.argv[1:]]; sys.exit(0 if v==["switchover"]*2 else "FAIL: postgres.primaryUpdateMethod defaults differ: %s" % v)' $(CONNECTIVITY_DIR)/values.yaml $(CHART_DIR)/values.yaml
+	@echo "ok: $@"
+
 .PHONY: verify-identity-migration
 verify-identity: verify-identity-migration
 verify-identity-migration: ## Assert the migration holds no cluster-scoped right: the 1.x -> 2.x run deletes no CRD, so no ClusterRole or ClusterRoleBinding renders with the migration on, off, or with agent-manager off; the per-GitOps-namespace Roles follow a renamed identity.
