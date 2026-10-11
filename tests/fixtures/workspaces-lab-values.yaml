@@ -10,9 +10,9 @@ workspaces:
   substrate:
     csiDriver:
       name: nfs.csi.k8s.io
-      controllerEndpoint: dns:///csi-nfs-controller.kube-system.svc:9443
-      nodeSocketOverride: /var/lib/kubelet/plugins/csi-nfsplugin/csi.sock
+      controllerEndpoint: tcp://csi-nfs-controller.agentlab-workspaces.svc.cluster.local:50051
+      nodeSocketOverride: unix:///var/lib/kubelet/plugins/csi-nfsplugin/csi.sock
       tls:
         enabled: true
         usePodIdentity: true
-        serverName: csi-nfs-controller.kube-system.svc
+        serverName: csi-nfs-controller.agentlab-workspaces.svc

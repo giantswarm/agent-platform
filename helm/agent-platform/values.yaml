@@ -4974,11 +4974,36 @@ workspaces:
       parameters: {}  # @schema additionalProperties: true
       # Mount options replacing the preset's when set.
       mountOptions: []  # @schema item: string
-  # Substrate's side of a Session's workspace mount: the CSI driver it drives
-  # for the workspace volumes (csiDriver: name, controllerEndpoint,
-  # nodeSocketOverride, tls), giantswarm/agent-platform#888. Declared open
-  # here; its keys are that slice's.
-  substrate: {}  # @schema additionalProperties: true
+  # Substrate's side of a Session's workspace mount. Substrate mounts the
+  # workspace's volume into a Session's actor without a PVC of its own: its
+  # ate-api-server calls the CSI driver's controller service over gRPC and
+  # every node's atelet the driver's node plugin, both found through a
+  # cluster-scoped CSIDriverConfig named after the driver. The connectivity
+  # release renders that object from csiDriver while workspaces are on, its
+  # name is set and Substrate's CRDs are there (components.substrate, or a
+  # cluster that serves ate.dev/v1alpha1 CSIDriverConfig), and admits
+  # ate-api-server's egress to the controller endpoint's port (Cilium flavour).
+  # Empty, nothing renders and a Session cannot mount a workspace.
+  substrate:
+    csiDriver:
+      # The CSI driver's name, which the workspace StorageClass's provisioner
+      # must equal (the render fails otherwise: the class this chart renders
+      # from a preset, or the live class it is given), e.g. nfs.csi.k8s.io.
+      name: ""  # @schema pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+      # The driver's controller service as ate-api-server reaches it:
+      # tcp://<host>:<port> or dns://<host>:<port>. REQUIRED with a name; the
+      # port is the one the network policy admits.
+      controllerEndpoint: ""  # @schema pattern: ^$|^(tcp|dns)://.+:[0-9]+$
+      # The node plugin's socket as atelet sees it (unix://…); empty, atelet
+      # uses the kubelet's plugin registration.
+      nodeSocketOverride: ""  # @schema pattern: ^$|^unix://.+$
+      # mTLS to the controller endpoint with Substrate's own pod identity, the
+      # only client certificate the CSIDriverConfig takes (usePodIdentity is
+      # required while enabled); serverName overrides the name verified.
+      tls:
+        enabled: true
+        usePodIdentity: true
+        serverName: ""
   # The Organizations whose members manage workspaces: each its name (a DNS
   # label, the Organization's) and memberGroups, the groups of the forwarded
   # identity that make a caller a member. A member creates, edits, deletes and

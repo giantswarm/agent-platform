@@ -2987,11 +2987,21 @@ workspaces:
         share: /
       parameters: {}  # @schema additionalProperties: true
       mountOptions: []  # @schema item: string
-  # Substrate's side of a Session's workspace mount: the CSI driver it drives
-  # for the workspace volumes (csiDriver: name, controllerEndpoint,
-  # nodeSocketOverride, tls), giantswarm/agent-platform#888. Declared open
-  # here; its keys are that slice's.
-  substrate: {}  # @schema additionalProperties: true
+  # Substrate's side of a Session's workspace mount: the CSI driver Substrate
+  # drives for the workspace volumes, rendered as the cluster-scoped
+  # CSIDriverConfig (templates/workspaces/csidriverconfig.yaml) while the
+  # switch is on, its name is set and Substrate's CRDs are there, and the
+  # egress of ate-api-server to the controller endpoint's port. The meta
+  # chart's copy of this block documents every key.
+  substrate:
+    csiDriver:
+      name: ""  # @schema pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+      controllerEndpoint: ""  # @schema pattern: ^$|^(tcp|dns)://.+:[0-9]+$
+      nodeSocketOverride: ""  # @schema pattern: ^$|^unix://.+$
+      tls:
+        enabled: true
+        usePodIdentity: true
+        serverName: ""
   # The Organizations whose members manage workspaces ({name, memberGroups}),
   # which the meta chart forwards to the workspace-manager release; this chart
   # renders nothing of them. The meta chart's copy documents the key.

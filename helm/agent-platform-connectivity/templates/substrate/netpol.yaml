@@ -29,7 +29,8 @@ what (the substrate chart's arguments and Service definitions):
         :443 (the egress gateway address), Postgres (the platform's CNPG
         Cluster, the bundled StatefulSet or an external one), the snapshot
         store (world:443, the bundled in-cluster store :9000, or the s3proxy façade
-        :8080 in the release namespace), the apiserver.
+        :8080 in the release namespace), the apiserver, and with workspaces the
+        CSI driver's controller endpoint (cluster, its port).
   atelet ──▶ ate-api :443, the apiserver, world:443 (the actor images it pulls,
         the gVisor asset from storage.googleapis.com, the S3 snapshot store; a
         registry mirror behind a private address is cluster:443), the bundled
@@ -218,6 +219,17 @@ spec:
       toPorts:
         - ports:
             - port: "8080"
+              protocol: TCP
+    {{- end }}
+    {{- if include "agent-platform.workspaces.csiDriverConfig.enabled" . }}
+    # The workspaces' CSI driver: its controller service
+    # (workspaces.substrate.csiDriver.controllerEndpoint), which the
+    # installation runs wherever it likes inside the cluster.
+    - toEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - port: {{ include "agent-platform.workspaces.csiDriver.port" . | quote }}
               protocol: TCP
     {{- end }}
 ---

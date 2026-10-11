@@ -1196,6 +1196,7 @@ keys as signin.keys {secretName, current} and its closed schema refuses the key.
 {{- end -}}
 {{- if $on -}}
 {{- include "agent-platform.workspaces.storage.validate" . -}}
+{{- include "agent-platform.workspaces.substrate.validate" . -}}
 {{- $wm := index .Values "workspace-manager" | default dict -}}
 {{- $names := dict -}}
 {{- range $i, $p := ($wm.providers | default list) -}}
@@ -1334,6 +1335,40 @@ an SMB share does not serve git. Emits nothing; fails naming the key.
 {{- $protocol := toString (dig "parameters" "protocol" "nfs" $sc) -}}
 {{- if and (eq $preset "azureFiles") (ne $protocol "nfs") -}}
 {{- fail (printf "workspaces.storage.storageClass.parameters.protocol is %q on the azureFiles preset: an Azure Files share over SMB fixes every file's mode at mount and has no symbolic links, so git does not work on it; the workspaces need protocol nfs, the preset's own" $protocol) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The template-time guards of Substrate's workspace driver
+(workspaces.substrate.csiDriver, giantswarm/agent-platform#888), run while
+workspaces are on, by this chart and by the connectivity chart alike (its templates/workspaces/_helpers.tpl
+carries the same definition): a driver without a name sets nothing; one with a
+name has a controller endpoint with a port (the network policy admits it); TLS
+takes Substrate's pod identity, the CSIDriverConfig's only client certificate;
+a class rendered from a preset is provisioned by that driver. Emits
+nothing; fails naming the key.
+*/}}
+{{- define "agent-platform.workspaces.substrate.validate" -}}
+{{- $csi := dig "substrate" "csiDriver" dict (.Values.workspaces | default dict) -}}
+{{- $name := toString ($csi.name | default "") -}}
+{{- $endpoint := toString ($csi.controllerEndpoint | default "") -}}
+{{- if not $name -}}
+{{- if or $endpoint ($csi.nodeSocketOverride | default "") ($csi.tls | default dict).serverName -}}
+{{- fail "workspaces.substrate.csiDriver.name is empty but other csiDriver keys are set: the CSIDriverConfig is named after the driver and renders only with a name; name the workspace StorageClass's provisioner, or unset the driver's keys" -}}
+{{- end -}}
+{{- else -}}
+{{- if not (regexMatch "^(tcp|dns)://.+:[0-9]+$" $endpoint) -}}
+{{- fail (printf "workspaces.substrate.csiDriver.controllerEndpoint is %q: Substrate's ate-api-server calls the driver's controller service at tcp://<host>:<port> or dns://<host>:<port>, and the network policy admits that port" $endpoint) -}}
+{{- end -}}
+{{- $tls := $csi.tls | default dict -}}
+{{- if and $tls.enabled (not $tls.usePodIdentity) -}}
+{{- fail "workspaces.substrate.csiDriver.tls.enabled is true but tls.usePodIdentity is not: Substrate presents its own pod identity to the controller endpoint, the only client certificate a CSIDriverConfig takes" -}}
+{{- end -}}
+{{- $sc := dig "storage" "storageClass" dict (.Values.workspaces | default dict) -}}
+{{- $provisioner := get (dict "efs" "efs.csi.aws.com" "azureFiles" "file.csi.azure.com" "nfs" "nfs.csi.k8s.io") (toString ($sc.preset | default "")) -}}
+{{- if and $sc.create (ne $provisioner $name) -}}
+{{- fail (printf "workspaces.substrate.csiDriver.name (%s) differs from the provisioner of the workspace StorageClass rendered from preset %s (%s): Substrate mounts a workspace's volume through the driver that provisioned it" $name $sc.preset $provisioner) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

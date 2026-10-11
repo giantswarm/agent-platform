@@ -1,0 +1,43 @@
+{{- /*
+Substrate's registration of the workspaces' CSI driver
+(giantswarm/agent-platform#888): a Session's workspace is a Substrate volume
+mount of the workspace's read-write-many volume, which Substrate drives
+without a PVC of the actor's own — ate-api-server calls the driver's
+controller service over gRPC, atelet the node plugin's socket — both found
+through this cluster-scoped object, named after the driver. Rendered while
+agent-platform.workspaces.csiDriverConfig.enabled; the provisioner of a
+provided class is checked against the driver on the cluster (`lookup`, empty
+offline), the class rendered from a preset by the shared guard.
+*/ -}}
+{{- if include "agent-platform.workspaces.enabled" . }}
+{{- include "agent-platform.workspaces.substrate.validate" . }}
+{{- end }}
+{{- if include "agent-platform.workspaces.csiDriverConfig.enabled" . }}
+{{- $csi := .Values.workspaces.substrate.csiDriver }}
+{{- $class := (include "agent-platform.workspaces.storage" . | fromJson).storageClassName }}
+{{- $live := lookup "storage.k8s.io/v1" "StorageClass" "" $class }}
+{{- if and $live (ne (toString $live.provisioner) (toString $csi.name)) }}
+{{- fail (printf "workspaces.substrate.csiDriver.name (%s) differs from the provisioner of the StorageClass %q (workspaces.storage.storageClassName), %s: Substrate mounts a workspace's volume through the driver that provisioned it" $csi.name $class $live.provisioner) }}
+{{- end }}
+{{- $tls := $csi.tls | default dict }}
+apiVersion: ate.dev/v1alpha1
+kind: CSIDriverConfig
+metadata:
+  name: {{ $csi.name }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  driverName: {{ $csi.name }}
+  controllerEndpoint: {{ $csi.controllerEndpoint | quote }}
+  {{- with $csi.nodeSocketOverride }}
+  nodeSocketOverride: {{ . | quote }}
+  {{- end }}
+  tls:
+    enabled: {{ $tls.enabled | default false }}
+    {{- if $tls.enabled }}
+    usePodIdentity: true
+    {{- end }}
+    {{- with $tls.serverName }}
+    serverName: {{ . | quote }}
+    {{- end }}
+{{- end }}
