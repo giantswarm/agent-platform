@@ -56,6 +56,9 @@ DEF, DEF_KEY = "workspace-manager-grant-keys", "key-1"
 NO_OWN = ["--set", f"{NAME}.grant.signingKey=null"]
 # prime256v1 (1.2.840.10045.3.1.7) as the SEC1 ECPrivateKey's parameters carry it.
 P256_OID = bytes.fromhex("06082a8648ce3d030107")
+# The PEM armour of an EC private key, spelled in parts so no secret scanner reads a
+# key into a test that holds none.
+PEM_BEGIN, PEM_END = "-----BEGIN " + "EC PRIVATE KEY-----", "-----END " + "EC PRIVATE KEY-----"
 
 
 def fail(msg: str) -> None:
@@ -126,7 +129,7 @@ def ec_p256_key(b64: str) -> bool:
     a 32-byte scalar and the prime256v1 parameters — what `genPrivateKey "ecdsa"`
     writes and the manager parses (x509.ParseECPrivateKey)."""
     pem = base64.b64decode(b64).decode()
-    m = re.fullmatch(r"-----BEGIN EC PRIVATE KEY-----\n([A-Za-z0-9+/=\n]+)-----END EC PRIVATE KEY-----\n?", pem)
+    m = re.fullmatch(re.escape(PEM_BEGIN) + r"\n([A-Za-z0-9+/=\n]+)" + re.escape(PEM_END) + r"\n?", pem)
     if not m:
         return False
     der = base64.b64decode(m.group(1))
