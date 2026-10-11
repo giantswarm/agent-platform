@@ -5141,6 +5141,22 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   # Secret than its own, and the owner guard never touches it.
   grant:
     signingKey: {}
+  # The kagent controller's gRPC API the manager lists every Session's last
+  # turn from, which the session directories' cleanup and a deleted
+  # workspace's volume removal need: kagent.address (`grpc://host:port`,
+  # in-cluster h2c, or `grpcs://host[:port]`), kagent.namespace and
+  # kagent.port (where the manager's own NetworkPolicy opens the egress).
+  # Unset, the default: with kagent on and the floor of
+  # components.workspace-manager.versionRange at 0.4.0 or later (the first
+  # release that takes the keys; an earlier one's schema refuses them) this
+  # chart forwards kagent's controller Service,
+  # grpc://<kagent.fullnameOverride>-controller.<kagent namespace>.svc:8083
+  # (grpc://kagent-controller.kagent.svc:8083 by default), with namespace the
+  # kagent namespace; otherwise none, and the manager cleans up no session
+  # directory. Set kagent.address to reach a kagent elsewhere, e.g.
+  #   kagent:
+  #     address: grpcs://kagent.example.com
+  #     namespace: kagent
   # The controller's reconcile period (a Go duration; 10m is the chart's
   # default): how often it reconciles every Workspace without an event, so a
   # claim deleted out from under a Workspace is made again by then. It is not
@@ -5228,7 +5244,9 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
   # public Gateway the route attaches to (route.enabled; the edge's Envoy
   # pods, or the agentgateway data plane when it is the edge) and the
   # kubelet's probes. Egress: DNS, the Kubernetes API (the workspace objects,
-  # volumes and Jobs it writes in the kagent namespace), the identity provider
+  # volumes and Jobs it writes in the kagent namespace), kagent's controller
+  # API on 8083 (kagent on: workspace-manager.kagent.address; the controller
+  # admits the manager there too), the identity provider
   # (oauth on: the Dex issuer by name, or for workspace-manager.oauth.provider
   # google its discovery, JWKS/userinfo and token hosts), each provider
   # instance's hosts (workspace-manager.providers) and the names and blocks of

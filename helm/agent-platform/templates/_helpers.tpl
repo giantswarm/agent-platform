@@ -243,6 +243,24 @@ its sync and cleanup Jobs live there too. */ -}}
 {{- fail (printf "workspace-manager.workspaces.namespace (%s) differs from the kagent namespace (%s), where every Session runs and mounts its workspace: leave workspace-manager.workspaces.namespace unset" $own $ns) -}}
 {{- end -}}
 {{- $_ := set $derived "workspaces" (dict "namespace" $ns) -}}
+{{- /* The kagent controller the manager lists every Session's last turn from
+for the session directories' cleanup, and the namespace its NetworkPolicy
+opens the egress to: a default, so an installation that reaches kagent
+elsewhere sets workspace-manager.kagent.address (and namespace, port) itself.
+Only while the floor of components.workspace-manager.versionRange takes the
+keys (agent-platform.workspaceManager.kagentFloor): an earlier release's closed
+schema refuses a kagent block. */ -}}
+{{- $ownKagent := dig "kagent" dict (index .root.Values "workspace-manager" | default dict) -}}
+{{- $wmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "workspace-manager" "versionRange" "" .root.Values.components) | default "0.0.0") "" -}}
+{{- $takesKagent := ge ((semver $wmFloor).Compare (semver (include "agent-platform.workspaceManager.kagentFloor" .root))) 0 -}}
+{{- with include "agent-platform.kagent.controllerAddress" .root -}}
+{{- if and $takesKagent (not $ownKagent.address) -}}
+{{- if and $ownKagent.namespace (ne (toString $ownKagent.namespace) $ns) -}}
+{{- fail (printf "workspace-manager.kagent.namespace (%s) differs from the kagent namespace (%s) of the controller address this chart derives (%s): leave workspace-manager.kagent.namespace unset, or set workspace-manager.kagent.address too" (toString $ownKagent.namespace) $ns .) -}}
+{{- end -}}
+{{- $_ := set $derived "kagent" (dict "address" . "namespace" $ns) -}}
+{{- end -}}
+{{- end -}}
 {{- /* The workspace StorageClass, one value for every consumer:
 workspaces.storage.storageClassName, the class every workspace's
 PersistentVolumeClaim names. */ -}}
@@ -2487,6 +2505,31 @@ Usage: include "agent-platform.kagent.namespace" .
 */}}
 {{- define "agent-platform.kagent.namespace" -}}
 {{- dig "namespaceOverride" "" (.Values.kagent | default dict) | default (include "agent-platform.targetNamespace" .) -}}
+{{- end -}}
+
+{{/*
+The first release of the workspace-manager line (giantswarm/workspace-manager)
+whose chart takes kagent.address, kagent.namespace and kagent.port (the session
+directories' cleanup from kagent's record of each Session's last turn); every
+earlier release's closed values schema refuses a kagent block. From it on
+(a release candidate of it included) the chart derives
+workspace-manager.kagent.address (agent-platform.componentDerivedValues). One
+line, no comment inside the define.
+*/}}
+{{- define "agent-platform.workspaceManager.kagentFloor" -}}0.4.0{{- end -}}
+
+{{/*
+The kagent controller's in-cluster gRPC API (in-cluster h2c), straight to its
+Service: grpc://<kagent.fullnameOverride>-controller.<kagent namespace>.svc:8083
+while the kagent component is on, "" otherwise. 8083 is the port the kagent
+controller serves its API on, the one the connectivity chart's policies and
+controller route name.
+Usage: include "agent-platform.kagent.controllerAddress" .
+*/}}
+{{- define "agent-platform.kagent.controllerAddress" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") -}}
+{{- printf "grpc://%s-controller.%s.svc:8083" (dig "fullnameOverride" "" (.Values.kagent | default dict) | default "kagent") (include "agent-platform.kagent.namespace" .) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

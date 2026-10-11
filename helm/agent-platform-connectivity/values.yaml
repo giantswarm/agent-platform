@@ -3104,7 +3104,9 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
   # JWKS endpoints a Session's credential is exchanged at, kagent on), the
   # public Gateway the route attaches to (route.enabled) and the kubelet's
   # probes. Egress: DNS, the Kubernetes API (the workspace objects,
-  # volumes and Jobs it writes in the kagent namespace), the identity provider
+  # volumes and Jobs it writes in the kagent namespace), kagent's controller
+  # API on 8083 (kagent on: workspace-manager.kagent.address; the controller
+  # admits the manager there too), the identity provider
   # (oauth on: the Dex issuer by name, or for workspace-manager.oauth.provider
   # google its discovery, JWKS/userinfo and token hosts), each provider
   # instance's hosts (workspace-manager.providers) and the names and blocks of

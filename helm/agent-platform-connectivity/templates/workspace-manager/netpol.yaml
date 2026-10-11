@@ -7,6 +7,8 @@
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") }}
 {{- $kagentNs := include "agent-platform.workspaceManager.kagentNamespace" . }}
+{{- /* The kagent controller's API port, as the controller's own policies name it. */ -}}
+{{- $controllerPort := "8083" }}
 {{- $oauthOn := include "agent-platform.workspaceManager.oauthEnabled" . }}
 {{- $peers := $wm.networkPolicy.ingress.additionalPeers }}
 {{- /* The public sign-in route's Gateway (route.yaml): the agentgateway data
@@ -112,7 +114,9 @@ spec:
 ---
 # Egress from workspace-manager: DNS (with Cilium's proxy clause so the FQDN
 # selectors below resolve), the Kubernetes API (the workspace objects, their
-# volume and Jobs in the kagent namespace), the identity provider
+# volume and Jobs in the kagent namespace), kagent's controller API (kagent on:
+# every Session's last turn, for the session directories' cleanup), the
+# identity provider
 # (workspace-manager.oauth), each provider instance's hosts on their ports
 # (workspace-manager.providers: url and apiURL) and the names and blocks of
 # workspaceManager.networkPolicy.egress on 443.
@@ -134,6 +138,18 @@ spec:
     {{- end }}
     - toEntities:
         - kube-apiserver
+    {{- if $kagentOn }}
+    # kagent's controller API (workspace-manager.kagent.address).
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: controller
+            app.kubernetes.io/name: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: {{ $controllerPort | quote }}
+              protocol: TCP
+    {{- end }}
     {{- if $oauthOn }}
     {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.workspaceManager.oauthProvider" .) "issuerUrl" (include "agent-platform.workspaceManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
@@ -231,6 +247,31 @@ spec:
         - ports:
             - port: {{ $port | quote }}
               protocol: TCP
+---
+# Ingress to kagent's controller API from workspace-manager (additive to the
+# controller's own ingress policy: the gateway and the UI): the manager lists
+# every Session's last turn there for the session directories' cleanup.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-workspace-manager-to-kagent-controller
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/name: kagent
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            {{- include "agent-platform.workspaceManager.podSelector" . | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ $controllerPort | quote }}
+              protocol: TCP
 {{- end }}
 
 {{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
@@ -309,7 +350,8 @@ spec:
           protocol: TCP
     {{- end }}
 ---
-# Egress from workspace-manager: DNS, the Kubernetes API, and on the provider
+# Egress from workspace-manager: DNS, the Kubernetes API, kagent's controller
+# API (kagent on), and on the provider
 # instances' ports (443 at least) workspaceManager.networkPolicy.egress.cidrs
 # when set, else every public destination — vanilla NetworkPolicy has no FQDN
 # selector — which also covers the identity provider (a private one needs its
@@ -357,6 +399,20 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
+    {{- if $kagentOn }}
+    # kagent's controller API (workspace-manager.kagent.address).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $kagentNs }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: controller
+              app.kubernetes.io/name: kagent
+      ports:
+        - port: {{ $controllerPort | int }}
+          protocol: TCP
+    {{- end }}
     {{- $ports := keys (merge (dict "443" true) $byPort) | sortAlpha }}
     {{- $hostsRule := or (not (empty $byPort)) (not (empty $oauthOn)) }}
     {{- if $hostsRule }}
@@ -440,6 +496,33 @@ spec:
               {{- include "agent-platform.workspaceManager.podSelector" . | nindent 14 }}
       ports:
         - port: {{ $port | int }}
+          protocol: TCP
+---
+# Ingress to kagent's controller API from workspace-manager (additive to the
+# controller's own ingress policy: the gateway and the UI).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-workspace-manager-to-kagent-controller
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/name: kagent
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              {{- include "agent-platform.workspaceManager.podSelector" . | nindent 14 }}
+      ports:
+        - port: {{ $controllerPort | int }}
           protocol: TCP
 {{- end }}
 {{- end }}
