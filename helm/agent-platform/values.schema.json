@@ -869,9 +869,6 @@
                                 "type": "string"
                             }
                         },
-                        "prereleases": {
-                            "type": "boolean"
-                        },
                         "repository": {
                             "type": "string"
                         },
@@ -915,9 +912,6 @@
                             "type": "string"
                         },
                         "injectGlobal": {
-                            "type": "boolean"
-                        },
-                        "prereleases": {
                             "type": "boolean"
                         },
                         "repository": {
