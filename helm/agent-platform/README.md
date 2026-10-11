@@ -1313,7 +1313,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaces.storage.storageClass.nfs.share | string | `"/"` |  |
 | workspaces.storage.storageClass.parameters | object | `{}` |  |
 | workspaces.storage.storageClass.mountOptions | list | `[]` |  |
-| workspaces.substrate | object | `{}` |  |
+| workspaces.substrate.csiDriver.name | string | `""` |  |
+| workspaces.substrate.csiDriver.controllerEndpoint | string | `""` |  |
+| workspaces.substrate.csiDriver.nodeSocketOverride | string | `""` |  |
+| workspaces.substrate.csiDriver.tls.enabled | bool | `true` |  |
+| workspaces.substrate.csiDriver.tls.usePodIdentity | bool | `true` |  |
+| workspaces.substrate.csiDriver.tls.serverName | string | `""` |  |
 | workspaces.organizations | list | `[]` |  |
 | workspace-manager.fullnameOverride | string | `"workspace-manager"` |  |
 | workspace-manager.observability.otel.endpoint | string | `"auto"` |  |

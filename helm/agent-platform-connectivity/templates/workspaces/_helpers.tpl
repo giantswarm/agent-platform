@@ -85,3 +85,59 @@ wins) and its mountOptions replacing the preset's when set, as JSON
 {{- with $sc.mountOptions -}}{{- $mount = . -}}{{- end -}}
 {{- dict "provisioner" $provisioner "parameters" $params "mountOptions" $mount | toJson -}}
 {{- end -}}
+
+{{/*
+The template-time guards of Substrate's workspace driver
+(workspaces.substrate.csiDriver, giantswarm/agent-platform#888), run while
+workspaces are on, by this chart and by the meta chart alike (its templates/_helpers.tpl
+carries the same definition): a driver without a name sets nothing; one with a
+name has a controller endpoint with a port (the network policy admits it); TLS
+takes Substrate's pod identity, the CSIDriverConfig's only client certificate;
+a class rendered from a preset is provisioned by that driver. Emits
+nothing; fails naming the key.
+*/}}
+{{- define "agent-platform.workspaces.substrate.validate" -}}
+{{- $csi := dig "substrate" "csiDriver" dict (.Values.workspaces | default dict) -}}
+{{- $name := toString ($csi.name | default "") -}}
+{{- $endpoint := toString ($csi.controllerEndpoint | default "") -}}
+{{- if not $name -}}
+{{- if or $endpoint ($csi.nodeSocketOverride | default "") ($csi.tls | default dict).serverName -}}
+{{- fail "workspaces.substrate.csiDriver.name is empty but other csiDriver keys are set: the CSIDriverConfig is named after the driver and renders only with a name; name the workspace StorageClass's provisioner, or unset the driver's keys" -}}
+{{- end -}}
+{{- else -}}
+{{- if not (regexMatch "^(tcp|dns)://.+:[0-9]+$" $endpoint) -}}
+{{- fail (printf "workspaces.substrate.csiDriver.controllerEndpoint is %q: Substrate's ate-api-server calls the driver's controller service at tcp://<host>:<port> or dns://<host>:<port>, and the network policy admits that port" $endpoint) -}}
+{{- end -}}
+{{- $tls := $csi.tls | default dict -}}
+{{- if and $tls.enabled (not $tls.usePodIdentity) -}}
+{{- fail "workspaces.substrate.csiDriver.tls.enabled is true but tls.usePodIdentity is not: Substrate presents its own pod identity to the controller endpoint, the only client certificate a CSIDriverConfig takes" -}}
+{{- end -}}
+{{- $sc := dig "storage" "storageClass" dict (.Values.workspaces | default dict) -}}
+{{- $provisioner := get (dict "efs" "efs.csi.aws.com" "azureFiles" "file.csi.azure.com" "nfs" "nfs.csi.k8s.io") (toString ($sc.preset | default "")) -}}
+{{- if and $sc.create (ne $provisioner $name) -}}
+{{- fail (printf "workspaces.substrate.csiDriver.name (%s) differs from the provisioner of the workspace StorageClass rendered from preset %s (%s): Substrate mounts a workspace's volume through the driver that provisioned it" $name $sc.preset $provisioner) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy when the CSIDriverConfig renders (templates/workspaces/csidriverconfig.yaml):
+workspaces on, workspaces.substrate.csiDriver.name set, and Substrate's CRDs
+there — the substrate component on (this release dependsOn substrate-crds,
+which renders them) or the cluster serving ate.dev/v1alpha1 CSIDriverConfig
+(a Substrate the installation provides). The network policy that admits
+ate-api-server's egress to the controller endpoint follows it.
+*/}}
+{{- define "agent-platform.workspaces.csiDriverConfig.enabled" -}}
+{{- if and (include "agent-platform.workspaces.enabled" .) (dig "substrate" "csiDriver" "name" "" .Values.workspaces) -}}
+{{- if or (include "agent-platform.substrate.enabled" .) (.Capabilities.APIVersions.Has "ate.dev/v1alpha1/CSIDriverConfig") }}true{{ end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The port of workspaces.substrate.csiDriver.controllerEndpoint
+(tcp|dns://<host>:<port>, validated), which ate-api-server's egress admits.
+*/}}
+{{- define "agent-platform.workspaces.csiDriver.port" -}}
+{{- regexFind "[0-9]+$" (toString .Values.workspaces.substrate.csiDriver.controllerEndpoint) -}}
+{{- end -}}

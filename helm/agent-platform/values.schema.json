@@ -2890,7 +2890,42 @@
                 },
                 "substrate": {
                     "type": "object",
-                    "additionalProperties": true
+                    "additionalProperties": false,
+                    "properties": {
+                        "csiDriver": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "controllerEndpoint": {
+                                    "type": "string",
+                                    "pattern": "^$|^(tcp|dns)://.+:[0-9]+$"
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                                },
+                                "nodeSocketOverride": {
+                                    "type": "string",
+                                    "pattern": "^$|^unix://.+$"
+                                },
+                                "tls": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "enabled": {
+                                            "type": "boolean"
+                                        },
+                                        "serverName": {
+                                            "type": "string"
+                                        },
+                                        "usePodIdentity": {
+                                            "type": "boolean"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
