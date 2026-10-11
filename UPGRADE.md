@@ -15,6 +15,18 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.126.x → \<next\> (Substrate 1.8.0: every snapshot is reset)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.8 from 1.8.0. Substrate 1.8 changes how a snapshot is laid out: one tar per container and one per durable volume (giantswarm/substrate#260). It cannot read a snapshot that 1.7 wrote, and 1.7 cannot read one that 1.8 wrote. On 1.8.0, a session restored from a 1.7 snapshot is refused and its actor crashes with `snapshot written before the per-volume layout` (giantswarm/substrate#265). A golden snapshot from 1.7 makes every new session of its Agent fail the same way. The control plane, the atelet and the WorkerPool roll to `ateom-gvisor:1.8.0` in place, and the kagent CRDs and the kagent release are unchanged.
+
+### Operator action
+
+- **Reset every snapshot once the roll is complete**, following the Substrate line's runbook `docs/snapshot-reset.md` (giantswarm/substrate, at the 1.8.0 tag). It has five steps: hold the re-creation of the Agents' HelmReleases, delete every Agent, check that Substrate and the snapshot store are empty, let the Agents come back (each one is a new revision with a fresh golden snapshot on 1.8), then prove one turn per Harness with a suspend and a restore. **Every open conversation ends.** Announce the window to the installation's users before the roll.
+- **Run the hold and its release as a change to whatever owns the Agents' HelmReleases** on that installation (its GitOps source or its capability tooling), never as a suspend by hand on the cluster. A suspend by hand drifts from the source and is lost on the next reconcile.
+- **A rollback below 1.8.0 needs the same reset**, because 1.8 snapshots are as unreadable to 1.7.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.8.0` in the same change that schedules the reset; `kagent` and `kagent-crds` stay at `1.8.0`.
+- **An installation with `gitops.prereleases: true`** follows the line's 1.8 release candidates within the new range, and the reset applies to its first move onto 1.8 in the same way.
+
 ## 4.126.x → \<next\> (Substrate follows `gitops.prereleases`)
 
 giantswarm/agent-platform#795: `components.substrate{,-crds}` no longer set `prereleases: false`. From Substrate 1.4.0 on, ate-controller runs every gVisor pool on the ateom-gvisor of its own release (`ateController.gvisorWorker.followRelease`, on by default; giantswarm/substrate#114), so a release candidate's atelet and worker are one build. That was the reason for the opt-out (giantswarm/agent-platform#796). An installation on stable releases renders byte for byte as before.
