@@ -15,6 +15,14 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.127.x → \<next\> (the workspace grant signing key)
+
+giantswarm/agent-platform#935: with `workspaces.enabled`, provider instances and `oauth.enabled`, the connectivity release creates its own grant signing key Secret, `workspaceManager.grantKey.secretName` (`workspace-manager-grant-keys`) with the entry `workspaceManager.grantKey.key` (`key-1`), kept across upgrades and on uninstall, and the meta chart names it in `workspace-manager.grant.signingKey` for the manager, which then serves `authorize_workspace` and its key set. An installation that references a Secret of its own there keeps it: the release creates nothing for a reference to another Secret than its own, and never replaces a Secret it does not own (giantswarm/agent-platform#944).
+
+### Operator action
+
+- **None.** A `workspace-manager.grant.signingKey` of the installation's own stays as set and its Secret untouched; an installation that set none gets the release's Secret and reference on the upgrade, and the manager starts signing grants with it. `workspaceManager.grantKey.create: false` leaves both the Secret and the reference to the installation.
+
 ## 4.126.x → \<next\> (Substrate follows `gitops.prereleases`)
 
 giantswarm/agent-platform#795: `components.substrate{,-crds}` no longer set `prereleases: false`. From Substrate 1.4.0 on, ate-controller runs every gVisor pool on the ateom-gvisor of its own release (`ateController.gvisorWorker.followRelease`, on by default; giantswarm/substrate#114), so a release candidate's atelet and worker are one build. That was the reason for the opt-out (giantswarm/agent-platform#796). An installation on stable releases renders byte for byte as before.

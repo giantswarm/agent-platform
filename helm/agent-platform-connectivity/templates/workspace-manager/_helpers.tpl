@@ -202,12 +202,18 @@ chart derives the same reference for the component release. Emits JSON:
 {{/*
 Truthy when this chart creates the grant signing key Secret: the component on
 with provider instances, oauth.enabled and workspaceManager.grantKey.create,
-and a Secret to name (grantSigningKey).
+and the reference the manager gets (grantSigningKey) naming the chart's own
+Secret and entry, workspaceManager.grantKey.secretName and .key — the derived
+reference, or an own one that names exactly them. A reference to another
+Secret is the installation's own key, which this chart never creates.
 */}}
 {{- define "agent-platform.workspaceManager.grantKeyEnabled" -}}
 {{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
 {{- $ref := include "agent-platform.workspaceManager.grantSigningKey" . | fromJson -}}
-{{- if and (include "agent-platform.workspaceManager.enabled" .) (dig "providers" list $chart) (include "agent-platform.workspaceManager.oauthEnabled" .) (dig "grantKey" "create" true .Values.workspaceManager) $ref.name }}true{{ end -}}
+{{- $wm := .Values.workspaceManager | default dict -}}
+{{- $name := toString (dig "grantKey" "secretName" "" $wm) -}}
+{{- $key := toString (dig "grantKey" "key" "" $wm) -}}
+{{- if and (include "agent-platform.workspaceManager.enabled" .) (dig "providers" list $chart) (include "agent-platform.workspaceManager.oauthEnabled" .) (dig "grantKey" "create" true $wm) $ref.name (eq $ref.name $name) (eq $ref.key $key) }}true{{ end -}}
 {{- end -}}
 
 {{/*

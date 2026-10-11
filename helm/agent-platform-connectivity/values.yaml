@@ -3088,11 +3088,13 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
   # key kept (templates/workspace-manager/signin-keys.yaml).
   signinKeys:
     create: true
-  # Create the grant signing key Secret workspace-manager.grant.signingKey
-  # names, with providers and oauth.enabled: the entry named key generated
-  # when missing (an EC P-256 private key, PEM), every entry kept
-  # (templates/workspace-manager/grant-key.yaml). The Secret and entry are the
-  # installation's own reference when it sets one, else secretName and key.
+  # Create the chart's own grant signing key Secret, secretName with the entry
+  # key, with providers and oauth.enabled: the entry generated when missing
+  # (an EC P-256 private key, PEM), every entry kept
+  # (templates/workspace-manager/grant-key.yaml). The manager gets it as
+  # workspace-manager.grant.signingKey when the installation references
+  # nothing or exactly this Secret and entry; a reference to another Secret
+  # is the installation's own key, which the chart never creates.
   grantKey:
     create: true
     secretName: workspace-manager-grant-keys

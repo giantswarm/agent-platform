@@ -5137,7 +5137,8 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   # forwards that reference; without them it forwards none, since the manager
   # refuses a key without providers and OAuth (a reference set here without
   # them fails the render). Set it to sign with a Secret of the installation's
-  # own.
+  # own: the connectivity release creates nothing for a reference to another
+  # Secret than its own, and the owner guard never touches it.
   grant:
     signingKey: {}
   # The controller's reconcile period (a Go duration; 10m is the chart's
@@ -5203,14 +5204,17 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
   # the installation.
   signinKeys:
     create: true
-  # The grant signing key Secret workspace-manager.grant.signingKey names when
-  # the installation sets none, created in the platform's namespace with
-  # providers and oauth.enabled: the entry named `key` is generated (an EC
-  # P-256 private key, PEM) when the Secret lacks it and every entry it holds
-  # is kept, also across an uninstall, since the manager publishes every entry
-  # at /.well-known/jwks.json and a grant signed before a rotation verifies
-  # until it expires (grant.ttl). A key rotates by naming the next id in `key`;
-  # the old entry goes by hand once its last grant expired. A Secret of the
+  # The connectivity release's own grant signing key Secret, secretName with
+  # the entry `key`, created in the platform's namespace with providers and
+  # oauth.enabled: the entry is generated (an EC P-256 private key, PEM) when
+  # the Secret lacks it and every entry it holds is kept, also across an
+  # uninstall, since the manager publishes every entry at
+  # /.well-known/jwks.json and a grant signed before a rotation verifies until
+  # it expires (grant.ttl). A key rotates by naming the next id in `key`; the
+  # old entry goes by hand once its last grant expired. The manager gets this
+  # Secret as workspace-manager.grant.signingKey when the installation sets
+  # none (or names exactly it); a reference to another Secret is the
+  # installation's own key, which the release never creates. A Secret of this
   # name another owner holds fails the render. false creates nothing and
   # forwards nothing: the installation names its own Secret in
   # workspace-manager.grant.signingKey.

@@ -1,15 +1,17 @@
 {{- /*
-The key the workspace-manager signs its workspace grants with, the Secret
-workspace-manager.grant.signingKey names (the installation's own reference,
-else workspaceManager.grantKey.secretName and .key): its entry a PEM private
-key, EC P-256, generated when the Secret lacks the entry (a lookup of the live
-object). Every entry the Secret already holds is kept: the manager publishes
-each of them at /.well-known/jwks.json, so a grant signed before a rotation
-verifies until it expires; a rotation names the next id and removes the old
-entry by hand once its last grant expired. No value passes through values.
-Kept on uninstall: a lost key invalidates every grant in flight. A Secret of
-the name another owner holds is never replaced: the render fails naming
-workspaceManager.grantKey.create: false.
+The key the workspace-manager signs its workspace grants with: the chart's
+own Secret, workspaceManager.grantKey.secretName with the entry .key, which
+the manager gets as workspace-manager.grant.signingKey when the installation
+references nothing (the meta chart derives it) or references exactly that
+Secret and entry. A reference to another Secret is the installation's own key:
+nothing is rendered here. The entry is a PEM private key, EC P-256, generated
+when the Secret lacks the entry (a lookup of the live object). Every entry the
+Secret already holds is kept: the manager publishes each of them at
+/.well-known/jwks.json, so a grant signed before a rotation verifies until it
+expires; a rotation names the next id and removes the old entry by hand once
+its last grant expired. No value passes through values. Kept on uninstall: a
+lost key invalidates every grant in flight. A Secret of the chart's name that
+another owner holds is never replaced: the render fails naming the ways out.
 */ -}}
 {{- if (include "agent-platform.workspaceManager.grantKeyEnabled" .) }}
 {{- $ref := include "agent-platform.workspaceManager.grantSigningKey" . | fromJson }}
@@ -18,7 +20,7 @@ workspaceManager.grantKey.create: false.
 {{- $owner := dig "metadata" "annotations" "meta.helm.sh/release-name" "" . }}
 {{- $ownerNs := dig "metadata" "annotations" "meta.helm.sh/release-namespace" "" . }}
 {{- if or (ne $owner $.Release.Name) (ne $ownerNs $.Release.Namespace) }}
-{{- fail (printf "Secret %s/%s (workspace-manager.grant.signingKey) exists and is not this release's (%s): the render never replaces another owner's key; set workspaceManager.grantKey.create: false to sign with it as it is, or name another Secret" $.Release.Namespace $ref.name (ternary (printf "Helm release %s/%s" $ownerNs $owner) "no Helm release" (ne $owner ""))) }}
+{{- fail (printf "Secret %s/%s (workspaceManager.grantKey.secretName) exists and is not this release's (%s): the render never replaces another owner's key; set workspaceManager.grantKey.create: false to sign with it as it is, or reference a Secret of another name in workspace-manager.grant.signingKey, which this chart never creates" $.Release.Namespace $ref.name (ternary (printf "Helm release %s/%s" $ownerNs $owner) "no Helm release" (ne $owner ""))) }}
 {{- end }}
 {{- $data = .data | default dict }}
 {{- end }}

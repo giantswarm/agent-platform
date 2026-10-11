@@ -7,14 +7,15 @@ the private key of a Secret in the platform's namespace, workspace-manager.grant
 Its chart never renders the key, and the meta chart forwarded an empty reference, so
 the manager served no grant and no key set. Each case below pins one property:
 
-- with providers and oauth.enabled the connectivity chart creates the Secret the
-  reference names — the installation's own reference, else
-  workspaceManager.grantKey.secretName and .key — holding ONE entry, an EC P-256
+- with providers and oauth.enabled the connectivity chart creates its own Secret,
+  workspaceManager.grantKey.secretName with the entry .key, when the installation
+  references nothing or exactly that Secret and entry: ONE entry, an EC P-256
   private key in PEM (SEC1, prime256v1, a 32-byte scalar: what the manager parses),
   generated per render (two offline renders differ), kept on uninstall, the entry
   following the key id and the Secret the name;
-- none without providers, with oauth off, with grantKey.create false or with the
-  component off;
+- an installation's own reference to another Secret is its own key: the chart
+  creates nothing for it (giantswarm/agent-platform#944), and none renders without
+  providers, with oauth off, with grantKey.create false or with the component off;
 - the meta chart forwards the installation's own reference unchanged and, with none,
   the created Secret's; nothing without providers, with oauth off or with create
   false; the connectivity release receives the grantKey block it creates the Secret
@@ -154,16 +155,23 @@ def the_secret(docs: dict, name: str, key: str, what: str) -> list:
 
 
 def main(meta: str, connectivity: str) -> int:
-    # --- the Secret of the installation's own reference ------------------------------------------
+    # --- the installation's own reference: its own key, nothing created ---------------------------
     docs = documents(helm(connectivity, CONN))
-    data = the_secret(docs, OWN, OWN_KEY, "the own reference")
-    again = the_secret(documents(helm(connectivity, CONN)), OWN, OWN_KEY, "the own reference, rendered again")
+    created = [n for k, n in docs if k == "Secret" and n in (OWN, DEF)]
+    if created:
+        fail(f"the own reference {OWN}/{OWN_KEY} is the installation's key, yet the chart renders {created} (#944)")
+    for name, key in ((OWN, DEF_KEY), (DEF, OWN_KEY)):
+        same = [n for k, n in documents(helm(connectivity, [*CONN, "--set", f"{NAME}.grant.signingKey.name={name}", "--set", f"{NAME}.grant.signingKey.key={key}"]))
+                if k == "Secret" and n in (OWN, DEF)]
+        if same:
+            fail(f"an own reference {name}/{key} differs from the chart's own {DEF}/{DEF_KEY} in one part, yet the chart renders {same}")
+    exact = [*CONN, "--set", f"{NAME}.grant.signingKey.name={DEF}", "--set", f"{NAME}.grant.signingKey.key={DEF_KEY}"]
+    data = the_secret(documents(helm(connectivity, exact)), DEF, DEF_KEY, "an own reference naming the chart's own Secret and entry")
+    again = the_secret(documents(helm(connectivity, exact)), DEF, DEF_KEY, "the same, rendered again")
     if again[0][1] == data[0][1]:
         fail("two renders share one key: the entry is a constant, not generated")
-    if ("Secret", DEF) in docs:
-        fail(f"the own reference set still renders the default Secret {DEF}")
-    ok(f"the own reference: ONE Secret {OWN} with the entry {OWN_KEY}, an EC P-256 private key in PEM generated per render, kept on uninstall; "
-       f"no {DEF}")
+    ok(f"the own reference {OWN}/{OWN_KEY}: the installation's key, no Secret rendered (nor for a reference that differs from the chart's own in name or entry); "
+       f"an own reference naming exactly {DEF}/{DEF_KEY} renders the chart's Secret, an EC P-256 private key in PEM generated per render, kept on uninstall")
 
     # --- the Secret of the chart's default -------------------------------------------------------
     default = documents(helm(connectivity, [*CONN, *NO_OWN]))
