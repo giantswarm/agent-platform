@@ -2995,9 +2995,9 @@ workspaces:
   # chart's copy of this block documents every key.
   substrate:
     csiDriver:
-      name: ""
-      controllerEndpoint: ""
-      nodeSocketOverride: ""
+      name: ""  # @schema pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+      controllerEndpoint: ""  # @schema pattern: ^$|^(tcp|dns)://.+:[0-9]+$
+      nodeSocketOverride: ""  # @schema pattern: ^$|^unix://.+$
       tls:
         enabled: true
         usePodIdentity: true

@@ -4989,14 +4989,14 @@ workspaces:
       # The CSI driver's name, which the workspace StorageClass's provisioner
       # must equal (the render fails otherwise: the class this chart renders
       # from a preset, or the live class it is given), e.g. nfs.csi.k8s.io.
-      name: ""
+      name: ""  # @schema pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
       # The driver's controller service as ate-api-server reaches it:
       # tcp://<host>:<port> or dns://<host>:<port>. REQUIRED with a name; the
       # port is the one the network policy admits.
-      controllerEndpoint: ""
+      controllerEndpoint: ""  # @schema pattern: ^$|^(tcp|dns)://.+:[0-9]+$
       # The node plugin's socket as atelet sees it (unix://…); empty, atelet
       # uses the kubelet's plugin registration.
-      nodeSocketOverride: ""
+      nodeSocketOverride: ""  # @schema pattern: ^$|^unix://.+$
       # mTLS to the controller endpoint with Substrate's own pod identity, the
       # only client certificate the CSIDriverConfig takes (usePodIdentity is
       # required while enabled); serverName overrides the name verified.
