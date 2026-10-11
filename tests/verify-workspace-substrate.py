@@ -178,7 +178,8 @@ def main() -> int:
         must_fail(chart, [*flags, "--set", f"{CSI}.controllerEndpoint="],
                   f'{CSI}.controllerEndpoint is "": Substrate\'s ate-api-server calls', "a driver without a controller endpoint", ci_values=ci)
         err = must_fail(chart, [*flags, "--set", f"{CSI}.controllerEndpoint=tcp://controller"], "controllerEndpoint", "an endpoint without a port (the schema)", ci_values=ci)
-        if "does not match pattern" not in err and "should match" not in err:
+        # Helm 3 and 4 word the schema's pattern refusal differently; both say "match pattern".
+        if "match pattern" not in err.lower() and "should match" not in err.lower():
             fail(f"an endpoint without a port failed for another reason than the schema's pattern:\n{err}")
         must_fail(chart, [*flags, "--set", f"{CSI}.controllerEndpoint=tcp://controller", "--skip-schema-validation"],
                   f'{CSI}.controllerEndpoint is "tcp://controller"', "an endpoint without a port (the guard behind the schema)", ci_values=ci)
