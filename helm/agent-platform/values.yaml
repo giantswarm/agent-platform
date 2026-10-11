@@ -4915,8 +4915,11 @@ workspaces:
   # NFS server through the NFS CSI driver (nfs.csi.k8s.io, the lab's). A
   # cluster rarely has such a class by default.
   storage:
-    # The class's name. REQUIRED while the switch is on: the render fails
-    # without it. The meta chart forwards it to the workspace-manager release
+    # The class's name: workspaces-rwx, the name every installation gives its
+    # read-write-many class (the installation provides it, below), so an
+    # installation sets it only for a class of another name; emptied while
+    # the switch is on, the render fails. The meta chart forwards it to the
+    # workspace-manager release
     # as storage.storageClassName, the class every workspace's
     # PersistentVolumeClaim names (a workspace-manager.storage.storageClassName
     # of its own must agree with it).
@@ -4924,7 +4927,7 @@ workspaces:
     # (the CSI driver and the volume handle) from the grant the
     # workspace-manager issues, and workspaces.substrate names the driver
     # Substrate mounts it with.
-    storageClassName: ""
+    storageClassName: workspaces-rwx
     # Whether the connectivity release renders the class from a preset below
     # (create: true), or the installation provides it (create: false, the
     # default: the class exists before the first workspace). A rendered class

@@ -3,11 +3,12 @@
 
 A workspace is one read-write-many volume shared by its sync and every Session,
 used by git, so it needs a class that keeps POSIX semantics; a cluster rarely has
-one. With workspaces on, workspaces.storage.storageClassName names it (required),
+one. With workspaces on, workspaces.storage.storageClassName names it (workspaces-rwx by default),
 and workspaces.storage.storageClass.create renders it in the connectivity release
 from a preset. Each case below pins one property:
 
-- the name is required: the switch on without it fails both charts naming the key;
+- the name defaults to workspaces-rwx, the name every installation gives the
+  class it provides; emptied, the switch on fails both charts naming the key;
   the meta chart forwards the block to the connectivity release and the name to
   the workspace-manager release as storage.storageClassName (the only storage key
   it forwards; an own value that disagrees fails naming the key, one that agrees
@@ -157,10 +158,15 @@ def live(connectivity: str) -> None:
 
 
 def main(meta: str, connectivity: str) -> int:
-    # --- the name is required, and forwarded -------------------------------------------------
-    must_fail(meta, ["--set", "workspaces.enabled=true"], "workspaces.storage.storageClassName is empty", "the meta chart: the switch on without a class")
-    must_fail(connectivity, [*CONN, "--set", "workspaces.enabled=true"], "workspaces.storage.storageClassName is empty",
-              "the connectivity chart: the switch on without a class", ci_values=False)
+    # --- the name defaults to workspaces-rwx, is required, and forwarded ----------------------
+    by_default = documents(helm(meta, ["--set", "workspaces.enabled=true"]))
+    must_have(by_default[("HelmRelease", "agent-platform-connectivity")], (f"        storageClassName: {NAME}\n",), "the meta chart's default class")
+    must_have(by_default[("HelmRelease", "workspace-manager")], (f"    storage:\n      storageClassName: {NAME}\n",), "the meta chart's default class")
+    helm(connectivity, [*CONN, "--set", "workspaces.enabled=true"], ci_values=False)
+    EMPTIED = ["--set", "workspaces.enabled=true", "--set", "workspaces.storage.storageClassName="]
+    must_fail(meta, EMPTIED, "workspaces.storage.storageClassName is empty", "the meta chart: the switch on with the class emptied")
+    must_fail(connectivity, [*CONN, *EMPTIED], "workspaces.storage.storageClassName is empty",
+              "the connectivity chart: the switch on with the class emptied", ci_values=False)
     on_docs = documents(helm(meta, ON))
     must_have(on_docs[("HelmRelease", "agent-platform-connectivity")], (f"    workspaces:\n      enabled: true\n      storage:\n", f"        storageClassName: {NAME}\n"),
               "the connectivity HelmRelease")
@@ -176,7 +182,7 @@ def main(meta: str, connectivity: str) -> int:
         off = helm(chart, [*flags, "-f", PRESETS["efs"][0], "--set", "workspaces.enabled=false"], ci_values=chart == meta)
         if storage_classes(off) or (chart == meta and re.search(r"^    workspaces:", off, re.M)):
             fail(f"{chart}: a preset with the switch off rendered a class or forwarded the block")
-    ok("the class is required with the switch on in both charts; the meta chart forwards the block to connectivity and the name "
+    ok(f"the class defaults to {NAME} and an emptied one fails with the switch on in both charts; the meta chart forwards the block to connectivity and the name "
        "to workspace-manager as storage.storageClassName (an own value must agree); off, a preset renders nothing")
 
     # --- the presets --------------------------------------------------------------------------

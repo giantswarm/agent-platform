@@ -1301,7 +1301,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | workspaces.enabled | bool | `false` |  |
-| workspaces.storage.storageClassName | string | `""` |  |
+| workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |
 | workspaces.storage.storageClass.preset | string | `""` |  |
 | workspaces.storage.storageClass.efs.fileSystemId | string | `""` |  |

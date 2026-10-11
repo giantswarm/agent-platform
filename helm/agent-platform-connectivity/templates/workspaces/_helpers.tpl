@@ -31,7 +31,7 @@ SMB share does not serve git. Emits nothing; fails naming the key.
 {{- define "agent-platform.workspaces.storage.validate" -}}
 {{- $storage := dig "storage" dict (.Values.workspaces | default dict) -}}
 {{- if not ($storage.storageClassName | default "") -}}
-{{- fail "workspaces.enabled is true but workspaces.storage.storageClassName is empty: a workspace is one read-write-many volume (bare mirrors and a directory per Session, used by git), claimed from a StorageClass that keeps POSIX semantics — Amazon EFS, Azure Files over NFS 4.1, an NFS server — which a cluster rarely has by default; name the class the installation provides, or name a new one and set workspaces.storage.storageClass.create with a preset to render it" -}}
+{{- fail "workspaces.enabled is true but workspaces.storage.storageClassName is empty: a workspace is one read-write-many volume (bare mirrors and a directory per Session, used by git), claimed from a StorageClass that keeps POSIX semantics — Amazon EFS, Azure Files over NFS 4.1, an NFS server — which a cluster rarely has by default; leave the default, workspaces-rwx, the name every installation gives the class it provides, name a class of another name it provides, or name a new one and set workspaces.storage.storageClass.create with a preset to render it" -}}
 {{- end -}}
 {{- $sc := $storage.storageClass | default dict -}}
 {{- if $sc.create -}}

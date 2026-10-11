@@ -1687,7 +1687,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | workspaces.enabled | bool | `false` |  |
-| workspaces.storage.storageClassName | string | `""` |  |
+| workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |
 | workspaces.storage.storageClass.preset | string | `""` |  |
 | workspaces.storage.storageClass.efs.fileSystemId | string | `""` |  |

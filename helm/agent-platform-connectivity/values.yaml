@@ -2964,13 +2964,14 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 workspaces:
   enabled: false
   # The workspace storage: the read-write-many StorageClass the workspace
-  # volumes are claimed from (storageClassName, required while the switch is
-  # on) and whether this chart renders it from a preset
+  # volumes are claimed from (storageClassName, workspaces-rwx: the name every
+  # installation gives the class it provides; emptied while the switch is on,
+  # the render fails) and whether this chart renders it from a preset
   # (storageClass.create; templates/workspaces/storageclass.yaml). The meta
   # chart's copy of this block documents every key; it forwards the block
   # while workspaces are on.
   storage:
-    storageClassName: ""
+    storageClassName: workspaces-rwx
     storageClass:
       create: false
       preset: ""  # @schema enum: ["", efs, azureFiles, nfs]
