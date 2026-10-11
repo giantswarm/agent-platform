@@ -4,18 +4,19 @@
 A person connects a workspace provider in the browser: the manager signs the
 browser in to Dex at <baseURL>/signin, starts the provider's consent at
 <baseURL>/connect/<instance>, and the provider redirects back to
-<baseURL>/callback/<instance>. Those three paths are the manager's only public
-surface. Each case below pins one property:
+<baseURL>/callback/<instance>. Those three paths, and the key set that verifies the
+grants the manager issues as <baseURL> (<baseURL>/.well-known/jwks.json), are the
+manager's only public surface. Each case below pins one property:
 
-- the connectivity chart routes exactly /signin (Exact), /connect and /callback
-  (PathPrefix) on the base URL's host — derived https://workspace-manager.<global.domain>,
+- the connectivity chart routes exactly /signin and /.well-known/jwks.json (Exact),
+  /connect and /callback (PathPrefix) on the base URL's host — derived https://workspace-manager.<global.domain>,
   or the host of workspace-manager.oauth.baseURL, its port dropped — straight to the
   manager's Service, on muster's public parents (ingress.parentRefs) unless the route
   names its own; with the route off, or no host, no route;
 - on that host, a Gateway API match over every HTTPRoute of the render routes
-  /signin, /connect/<i> and /callback/<i> to the manager and nothing else of the
-  manager's: MCP, the token exchange, JWKS, its own OAuth server and the probes are
-  not routed;
+  /signin, /.well-known/jwks.json, /connect/<i> and /callback/<i> to the manager and
+  nothing else of the manager's: MCP, the token exchange, its own OAuth server and
+  its metadata, and the probes are not routed;
 - the network policies admit the route's Gateway on the Service port, both flavors:
   the Envoy edge of the parents' namespaces, or the agentgateway data plane when it
   is the edge; none with the route off;
@@ -59,8 +60,8 @@ CONN = ["--set", "ingress.parentRefs[0].name=edge", "--set", "ingress.parentRefs
 # The chart-owned edge: the agentgateway data plane is the public Gateway.
 EDGE = ["--set", "gatewayApi.gateway.create=true", "--set", "gatewayApi.gateway.tls.secretName=wildcard", "--set", "ingress.parentRefs=null"]
 META = ["--set", "components.flux.enabled=false", "-f", FIXTURE]
-ROUTED = ("/signin", "/connect/github", "/connect/gitlab", "/callback/github", "/callback/gitlab")
-INTERNAL = ("/mcp", "/mcp/", "/token", "/.well-known/jwks.json", "/.well-known/oauth-authorization-server",
+ROUTED = ("/signin", "/.well-known/jwks.json", "/connect/github", "/connect/gitlab", "/callback/github", "/callback/gitlab")
+INTERNAL = ("/mcp", "/mcp/", "/token", "/.well-known/jwks.json/x", "/.well-known/oauth-authorization-server",
             "/.well-known/oauth-protected-resource", "/oauth/token", "/oauth/callback", "/oauth/authorize",
             "/oauth/register", "/healthz", "/readyz", "/metrics", "/", "/signin/x", "/signins", "/callbacks/github",
             "/connector/github")
@@ -173,8 +174,8 @@ def main(meta: str, connectivity: str) -> int:
     parsed = [r for r in routes(docs) if r["name"] == f"{NAME}-public"][0]
     if parsed["hostnames"] != [HOST]:
         fail(f"the route serves {parsed['hostnames']}, expected [{HOST}]")
-    if [sorted(r["matches"]) for r in parsed["rules"]] != [sorted([("Exact", "/signin"), ("PathPrefix", "/connect"), ("PathPrefix", "/callback")])]:
-        fail(f"the route's matches are not exactly /signin (Exact), /connect and /callback (PathPrefix):\n{route}")
+    if [sorted(r["matches"]) for r in parsed["rules"]] != [sorted([("Exact", "/signin"), ("Exact", "/.well-known/jwks.json"), ("PathPrefix", "/connect"), ("PathPrefix", "/callback")])]:
+        fail(f"the route's matches are not exactly /signin and /.well-known/jwks.json (Exact), /connect and /callback (PathPrefix):\n{route}")
     if parsed["rules"][0]["backends"] != [NAME] or "          port: 8080\n" not in route:
         fail(f"the route does not proxy straight to the {NAME} Service on 8080:\n{route}")
     if "  parentRefs:\n    - name: edge\n      namespace: envoy-gateway-system\n" not in route:
@@ -182,7 +183,7 @@ def main(meta: str, connectivity: str) -> int:
     others = [r["name"] for r in routes(docs) if HOST in r["hostnames"] and r["name"] != f"{NAME}-public"]
     if others:
         fail(f"other HTTPRoutes name the sign-in host: {others}")
-    ok(f"the route serves {HOST} with exactly /signin (Exact), /connect and /callback (PathPrefix) to {NAME}:8080 on muster's parents")
+    ok(f"the route serves {HOST} with exactly /signin and /.well-known/jwks.json (Exact), /connect and /callback (PathPrefix) to {NAME}:8080 on muster's parents")
 
     # --- what the host routes ----------------------------------------------------------------
     for flags in ([], EDGE):
@@ -196,7 +197,7 @@ def main(meta: str, connectivity: str) -> int:
         for r in everything:
             if r["name"] != f"{NAME}-public" and any(NAME in rule["backends"] for rule in r["rules"]):
                 fail(f"HTTPRoute {r['name']} reaches {NAME}: the sign-in route is its only one")
-    ok(f"on {HOST}: {', '.join(ROUTED)} reach {NAME}; MCP, the token exchange, JWKS, the OAuth server, the probes and look-alike paths do not "
+    ok(f"on {HOST}: {', '.join(ROUTED)} reach {NAME}; MCP, the token exchange, the OAuth server and its metadata, the probes and look-alike paths do not "
        "(front Gateway and chart-owned edge)")
 
     # --- the host: derived, explicit, with a port; off ---------------------------------------

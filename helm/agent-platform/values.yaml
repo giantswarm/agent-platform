@@ -5044,7 +5044,8 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
     # registered with. Empty, the default, derives
     # https://<fullnameOverride>.<global.domain>; the meta chart forwards the
     # resolved URL and NOTES prints it. The connectivity release routes those
-    # three paths, and only those, on the URL's host
+    # three paths and the grants' key set, <baseURL>/.well-known/jwks.json,
+    # and only those, on the URL's host
     # (workspaceManager.route); a provider instance with an OAuth client and
     # no such host fails the render. A URL with a port (a lab's gateway port)
     # is taken as it is: the route matches the host.
@@ -5137,12 +5138,14 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
   # workspace-manager.oauth.baseURL (https://workspace-manager.<global.domain>
   # unless set): /signin (Exact; the person's Dex sign-in, whose redirect URI
   # <baseURL>/signin the manager's Dex client lists), /connect/<instance> and
-  # /callback/<instance> (PathPrefix), straight to the manager's Service, with
-  # the TLS and route conventions of the platform's other public routes. Every
-  # other path of the host — MCP, the token exchange, JWKS, the manager's own
-  # OAuth server — is not routed: those stay cluster-internal.
+  # /callback/<instance> (PathPrefix), and /.well-known/jwks.json (Exact; the
+  # key set of the grants the manager issues as <baseURL>, public by design),
+  # straight to the manager's Service, with the TLS and route conventions of
+  # the platform's other public routes. Every other path of the host — MCP, the
+  # token exchange, the manager's own OAuth server and its metadata — is not
+  # routed: those stay cluster-internal.
   route:
-    # Off leaves the three paths to a route the installation provides on the
+    # Off leaves the four paths to a route the installation provides on the
     # same host; a provider instance with an OAuth client then needs
     # workspace-manager.oauth.baseURL set (the render fails otherwise).
     enabled: true

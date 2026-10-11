@@ -2,9 +2,12 @@
 The browser's provider sign-in, the workspace-manager's only public surface.
 A provider redirects the browser back to <baseURL>/callback/<instance>, which
 carries no bearer token, so the manager first signs the browser in to Dex at
-<baseURL>/signin and starts a connect at <baseURL>/connect/<instance>. Those
-three paths, and only those, are routed on the base URL's host; MCP, the token
-exchange, JWKS and the manager's own OAuth server are not, and stay reachable
+<baseURL>/signin and starts a connect at <baseURL>/connect/<instance>. The
+grants the manager signs name the base URL as their issuer, so the key set that
+verifies them, <baseURL>/.well-known/jwks.json, is served on the host too: a key
+set is public by design. Those four paths, and only those, are routed on the
+base URL's host; MCP, the token exchange and the manager's own OAuth server
+(its /.well-known/oauth-* metadata included) are not, and stay reachable
 in-cluster only. Without a host (no workspace-manager.oauth.baseURL and no
 global.domain) nothing renders: a route without hostnames would take the paths
 on every host of the Gateway. validate.yaml fails a provider instance with an
@@ -32,6 +35,9 @@ spec:
         - path:
             type: Exact
             value: /signin
+        - path:
+            type: Exact
+            value: /.well-known/jwks.json
         - path:
             type: PathPrefix
             value: /connect
