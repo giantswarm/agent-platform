@@ -22,6 +22,7 @@ giantswarm/agent-platform#795: `components.substrate{,-crds}` no longer set `pre
 ### Operator action
 
 - **None** on stable releases.
+- **Uninstalling the kagent release deletes the platform Harness** (giantswarm/agent-platform#925). From kagent 1.8.1 on, which `>=1.8.0 <1.9.0` resolves to, the chart renders its Harness without `helm.sh/resource-policy: keep` (giantswarm/kagent-upstream#371), and the keep stays on the CRDs only. The kept Agents stay, but nothing runs them until a reinstall renders the Harness again. They name it by `spec.harnessRef`, so they run again untouched. A Harness deleted by hand still comes back on the release's next reconcile.
 - **An installation with `gitops.prereleases: true`**: its Substrate control plane and workers now follow the line's release candidates within `>=1.7.0 <1.8.0`, as its other components already do. To keep Substrate on stable releases, set `components.substrate.prereleases: false` and `components.substrate-crds.prereleases: false`.
 
 ## 4.125.x → \<next\> (kagent 1.8.0)
