@@ -156,21 +156,19 @@ What follows from it:
   of a range carries one and evaluates them all once one does, so `<1.1.0-0`
   would admit the line's dev builds. A patch of the line is carried patches or a
   rebuild on the same upstream pin and never changes the worker and atelet bundle
-  layout; a re-pin onto another upstream release is at least a minor. The worker
-  follows the floor and the atelet follows what Flux resolves, so a later patch
-  of the pinned minor may reach the control plane ahead of the worker and a
-  `1.1.0` never does. `0.x`, `~`, `^`, a `-0` bound, a `<=` ceiling, a patch
+  layout; a re-pin onto another upstream release is at least a minor. The
+  WorkerPool's `workerImage` follows the floor, and ate-controller runs the
+  workers on the release Flux resolves, so a minor never changes under a pool
+  without its range moving. `0.x`, `~`, `^`, a `-0` bound, a `<=` ceiling, a patch
   ceiling, a floor alone or the former `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` fail the
   render (`agent-platform.substrate.validateRange`).
-- **Substrate follows stable releases only**, also where `gitops.prereleases`
-  admits the platform's release candidates (`components.substrate.prereleases:
-  false`, and on substrate-crds): a candidate of the pinned minor would reach the
-  atelet while the worker stays on the floor. From `1.3.1` on, the atelet honors
-  an image's `USER`, and a `1.3.0` worker beside it fails every gVisor actor at
-  its pause container (`failed to load /pause: permission denied`): the floor is
-  `1.3.1`, so worker and atelet move onto it together.
-  From `1.4.0` on, ate-controller runs the gVisor workers on its own release
-  (giantswarm/substrate#114).
+- **Substrate follows `gitops.prereleases`** like every component. From `1.4.0`
+  on, ate-controller runs every gVisor pool on the ateom-gvisor of its own
+  release (`ateController.gvisorWorker.followRelease`, on by default;
+  giantswarm/substrate#114), so a candidate's atelet and worker are one build.
+  Before it, a `1.3.1` candidate's atelet beside the floor's `1.3.0` worker
+  failed every gVisor actor at its pause container, which is why the chart
+  kept Substrate on stable releases from giantswarm/agent-platform#796 until giantswarm/agent-platform#795.
 - **A Substrate re-pin is one values change**, `components.substrate.versionRange`
   and `components.substrate-crds.versionRange` together; it **rolls the pool once**
   (the WorkerPool's `workerImage` changes; one worker at a time under the budget, a
@@ -390,14 +388,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
 | components.substrate-crds.versionRange | string | `">=1.7.0 <1.8.0"` |  |
-| components.substrate-crds.prereleases | bool | `false` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
 | components.substrate.versionRange | string | `">=1.7.0 <1.8.0"` |  |
-| components.substrate.prereleases | bool | `false` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |

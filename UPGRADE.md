@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.126.x → \<next\> (Substrate follows `gitops.prereleases`)
+
+giantswarm/agent-platform#795: `components.substrate{,-crds}` no longer set `prereleases: false`. From Substrate 1.4.0 on, ate-controller runs every gVisor pool on the ateom-gvisor of its own release (`ateController.gvisorWorker.followRelease`, on by default; giantswarm/substrate#114), so a release candidate's atelet and worker are one build. That was the reason for the opt-out (giantswarm/agent-platform#796). An installation on stable releases renders byte for byte as before.
+
+### Operator action
+
+- **None** on stable releases.
+- **An installation with `gitops.prereleases: true`**: its Substrate control plane and workers now follow the line's release candidates within `>=1.7.0 <1.8.0`, as its other components already do. To keep Substrate on stable releases, set `components.substrate.prereleases: false` and `components.substrate-crds.prereleases: false`.
+
 ## 4.125.x → \<next\> (kagent 1.8.0)
 
 `components.kagent{,-crds}.versionRange` selects kagent 1.8 from 1.8.0; `components.substrate{,-crds}.versionRange` stays on Substrate 1.7, the release kagent 1.8.0 is built against. The release installs over 1.7.0 in place: the kagent CRDs are unchanged, the Substrate control plane and the kagent WorkerPool stay on `ateom-gvisor:1.7.0`, the controller and UI roll to 1.8.0 and every AgentTemplate re-snapshots once on the new Harness image. A Session's egress policy no longer carries the template's artifact credentials: a skill or plugin source's credential reaches its host on the golden boot's fetch only.

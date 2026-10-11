@@ -4,8 +4,7 @@ on, every component range and the self-management range admit pre-releases
 and filter their tags to releases and release candidates. The exact version of
 a component released with this chart, an exact pin (1.2.3, =1.2.3), an
 exclusion (!=1.2.3), a range filtered by a semverFilter and a component with
-prereleases: false (Substrate: its worker image follows the floor) stay as
-written; a
+prereleases: false stay as written; a
 range that already carries a pre-release is filtered; a range with no version
 fails the render.
 
@@ -28,9 +27,9 @@ RELEASE = "agent-platform"
 NAMESPACE = "agent-platform"
 ON = ["--set", "gitops.prereleases=true"]
 # Components the chart keeps on stable releases (components.<name>.prereleases:
-# false): the WorkerPool's worker image follows Substrate's floor, and a
-# candidate's atelet next to it fails every gVisor actor.
-STABLE_ONLY = {"substrate", "substrate-crds"}
+# false): none since Substrate 1.4.0 runs its gVisor workers on its own release
+# (giantswarm/substrate#114). The knob itself is checked on muster below.
+STABLE_ONLY: set[str] = set()
 
 
 def fail(msg: str) -> None:
@@ -113,7 +112,7 @@ def main() -> None:
 
     missing = STABLE_ONLY - off.keys()
     if missing:
-        fail(f"no OCIRepository {sorted(missing)} rendered; the test no longer covers prereleases: false")
+        fail(f"no OCIRepository {sorted(missing)} rendered")
     for name in STABLE_ONLY:
         if on[name] != off[name]:
             fail(f"{name}: prereleases: false, yet {off[name]!r} became {on[name]!r}")
