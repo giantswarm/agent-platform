@@ -40,11 +40,21 @@ muster. Each case below pins one property of its wiring:
 - inline credentials, a duplicate or non-DNS provider name, a provider without a
   kind fail the render naming the path; a workspaces.namespace that differs from
   kagent's fails naming the key, kagent.namespaceOverride moves it;
+- the kagent address: with kagent on, the workspace-manager range's floor at
+  agent-platform.workspaceManager.kagentFloor (0.4.0, a release candidate of it
+  too) and no value set the release carries kagent.address
+  grpc://kagent-controller.kagent.svc:8083 and kagent.namespace kagent
+  (kagent.namespaceOverride and kagent.fullnameOverride move both), and the
+  component chart at 0.4.0-rc.1 takes the block; an own address wins and takes
+  nothing derived; an own namespace without an address that differs fails
+  naming the key; without kagent or below the floor (an earlier release's
+  closed schema refuses the block) no kagent block;
 - the connectivity chart, cilium: the ingress (muster, kagent's controller, the
   kubelet's probes, the metrics port), the egress (DNS with the proxy clause, the
   kube-apiserver, the Dex issuer by name, each provider instance's hosts on their
   ports — github.com and api.github.com for a GitHub instance without url), the
-  muster-to and the kagent-controller-to policies; kubernetes: the same as
+  muster-to, the kagent-controller-to and the workspace-manager-to-kagent-controller
+  policies, the egress to kagent's controller on 8083; kubernetes: the same as
   NetworkPolicy; without kagent no kagent rule or policy;
 - the connectivity guards: muster off with the MCPServer on, a provider of another
   kind without url, a bad CIDR;
@@ -76,6 +86,8 @@ IDENTITY = [
     "--set", "global.identity.clientId=platform",
     "--set", "global.identity.existingSecret=platform-oauth",
 ]
+# The first workspace-manager release whose chart takes kagent.address.
+WM_KAGENT = ["--set", "components.workspace-manager.versionRange=>=0.4.0 <1.0.0"]
 CREDENTIALS = ("privateKey", "clientSecret", "token", "signingKey")
 
 
@@ -131,24 +143,30 @@ def must_fail(chart: str, flags: list, needle: str, what: str, ci_values: bool =
         fail(f"{what} failed for another reason (expected {needle!r}):\n{err}")
 
 
-def component_rbac(hr: str) -> dict:
-    """Render the workspace-manager chart, at the BOM's pin, with the values block the
-    HelmRelease forwards, and return its RBAC: the Roles and RoleBindings as
-    `namespace/name`, the cluster-wide ones, and the kinds of every binding's subjects."""
-    with open(BOM, encoding="utf-8") as f:
-        pin = re.search(rf'^\s*{re.escape(NAME)}:\s*\{{\s*versionRange:\s*"([^"]+)"', f.read(), re.M).group(1)
+def component_render(hr: str, version: str) -> subprocess.CompletedProcess:
+    """`helm template` of the workspace-manager chart at version with the values block
+    the HelmRelease forwards."""
     values = block(hr, "values", 2)
     if not values:
         fail(f"the HelmRelease carries no values block:\n{hr}")
     with tempfile.TemporaryDirectory() as tmp:
         with open(f"{tmp}/values.yaml", "w", encoding="utf-8") as f:
             f.write("".join(line[4:] + "\n" for line in values.splitlines()[1:]))
-        r = subprocess.run([HELM, "pull", f"{REPOSITORY}/{NAME}", "--version", pin, "--untar", "-d", tmp], capture_output=True, text=True)
+        r = subprocess.run([HELM, "pull", f"{REPOSITORY}/{NAME}", "--version", version, "--untar", "-d", tmp], capture_output=True, text=True)
         if r.returncode != 0:
-            fail(f"helm pull {NAME} {pin}: {r.stderr}")
-        r = subprocess.run([HELM, "template", NAME, f"{tmp}/{NAME}", "-n", "default", "-f", f"{tmp}/values.yaml"], capture_output=True, text=True)
-        if r.returncode != 0:
-            fail(f"the {NAME} chart {pin} refuses the forwarded values:\n{r.stderr}")
+            fail(f"helm pull {NAME} {version}: {r.stderr}")
+        return subprocess.run([HELM, "template", NAME, f"{tmp}/{NAME}", "-n", "default", "-f", f"{tmp}/values.yaml"], capture_output=True, text=True)
+
+
+def component_rbac(hr: str) -> dict:
+    """Render the workspace-manager chart, at the BOM's pin, with the values block the
+    HelmRelease forwards, and return its RBAC: the Roles and RoleBindings as
+    `namespace/name`, the cluster-wide ones, and the kinds of every binding's subjects."""
+    with open(BOM, encoding="utf-8") as f:
+        pin = re.search(rf'^\s*{re.escape(NAME)}:\s*\{{\s*versionRange:\s*"([^"]+)"', f.read(), re.M).group(1)
+    r = component_render(hr, pin)
+    if r.returncode != 0:
+        fail(f"the {NAME} chart {pin} refuses the forwarded values:\n{r.stderr}")
     out = {"version": pin, "Role": [], "RoleBinding": [], "ClusterRole": [], "ClusterRoleBinding": [], "subjects": set()}
     for doc in r.stdout.split("\n---\n"):
         kind = re.search(r"^kind: (\S+)", doc, re.M)
@@ -336,6 +354,32 @@ def main(meta: str, connectivity: str) -> int:
               "a disagreeing workspaces.namespace")
     ok("workspaces.namespace follows the kagent namespace; an own value must agree")
 
+    # --- the kagent address -------------------------------------------------------------
+    if "\n    kagent:\n" in documents(helm(meta, [*ON, *WM_KAGENT, "--set", "components.kagent.enabled=false"]))[("HelmRelease", NAME)]:
+        fail("the HelmRelease carries a kagent block with kagent off")
+    if "\n    kagent:\n" in documents(helm(meta, [*ON, *KAGENT]))[("HelmRelease", NAME)]:
+        fail("the HelmRelease carries a kagent block below the workspace-manager floor that takes it (an earlier chart's schema refuses it)")
+    want = "    kagent:\n      address: grpc://kagent-controller.kagent.svc:8083\n      namespace: kagent\n"
+    for rng in ("0.4.0-rc.1", ">=0.4.0 <1.0.0"):
+        hr = documents(helm(meta, [*ON, *KAGENT, *IDENTITY, "--set", f"components.{NAME}.versionRange={rng}"]))[("HelmRelease", NAME)]
+        must_have(hr, (want,), f"the HelmRelease with kagent on and the range {rng}")
+    if (r := component_render(hr, "0.4.0-rc.1")).returncode != 0:
+        fail(f"the {NAME} chart 0.4.0-rc.1 refuses the forwarded kagent block:\n{r.stderr}")
+    if "grpc://kagent-controller.kagent.svc:8083" not in r.stdout:
+        fail(f"the {NAME} chart 0.4.0-rc.1 renders no kagent address from the forwarded block")
+    moved = documents(helm(meta, [*ON, *KAGENT, *WM_KAGENT, "--set", "kagent.namespaceOverride=agents", "--set", "kagent.fullnameOverride=kg"]))[("HelmRelease", NAME)]
+    must_have(moved, ("    kagent:\n      address: grpc://kg-controller.agents.svc:8083\n      namespace: agents\n",),
+              "the HelmRelease with kagent.namespaceOverride and fullnameOverride")
+    own = documents(helm(meta, [*ON, *KAGENT, *WM_KAGENT, "--set", f"{NAME}.kagent.address=grpcs://kagent.example.com",
+                                "--set", f"{NAME}.kagent.namespace=elsewhere"]))[("HelmRelease", NAME)]
+    must_have(own, ("    kagent:\n      address: grpcs://kagent.example.com\n      namespace: elsewhere\n",), "the HelmRelease with an own address")
+    helm(meta, [*ON, *KAGENT, *WM_KAGENT, "--set", f"{NAME}.kagent.namespace=kagent"])
+    must_fail(meta, [*ON, *KAGENT, *WM_KAGENT, "--set", f"{NAME}.kagent.namespace=elsewhere"], f"{NAME}.kagent.namespace (elsewhere) differs",
+              "an own kagent namespace that disagrees with the derived address")
+    ok("kagent.address defaults to kagent's controller Service (grpc://kagent-controller.kagent.svc:8083) with its namespace from "
+       "workspace-manager 0.4.0 on, which takes it (0.4.0-rc.1 renders it), following kagent's namespace and fullname; an own address wins; "
+       "a disagreeing own namespace fails; none without kagent or below the floor")
+
     # --- the connectivity chart -------------------------------------------------------------
     conn_on_flags = ["--set", "ingress.parentRefs[0].name=x", "--set", f"components.{NAME}.enabled=true", "-f", FIXTURE, *IDENTITY]
     prefix = "agent-platform-connectivity"
@@ -343,26 +387,37 @@ def main(meta: str, connectivity: str) -> int:
         flags = [*conn_on_flags, "--set", f"networkPolicy.flavor={flavor}", "--set", "components.kagent.enabled=true"]
         docs = documents(helm(connectivity, flags, ci_values=False))
         names = {n for k, n in docs if k == kind and NAME in n}
-        want = {f"{prefix}-{NAME}-ingress", f"{prefix}-{NAME}-egress", f"{prefix}-muster-to-{NAME}", f"{prefix}-kagent-controller-to-{NAME}"}
+        want = {f"{prefix}-{NAME}-ingress", f"{prefix}-{NAME}-egress", f"{prefix}-muster-to-{NAME}", f"{prefix}-kagent-controller-to-{NAME}",
+                f"{prefix}-{NAME}-to-kagent-controller"}
         if names != want:
             fail(f"{flavor}: the policies for {NAME} are {sorted(names)}, expected {sorted(want)}")
         ingress = docs[(kind, f"{prefix}-{NAME}-ingress")]
         egress = docs[(kind, f"{prefix}-{NAME}-egress")]
         kc = docs[(kind, f"{prefix}-kagent-controller-to-{NAME}")]
         must_have(kc, ("  namespace: kagent\n",), f"{flavor}: the kagent controller's egress")
+        to_kc = docs[(kind, f"{prefix}-{NAME}-to-kagent-controller")]
+        must_have(to_kc, ("  namespace: kagent\n", "app.kubernetes.io/component: controller\n", f"app.kubernetes.io/name: {NAME}\n"),
+                  f"{flavor}: the kagent controller's ingress from the manager")
         if flavor == "cilium":
             must_have(ingress, ("app.kubernetes.io/name: muster\n", "app.kubernetes.io/name: kagent\n",
                                 "io.kubernetes.pod.namespace: kagent\n", "- host\n", 'port: "9464"\n'), "cilium ingress")
             must_have(egress, ("- kube-apiserver\n", "matchName: dex.ci.example.com\n",
+                               "app.kubernetes.io/component: controller\n            app.kubernetes.io/name: kagent\n"
+                               "            io.kubernetes.pod.namespace: kagent\n      toPorts:\n        - ports:\n            - port: \"8083\"\n",
                                '- matchName: "github.com"\n        - matchName: "api.github.com"\n',
                                '- matchName: "gitlab.example.com"\n', 'port: "8443"\n', "dns:\n"), "cilium egress")
         else:
             must_have(ingress, ("app.kubernetes.io/name: muster\n", "kubernetes.io/metadata.name: kagent\n"), "kubernetes ingress")
-            must_have(egress, ("cidr: 0.0.0.0/0\n", "- port: 443\n", "- port: 8443\n", "port: 53\n"), "kubernetes egress")
+            must_have(egress, ("cidr: 0.0.0.0/0\n", "- port: 443\n", "- port: 8443\n", "port: 53\n",
+                               "kubernetes.io/metadata.name: kagent\n          podSelector:\n            matchLabels:\n"
+                               "              app.kubernetes.io/component: controller\n              app.kubernetes.io/name: kagent\n"
+                               "      ports:\n        - port: 8083\n"), "kubernetes egress")
         if any(k == "MCPServer" for k, _ in docs):
             fail(f"{flavor}: the connectivity chart renders an MCPServer; the registration is the component chart's own")
         no_kagent = documents(helm(connectivity, [*conn_on_flags, "--set", f"networkPolicy.flavor={flavor}"], ci_values=False))
-        if (kind, f"{prefix}-kagent-controller-to-{NAME}") in no_kagent or "app.kubernetes.io/name: kagent\n" in no_kagent[(kind, f"{prefix}-{NAME}-ingress")]:
+        if (kind, f"{prefix}-kagent-controller-to-{NAME}") in no_kagent or (kind, f"{prefix}-{NAME}-to-kagent-controller") in no_kagent \
+                or "app.kubernetes.io/name: kagent\n" in no_kagent[(kind, f"{prefix}-{NAME}-ingress")] \
+                or "app.kubernetes.io/name: kagent\n" in no_kagent[(kind, f"{prefix}-{NAME}-egress")]:
             fail(f"{flavor}: a kagent rule renders with kagent off")
     narrowed = documents(helm(connectivity, [*conn_on_flags, "--set", "networkPolicy.flavor=kubernetes",
                                              "--set", "workspaceManager.networkPolicy.egress.cidrs[0]=198.51.100.0/24"], ci_values=False))
@@ -370,7 +425,8 @@ def main(meta: str, connectivity: str) -> int:
     if "except:" in narrowed_egress or 'cidr: "198.51.100.0/24"\n      ports:\n        - port: 443\n          protocol: TCP\n        - port: 8443\n' not in narrowed_egress:
         fail("kubernetes: workspaceManager.networkPolicy.egress.cidrs does not narrow the providers' egress")
     ok("connectivity: ingress (muster, kagent's controller, probes, metrics), egress (DNS, kube-apiserver, the issuer, "
-       "every provider instance's hosts on their ports), muster-to and kagent-controller-to policies in both flavors; none of kagent's without it; cidrs narrow")
+       "every provider instance's hosts on their ports, kagent's controller on 8083), muster-to, kagent-controller-to and "
+       "workspace-manager-to-kagent-controller policies in both flavors; none of kagent's without it; cidrs narrow")
 
     must_fail(connectivity, [*conn_on_flags, "--set", "components.muster.enabled=false"], "components.muster.enabled is false",
               "muster off with the MCPServer on", ci_values=False)
