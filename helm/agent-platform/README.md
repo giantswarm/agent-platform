@@ -1363,7 +1363,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaces.substrate.csiCompanion.node.resources.limits.ephemeral-storage | string | `"256Mi"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.image.registry | string | `"gsoci.azurecr.io"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.image.repository | string | `"giantswarm/livenessprobe"` |  |
-| workspaces.substrate.csiCompanion.livenessProbe.image.tag | string | `"v2.19.0"` |  |
+| workspaces.substrate.csiCompanion.livenessProbe.image.tag | string | `"v2.20.0"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.nodePort | int | `29662` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.resources.requests.cpu | string | `"5m"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.resources.requests.memory | string | `"16Mi"` |  |
