@@ -751,7 +751,8 @@ workspace-manager's volumes — unchanged (`templates/workspaces/csi-companion.y
   the Service as the controller endpoint, the node socket, mTLS through the
   pod identity with the Service's name (`<service>.<namespace>.svc`, the one
   name the signer certifies) verified — and ate-api-server's egress admits the
-  endpoint's port. An installation whose driver already serves Substrate —
+  controller's pods on the proxy's port (Cilium judges egress after the
+  Service's translation, so the Service port alone admits nothing). An installation whose driver already serves Substrate —
   a network-reachable controller behind mTLS, a node plugin propagating
   `/var/lib/ate` — leaves the companion off and sets `csiDriver` itself; a
   `csiDriver` named beside the companion must be the preset's driver.

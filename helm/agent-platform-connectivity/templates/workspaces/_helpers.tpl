@@ -272,8 +272,16 @@ follows it.
 {{- end -}}
 
 {{/*
+Truthy when the registered driver is the CSI companion's: the companion renders
+and the installation names no csiDriver of its own.
+*/}}
+{{- define "agent-platform.workspaces.csiCompanion.registered" -}}
+{{- if and (include "agent-platform.workspaces.csiCompanion.enabled" .) (not (dig "substrate" "csiDriver" "name" "" (.Values.workspaces | default dict))) }}true{{ end -}}
+{{- end -}}
+
+{{/*
 The port of the registered driver's controller endpoint (tcp|dns://<host>:<port>,
-validated), which ate-api-server's egress admits.
+validated), which ate-api-server's egress admits for an installation's own driver.
 */}}
 {{- define "agent-platform.workspaces.csiDriver.port" -}}
 {{- regexFind "[0-9]+$" (toString (include "agent-platform.workspaces.csiDriver.resolved" . | fromJson).controllerEndpoint) -}}

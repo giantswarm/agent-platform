@@ -46,7 +46,9 @@ Substrate worker nodes. Each case below pins one property:
   reaches admission, none with Kyverno off; the ingress policy admits ate-api-server from
   Substrate's namespace on the proxy port, the egress policy DNS, the API
   server, the cloud's APIs and (efs only) the instance metadata service, and
-  ate-api-server's own egress the controller endpoint's port; the kubernetes
+  ate-api-server's own egress the controller's pods on the proxy's port, not
+  the Service port (Cilium judges egress after the Service's translation),
+  an own driver's endpoint the cluster on its port; the kubernetes
   flavour renders the ingress policy; the meta chart forwards the block;
 - cloud identity by values: the IRSA role annotates both ServiceAccounts, the
   workload-identity client id annotates them and labels both pod templates;
@@ -196,6 +198,13 @@ def conn(flags: list) -> str:
     return helm(CONNECTIVITY, [*CONN, *flags], ci_values=False)
 
 
+def ate_api_server_companion_egress_ports(render: str) -> set:
+    """The ports ate-api-server's egress admits to the companion's controller pods (after the Service's translation, the proxy's)."""
+    doc = documents(render)[("CiliumNetworkPolicy", "substrate-ate-api-server")]
+    return set(re.findall(r'- toEndpoints:\n\s+- matchLabels:\n\s+app.kubernetes.io/name: csi-companion\n\s+app.kubernetes.io/component: controller\n'
+                          rf'\s+io.kubernetes.pod.namespace: {NS}\n\s+toPorts:\n\s+- ports:\n\s+- port: "(\d+)"\n', doc))
+
+
 def ate_api_server_egress_ports(render: str) -> set:
     doc = documents(render)[("CiliumNetworkPolicy", "substrate-ate-api-server")]
     return set(re.findall(r'- toEntities:\n\s+- cluster\n\s+toPorts:\n\s+- ports:\n\s+- port: "(\d+)"\n', doc))
@@ -239,8 +248,9 @@ def preset(name: str) -> None:
                  f"  tls:\n    enabled: true\n    usePodIdentity: true\n    serverName: \"{CONTROLLER}.{NS}.svc\"\n")
     if spec(found[("CSIDriverConfig", p["driver"])]) != want_spec:
         fail(f"{name}: the derived CSIDriverConfig is off:\n{found[('CSIDriverConfig', p['driver'])]}")
-    if ate_api_server_egress_ports(render) != {"50051"}:
-        fail(f"{name}: ate-api-server's egress admits {ate_api_server_egress_ports(render)}, not the controller endpoint's port alone")
+    if ate_api_server_companion_egress_ports(render) != {"10000"} or ate_api_server_egress_ports(render):
+        fail(f"{name}: ate-api-server's egress admits the companion's pods on {ate_api_server_companion_egress_ports(render)} and the cluster on "
+             f"{ate_api_server_egress_ports(render)}, not the proxy's port on the controller's pods alone (Cilium judges egress after the Service's translation)")
 
     # The controller.
     deploy = found[("Deployment", CONTROLLER)]
@@ -428,7 +438,7 @@ def overrides() -> None:
         fail("other ports do not move the Service and the sidecar")
     if "port_value: 10001 }" not in docs[("ConfigMap", PROXY_CONFIG)] or 'exact: "spiffe://cluster.local/ns/ate-system/sa/other"' not in docs[("ConfigMap", PROXY_CONFIG)]:
         fail("another proxy port and client identity do not move the listener and the SAN")
-    if '- port: "10001"' not in docs[("CiliumNetworkPolicy", f"{POLICY}-ingress")] or ate_api_server_egress_ports(render) != {"50052"}:
+    if '- port: "10001"' not in docs[("CiliumNetworkPolicy", f"{POLICY}-ingress")] or ate_api_server_companion_egress_ports(render) != {"10001"}:
         fail("other ports do not move the ingress policy and ate-api-server's egress")
     ok("the image, appended controller arguments and replaced node arguments, the pool template's selector and tolerations (the node block's win), the controller's "
        "selector, another socket directory, other ports and another client identity move the render where they belong")
@@ -445,8 +455,8 @@ def own_driver() -> None:
         fail(f"the installation's own csiDriver does not win over the derived registration:\n{docs[('CSIDriverConfig', 'efs.csi.aws.com')]}")
     if ("Deployment", CONTROLLER) not in docs or ("DaemonSet", NODE) not in docs:
         fail("the companion does not render beside the installation's own csiDriver")
-    if ate_api_server_egress_ports(render) != {"4444"}:
-        fail(f"ate-api-server's egress admits {ate_api_server_egress_ports(render)}, not the own endpoint's port alone")
+    if ate_api_server_egress_ports(render) != {"4444"} or ate_api_server_companion_egress_ports(render):
+        fail(f"ate-api-server's egress admits {ate_api_server_egress_ports(render)} (and the companion's pods on {ate_api_server_companion_egress_ports(render)}), not the own endpoint's port alone")
     for chart, flags, ci in ((META, ["-f", FIXTURES["efs"]], True), (CONNECTIVITY, [*CONN, "-f", FIXTURES["efs"]], False)):
         must_fail(chart, [*flags, "--set", f"{CSI}.name=nfs.csi.k8s.io", "--set", f"{CSI}.controllerEndpoint=tcp://own.storage.svc:4444"],
                   f"{CSI}.name (nfs.csi.k8s.io) is not the driver of the CSI companion's preset efs (efs.csi.aws.com)", "a csiDriver naming another driver", ci_values=ci)

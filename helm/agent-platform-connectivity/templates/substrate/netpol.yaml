@@ -222,15 +222,34 @@ spec:
               protocol: TCP
     {{- end }}
     {{- if include "agent-platform.workspaces.csiDriverConfig.enabled" . }}
+    {{- if include "agent-platform.workspaces.csiCompanion.registered" . }}
+    # The workspaces' CSI companion: its controller's proxy. Cilium judges
+    # egress after the Service's translation, so the rule names the pods and
+    # the proxy's port, not the Service port the registration dials.
+    {{- $companion := include "agent-platform.workspaces.csiCompanion.spec" . | fromJson }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: csi-companion
+            app.kubernetes.io/component: controller
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ $companion.proxyPort | quote }}
+              protocol: TCP
+    {{- else }}
     # The workspaces' CSI driver: its controller service
     # (workspaces.substrate.csiDriver.controllerEndpoint), which the
-    # installation runs wherever it likes inside the cluster.
+    # installation runs wherever it likes inside the cluster. Cilium judges
+    # egress after a Service's translation, so the endpoint's port is the
+    # backend's: a Service in front of the controller keeps port and
+    # targetPort equal.
     - toEntities:
         - cluster
       toPorts:
         - ports:
             - port: {{ include "agent-platform.workspaces.csiDriver.port" . | quote }}
               protocol: TCP
+    {{- end }}
     {{- end }}
 ---
 # ate-controller: reconciles WorkerPools into worker Deployments through the
