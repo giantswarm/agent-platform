@@ -1608,6 +1608,9 @@ own csiDriver while its name is set, else the companion's driver.
 {{- if not (hasPrefix "/var/lib/kubelet/plugins/" $socketDir) -}}
 {{- fail (printf "workspaces.substrate.csiCompanion.node.socketDir is %q: atelet reaches a node plugin's socket under /var/lib/kubelet/plugins, the directory it mounts" $socketDir) -}}
 {{- end -}}
+{{- if and (eq (include "agent-platform.shape.kyvernoPolicies" .) "true") (include "agent-platform.targetSecretName" .) -}}
+{{- fail "workspaces.substrate.csiCompanion is on with gitops.target and Kyverno policies: the companion's PolicyExceptions must exist before its workloads, and this chart renders them on its own cluster, not the target; provide them on the target cluster and set kyvernoPolicies.enabled false, or run the companion without a target" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
@@ -3281,4 +3284,36 @@ The helm-and-shell image the hooks that need helm run (gitops.hooks.helmImage).
 {{- define "agent-platform.hooks.helmImage" -}}
 {{- $i := .Values.gitops.hooks.helmImage -}}
 {{- printf "%s/%s:%s" $i.registry $i.repository $i.tag -}}
+{{- end -}}
+
+{{/*
+=== Kyverno PolicyExceptions ===
+
+The `exceptions:` list of a PolicyException from the rules one workload
+violates: each rule is looked up in kyvernoPolicies.rules (rule → the
+ClusterPolicy of the cluster's PSS set; a rule without an entry fails the
+render naming it), the rules are grouped by policy, and each rule is cited
+with its autogen-<rule> — the copy Kyverno generates for the controller kinds
+(Deployment, DaemonSet, ...) a pod-level rule matches through. Rendered as YAML
+list items; the caller provides the `exceptions:` key.
+Usage: include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "host-path" "privileged-containers"))
+*/}}
+{{- define "agent-platform.kyverno.exceptions" -}}
+{{- $root := .root -}}
+{{- $byPolicy := dict -}}
+{{- range .rules -}}
+{{- $policy := index ($root.Values.kyvernoPolicies.rules | default dict) . -}}
+{{- if not $policy -}}
+{{- fail (printf "kyvernoPolicies.rules names no ClusterPolicy for the rule %q; add `%s: <policy>` (the PSS policy of the cluster's kyverno-policies chart that carries the rule)" . .) -}}
+{{- end -}}
+{{- $_ := set $byPolicy $policy (append (index $byPolicy $policy | default list) .) -}}
+{{- end -}}
+{{- range $policy, $rules := $byPolicy }}
+- policyName: {{ $policy }}
+  ruleNames:
+  {{- range $rules }}
+    - {{ . }}
+    - autogen-{{ . }}
+  {{- end }}
+{{- end }}
 {{- end -}}

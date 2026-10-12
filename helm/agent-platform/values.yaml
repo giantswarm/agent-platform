@@ -5079,8 +5079,9 @@ workspaces:
     #     override; no kubelet registration, so the kubelet never sees it) and
     #     node.substrateDir mounted Bidirectional. The plugin is privileged on
     #     the node's network with host paths, as the cluster's own is, so on a
-    #     cluster that enforces the restricted profile through Kyverno the
-    #     connectivity release renders its PolicyExceptions (kyvernoPolicies).
+    #     cluster that enforces the restricted profile through Kyverno this
+    #     chart renders its PolicyExceptions (kyvernoPolicies), ahead of the
+    #     connectivity release; with gitops.target the two are refused together.
     # The registration above (csiDriver) is DERIVED from the companion while
     # csiDriver.name is empty: the preset's driver, the Service as the
     # controller endpoint, the node socket override and the TLS server name
