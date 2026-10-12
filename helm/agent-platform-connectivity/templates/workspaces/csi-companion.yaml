@@ -281,10 +281,12 @@ spec:
             {{- end }}
           securityContext:
             {{- toYaml $restricted | nindent 12 }}
+          # The sidecar's health port by number: the kubelet resolves a named
+          # probe port within the probed container only.
           livenessProbe:
             httpGet:
               path: /healthz
-              port: healthz
+              port: 9808
             initialDelaySeconds: 10
             timeoutSeconds: 3
             periodSeconds: 10
@@ -322,6 +324,12 @@ spec:
           args:
             - -c
             - /etc/envoy/envoy.yaml
+          # The image's entrypoint otherwise chowns stdout and switches to its
+          # envoy user, which the dropped capabilities forbid; as root it
+          # execs Envoy directly.
+          env:
+            - name: ENVOY_UID
+              value: "0"
           securityContext:
             runAsUser: 0
             {{- toYaml $restricted | nindent 12 }}

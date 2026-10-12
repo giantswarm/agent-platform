@@ -249,9 +249,13 @@ def preset(name: str) -> None:
     driver = container(deploy, "driver")
     if f"image: {p['image']}\n" not in driver or args(driver) != p["controllerArgs"]:
         fail(f"{name}: the controller's driver is not the preset's image with its arguments:\n{driver}")
+    if not re.search(r"livenessProbe:\n\s+httpGet:\n\s+path: /healthz\n\s+port: 9808\n", driver) or "--health-port=9808" not in container(deploy, "liveness-probe"):
+        fail(f"{name}: the driver's liveness probe does not read the sidecar's health port by number (a named port resolves within the probed container only):\n{driver}")
     if "value: unix:///csi/csi.sock\n" not in driver or ("CSI_NODE_NAME" in driver) != efs or ("AWS_STS_REGIONAL_ENDPOINTS" in driver) != efs:
         fail(f"{name}: the controller's driver environment is off:\n{driver}")
     envoy = container(deploy, "envoy")
+    if "- name: ENVOY_UID\n              value: \"0\"\n" not in envoy:
+        fail(f"{name}: the Envoy sidecar lacks ENVOY_UID=0; its entrypoint would chown stdout and su-exec to its envoy user, which drop ALL forbids:\n{envoy}")
     if f"image: {PROXY_IMAGE}\n" not in envoy or "runAsUser: 0\n" not in envoy or "containerPort: 10000\n" not in envoy:
         fail(f"{name}: the Envoy sidecar is not the pinned image as root on the proxy port:\n{envoy}")
     if f"image: {PROBE_IMAGE}\n" not in container(deploy, "liveness-probe"):
