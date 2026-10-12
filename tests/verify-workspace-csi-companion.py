@@ -50,6 +50,12 @@ Substrate worker nodes. Each case below pins one property:
   the Service port (Cilium judges egress after the Service's translation),
   an own driver's endpoint the cluster on its port; the kubernetes
   flavour renders the ingress policy; the meta chart forwards the block;
+- the pod templates of the controller and the node plugin carry the selector
+  labels and the release-stable common labels only (labels.podTemplate), never
+  helm.sh/chart or app.kubernetes.io/version, which stay on the workloads' own
+  metadata; the selectors are unchanged, and both pod templates render
+  identically at two chart versions, so a release that leaves the companion
+  alone rolls neither (giantswarm/agent-platform#974);
 - cloud identity by values: the IRSA role annotates both ServiceAccounts, the
   workload-identity client id annotates them and labels both pod templates;
   nothing by default;
@@ -76,8 +82,10 @@ HELM selects the binary.
 
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 HELM = os.environ.get("HELM", "helm")
 NS = "agent-platform"
@@ -354,6 +362,56 @@ def preset(name: str) -> None:
        "chart forwards the block")
 
 
+def pod_template(doc: str) -> str:
+    """A workload's pod template, from `  template:` to the end of the document."""
+    return doc[doc.index("\n  template:\n") + 1:]
+
+
+def pod_labels(doc: str) -> str:
+    """The labels block of a workload's pod template."""
+    tpl = pod_template(doc)
+    return tpl[:tpl.index("\n    spec:\n") + 1]
+
+
+def pod_labels_stable(name: str) -> None:
+    """The pod templates carry no chart-version label, so a release that leaves the companion alone rolls neither workload."""
+    render = conn(["-f", FIXTURES[name]])
+    docs = documents(render)
+    with tempfile.TemporaryDirectory() as tmp:
+        bumped = os.path.join(tmp, "chart")
+        shutil.copytree(CONNECTIVITY, bumped)
+        chart_yaml = os.path.join(bumped, "Chart.yaml")
+        with open(chart_yaml) as f:
+            meta = f.read()
+        meta = re.sub(r"^version: .*$", "version: 99.0.0", meta, flags=re.M)
+        meta = re.sub(r"^appVersion: .*$", 'appVersion: "99.0.0"', meta, flags=re.M)
+        with open(chart_yaml, "w") as f:
+            f.write(meta)
+        bumped_docs = documents(helm(bumped, [*CONN, "-f", FIXTURES[name]], ci_values=False))
+    for kind, obj, component in (("Deployment", CONTROLLER, "controller"), ("DaemonSet", NODE, "node")):
+        doc = docs[(kind, obj)]
+        labels = pod_labels(doc)
+        if "helm.sh/chart" in labels or "app.kubernetes.io/version" in labels:
+            fail(f"{name}: the {kind}'s pod template carries a chart-version label (helm.sh/chart, app.kubernetes.io/version): "
+                 f"every release would roll it (giantswarm/agent-platform#974):\n{labels}")
+        want_labels = ("    metadata:\n      labels:\n        app: agent-platform-connectivity\n"
+                       f"        app.kubernetes.io/component: {component}\n        app.kubernetes.io/instance: t\n"
+                       "        app.kubernetes.io/managed-by: Helm\n        app.kubernetes.io/name: csi-companion\n"
+                       "        application.giantswarm.io/team: bumblebee\n")
+        if labels != f"  template:\n{want_labels}":
+            fail(f"{name}: the {kind}'s pod template labels are not the selector's plus the release-stable common ones:\n{labels}")
+        own = doc[:doc.index("\nspec:\n")]
+        if "    helm.sh/chart: " not in own or "    app.kubernetes.io/version: " not in own:
+            fail(f"{name}: the {kind} lost helm.sh/chart or app.kubernetes.io/version from its own metadata:\n{own}")
+        want_selector = f"  selector:\n    matchLabels:\n      app.kubernetes.io/component: {component}\n      app.kubernetes.io/name: csi-companion\n"
+        if want_selector not in doc:
+            fail(f"{name}: the {kind}'s selector moved (spec.selector is immutable: an upgrade would be refused):\n{doc}")
+        if pod_template(bumped_docs[(kind, obj)]) != pod_template(doc):
+            fail(f"{name}: the {kind}'s pod template differs between two chart versions: a release alone would roll it (giantswarm/agent-platform#974)")
+    ok(f"{name}: the controller's and the node plugin's pod templates carry the selector and the release-stable common labels only, "
+       "render identically at two chart versions, the selectors unchanged, helm.sh/chart on the workloads' own metadata")
+
+
 def meta_exceptions(name: str) -> None:
     """The companion's PolicyExceptions, rendered by the meta chart ahead of the connectivity release."""
     kyverno = ["--namespace", NS, "-f", FIXTURES[name], "--set", "kyvernoPolicies.enabled=true", "--api-versions", "kyverno.io/v1"]
@@ -492,6 +550,7 @@ def main() -> int:
     off()
     for name in PRESETS:
         preset(name)
+        pod_labels_stable(name)
     identity()
     overrides()
     own_driver()

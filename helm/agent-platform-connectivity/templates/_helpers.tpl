@@ -37,6 +37,17 @@ helm.sh/chart: {{ include "chart" . | quote }}
 {{- end -}}
 
 {{/*
+The common labels of a pod template: labels.common without helm.sh/chart and
+app.kubernetes.io/version. Both change with every chart release; in a pod
+template they rolled the workload on every release although nothing of it
+changed, so they stay on the objects' own metadata. A workload merges its
+selector labels over these.
+*/}}
+{{- define "labels.podTemplate" -}}
+{{- omit (include "labels.common" . | fromYaml) "helm.sh/chart" "app.kubernetes.io/version" | toYaml -}}
+{{- end -}}
+
+{{/*
 Selector labels
 */}}
 {{- define "labels.selector" -}}

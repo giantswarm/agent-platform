@@ -63,6 +63,11 @@ holds the render, tests/verify-kyverno.py the exceptions to the pod specs.
 {{- if $c.azureClientID }}
 {{- $_ := set $podLabels "azure.workload.identity/use" "true" }}
 {{- end }}
+{{- /* The pod templates carry no version-bearing label (labels.podTemplate):
+with them every release rolled the controller and the node plugin on every
+node (giantswarm/agent-platform#974). */ -}}
+{{- $controllerPodLabels := merge (deepCopy $podLabels) $controllerSelector (include "labels.podTemplate" . | fromYaml) }}
+{{- $nodePodLabels := merge (deepCopy $podLabels) $nodeSelector (include "labels.podTemplate" . | fromYaml) }}
 {{- $saAnnotations := dict }}
 {{- if $c.awsRoleARN }}
 {{- $_ := set $saAnnotations "eks.amazonaws.com/role-arn" $c.awsRoleARN }}
@@ -244,7 +249,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- toYaml (merge (deepCopy $podLabels) $controllerLabels) | nindent 8 }}
+        {{- toYaml $controllerPodLabels | nindent 8 }}
     spec:
       serviceAccountName: {{ $c.controllerName }}
       {{- with $v.controller.nodeSelector }}
@@ -397,7 +402,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- toYaml (merge (deepCopy $podLabels) $nodeLabels) | nindent 8 }}
+        {{- toYaml $nodePodLabels | nindent 8 }}
     spec:
       serviceAccountName: {{ $c.nodeName }}
       hostNetwork: true
