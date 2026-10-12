@@ -355,13 +355,13 @@ def main(meta: str, connectivity: str) -> int:
     ok("workspaces.namespace follows the kagent namespace; an own value must agree")
 
     # --- the kagent address -------------------------------------------------------------
-    if "\n    kagent:\n" in documents(helm(meta, [*ON, *WM_KAGENT]))[("HelmRelease", NAME)]:
+    if "\n    kagent:\n" in documents(helm(meta, [*ON, *WM_KAGENT, "--set", "components.kagent.enabled=false"]))[("HelmRelease", NAME)]:
         fail("the HelmRelease carries a kagent block with kagent off")
     if "\n    kagent:\n" in documents(helm(meta, [*ON, *KAGENT]))[("HelmRelease", NAME)]:
         fail("the HelmRelease carries a kagent block below the workspace-manager floor that takes it (an earlier chart's schema refuses it)")
     want = "    kagent:\n      address: grpc://kagent-controller.kagent.svc:8083\n      namespace: kagent\n"
     for rng in ("0.4.0-rc.1", ">=0.4.0 <1.0.0"):
-        hr = documents(helm(meta, [*ON, *KAGENT, "--set", f"components.{NAME}.versionRange={rng}"]))[("HelmRelease", NAME)]
+        hr = documents(helm(meta, [*ON, *KAGENT, *IDENTITY, "--set", f"components.{NAME}.versionRange={rng}"]))[("HelmRelease", NAME)]
         must_have(hr, (want,), f"the HelmRelease with kagent on and the range {rng}")
     if (r := component_render(hr, "0.4.0-rc.1")).returncode != 0:
         fail(f"the {NAME} chart 0.4.0-rc.1 refuses the forwarded kagent block:\n{r.stderr}")
