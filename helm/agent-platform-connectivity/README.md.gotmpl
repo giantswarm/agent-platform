@@ -704,6 +704,73 @@ platform needs:
 The meta chart's README ("Agent Substrate") has the prerequisites, the version
 pin and the snapshot store; `docs/substrate-security.md` the security write-up.
 
+### The workspaces' CSI companion
+
+A Session's workspace is a directory of the workspace's read-write-many
+volume, which Substrate mounts without a PVC of the actor's own: ate-api-server
+calls the CSI driver's controller service over the network and atelet a node
+plugin that propagates `/var/lib/ate`, both found through the cluster-scoped
+`CSIDriverConfig` rendered from `workspaces.substrate.csiDriver`. The file
+drivers a cluster runs — Amazon EFS, Azure Files — are not built for that:
+their controllers listen on an in-pod Unix socket the sidecars of their own
+pod reach, and their node plugins propagate the kubelet directory only. Those
+driver apps are the cluster operators' to configure, never this chart's to
+change. So with `workspaces.substrate.csiCompanion.enabled` and a `preset`
+(`efs`, `azureFiles`) the chart runs the driver's own image twice more for
+Substrate, beside the cluster's driver, which keeps serving the PVCs — the
+workspace-manager's volumes — unchanged (`templates/workspaces/csi-companion.yaml`):
+
+- **The controller** (`csi-companion-controller`, a Deployment in the release
+  namespace): the driver in controller mode on a pod-local socket, an Envoy
+  sidecar in front of it terminating mTLS — its serving certificate a
+  `PodCertificateRequest` Substrate's service-DNS signer answers for the
+  Service that selects the pod, a client certificate from Substrate's
+  pod-identity CA required and exactly one SPIFFE ID admitted,
+  `proxy.clientIdentity` (ate-api-server's) — and the Service the registration
+  names as the controller endpoint (`service.port`). The driver is given no
+  cloud identity by default: Substrate mounts existing volumes only, so the
+  controller answers capability and publish calls alone. An installation whose
+  driver needs one sets `cloudIdentity.aws.roleARN` (the IRSA annotation) or
+  `cloudIdentity.azure.workloadIdentityClientID` (the workload-identity
+  annotation and pod label).
+- **The node plugin** (`csi-companion-node`, a DaemonSet on the Substrate
+  worker nodes: the WorkerPool template's node selector and tolerations unless
+  `node.nodeSelector` / `node.tolerations` are set, the os label always): the
+  driver in node mode on a socket of its own under the kubelet's plugins
+  directory (`node.socketDir`, the registration's node socket override; no
+  node-driver-registrar, so the kubelet never learns of it) with
+  `node.substrateDir` mounted `Bidirectional`. Privileged on the node's
+  network with host paths, as the cluster's own node plugin is: an NFS mount
+  made from a pod's network namespace dies with the pod, and efs-utils' TLS
+  tunnels and the kernel's NFS client live on the host. The `efs` preset keeps
+  efs-utils' state and configuration on host paths of its own
+  (`node.efs.stateDir`, `node.efs.configDir`); the `azureFiles` preset reads
+  the node's `/etc/kubernetes/azure.json` where it is and runs without one.
+- **The registration**: while `workspaces.substrate.csiDriver.name` is empty
+  the `CSIDriverConfig` is derived from the companion — the preset's driver,
+  the Service as the controller endpoint, the node socket, mTLS through the
+  pod identity with the Service's name (`<service>.<namespace>.svc`, the one
+  name the signer certifies) verified — and ate-api-server's egress admits the
+  endpoint's port. An installation whose driver already serves Substrate —
+  a network-reachable controller behind mTLS, a node plugin propagating
+  `/var/lib/ate` — leaves the companion off and sets `csiDriver` itself; a
+  `csiDriver` named beside the companion must be the preset's driver.
+- **Kyverno** (`templates/workspaces/csi-companion-policy-exceptions.yaml`):
+  `csi-companion-controller` (every container as root — the driver images
+  are, and the proxy must be to reach the driver's root-owned socket) and
+  `csi-companion-node` (privileged, the node's network, host paths), in
+  `kyvernoPolicies.policyExceptionNamespace`; `make verify-kyverno` holds
+  their rule lists to the pod specs.
+- **Network policies** (`templates/workspaces/csi-companion-netpol.yaml`,
+  both flavours): the controller admits ate-api-server from Substrate's
+  namespace on the proxy port and the kubelet's probes; it reaches DNS, the
+  API server, the cloud's APIs and (`efs`) the instance metadata service. The
+  node plugin is on the node's network, which no pod policy selects.
+- **Guards**: a companion without a preset or with an unknown one, a storage
+  preset of another driver, a client identity that is no SPIFFE ID, a socket
+  directory outside the kubelet's plugins directory. `make
+  verify-workspace-csi-companion` asserts the render.
+
 ## klaus-gateway — reaching its stores
 
 Three policies select the klaus-gateway pod under `networkPolicy.enabled`

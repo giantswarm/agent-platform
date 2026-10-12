@@ -1432,11 +1432,70 @@ nothing; fails naming the key.
 {{- if and $tls.enabled (not $tls.usePodIdentity) -}}
 {{- fail "workspaces.substrate.csiDriver.tls.enabled is true but tls.usePodIdentity is not: Substrate presents its own pod identity to the controller endpoint, the only client certificate a CSIDriverConfig takes" -}}
 {{- end -}}
+{{- end -}}
+{{- include "agent-platform.workspaces.csiCompanion.validate" . -}}
+{{- $resolved := toString ((include "agent-platform.workspaces.csiDriver.resolved" . | fromJson).name | default "") -}}
+{{- if $resolved -}}
 {{- $sc := dig "storage" "storageClass" dict (.Values.workspaces | default dict) -}}
 {{- $provisioner := get (dict "efs" "efs.csi.aws.com" "azureFiles" "file.csi.azure.com" "nfs" "nfs.csi.k8s.io") (toString ($sc.preset | default "")) -}}
-{{- if and $sc.create (ne $provisioner $name) -}}
-{{- fail (printf "workspaces.substrate.csiDriver.name (%s) differs from the provisioner of the workspace StorageClass rendered from preset %s (%s): Substrate mounts a workspace's volume through the driver that provisioned it" $name $sc.preset $provisioner) -}}
+{{- if and $sc.create (ne $provisioner $resolved) -}}
+{{- fail (printf "workspaces.substrate.csiDriver.name (%s) differs from the provisioner of the workspace StorageClass rendered from preset %s (%s): Substrate mounts a workspace's volume through the driver that provisioned it" $resolved $sc.preset $provisioner) -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The CSI companion's guards and the registration derived from it
+(giantswarm/agent-platform#889), the connectivity chart's definitions
+(templates/workspaces/_helpers.tpl there), carried here so the meta chart
+refuses the same values the connectivity release would: a companion names a
+preset of the driver it stands in for; a csiDriver named beside it is that
+driver; the proxy admits one SPIFFE identity; the node socket is under the
+kubelet's plugins directory. The resolved registration is the installation's
+own csiDriver while its name is set, else the companion's driver.
+*/}}
+{{- define "agent-platform.workspaces.csiCompanion.enabled" -}}
+{{- if and (dig "enabled" false (.Values.workspaces | default dict)) (dig "substrate" "csiCompanion" "enabled" false (.Values.workspaces | default dict)) }}true{{ end -}}
+{{- end -}}
+
+{{- define "agent-platform.workspaces.csiCompanion.presets" -}}
+{{- dict
+  "efs" (dict "provisioner" "efs.csi.aws.com")
+  "azureFiles" (dict "provisioner" "file.csi.azure.com")
+  | toJson -}}
+{{- end -}}
+
+{{- define "agent-platform.workspaces.csiCompanion.validate" -}}
+{{- if include "agent-platform.workspaces.csiCompanion.enabled" . -}}
+{{- $c := dig "substrate" "csiCompanion" dict (.Values.workspaces | default dict) -}}
+{{- $preset := toString ($c.preset | default "") -}}
+{{- $presets := include "agent-platform.workspaces.csiCompanion.presets" . | fromJson -}}
+{{- if not (hasKey $presets $preset) -}}
+{{- fail (printf "workspaces.substrate.csiCompanion.enabled is true but workspaces.substrate.csiCompanion.preset is %q: the companion runs the cluster's file driver for Substrate — efs (Amazon EFS, efs.csi.aws.com) or azureFiles (Azure Files over NFS, file.csi.azure.com); name the driver the workspace StorageClass is provisioned with" $preset) -}}
+{{- end -}}
+{{- $provisioner := (get $presets $preset).provisioner -}}
+{{- $own := toString (dig "substrate" "csiDriver" "name" "" (.Values.workspaces | default dict)) -}}
+{{- if and $own (ne $own $provisioner) -}}
+{{- fail (printf "workspaces.substrate.csiDriver.name (%s) is not the driver of the CSI companion's preset %s (%s): Substrate registers one driver for the workspace volumes; set the companion's preset to that driver, or leave csiDriver.name empty and the registration is derived from the companion" $own $preset $provisioner) -}}
+{{- end -}}
+{{- $identity := toString (dig "proxy" "clientIdentity" "spiffe://cluster.local/ns/ate-system/sa/ate-api-server" $c) -}}
+{{- if not (hasPrefix "spiffe://" $identity) -}}
+{{- fail (printf "workspaces.substrate.csiCompanion.proxy.clientIdentity is %q: the proxy admits the client certificate that carries this SPIFFE ID, ate-api-server's (spiffe://<trust domain>/ns/<namespace>/sa/ate-api-server)" $identity) -}}
+{{- end -}}
+{{- $socketDir := toString (dig "node" "socketDir" "/var/lib/kubelet/plugins/agent-platform-csi-companion" $c) -}}
+{{- if not (hasPrefix "/var/lib/kubelet/plugins/" $socketDir) -}}
+{{- fail (printf "workspaces.substrate.csiCompanion.node.socketDir is %q: atelet reaches a node plugin's socket under /var/lib/kubelet/plugins, the directory it mounts" $socketDir) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "agent-platform.workspaces.csiDriver.resolved" -}}
+{{- $own := dig "substrate" "csiDriver" dict (.Values.workspaces | default dict) -}}
+{{- if and (not ($own.name | default "")) (include "agent-platform.workspaces.csiCompanion.enabled" .) -}}
+{{- $preset := toString (dig "substrate" "csiCompanion" "preset" "" (.Values.workspaces | default dict)) -}}
+{{- dict "name" ((get (include "agent-platform.workspaces.csiCompanion.presets" . | fromJson) $preset | default dict).provisioner | default "") | toJson -}}
+{{- else -}}
+{{- $own | toJson -}}
 {{- end -}}
 {{- end -}}
 

@@ -783,6 +783,7 @@ kyvernoPolicies:
   rules:  # @schema additionalProperties: true
     privileged-containers: disallow-privileged-containers
     host-ports-none: disallow-host-ports
+    host-namespaces: disallow-host-namespaces
     host-path: disallow-host-path
     restricted-volumes: restrict-volume-types
     adding-capabilities: disallow-capabilities
@@ -3012,6 +3013,87 @@ workspaces:
         enabled: true
         usePodIdentity: true
         serverName: ""
+    # The platform's own CSI companion for the cluster's file driver
+    # (templates/workspaces/csi-companion.yaml): the driver's controller
+    # behind an mTLS proxy for ate-api-server and its node plugin on the
+    # Substrate worker nodes with substrateDir propagated, rendered while the
+    # switch is on and this is enabled; csiDriver above is derived from it
+    # while its name is empty. README "The workspaces' CSI companion"; the
+    # meta chart's copy of this block documents every key.
+    csiCompanion:
+      enabled: false
+      preset: ""  # @schema enum: ["", efs, azureFiles]
+      image:
+        registry: gsoci.azurecr.io
+        repository: ""
+        tag: ""
+      controller:
+        args: []  # @schema item: string
+        extraArgs: []  # @schema item: string
+        nodeSelector: {}  # @schema additionalProperties: true
+        tolerations: []
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 10m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            memory: 256Mi
+            ephemeral-storage: 256Mi
+      proxy:
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/envoy
+          tag: v1.39.3
+        port: 10000
+        clientIdentity: spiffe://cluster.local/ns/ate-system/sa/ate-api-server
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 10m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            memory: 256Mi
+            ephemeral-storage: 256Mi
+      service:
+        port: 50051
+      node:
+        args: []  # @schema item: string
+        extraArgs: []  # @schema item: string
+        socketDir: /var/lib/kubelet/plugins/agent-platform-csi-companion
+        substrateDir: /var/lib/ate
+        nodeSelector: {}  # @schema additionalProperties: true
+        tolerations: []
+        efs:
+          stateDir: /var/run/agent-platform-csi-companion/efs
+          configDir: /var/lib/agent-platform-csi-companion/efs-utils
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 10m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            memory: 512Mi
+            ephemeral-storage: 256Mi
+      livenessProbe:
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/livenessprobe
+          tag: v2.19.0
+        nodePort: 29662
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 5m
+            memory: 16Mi
+            ephemeral-storage: 16Mi
+          limits:
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+      cloudIdentity:
+        aws:
+          roleARN: ""
+        azure:
+          workloadIdentityClientID: ""
   # The Organizations whose members manage workspaces ({name, memberGroups}),
   # which the meta chart forwards to the workspace-manager release; this chart
   # renders nothing of them. The meta chart's copy documents the key.

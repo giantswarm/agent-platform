@@ -1,0 +1,16 @@
+# The CSI companion with the efs preset: the EFS driver's controller behind
+# the mTLS proxy for ate-api-server and its node plugin on the Substrate
+# worker nodes, beside the efs class (tests/verify-workspace-csi-companion.py).
+workspaces:
+  enabled: true
+  storage:
+    storageClassName: workspaces-rwx
+    storageClass:
+      create: true
+      preset: efs
+      efs:
+        fileSystemId: fs-0123456789abcdef0
+  substrate:
+    csiCompanion:
+      enabled: true
+      preset: efs

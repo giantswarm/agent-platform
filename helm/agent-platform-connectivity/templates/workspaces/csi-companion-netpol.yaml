@@ -1,0 +1,109 @@
+{{- /*
+Network policies of the CSI companion's controller (csi-companion.yaml), both
+flavours: ingress on the proxy's port from ate-api-server alone — the one
+caller the proxy admits anyway, by its client certificate — and the kubelet's
+probes; egress (Cilium) to DNS, the Kubernetes API (the EFS driver reads its
+Node), the cloud's APIs and the instance metadata service (the efs preset's
+region). ate-api-server's own egress to the endpoint's port is in
+templates/substrate/netpol.yaml. The node plugin is on the node's network,
+which no pod policy selects. The kubernetes flavour renders the ingress policy
+only, as the chart does for every workload.
+*/ -}}
+{{- if and (include "agent-platform.workspaces.csiCompanion.enabled" .) .Values.networkPolicy.enabled }}
+{{- $c := include "agent-platform.workspaces.csiCompanion.spec" . | fromJson }}
+{{- $ns := .Release.Namespace }}
+{{- $substrateNs := include "agent-platform.substrate.namespace" . }}
+{{- $selector := dict "app.kubernetes.io/name" "csi-companion" "app.kubernetes.io/component" "controller" }}
+{{- $labels := merge (deepCopy $selector) (include "labels.common" . | fromYaml) }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-csi-companion-controller-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: ate-api-server
+            io.kubernetes.pod.namespace: {{ $substrateNs }}
+      toPorts:
+        - ports:
+            - port: {{ $c.proxyPort | quote }}
+              protocol: TCP
+    # The kubelet's liveness and readiness probes arrive from the host entity.
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: {{ $c.proxyPort | quote }}
+              protocol: TCP
+            - port: "9808"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-csi-companion-controller-egress
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+    # The cloud's APIs (EFS and STS, Azure Resource Manager), should the
+    # controller be given a volume to create or delete.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- if eq $c.preset "efs" }}
+    # The instance metadata service: the EFS driver's region at start.
+    - toCIDR:
+        - 169.254.169.254/32
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+    {{- end }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-csi-companion-controller-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $substrateNs }}
+          podSelector:
+            matchLabels:
+              app: ate-api-server
+      ports:
+        - port: {{ $c.proxyPort | int }}
+          protocol: TCP
+{{- end }}
+{{- end }}

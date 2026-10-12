@@ -93,8 +93,9 @@ workspaces are on, by this chart and by the meta chart alike (its templates/_hel
 carries the same definition): a driver without a name sets nothing; one with a
 name has a controller endpoint with a port (the network policy admits it); TLS
 takes Substrate's pod identity, the CSIDriverConfig's only client certificate;
-a class rendered from a preset is provisioned by that driver. Emits
-nothing; fails naming the key.
+a class rendered from a preset is provisioned by the driver — the named one, or
+the companion's (giantswarm/agent-platform#889), whose own guards run here too.
+Emits nothing; fails naming the key.
 */}}
 {{- define "agent-platform.workspaces.substrate.validate" -}}
 {{- $csi := dig "substrate" "csiDriver" dict (.Values.workspaces | default dict) -}}
@@ -112,32 +113,168 @@ nothing; fails naming the key.
 {{- if and $tls.enabled (not $tls.usePodIdentity) -}}
 {{- fail "workspaces.substrate.csiDriver.tls.enabled is true but tls.usePodIdentity is not: Substrate presents its own pod identity to the controller endpoint, the only client certificate a CSIDriverConfig takes" -}}
 {{- end -}}
+{{- end -}}
+{{- include "agent-platform.workspaces.csiCompanion.validate" . -}}
+{{- $resolved := toString ((include "agent-platform.workspaces.csiDriver.resolved" . | fromJson).name | default "") -}}
+{{- if $resolved -}}
 {{- $sc := dig "storage" "storageClass" dict (.Values.workspaces | default dict) -}}
 {{- $provisioner := get (dict "efs" "efs.csi.aws.com" "azureFiles" "file.csi.azure.com" "nfs" "nfs.csi.k8s.io") (toString ($sc.preset | default "")) -}}
-{{- if and $sc.create (ne $provisioner $name) -}}
-{{- fail (printf "workspaces.substrate.csiDriver.name (%s) differs from the provisioner of the workspace StorageClass rendered from preset %s (%s): Substrate mounts a workspace's volume through the driver that provisioned it" $name $sc.preset $provisioner) -}}
+{{- if and $sc.create (ne $provisioner $resolved) -}}
+{{- fail (printf "workspaces.substrate.csiDriver.name (%s) differs from the provisioner of the workspace StorageClass rendered from preset %s (%s): Substrate mounts a workspace's volume through the driver that provisioned it" $resolved $sc.preset $provisioner) -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy while the CSI companion renders (giantswarm/agent-platform#889):
+workspaces on and workspaces.substrate.csiCompanion.enabled.
+*/}}
+{{- define "agent-platform.workspaces.csiCompanion.enabled" -}}
+{{- if and (include "agent-platform.workspaces.enabled" .) (dig "substrate" "csiCompanion" "enabled" false (.Values.workspaces | default dict)) }}true{{ end -}}
+{{- end -}}
+
+{{/*
+The companion's presets: the driver each stands in for, its image (the gsoci
+mirror, pinned) and the driver's arguments in controller and node mode, as
+JSON {<preset>: {provisioner, repository, tag, controllerArgs, nodeArgs}}.
+The socket is always --endpoint=$(CSI_ENDPOINT), the chart's own.
+  efs: aws-efs-csi-driver — controller: never deletes an access point's root
+    directory (nothing of Substrate's creates one); node: no volume metrics.
+  azureFiles: azurefile-csi — no cloud configuration Secret (the node reads the
+    node's /etc/kubernetes/azure.json through AZURE_CREDENTIAL_FILE where it is;
+    both run without one: --allow-empty-cloud-config), the share's root chmod
+    the cluster's own node plugin applies (--mount-permissions=0777).
+*/}}
+{{- define "agent-platform.workspaces.csiCompanion.presets" -}}
+{{- dict
+  "efs" (dict "provisioner" "efs.csi.aws.com" "repository" "giantswarm/aws-efs-csi-driver" "tag" "v2.1.15"
+    "controllerArgs" (list "--endpoint=$(CSI_ENDPOINT)" "--logtostderr" "--v=2" "--delete-access-point-root-dir=false")
+    "nodeArgs" (list "--endpoint=$(CSI_ENDPOINT)" "--logtostderr" "--v=2" "--vol-metrics-opt-in=false"))
+  "azureFiles" (dict "provisioner" "file.csi.azure.com" "repository" "giantswarm/azurefile-csi" "tag" "v1.34.10"
+    "controllerArgs" (list "--v=2" "--endpoint=$(CSI_ENDPOINT)" "--drivername=file.csi.azure.com" "--cloud-config-secret-name=" "--cloud-config-secret-namespace=" "--allow-empty-cloud-config=true" "--user-agent-suffix=agent-platform")
+    "nodeArgs" (list "--v=2" "--endpoint=$(CSI_ENDPOINT)" "--nodeid=$(KUBE_NODE_NAME)" "--drivername=file.csi.azure.com" "--cloud-config-secret-name=" "--cloud-config-secret-namespace=" "--allow-empty-cloud-config=true" "--mount-permissions=0777" "--user-agent-suffix=agent-platform"))
+  | toJson -}}
+{{- end -}}
+
+{{/*
+The companion as rendered (templates/workspaces/csi-companion.yaml), as JSON:
+the preset and its provisioner, the driver image, the arguments of both modes
+(the preset's unless set, extraArgs appended), the object names, the proxy's
+and the Service's ports, the node socket and Substrate directory, the derived
+controller endpoint and TLS server name (the Service's <name>.<namespace>.svc,
+the one name Substrate's service-DNS signer puts into its certificate), the
+node selector and tolerations (the WorkerPool template's unless set, the os
+label always). For a validated block only.
+*/}}
+{{- define "agent-platform.workspaces.csiCompanion.spec" -}}
+{{- $c := dig "substrate" "csiCompanion" dict (.Values.workspaces | default dict) -}}
+{{- $preset := get (include "agent-platform.workspaces.csiCompanion.presets" . | fromJson) (toString ($c.preset | default "")) | default dict -}}
+{{- $image := $c.image | default dict -}}
+{{- $controller := $c.controller | default dict -}}
+{{- $node := $c.node | default dict -}}
+{{- $proxy := $c.proxy | default dict -}}
+{{- $probe := $c.livenessProbe | default dict -}}
+{{- $pool := dig "substrateWorkerPool" "template" dict (.Values.kagent | default dict) -}}
+{{- $name := "csi-companion-controller" -}}
+{{- $servicePort := dig "service" "port" 50051 $c | int -}}
+{{- $socketDir := toString ($node.socketDir | default "/var/lib/kubelet/plugins/agent-platform-csi-companion") | trimSuffix "/" -}}
+{{- $nodeSelector := merge (dict "kubernetes.io/os" "linux") (ternary $node.nodeSelector ($pool.nodeSelector | default dict) (not (empty $node.nodeSelector))) -}}
+{{- dict
+  "preset" (toString $c.preset)
+  "provisioner" $preset.provisioner
+  "image" (printf "%s/%s:%s" (toString ($image.registry | default "gsoci.azurecr.io")) (toString ($image.repository | default $preset.repository)) (toString ($image.tag | default $preset.tag)))
+  "controllerArgs" (concat (ternary $controller.args ($preset.controllerArgs | default list) (not (empty $controller.args))) ($controller.extraArgs | default list))
+  "nodeArgs" (concat (ternary $node.args ($preset.nodeArgs | default list) (not (empty $node.args))) ($node.extraArgs | default list))
+  "controllerName" $name
+  "nodeName" "csi-companion-node"
+  "proxyConfigName" "csi-companion-proxy"
+  "serviceName" $name
+  "servicePort" $servicePort
+  "proxyPort" (dig "port" 10000 $proxy | int)
+  "proxyImage" (printf "%s/%s:%s" (toString (dig "image" "registry" "gsoci.azurecr.io" $proxy)) (toString (dig "image" "repository" "giantswarm/envoy" $proxy)) (toString (dig "image" "tag" "" $proxy)))
+  "clientIdentity" (toString ($proxy.clientIdentity | default "spiffe://cluster.local/ns/ate-system/sa/ate-api-server"))
+  "probeImage" (printf "%s/%s:%s" (toString (dig "image" "registry" "gsoci.azurecr.io" $probe)) (toString (dig "image" "repository" "giantswarm/livenessprobe" $probe)) (toString (dig "image" "tag" "" $probe)))
+  "probeNodePort" (dig "nodePort" 29662 $probe | int)
+  "socketDir" $socketDir
+  "nodeSocket" (printf "unix://%s/csi.sock" $socketDir)
+  "substrateDir" (toString ($node.substrateDir | default "/var/lib/ate") | trimSuffix "/")
+  "efsStateDir" (toString (dig "efs" "stateDir" "/var/run/agent-platform-csi-companion/efs" $node))
+  "efsConfigDir" (toString (dig "efs" "configDir" "/var/lib/agent-platform-csi-companion/efs-utils" $node))
+  "controllerEndpoint" (printf "tcp://%s.%s.svc.cluster.local:%d" $name .Release.Namespace $servicePort)
+  "serverName" (printf "%s.%s.svc" $name .Release.Namespace)
+  "nodeSelector" $nodeSelector
+  "nodeTolerations" (ternary $node.tolerations ($pool.tolerations | default list) (not (empty $node.tolerations)))
+  "awsRoleARN" (toString (dig "cloudIdentity" "aws" "roleARN" "" $c))
+  "azureClientID" (toString (dig "cloudIdentity" "azure" "workloadIdentityClientID" "" $c))
+  | toJson -}}
+{{- end -}}
+
+{{/*
+The template-time guards of the CSI companion, run while workspaces are on by
+this chart and by the meta chart alike: a companion names a preset of the
+driver it stands in for; a csiDriver the installation names beside it is that
+driver (the companion is for the driver the workspace volumes are provisioned
+with, and the registration is one object); the proxy admits one identity.
+Emits nothing; fails naming the key.
+*/}}
+{{- define "agent-platform.workspaces.csiCompanion.validate" -}}
+{{- if include "agent-platform.workspaces.csiCompanion.enabled" . -}}
+{{- $c := dig "substrate" "csiCompanion" dict (.Values.workspaces | default dict) -}}
+{{- $preset := toString ($c.preset | default "") -}}
+{{- if not (hasKey (include "agent-platform.workspaces.csiCompanion.presets" . | fromJson) $preset) -}}
+{{- fail (printf "workspaces.substrate.csiCompanion.enabled is true but workspaces.substrate.csiCompanion.preset is %q: the companion runs the cluster's file driver for Substrate — efs (Amazon EFS, efs.csi.aws.com) or azureFiles (Azure Files over NFS, file.csi.azure.com); name the driver the workspace StorageClass is provisioned with" $preset) -}}
+{{- end -}}
+{{- $spec := include "agent-platform.workspaces.csiCompanion.spec" . | fromJson -}}
+{{- $own := toString (dig "substrate" "csiDriver" "name" "" (.Values.workspaces | default dict)) -}}
+{{- if and $own (ne $own $spec.provisioner) -}}
+{{- fail (printf "workspaces.substrate.csiDriver.name (%s) is not the driver of the CSI companion's preset %s (%s): Substrate registers one driver for the workspace volumes; set the companion's preset to that driver, or leave csiDriver.name empty and the registration is derived from the companion" $own $spec.preset $spec.provisioner) -}}
+{{- end -}}
+{{- if not (hasPrefix "spiffe://" $spec.clientIdentity) -}}
+{{- fail (printf "workspaces.substrate.csiCompanion.proxy.clientIdentity is %q: the proxy admits the client certificate that carries this SPIFFE ID, ate-api-server's (spiffe://<trust domain>/ns/<namespace>/sa/ate-api-server)" $spec.clientIdentity) -}}
+{{- end -}}
+{{- if not (hasPrefix "/var/lib/kubelet/plugins/" $spec.socketDir) -}}
+{{- fail (printf "workspaces.substrate.csiCompanion.node.socketDir is %q: atelet reaches a node plugin's socket under /var/lib/kubelet/plugins, the directory it mounts" $spec.socketDir) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Substrate's workspace driver registration as JSON {name, controllerEndpoint,
+nodeSocketOverride, tls: {enabled, usePodIdentity, serverName}}: the
+installation's own (workspaces.substrate.csiDriver) while its name is set, else
+derived from the CSI companion while that renders — the preset's driver, the
+companion's Service as the controller endpoint, its node socket, mTLS through
+the pod identity with the Service's name verified — else the own block, empty.
+*/}}
+{{- define "agent-platform.workspaces.csiDriver.resolved" -}}
+{{- $own := dig "substrate" "csiDriver" dict (.Values.workspaces | default dict) -}}
+{{- if and (not ($own.name | default "")) (include "agent-platform.workspaces.csiCompanion.enabled" .) -}}
+{{- $spec := include "agent-platform.workspaces.csiCompanion.spec" . | fromJson -}}
+{{- dict "name" $spec.provisioner "controllerEndpoint" $spec.controllerEndpoint "nodeSocketOverride" $spec.nodeSocket "tls" (dict "enabled" true "usePodIdentity" true "serverName" $spec.serverName) | toJson -}}
+{{- else -}}
+{{- $own | toJson -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
 Truthy when the CSIDriverConfig renders (templates/workspaces/csidriverconfig.yaml):
-workspaces on, workspaces.substrate.csiDriver.name set, and Substrate's CRDs
-there — the substrate component on (this release dependsOn substrate-crds,
-which renders them) or the cluster serving ate.dev/v1alpha1 CSIDriverConfig
-(a Substrate the installation provides). The network policy that admits
-ate-api-server's egress to the controller endpoint follows it.
+workspaces on, a driver registered (workspaces.substrate.csiDriver.name, or the
+companion's), and Substrate's CRDs there — the substrate component on (this
+release dependsOn substrate-crds, which renders them) or the cluster serving
+ate.dev/v1alpha1 CSIDriverConfig (a Substrate the installation provides). The
+network policy that admits ate-api-server's egress to the controller endpoint
+follows it.
 */}}
 {{- define "agent-platform.workspaces.csiDriverConfig.enabled" -}}
-{{- if and (include "agent-platform.workspaces.enabled" .) (dig "substrate" "csiDriver" "name" "" .Values.workspaces) -}}
+{{- if and (include "agent-platform.workspaces.enabled" .) ((include "agent-platform.workspaces.csiDriver.resolved" . | fromJson).name | default "") -}}
 {{- if or (include "agent-platform.substrate.enabled" .) (.Capabilities.APIVersions.Has "ate.dev/v1alpha1/CSIDriverConfig") }}true{{ end -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-The port of workspaces.substrate.csiDriver.controllerEndpoint
-(tcp|dns://<host>:<port>, validated), which ate-api-server's egress admits.
+The port of the registered driver's controller endpoint (tcp|dns://<host>:<port>,
+validated), which ate-api-server's egress admits.
 */}}
 {{- define "agent-platform.workspaces.csiDriver.port" -}}
-{{- regexFind "[0-9]+$" (toString .Values.workspaces.substrate.csiDriver.controllerEndpoint) -}}
+{{- regexFind "[0-9]+$" (toString (include "agent-platform.workspaces.csiDriver.resolved" . | fromJson).controllerEndpoint) -}}
 {{- end -}}

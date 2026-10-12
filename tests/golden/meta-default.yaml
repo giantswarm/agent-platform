@@ -1164,6 +1164,7 @@ spec:
         app-armor: restrict-apparmor-profiles
         check-seccomp: restrict-seccomp
         check-seccomp-strict: restrict-seccomp-strict
+        host-namespaces: disallow-host-namespaces
         host-path: disallow-host-path
         host-ports-none: disallow-host-ports
         privilege-escalation: disallow-privilege-escalation

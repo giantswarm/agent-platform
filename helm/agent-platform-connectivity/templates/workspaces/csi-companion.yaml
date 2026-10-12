@@ -1,0 +1,503 @@
+{{- /*
+The platform's CSI companion for the cluster's file driver
+(giantswarm/agent-platform#889), rendered while workspaces are on and
+workspaces.substrate.csiCompanion.enabled.
+
+Substrate mounts a Session's workspace — a directory of the workspace's
+read-write-many volume — without a PVC of the actor's own: ate-api-server
+calls the CSI controller service over the network, ideally behind mTLS that
+admits only its own SPIFFE identity, and atelet calls a node plugin that
+mounts Substrate's volume directory with bidirectional propagation, so a
+mount the plugin makes is one the actor's sandbox sees (Substrate's
+docs/csi-deployment.md). The file drivers a cluster runs, Amazon EFS and
+Azure Files, listen on an in-pod Unix socket and propagate the kubelet
+directory only, and those driver apps are the cluster operators' to
+configure, never the platform's to change. So the platform runs the driver's
+own image twice more, beside the cluster's driver, which keeps serving the
+PVCs — the workspace-manager's volumes — unchanged:
+
+  * the controller: a Deployment in the release namespace, the driver in
+    controller mode on an in-pod socket and an Envoy sidecar terminating mTLS
+    in front of it — its serving certificate a PodCertificateRequest
+    Substrate's service-DNS signer answers for the Service that selects the
+    pod (<service>.<namespace>.svc, the one name it certifies; the Service
+    comes first in the render, as the signer requires), a client certificate
+    from Substrate's pod-identity CA required, the one identity admitted
+    proxy.clientIdentity (ate-api-server's) — and the Service in front of it,
+    the controller endpoint the registration names. The driver is given no
+    cloud identity by default: Substrate mounts existing volumes only, so the
+    controller answers capability and publish calls alone (both drivers
+    answer ControllerPublishVolume Unimplemented, which Substrate skips).
+  * the node plugin: a DaemonSet on the Substrate worker nodes (the WorkerPool
+    template's selector and tolerations unless set), the driver in node mode
+    on a socket of its own under the kubelet's plugins directory — the
+    registration's node socket override; no node-driver-registrar, so the
+    kubelet never learns of it — with node.substrateDir mounted Bidirectional.
+    Privileged on the node's network with host paths, as the cluster's own
+    node plugin is: an NFS mount made from a pod's network namespace dies with
+    the pod, and efs-utils' TLS tunnels and the kernel's NFS client live on
+    the host. The efs preset keeps efs-utils' state and configuration on host
+    paths of its own, apart from the cluster driver's; the azureFiles preset
+    reads the node's /etc/kubernetes/azure.json where it is, as the cluster's
+    own plugin does, and runs without one.
+
+The CSIDriverConfig (csidriverconfig.yaml) is derived from this while
+workspaces.substrate.csiDriver.name is empty; the network policies are
+csi-companion-netpol.yaml, the Kyverno PolicyExceptions
+csi-companion-policy-exceptions.yaml. tests/verify-workspace-csi-companion.py
+holds the render, tests/verify-kyverno.py the exceptions to the pod specs.
+*/ -}}
+{{- if include "agent-platform.workspaces.csiCompanion.enabled" . }}
+{{- include "agent-platform.workspaces.csiCompanion.validate" . }}
+{{- $c := include "agent-platform.workspaces.csiCompanion.spec" . | fromJson }}
+{{- $v := .Values.workspaces.substrate.csiCompanion }}
+{{- $ns := .Release.Namespace }}
+{{- $efs := eq $c.preset "efs" }}
+{{- $azure := eq $c.preset "azureFiles" }}
+{{- $controllerSelector := dict "app.kubernetes.io/name" "csi-companion" "app.kubernetes.io/component" "controller" }}
+{{- $nodeSelector := dict "app.kubernetes.io/name" "csi-companion" "app.kubernetes.io/component" "node" }}
+{{- /* The selector's name wins over the chart's common name label. */ -}}
+{{- $controllerLabels := merge (deepCopy $controllerSelector) (include "labels.common" . | fromYaml) }}
+{{- $nodeLabels := merge (deepCopy $nodeSelector) (include "labels.common" . | fromYaml) }}
+{{- $podLabels := dict }}
+{{- if $c.azureClientID }}
+{{- $_ := set $podLabels "azure.workload.identity/use" "true" }}
+{{- end }}
+{{- $saAnnotations := dict }}
+{{- if $c.awsRoleARN }}
+{{- $_ := set $saAnnotations "eks.amazonaws.com/role-arn" $c.awsRoleARN }}
+{{- end }}
+{{- if $c.azureClientID }}
+{{- $_ := set $saAnnotations "azure.workload.identity/client-id" $c.azureClientID }}
+{{- end }}
+{{- $restricted := dict "allowPrivilegeEscalation" false "capabilities" (dict "drop" (list "ALL")) }}
+{{- range $name, $labels := dict $c.controllerName $controllerLabels $c.nodeName $nodeLabels }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+  {{- with $saAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if $efs }}
+---
+# The EFS driver reads its region from the instance metadata service and,
+# where a pod's network cannot reach it (IMDSv2's hop limit), from its Node;
+# at start it also looks for the not-ready taint EKS puts on a fresh node.
+# Both pods: get on nodes, nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-csi-companion
+  labels:
+    {{- toYaml $controllerLabels | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-csi-companion
+  labels:
+    {{- toYaml $controllerLabels | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-csi-companion
+subjects:
+  - kind: ServiceAccount
+    name: {{ $c.controllerName }}
+    namespace: {{ $ns }}
+  - kind: ServiceAccount
+    name: {{ $c.nodeName }}
+    namespace: {{ $ns }}
+{{- end }}
+---
+# The mTLS proxy's Envoy configuration (Substrate's docs/csi-deployment.md):
+# a TLS listener that requires a client certificate from Substrate's
+# pod-identity CA bearing ate-api-server's SPIFFE ID, forwarding the gRPC
+# stream to the controller's socket in the shared socket directory. Its own
+# certificate is the pod's service-DNS credential bundle and the client trust
+# the pod-identity CA's live ClusterTrustBundle, both projected volumes
+# Envoy's SDS re-reads as they rotate (watched_directory works on
+# SDS-delivered secrets only).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $c.proxyConfigName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $controllerLabels | nindent 4 }}
+data:
+  envoy.yaml: |
+    node:
+      id: {{ $c.proxyConfigName }}
+      cluster: {{ $c.proxyConfigName }}
+    static_resources:
+      listeners:
+        - name: csi_tls_listener
+          address:
+            socket_address: { address: 0.0.0.0, port_value: {{ $c.proxyPort }} }
+          filter_chains:
+            - transport_socket:
+                name: envoy.transport_sockets.tls
+                typed_config:
+                  "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+                  require_client_certificate: true
+                  common_tls_context:
+                    alpn_protocols:
+                      - h2
+                    tls_certificate_sds_secret_configs:
+                      - name: servicedns_serving_cert
+                        sds_config:
+                          resource_api_version: V3
+                          path_config_source:
+                            path: /etc/envoy/sds-servicedns-cert.yaml
+                    combined_validation_context:
+                      default_validation_context:
+                        match_typed_subject_alt_names:
+                          - san_type: URI
+                            matcher:
+                              exact: {{ $c.clientIdentity | quote }}
+                      validation_context_sds_secret_config:
+                        name: podidentity_validation_context
+                        sds_config:
+                          resource_api_version: V3
+                          path_config_source:
+                            path: /etc/envoy/sds-podidentity-validation.yaml
+              filters:
+                - name: envoy.filters.network.tcp_proxy
+                  typed_config:
+                    "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                    stat_prefix: csi_proxy
+                    cluster: csi_unix_socket
+      clusters:
+        - name: csi_unix_socket
+          connect_timeout: 0.25s
+          type: STATIC
+          load_assignment:
+            cluster_name: csi_unix_socket
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        pipe:
+                          path: /csi/csi.sock
+  sds-servicedns-cert.yaml: |
+    resources:
+      - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret
+        name: servicedns_serving_cert
+        tls_certificate:
+          certificate_chain: { filename: /run/servicedns/credential-bundle.pem }
+          private_key: { filename: /run/servicedns/credential-bundle.pem }
+          watched_directory: { path: /run/servicedns }
+  sds-podidentity-validation.yaml: |
+    resources:
+      - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret
+        name: podidentity_validation_context
+        validation_context:
+          trusted_ca: { filename: /run/podidentity-ca/trust-bundle.pem }
+          watched_directory: { path: /run/podidentity-ca }
+---
+# The controller endpoint: the Service in front of the proxy, before the pod
+# it selects (the service-DNS signer certifies a pod for the Services that
+# select it when its certificate is requested).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $c.serviceName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $controllerLabels | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- toYaml $controllerSelector | nindent 4 }}
+  ports:
+    - name: grpc
+      port: {{ $c.servicePort }}
+      targetPort: grpc
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $c.controllerName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $controllerLabels | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- toYaml $controllerSelector | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- toYaml (merge (deepCopy $podLabels) $controllerLabels) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $c.controllerName }}
+      {{- with $v.controller.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.controller.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        # The driver in controller mode on the pod's socket. Its image runs as
+        # root (the socket it creates is root's, which is why the proxy is);
+        # nothing of the node is needed here.
+        - name: driver
+          image: {{ $c.image }}
+          args:
+            {{- range $c.controllerArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: CSI_ENDPOINT
+              value: unix:///csi/csi.sock
+            {{- if $efs }}
+            - name: CSI_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: AWS_STS_REGIONAL_ENDPOINTS
+              value: regional
+            {{- end }}
+          securityContext:
+            {{- toYaml $restricted | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 10
+            timeoutSeconds: 3
+            periodSeconds: 10
+            failureThreshold: 5
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          resources:
+            {{- toYaml $v.controller.resources | nindent 12 }}
+        # The CSI liveness probe: Probe() on the driver's socket, answered on
+        # the healthz port the driver's liveness probe above reads.
+        - name: liveness-probe
+          image: {{ $c.probeImage }}
+          args:
+            - --csi-address=/csi/csi.sock
+            - --probe-timeout=3s
+            - --health-port=9808
+            - --v=2
+          ports:
+            - name: healthz
+              containerPort: 9808
+              protocol: TCP
+          securityContext:
+            {{- toYaml $restricted | nindent 12 }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          resources:
+            {{- toYaml $v.livenessProbe.resources | nindent 12 }}
+        # The mTLS proxy: Envoy on the listener the Service fronts. The
+        # driver's socket is root-owned, so the proxy connects to it as root;
+        # it needs nothing else.
+        - name: envoy
+          image: {{ $c.proxyImage }}
+          args:
+            - -c
+            - /etc/envoy/envoy.yaml
+          securityContext:
+            runAsUser: 0
+            {{- toYaml $restricted | nindent 12 }}
+          ports:
+            - name: grpc
+              containerPort: {{ $c.proxyPort }}
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            periodSeconds: 5
+          volumeMounts:
+            - name: envoy-config
+              mountPath: /etc/envoy
+              readOnly: true
+            - name: socket-dir
+              mountPath: /csi
+            - name: servicedns-certs
+              mountPath: /run/servicedns
+              readOnly: true
+            - name: podidentity-ca
+              mountPath: /run/podidentity-ca
+              readOnly: true
+          resources:
+            {{- toYaml $v.proxy.resources | nindent 12 }}
+      volumes:
+        - name: socket-dir
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: envoy-config
+          configMap:
+            name: {{ $c.proxyConfigName }}
+        - name: servicedns-certs
+          projected:
+            sources:
+              - podCertificate:
+                  signerName: servicedns.podcert.ate.dev/identity
+                  keyType: ECDSAP256
+                  credentialBundlePath: credential-bundle.pem
+        - name: podidentity-ca
+          projected:
+            sources:
+              - clusterTrustBundle:
+                  signerName: podidentity.podcert.ate.dev/identity
+                  labelSelector:
+                    matchLabels:
+                      podcert.ate.dev/canarying: live
+                  path: trust-bundle.pem
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ $c.nodeName }}
+  namespace: {{ $ns }}
+  labels:
+    {{- toYaml $nodeLabels | nindent 4 }}
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- toYaml $nodeSelector | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- toYaml (merge (deepCopy $podLabels) $nodeLabels) | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $c.nodeName }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      priorityClassName: system-node-critical
+      nodeSelector:
+        {{- toYaml $c.nodeSelector | nindent 8 }}
+      {{- with $c.nodeTolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        # The CSI liveness probe on the node's network: localhost only.
+        - name: liveness-probe
+          image: {{ $c.probeImage }}
+          args:
+            - --csi-address=/csi/csi.sock
+            - --probe-timeout=3s
+            - --http-endpoint=localhost:{{ $c.probeNodePort }}
+            - --v=2
+          securityContext:
+            {{- toYaml $restricted | nindent 12 }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+          resources:
+            {{- toYaml $v.livenessProbe.resources | nindent 12 }}
+        # The driver in node mode: privileged, since it mounts in the node's
+        # mount namespace and propagates the mounts into Substrate's directory.
+        - name: driver
+          image: {{ $c.image }}
+          args:
+            {{- range $c.nodeArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: CSI_ENDPOINT
+              value: unix:///csi/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- if $efs }}
+            - name: CSI_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- end }}
+            {{- if $azure }}
+            - name: AZURE_CREDENTIAL_FILE
+              value: /etc/kubernetes/azure.json
+            {{- end }}
+          securityContext:
+            privileged: true
+          livenessProbe:
+            httpGet:
+              host: localhost
+              path: /healthz
+              port: {{ $c.probeNodePort }}
+            initialDelaySeconds: 30
+            timeoutSeconds: 10
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: substrate-dir
+              mountPath: {{ $c.substrateDir }}
+              mountPropagation: Bidirectional
+            {{- if $efs }}
+            - name: efs-state
+              mountPath: /var/run/efs
+            - name: efs-config
+              mountPath: /var/amazon/efs
+            {{- end }}
+            {{- if $azure }}
+            - name: azure-cred
+              mountPath: /etc/kubernetes
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml $v.node.resources | nindent 12 }}
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: {{ $c.socketDir }}
+            type: DirectoryOrCreate
+        - name: substrate-dir
+          hostPath:
+            path: {{ $c.substrateDir }}
+            type: DirectoryOrCreate
+        {{- if $efs }}
+        - name: efs-state
+          hostPath:
+            path: {{ $c.efsStateDir }}
+            type: DirectoryOrCreate
+        - name: efs-config
+          hostPath:
+            path: {{ $c.efsConfigDir }}
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if $azure }}
+        - name: azure-cred
+          hostPath:
+            path: /etc/kubernetes
+            type: DirectoryOrCreate
+        {{- end }}
+{{- end }}

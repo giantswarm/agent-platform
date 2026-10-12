@@ -5,15 +5,17 @@ mount of the workspace's read-write-many volume, which Substrate drives
 without a PVC of the actor's own — ate-api-server calls the driver's
 controller service over gRPC, atelet the node plugin's socket — both found
 through this cluster-scoped object, named after the driver. Rendered while
-agent-platform.workspaces.csiDriverConfig.enabled; the provisioner of a
-provided class is checked against the driver on the cluster (`lookup`, empty
-offline), the class rendered from a preset by the shared guard.
+agent-platform.workspaces.csiDriverConfig.enabled, from the installation's
+own workspaces.substrate.csiDriver or, while its name is empty, from the CSI
+companion (agent-platform.workspaces.csiDriver.resolved); the provisioner of
+a provided class is checked against the driver on the cluster (`lookup`,
+empty offline), the class rendered from a preset by the shared guard.
 */ -}}
 {{- if include "agent-platform.workspaces.enabled" . }}
 {{- include "agent-platform.workspaces.substrate.validate" . }}
 {{- end }}
 {{- if include "agent-platform.workspaces.csiDriverConfig.enabled" . }}
-{{- $csi := .Values.workspaces.substrate.csiDriver }}
+{{- $csi := include "agent-platform.workspaces.csiDriver.resolved" . | fromJson }}
 {{- $class := (include "agent-platform.workspaces.storage" . | fromJson).storageClassName }}
 {{- $live := lookup "storage.k8s.io/v1" "StorageClass" "" $class }}
 {{- if and $live (ne (toString $live.provisioner) (toString $csi.name)) }}

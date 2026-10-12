@@ -148,7 +148,7 @@ def main() -> int:
     if spec(plain[DRIVER]) != f"spec:\n  driverName: {DRIVER}\n  controllerEndpoint: \"{ENDPOINT}\"\n  tls:\n    enabled: false\n":
         fail(f"tls off, no node socket and no server name render another spec:\n{plain[DRIVER]}")
     wiring = documents(helm(META, ["-f", FIXTURE]))[("HelmRelease", "agent-platform-connectivity")]
-    if not re.search(rf"      substrate:\n        csiDriver:\n          controllerEndpoint: {re.escape(ENDPOINT)}\n          name: {DRIVER}\n", wiring):
+    if not re.search(rf"^        csiDriver:\n          controllerEndpoint: {re.escape(ENDPOINT)}\n          name: {DRIVER}\n", wiring, re.M):
         fail(f"the meta chart did not forward {CSI} to the connectivity release:\n{wiring}")
     ok(f"one CSIDriverConfig {DRIVER} with the controller endpoint, node socket and mTLS through the pod identity; tls off, an empty socket and server name "
        "render the bare spec; the meta chart forwards the block")

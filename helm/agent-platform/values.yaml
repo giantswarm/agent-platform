@@ -2032,6 +2032,7 @@ kyvernoPolicies:
   rules:  # @schema additionalProperties: true
     privileged-containers: disallow-privileged-containers
     host-ports-none: disallow-host-ports
+    host-namespaces: disallow-host-namespaces
     host-path: disallow-host-path
     restricted-volumes: restrict-volume-types
     adding-capabilities: disallow-capabilities
@@ -5029,6 +5030,174 @@ workspaces:
         enabled: true
         usePodIdentity: true
         serverName: ""
+    # The platform's own CSI companion for the cluster's file driver, rendered
+    # by the connectivity release while workspaces are on and this is enabled.
+    # Why a companion: Substrate drives the driver itself (no PVC of the
+    # actor's own) — ate-api-server calls the controller service over the
+    # network, behind mTLS that admits only its SPIFFE identity, and atelet
+    # calls a node plugin that mounts Substrate's volume directory
+    # (node.substrateDir) with bidirectional propagation, so a mount the plugin
+    # makes is one the actor's sandbox sees. The file drivers a cluster runs
+    # (Amazon EFS, Azure Files) listen on an in-pod socket and propagate the
+    # kubelet directory only; those driver apps are the cluster operators' to
+    # configure, never the platform's to change. So the companion runs the
+    # cluster driver's own image twice more, beside the cluster's driver,
+    # which keeps serving the PVCs (the workspace-manager's volumes):
+    #   - a controller Deployment (one replica) in the release namespace,
+    #     the driver in controller mode on an in-pod socket and an Envoy
+    #     sidecar terminating mTLS in front of it — its serving certificate
+    #     Substrate's service-DNS signer answers for the Service, a client
+    #     certificate from Substrate's pod-identity CA required, the one
+    #     identity admitted proxy.clientIdentity (ate-api-server's) — and its
+    #     Service, the controller endpoint;
+    #   - a node DaemonSet on the Substrate worker nodes only (node.nodeSelector
+    #     and node.tolerations; empty, the WorkerPool template's,
+    #     kagent.substrateWorkerPool.template, with kubernetes.io/os linux),
+    #     the driver in node mode on a socket of its own under the kubelet's
+    #     plugins directory (node.socketDir, the registration's node socket
+    #     override; no kubelet registration, so the kubelet never sees it) and
+    #     node.substrateDir mounted Bidirectional. The plugin is privileged on
+    #     the node's network with host paths, as the cluster's own is, so on a
+    #     cluster that enforces the restricted profile through Kyverno the
+    #     connectivity release renders its PolicyExceptions (kyvernoPolicies).
+    # The registration above (csiDriver) is DERIVED from the companion while
+    # csiDriver.name is empty: the preset's driver, the Service as the
+    # controller endpoint, the node socket override and the TLS server name
+    # (the Service's <name>.<namespace>.svc, the name its certificate carries).
+    # An installation whose driver is Substrate-ready — a network-reachable
+    # controller behind mTLS and a node plugin propagating node.substrateDir —
+    # leaves this off and sets csiDriver itself; one that sets csiDriver with
+    # the companion on names the same driver (the render refuses another).
+    # Substrate mounts existing volumes only (the workspace-manager provisions
+    # them through the cluster's driver): the companion creates nothing and
+    # the controller answers capability and publish calls alone, so no cloud
+    # identity is needed; cloudIdentity is there for a controller that is
+    # given more to do.
+    csiCompanion:
+      enabled: false
+      # efs: Amazon EFS (efs.csi.aws.com) — the aws-efs-csi-driver image; the
+      #   node plugin keeps efs-utils' state and configuration on host paths
+      #   of its own (node.efs), apart from the cluster driver's.
+      # azureFiles: Azure Files (file.csi.azure.com) — the azurefile-csi
+      #   image; the node plugin reads the node's cloud configuration
+      #   (/etc/kubernetes/azure.json, read-only), as the cluster's own does,
+      #   and runs without one.
+      # The preset must be the workspace StorageClass's driver: the one
+      # workspaces.storage.storageClass renders, or the class the installation
+      # provides.
+      preset: ""  # @schema enum: ["", efs, azureFiles]
+      # The driver's image: the preset's unless set (registry + repository +
+      # tag; a preset's tag is a pin of the gsoci mirror, giantswarm/retagger).
+      image:
+        registry: gsoci.azurecr.io
+        repository: ""
+        tag: ""
+      controller:
+        # The driver's arguments in controller mode: the preset's unless set;
+        # extraArgs are appended either way. The socket (--endpoint) is the
+        # chart's.
+        args: []  # @schema item: string
+        extraArgs: []  # @schema item: string
+        # Scheduling of the controller pod: empty, the cluster's choice (a
+        # Karpenter installation names on-demand capacity here).
+        nodeSelector: {}  # @schema additionalProperties: true
+        tolerations: []
+        # The ephemeral-storage requests and limit are required: every
+        # container mounts the socket's emptyDir, and Kyverno's
+        # require-emptydir-requests-and-limits reports a container mounting
+        # an emptyDir without both.
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 10m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            memory: 256Mi
+            ephemeral-storage: 256Mi
+      # The mTLS proxy in the controller's pod: Envoy, a TLS listener
+      # requiring a client certificate from Substrate's pod-identity CA that
+      # carries clientIdentity, forwarding the gRPC stream to the driver's
+      # socket. Its own certificate is the pod's service-DNS credential
+      # bundle, re-read as it rotates.
+      proxy:
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/envoy
+          tag: v1.39.3
+        # The listener's port in the pod; the Service (service.port) fronts it.
+        port: 10000
+        clientIdentity: spiffe://cluster.local/ns/ate-system/sa/ate-api-server
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 10m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            memory: 256Mi
+            ephemeral-storage: 256Mi
+      # The controller endpoint: a ClusterIP Service named after the
+      # controller in the release namespace. Its port is what the derived
+      # registration names and ate-api-server's egress admits.
+      service:
+        port: 50051
+      node:
+        # The driver's arguments in node mode: the preset's unless set;
+        # extraArgs are appended either way.
+        args: []  # @schema item: string
+        extraArgs: []  # @schema item: string
+        # The node plugin's socket directory on the host, under the kubelet's
+        # plugins directory atelet mounts; the socket is <socketDir>/csi.sock.
+        socketDir: /var/lib/kubelet/plugins/agent-platform-csi-companion
+        # Substrate's volume directory on the host, where atelet asks the
+        # plugin to mount an actor's volumes; mounted Bidirectional.
+        substrateDir: /var/lib/ate
+        # The Substrate worker nodes: empty, the WorkerPool template's
+        # nodeSelector and tolerations (kagent.substrateWorkerPool.template);
+        # kubernetes.io/os linux is always selected.
+        nodeSelector: {}  # @schema additionalProperties: true
+        tolerations: []
+        # The efs preset's host paths for efs-utils (its mount watchdog's
+        # state, its configuration), apart from the cluster driver's own.
+        efs:
+          stateDir: /var/run/agent-platform-csi-companion/efs
+          configDir: /var/lib/agent-platform-csi-companion/efs-utils
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 10m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            memory: 512Mi
+            ephemeral-storage: 256Mi
+      # The CSI liveness probe sidecar beside the driver, in both pods (the
+      # gsoci mirror of kubernetes-csi/livenessprobe).
+      livenessProbe:
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/livenessprobe
+          tag: v2.19.0
+        # The node plugin is on the node's network: its probe listens on
+        # localhost at this port (the controller's, in its pod, on 9808).
+        nodePort: 29662
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 5m
+            memory: 16Mi
+            ephemeral-storage: 16Mi
+          limits:
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+      # The cloud identity the companion's ServiceAccounts carry, by values:
+      # aws.roleARN annotates both with eks.amazonaws.com/role-arn (IRSA, the
+      # pod identity webhook); azure.workloadIdentityClientID annotates both
+      # with azure.workload.identity/client-id and labels the pods for the
+      # Workload Identity webhook. Empty, no identity: existing volumes need
+      # none.
+      cloudIdentity:
+        aws:
+          roleARN: ""
+        azure:
+          workloadIdentityClientID: ""
   # The Organizations whose members manage workspaces: each its name (a DNS
   # label, the Organization's) and memberGroups, the groups of the forwarded
   # identity that make a caller a member. A member creates, edits, deletes and
