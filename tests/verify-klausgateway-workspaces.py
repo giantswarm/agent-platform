@@ -11,8 +11,9 @@ workspaces are on. Each case below pins one property:
   agent-platform.klausGateway.workspacesFloor (4.3.0, a release candidate of it
   too): the release carries workspaces.toolsPrefix x_workspace-manager_, x_ and
   workspace-manager.muster.mcpServer.name and _ (a renamed MCPServer moves it);
-- below the floor (the default range, an earlier release's closed schema refuses
-  the block) or with workspaces off: no workspaces block on the release;
+- the default range, whose floor is 4.3.0: the release carries the prefix;
+- below the floor (an earlier release's closed schema refuses the block) or with
+  workspaces off: no workspaces block on the release;
 - an own klausGateway.workspaces.toolsPrefix that agrees passes, one that differs
   fails the render naming the key.
 
@@ -34,6 +35,7 @@ BASE = [
 ON = ["-f", FIXTURE]
 FLOOR = ["--set", "components.klaus-gateway.versionRange=>=4.3.0 <5.0.0"]
 RC = ["--set", "components.klaus-gateway.versionRange=>=4.3.0-rc.1 <5.0.0"]
+BELOW = ["--set", "components.klaus-gateway.versionRange=>=4.2.1 <5.0.0"]
 PREFIX = "    workspaces:\n      toolsPrefix: x_workspace-manager_\n"
 
 
@@ -68,18 +70,18 @@ def gateway_values(render: str) -> str:
 
 
 def main(chart: str) -> int:
-    for what, flags in (("the 4.3.0 floor", FLOOR), ("a 4.3.0 release candidate floor", RC)):
+    for what, flags in (("the 4.3.0 floor", FLOOR), ("a 4.3.0 release candidate floor", RC), ("the default range", [])):
         values = gateway_values(helm(chart, ON + flags))
         if PREFIX not in values:
             fail(f"workspaces on at {what}: the klaus-gateway release lacks workspaces.toolsPrefix x_workspace-manager_:\n{values}")
-    ok("workspaces on from the 4.3.0 floor (a release candidate too): workspaces.toolsPrefix x_workspace-manager_")
+    ok("workspaces on from the 4.3.0 floor (a release candidate too, the default range): workspaces.toolsPrefix x_workspace-manager_")
 
     values = gateway_values(helm(chart, ON + FLOOR + ["--set", "workspace-manager.muster.mcpServer.name=workspaces"]))
     if "      toolsPrefix: x_workspaces_\n" not in values:
         fail(f"a renamed MCPServer did not move the prefix:\n{values}")
     ok("the prefix follows workspace-manager.muster.mcpServer.name")
 
-    for what, flags in (("below the floor", ON), ("workspaces off", FLOOR)):
+    for what, flags in (("below the floor", ON + BELOW), ("workspaces off", FLOOR)):
         values = gateway_values(helm(chart, flags))
         if re.search(r"^    workspaces:", values, re.M):
             fail(f"{what}: the klaus-gateway release carries a workspaces block:\n{values}")
