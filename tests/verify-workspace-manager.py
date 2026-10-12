@@ -28,8 +28,9 @@ muster. Each case below pins one property of its wiring:
   (verify-workspace-storage covers the class); the keys left empty are not
   forwarded; a signInStore block fails naming signin.keys (the chart's key);
   nothing under muster.* moves (the muster release and the muster block forwarded
-  to connectivity are unchanged) and no MCPServer renders anywhere for the
-  component or a provider;
+  to connectivity are unchanged), nothing else of the render moves but the kagent
+  release's jwt Session admission (tests/verify-workspace-session-admission.py),
+  and no MCPServer renders anywhere for the component or a provider;
 - the Organizations (#886): workspaces.organizations [{name, memberGroups}] reaches
   the release as the chart's organizations map and moves nothing else; the
   component chart, rendered at the BOM's pin with the forwarded block, gives the
@@ -279,7 +280,18 @@ def main(meta: str, connectivity: str) -> int:
     if added != {("OCIRepository", NAME), ("HelmRelease", NAME)}:
         fail(f"switching workspaces on added documents other than the component's two: {sorted(added)}")
     for key, doc in off_docs.items():
-        if key != ("HelmRelease", "agent-platform-connectivity") and on_docs.get(key) != doc:
+        if key == ("HelmRelease", "agent-platform-connectivity"):
+            continue
+        on = on_docs.get(key)
+        if key == ("HelmRelease", "kagent"):
+            # The one change the switch makes outside the component: kagent's jwt
+            # Session admission, derived onto the kagent release while the manager
+            # signs grants (tests/verify-workspace-session-admission.py pins its values).
+            session = block(block(on or "", "controller", 4), "session", 6)
+            if not re.search(r"^        admission:\n          jwt:\n", session, re.M):
+                fail(f"switching workspaces on did not derive kagent's Session admission onto {key}:\n{session}")
+            on = on.replace(session, "", 1)
+        if on != doc:
             fail(f"switching workspaces on changed {key} (muster.* included)")
     if any(kind == "MCPServer" for kind, _ in on_docs):
         fail("the meta chart renders an MCPServer: the registration is the component chart's own")
