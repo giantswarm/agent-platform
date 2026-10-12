@@ -881,23 +881,10 @@
                         },
                         "upgradeRemediation": {
                             "type": "object",
-                            "additionalProperties": false,
+                            "additionalProperties": true,
                             "properties": {
-                                "ignoreTestFailures": {
-                                    "type": "boolean"
-                                },
-                                "remediateLastFailure": {
-                                    "type": "boolean"
-                                },
                                 "retries": {
                                     "type": "integer"
-                                },
-                                "strategy": {
-                                    "type": "string",
-                                    "enum": [
-                                        "rollback",
-                                        "uninstall"
-                                    ]
                                 }
                             }
                         },

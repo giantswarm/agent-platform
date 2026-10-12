@@ -772,13 +772,13 @@ components:  # @schema additionalProperties: true
     # that exceeds helm-controller's 5m default, the upgrade fails on "context
     # deadline exceeded" and the remediation rolls a healthy release back, over
     # and over. 15m fits a cold roll of such a cluster with margin.
-    timeout: 15m
+    timeout: 15m  # @schema pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
     # Overrides of this release's spec.upgrade.remediation over
     # gitops.retries, key by key. Each failed attempt waits out the full
     # timeout and its rollback rolls every node again, so three attempts are
     # the bound; a release that fails all three is rolled back to the last
     # good one (strategy rollback, remediateLastFailure: Flux's defaults).
-    upgradeRemediation:
+    upgradeRemediation:  # @schema additionalProperties: true
       retries: 3
   klaus-gateway:  # @schema additionalProperties: true
     chart: klaus-gateway
