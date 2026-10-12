@@ -141,7 +141,13 @@ overwrite would hide a values file that still spells the old key.
     default user with (agent-platform.valkeySecretName / valkeyPasswordKey), so
     the switch is one line. These are defaults, not the single-source rule
     above: an operator's own url (an out-of-band Valkey), Secret or key wins.
-  valkey: auth.usersExistingSecret and auth.aclUsers.default.passwordKey, when
+    And workspaces.toolsPrefix while workspaces are on: x_ and
+    workspace-manager.muster.mcpServer.name and _ (x_workspace-manager_), the
+    name muster gives the manager's tools, which the gateway calls as the
+    person; only from the floor agent-platform.klausGateway.workspacesFloor
+    (4.3.0) of components.klaus-gateway.versionRange, below it nothing. Single
+    source: an own value that differs fails the render.
+  valkey:auth.usersExistingSecret and auth.aclUsers.default.passwordKey, when
     its own block leaves them empty, from the Secret and key muster reads the
     same password with (agent-platform.valkeySecretName / valkeyPasswordKey:
     muster's storage Secret, else global.identity.existingSecret; the key
@@ -305,6 +311,22 @@ the connectivity release creates with providers and oauth.enabled
 {{- if and $v (not (dig $k "" $own)) -}}{{- $_ := set $valkey $k $v -}}{{- end -}}
 {{- end -}}
 {{- if $valkey -}}{{- $_ := set $derived "routing" (dict "valkey" $valkey) -}}{{- end -}}
+{{- end -}}
+{{- /* The workspace-manager's tools by the name muster gives them, while
+workspaces are on: x_<the manager's MCPServer name>_, which the gateway calls
+as the person. Only while the floor of components.klaus-gateway.versionRange
+takes the key (agent-platform.klausGateway.workspacesFloor): an earlier
+release's closed schema refuses a workspaces block. */ -}}
+{{- if (.root.Values.workspaces | default dict).enabled -}}
+{{- $kgFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "klaus-gateway" "versionRange" "" .root.Values.components) | default "0.0.0") "" -}}
+{{- if ge ((semver $kgFloor).Compare (semver (include "agent-platform.klausGateway.workspacesFloor" .root))) 0 -}}
+{{- $prefix := printf "x_%s_" (dig "muster" "mcpServer" "name" "workspace-manager" (index .root.Values "workspace-manager" | default dict)) -}}
+{{- $own := dig "workspaces" "toolsPrefix" "" $kg -}}
+{{- if and $own (ne $own $prefix) -}}
+{{- fail (printf "klausGateway.workspaces.toolsPrefix (%s) differs from the prefix muster gives the workspace-manager's tools (%s, x_ and workspace-manager.muster.mcpServer.name): the gateway calls them by that name — leave klausGateway.workspaces.toolsPrefix unset" $own $prefix) -}}
+{{- end -}}
+{{- $_ := set $derived "workspaces" (dict "toolsPrefix" $prefix) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "valkey" -}}
@@ -2701,6 +2723,16 @@ workspace-manager.kagent.address (agent-platform.componentDerivedValues). One
 line, no comment inside the define.
 */}}
 {{- define "agent-platform.workspaceManager.kagentFloor" -}}0.4.0{{- end -}}
+
+{{/*
+The first release of the klaus-gateway line (giantswarm/klaus-gateway) whose
+chart takes workspaces.toolsPrefix (the workspace-manager client over muster);
+every earlier release's closed values schema refuses a workspaces block. From
+it on (a release candidate of it included) the chart derives
+klausGateway.workspaces.toolsPrefix while workspaces are on
+(agent-platform.componentDerivedValues). One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.klausGateway.workspacesFloor" -}}4.3.0{{- end -}}
 
 {{/*
 The kagent controller's in-cluster gRPC API (in-cluster h2c), straight to its

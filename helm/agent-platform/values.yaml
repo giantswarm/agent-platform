@@ -3912,6 +3912,17 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     #   existingSecret: ""  # default: valkey.valkey.auth.usersExistingSecret
     #   passwordKey: ""     # default: valkey.valkey.auth.aclUsers.default.passwordKey
 
+  # Workspaces (klaus-gateway 4.3.0): the gateway calls the workspace-manager's
+  # tools through muster as the person (it needs obo.enabled), by the name
+  # muster gives them. With workspaces.enabled the chart derives the prefix,
+  # x_<workspace-manager.muster.mcpServer.name>_ (x_workspace-manager_), once
+  # the floor of components.klaus-gateway.versionRange is 4.3.0 (a release
+  # candidate of it too): an earlier chart's closed schema refuses the block,
+  # so below it nothing is forwarded. Empty in the gateway turns workspaces
+  # off there. An own value must agree with the derived one.
+  # workspaces:
+  #   toolsPrefix: ""  # default: x_workspace-manager_ with workspaces.enabled
+
   # OTel traces to the collector global.observability.traces.otlp names (each
   # `auto` below takes its endpoint, and its headers with the tenant as
   # X-Scope-OrgID; a value set here wins). Every channel turn is one trace: the
