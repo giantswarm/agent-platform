@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=1.10.0 <1.11.0"
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=1.8.1 <1.9.0"
-SUBSTRATE_PIN = "1.8.1"  # the range's floor, the BOM pin and the worker image's tag: the release that converts a 1.7-layout durable snapshot on its first restore and re-takes a golden written in the old layout (giantswarm/substrate#277, #282), so the step from 1.7 needs no snapshot reset (1.8.0 refuses a 1.7 restore); before it 1.7.0, the release kagent 1.6 is built against, with an existing volume mounted per actor at a sub-path; before it the line on kagent-dev/substrate v0.4.0-alpha1 (giantswarm/substrate#210, the 2026-10-08 re-pin) with the sandbox resolver fix in the worker (giantswarm/substrate#216) and the sandbox's pause image as a value, defaulting to its gsoci copy (giantswarm/substrate#224); the 1.0 and 1.3 lines stay on release-1.0 and release-1.3
+SUBSTRATE_RANGE = ">=1.8.2-rc.5 <1.9.0"
+SUBSTRATE_PIN = "1.8.2-rc.5"  # the range's floor, the BOM pin and the worker image's tag: the candidate that retries a golden take or a session resume a rolling worker pool interrupts (a draining worker, an atelet without an IP, a missing ateom socket, a cancelled wakeup probe) and clears a recorded terminal golden error of such a cause on start (giantswarm/substrate#292, #294, #297); before it 1.8.1, the release that converts a 1.7-layout durable snapshot on its first restore and re-takes a golden written in the old layout (giantswarm/substrate#277, #282), so the step from 1.7 needs no snapshot reset (1.8.0 refuses a 1.7 restore); before it 1.7.0, the release kagent 1.6 is built against, with an existing volume mounted per actor at a sub-path; before it the line on kagent-dev/substrate v0.4.0-alpha1 (giantswarm/substrate#210, the 2026-10-08 re-pin) with the sandbox resolver fix in the worker (giantswarm/substrate#216) and the sandbox's pause image as a value, defaulting to its gsoci copy (giantswarm/substrate#224); the 1.0 and 1.3 lines stay on release-1.0 and release-1.3
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
@@ -175,6 +175,8 @@ DEV_CHANNEL: dict[str, str] = {}
 # A filter handed to a component that has none by default; the value carries
 # the backslashes a real filter has (`\.`), so the quoting is exercised.
 PROBE_FILTER = ".*-dev\\.x\\..*"
+# agent-platform.releaseTagFilter: stable releases and release candidates.
+RELEASE_TAG_FILTER = "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
 
 ON = [f"--set=components.{n}.enabled=true" for n in (*NEW, "klaus-gateway", "cluster-manager")]
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
@@ -247,14 +249,17 @@ def semver_filters(manifest: str) -> dict[str, str]:
 def check_semver_filters(meta: str, ci: list[str]) -> None:
     every = [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]]
     got = semver_filters(render(meta, every))
-    if got != DEV_CHANNEL:
-        fail(f"OCIRepository semverFilters differ from the dev-channel defaults: rendered {got}, expected {DEV_CHANNEL}")
+    # A release candidate's floor renders the release tag filter (Flux evaluates
+    # every pre-release tag against it, the line's branch builds included).
+    want = {**DEV_CHANNEL, **({n: RELEASE_TAG_FILTER for n in ("substrate", "substrate-crds")} if "-" in SUBSTRATE_RANGE else {})}
+    if got != want:
+        fail(f"OCIRepository semverFilters differ from the dev-channel and release-candidate defaults: rendered {got}, expected {want}")
     probe = render(meta, [*every, "--set-json", f"components.muster.semverFilter={json.dumps(PROBE_FILTER)}"])
-    if semver_filters(probe) != {**DEV_CHANNEL, "muster": PROBE_FILTER}:
+    if semver_filters(probe) != {**want, "muster": PROBE_FILTER}:
         fail(f"components.muster.semverFilter did not reach the muster OCIRepository alone: {semver_filters(probe)}")
     if f"semverFilter: {json.dumps(PROBE_FILTER)}" not in probe:
         fail("the semverFilter is not rendered as a double-quoted string with its backslashes escaped (Flux reads it as a Go regexp)")
-    print(f"ok: semverFilter — the dev-channel defaults {sorted(DEV_CHANNEL) or 'none'} and no other component; a component given one renders it verbatim; no filterTags")
+    print(f"ok: semverFilter — the dev-channel and release-candidate defaults {sorted(want) or 'none'} and no other component; a component given one renders it verbatim; no filterTags")
 
 
 def check_gateway_api_crds(meta: str, ci: list[str]) -> None:
@@ -550,11 +555,12 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"examples/customer-bom.yaml does not pin components.{name}.versionRange")
         pin = m.group(1)
         # Exact: X.Y.Z — the kagent and Substrate lines release stable semver of
-        # their own; a dogfooding BOM may pin a line's dev build instead:
+        # their own — or a release candidate X.Y.Z-rc.N while the range's floor
+        # is one; a dogfooding BOM may pin a line's dev build instead:
         # gitsemver 3's X.Y.Z-r<branch-hash>t<YYYYMMDDHHMMSS>h<sha7>, or the
         # superseded X.Y.Z-dev.<branch>.<date>.<time>.h<sha7> of a build made
         # before architect-orb 10.10.0, which the registry still holds.
-        if not re.fullmatch(r"\d+\.\d+\.\d+(-r[0-9a-f]{8}t\d{14}h[0-9a-f]{7}|-dev\.[a-z0-9-]+\.\d{4}-\d{2}-\d{2}\.\d{2}-\d{2}-\d{2}\.h[0-9a-f]{7})?", pin):
+        if not re.fullmatch(r"\d+\.\d+\.\d+(-rc\.\d+|-r[0-9a-f]{8}t\d{14}h[0-9a-f]{7}|-dev\.[a-z0-9-]+\.\d{4}-\d{2}-\d{2}\.\d{2}-\d{2}-\d{2}\.h[0-9a-f]{7})?", pin):
             fail(f"the BOM pin for {name} is not an exact version: {pin!r}")
         if f'semver: "{pin}"' not in bom[("OCIRepository", name)]:
             fail(f"the BOM pin {pin} for {name} did not reach its OCIRepository")

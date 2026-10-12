@@ -1466,7 +1466,7 @@ verify-self: ## Assert self-management's shapes: engine off renders nothing of i
 	@echo "self-management shapes verified."
 
 .PHONY: verify-prereleases
-verify-prereleases: ## Assert gitops.prereleases: off, every range stays stable-only; on, every component range and the self range admit pre-releases, the exact version of a chart released with this one and a semverFilter's range stay as written, a range with no version fails. HELM selects the binary.
+verify-prereleases: ## Assert gitops.prereleases: off, every range stays stable-only but a release candidate's floor, which renders the release tag filter; on, every component range and the self range admit pre-releases, the exact version of a chart released with this one and a semverFilter's range stay as written, a range with no version fails. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-prereleases.py $(CHART_DIR)
 
