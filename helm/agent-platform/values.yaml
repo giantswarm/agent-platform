@@ -2620,6 +2620,22 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # stable human identity and matches muster's trusted-issuer subjectClaim,
       # so UI (oauth2-proxy) and A2A sessions key identically.
       userIdClaim: email
+    # kagent's jwt Session admission (controller.session.admission.jwt:
+    # jwksURL, issuer, audience; the kagent chart from 1.6.0) is not set here:
+    # with workspaces.enabled and a grant signing key (the reference the chart
+    # derives for workspace-manager.grant.signingKey) the chart derives it
+    # onto this release (agent-platform.kagent.sessionAdmission) — the
+    # workspace-manager's key set through its Service,
+    # http://<workspace-manager.fullnameOverride>.<platform namespace>.svc:<workspace-manager.service.port>/.well-known/jwks.json,
+    # the issuer the manager writes into every grant's iss (its base URL,
+    # workspace-manager.oauth.baseURL or https://workspace-manager.<global.domain>)
+    # and the audience it writes into aud (workspace-manager.grant.audience,
+    # kagent) — and a value set here for any of the three stands, the rest is
+    # derived (README "Workspaces"). The grant names the person by email, the
+    # userIdClaim above, which the controller compares with the caller: another
+    # claim fails the render, as does a kagent range whose floor is below
+    # 1.6.0. Without workspaces nothing is forwarded, and the controller
+    # refuses every Session that names a volume source.
     # The line's session lifecycle knobs travel as written (the block is the
     # kagent chart's; the chart renders each as its KAGENT_* env): sessionIdleTTL
     # (KAGENT_SESSION_IDLE_TTL, 168h: an idle session is deleted; running tasks

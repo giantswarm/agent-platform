@@ -160,7 +160,13 @@ overwrite would hide a values file that still spells the old key.
     affinity to the atelet on their node, from the Substrate release that
     carries the field on (agent-platform.substrate.workerPoolAteletAffinity,
     giantswarm/agent-platform#756); an installation's own podAffinity stands
-    instead.
+    instead. And controller.session.admission.jwt, the jwt Session admission a
+    Session with a workspace passes, while workspaces are on and the
+    workspace-manager signs grants (agent-platform.kagent.sessionAdmission):
+    jwksURL the manager's key set through its Service, issuer its base URL,
+    audience its grant.audience — defaults as for klaus-gateway, the kagent
+    block's own value stands per key; the kagent floor that takes the block,
+    an issuer and the email claim are guarded (agent-platform.validateSessionAdmission).
   model-manager: kagent.disableWiring: true while components.kagent is off —
     on by default with no backend (giantswarm/agent-platform#329), the release
     must not wire ModelConfigs into a kagent the installation does not run;
@@ -338,6 +344,17 @@ installation's own podAffinity stands instead. */ -}}
 {{- $pool := get $derived "substrateWorkerPool" | default dict -}}
 {{- $_ := set $pool "template" (dict "podAffinity" $affinity) -}}
 {{- $_ := set $derived "substrateWorkerPool" $pool -}}
+{{- end -}}
+{{- /* The jwt Session admission a Session with a workspace passes: the
+workspace-manager's key set, issuer and audience, while workspaces are on and
+the manager signs grants (agent-platform.kagent.sessionAdmission); the block's
+own value stands per key. Guarded first: the kagent floor that takes the
+block, an issuer, the email claim, an own block set in part. */ -}}
+{{- include "agent-platform.validateSessionAdmission" .root -}}
+{{- with (include "agent-platform.kagent.sessionAdmission" .root | fromJson) -}}
+{{- $controller := get $derived "controller" | default dict -}}
+{{- $_ := set $controller "session" (dict "admission" (dict "jwt" .)) -}}
+{{- $_ := set $derived "controller" $controller -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "muster" -}}
@@ -522,6 +539,111 @@ Emits nothing; fails naming the instance or key and the fix.
 {{- fail (printf "workspace-manager.grant.signingKey.key %q is not a Secret data key (letters, digits, -, _ and .): the entry of Secret %s holding the PEM private key" .key .name) -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The first release of the kagent line (giantswarm/kagent-upstream) whose chart
+takes controller.session.admission.jwt: the jwt Session admission a create
+that names a volume source passes with the workspace-manager's grant. An
+earlier chart ignores the block, so with the admission derived (below) every
+Session naming a workspace volume would be refused: the render fails under
+that floor (agent-platform.validateSessionAdmission). One line, no comment
+inside the define.
+*/}}
+{{- define "agent-platform.kagent.sessionAdmissionFloor" -}}1.6.0{{- end -}}
+
+{{/*
+The workspace-manager's key set as kagent's controller reads it in-cluster:
+http://<workspace-manager.fullnameOverride>.<the manager's namespace>.svc:<workspace-manager.service.port>/.well-known/jwks.json
+— the Service the connectivity chart's policies target (its name and port as
+the component chart renders them; kagent-controller-to-workspace-manager
+admits the controller there), in the namespace the component's release
+installs into (components.workspace-manager.targetNamespace, else the
+platform's); plain http, since the controller and the manager share the
+cluster and the key set is public by design. Empty while the component is off.
+Usage: include "agent-platform.workspaceManager.jwksURL" .
+*/}}
+{{- define "agent-platform.workspaceManager.jwksURL" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager") -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $ns := dig "workspace-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- printf "http://%s.%s.svc:%v/.well-known/jwks.json" ($wm.fullnameOverride | default "workspace-manager") $ns (dig "service" "port" 8080 $wm) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+kagent's jwt Session admission as the kagent release receives it
+(kagent.controller.session.admission.jwt: jwksURL, issuer, audience), while
+kagent and the workspace-manager are on and the manager signs grants (the
+reference agent-platform.workspaceManager.grantSigningKey resolves, so the
+manager serves authorize_workspace and its key set): the key set through the
+manager's Service (agent-platform.workspaceManager.jwksURL), the issuer the
+manager writes into every grant's iss (its base URL,
+agent-platform.workspaceManager.baseURL) and the audience it writes into aud
+(workspace-manager.grant.audience; kagent, the chart's default). A value the
+kagent block sets for one of the three stands, the rest is derived: the kagent
+chart needs all three together. Emits JSON {jwksURL, issuer, audience}, or {}
+while nothing is derived (the switch off, no grant key, kagent off): the kagent
+block's own admission, if any, then reaches the release as written.
+Usage: include "agent-platform.kagent.sessionAdmission" . | fromJson
+*/}}
+{{- define "agent-platform.kagent.sessionAdmission" -}}
+{{- $out := dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager")) -}}
+{{- $key := include "agent-platform.workspaceManager.grantSigningKey" . | fromJson -}}
+{{- if $key.name -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $own := dig "controller" "session" "admission" "jwt" dict (.Values.kagent | default dict) | default dict -}}
+{{- $derived := dict "jwksURL" (include "agent-platform.workspaceManager.jwksURL" .) "issuer" (include "agent-platform.workspaceManager.baseURL" .) "audience" (toString (dig "grant" "audience" "kagent" $wm)) -}}
+{{- range $k, $v := $derived -}}
+{{- $_ := set $out $k (toString (dig $k "" $own) | default $v) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The guards of kagent's jwt Session admission, run while the kagent component
+renders (agent-platform.componentDerivedValues):
+- with the admission derived, the kagent range's floor is at least
+  agent-platform.kagent.sessionAdmissionFloor, the first chart that takes the
+  block (an earlier one ignores it and refuses every Session naming a volume);
+- with the admission derived, the grants have an issuer: workspace-manager
+  .oauth.baseURL or global.domain (the manager refuses to start without one);
+- with the admission derived, kagent.controller.auth.userIdClaim is email, the
+  claim the workspace-manager names the person by in every grant's sub, which
+  the controller compares with the caller that claim derives: another claim
+  admits nobody;
+- without it, an own kagent.controller.session.admission.jwt names all three
+  of jwksURL, issuer and audience or none: the kagent chart refuses a part.
+Emits nothing; fails naming the key and the fix.
+*/}}
+{{- define "agent-platform.validateSessionAdmission" -}}
+{{- $adm := include "agent-platform.kagent.sessionAdmission" . | fromJson -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- if $adm -}}
+{{- $floor := include "agent-platform.kagent.sessionAdmissionFloor" . -}}
+{{- $range := dig "kagent" "versionRange" "" .Values.components -}}
+{{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- if lt ((semver $have).Compare (semver $floor)) 0 -}}
+{{- fail (printf "components.kagent.versionRange %q admits a kagent release below %s, the first whose chart takes controller.session.admission.jwt: with workspaces.enabled and a grant signing key this chart derives kagent's jwt Session admission (the workspace-manager's key set, issuer and audience) onto the kagent release, which an earlier chart ignores, so every Session naming a workspace volume would be refused — move the floor to %s or later" $range $floor $floor) -}}
+{{- end -}}
+{{- if not $adm.issuer -}}
+{{- fail "kagent's Session admission has no issuer: the workspace-manager names its base URL as every grant's iss and refuses to start without one — set global.domain (the base URL is then https://<workspace-manager.fullnameOverride>.<global.domain>) or workspace-manager.oauth.baseURL" -}}
+{{- end -}}
+{{- $claim := toString (dig "controller" "auth" "userIdClaim" "" $kagent) -}}
+{{- if ne $claim "email" -}}
+{{- fail (printf "kagent.controller.auth.userIdClaim is %q but the workspace-manager's grant names the person by email (its sub), which kagent's Session admission compares with the caller that claim derives, so a Session with a workspace would admit nobody: with workspaces.enabled and a grant signing key keep the chart's email" $claim) -}}
+{{- end -}}
+{{- else -}}
+{{- $own := dig "controller" "session" "admission" "jwt" dict $kagent | default dict -}}
+{{- $set := list -}}
+{{- range $k := list "jwksURL" "issuer" "audience" -}}{{- if toString (dig $k "" $own) -}}{{- $set = append $set $k -}}{{- end -}}{{- end -}}
+{{- if and $set (ne (len $set) 3) -}}
+{{- fail (printf "kagent.controller.session.admission.jwt sets %s but the kagent chart needs jwksURL, issuer and audience together; this chart derives the three from the workspace-manager with workspaces.enabled and a grant signing key, and fills what the block leaves unset only then — set all three, or none" (join ", " $set)) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

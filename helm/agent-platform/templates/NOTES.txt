@@ -96,4 +96,9 @@ Workspace provider sign-in, base URL {{ $wmBase }} (routed: /signin, /connect/<i
   Workspace grants: signed with the key {{ .name }}/{{ .key }} (a Secret in the platform's namespace), published at {{ $wmBase }}/.well-known/jwks.json
 {{- end }}
 {{- end }}
+{{- with (include "agent-platform.kagent.sessionAdmission" . | fromJson) }}
+{{- if .jwksURL }}
+  kagent's Session admission: a Session naming a workspace volume is admitted with a grant the key set {{ .jwksURL }} verifies (issuer {{ .issuer }}, audience {{ .audience }}), naming the caller by email
+{{- end }}
+{{- end }}
 {{- end }}
