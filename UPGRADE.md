@@ -17,18 +17,18 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## 4.127.x → \<next\> (Substrate 1.8.2: snapshots migrate on the roll)
 
-`components.substrate{,-crds}.versionRange` selects Substrate 1.8 from 1.8.2-rc.2 (giantswarm/agent-platform#918, giantswarm/substrate#292). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.8.2-rc.2 (`ateom-gvisor:1.8.2-rc.2`); the kagent CRDs and the kagent release are unchanged. Substrate 1.8 lays a snapshot out as one tar per container and one per durable volume (giantswarm/substrate#260), and from 1.8.1 the line migrates what 1.7 wrote by itself:
+`components.substrate{,-crds}.versionRange` selects Substrate 1.8 from 1.8.2-rc.5 (giantswarm/agent-platform#918, giantswarm/substrate#292). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.8.2-rc.5 (`ateom-gvisor:1.8.2-rc.5`); the kagent CRDs and the kagent release are unchanged. Substrate 1.8 lays a snapshot out as one tar per container and one per durable volume (giantswarm/substrate#260), and from 1.8.1 the line migrates what 1.7 wrote by itself:
 
 - **Each actor's durable snapshot in the 1.7 layout is converted on its first resume** (giantswarm/substrate#277): a suspended agent resumes with its conversation and its volumes.
 - **Every ActorTemplate's golden written in the old layout is re-taken on the new workers** (giantswarm/substrate#282). A new conversation created while its golden is re-taken answers `Unavailable` and succeeds on retry.
-- **A golden take a rolling worker pool interrupts is retried** (giantswarm/substrate#294): a take that meets a draining worker, an atelet without an IP or a missing ateom socket is taken again instead of ending in a terminal `GoldenActorCrashed`, and a terminal golden error an installation on 1.8.1 recorded is cleared when 1.8.2 starts, so its goldens are re-taken on the step as well.
+- **A golden take or a session resume a rolling worker pool interrupts is retried** (giantswarm/substrate#294, giantswarm/substrate#297): a take that meets a draining worker, an atelet without an IP, a missing ateom socket or a cancelled wakeup probe is taken again instead of ending in a terminal `GoldenActorCrashed`, and a terminal golden error an installation on 1.8.1 recorded is cleared when 1.8.2 starts, so its goldens are re-taken on the step as well. A resume Substrate refuses up front while no worker is free is retried by kagent only from the release that carries giantswarm/kagent-upstream#412.
 
 1.8 also brings the egress gateway's Google access token provider, which a Vertex AI agent on the Substrate runtime needs (giantswarm/substrate#250), and the egress gateway's bounded ephemeral storage: the chart renders the bound itself, so the substrate HelmRelease's postRenderer patch is gone.
 
 ### Operator action
 
 - **None.** No snapshot reset and no manual step: the conversion and the re-take run on the roll.
-- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.8.2-rc.2`, never `1.8.0`, which refuses a 1.7 snapshot on restore and re-takes no golden, nor `1.8.1`, whose golden take a worker drain ends for good; `kagent` and `kagent-crds` stay at `1.8.0`.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.8.2-rc.5`, never `1.8.0`, which refuses a 1.7 snapshot on restore and re-takes no golden, nor `1.8.1`, whose golden take a worker drain ends for good; `kagent` and `kagent-crds` stay at `1.8.0`.
 
 ## 4.127.x → \<next\> (the workspace grant signing key)
 
