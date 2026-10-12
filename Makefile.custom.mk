@@ -1661,6 +1661,12 @@ verify-klausgateway-valkey: ## Assert the gateway's Valkey routing-store default
 	@python3 tests/verify-klausgateway-valkey.py --own $(VERIFY_TMP)/vkv-own.out
 	@echo "$@: all passed"
 
+.PHONY: verify-klausgateway-workspaces
+verify-klausgateway-workspaces: ## Assert the gateway's workspace tools prefix (giantswarm/agent-platform#966): with workspaces on and components.klaus-gateway.versionRange from the 4.3.0 floor (a release candidate too) the klaus-gateway release carries workspaces.toolsPrefix x_workspace-manager_ (x_, workspace-manager.muster.mcpServer.name, _); below the floor or with workspaces off no workspaces block; an own value that differs fails naming the key. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-klausgateway-workspaces.py $(CHART_DIR)
+	@echo "$@: all passed"
+
 verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-platform#431): karpenter.sh/do-not-disrupt on muster, kagent-controller, klaus-gateway and muster-valkey (their charts' podAnnotations) and NOT on the agentgateway data plane, which is HA instead (two replicas + budget + spread, verify-dataplane-ha) though its annotation knob still travels when set; PodDisruptionBudgets from the muster, kagent and klaus-gateway charts' knobs and the connectivity chart's own for agent-manager and muster-valkey (#439); every knob off = nothing; the budgets' guards. And the placement of the stateful singletons (#439): scheduling.singletons.nodeSelector / tolerations reach muster, muster-valkey, the kagent controller and klaus-gateway as their charts' knobs (a component's own keys win), never the connectivity release; empty = nothing forwarded.
 	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
 	@echo "--> connectivity, agent-manager on: the HA data plane carries NO do-not-disrupt, and the agent-manager budget renders"
