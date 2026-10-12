@@ -87,10 +87,11 @@ components:
   # The cluster write surface (components.cluster-manager, off by default).
   cluster-manager:               { versionRange: "0.22.0" }
   # The workspace surface (components.workspace-manager, follows
-  # workspaces.enabled, off by default). 0.4.0, the floor of its range: it
-  # serves the grant key set (/.well-known/jwks.json, from 0.2.0) and takes the
-  # kagent address the chart forwards for the session directories' cleanup.
-  workspace-manager:             { versionRange: "0.4.0" }
+  # workspaces.enabled, off by default). 0.5.0, the floor of its range: it has
+  # the provider kind gitlab, serves the grant key set (/.well-known/jwks.json,
+  # from 0.2.0) and takes the kagent address the chart forwards for the
+  # session directories' cleanup (from 0.4.0).
+  workspace-manager:             { versionRange: "0.5.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08, backstage and mcp-kubernetes at their

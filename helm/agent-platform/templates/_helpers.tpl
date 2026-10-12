@@ -1403,6 +1403,14 @@ keys as signin.keys {secretName, current} and its closed schema refuses the key.
 {{- if not $p.kind -}}
 {{- fail (printf "workspace-manager.providers[%d] (%s) names no kind" $i $name) -}}
 {{- end -}}
+{{- if eq (toString $p.kind) "gitlab" -}}
+{{- $range := dig "workspace-manager" "versionRange" "" $.Values.components -}}
+{{- $wmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- $gitlabFloor := include "agent-platform.workspaceManager.gitlabFloor" $ -}}
+{{- if lt ((semver $wmFloor).Compare (semver $gitlabFloor)) 0 -}}
+{{- fail (printf "workspace-manager.providers[%d] (%s) is of kind gitlab, which workspace-manager has from %s on, but components.workspace-manager.versionRange (%s) admits earlier releases, whose manager refuses the kind at start: raise its floor to %s" $i $name $gitlabFloor $range $gitlabFloor) -}}
+{{- end -}}
+{{- end -}}
 {{- include "agent-platform.workspaces.secretRefs" (dict "node" ($p.values | default dict) "at" (printf "workspace-manager.providers[%d].values" $i)) -}}
 {{- end -}}
 {{- if $wm.signInStore -}}
@@ -2701,6 +2709,17 @@ workspace-manager.kagent.address (agent-platform.componentDerivedValues). One
 line, no comment inside the define.
 */}}
 {{- define "agent-platform.workspaceManager.kagentFloor" -}}0.4.0{{- end -}}
+
+{{/*
+The first release of the workspace-manager line whose manager has the provider
+kind gitlab (gitlab.com or a self-managed GitLab: url, apiURL, a group access
+token as the sync credential, an OAuth application as the sign-in); an earlier
+manager refuses the kind at start. A gitlab provider instance needs the floor of
+components.workspace-manager.versionRange at it or later (a release candidate
+of it included), or the render fails (agent-platform.validateWorkspaces). One
+line, no comment inside the define.
+*/}}
+{{- define "agent-platform.workspaceManager.gitlabFloor" -}}0.5.0{{- end -}}
 
 {{/*
 The kagent controller's in-cluster gRPC API (in-cluster h2c), straight to its
