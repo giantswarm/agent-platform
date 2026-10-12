@@ -360,14 +360,29 @@ def hr_values(doc: str) -> str:
     return "\n".join(line[4:] if line.startswith("    ") else line for line in body.splitlines())
 
 
+# agent-platform.releaseTagFilter: the one filter a default renders, on a range
+# whose bound carries a pre-release (a release candidate's floor).
+RELEASE_TAG_FILTER = r"^v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$"
+
+
 def source(doc: str) -> tuple[str, str]:
     """An OCIRepository's url and semver range. A semverFilter would change the
-    resolution; the defaults carry none and this check renders the defaults."""
-    if "semverFilter" in doc:
-        fail("a default OCIRepository carries a semverFilter; the release ranges select releases, a filter is a consumer's knob")
+    resolution; the defaults carry none but the release tag filter of a
+    release candidate's floor, which resolve_tags applies."""
     url = re.search(r"^  url: (\S+)", doc, re.M).group(1)
     semver = re.search(r'semver: "([^"]+)"', doc).group(1)
+    flt = re.search(r'^    semverFilter: "(.*)"$', doc, re.M)
+    if flt and not ("-" in semver and flt.group(1).replace("\\\\", "\\") == RELEASE_TAG_FILTER):
+        fail("a default OCIRepository carries a semverFilter other than the release tag filter of a release candidate's floor; the release ranges select releases, a filter is a consumer's knob")
     return url, semver
+
+
+def resolve_tags(tags: list[str], constraint: str) -> list[str]:
+    """The tags Flux evaluates the constraint against: a range whose bound
+    carries a pre-release renders the release tag filter."""
+    if re.search(r"\d-[0-9A-Za-z]", constraint):
+        return [t for t in tags if re.search(RELEASE_TAG_FILTER, t)]
+    return tags
 
 
 # Anonymous bearer tokens, one per OCI repository (`oci://host/path`).
@@ -650,7 +665,7 @@ def main(meta: str) -> int:
         if pin != pins[name]:
             fail(f"{name}: the BOM render carries {pin!r} while examples/customer-bom.yaml pins {pins[name]!r} — the pin did not reach the OCIRepository")
         tags = registry_tags(url)
-        version_range = fluxsemver.resolve(tags, rng)
+        version_range = fluxsemver.resolve(resolve_tags(tags, rng), rng)
         if not version_range:
             version_range = fallback(name, url, rng, tags, kagent_tag)
             own = components[name]["versionRange"]

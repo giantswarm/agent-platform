@@ -343,7 +343,10 @@ that CRD either, so the dependency is moot. */ -}}
 this chart's tag (see releasedWithChart above) — this chart's exact version.
 gitops.prereleases widens a range (never the exact version, a dev channel's
 filtered one, nor a component with prereleases: false) to admit pre-releases, and filters the tags to releases and release
-candidates (agent-platform.releaseTagFilter). */ -}}
+candidates (agent-platform.releaseTagFilter). A range whose own bound carries a
+pre-release (a release candidate's floor, `>=1.8.2-rc.2 <1.9.0`) gets the same
+filter whatever gitops.prereleases says: Flux evaluates every pre-release tag
+against such a range, the branch builds of the repository included. */ -}}
 {{- $semver := $c.versionRange }}
 {{- $filter := $c.semverFilter }}
 {{- if $c.releasedWithChart }}
@@ -357,6 +360,8 @@ candidates (agent-platform.releaseTagFilter). */ -}}
 {{- $widened := include "agent-platform.admitPrereleases" (dict "range" $semver "key" (printf "components.%s.versionRange" $key)) | fromJson }}
 {{- $semver = $widened.range }}
 {{- if $widened.admits }}{{ $filter = include "agent-platform.releaseTagFilter" $root }}{{ end }}
+{{- else if and $semver (not $filter) (regexMatch "(^|[ ,])[<>=~^]+v?[0-9]+(\\.[0-9]+){0,2}-" $semver) }}
+{{- $filter = include "agent-platform.releaseTagFilter" $root }}
 {{- end }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
