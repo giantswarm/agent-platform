@@ -73,8 +73,10 @@ components:
   # thread, the turn record and the turn metric, and sends a tool-set or
   # platform failure once more (giantswarm/klaus-gateway#329). Nothing below
   # 2.0.0 starts: the meta chart forwards no lifecycle.driver
-  # (giantswarm/klaus-gateway#319).
-  klaus-gateway:                 { versionRange: "3.3.0" }
+  # (giantswarm/klaus-gateway#319). 4.3.0 starts every Slack Session through
+  # agent-manager's start_session without a message, which agent-manager
+  # 1.13.0 serves (giantswarm/klaus-gateway#446).
+  klaus-gateway:                 { versionRange: "4.3.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "1.14.0" }

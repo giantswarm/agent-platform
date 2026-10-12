@@ -408,7 +408,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.upgradeRemediation.retries | int | `3` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.klaus-gateway.versionRange | string | `">=3.3.0 <5.0.0"` |  |
+| components.klaus-gateway.versionRange | string | `">=4.3.0 <5.0.0"` |  |
 | components.klaus-gateway.valuesFrom | string | `"klausGateway"` |  |
 | components.klaus-gateway.omitKeys[0] | string | `"observability.enabled"` |  |
 | components.klaus-gateway.omitEmptyKeys[0] | string | `"slack.contextBotIDs"` |  |
