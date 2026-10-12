@@ -765,6 +765,21 @@ components:  # @schema additionalProperties: true
         optional: true
     omitEmptyKeys:
       - atelet.imageCache.pinnedImages
+    # Bounds every Helm action of this release (HelmRelease spec.timeout; the
+    # rollback inherits it). An upgrade rolls the atelet DaemonSet one node at a
+    # time (maxSurge 0, maxUnavailable 1, ~17 s a node) plus ate-api-server,
+    # ate-controller, atenet and the kagent WorkerPool: on 20+ Substrate nodes
+    # that exceeds helm-controller's 5m default, the upgrade fails on "context
+    # deadline exceeded" and the remediation rolls a healthy release back, over
+    # and over. 15m fits a cold roll of such a cluster with margin.
+    timeout: 15m
+    # Overrides of this release's spec.upgrade.remediation over
+    # gitops.retries, key by key. Each failed attempt waits out the full
+    # timeout and its rollback rolls every node again, so three attempts are
+    # the bound; a release that fails all three is rolled back to the last
+    # good one (strategy rollback, remediateLastFailure: Flux's defaults).
+    upgradeRemediation:
+      retries: 3
   klaus-gateway:  # @schema additionalProperties: true
     chart: klaus-gateway
     repository: oci://gsoci.azurecr.io/charts/giantswarm

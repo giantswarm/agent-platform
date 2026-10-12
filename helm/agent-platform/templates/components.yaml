@@ -393,6 +393,9 @@ metadata:
     {{- include "labels.common" $root | nindent 4 }}
 spec:
   interval: {{ $g.interval }}
+  {{- with $c.timeout }}
+  timeout: {{ . }}
+  {{- end }}
   releaseName: {{ $name }}
   targetNamespace: {{ $c.targetNamespace | default $targetNs }}
   {{- /* On a target the Helm release is stored where its workloads land: the
@@ -436,8 +439,12 @@ spec:
     {{- if $c.disableWaitForJobs }}
     disableWaitForJobs: true
     {{- end }}
+    {{- /* The entry's upgradeRemediation keys win over gitops.retries, key by
+    key (a set, not a merge: retries 0 is a value, not an empty key). */ -}}
+    {{- $remediation := dict "retries" $g.retries }}
+    {{- range $k, $v := ($c.upgradeRemediation | default dict) }}{{ $_ := set $remediation $k $v }}{{ end }}
     remediation:
-      retries: {{ $g.retries }}
+      {{- toYaml $remediation | nindent 6 }}
   {{- with $c.driftDetection }}
   driftDetection:
     {{- toYaml . | nindent 4 }}

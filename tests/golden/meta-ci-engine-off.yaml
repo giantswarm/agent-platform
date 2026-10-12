@@ -2364,6 +2364,7 @@ metadata:
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
   interval: 10m
+  timeout: 15m
   releaseName: substrate
   targetNamespace: ate-system
   storageNamespace: ate-system
@@ -2377,7 +2378,7 @@ spec:
       retries: 5
   upgrade:
     remediation:
-      retries: 5
+      retries: 3
   dependsOn:
     - name: substrate-crds
     - name: agent-platform-connectivity

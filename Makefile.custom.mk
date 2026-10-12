@@ -504,6 +504,10 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 		echo "FAIL: the kagent-crds guard failed for the wrong reason"; cat $(VERIFY_TMP)/ap-kag-crds.out; exit 1; \
 	else echo "ok: kagent on without kagent-crds is refused"; fi
 	@echo "ok: the kagent line's wiring"
+	@echo "--> the substrate release fits a cold atelet roll: spec.timeout 15m and three upgrade attempts; every other child on the default timeout and gitops.retries"
+	@python3 tests/verify-helmrelease-timeout.py $(VERIFY_TMP)/ap-kag.out
+	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent.enabled=true --set gitops.retries=0 >$(VERIFY_TMP)/ap-hr-retries.out 2>&1 || { cat $(VERIFY_TMP)/ap-hr-retries.out; exit 1; }
+	@python3 tests/verify-helmrelease-timeout.py $(VERIFY_TMP)/ap-hr-retries.out 0
 	@echo "--> PURE app-of-apps (engine off): root emits ONLY OCIRepository + HelmRelease as release objects (no raw CRs, no hook)"
 	@python3 -c 'import re,sys; docs=open("$(VERIFY_TMP)/ap-flux.out").read().split("\n---\n"); bad=[re.search(r"^kind: (\S+)$$", d, re.M).group(1) for d in docs if re.search(r"^kind: ", d, re.M) and "helm.sh/hook:" not in d and not re.search(r"^kind: (OCIRepository|HelmRelease)$$", d, re.M)]; sys.exit("FAIL: root rendered a non-app-of-apps kind: " + ", ".join(bad)) if bad else print("ok: pure renderer (only OCIRepository/HelmRelease besides the hooks)")'
 	@echo "--> Flux is the only engine: the render carries no argoproj.io object"

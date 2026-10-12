@@ -875,6 +875,32 @@
                         "targetNamespace": {
                             "type": "string"
                         },
+                        "timeout": {
+                            "type": "string",
+                            "pattern": "^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$"
+                        },
+                        "upgradeRemediation": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "ignoreTestFailures": {
+                                    "type": "boolean"
+                                },
+                                "remediateLastFailure": {
+                                    "type": "boolean"
+                                },
+                                "retries": {
+                                    "type": "integer"
+                                },
+                                "strategy": {
+                                    "type": "string",
+                                    "enum": [
+                                        "rollback",
+                                        "uninstall"
+                                    ]
+                                }
+                            }
+                        },
                         "valuesFrom": {
                             "type": "string"
                         },
