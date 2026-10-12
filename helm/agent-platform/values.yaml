@@ -5196,7 +5196,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/livenessprobe
-          tag: v2.19.0
+          tag: v2.20.0
         # The node plugin is on the node's network: its probe listens on
         # localhost at this port (the controller's, in its pod, on 9808).
         nodePort: 29662
