@@ -79,10 +79,12 @@ components:
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "1.14.0" }
   # 1.10.0 takes kagent.controllerTarget, which the meta chart forwards while
-  # the kagent controller route is on (giantswarm/agent-manager#101); 1.12.0,
-  # the floor of its range, takes a workspace grant on start_session
-  # (giantswarm/agent-manager#134).
-  agent-manager:                { versionRange: "1.12.0" }
+  # the kagent controller route is on (giantswarm/agent-manager#101); 1.12.0
+  # takes a workspace grant on start_session (giantswarm/agent-manager#134);
+  # 1.13.0, the floor of its range, starts a Session without a first message
+  # (giantswarm/agent-manager#138) and bounds MCP request bodies
+  # (giantswarm/agent-manager#141).
+  agent-manager:                 { versionRange: "1.13.0" }
   vm-manager:                    { versionRange: "0.24.0" }
   # The cluster write surface (components.cluster-manager, off by default).
   cluster-manager:               { versionRange: "0.22.0" }
