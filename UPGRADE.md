@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.127.x → \<next\> (agent-manager 1.13.0: start_session without a first message)
+
+`components.agent-manager.versionRange` selects agent-manager from 1.13.0, and the connectivity release's `agent-manager migrate` run takes the same image. `start_session`'s `message` is optional (giantswarm/agent-manager#138): without it agent-manager creates the Session and answers it without a turn, and the caller sends the first message itself; with it the call behaves as before. The MCP endpoint refuses a request body over 1 MiB, the bound the REST API already applies (giantswarm/agent-manager#141). The portal and the gateway start every Session through `start_session` and rely on the create-only form. The agent-manager chart takes no new value, and agent-manager keeps no state of its own: the release rolls in place, and the agents, their Sessions and their conversations stay as they are.
+
+### Operator action
+
+- **None.**
+- **An installation that pins the BOM**: move `agent-manager` to `1.13.0`.
+
 ## 4.127.x → \<next\> (agent-manager 1.12.0: start_session in a workspace)
 
 `components.agent-manager.versionRange` selects agent-manager from 1.12.0 (giantswarm/agent-manager#134), and the connectivity release's `agent-manager migrate` run takes the same image. `start_session` takes a workspace grant and starts the Session in the workspace's volume; without one it starts the Session as before. The agent-manager chart takes no new value, and agent-manager keeps no state of its own: the release rolls in place, and the agents, their Sessions and their conversations stay as they are.
