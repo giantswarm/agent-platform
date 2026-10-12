@@ -84,13 +84,13 @@ SUBSTRATE_FIXTURE = "tests/fixtures/workspaces-substrate-values.yaml"
 PRESETS = {
     "efs": {
         "driver": "efs.csi.aws.com",
-        "image": "gsoci.azurecr.io/giantswarm/aws-efs-csi-driver:v2.1.15",
+        "image": "gsoci.azurecr.io/giantswarm/aws-efs-csi-driver:v3.5.0",
         "controllerArgs": ["--endpoint=$(CSI_ENDPOINT)", "--logtostderr", "--v=2", "--delete-access-point-root-dir=false"],
         "nodeArgs": ["--endpoint=$(CSI_ENDPOINT)", "--logtostderr", "--v=2", "--vol-metrics-opt-in=false"],
     },
     "azureFiles": {
         "driver": "file.csi.azure.com",
-        "image": "gsoci.azurecr.io/giantswarm/azurefile-csi:v1.34.10",
+        "image": "gsoci.azurecr.io/giantswarm/azurefile-csi:v1.35.7",
         "controllerArgs": ["--v=2", "--endpoint=$(CSI_ENDPOINT)", "--drivername=file.csi.azure.com", "--cloud-config-secret-name=",
                            "--cloud-config-secret-namespace=", "--allow-empty-cloud-config=true", "--user-agent-suffix=agent-platform"],
         "nodeArgs": ["--v=2", "--endpoint=$(CSI_ENDPOINT)", "--nodeid=$(KUBE_NODE_NAME)", "--drivername=file.csi.azure.com", "--cloud-config-secret-name=",

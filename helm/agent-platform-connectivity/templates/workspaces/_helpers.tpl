@@ -147,10 +147,10 @@ The socket is always --endpoint=$(CSI_ENDPOINT), the chart's own.
 */}}
 {{- define "agent-platform.workspaces.csiCompanion.presets" -}}
 {{- dict
-  "efs" (dict "provisioner" "efs.csi.aws.com" "repository" "giantswarm/aws-efs-csi-driver" "tag" "v2.1.15"
+  "efs" (dict "provisioner" "efs.csi.aws.com" "repository" "giantswarm/aws-efs-csi-driver" "tag" "v3.5.0"
     "controllerArgs" (list "--endpoint=$(CSI_ENDPOINT)" "--logtostderr" "--v=2" "--delete-access-point-root-dir=false")
     "nodeArgs" (list "--endpoint=$(CSI_ENDPOINT)" "--logtostderr" "--v=2" "--vol-metrics-opt-in=false"))
-  "azureFiles" (dict "provisioner" "file.csi.azure.com" "repository" "giantswarm/azurefile-csi" "tag" "v1.34.10"
+  "azureFiles" (dict "provisioner" "file.csi.azure.com" "repository" "giantswarm/azurefile-csi" "tag" "v1.35.7"
     "controllerArgs" (list "--v=2" "--endpoint=$(CSI_ENDPOINT)" "--drivername=file.csi.azure.com" "--cloud-config-secret-name=" "--cloud-config-secret-namespace=" "--allow-empty-cloud-config=true" "--user-agent-suffix=agent-platform")
     "nodeArgs" (list "--v=2" "--endpoint=$(CSI_ENDPOINT)" "--nodeid=$(KUBE_NODE_NAME)" "--drivername=file.csi.azure.com" "--cloud-config-secret-name=" "--cloud-config-secret-namespace=" "--allow-empty-cloud-config=true" "--mount-permissions=0777" "--user-agent-suffix=agent-platform"))
   | toJson -}}
