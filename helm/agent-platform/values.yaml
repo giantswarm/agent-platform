@@ -912,8 +912,10 @@ components:  # @schema additionalProperties: true
     # api.kagent.dev Agent of this kagent line and migrates Generic chart 1.x
     # releases to 2.x (giantswarm/agent-manager#100).
     # 1.10.0 takes kagent.controllerTarget, the kagent controller its session
-    # tools call (giantswarm/agent-manager#101).
-    versionRange: ">=1.10.0 <2.0.0"
+    # tools call (giantswarm/agent-manager#101). 1.12.0 takes a workspace
+    # grant on start_session, which starts the Session in the workspace's
+    # volume (giantswarm/agent-manager#134).
+    versionRange: ">=1.12.0 <2.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -4770,7 +4772,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.10.0
+      tag: 1.12.0
     dryRun: false
     gitopsNamespaces: []
 

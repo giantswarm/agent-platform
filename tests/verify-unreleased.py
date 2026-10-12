@@ -11,8 +11,8 @@ copy of the chart with that annotation, the version shapes and the values below:
 
 - the annotation: written as the last line of Chart.yaml's annotations, read
   back as written, and dropped again leaving the file byte-identical;
-- a dev build whose agent-manager range waits for 1.10.0, with the bundled
-  engine: exactly one hook Job <release>-waits-for-agent-manager-1.10.0,
+- a dev build whose agent-manager range waits for 1.12.0, with the bundled
+  engine: exactly one hook Job <release>-waits-for-agent-manager-1.12.0,
   pre-install,pre-upgrade at weight -11 (ahead of every other hook), no retry,
   as the default ServiceAccount, whose script, run here, exits non-zero naming
   the component, the version and the range;
@@ -38,7 +38,7 @@ HELM = os.environ.get("HELM", "helm")
 HERE = pathlib.Path(__file__).resolve().parent
 RELEASE = "agent-platform"
 NAMESPACE = "agent-platform"
-COMPONENT, RANGE, WAITS_FOR = "agent-manager", ">=1.10.0 <2.0.0", "1.10.0"
+COMPONENT, RANGE, WAITS_FOR = "agent-manager", ">=1.12.0 <2.0.0", "1.12.0"
 DEV = "4.116.1-r7fb489f8t20261006135307h75833ed"
 JOB = f"{RELEASE}-waits-for-{COMPONENT}-{WAITS_FOR}"
 

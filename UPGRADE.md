@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.127.x → \<next\> (agent-manager 1.12.0: start_session in a workspace)
+
+`components.agent-manager.versionRange` selects agent-manager from 1.12.0 (giantswarm/agent-manager#134), and the connectivity release's `agent-manager migrate` run takes the same image. `start_session` takes a workspace grant and starts the Session in the workspace's volume; without one it starts the Session as before. The agent-manager chart takes no new value, and agent-manager keeps no state of its own: the release rolls in place, and the agents, their Sessions and their conversations stay as they are.
+
+### Operator action
+
+- **None.**
+- **An installation that pins the BOM**: move `agent-manager` to `1.12.0`.
+
 ## 4.127.x → \<next\> (kagent 1.10.0: Sessions set up on workspace volumes)
 
 `components.kagent{,-crds}.versionRange` selects kagent 1.10 from 1.10.0 (giantswarm/agent-platform#950). The kagent CRDs, the database schema and the Substrate contract are unchanged from 1.8: the controller, UI and Harness images roll in place, every AgentTemplate re-snapshots once on the new Harness image, and a suspended Session resumes with its conversation and its files. From 1.10.0 a Session on a workspace volume works in its own session directory with the turn's repositories cloned from the volume's mirrors, and the agent can clone any mirror itself.
