@@ -93,8 +93,11 @@ spec:
   template:
     metadata:
       labels:
-        {{- /* The selector's name wins over the chart's common name label. */}}
-        {{- merge (deepCopy $selector) (include "labels.common" . | fromYaml) | toYaml | nindent 8 }}
+        {{- /* The selector's name wins over the chart's common name label.
+        helm.sh/chart and app.kubernetes.io/version change with every chart
+        release and stay on the objects' own metadata: in the pod template they
+        rolled the façade on every release (giantswarm/agent-platform#941). */}}
+        {{- merge (deepCopy $selector) (omit (include "labels.common" . | fromYaml) "helm.sh/chart" "app.kubernetes.io/version") | toYaml | nindent 8 }}
         {{- if $capz }}
         azure.workload.identity/use: "true"
         {{- end }}
