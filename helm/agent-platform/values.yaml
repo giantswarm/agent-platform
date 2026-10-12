@@ -1000,15 +1000,18 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.2.0, the first release that serves the grant key set
-    # (/.well-known/jwks.json, the JWKS URL the grant issuer advertises and
-    # the manager's route publishes); 0.1.x answers 404 there. Its schema
+    # The floor is 0.4.0. 0.2.0 is the first release that serves the grant key
+    # set (/.well-known/jwks.json, the JWKS URL the grant issuer advertises and
+    # the manager's route publishes; 0.1.x answers 404 there), and 0.4.0 the
+    # first that takes the kagent block, so at this floor the chart forwards
+    # kagent's controller address and the manager cleans up session
+    # directories (agent-platform.workspaceManager.kagentFloor). Its schema
     # declares every key this chart forwards: the browser's provider sign-in
-    # (signin.keys) and the workspace StorageClass (storage.storageClassName),
-    # which the earlier candidates' closed schemas refuse. A stable never pins a
-    # prerelease; the ceiling stays the next major, so later minor releases
-    # roll on their own.
-    versionRange: ">=0.2.0 <1.0.0"
+    # (signin.keys), the workspace StorageClass (storage.storageClassName) and
+    # kagent.address/namespace, which earlier releases' closed schemas refuse.
+    # A stable never pins a prerelease; the ceiling stays the next major, so
+    # later minor releases roll on their own.
+    versionRange: ">=0.4.0 <1.0.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
