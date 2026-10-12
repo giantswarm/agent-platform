@@ -298,6 +298,13 @@ def main(meta: str, connectivity: str) -> int:
             if not re.search(r"^        admission:\n          jwt:\n", session, re.M):
                 fail(f"switching workspaces on did not derive kagent's Session admission onto {key}:\n{session}")
             on = on.replace(session, "", 1)
+        if key == ("HelmRelease", "klaus-gateway"):
+            # And the gateway's workspace tools prefix, derived from the
+            # klaus-gateway floor 4.3.0 on (tests/verify-klausgateway-workspaces.py).
+            prefix = "    workspaces:\n      toolsPrefix: x_workspace-manager_\n"
+            if prefix not in (on or ""):
+                fail(f"switching workspaces on did not derive the gateway's workspaces.toolsPrefix onto {key}")
+            on = on.replace(prefix, "", 1)
         if on != doc:
             fail(f"switching workspaces on changed {key} (muster.* included)")
     if any(kind == "MCPServer" for kind, _ in on_docs):
