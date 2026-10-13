@@ -207,9 +207,13 @@ def main(meta: str) -> int:
         chart_meta = yaml.safe_load(open(os.path.join(chart_dir, "kagent", "Chart.yaml"), encoding="utf-8"))
         stamped = yaml.safe_load(open(os.path.join(chart_dir, "kagent", "values.yaml"), encoding="utf-8"))
         stamp = ((stamped.get("substrateWorkerPool") or {}).get("workerImage")) or ""
+        # A build that vendors Substrate names it as a Chart.yaml dependency; since
+        # upstream dropped the subchart, the line stamps it as the tag of its worker image.
         built_against = next((d.get("version") for d in chart_meta.get("dependencies") or [] if d.get("name") == "substrate"), "")
+        if not built_against and stamp.startswith(f"{REGISTRY}/{REPOSITORY}/{WORKER}:"):
+            built_against = stamp.rsplit(":", 1)[1]
         if not built_against:
-            cc.fail(f"the kagent chart {resolved} names no substrate dependency in Chart.yaml; the line stamps the Substrate it was published against there")
+            cc.fail(f"the kagent chart {resolved} names no substrate dependency in Chart.yaml and stamps no {REGISTRY}/{REPOSITORY}/{WORKER} tag as substrateWorkerPool.workerImage; the line records the Substrate it was published against in one of them")
         print(f"ok: the kagent chart {resolved} (the range {kagent_rng!r}) renders the one WorkerPool with workerImage {derived} — its own stamp {stamp or '(none)'} overridden; published against Substrate {built_against}")
         built, pinned = ints_of(built_against), ints_of(floor)
         line = {pinned[:2], *SAME_UPSTREAM.get(pinned[:2], set())}
