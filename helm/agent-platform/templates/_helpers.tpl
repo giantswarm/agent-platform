@@ -342,6 +342,26 @@ release's closed schema refuses a workspaces block. */ -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
 {{- end -}}
+{{- if and (eq .name "kagent") .root.Values.postgres.enabled (ne (dig "databases" "kagent-v2" "enabled" true .root.Values.postgres) false) -}}
+{{- /* The kagent line's v1.11 chart reads the controller's connection string
+only from the Secret database.postgres.connectionStringSecretRef names and runs
+SET ROLE database.postgres.role; the 1.10 line reads urlFile. Both shapes are
+derived beside the installation's own urlFile, so either line installs
+(giantswarm/agent-platform#977). The Secret is the one the connectivity release
+derives for postgres.databases.kagent-v2 in the kagent namespace; the role is
+the one CNPG creates, postgres.applicationDatabase.owner. An own value stands. */ -}}
+{{- $pg := dig "database" "postgres" dict (.root.Values.kagent | default dict) -}}
+{{- $out := dict -}}
+{{- if not (dig "connectionStringSecretRef" "name" "" $pg) -}}
+{{- $_ := set $out "connectionStringSecretRef" (dict "name" (printf "%s-kagent-v2-app" .root.Values.postgres.clusterName) "key" "uri") -}}
+{{- end -}}
+{{- if not $pg.role -}}
+{{- $_ := set $out "role" (.root.Values.postgres.applicationDatabase.owner | default "kagent") -}}
+{{- end -}}
+{{- if $out -}}
+{{- $_ := set $derived "database" (dict "postgres" $out) -}}
+{{- end -}}
+{{- end -}}
 {{- if eq .name "kagent" -}}
 {{- /* The worker image follows the chart's Substrate pin, not the kagent build's
 stamp (giantswarm/agent-platform#466): a 0.0.30 worker under a 0.0.27 atelet
