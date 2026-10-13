@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "One rate-limit entry (llmRouting.rateLimits, llmRouting.external.rateLimits): an item of AgentgatewayPolicy traffic.rateLimit.local",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "unit"
+  ],
+  "oneOf": [
+    {
+      "required": [
+        "tokens"
+      ]
+    },
+    {
+      "required": [
+        "requests"
+      ]
+    }
+  ],
+  "properties": {
+    "tokens": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "requests": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "unit": {
+      "type": "string",
+      "enum": [
+        "Seconds",
+        "Minutes",
+        "Hours"
+      ]
+    },
+    "burst": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2147483647
+    },
+    "key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384
+    }
+  }
+}
