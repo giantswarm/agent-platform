@@ -603,8 +603,7 @@ llmRouting:
   #   - An empty bucket answers 429 until it refills. A per-second bucket is
   #     drained by one long completion and an hourly one can refuse calls for
   #     up to an hour, hence Minutes.
-  #   - It works alongside the per-turn limits of a claude Harness
-  #     (kagent.harnesses[].limits) and the provider's own workspace limits.
+  #   - It works alongside the provider's own workspace limits.
   rateLimits: []  # @schema type: array; maxItems: 16; itemRef: files/llm/rate-limit.schema.json
   # - tokens: 2000000          # the whole listener
   #   unit: Minutes

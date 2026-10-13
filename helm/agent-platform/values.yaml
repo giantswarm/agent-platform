@@ -1884,8 +1884,7 @@ llmRouting:
   #   - An empty bucket answers 429 until it refills. A per-second bucket is
   #     drained by one long completion and an hourly one can refuse calls for
   #     up to an hour, hence Minutes.
-  #   - It works alongside the per-turn limits of a claude Harness
-  #     (kagent.harnesses[].limits) and the provider's own workspace limits.
+  #   - It works alongside the provider's own workspace limits.
   rateLimits: []  # @schema type: array; maxItems: 16; itemRef: ../agent-platform-connectivity/files/llm/rate-limit.schema.json
   # - tokens: 2000000          # the whole listener
   #   unit: Minutes
@@ -3577,9 +3576,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # kagent. A claude entry takes the chart's claude-harness image at its
   # published digest; its snapshotLocation is its own (a snapshot is the
   # actor's whole memory and filesystem, and each store has its own
-  # retention); limits (claude entries only, Harness.spec.claude.limits:
-  # budgetUSD as a decimal string, maxTurns) bound every turn of every agent
-  # on it. An Agent declares its own egress (spec.egress, the agent chart's
+  # retention). An Agent declares its own egress (spec.egress, the agent chart's
   # agent.egress); a Harness carries none. Empty (the default) renders no
   # further Harness.
   harnesses: []
@@ -3589,9 +3586,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   env:
   #     - name: KAGENT_PROPAGATE_TOKEN          # tool calls to muster as the person
   #       value: "true"
-  #   limits:
-  #     budgetUSD: "2.00"
-  #     maxTurns: 40
 
 # === The platform's own Grafana boards ===
 # Forwarded to the connectivity chart, which renders one ConfigMap per board
