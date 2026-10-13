@@ -760,16 +760,22 @@ workspace-manager's volumes — unchanged (`templates/workspaces/csi-companion.y
   the Service as the controller endpoint, the node socket, mTLS through the
   pod identity with the Service's name (`<service>.<namespace>.svc`, the one
   name the signer certifies) verified — and ate-api-server's egress admits the
-  endpoint's port. An installation whose driver already serves Substrate —
+  controller's pods on the proxy's port (Cilium judges egress after the
+  Service's translation, so the Service port alone admits nothing). An installation whose driver already serves Substrate —
   a network-reachable controller behind mTLS, a node plugin propagating
   `/var/lib/ate` — leaves the companion off and sets `csiDriver` itself; a
   `csiDriver` named beside the companion must be the preset's driver.
-- **Kyverno** (`templates/workspaces/csi-companion-policy-exceptions.yaml`):
-  `csi-companion-controller` (every container as root — the driver images
-  are, and the proxy must be to reach the driver's root-owned socket) and
-  `csi-companion-node` (privileged, the node's network, host paths), in
-  `kyvernoPolicies.policyExceptionNamespace`; `make verify-kyverno` holds
-  their rule lists to the pod specs.
+- **Kyverno**: the meta chart renders the companion's PolicyExceptions
+  (its `templates/csi-companion-policy-exceptions.yaml`), so they exist
+  before this release reaches admission — Helm creates kinds it does not know
+  after the built-in ones, so rendered here the DaemonSet would be judged
+  without its exception: `csi-companion-controller` (every container as root
+  — the driver images are, and the proxy must be to reach the driver's
+  root-owned socket) and `csi-companion-node` (privileged, the node's
+  network, host paths), in `kyvernoPolicies.policyExceptionNamespace`; `make
+  verify-kyverno` holds their rule lists to the pod specs. With
+  `gitops.target` the meta chart refuses the companion beside Kyverno
+  policies: its exceptions would land on its own cluster, not the target.
 - **Network policies** (`templates/workspaces/csi-companion-netpol.yaml`,
   both flavours): the controller admits ate-api-server from Substrate's
   namespace on the proxy port and the kubelet's probes; it reaches DNS, the
@@ -1729,7 +1735,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"1.10.0"` |  |
+| agentManager.migration.image.tag | string | `"1.13.0"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |

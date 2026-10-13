@@ -41,14 +41,17 @@ muster. Each case below pins one property of its wiring:
   empty-group or non-DNS Organization, an own workspace-manager.organizations and
   workspace-manager.rbac.create false fail the render;
 - inline credentials, a duplicate or non-DNS provider name, a provider without a
-  kind fail the render naming the path; a workspaces.namespace that differs from
+  kind fail the render naming the path; a gitlab instance below the floor
+  agent-platform.workspaceManager.gitlabFloor (0.5.0, a release candidate of it
+  too) fails naming it, the default floor is 0.5.0, and the component chart at
+  the BOM's pin takes the instance; a workspaces.namespace that differs from
   kagent's fails naming the key, kagent.namespaceOverride moves it;
 - the kagent address: with kagent on, the workspace-manager range's floor at
   agent-platform.workspaceManager.kagentFloor (0.4.0, a release candidate of it
   too) and no value set the release carries kagent.address
   grpc://kagent-controller.kagent.svc:8083 and kagent.namespace kagent
   (kagent.namespaceOverride and kagent.fullnameOverride move both), and the
-  component chart at 0.4.0 takes the block; the default floor is 0.4.0; an own address wins and takes
+  component chart at 0.4.0 takes the block; an own address wins and takes
   nothing derived; an own namespace without an address that differs fails
   naming the key; without kagent or below the floor (an earlier release's
   closed schema refuses the block) no kagent block;
@@ -89,8 +92,12 @@ IDENTITY = [
     "--set", "global.identity.clientId=platform",
     "--set", "global.identity.existingSecret=platform-oauth",
 ]
-# The first workspace-manager release whose chart takes kagent.address.
+# The first workspace-manager release whose chart takes kagent.address, with the
+# fixture's second instance as a github one: the gitlab kind needs 0.5.0.
 WM_KAGENT = ["--set", "components.workspace-manager.versionRange=>=0.4.0 <1.0.0"]
+NO_GITLAB = ["--set", "workspace-manager.providers[1].kind=github"]
+# The first workspace-manager release with the provider kind gitlab.
+GITLAB_FLOOR = "0.5.0"
 CREDENTIALS = ("privateKey", "clientSecret", "token", "signingKey")
 
 
@@ -298,6 +305,13 @@ def main(meta: str, connectivity: str) -> int:
             if not re.search(r"^        admission:\n          jwt:\n", session, re.M):
                 fail(f"switching workspaces on did not derive kagent's Session admission onto {key}:\n{session}")
             on = on.replace(session, "", 1)
+        if key == ("HelmRelease", "klaus-gateway"):
+            # And the gateway's workspace tools prefix, derived from the
+            # klaus-gateway floor 4.3.0 on (tests/verify-klausgateway-workspaces.py).
+            prefix = "    workspaces:\n      toolsPrefix: x_workspace-manager_\n"
+            if prefix not in (on or ""):
+                fail(f"switching workspaces on did not derive the gateway's workspaces.toolsPrefix onto {key}")
+            on = on.replace(prefix, "", 1)
         if on != doc:
             fail(f"switching workspaces on changed {key} (muster.* included)")
     if any(kind == "MCPServer" for kind, _ in on_docs):
@@ -368,6 +382,25 @@ def main(meta: str, connectivity: str) -> int:
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[1].kind="], "names no kind", "a provider without kind")
     ok("an inline credential, a duplicate or non-DNS name and a missing kind fail naming the path")
 
+    # --- the gitlab kind's floor ----------------------------------------------------------
+    if not (rng := re.search(RANGE_RE, on_docs[("OCIRepository", NAME)])) or not rng.group(1).startswith(f">={GITLAB_FLOOR} "):
+        fail(f"the default workspace-manager range is not floored at {GITLAB_FLOOR}, the first release with the gitlab kind")
+    for below in (">=0.4.0 <1.0.0", "0.4.1"):
+        must_fail(meta, [*ON, "--set", f"components.{NAME}.versionRange={below}"],
+                  f"{NAME}.providers[1] (gitlab) is of kind gitlab, which workspace-manager has from {GITLAB_FLOOR} on", f"a gitlab instance on the range {below}")
+    for at in (f"{GITLAB_FLOOR}-rc.1", f">={GITLAB_FLOOR} <1.0.0"):
+        helm(meta, [*ON, "--set", f"components.{NAME}.versionRange={at}"])
+    helm(meta, [*ON, *NO_GITLAB, "--set", f"components.{NAME}.versionRange=>=0.4.0 <1.0.0"])
+    with open(BOM, encoding="utf-8") as f:
+        pin = re.search(rf'^\s*{re.escape(NAME)}:\s*\{{\s*versionRange:\s*"([^"]+)"', f.read(), re.M).group(1)
+    r = component_render(documents(helm(meta, [*ON, *IDENTITY]))[("HelmRelease", NAME)], pin)
+    if r.returncode != 0:
+        fail(f"the {NAME} chart {pin} refuses the forwarded gitlab instance:\n{r.stderr}")
+    must_have(r.stdout, ("kind: gitlab", "name: gitlab", "url: https://gitlab.example.com:8443", "name: workspace-gitlab"),
+              f"the {NAME} chart {pin}'s providers configuration")
+    ok(f"a gitlab instance needs the workspace-manager floor at {GITLAB_FLOOR} (a release candidate of it too; below, the render fails naming "
+       f"the floor; a github-only list does not), the default floor; the component chart at the BOM's pin {pin} takes the instance with its Secret references")
+
     # --- the derived namespace ----------------------------------------------------------
     moved = documents(helm(meta, [*ON, "--set", "kagent.namespaceOverride=agents"]))[("HelmRelease", NAME)]
     must_have(moved, ("    workspaces:\n      namespace: agents\n",), "the HelmRelease with kagent.namespaceOverride")
@@ -377,26 +410,26 @@ def main(meta: str, connectivity: str) -> int:
     ok("workspaces.namespace follows the kagent namespace; an own value must agree")
 
     # --- the kagent address -------------------------------------------------------------
-    if "\n    kagent:\n" in documents(helm(meta, [*ON, *WM_KAGENT, "--set", "components.kagent.enabled=false"]))[("HelmRelease", NAME)]:
+    if "\n    kagent:\n" in documents(helm(meta, [*ON, *NO_GITLAB, *WM_KAGENT, "--set", "components.kagent.enabled=false"]))[("HelmRelease", NAME)]:
         fail("the HelmRelease carries a kagent block with kagent off")
-    if "\n    kagent:\n" in documents(helm(meta, [*ON, *KAGENT, "--set", f"components.{NAME}.versionRange=>=0.2.0 <1.0.0"]))[("HelmRelease", NAME)]:
+    if "\n    kagent:\n" in documents(helm(meta, [*ON, *NO_GITLAB, *KAGENT, "--set", f"components.{NAME}.versionRange=>=0.2.0 <1.0.0"]))[("HelmRelease", NAME)]:
         fail("the HelmRelease carries a kagent block below the workspace-manager floor that takes it (an earlier chart's schema refuses it)")
     want = "    kagent:\n      address: grpc://kagent-controller.kagent.svc:8083\n      namespace: kagent\n"
     for rng in ("0.4.0-rc.1", ">=0.4.0 <1.0.0"):
-        hr = documents(helm(meta, [*ON, *KAGENT, *IDENTITY, "--set", f"components.{NAME}.versionRange={rng}"]))[("HelmRelease", NAME)]
+        hr = documents(helm(meta, [*ON, *NO_GITLAB, *KAGENT, *IDENTITY, "--set", f"components.{NAME}.versionRange={rng}"]))[("HelmRelease", NAME)]
         must_have(hr, (want,), f"the HelmRelease with kagent on and the range {rng}")
     if (r := component_render(hr, "0.4.0")).returncode != 0:
         fail(f"the {NAME} chart 0.4.0 refuses the forwarded kagent block:\n{r.stderr}")
     if "grpc://kagent-controller.kagent.svc:8083" not in r.stdout:
         fail(f"the {NAME} chart 0.4.0 renders no kagent address from the forwarded block")
-    moved = documents(helm(meta, [*ON, *KAGENT, *WM_KAGENT, "--set", "kagent.namespaceOverride=agents", "--set", "kagent.fullnameOverride=kg"]))[("HelmRelease", NAME)]
+    moved = documents(helm(meta, [*ON, *NO_GITLAB, *KAGENT, *WM_KAGENT, "--set", "kagent.namespaceOverride=agents", "--set", "kagent.fullnameOverride=kg"]))[("HelmRelease", NAME)]
     must_have(moved, ("    kagent:\n      address: grpc://kg-controller.agents.svc:8083\n      namespace: agents\n",),
               "the HelmRelease with kagent.namespaceOverride and fullnameOverride")
-    own = documents(helm(meta, [*ON, *KAGENT, *WM_KAGENT, "--set", f"{NAME}.kagent.address=grpcs://kagent.example.com",
+    own = documents(helm(meta, [*ON, *NO_GITLAB, *KAGENT, *WM_KAGENT, "--set", f"{NAME}.kagent.address=grpcs://kagent.example.com",
                                 "--set", f"{NAME}.kagent.namespace=elsewhere"]))[("HelmRelease", NAME)]
     must_have(own, ("    kagent:\n      address: grpcs://kagent.example.com\n      namespace: elsewhere\n",), "the HelmRelease with an own address")
-    helm(meta, [*ON, *KAGENT, *WM_KAGENT, "--set", f"{NAME}.kagent.namespace=kagent"])
-    must_fail(meta, [*ON, *KAGENT, *WM_KAGENT, "--set", f"{NAME}.kagent.namespace=elsewhere"], f"{NAME}.kagent.namespace (elsewhere) differs",
+    helm(meta, [*ON, *NO_GITLAB, *KAGENT, *WM_KAGENT, "--set", f"{NAME}.kagent.namespace=kagent"])
+    must_fail(meta, [*ON, *NO_GITLAB, *KAGENT, *WM_KAGENT, "--set", f"{NAME}.kagent.namespace=elsewhere"], f"{NAME}.kagent.namespace (elsewhere) differs",
               "an own kagent namespace that disagrees with the derived address")
     ok("kagent.address defaults to kagent's controller Service (grpc://kagent-controller.kagent.svc:8083) with its namespace from "
        "workspace-manager 0.4.0 on, the default floor, which takes it (0.4.0 renders it), following kagent's namespace and fullname; an own address wins; "

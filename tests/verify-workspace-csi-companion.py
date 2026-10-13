@@ -19,8 +19,8 @@ Substrate worker nodes. Each case below pins one property:
   storage preset (then no CSIDriverConfig either: nothing to derive it from);
 - each preset (tests/fixtures/workspaces-csi-companion-{efs,azure-files}-values.yaml):
   exactly the companion's objects — two ServiceAccounts, the proxy ConfigMap,
-  ONE Service, ONE Deployment, ONE DaemonSet, the two Cilium policies, the two
-  PolicyExceptions, ONE CSIDriverConfig named after the preset's driver and,
+  ONE Service, ONE Deployment, ONE DaemonSet, the two Cilium policies, ONE
+  CSIDriverConfig named after the preset's driver and,
   for efs, a ClusterRole and binding on nodes get — the Service ahead of the
   Deployment (Substrate's service-DNS signer certifies a pod for the Services
   that select it); the CSIDriverConfig derived from the companion: the
@@ -38,12 +38,24 @@ Substrate worker nodes. Each case below pins one property:
   paths (efs-utils' state and configuration for efs, the node's cloud
   configuration read-only for azureFiles), the node selector derived from the
   WorkerPool template plus the os label; everything namespaced in the release
-  namespace but the PolicyExceptions (kyvernoPolicies.policyExceptionNamespace),
-  none with Kyverno off; the ingress policy admits ate-api-server from
+  namespace, no PolicyException in the connectivity render even with Kyverno
+  on; the meta chart renders the two PolicyExceptions in
+  kyvernoPolicies.policyExceptionNamespace, selecting the workloads by their
+  labels in the connectivity release's namespace (gitops.targetNamespace or the
+  component's targetNamespace), so they exist before the connectivity release
+  reaches admission, none with Kyverno off; the ingress policy admits ate-api-server from
   Substrate's namespace on the proxy port, the egress policy DNS, the API
   server, the cloud's APIs and (efs only) the instance metadata service, and
-  ate-api-server's own egress the controller endpoint's port; the kubernetes
+  ate-api-server's own egress the controller's pods on the proxy's port, not
+  the Service port (Cilium judges egress after the Service's translation),
+  an own driver's endpoint the cluster on its port; the kubernetes
   flavour renders the ingress policy; the meta chart forwards the block;
+- the pod templates of the controller and the node plugin carry the selector
+  labels and the release-stable common labels only (labels.podTemplate), never
+  helm.sh/chart or app.kubernetes.io/version, which stay on the workloads' own
+  metadata; the selectors are unchanged, and both pod templates render
+  identically at two chart versions, so a release that leaves the companion
+  alone rolls neither (giantswarm/agent-platform#974);
 - cloud identity by values: the IRSA role annotates both ServiceAccounts, the
   workload-identity client id annotates them and labels both pod templates;
   nothing by default;
@@ -60,7 +72,8 @@ Substrate worker nodes. Each case below pins one property:
   preset, with an unknown one (the schema's enum, then the guard behind it),
   beside a storage preset of another driver, a client identity that is no
   SPIFFE ID, a socket directory outside the kubelet's plugins directory, an
-  unknown key (the schema).
+  unknown key (the schema); in the meta chart the companion with gitops.target
+  and Kyverno policies (its exceptions would land on the wrong cluster).
 
 The PolicyExceptions' rule lists are held to the pod specs by
 tests/verify-kyverno.py. Deliberately stdlib-only: the CI image has no PyYAML.
@@ -69,8 +82,10 @@ HELM selects the binary.
 
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 HELM = os.environ.get("HELM", "helm")
 NS = "agent-platform"
@@ -191,6 +206,13 @@ def conn(flags: list) -> str:
     return helm(CONNECTIVITY, [*CONN, *flags], ci_values=False)
 
 
+def ate_api_server_companion_egress_ports(render: str) -> set:
+    """The ports ate-api-server's egress admits to the companion's controller pods (after the Service's translation, the proxy's)."""
+    doc = documents(render)[("CiliumNetworkPolicy", "substrate-ate-api-server")]
+    return set(re.findall(r'- toEndpoints:\n\s+- matchLabels:\n\s+app.kubernetes.io/name: csi-companion\n\s+app.kubernetes.io/component: controller\n'
+                          rf'\s+io.kubernetes.pod.namespace: {NS}\n\s+toPorts:\n\s+- ports:\n\s+- port: "(\d+)"\n', doc))
+
+
 def ate_api_server_egress_ports(render: str) -> set:
     doc = documents(render)[("CiliumNetworkPolicy", "substrate-ate-api-server")]
     return set(re.findall(r'- toEntities:\n\s+- cluster\n\s+toPorts:\n\s+- ports:\n\s+- port: "(\d+)"\n', doc))
@@ -220,7 +242,7 @@ def preset(name: str) -> None:
     found = companion(docs)
     want = {("ServiceAccount", CONTROLLER), ("ServiceAccount", NODE), ("ConfigMap", PROXY_CONFIG), ("Service", CONTROLLER), ("Deployment", CONTROLLER),
             ("DaemonSet", NODE), ("CiliumNetworkPolicy", f"{POLICY}-ingress"), ("CiliumNetworkPolicy", f"{POLICY}-egress"),
-            ("PolicyException", CONTROLLER), ("PolicyException", NODE), ("CSIDriverConfig", p["driver"])}
+            ("CSIDriverConfig", p["driver"])}
     if efs:
         want |= {("ClusterRole", "t-csi-companion"), ("ClusterRoleBinding", "t-csi-companion")}
     if set(found) != want:
@@ -234,8 +256,9 @@ def preset(name: str) -> None:
                  f"  tls:\n    enabled: true\n    usePodIdentity: true\n    serverName: \"{CONTROLLER}.{NS}.svc\"\n")
     if spec(found[("CSIDriverConfig", p["driver"])]) != want_spec:
         fail(f"{name}: the derived CSIDriverConfig is off:\n{found[('CSIDriverConfig', p['driver'])]}")
-    if ate_api_server_egress_ports(render) != {"50051"}:
-        fail(f"{name}: ate-api-server's egress admits {ate_api_server_egress_ports(render)}, not the controller endpoint's port alone")
+    if ate_api_server_companion_egress_ports(render) != {"10000"} or ate_api_server_egress_ports(render):
+        fail(f"{name}: ate-api-server's egress admits the companion's pods on {ate_api_server_companion_egress_ports(render)} and the cluster on "
+             f"{ate_api_server_egress_ports(render)}, not the proxy's port on the controller's pods alone (Cilium judges egress after the Service's translation)")
 
     # The controller.
     deploy = found[("Deployment", CONTROLLER)]
@@ -244,9 +267,13 @@ def preset(name: str) -> None:
     driver = container(deploy, "driver")
     if f"image: {p['image']}\n" not in driver or args(driver) != p["controllerArgs"]:
         fail(f"{name}: the controller's driver is not the preset's image with its arguments:\n{driver}")
+    if not re.search(r"livenessProbe:\n\s+httpGet:\n\s+path: /healthz\n\s+port: 9808\n", driver) or "--health-port=9808" not in container(deploy, "liveness-probe"):
+        fail(f"{name}: the driver's liveness probe does not read the sidecar's health port by number (a named port resolves within the probed container only):\n{driver}")
     if "value: unix:///csi/csi.sock\n" not in driver or ("CSI_NODE_NAME" in driver) != efs or ("AWS_STS_REGIONAL_ENDPOINTS" in driver) != efs:
         fail(f"{name}: the controller's driver environment is off:\n{driver}")
     envoy = container(deploy, "envoy")
+    if "- name: ENVOY_UID\n              value: \"0\"\n" not in envoy:
+        fail(f"{name}: the Envoy sidecar lacks ENVOY_UID=0; its entrypoint would chown stdout and su-exec to its envoy user, which drop ALL forbids:\n{envoy}")
     if f"image: {PROXY_IMAGE}\n" not in envoy or "runAsUser: 0\n" not in envoy or "containerPort: 10000\n" not in envoy:
         fail(f"{name}: the Envoy sidecar is not the pinned image as root on the proxy port:\n{envoy}")
     if f"image: {PROBE_IMAGE}\n" not in container(deploy, "liveness-probe"):
@@ -300,15 +327,11 @@ def preset(name: str) -> None:
             if ns:
                 fail(f"{name}: {kind} {obj} is namespaced")
             continue
-        want_ns = POLEX_NS if kind == "PolicyException" else NS
-        if not ns or ns.group(1) != want_ns:
-            fail(f"{name}: {kind} {obj} is in {ns.group(1) if ns else 'no namespace'}, not {want_ns}")
-    for obj, component in ((CONTROLLER, "controller"), (NODE, "node")):
-        pe = found[("PolicyException", obj)]
-        if f"        namespaces:\n        - {NS}\n        selector:\n          matchLabels:\n            app.kubernetes.io/name: csi-companion\n            app.kubernetes.io/component: {component}\n" not in pe:
-            fail(f"{name}: PolicyException {obj} does not select the {component} by its labels in {NS}:\n{pe}")
-    if any(k[0] == "PolicyException" for k in companion(documents(conn(["-f", FIXTURES[name], "--set", "kyvernoPolicies.enabled=false"])))):
-        fail(f"{name}: a PolicyException rendered with Kyverno off")
+        if not ns or ns.group(1) != NS:
+            fail(f"{name}: {kind} {obj} is in {ns.group(1) if ns else 'no namespace'}, not {NS}")
+    if any(k[0] == "PolicyException" and "csi-companion" in k[1] for k in documents(render)):
+        fail(f"{name}: the connectivity render carries a companion PolicyException; Helm would create it after the workloads it excepts")
+    meta_exceptions(name)
     ingress = found[("CiliumNetworkPolicy", f"{POLICY}-ingress")]
     if f"app: ate-api-server\n            io.kubernetes.pod.namespace: {SUBSTRATE_NS}\n      toPorts:\n        - ports:\n            - port: \"10000\"\n" not in ingress:
         fail(f"{name}: the ingress policy does not admit ate-api-server from {SUBSTRATE_NS} on the proxy port:\n{ingress}")
@@ -334,8 +357,80 @@ def preset(name: str) -> None:
     ok(f"{name}: exactly the companion's objects, the Service ahead of the Deployment; the registration derived from the companion; the controller runs the preset's "
        "driver behind Envoy as root with the projected service-DNS certificate and pod-identity trust, requiring a client certificate with exactly ate-api-server's "
        "SPIFFE ID; the node plugin privileged on the node's network with Substrate's directory Bidirectional, its socket under the plugins directory, no registrar, "
-       "the preset's host paths; the release namespace throughout, the exceptions in the policy namespace and none with Kyverno off; the policies in both "
-       "flavours; the meta chart forwards the block")
+       "the preset's host paths; the release namespace throughout and no PolicyException in the connectivity render; the meta chart renders both exceptions "
+       "in the policy namespace selecting the connectivity release's namespace, none with Kyverno or the companion off; the policies in both flavours; the meta "
+       "chart forwards the block")
+
+
+def pod_template(doc: str) -> str:
+    """A workload's pod template, from `  template:` to the end of the document."""
+    return doc[doc.index("\n  template:\n") + 1:]
+
+
+def pod_labels(doc: str) -> str:
+    """The labels block of a workload's pod template."""
+    tpl = pod_template(doc)
+    return tpl[:tpl.index("\n    spec:\n") + 1]
+
+
+def pod_labels_stable(name: str) -> None:
+    """The pod templates carry no chart-version label, so a release that leaves the companion alone rolls neither workload."""
+    render = conn(["-f", FIXTURES[name]])
+    docs = documents(render)
+    with tempfile.TemporaryDirectory() as tmp:
+        bumped = os.path.join(tmp, "chart")
+        shutil.copytree(CONNECTIVITY, bumped)
+        chart_yaml = os.path.join(bumped, "Chart.yaml")
+        with open(chart_yaml) as f:
+            meta = f.read()
+        meta = re.sub(r"^version: .*$", "version: 99.0.0", meta, flags=re.M)
+        meta = re.sub(r"^appVersion: .*$", 'appVersion: "99.0.0"', meta, flags=re.M)
+        with open(chart_yaml, "w") as f:
+            f.write(meta)
+        bumped_docs = documents(helm(bumped, [*CONN, "-f", FIXTURES[name]], ci_values=False))
+    for kind, obj, component in (("Deployment", CONTROLLER, "controller"), ("DaemonSet", NODE, "node")):
+        doc = docs[(kind, obj)]
+        labels = pod_labels(doc)
+        if "helm.sh/chart" in labels or "app.kubernetes.io/version" in labels:
+            fail(f"{name}: the {kind}'s pod template carries a chart-version label (helm.sh/chart, app.kubernetes.io/version): "
+                 f"every release would roll it (giantswarm/agent-platform#974):\n{labels}")
+        want_labels = ("    metadata:\n      labels:\n        app: agent-platform-connectivity\n"
+                       f"        app.kubernetes.io/component: {component}\n        app.kubernetes.io/instance: t\n"
+                       "        app.kubernetes.io/managed-by: Helm\n        app.kubernetes.io/name: csi-companion\n"
+                       "        application.giantswarm.io/team: bumblebee\n")
+        if labels != f"  template:\n{want_labels}":
+            fail(f"{name}: the {kind}'s pod template labels are not the selector's plus the release-stable common ones:\n{labels}")
+        own = doc[:doc.index("\nspec:\n")]
+        if "    helm.sh/chart: " not in own or "    app.kubernetes.io/version: " not in own:
+            fail(f"{name}: the {kind} lost helm.sh/chart or app.kubernetes.io/version from its own metadata:\n{own}")
+        want_selector = f"  selector:\n    matchLabels:\n      app.kubernetes.io/component: {component}\n      app.kubernetes.io/name: csi-companion\n"
+        if want_selector not in doc:
+            fail(f"{name}: the {kind}'s selector moved (spec.selector is immutable: an upgrade would be refused):\n{doc}")
+        if pod_template(bumped_docs[(kind, obj)]) != pod_template(doc):
+            fail(f"{name}: the {kind}'s pod template differs between two chart versions: a release alone would roll it (giantswarm/agent-platform#974)")
+    ok(f"{name}: the controller's and the node plugin's pod templates carry the selector and the release-stable common labels only, "
+       "render identically at two chart versions, the selectors unchanged, helm.sh/chart on the workloads' own metadata")
+
+
+def meta_exceptions(name: str) -> None:
+    """The companion's PolicyExceptions, rendered by the meta chart ahead of the connectivity release."""
+    kyverno = ["--namespace", NS, "-f", FIXTURES[name], "--set", "kyvernoPolicies.enabled=true", "--api-versions", "kyverno.io/v1"]
+    for flags, release_ns in (([], NS), (["--set", "gitops.targetNamespace=agents"], "agents"),
+                              (["--set", "components.agent-platform-connectivity.targetNamespace=wiring"], "wiring")):
+        docs = documents(helm(META, [*kyverno, *flags]))
+        found = {k: d for k, d in docs.items() if k[0] == "PolicyException"}
+        if set(found) != {("PolicyException", CONTROLLER), ("PolicyException", NODE)}:
+            fail(f"{name}: the meta chart renders the PolicyExceptions {sorted(found)}, not {CONTROLLER} and {NODE}")
+        for obj, component in ((CONTROLLER, "controller"), (NODE, "node")):
+            pe = found[("PolicyException", obj)]
+            if not re.search(rf"^  namespace: {POLEX_NS}$", pe, re.M):
+                fail(f"{name}: PolicyException {obj} is not in {POLEX_NS}:\n{pe}")
+            if f"        namespaces:\n        - {release_ns}\n        selector:\n          matchLabels:\n            app.kubernetes.io/name: csi-companion\n            app.kubernetes.io/component: {component}\n" not in pe:
+                fail(f"{name}: PolicyException {obj} does not select the {component} by its labels in {release_ns} ({' '.join(flags) or 'defaults'}):\n{pe}")
+    if any(k[0] == "PolicyException" for k in documents(helm(META, [*kyverno, "--set", "kyvernoPolicies.enabled=false"]))):
+        fail(f"{name}: a PolicyException rendered with Kyverno off")
+    if any(k[0] == "PolicyException" and "csi-companion" in k[1] for k in documents(helm(META, [*kyverno, "--set", f"{COMPANION}.enabled=false"]))):
+        fail(f"{name}: a companion PolicyException rendered with the companion off")
 
 
 def identity() -> None:
@@ -401,7 +496,7 @@ def overrides() -> None:
         fail("other ports do not move the Service and the sidecar")
     if "port_value: 10001 }" not in docs[("ConfigMap", PROXY_CONFIG)] or 'exact: "spiffe://cluster.local/ns/ate-system/sa/other"' not in docs[("ConfigMap", PROXY_CONFIG)]:
         fail("another proxy port and client identity do not move the listener and the SAN")
-    if '- port: "10001"' not in docs[("CiliumNetworkPolicy", f"{POLICY}-ingress")] or ate_api_server_egress_ports(render) != {"50052"}:
+    if '- port: "10001"' not in docs[("CiliumNetworkPolicy", f"{POLICY}-ingress")] or ate_api_server_companion_egress_ports(render) != {"10001"}:
         fail("other ports do not move the ingress policy and ate-api-server's egress")
     ok("the image, appended controller arguments and replaced node arguments, the pool template's selector and tolerations (the node block's win), the controller's "
        "selector, another socket directory, other ports and another client identity move the render where they belong")
@@ -418,8 +513,8 @@ def own_driver() -> None:
         fail(f"the installation's own csiDriver does not win over the derived registration:\n{docs[('CSIDriverConfig', 'efs.csi.aws.com')]}")
     if ("Deployment", CONTROLLER) not in docs or ("DaemonSet", NODE) not in docs:
         fail("the companion does not render beside the installation's own csiDriver")
-    if ate_api_server_egress_ports(render) != {"4444"}:
-        fail(f"ate-api-server's egress admits {ate_api_server_egress_ports(render)}, not the own endpoint's port alone")
+    if ate_api_server_egress_ports(render) != {"4444"} or ate_api_server_companion_egress_ports(render):
+        fail(f"ate-api-server's egress admits {ate_api_server_egress_ports(render)} (and the companion's pods on {ate_api_server_companion_egress_ports(render)}), not the own endpoint's port alone")
     for chart, flags, ci in ((META, ["-f", FIXTURES["efs"]], True), (CONNECTIVITY, [*CONN, "-f", FIXTURES["efs"]], False)):
         must_fail(chart, [*flags, "--set", f"{CSI}.name=nfs.csi.k8s.io", "--set", f"{CSI}.controllerEndpoint=tcp://own.storage.svc:4444"],
                   f"{CSI}.name (nfs.csi.k8s.io) is not the driver of the CSI companion's preset efs (efs.csi.aws.com)", "a csiDriver naming another driver", ci_values=ci)
@@ -442,14 +537,20 @@ def guards() -> None:
         must_fail(chart, [*flags, "--set", f"{COMPANION}.node.socketDir=/var/lib/csi"], f'{COMPANION}.node.socketDir is "/var/lib/csi"',
                   "a socket directory outside the plugins directory", ci_values=ci)
         must_fail(chart, [*flags, "--set", f"{COMPANION}.unknownKey=1"], "unknownKey", "an unknown key (the schema)", ci_values=ci)
+    must_fail(META, ["-f", FIXTURES["efs"], "--set", "kyvernoPolicies.enabled=true", "--api-versions", "kyverno.io/v1",
+                     "--set", "gitops.target.kubeConfig.secretRef.name=target-kubeconfig"],
+              f"{COMPANION} is on with gitops.target and Kyverno policies", "the companion with a target and Kyverno policies")
+    helm(META, ["-f", FIXTURES["efs"], "--set", "kyvernoPolicies.enabled=false", "--set", "gitops.target.kubeConfig.secretRef.name=target-kubeconfig"])
     ok("both charts: the companion without a preset, with an unknown one (schema, then the guard), beside a storage preset of another driver, a client identity "
-       "that is no SPIFFE ID, a socket directory outside the plugins directory and an unknown key fail naming the key")
+       "that is no SPIFFE ID, a socket directory outside the plugins directory and an unknown key fail naming the key; the meta chart refuses the companion "
+       "with a target and Kyverno policies, and renders it with a target and Kyverno off")
 
 
 def main() -> int:
     off()
     for name in PRESETS:
         preset(name)
+        pod_labels_stable(name)
     identity()
     overrides()
     own_driver()

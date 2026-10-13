@@ -73,22 +73,29 @@ components:
   # thread, the turn record and the turn metric, and sends a tool-set or
   # platform failure once more (giantswarm/klaus-gateway#329). Nothing below
   # 2.0.0 starts: the meta chart forwards no lifecycle.driver
-  # (giantswarm/klaus-gateway#319).
-  klaus-gateway:                 { versionRange: "3.3.0" }
+  # (giantswarm/klaus-gateway#319). 4.3.0 starts every Slack Session through
+  # agent-manager's start_session without a message, which agent-manager
+  # 1.13.0 serves (giantswarm/klaus-gateway#446).
+  klaus-gateway:                 { versionRange: "4.3.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "1.14.0" }
   # 1.10.0 takes kagent.controllerTarget, which the meta chart forwards while
-  # the kagent controller route is on (giantswarm/agent-manager#101).
-  agent-manager:                 { versionRange: "1.10.0" }
+  # the kagent controller route is on (giantswarm/agent-manager#101); 1.12.0
+  # takes a workspace grant on start_session (giantswarm/agent-manager#134);
+  # 1.13.0, the floor of its range, starts a Session without a first message
+  # (giantswarm/agent-manager#138) and bounds MCP request bodies
+  # (giantswarm/agent-manager#141).
+  agent-manager:                 { versionRange: "1.13.0" }
   vm-manager:                    { versionRange: "0.24.0" }
   # The cluster write surface (components.cluster-manager, off by default).
   cluster-manager:               { versionRange: "0.22.0" }
   # The workspace surface (components.workspace-manager, follows
-  # workspaces.enabled, off by default). 0.4.0, the floor of its range: it
-  # serves the grant key set (/.well-known/jwks.json, from 0.2.0) and takes the
-  # kagent address the chart forwards for the session directories' cleanup.
-  workspace-manager:             { versionRange: "0.4.0" }
+  # workspaces.enabled, off by default). 0.5.0, the floor of its range: it has
+  # the provider kind gitlab, serves the grant key set (/.well-known/jwks.json,
+  # from 0.2.0) and takes the kagent address the chart forwards for the
+  # session directories' cleanup (from 0.4.0).
+  workspace-manager:             { versionRange: "0.5.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08, backstage and mcp-kubernetes at their

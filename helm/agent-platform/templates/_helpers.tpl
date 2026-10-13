@@ -141,7 +141,13 @@ overwrite would hide a values file that still spells the old key.
     default user with (agent-platform.valkeySecretName / valkeyPasswordKey), so
     the switch is one line. These are defaults, not the single-source rule
     above: an operator's own url (an out-of-band Valkey), Secret or key wins.
-  valkey: auth.usersExistingSecret and auth.aclUsers.default.passwordKey, when
+    And workspaces.toolsPrefix while workspaces are on: x_ and
+    workspace-manager.muster.mcpServer.name and _ (x_workspace-manager_), the
+    name muster gives the manager's tools, which the gateway calls as the
+    person; only from the floor agent-platform.klausGateway.workspacesFloor
+    (4.3.0) of components.klaus-gateway.versionRange, below it nothing. Single
+    source: an own value that differs fails the render.
+  valkey:auth.usersExistingSecret and auth.aclUsers.default.passwordKey, when
     its own block leaves them empty, from the Secret and key muster reads the
     same password with (agent-platform.valkeySecretName / valkeyPasswordKey:
     muster's storage Secret, else global.identity.existingSecret; the key
@@ -306,6 +312,22 @@ the connectivity release creates with providers and oauth.enabled
 {{- end -}}
 {{- if $valkey -}}{{- $_ := set $derived "routing" (dict "valkey" $valkey) -}}{{- end -}}
 {{- end -}}
+{{- /* The workspace-manager's tools by the name muster gives them, while
+workspaces are on: x_<the manager's MCPServer name>_, which the gateway calls
+as the person. Only while the floor of components.klaus-gateway.versionRange
+takes the key (agent-platform.klausGateway.workspacesFloor): an earlier
+release's closed schema refuses a workspaces block. */ -}}
+{{- if (.root.Values.workspaces | default dict).enabled -}}
+{{- $kgFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "klaus-gateway" "versionRange" "" .root.Values.components) | default "0.0.0") "" -}}
+{{- if ge ((semver $kgFloor).Compare (semver (include "agent-platform.klausGateway.workspacesFloor" .root))) 0 -}}
+{{- $prefix := printf "x_%s_" (dig "muster" "mcpServer" "name" "workspace-manager" (index .root.Values "workspace-manager" | default dict)) -}}
+{{- $own := dig "workspaces" "toolsPrefix" "" $kg -}}
+{{- if and $own (ne $own $prefix) -}}
+{{- fail (printf "klausGateway.workspaces.toolsPrefix (%s) differs from the prefix muster gives the workspace-manager's tools (%s, x_ and workspace-manager.muster.mcpServer.name): the gateway calls them by that name — leave klausGateway.workspaces.toolsPrefix unset" $own $prefix) -}}
+{{- end -}}
+{{- $_ := set $derived "workspaces" (dict "toolsPrefix" $prefix) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "valkey" -}}
 {{- $auth := dig "valkey" "auth" dict (.root.Values.valkey | default dict) -}}
@@ -319,6 +341,26 @@ the connectivity release creates with providers and oauth.enabled
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
+{{- end -}}
+{{- if and (eq .name "kagent") .root.Values.postgres.enabled (ne (dig "databases" "kagent-v2" "enabled" true .root.Values.postgres) false) -}}
+{{- /* The kagent line's v1.11 chart reads the controller's connection string
+only from the Secret database.postgres.connectionStringSecretRef names and runs
+SET ROLE database.postgres.role; the 1.10 line reads urlFile. Both shapes are
+derived beside the installation's own urlFile, so either line installs
+(giantswarm/agent-platform#977). The Secret is the one the connectivity release
+derives for postgres.databases.kagent-v2 in the kagent namespace; the role is
+the one CNPG creates, postgres.applicationDatabase.owner. An own value stands. */ -}}
+{{- $pg := dig "database" "postgres" dict (.root.Values.kagent | default dict) -}}
+{{- $out := dict -}}
+{{- if not (dig "connectionStringSecretRef" "name" "" $pg) -}}
+{{- $_ := set $out "connectionStringSecretRef" (dict "name" (printf "%s-kagent-v2-app" .root.Values.postgres.clusterName) "key" "uri") -}}
+{{- end -}}
+{{- if not $pg.role -}}
+{{- $_ := set $out "role" (.root.Values.postgres.applicationDatabase.owner | default "kagent") -}}
+{{- end -}}
+{{- if $out -}}
+{{- $_ := set $derived "database" (dict "postgres" $out) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "kagent" -}}
 {{- /* The worker image follows the chart's Substrate pin, not the kagent build's
@@ -1403,6 +1445,14 @@ keys as signin.keys {secretName, current} and its closed schema refuses the key.
 {{- if not $p.kind -}}
 {{- fail (printf "workspace-manager.providers[%d] (%s) names no kind" $i $name) -}}
 {{- end -}}
+{{- if eq (toString $p.kind) "gitlab" -}}
+{{- $range := dig "workspace-manager" "versionRange" "" $.Values.components -}}
+{{- $wmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- $gitlabFloor := include "agent-platform.workspaceManager.gitlabFloor" $ -}}
+{{- if lt ((semver $wmFloor).Compare (semver $gitlabFloor)) 0 -}}
+{{- fail (printf "workspace-manager.providers[%d] (%s) is of kind gitlab, which workspace-manager has from %s on, but components.workspace-manager.versionRange (%s) admits earlier releases, whose manager refuses the kind at start: raise its floor to %s" $i $name $gitlabFloor $range $gitlabFloor) -}}
+{{- end -}}
+{{- end -}}
 {{- include "agent-platform.workspaces.secretRefs" (dict "node" ($p.values | default dict) "at" (printf "workspace-manager.providers[%d].values" $i)) -}}
 {{- end -}}
 {{- if $wm.signInStore -}}
@@ -1607,6 +1657,9 @@ own csiDriver while its name is set, else the companion's driver.
 {{- $socketDir := toString (dig "node" "socketDir" "/var/lib/kubelet/plugins/agent-platform-csi-companion" $c) -}}
 {{- if not (hasPrefix "/var/lib/kubelet/plugins/" $socketDir) -}}
 {{- fail (printf "workspaces.substrate.csiCompanion.node.socketDir is %q: atelet reaches a node plugin's socket under /var/lib/kubelet/plugins, the directory it mounts" $socketDir) -}}
+{{- end -}}
+{{- if and (eq (include "agent-platform.shape.kyvernoPolicies" .) "true") (include "agent-platform.targetSecretName" .) -}}
+{{- fail "workspaces.substrate.csiCompanion is on with gitops.target and Kyverno policies: the companion's PolicyExceptions must exist before its workloads, and this chart renders them on its own cluster, not the target; provide them on the target cluster and set kyvernoPolicies.enabled false, or run the companion without a target" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -2700,6 +2753,27 @@ line, no comment inside the define.
 {{- define "agent-platform.workspaceManager.kagentFloor" -}}0.4.0{{- end -}}
 
 {{/*
+The first release of the workspace-manager line whose manager has the provider
+kind gitlab (gitlab.com or a self-managed GitLab: url, apiURL, a group access
+token as the sync credential, an OAuth application as the sign-in); an earlier
+manager refuses the kind at start. A gitlab provider instance needs the floor of
+components.workspace-manager.versionRange at it or later (a release candidate
+of it included), or the render fails (agent-platform.validateWorkspaces). One
+line, no comment inside the define.
+*/}}
+{{- define "agent-platform.workspaceManager.gitlabFloor" -}}0.5.0{{- end -}}
+
+{{/*
+The first release of the klaus-gateway line (giantswarm/klaus-gateway) whose
+chart takes workspaces.toolsPrefix (the workspace-manager client over muster);
+every earlier release's closed values schema refuses a workspaces block. From
+it on (a release candidate of it included) the chart derives
+klausGateway.workspaces.toolsPrefix while workspaces are on
+(agent-platform.componentDerivedValues). One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.klausGateway.workspacesFloor" -}}4.3.0{{- end -}}
+
+{{/*
 The kagent controller's in-cluster gRPC API (in-cluster h2c), straight to its
 Service: grpc://<kagent.fullnameOverride>-controller.<kagent namespace>.svc:8083
 while the kagent component is on, "" otherwise. 8083 is the port the kagent
@@ -3281,4 +3355,36 @@ The helm-and-shell image the hooks that need helm run (gitops.hooks.helmImage).
 {{- define "agent-platform.hooks.helmImage" -}}
 {{- $i := .Values.gitops.hooks.helmImage -}}
 {{- printf "%s/%s:%s" $i.registry $i.repository $i.tag -}}
+{{- end -}}
+
+{{/*
+=== Kyverno PolicyExceptions ===
+
+The `exceptions:` list of a PolicyException from the rules one workload
+violates: each rule is looked up in kyvernoPolicies.rules (rule → the
+ClusterPolicy of the cluster's PSS set; a rule without an entry fails the
+render naming it), the rules are grouped by policy, and each rule is cited
+with its autogen-<rule> — the copy Kyverno generates for the controller kinds
+(Deployment, DaemonSet, ...) a pod-level rule matches through. Rendered as YAML
+list items; the caller provides the `exceptions:` key.
+Usage: include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "host-path" "privileged-containers"))
+*/}}
+{{- define "agent-platform.kyverno.exceptions" -}}
+{{- $root := .root -}}
+{{- $byPolicy := dict -}}
+{{- range .rules -}}
+{{- $policy := index ($root.Values.kyvernoPolicies.rules | default dict) . -}}
+{{- if not $policy -}}
+{{- fail (printf "kyvernoPolicies.rules names no ClusterPolicy for the rule %q; add `%s: <policy>` (the PSS policy of the cluster's kyverno-policies chart that carries the rule)" . .) -}}
+{{- end -}}
+{{- $_ := set $byPolicy $policy (append (index $byPolicy $policy | default list) .) -}}
+{{- end -}}
+{{- range $policy, $rules := $byPolicy }}
+- policyName: {{ $policy }}
+  ruleNames:
+  {{- range $rules }}
+    - {{ . }}
+    - autogen-{{ . }}
+  {{- end }}
+{{- end }}
 {{- end -}}

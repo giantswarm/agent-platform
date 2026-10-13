@@ -36,11 +36,14 @@ exceptions are hand-written; this check computes them.
     it is the CNPG ImageVolume exception, whose one rule is checked too.
   * No exception may select app: kagent (the v1alpha2 agent Deployments' label;
     nothing carries it on kagent API v2).
-  * The workspaces' CSI companion (templates/workspaces/csi-companion.yaml,
-    giantswarm/agent-platform#889), rendered per preset from its fixture: its
-    controller Deployment and node DaemonSet are held to their own exceptions
-    (csi-companion-controller, csi-companion-node) the same way, and nothing of
-    the companion renders without the block.
+  * The workspaces' CSI companion (the connectivity chart's
+    templates/workspaces/csi-companion.yaml), rendered per preset from its
+    fixture: its controller Deployment and node DaemonSet are held the same way
+    to their own exceptions (csi-companion-controller, csi-companion-node),
+    which the meta chart renders (templates/csi-companion-policy-exceptions.yaml)
+    so they exist before the connectivity release reaches admission; the
+    connectivity render carries none of them, and nothing of the companion
+    renders without the block.
 
 Needs PyYAML (the CI job installs it) and network to gsoci.azurecr.io for the chart.
 """
@@ -94,6 +97,7 @@ COMPANION_FIXTURES = {
     "azureFiles": "tests/fixtures/workspaces-csi-companion-azure-files-values.yaml",
 }
 COMPANION = "csi-companion"
+COMPANION_NAMESPACE = "agent-platform"
 
 # The worker pod, as ate-controller renders it (see the module docstring).
 WORKER_POD = {
@@ -327,9 +331,11 @@ def hold(workloads: list[dict], pes: list[dict]) -> set[str]:
     return used
 
 
-def companion(connectivity: str, preset: str, fixture: str) -> None:
-    """The CSI companion's controller and node plugin, held to the companion's own exceptions."""
-    docs = render(connectivity, [*CONNECTIVITY_ON, *FLEET_APIS, "-f", fixture])
+def companion(meta: str, connectivity: str, preset: str, fixture: str) -> None:
+    """The CSI companion's controller and node plugin, held to the exceptions the meta chart renders for them."""
+    docs = render(connectivity, [*CONNECTIVITY_ON, *FLEET_APIS, "--namespace", COMPANION_NAMESPACE, "-f", fixture])
+    if any(d["kind"] == "PolicyException" and d["metadata"]["name"].startswith(COMPANION) for d in docs):
+        fail(f"the connectivity render carries a CSI companion exception ({preset}); Helm would create it after the workloads it excepts")
     workloads = [{
         "name": f"{d['kind']} {d['metadata']['namespace']}/{d['metadata']['name']} (the CSI companion, preset {preset})",
         "kind": d["kind"],
@@ -340,7 +346,9 @@ def companion(connectivity: str, preset: str, fixture: str) -> None:
     } for d in docs if d["kind"] in ("Deployment", "DaemonSet") and d["metadata"]["name"].startswith(COMPANION)]
     if {w["kind"] for w in workloads} != {"Deployment", "DaemonSet"}:
         fail(f"the CSI companion ({preset}) renders {[w['name'] for w in workloads]}, not one Deployment and one DaemonSet")
-    pes = [d for d in docs if d["kind"] == "PolicyException" and d["metadata"]["name"].startswith(COMPANION)]
+    meta_docs = render(meta, ["-f", f"{meta}/ci/ci-values.yaml", "--set", "components.flux.enabled=false", "--namespace", COMPANION_NAMESPACE,
+                              "--set", "kyvernoPolicies.enabled=true", *FLEET_APIS, *ON, "-f", fixture])
+    pes = [d for d in meta_docs if d["kind"] == "PolicyException" and d["metadata"]["name"].startswith(COMPANION)]
     used = hold(workloads, pes)
     if used != {pe["metadata"]["name"] for pe in pes}:
         fail(f"the CSI companion's exceptions {sorted(pe['metadata']['name'] for pe in pes)} are not all used by its workloads ({sorted(used)})")
@@ -369,8 +377,9 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"PolicyException {pe['metadata']['name']} selects app: kagent, the v1alpha2 agent Deployments' label; nothing carries it on kagent API v2")
     print("ok: no exception selects app: kagent")
     for preset, fixture in COMPANION_FIXTURES.items():
-        companion(connectivity, preset, fixture)
-    print("ok: the CSI companion's controller and node plugin are held to csi-companion-controller and csi-companion-node per preset; none without the block")
+        companion(meta, connectivity, preset, fixture)
+    print("ok: the CSI companion's controller and node plugin are held to csi-companion-controller and csi-companion-node, rendered by the meta chart, per preset; "
+          "none in the connectivity render, none without the block")
     return 0
 
 

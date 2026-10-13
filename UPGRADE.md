@@ -15,6 +15,33 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.127.x → \<next\> (klaus-gateway 4.3.0: Slack Sessions start through start_session)
+
+`components.klaus-gateway.versionRange` selects klaus-gateway from 4.3.0. The gateway starts every thread's Session through agent-manager's `start_session` as the person, without a message (giantswarm/klaus-gateway#446), and needs agent-manager 1.13.0, the floor of the entry below; a thread already bound keeps its Session and conversation. With `workspaces.enabled` the meta chart derives `klausGateway.workspaces.toolsPrefix` onto the release. The gateway keeps its link and routing stores as they are: the release rolls in place.
+
+### Operator action
+
+- **None.**
+- **An installation that pins the BOM**: move `klaus-gateway` to `4.3.0` together with `agent-manager` `1.13.0`.
+
+## 4.127.x → \<next\> (agent-manager 1.13.0: start_session without a first message)
+
+`components.agent-manager.versionRange` selects agent-manager from 1.13.0, and the connectivity release's `agent-manager migrate` run takes the same image. `start_session`'s `message` is optional (giantswarm/agent-manager#138): without it agent-manager creates the Session and answers it without a turn, and the caller sends the first message itself; with it the call behaves as before. The MCP endpoint refuses a request body over 1 MiB, the bound the REST API already applies (giantswarm/agent-manager#141). The portal and the gateway start every Session through `start_session` and rely on the create-only form. The agent-manager chart takes no new value, and agent-manager keeps no state of its own: the release rolls in place, and the agents, their Sessions and their conversations stay as they are.
+
+### Operator action
+
+- **None.**
+- **An installation that pins the BOM**: move `agent-manager` to `1.13.0`.
+
+## 4.127.x → \<next\> (agent-manager 1.12.0: start_session in a workspace)
+
+`components.agent-manager.versionRange` selects agent-manager from 1.12.0 (giantswarm/agent-manager#134), and the connectivity release's `agent-manager migrate` run takes the same image. `start_session` takes a workspace grant and starts the Session in the workspace's volume; without one it starts the Session as before. The agent-manager chart takes no new value, and agent-manager keeps no state of its own: the release rolls in place, and the agents, their Sessions and their conversations stay as they are.
+
+### Operator action
+
+- **None.**
+- **An installation that pins the BOM**: move `agent-manager` to `1.12.0`.
+
 ## 4.127.x → \<next\> (kagent 1.10.0: Sessions set up on workspace volumes)
 
 `components.kagent{,-crds}.versionRange` selects kagent 1.10 from 1.10.0 (giantswarm/agent-platform#950). The kagent CRDs, the database schema and the Substrate contract are unchanged from 1.8: the controller, UI and Harness images roll in place, every AgentTemplate re-snapshots once on the new Harness image, and a suspended Session resumes with its conversation and its files. From 1.10.0 a Session on a workspace volume works in its own session directory with the turn's repositories cloned from the volume's mirrors, and the agent can clone any mirror itself.

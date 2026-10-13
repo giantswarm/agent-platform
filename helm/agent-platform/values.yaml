@@ -810,7 +810,12 @@ components:  # @schema additionalProperties: true
     # turn_complete and klaus_gateway_turn_total carry failure_class
     # (giantswarm/klaus-gateway#329). An alert on a burst of one class reads
     # every installation only once none runs an older gateway.
-    versionRange: ">=3.3.0 <5.0.0"
+    # The floor is 4.3.0: every Slack Session starts through agent-manager's
+    # start_session as the person, create-only and without a message
+    # (giantswarm/klaus-gateway#446), which agent-manager's 1.13.0 floor
+    # serves; and the chart takes workspaces.toolsPrefix, which this chart
+    # derives from that floor on (agent-platform.klausGateway.workspacesFloor).
+    versionRange: ">=4.3.0 <5.0.0"
     valuesFrom: klausGateway
     # klausGateway.observability.enabled is this chart's knob (auto | true |
     # false, resolved by agent-platform.shape.apply); the klaus-gateway chart's
@@ -912,8 +917,13 @@ components:  # @schema additionalProperties: true
     # api.kagent.dev Agent of this kagent line and migrates Generic chart 1.x
     # releases to 2.x (giantswarm/agent-manager#100).
     # 1.10.0 takes kagent.controllerTarget, the kagent controller its session
-    # tools call (giantswarm/agent-manager#101).
-    versionRange: ">=1.10.0 <2.0.0"
+    # tools call (giantswarm/agent-manager#101). 1.12.0 takes a workspace
+    # grant on start_session, which starts the Session in the workspace's
+    # volume (giantswarm/agent-manager#134). 1.13.0 starts a Session without a
+    # first message, answering the created Session only, so a surface sends
+    # the first turn itself (giantswarm/agent-manager#138), and bounds MCP
+    # request bodies at 1 MiB (giantswarm/agent-manager#141).
+    versionRange: ">=1.13.0 <2.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -1000,7 +1010,9 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.4.0. 0.2.0 is the first release that serves the grant key
+    # The floor is 0.5.0, the first release with the provider kind gitlab
+    # (agent-platform.workspaceManager.gitlabFloor; a gitlab instance below it
+    # fails the render). 0.2.0 is the first release that serves the grant key
     # set (/.well-known/jwks.json, the JWKS URL the grant issuer advertises and
     # the manager's route publishes; 0.1.x answers 404 there), and 0.4.0 the
     # first that takes the kagent block, so at this floor the chart forwards
@@ -1011,7 +1023,7 @@ components:  # @schema additionalProperties: true
     # kagent.address/namespace, which earlier releases' closed schemas refuse.
     # A stable never pins a prerelease; the ceiling stays the next major, so
     # later minor releases roll on their own.
-    versionRange: ">=0.4.0 <1.0.0"
+    versionRange: ">=0.5.0 <1.0.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
@@ -3910,6 +3922,17 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     #   existingSecret: ""  # default: valkey.valkey.auth.usersExistingSecret
     #   passwordKey: ""     # default: valkey.valkey.auth.aclUsers.default.passwordKey
 
+  # Workspaces (klaus-gateway 4.3.0): the gateway calls the workspace-manager's
+  # tools through muster as the person (it needs obo.enabled), by the name
+  # muster gives them. With workspaces.enabled the chart derives the prefix,
+  # x_<workspace-manager.muster.mcpServer.name>_ (x_workspace-manager_), once
+  # the floor of components.klaus-gateway.versionRange is 4.3.0 (a release
+  # candidate of it too): an earlier chart's closed schema refuses the block,
+  # so below it nothing is forwarded. Empty in the gateway turns workspaces
+  # off there. An own value must agree with the derived one.
+  # workspaces:
+  #   toolsPrefix: ""  # default: x_workspace-manager_ with workspaces.enabled
+
   # OTel traces to the collector global.observability.traces.otlp names (each
   # `auto` below takes its endpoint, and its headers with the tenant as
   # X-Scope-OrgID; a value set here wins). Every channel turn is one trace: the
@@ -4770,7 +4793,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.10.0
+      tag: 1.13.0
     dryRun: false
     gitopsNamespaces: []
 
@@ -5079,8 +5102,9 @@ workspaces:
     #     override; no kubelet registration, so the kubelet never sees it) and
     #     node.substrateDir mounted Bidirectional. The plugin is privileged on
     #     the node's network with host paths, as the cluster's own is, so on a
-    #     cluster that enforces the restricted profile through Kyverno the
-    #     connectivity release renders its PolicyExceptions (kyvernoPolicies).
+    #     cluster that enforces the restricted profile through Kyverno this
+    #     chart renders its PolicyExceptions (kyvernoPolicies), ahead of the
+    #     connectivity release; with gitops.target the two are refused together.
     # The registration above (csiDriver) is DERIVED from the companion while
     # csiDriver.name is empty: the preset's driver, the Service as the
     # controller endpoint, the node socket override and the TLS server name
@@ -5329,9 +5353,28 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   #         oauth:
   #           clientID: Iv1.abc
   #           clientSecret: {name: workspace-github, key: client-secret}
+  # Kind `gitlab` (gitlab.com or a self-managed GitLab, workspace-manager
+  # 0.5.0 and newer) takes `url` (the git host and the OAuth application's,
+  # https://gitlab.com for gitlab.com; named, since the connectivity chart
+  # opens the egress to it), `apiURL` (default <url>/api/v4), `token`
+  # (a group access token with read_api and read_repository, the sync's) and
+  # `oauth.clientID`, `oauth.clientSecret` (an OAuth application with the
+  # scopes `api read_user read_repository write_repository` and the redirect
+  # URI <oauth.baseURL>/callback/<name>); a source's owner is a top-level
+  # group, its sub-groups' projects included, or a user. Beside the github
+  # instance above, e.g.
+  #     - name: gitlab
+  #       kind: gitlab
+  #       values:
+  #         url: https://gitlab.example.com
+  #         token: {name: workspace-gitlab, key: token}
+  #         oauth:
+  #           clientID: 0123abcd
+  #           clientSecret: {name: workspace-gitlab, key: client-secret}
   # The connectivity chart opens the manager's egress to each instance's hosts
   # (url and apiURL; github.com and api.github.com for a github instance
-  # without url). Empty, the default, configures none.
+  # without url; an instance of another kind without url fails the render).
+  # Empty, the default, configures none.
   providers: []
   # The key the workspace grant a Session carries is signed with: {name, key}
   # of a Secret in the platform's namespace whose entry is a PEM private key

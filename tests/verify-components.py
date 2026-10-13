@@ -101,7 +101,7 @@ LINE = {
     "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
-    "agent-manager": (GSOCI, ">=1.10.0 <2.0.0", ["muster", "kagent"]),
+    "agent-manager": (GSOCI, ">=1.13.0 <2.0.0", ["muster", "kagent"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).
@@ -122,8 +122,9 @@ LINE = {
     # lifecycle.driver, and a 1.x gateway without one falls back to operator
     # with no operatorMCPURL and does not start. 3.3.0 names a turn's failure
     # class in the thread, the turn record and the turn metric
-    # (giantswarm/klaus-gateway#329).
-    "klaus-gateway": (GSOCI, ">=3.3.0 <5.0.0", []),
+    # (giantswarm/klaus-gateway#329). 4.3.0 starts every Slack Session through
+    # agent-manager's start_session (giantswarm/klaus-gateway#446).
+    "klaus-gateway": (GSOCI, ">=4.3.0 <5.0.0", []),
 }
 
 # The kagent.dev API version the 4.x line serves, pinned into both managers'
