@@ -1422,7 +1422,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.oauth2-proxy.extraArgs.pass-authorization-header | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.set-authorization-header | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.approval-prompt | string | `"auto"` |  |
-| kagent.oauth2-proxy.extraArgs.scope | string | `"openid profile email groups offline_access audience:server:client_id:dex-k8s-authenticator"` |  |
+| kagent.oauth2-proxy.extraArgs.scope | string | `"openid profile email groups offline_access"` |  |
 | kagent.oauth2-proxy.extraArgs.cookie-secure | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.cookie-samesite | string | `"lax"` |  |
 | kagent.oauth2-proxy.extraArgs.cookie-refresh | string | `"10m"` |  |

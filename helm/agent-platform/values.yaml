@@ -3141,13 +3141,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       pass-authorization-header: true
       set-authorization-header: true
       approval-prompt: auto
-      # audience:server:client_id:dex-k8s-authenticator: the session's token
-      # carries the Kubernetes API server's audience, so muster can list the
-      # caller's MCPServers with it during an agent turn
-      # (giantswarm/agent-platform#706). Dex keeps this client in aud and
-      # allows the scope only while dex-k8s-authenticator lists this client
-      # in its trustedPeers (docs/install.md).
-      scope: "openid profile email groups offline_access audience:server:client_id:dex-k8s-authenticator"
+      scope: "openid profile email groups offline_access"
       cookie-secure: true
       cookie-samesite: lax
       # Refresh the upstream id_token before it expires so the forwarded OBO

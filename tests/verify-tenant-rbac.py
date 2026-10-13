@@ -25,8 +25,6 @@ Each case pins one property of the render:
 - the meta chart appends tenants.platformTeam to muster's mcpserver-editor and
   workflow-editor subjects (each subject once) and leaves them alone while the
   list is empty;
-- kagent's UI proxy asks for the Kubernetes API server's audience
-  (audience:server:client_id:dex-k8s-authenticator) in both charts' values.
 
 Needs PyYAML. HELM selects the binary.
 """
@@ -59,7 +57,6 @@ TEAM = [
 ADMINS = ["giantswarm-ad:giantswarm-admins", "giantswarm-github:giantswarm:giantswarm-admins"]
 ROLES = ["agent-platform-user", "agent-platform-author", "agent-platform-tenant-admin"]
 WRITES = {"create", "update", "patch", "delete"}
-AUDIENCE = "audience:server:client_id:dex-k8s-authenticator"
 
 
 def fail(msg: str) -> None:
@@ -214,16 +211,6 @@ def check_meta(chart: str) -> None:
     ok("the meta chart appends tenants.platformTeam to muster's two editor bindings, each subject once")
 
 
-def check_scope(meta: str, conn: str) -> None:
-    for chart in (meta, conn):
-        with open(f"{chart}/values.yaml", encoding="utf-8") as f:
-            v = yaml.safe_load(f)
-        scope = v["kagent"]["oauth2-proxy"]["extraArgs"]["scope"].split()
-        if AUDIENCE not in scope:
-            fail(f"{chart}: kagent.oauth2-proxy.extraArgs.scope lacks {AUDIENCE}")
-    ok("kagent's UI proxy asks for the API server's audience")
-
-
 def main() -> None:
     meta, conn = sys.argv[1], sys.argv[2]
     off = render(conn, CONN)
@@ -263,7 +250,6 @@ def main() -> None:
     ok("agent-manager's tenant reconciler: namespaces read, a tenant's objects (network policies of the flavor) written, agent-platform-tenant-flux bound only")
 
     check_meta(meta)
-    check_scope(meta, conn)
 
 
 if __name__ == "__main__":

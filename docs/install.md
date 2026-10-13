@@ -97,7 +97,7 @@ One OIDC provider signs in every person, **Dex only today** (Keycloak and Entra 
 | `global.identity.clientId` (e.g. `agent-platform`) | `https://muster.<domain>/oauth/callback` | always (muster's OAuth server) |
 | the same client | `https://backstage.<domain>/api/auth/oidc-agent-platform/handler/frame` | `components.backstage` |
 | a client of its own for the kagent UI's oauth2-proxy | `https://kagent.<domain>/oauth2/callback` | `kagent.uiRoute` with `kagent.oauth2-proxy` |
-| `dex-k8s-authenticator` (the audience your kube-apiserver trusts), `trustedPeers: [<global.identity.clientId>, <the kagent UI's client>]`, no redirect URI | — | model-manager, agent-manager and mcp-kubernetes: muster forwards the person's token to them with this audience, and they act on the cluster as that person. The kagent UI's login asks for the same audience, so muster can list an agent turn's MCPServers as the person; without its client in `trustedPeers` Dex refuses the kagent UI's login |
+| `dex-k8s-authenticator` (the audience your kube-apiserver trusts), `trustedPeers: [<global.identity.clientId>]`, no redirect URI | — | model-manager, agent-manager and mcp-kubernetes: muster forwards the person's token to them with this audience, and they act on the cluster as that person |
 
 In Dex's config:
 
@@ -119,7 +119,6 @@ staticClients:
     secret: <its secret>
     trustedPeers:
       - agent-platform
-      - kagent-ui
 ```
 
 The kube-apiserver has to trust the same issuer (`--oidc-issuer-url`, `--oidc-client-id=dex-k8s-authenticator`) for the forwarded tokens to carry a person's RBAC; a cluster whose apiserver trusts another audience sets it in `mcp-kubernetes.kubernetesAudience` and in each manager's `muster.mcpServer.auth.requiredAudiences`.

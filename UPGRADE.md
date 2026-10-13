@@ -15,13 +15,12 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
-## 4.127.x → \<next\> (agent tenants: roles, the platform tenant, the kagent UI's audience)
+## 4.127.x → \<next\> (agent tenants: roles, the platform tenant)
 
-With kagent on, the connectivity release renders the ClusterRoles `agent-platform-user`, `agent-platform-author` and `agent-platform-tenant-admin` and binds the kagent namespace as the platform tenant; muster's MCPServers are listed to `tenants.platform.users`; with agent-manager on, its ServiceAccount gets the tenant reconciler's ClusterRole `agent-manager-tenants` (giantswarm/agent-platform#706). Nothing a person sees changes until the kagent controller's authorizer is on. The kagent UI's oauth2-proxy now asks Dex for `audience:server:client_id:dex-k8s-authenticator`.
+With kagent on, the connectivity release renders the ClusterRoles `agent-platform-user`, `agent-platform-author` and `agent-platform-tenant-admin` and binds the kagent namespace as the platform tenant; muster's MCPServers are listed to `tenants.platform.users`; with agent-manager on, its ServiceAccount gets the tenant reconciler's ClusterRole `agent-manager-tenants` (giantswarm/agent-platform#706). Nothing a person sees changes until the kagent controller's authorizer is on.
 
 ### Operator action
 
-- **An installation with the kagent UI (`kagent.oauth2-proxy`)**: add the kagent UI's Dex client to the `trustedPeers` of `dex-k8s-authenticator` before the upgrade ([docs/install.md](docs/install.md#the-identity-provider)). Without it, Dex refuses the kagent UI's login. An installation whose kagent UI uses a client that is already a trusted peer (`global.identity.clientId`) does nothing.
 - **An installation with a customer platform team**: name its group in `tenants.platformTeam` (RBAC subjects, with the installation's OIDC groups prefix). It becomes an author in the kagent namespace and an editor of muster's servers and workflows.
 
 ## 4.127.x → \<next\> (klaus-gateway 4.3.0: Slack Sessions start through start_session)

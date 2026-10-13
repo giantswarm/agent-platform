@@ -971,7 +971,7 @@ spec:
           provider: oidc
           redirect-url: $(OIDC_REDIRECT_URL)
           reverse-proxy: true
-          scope: openid profile email groups offline_access audience:server:client_id:dex-k8s-authenticator
+          scope: openid profile email groups offline_access
           set-authorization-header: true
           skip-auth-regex: ^/(login|_next/static|_next/image|login-bg\.(jpg|png|webp)|logo-.*\.png|favicon\.ico).*$
           skip-auth-route: ^/(health|login)$
