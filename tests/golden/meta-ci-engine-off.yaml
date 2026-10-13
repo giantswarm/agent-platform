@@ -661,11 +661,7 @@ spec:
           namespace: envoy-gateway-system
       database:
         postgres:
-          bundled:
-            image:
-              name: pgvector
-              repository: pgvector
-              tag: pg18-trixie
+          urlFile: /etc/kagent-db/uri
           vectorEnabled: true
           vectorSchema: public
       fluxServiceAccountName: kagent-flux
@@ -1802,11 +1798,7 @@ spec:
         enabled: true
     database:
       postgres:
-        bundled:
-          image:
-            name: pgvector
-            repository: pgvector
-            tag: pg18-trixie
+        urlFile: /etc/kagent-db/uri
         vectorEnabled: true
         vectorSchema: public
     fullnameOverride: kagent

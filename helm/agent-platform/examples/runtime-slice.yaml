@@ -1,9 +1,11 @@
 # The runtime slice (giantswarm/agent-platform#317; giantswarm/giantswarm#37611,
 # Phase 3): the values profile of ONE `<cluster>-agent-platform` release that
 # runs agents on a workload cluster managed from the installation and nothing
-# else of the platform's control plane — the kagent line (kagent-crds, the
-# controller and its bundled database), Agent Substrate (substrate-crds, the
-# control plane in ate-system, atelet on the nodes) and the connectivity release
+# else of the platform's control plane — the kagent line (kagent-crds and the
+# controller), its database on a CloudNativePG Cluster (the operator and the
+# Cluster; the kagent chart deploys no PostgreSQL), Agent Substrate
+# (substrate-crds, the control plane in ate-system, atelet on the nodes, its
+# database on the same Cluster) and the connectivity release
 # with the platform Harness, its WorkerPool and the policies of those hops. The
 # workload cluster never becomes a second installation: no muster, Backstage,
 # model-manager, agent-manager or MCP server of its own.
@@ -47,6 +49,10 @@ components:
   # components.kagent (they carry no enabled of their own).
   kagent:
     enabled: true
+  # kagent's and Substrate's database: the CloudNativePG operator, for the
+  # Cluster below (a target that runs the operator already leaves it off).
+  cloudnative-pg:
+    enabled: true
   # The workload cluster runs no agentgateway controller of its own: the slice
   # brings it, and the target's agentgateway verifies the installation's tokens
   # in front of the kagent controller.
@@ -58,6 +64,16 @@ components:
 #     kubeConfig:
 #       secretRef:
 #         name: <cluster>-kubeconfig
+
+# The CloudNativePG Cluster with kagent's and Substrate's databases
+# (postgres.databases), pgvector for kagent's memory; size it per target.
+postgres:
+  enabled: true
+  instances: 1
+  vector:
+    enabled: true
+    extensionImage:
+      reference: gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
 kagent:
   harness:

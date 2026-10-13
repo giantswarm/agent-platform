@@ -2603,26 +2603,15 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
 # The kagent.dev + kmcp CRDs ship with the kagent app chart itself (app-owned
 # CRDs), so enabling kagent installs them too.
 #
-# When postgres.enabled is true, configure the CNPG DSN wiring below so kagent
-# uses the platform Postgres instead of its bundled instance. The controller's
-# database is kagent_v2 (postgres.databases); the connectivity chart derives
-# its connection Secret `kagent-pg-kagent-v2-app` in the kagent namespace from
-# the Cluster's bootstrap Secret. Mount its `uri` key:
-#
-#   kagent:
-#     database:
-#       postgres:
-#         urlFile: /etc/cnpg/uri       # POSTGRES_DATABASE_URL_FILE
-#         vectorEnabled: true          # mirror of postgres.vector.enabled
-#         bundled: { enabled: false }  # disable bundled postgres:18.3-alpine
-#     controller:
-#       volumes:
-#         - name: cnpg-dsn
-#           secret:
-#             secretName: kagent-pg-kagent-v2-app
-#             items: [{ key: uri, path: uri }]
-#       volumeMounts:
-#         - { name: cnpg-dsn, mountPath: /etc/cnpg, readOnly: true }
+# kagent's database: the kagent chart deploys no PostgreSQL, so kagent runs on
+# the platform's CloudNativePG Cluster (postgres.enabled), the supported shape,
+# or on an own database through kagent.database.postgres.urlFile or
+# connectionStringSecretRef; anything else fails the render
+# (agent-platform.validateKagentDatabase). On the Cluster the controller's
+# database is kagent_v2 (postgres.databases): the connectivity chart derives its
+# connection Secret `kagent-pg-kagent-v2-app` in the kagent namespace, and the
+# meta chart forwards it as connectionStringSecretRef with the role
+# postgres.applicationDatabase.owner.
 # kagent is forwarded verbatim to the kagent component release (an upstream
 # chart with many more keys than mirrored here), so unknown keys must stay
 # allowed.
@@ -2980,11 +2969,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           cpu: "2"
           memory: 2Gi
 
-  # The kagent line's memory API needs pgvector. With the bundled Postgres (the
-  # chart's default) the image has to carry the extension, so the bundled
-  # instance runs the pgvector image; with the platform CNPG Cluster
-  # (postgres.enabled) set postgres.vector.enabled as well and turn the
-  # bundled instance off — the CNPG note above.
+  # The kagent line's memory API needs pgvector: on the platform's CNPG Cluster
+  # set postgres.vector.enabled as well (the database note above).
   database:
     postgres:
       vectorEnabled: true
@@ -2993,11 +2979,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # to the chart's default `extensions`. kagent's tables move from public to
       # its `kagent` schema at the controller's first start on 1.11.
       vectorSchema: public
-      bundled:
-        image:
-          repository: pgvector
-          name: pgvector
-          tag: pg18-trixie
 
   # Keep kagent core resources in a dedicated namespace separate from the
   # umbrella release namespace. NOTE: the bundled agent subcharts each need
@@ -3623,9 +3604,9 @@ dashboards:
 
 # Platform Postgres — CloudNativePG Cluster for kagent (and future Klaus sessions).
 # The CNPG operator and its CRDs are a cluster-level prerequisite (like Gateway
-# API CRDs): they must be installed before enabling this. Flip `enabled: false`
-# to use kagent's bundled Postgres or an external DSN (set kagent.database.postgres
-# accordingly). When `enabled: true`, set `postgres.namespace` to match
+# API CRDs, or components.cloudnative-pg): they must be installed before enabling
+# this. kagent needs it, or an own database in kagent.database.postgres (the
+# kagent chart deploys no PostgreSQL). When `enabled: true`, set `postgres.namespace` to match
 # `kagent.namespaceOverride` so the generated DSN Secret is co-located with the
 # kagent controller that mounts it.
 postgres:

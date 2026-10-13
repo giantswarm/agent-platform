@@ -832,9 +832,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.substrateWorkerPool.template.resources.limits.memory | string | `"2Gi"` |  |
 | kagent.database.postgres.vectorEnabled | bool | `true` |  |
 | kagent.database.postgres.vectorSchema | string | `"public"` |  |
-| kagent.database.postgres.bundled.image.repository | string | `"pgvector"` |  |
-| kagent.database.postgres.bundled.image.name | string | `"pgvector"` |  |
-| kagent.database.postgres.bundled.image.tag | string | `"pg18-trixie"` |  |
 | kagent.namespaceOverride | string | `"kagent"` |  |
 | kagent.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | kagent.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |

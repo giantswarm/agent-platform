@@ -40,7 +40,7 @@ import yaml
 HELM = os.environ.get("HELM", "helm")
 FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2", "--api-versions", "monitoring.coreos.com/v1",
               "--api-versions", "gateway.networking.k8s.io/v1", "--api-versions", "gateway.envoyproxy.io/v1alpha1"]
-BASE = ["--namespace", "agent-platform", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+BASE = ["--namespace", "agent-platform", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
         "--set", "global.domain=wc01.example.com", "--set", "global.identity.issuerUrl=https://dex.mc.example.com",
         "--set", "gatewayApi.gateway.tls.secretName=wildcard-tls", *FLEET_APIS]
 KSERVE_ON = [a for c in ("kserve-llmisvc-crd", "kserve-llmisvc-resources", "kserve-runtime-configs")

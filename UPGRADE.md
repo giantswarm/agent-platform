@@ -21,7 +21,8 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ### Operator action
 
-- **None.**
+- **None** for an installation on the platform's CloudNativePG database (`postgres.enabled`), the fleet's shape.
+- **An installation on the kagent 1.10 chart's bundled PostgreSQL** (no `postgres.enabled`, no own `kagent.database.postgres` connection): the render now fails naming CloudNativePG, and the release stays on its current version. The 1.11 chart deploys no PostgreSQL, and its upgrade would delete the bundled claim `kagent-postgresql` with every conversation. Move the data to the platform's Cluster (or an own database) first, then turn `postgres.enabled` on.
 - **An installation that overrides `kagent.database.postgres`**: keep `vectorSchema: public` unless pgvector's owner moved it to another schema first.
 - **A rollback to kagent 1.10** after the move finds `public` empty: move the tables back first, as kagent's chart README describes.
 

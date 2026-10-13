@@ -59,7 +59,7 @@ _spec = importlib.util.spec_from_file_location("components_charts", os.path.join
 cc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cc)
 
-KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "ingress.parentRefs[0].name=x"]
+KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "ingress.parentRefs[0].name=x"]
 REGISTRY = "gsoci.azurecr.io"
 REPOSITORY = "giantswarm/substrate"
 WORKER = "ateom-gvisor"

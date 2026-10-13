@@ -74,7 +74,7 @@ PROVIDER_BLOCKS = {
 
 CATALOG_SHAPE = [
     "--set", "ingress.parentRefs[0].name=x",
-    "--set", "components.kagent.enabled=true",
+    "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     "--set", "kagent.namespaceOverride=kagent",
     "--set-json", 'kagent.modelConfigs=[{"name":"anthropic-sonnet","displayName":"Anthropic Sonnet 4.6","provider":"Anthropic","model":"claude-sonnet-4-6","apiKeySecret":"kagent-anthropic","baseUrl":"http://agentgateway.default.svc:8081","promptCaching":true,"cacheTTL":"1h","maxTokens":32000}]',
     "--set-json", 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"},{"name":"open","url":"http://open.tools.svc:8080/mcp","description":"an MCP server reached with the propagated token"}]',
@@ -273,7 +273,7 @@ def provider_shape(provider: str, base_url: str | None) -> list[str]:
     entry = {"name": "probe", "provider": provider, "model": "m", "apiKeySecret": "s", "apiKeySecretKey": "k"}
     if base_url:
         entry["baseUrl"] = base_url
-    return ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true",
+    return ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
             "--set", "kagent.namespaceOverride=kagent", "--set-json", f"kagent.modelConfigs={json.dumps([entry])}"]
 
 

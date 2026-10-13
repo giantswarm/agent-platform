@@ -61,7 +61,7 @@ cc = load("verify-components-charts")
 worker = load("verify-worker-image")
 
 REGISTRY = "gsoci.azurecr.io"
-KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "ingress.parentRefs[0].name=x"]
+KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "ingress.parentRefs[0].name=x"]
 # The bundled shapes: the database StatefulSet, the store Deployment and its Job.
 BUNDLED = ["--set", "rustfs.enabled=true", "--set", "postgres.enabled=true"]
 # Keys whose default stays off gsoci on purpose, with the reason: none.

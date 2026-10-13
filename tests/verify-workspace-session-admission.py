@@ -54,7 +54,7 @@ FIXTURE = "tests/fixtures/workspaces-values.yaml"
 KAGENT_CHART = "oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent"
 CI = ["--set", "components.flux.enabled=false"]
 ON = ["-f", FIXTURE]
-KAGENT = ["--set", "components.kagent.enabled=true", "--set", "kagent.harness.snapshotLocation=s3://ci/agents"]
+KAGENT = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "kagent.harness.snapshotLocation=s3://ci/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
 IDENTITY = [
     "--set", "global.domain=ci.example.com",
     "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
