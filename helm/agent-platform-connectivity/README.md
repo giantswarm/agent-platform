@@ -1422,7 +1422,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.oauth2-proxy.extraArgs.pass-authorization-header | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.set-authorization-header | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.approval-prompt | string | `"auto"` |  |
-| kagent.oauth2-proxy.extraArgs.scope | string | `"openid profile email groups offline_access"` |  |
+| kagent.oauth2-proxy.extraArgs.scope | string | `"openid profile email groups offline_access audience:server:client_id:dex-k8s-authenticator"` |  |
 | kagent.oauth2-proxy.extraArgs.cookie-secure | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.cookie-samesite | string | `"lax"` |  |
 | kagent.oauth2-proxy.extraArgs.cookie-refresh | string | `"10m"` |  |
@@ -1763,6 +1763,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: agent-platform-user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace. |
+| tenants.platform.authors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: agent-platform-author in the kagent namespace. |
+| tenants.platformTeam | list | `[]` | The customer's platform team: agent-platform-author in the kagent namespace beside platform.authors (the meta chart also adds it to muster's editor bindings). |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |

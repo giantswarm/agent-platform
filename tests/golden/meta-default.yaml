@@ -971,7 +971,7 @@ spec:
           provider: oidc
           redirect-url: $(OIDC_REDIRECT_URL)
           reverse-proxy: true
-          scope: openid profile email groups offline_access
+          scope: openid profile email groups offline_access audience:server:client_id:dex-k8s-authenticator
           set-authorization-header: true
           skip-auth-regex: ^/(login|_next/static|_next/image|login-bg\.(jpg|png|webp)|logo-.*\.png|favicon\.ico).*$
           skip-auth-route: ^/(health|login)$
@@ -1603,6 +1603,20 @@ spec:
       rustfs:
         enabled: false
     substrate-crds: {}
+    tenants:
+      platform:
+        authors:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
+        users:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: system:authenticated
+      platformTeam: []
     valkey:
       ciliumNetworkPolicy:
         enabled: false

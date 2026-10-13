@@ -1971,6 +1971,96 @@
             "type": "object",
             "additionalProperties": true
         },
+        "tenants": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "platform": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "authors": {
+                            "type": "array",
+                            "description": "The platform's operators: agent-platform-author in the kagent namespace.",
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "kind",
+                                    "name"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "apiGroup": {
+                                        "type": "string"
+                                    },
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "namespace": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        },
+                        "users": {
+                            "type": "array",
+                            "description": "Every signed-in person: agent-platform-user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace.",
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "kind",
+                                    "name"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "apiGroup": {
+                                        "type": "string"
+                                    },
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "namespace": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "platformTeam": {
+                    "type": "array",
+                    "description": "The customer's platform team: agent-platform-author in the kagent namespace beside platform.authors (the meta chart also adds it to muster's editor bindings).",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "kind",
+                            "name"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "apiGroup": {
+                                "type": "string"
+                            },
+                            "kind": {
+                                "type": "string"
+                            },
+                            "name": {
+                                "type": "string"
+                            },
+                            "namespace": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "valkey": {
             "type": "object",
             "additionalProperties": true

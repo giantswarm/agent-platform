@@ -884,7 +884,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.oauth2-proxy.extraArgs.pass-authorization-header | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.set-authorization-header | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.approval-prompt | string | `"auto"` |  |
-| kagent.oauth2-proxy.extraArgs.scope | string | `"openid profile email groups offline_access"` |  |
+| kagent.oauth2-proxy.extraArgs.scope | string | `"openid profile email groups offline_access audience:server:client_id:dex-k8s-authenticator"` |  |
 | kagent.oauth2-proxy.extraArgs.cookie-secure | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.cookie-samesite | string | `"lax"` |  |
 | kagent.oauth2-proxy.extraArgs.cookie-refresh | string | `"10m"` |  |
@@ -1306,6 +1306,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: bound to agent-platform-user in the kagent namespace, and to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, is every identity the API server authenticates, ServiceAccounts included. |
+| tenants.platform.authors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: bound to agent-platform-author in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects. |
+| tenants.platformTeam | list | `[]` | The customer's platform team, per installation: RBAC subjects bound to agent-platform-author in the kagent namespace beside `platform.authors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation). |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |

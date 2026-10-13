@@ -2850,6 +2850,96 @@
             "type": "object",
             "additionalProperties": true
         },
+        "tenants": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "platform": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "authors": {
+                            "type": "array",
+                            "description": "The platform's operators: bound to agent-platform-author in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects.",
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "kind",
+                                    "name"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "apiGroup": {
+                                        "type": "string"
+                                    },
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "namespace": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        },
+                        "users": {
+                            "type": "array",
+                            "description": "Every signed-in person: bound to agent-platform-user in the kagent namespace, and to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, is every identity the API server authenticates, ServiceAccounts included.",
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "kind",
+                                    "name"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "apiGroup": {
+                                        "type": "string"
+                                    },
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "namespace": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "platformTeam": {
+                    "type": "array",
+                    "description": "The customer's platform team, per installation: RBAC subjects bound to agent-platform-author in the kagent namespace beside `platform.authors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation).",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "kind",
+                            "name"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "apiGroup": {
+                                "type": "string"
+                            },
+                            "kind": {
+                                "type": "string"
+                            },
+                            "name": {
+                                "type": "string"
+                            },
+                            "namespace": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "valkey": {
             "type": "object",
             "additionalProperties": true
