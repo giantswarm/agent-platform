@@ -85,7 +85,7 @@ FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2
 INPUTS = ["--set", "global.domain=ci.example.com", "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
           "--set", "global.identity.clientId=agent-platform", "--set", "global.identity.existingSecret=agent-platform-idp",
           "--set", "global.gatewayApi.parentRefs[0].name=giantswarm-default", "--set", "global.gatewayApi.parentRefs[0].namespace=envoy-gateway-system",
-          "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents"]
+          "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
 # References whose gsoci copy is not published yet, each with the change that
 # publishes it and removes the entry: a regular expression over `<path>=<value>`
 # (the rendered object's kind/name, the field path and the value).

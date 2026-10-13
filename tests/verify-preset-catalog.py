@@ -34,7 +34,7 @@ CONN = sys.argv[1]
 NAMESPACE = "agent-platform"
 BASE = [
     "--namespace", NAMESPACE,
-    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     "--set", "global.gatewayApi.parentRefs[0].name=giantswarm-default",
     "--set", "global.gatewayApi.parentRefs[0].namespace=envoy-gateway-system",
 ]

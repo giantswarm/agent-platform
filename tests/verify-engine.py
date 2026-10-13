@@ -408,7 +408,7 @@ def main(chart: str) -> int:
         for kind in ("ServiceAccount", "ClusterRoleBinding"):
             if hook_meta(one(ds, kind, f"{RELEASE}-hooks"))[0] != identity_events:
                 fail(f"{label}: the hook {kind} is not at {identity_events} ({hook_meta(one(ds, kind, f'{RELEASE}-hooks'))[0]})")
-    kag_off = helm(chart, [*ci, *OFF, "--set", "components.kagent.enabled=true"])
+    kag_off = helm(chart, [*ci, *OFF, "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"])
     if "kagent-namespace" in kag_off:
         fail("engine off with kagent on: the kagent namespace hook rendered (the pure render must not carry it; a cluster's own Flux gets the namespace out of band)")
     print(f"ok: kagent namespace hook — pre-install,pre-upgrade at -8 as {RELEASE}-hooks in {helm_ref}, create-if-missing / wait out Terminating / leave Active; no Namespace object; absent with kagent off, target namespace = kagent, namespaceOverride empty, engine off")

@@ -19,11 +19,31 @@
 # store (a lab's shape; an installation names its own bucket), the kagent UI at
 # zero replicas (nothing in the smoke reaches it, and its image is the largest
 # pull of the install — the chart has no ui.enabled switch, zero replicas keeps
-# the Deployment without a pod) and the controller's bundled Postgres with a
-# small request. tests/ats/README.md carries the measured timings.
+# the Deployment without a pod) and the controller's database on the platform's
+# CloudNativePG Cluster, the one supported shape since the kagent chart deploys
+# no PostgreSQL (agent-platform.validateKagentDatabase): one instance with
+# pgvector, the operator from components.cloudnative-pg (an installation's
+# cluster brings its own). tests/ats/README.md carries the measured timings.
 components:
   kagent:
     enabled: true
+  cloudnative-pg:
+    enabled: true
+postgres:
+  enabled: true
+  instances: 1
+  storage:
+    size: 1Gi
+  image:
+    name: gsoci.azurecr.io/giantswarm/postgresql-cnpg:18.3
+  vector:
+    enabled: true
+    extensionImage:
+      reference: gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
 kagent:
   controller:
     resources:
@@ -31,12 +51,6 @@ kagent:
         cpu: 50m
   ui:
     replicas: 0
-  database:
-    postgres:
-      bundled:
-        resources:
-          requests:
-            cpu: 50m
   harness:
     # The actors' snapshot store: the bundled RustFS below, s3://<bucket>/<prefix>.
     snapshotLocation: s3://ate-snapshots/kagent
@@ -53,13 +67,7 @@ kagent:
 
 substrate:
   # The in-cluster S3 store (the chart's static lab credentials) the snapshot
-  # location above names. The control plane's Postgres is the chart's bundled
-  # StatefulSet: substrate.postgres.enabled `auto` resolves to it without the
-  # platform's CNPG Cluster (postgres.enabled is off in the smoke).
+  # location above names. The control plane's Postgres is a database of the
+  # platform's CNPG Cluster above: substrate.postgres.enabled `auto` resolves to it.
   rustfs:
     enabled: true
-  postgres:
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi

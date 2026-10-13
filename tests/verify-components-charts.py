@@ -232,7 +232,7 @@ QUICKSTART = [
     # installation input, empty in the meta chart's values).
     "--set", "model-manager.ollama.endpoint=http://ollama.example.com:11434",
     # kagent on requires the Harness's snapshot store (the meta chart's guard).
-    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     # The platform Cluster on: the Substrate render takes the CNPG path (the
     # derived connection Secret reference); SHAPES adds the bundled one.
     "--set", "postgres.enabled=true",

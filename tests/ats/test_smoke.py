@@ -138,9 +138,14 @@ logger = logging.getLogger(__name__)
 
 # The component HelmReleases the smoke values turn on: the quick start's three,
 # kagent with its CRD chart, Agent Substrate with its CRD chart (both follow
-# components.kagent), agent-manager, and model-manager — on by default with no
-# backend (giantswarm/agent-platform#329), nothing in the smoke values names it.
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "agent-manager", "model-manager")
+# components.kagent), the CloudNativePG operator for kagent's and Substrate's
+# database, agent-manager, and model-manager — on by default with no backend
+# (giantswarm/agent-platform#329), nothing in the smoke values names it.
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "cloudnative-pg", "agent-manager", "model-manager")
+# The platform's CloudNativePG Cluster, kagent's and Substrate's database: the
+# connectivity release renders it with helm.sh/resource-policy: keep, so the
+# conversations outlive an uninstall.
+POSTGRES_CLUSTER = "kagent-pg"
 # The Deployments `helm install --wait` leaves running in the release namespace
 # (the kagent controller runs in the kagent namespace and is waited for separately).
 # model-manager Ready here is the zero-backend start-up: no backend registered.
@@ -737,8 +742,9 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     # connectivity release, long done; a reinstall renders the Harness again
     # and the kept Agents name it by spec.harnessRef. Nothing else of the agent
     # runtime survives: the ModelConfig, the WorkerPool and its workers, the
-    # controller and its Postgres (the kagent release's), the
-    # substrate release's SandboxConfig and Substrate's control plane go. The
+    # controller, the substrate release's SandboxConfig and Substrate's control
+    # plane go. The database stays: the CloudNativePG Cluster (keep policy) with
+    # its instance pods, which hold every Session. The
     # three ate.dev CRDs stay too — the Substrate line's keep policy (on its
     # CRD templates), the same convention as kagent-crds', so a consumer's
     # uninstall can always delete its CRs whatever order the releases go in
@@ -762,8 +768,10 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     assert not kube.items("modelconfigs.api.kagent.dev", namespace=KAGENT_NAMESPACE), "ModelConfigs survived the uninstall of the kagent release"
     assert kube.get("sandboxconfigs.ate.dev", SANDBOX_CONFIG) is None, "the substrate release's SandboxConfig survived its uninstall"
     assert not kube.items("workerpools.ate.dev", all_namespaces=True), "a WorkerPool survived the kagent release's uninstall"
-    wait_for(f"no workload left in {KAGENT_NAMESPACE} (the controller, the UI, its Postgres, the WorkerPool's workers)",
-             lambda: not (kube.items("deployments", namespace=KAGENT_NAMESPACE) or kube.items("statefulsets", namespace=KAGENT_NAMESPACE) or kube.items("pods", namespace=KAGENT_NAMESPACE)), 180, interval=3)
+    assert kube.get("clusters.postgresql.cnpg.io", POSTGRES_CLUSTER, namespace=KAGENT_NAMESPACE), f"the CloudNativePG Cluster {POSTGRES_CLUSTER} went with the uninstall; it must be kept (it holds the Sessions)"
+    wait_for(f"no workload left in {KAGENT_NAMESPACE} but the kept Cluster {POSTGRES_CLUSTER} (the controller, the UI, the WorkerPool's workers)",
+             lambda: not (kube.items("deployments", namespace=KAGENT_NAMESPACE) or kube.items("statefulsets", namespace=KAGENT_NAMESPACE)
+                          or [p for p in kube.items("pods", namespace=KAGENT_NAMESPACE) if (p["metadata"].get("labels") or {}).get("cnpg.io/cluster") != POSTGRES_CLUSTER]), 180, interval=3)
     wait_for(f"Substrate's control plane gone from {ATE_NAMESPACE}", lambda: not kube.items("pods", namespace=ATE_NAMESPACE), 180, interval=3)
     wait_for(f"the podcertificate-controller gone from {PODCERT_NAMESPACE}", lambda: not kube.items("pods", namespace=PODCERT_NAMESPACE), 180, interval=3)
     podcert_ns = kube.get("namespace", PODCERT_NAMESPACE)

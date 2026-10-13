@@ -224,6 +224,7 @@ knowledge:
 {{- include "agent-platform.validateWorkspaces" . -}}
 {{- include "agent-platform.validateWorkspaceSignIn" . -}}
 {{- include "agent-platform.validateKagentLineCrossing" . -}}
+{{- include "agent-platform.validateKagentDatabase" . -}}
 {{- include "agent-platform.validateSubstrate" . -}}
 {{- include "agent-platform.validateWorkerPool" . -}}
 {{- include "agent-platform.validateInlineSecrets" . -}}

@@ -50,11 +50,11 @@ FLEET_APIS = [
     "--api-versions", "gateway.networking.k8s.io/v1",
     "--api-versions", "gateway.envoyproxy.io/v1alpha1",
 ]
-VM = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", *FLEET_APIS]
+VM = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", *FLEET_APIS]
 # Every exporter on: kagent (controller + actors), muster (on by default),
 # klaus-gateway, Substrate, the agentgateway data plane.
 ON = [
-    "--set", "components.kagent.enabled=true",
+    "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     "--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true",
     "--set", "components.klaus-gateway.enabled=true",
     "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster",

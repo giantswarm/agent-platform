@@ -83,7 +83,7 @@ CONNECTIVITY = "agent-platform-connectivity"
 # 0.x from 0.20.0, dual-version), klaus-gateway 2.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=1.10.0 <1.11.0"
+KAGENT_RANGE = ">=1.11.3-rc.2 <1.12.0-0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin,
 # both landing in ate-system, both following components.kagent. The pin is the
@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=1.10.0 <1.11.0"
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=1.8.2 <1.9.0"
-SUBSTRATE_PIN = "1.8.2"  # the range's floor, the BOM pin and the worker image's tag: the release that retries a golden take or a session resume a rolling worker pool interrupts (a draining worker, an atelet without an IP, a missing ateom socket, a cancelled wakeup probe) and clears a recorded terminal golden error of such a cause on start (giantswarm/substrate#292, #294, #297); before it 1.8.1, the release that converts a 1.7-layout durable snapshot on its first restore and re-takes a golden written in the old layout (giantswarm/substrate#277, #282), so the step from 1.7 needs no snapshot reset (1.8.0 refuses a 1.7 restore); before it 1.7.0, the release kagent 1.6 is built against, with an existing volume mounted per actor at a sub-path; before it the line on kagent-dev/substrate v0.4.0-alpha1 (giantswarm/substrate#210, the 2026-10-08 re-pin) with the sandbox resolver fix in the worker (giantswarm/substrate#216) and the sandbox's pause image as a value, defaulting to its gsoci copy (giantswarm/substrate#224); the 1.0 and 1.3 lines stay on release-1.0 and release-1.3
+SUBSTRATE_RANGE = ">=1.9.0 <1.10.0"
+SUBSTRATE_PIN = "1.9.0"  # the range's floor, the BOM pin and the worker image's tag: the release that retries a golden take or a session resume a rolling worker pool interrupts (a draining worker, an atelet without an IP, a missing ateom socket, a cancelled wakeup probe) and clears a recorded terminal golden error of such a cause on start (giantswarm/substrate#292, #294, #297); before it 1.8.1, the release that converts a 1.7-layout durable snapshot on its first restore and re-takes a golden written in the old layout (giantswarm/substrate#277, #282), so the step from 1.7 needs no snapshot reset (1.8.0 refuses a 1.7 restore); before it 1.7.0, the release kagent 1.6 is built against, with an existing volume mounted per actor at a sub-path; before it the line on kagent-dev/substrate v0.4.0-alpha1 (giantswarm/substrate#210, the 2026-10-08 re-pin) with the sandbox resolver fix in the worker (giantswarm/substrate#216) and the sandbox's pause image as a value, defaulting to its gsoci copy (giantswarm/substrate#224); the 1.0 and 1.3 lines stay on release-1.0 and release-1.3
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
@@ -252,7 +252,8 @@ def check_semver_filters(meta: str, ci: list[str]) -> None:
     got = semver_filters(render(meta, every))
     # A release candidate's floor renders the release tag filter (Flux evaluates
     # every pre-release tag against it, the line's branch builds included).
-    want = {**DEV_CHANNEL, **({n: RELEASE_TAG_FILTER for n in ("substrate", "substrate-crds")} if "-" in SUBSTRATE_RANGE else {})}
+    want = {**DEV_CHANNEL, **({n: RELEASE_TAG_FILTER for n in ("substrate", "substrate-crds")} if "-" in SUBSTRATE_RANGE else {}),
+            **({n: RELEASE_TAG_FILTER for n in ("kagent", "kagent-crds")} if "-" in KAGENT_RANGE else {})}
     if got != want:
         fail(f"OCIRepository semverFilters differ from the dev-channel and release-candidate defaults: rendered {got}, expected {want}")
     probe = render(meta, [*every, "--set-json", f"components.muster.semverFilter={json.dumps(PROBE_FILTER)}"])
