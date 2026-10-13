@@ -973,7 +973,7 @@ spec:
           reverse-proxy: true
           scope: openid profile email groups offline_access
           set-authorization-header: true
-          skip-auth-regex: ^/(login|_next/static|_next/image|login-bg\.(jpg|png|webp)|logo-.*\.png|favicon\.ico).*$
+          skip-auth-regex: ^/(login|env-config\.js|favicon\.svg|assets/[^/]+\.(js|css|svg|png|woff2?))$
           skip-auth-route: ^/(health|login)$
           skip-jwt-bearer-tokens: true
           upstream: $(UPSTREAM_URL)

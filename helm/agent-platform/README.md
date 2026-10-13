@@ -891,7 +891,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.oauth2-proxy.extraArgs.reverse-proxy | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.skip-jwt-bearer-tokens | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.skip-auth-route | string | `"^/(health|login)$"` |  |
-| kagent.oauth2-proxy.extraArgs.skip-auth-regex | string | `"^/(login|_next/static|_next/image|login-bg\\.(jpg|png|webp)|logo-.*\\.png|favicon\\.ico).*$"` |  |
+| kagent.oauth2-proxy.extraArgs.skip-auth-regex | string | `"^/(login|env-config\\.js|favicon\\.svg|assets/[^/]+\\.(js|css|svg|png|woff2?))$"` |  |
 | kagent.oauth2-proxy.extraArgs.custom-templates-dir | string | `"/templates"` |  |
 | kagent.oauth2-proxy.service.type | string | `"ClusterIP"` |  |
 | kagent.oauth2-proxy.service.portNumber | int | `4180` |  |

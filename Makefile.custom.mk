@@ -4330,6 +4330,13 @@ verify-tenant-rbac: ## Assert the RBAC of agent tenants (giantswarm/agent-platfo
 	@HELM="$(HELM)" python3 tests/verify-tenant-rbac.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-kagent-login-public-paths
+verify-kagent-login-public-paths: ## Assert kagent's oauth2-proxy serves the sign-in page without a session and nothing else (giantswarm/agent-platform#989): the skip-auth arguments the kagent HelmRelease carries, the same in the connectivity chart's values, admit /login, /env-config.js, /favicon.svg and the Vite bundle under /assets/, and refuse the app's pages, /api and anything deeper under /assets/. Needs PyYAML.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-kagent-login-public-paths.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-scenarios
 verify-scenarios: ## Assert the ATS scenario inputs (tests/ats/scenarios.py) and the `make e2e` values overlay (tests/e2e_overlay.py) offline: the kind and eks defaults, every refusal naming its variable, the derived muster base URL, the base-URL --set, and the overlay's shapes.
 	@echo "====> $@"
