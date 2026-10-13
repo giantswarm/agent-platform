@@ -83,7 +83,7 @@ CONNECTIVITY = "agent-platform-connectivity"
 # 0.x from 0.20.0, dual-version), klaus-gateway 2.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=1.11.0 <1.12.0"
+KAGENT_RANGE = ">=1.11.3-rc.2 <1.12.0-0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin,
 # both landing in ate-system, both following components.kagent. The pin is the
@@ -252,7 +252,8 @@ def check_semver_filters(meta: str, ci: list[str]) -> None:
     got = semver_filters(render(meta, every))
     # A release candidate's floor renders the release tag filter (Flux evaluates
     # every pre-release tag against it, the line's branch builds included).
-    want = {**DEV_CHANNEL, **({n: RELEASE_TAG_FILTER for n in ("substrate", "substrate-crds")} if "-" in SUBSTRATE_RANGE else {})}
+    want = {**DEV_CHANNEL, **({n: RELEASE_TAG_FILTER for n in ("substrate", "substrate-crds")} if "-" in SUBSTRATE_RANGE else {}),
+            **({n: RELEASE_TAG_FILTER for n in ("kagent", "kagent-crds")} if "-" in KAGENT_RANGE else {})}
     if got != want:
         fail(f"OCIRepository semverFilters differ from the dev-channel and release-candidate defaults: rendered {got}, expected {want}")
     probe = render(meta, [*every, "--set-json", f"components.muster.semverFilter={json.dumps(PROBE_FILTER)}"])

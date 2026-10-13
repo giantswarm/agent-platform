@@ -105,9 +105,9 @@ def fail(msg: str) -> None:
 def pinned_ref() -> str:
     """The tag of the floor of the meta chart's components.kagent-crds range."""
     rng = yaml.safe_load(open(META_VALUES))["components"]["kagent-crds"]["versionRange"]
-    m = re.match(r">=\s*(\d+\.\d+\.\d+)\s", rng)
+    m = re.match(r">=\s*(\d+\.\d+\.\d+(?:-rc\.\d+)?)\s", rng)
     if not m:
-        fail(f"components.kagent-crds.versionRange {rng!r} has no >=X.Y.Z floor to read the pinned release from")
+        fail(f"components.kagent-crds.versionRange {rng!r} has no >=X.Y.Z or >=X.Y.Z-rc.N floor to read the pinned release from")
     return "v" + m.group(1)
 
 

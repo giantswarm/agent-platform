@@ -151,9 +151,9 @@ def kagent_floor(chart: str) -> str:
     """The floor of components.kagent.versionRange as values.yaml pins it."""
     with open(f"{chart}/values.yaml", encoding="utf-8") as f:
         entry = block(f.read(), "kagent", 2)
-    m = re.search(r'^    versionRange: ">=([0-9]+\.[0-9]+\.[0-9]+)', entry, re.M)
+    m = re.search(r'^    versionRange: ">=([0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?)[ "]', entry, re.M)
     if not m:
-        fail("components.kagent.versionRange in values.yaml has no `>=X.Y.Z` floor")
+        fail("components.kagent.versionRange in values.yaml has no `>=X.Y.Z` or `>=X.Y.Z-rc.N` floor")
     return m.group(1)
 
 
