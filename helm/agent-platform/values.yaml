@@ -5300,7 +5300,13 @@ workspaces:
   # installation lists its Organizations, e.g.
   #   organizations:
   #     - name: acme
-  #       memberGroups: [acme-ad:developers, acme-ad:sre]
+  #       memberGroups: [giantswarm-github:acme:developers, giantswarm-github:acme:sre]
+  #
+  # A group is written as the platform sees it in the token's groups claim: the
+  # Dex connector id, a colon, then the group as the connector reports it (for
+  # the GitHub connector <org>:<team>). The prefix is the id of the connector
+  # (`connectors[].id`) in the installation's Dex configuration; a group
+  # without it never matches.
   #
   # Every workspace, its volume, its sync Jobs and every Session live in the
   # kagent namespace, where Organization membership cannot be namespace RBAC:
