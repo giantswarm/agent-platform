@@ -466,9 +466,14 @@ components:  # @schema additionalProperties: true
     # `monitoring.grafanaDashboard.labels` against their concrete defaults and
     # rendered no annotations on the dashboard ConfigMap, so the tenant label,
     # the discovery label and the organization and folder annotations were all
-    # refused or dropped (giantswarm/agentgateway#60). Pin first: this floor
-    # moves with the release, and the values below only work above it.
-    versionRange: ">=2.4.0 <3.0.0"
+    # refused or dropped (giantswarm/agentgateway#60). The floor is 2.8.0, the
+    # first packaging release whose CRDs are upstream v1.6.0's, the release the
+    # agentgateway line's controller and data plane below are built on: through
+    # 2.7.5 the CRDs were v1.5.0's, and the API server pruned every field v1.6.0
+    # added (traffic.rateLimit.local[].key among them) before the controller
+    # saw it. Pin first: this floor moves with the release, and the values
+    # below only work above it.
+    versionRange: ">=2.8.0 <3.0.0"
     valuesFrom: agentgateway
     enabled: true
     # The slice profiles set this per target: on for a workload cluster, off
