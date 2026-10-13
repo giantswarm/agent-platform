@@ -9,6 +9,3 @@ kagent:
       env:
         - name: KAGENT_PROPAGATE_TOKEN
           value: "true"
-      limits:
-        budgetUSD: "2.00"
-        maxTurns: 40

@@ -494,7 +494,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "ok: flux render"
 	@echo "--> agentgateway 2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
 	@./tests/verify-agentgateway-wiring.py $(VERIFY_TMP)/ap-flux.out
-	@grep -q 'semver: ">=2.4.0 <3.0.0"' $(VERIFY_TMP)/ap-flux.out || { echo "FAIL: agentgateway range is not >=2.4.0 <3.0.0 (the flattened chart line, floored at the packaging release whose monitoring values this chart sets — giantswarm/agentgateway#60)"; exit 1; }
+	@grep -q 'semver: ">=2.8.0 <3.0.0"' $(VERIFY_TMP)/ap-flux.out || { echo "FAIL: agentgateway range is not >=2.8.0 <3.0.0 (the flattened chart line, floored at the packaging release whose CRDs are upstream v1.6.0, the agentgateway line's base)"; exit 1; }
 	@echo "ok: agentgateway 2.x wiring"
 	@echo "--> the kagent line's wiring: kagent + kagent-crds on the line's release range, one build (tag + Harness digest), flat forwarded values with no umbrella-only or retired key"
 	@./tests/verify-kagent-wiring.py $(VERIFY_TMP)/ap-flux.out
@@ -2185,6 +2185,12 @@ verify-kagent-crds: ## Assert every api.kagent.dev object the connectivity chart
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-harness
+verify-llm-rate-limit: ## Assert the LLM endpoint's rate limits (giantswarm/giantswarm#38004): llmRouting.rateLimits empty renders no policy; entries render one <name>-llm-rate-limit AgentgatewayPolicy on the data-plane Gateway's LLM listener (sectionName) with traffic.rateLimit.local as written, a key through tpl (the per-agent key behind the Substrate egress predicate); llmRouting.external.rateLimits renders <name>-llm-external-rate-limit on the external HTTPRoute alone, none with the endpoint off; llmRouting off renders neither; the schema refuses both or neither of tokens and requests, a zero, an unknown unit, an empty key and an unknown field; the entry schema's fields are those of agentgateway.dev_agentgatewaypolicies at the floor of components.agentgateway.versionRange, and both policies validate against that CRD; the meta chart forwards both lists as written. Network: gsoci.azurecr.io.
+	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-llm-rate-limit.py $(CONNECTIVITY_DIR) $(CHART_DIR)
+	@echo "ok: $@"
+
 verify-kagent-harness: ## Assert the platform Harness is the kagent chart's since 4.8.0: the connectivity chart renders none, the meta chart forwards the GS policy only (create, snapshot location, KAGENT_PROPAGATE_TOKEN, the admission label; no image by default, an override digest when set) and kagent.harnesses reaches the kagent release unchanged (empty by default: no further Harness).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
@@ -4299,6 +4305,13 @@ verify-kagent-oauth2-proxy-image: ## Assert kagent's oauth2-proxy runs the gsoci
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-oauth2-proxy-image.py $(CHART_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-kagent-login-public-paths
+verify-kagent-login-public-paths: ## Assert kagent's oauth2-proxy serves the sign-in page without a session and nothing else (giantswarm/agent-platform#989): the skip-auth arguments the kagent HelmRelease carries, the same in the connectivity chart's values, admit /login, /env-config.js, /favicon.svg and the Vite bundle under /assets/, and refuse the app's pages, /api and anything deeper under /assets/. Needs PyYAML.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@python3 tests/verify-kagent-login-public-paths.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
 .PHONY: verify-scenarios

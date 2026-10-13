@@ -1203,10 +1203,12 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | llmRouting.models[0].provider | string | `"Anthropic"` |  |
 | llmRouting.models[0].baseURL | string | `"https://api.anthropic.com/v1"` |  |
 | llmRouting.models[0].match | string | `"claude-*"` |  |
+| llmRouting.rateLimits | list | `[]` |  |
 | llmRouting.external.enabled | bool | `false` |  |
 | llmRouting.external.hostPrefix | string | `"llm"` |  |
 | llmRouting.external.listener.name | string | `"llm-external"` |  |
 | llmRouting.external.listener.port | int | `8082` |  |
+| llmRouting.external.rateLimits | list | `[]` |  |
 | llmRouting.external.apiKeys.secretRef.name | string | `""` |  |
 | llmRouting.external.apiKeys.secretSelector.matchLabels | object | `{}` |  |
 | llmRouting.external.apiKeys.configMapSelector.matchLabels | object | `{}` |  |
@@ -1427,7 +1429,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.oauth2-proxy.extraArgs.reverse-proxy | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.skip-jwt-bearer-tokens | bool | `true` |  |
 | kagent.oauth2-proxy.extraArgs.skip-auth-route | string | `"^/(health|login)$"` |  |
-| kagent.oauth2-proxy.extraArgs.skip-auth-regex | string | `"^/(login|_next/static|_next/image|login-bg\\.(jpg|png|webp)|logo-.*\\.png|favicon\\.ico).*$"` |  |
+| kagent.oauth2-proxy.extraArgs.skip-auth-regex | string | `"^/(login|env-config\\.js|favicon\\.svg|assets/[^/]+\\.(js|css|svg|png|woff2?))$"` |  |
 | kagent.oauth2-proxy.extraArgs.custom-templates-dir | string | `"/templates"` |  |
 | kagent.oauth2-proxy.service.type | string | `"ClusterIP"` |  |
 | kagent.oauth2-proxy.service.portNumber | int | `4180` |  |
@@ -1619,10 +1621,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.3.4"` |  |
+| agentgateway.controller.image.tag | string | `"2.3.5"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.3.4"` |  |
+| agentgateway.proxy.image.tag | string | `"2.3.5"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |

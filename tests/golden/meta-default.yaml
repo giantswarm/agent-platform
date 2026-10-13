@@ -460,7 +460,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.3.4
+          tag: 2.3.5
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -491,7 +491,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.3.4
+          tag: 2.3.5
       resources:
         limits:
           cpu: 500m
@@ -973,7 +973,7 @@ spec:
           reverse-proxy: true
           scope: openid profile email groups offline_access
           set-authorization-header: true
-          skip-auth-regex: ^/(login|_next/static|_next/image|login-bg\.(jpg|png|webp)|logo-.*\.png|favicon\.ico).*$
+          skip-auth-regex: ^/(login|env-config\.js|favicon\.svg|assets/[^/]+\.(js|css|svg|png|woff2?))$
           skip-auth-route: ^/(health|login)$
           skip-jwt-bearer-tokens: true
           upstream: $(UPSTREAM_URL)
@@ -1188,6 +1188,7 @@ spec:
         listener:
           name: llm-external
           port: 8082
+        rateLimits: []
       listener:
         name: llm
         port: 8081
@@ -1203,6 +1204,7 @@ spec:
         match: claude-*
         name: anthropic
         provider: Anthropic
+      rateLimits: []
     mcp-kubernetes:
       fullnameOverride: mcp-kubernetes
       grafanaDashboards:
@@ -1713,7 +1715,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.3.4
+        tag: 2.3.5
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1766,7 +1768,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.3.4
+        tag: 2.3.5
     resources:
       limits:
         cpu: 500m
@@ -2268,7 +2270,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=2.4.0 <3.0.0"
+    semver: ">=2.8.0 <3.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
