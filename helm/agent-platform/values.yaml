@@ -558,7 +558,7 @@ components:  # @schema additionalProperties: true
     # chart takes its OTel settings in the SDK-spec shape kagent.otel below
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
     # ignores them and exports nothing.
-    versionRange: ">=1.10.0 <1.11.0"
+    versionRange: ">=1.11.0 <1.12.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -668,7 +668,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.10.0 <1.11.0"
+    versionRange: ">=1.11.0 <1.12.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -2988,6 +2988,11 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   database:
     postgres:
       vectorEnabled: true
+      # pgvector stays in public, where the CNPG Database creates it as the
+      # superuser: kagent's role does not own the extension and cannot move it
+      # to the chart's default `extensions`. kagent's tables move from public to
+      # its `kagent` schema at the controller's first start on 1.11.
+      vectorSchema: public
       bundled:
         image:
           repository: pgvector

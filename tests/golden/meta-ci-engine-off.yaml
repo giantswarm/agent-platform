@@ -667,6 +667,7 @@ spec:
               repository: pgvector
               tag: pg18-trixie
           vectorEnabled: true
+          vectorSchema: public
       fluxServiceAccountName: kagent-flux
       fullnameOverride: kagent
       grafana-mcp:
@@ -1807,6 +1808,7 @@ spec:
             repository: pgvector
             tag: pg18-trixie
         vectorEnabled: true
+        vectorSchema: public
     fullnameOverride: kagent
     global:
       domain: ""
@@ -2845,7 +2847,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.10.0 <1.11.0"
+    semver: ">=1.11.0 <1.12.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2868,7 +2870,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.10.0 <1.11.0"
+    semver: ">=1.11.0 <1.12.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.128.x → \<next\> (kagent 1.11: its tables move to the `kagent` schema)
+
+`components.kagent{,-crds}.versionRange` selects kagent 1.11 (the kagent line on upstream `main@92dd6caa`). kagent 1.11 keeps its tables in a `kagent` schema instead of `public`. At its first start the controller moves an installation's tables, sequences and migration tracking from `public` into `kagent` in one transaction under its migration lock, and adds the push notification tables a database migrated before 1.11 lacks (giantswarm/kagent-upstream#456). The step resets nothing: every Agent, Session, conversation and memory is kept, and a second start changes nothing. pgvector stays in `public`, where the CNPG Database creates it as the superuser: the meta chart sets `kagent.database.postgres.vectorSchema: public`, because kagent's role cannot move an extension it does not own, and kagent's own default `extensions` would stop the controller (`must be owner of extension vector`).
+
+### Operator action
+
+- **None.**
+- **An installation that overrides `kagent.database.postgres`**: keep `vectorSchema: public` unless pgvector's owner moved it to another schema first.
+- **A rollback to kagent 1.10** after the move finds `public` empty: move the tables back first, as kagent's chart README describes.
+
 ## 4.127.x → \<next\> (klaus-gateway 4.3.0: Slack Sessions start through start_session)
 
 `components.klaus-gateway.versionRange` selects klaus-gateway from 4.3.0. The gateway starts every thread's Session through agent-manager's `start_session` as the person, without a message (giantswarm/klaus-gateway#446), and needs agent-manager 1.13.0, the floor of the entry below; a thread already bound keeps its Session and conversation. With `workspaces.enabled` the meta chart derives `klausGateway.workspaces.toolsPrefix` onto the release. The gateway keeps its link and routing stores as they are: the release rolls in place.
