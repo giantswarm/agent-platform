@@ -153,13 +153,12 @@ WIRING_PG_GOLDEN_HOLD_NEW :=
 # and not on a golden from before; it is left out of both sides. Drop it once
 # GOLDEN_REF carries #840.
 WIRING_PG_GOLDEN_DROP := $(DASHBOARDS_GOLDEN_DROP) muster-mcp-egress
-# The RBAC of agent tenants (templates/tenants/,
-# templates/agent-manager/tenant-rbac.yaml, giantswarm/agent-platform#706), by
+# The RBAC of agent tenants (templates/tenants/, giantswarm/agent-platform#706), by
 # metadata.name: the cluster-scoped roles and bindings, dropped from a render
 # before asserting that the migration or the flux identity holds no other
 # RBAC. TENANT_RBAC_ALL adds muster's MCPServer viewer Role and RoleBinding,
 # which render whether kagent is on or not.
-TENANT_RBAC := agent-platform-user agent-platform-author agent-platform-tenant-admin agent-platform-tenant-flux agent-manager-tenants
+TENANT_RBAC := agent-platform-user agent-platform-author agent-platform-tenant-admin
 TENANT_RBAC_ALL := $(TENANT_RBAC) agent-platform-mcpserver-viewer
 # New beside GOLDEN_REF: left out of both sides of the postgres golden too.
 WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
@@ -4325,7 +4324,7 @@ verify-kagent-oauth2-proxy-image: ## Assert kagent's oauth2-proxy runs the gsoci
 	@echo "ok: $@"
 
 .PHONY: verify-tenant-rbac
-verify-tenant-rbac: ## Assert the RBAC of agent tenants (giantswarm/agent-platform#706): with kagent on, the three ClusterRoles agent-platform-user, -author and -tenant-admin nest, the user writes nothing, the author writes what agent-manager writes as the caller, the tenant admin writes ModelConfigs and RoleBindings and binds the three roles only, none escalates; the platform tenant's RoleBindings in the kagent namespace (tenants.platform.users, tenants.platform.authors plus tenants.platformTeam; none for an empty list; none with kagent off); muster's MCPServers listed to tenants.platform.users in the release namespace; with agent-manager on, its tenant reconciler's ClusterRole and binding (bind on agent-platform-tenant-flux only); the meta chart appends tenants.platformTeam to muster's editor subjects; kagent's UI proxy asks for the API server's audience. Needs PyYAML. HELM selects the binary.
+verify-tenant-rbac: ## Assert the RBAC of agent tenants (giantswarm/agent-platform#706): with kagent on, the three ClusterRoles agent-platform-user, -author and -tenant-admin nest, the user writes nothing, the author writes what agent-manager writes as the caller, the tenant admin writes ModelConfigs and RoleBindings and binds the three roles only, none escalates; the platform tenant's RoleBindings in the kagent namespace (tenants.platform.users, tenants.platform.authors plus tenants.platformTeam; none for an empty list; none with kagent off); muster's MCPServers listed to tenants.platform.users in the release namespace; the meta chart appends tenants.platformTeam to muster's editor subjects. Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-tenant-rbac.py $(CHART_DIR) $(CONNECTIVITY_DIR)

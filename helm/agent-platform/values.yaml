@@ -5028,7 +5028,10 @@ tenants:
     # namespace, and to `list` (with get and watch) on muster's MCPServers in
     # muster's namespace (the servers for everyone). RBAC subjects. The
     # default, system:authenticated, is every identity the API server
-    # authenticates, ServiceAccounts included.
+    # authenticates, ServiceAccounts included: every pod with a token can
+    # read the platform tenant's Agents, RemoteMCPServer URLs and muster's
+    # MCPServer specs. An installation that does not want this sets its OIDC
+    # "everyone" group (with the installation's OIDC groups prefix) instead.
     users:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
       - apiGroup: rbac.authorization.k8s.io
         kind: Group

@@ -17,7 +17,7 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## 4.127.x → \<next\> (agent tenants: roles, the platform tenant)
 
-With kagent on, the connectivity release renders the ClusterRoles `agent-platform-user`, `agent-platform-author` and `agent-platform-tenant-admin` and binds the kagent namespace as the platform tenant; muster's MCPServers are listed to `tenants.platform.users`; with agent-manager on, its ServiceAccount gets the tenant reconciler's ClusterRole `agent-manager-tenants` (giantswarm/agent-platform#706). Nothing a person sees changes until the kagent controller's authorizer is on.
+With kagent on, the connectivity release renders the ClusterRoles `agent-platform-user`, `agent-platform-author` and `agent-platform-tenant-admin` and binds the kagent namespace as the platform tenant; muster's MCPServers are listed to `tenants.platform.users` (giantswarm/agent-platform#706). Nothing a person sees changes until the kagent controller's authorizer is on.
 
 ### Operator action
 

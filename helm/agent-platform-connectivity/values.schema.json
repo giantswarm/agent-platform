@@ -2007,7 +2007,7 @@
                         },
                         "users": {
                             "type": "array",
-                            "description": "Every signed-in person: agent-platform-user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace.",
+                            "description": "Every signed-in person: agent-platform-user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC \"everyone\" group instead.",
                             "items": {
                                 "type": "object",
                                 "required": [

@@ -2886,7 +2886,7 @@
                         },
                         "users": {
                             "type": "array",
-                            "description": "Every signed-in person: bound to agent-platform-user in the kagent namespace, and to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, is every identity the API server authenticates, ServiceAccounts included.",
+                            "description": "Every signed-in person: bound to agent-platform-user in the kagent namespace, and to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, is every identity the API server authenticates, ServiceAccounts included: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation that does not want this sets its OIDC \"everyone\" group (with the installation's OIDC groups prefix) instead.",
                             "items": {
                                 "type": "object",
                                 "required": [

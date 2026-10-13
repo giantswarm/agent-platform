@@ -37,20 +37,6 @@ instead of a silent 503.
 {{- end -}}
 
 {{/*
-The agent-manager ServiceAccount, named as the component chart names it:
-agent-manager.serviceAccount.name, else the fullname (serviceAccount.create
-false: the name, else default).
-*/}}
-{{- define "agent-platform.agentManager.serviceAccountName" -}}
-{{- $chart := include "agent-platform.agentManager.chartValues" . | fromJson -}}
-{{- if dig "serviceAccount" "create" true $chart -}}
-{{- dig "serviceAccount" "name" "" $chart | default (include "agent-platform.agentManager.fullname" .) -}}
-{{- else -}}
-{{- dig "serviceAccount" "name" "" $chart | default "default" -}}
-{{- end -}}
-{{- end -}}
-
-{{/*
 The port the agent-manager Service listens on (agent-manager.service.port, default 8080).
 */}}
 {{- define "agent-platform.agentManager.servicePort" -}}

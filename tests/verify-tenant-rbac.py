@@ -17,14 +17,9 @@ Each case pins one property of the render:
   binding; with kagent off, none of the roles and bindings render;
 - muster's MCPServers: `list` (get, watch) in the release namespace for
   tenants.platform.users, whether kagent is on or not;
-- with agent-manager on, its ServiceAccount is bound cluster-wide to
-  agent-manager-tenants (namespaces read; Harnesses, ModelConfigs,
-  WorkerPools, OCIRepositories, the network policies of the resolved flavor,
-  ServiceAccounts and RoleBindings written; `bind` on agent-platform-tenant-flux only); with
-  agent-manager off, nothing of it renders;
 - the meta chart appends tenants.platformTeam to muster's mcpserver-editor and
   workflow-editor subjects (each subject once) and leaves them alone while the
-  list is empty;
+  list is empty.
 
 Needs PyYAML. HELM selects the binary.
 """
@@ -168,33 +163,6 @@ def check_muster_viewer(docs: list) -> None:
         fail(f"agent-platform-mcpserver-viewer is bound to {subject_names(rb)}")
 
 
-def check_reconciler(docs: list, netpol: tuple) -> None:
-    role = find(docs, "ClusterRole", "agent-manager-tenants")
-    crb = find(docs, "ClusterRoleBinding", "agent-manager-tenants")
-    flux = find(docs, "ClusterRole", "agent-platform-tenant-flux")
-    if role is None or crb is None or flux is None:
-        fail("agent-manager's tenant reconciler RBAC is missing with agent-manager on")
-    if crb["subjects"] != [{"kind": "ServiceAccount", "name": "agent-manager", "namespace": "agent-platform"}]:
-        fail(f"ClusterRoleBinding agent-manager-tenants binds {crb['subjects']}")
-    g = grants(role["rules"])
-    for v in ("get", "list", "watch"):
-        if ("", "namespaces", v, None) not in g:
-            fail(f"agent-manager cannot {v} namespaces")
-    for group, res in (("api.kagent.dev", "harnesses"), ("api.kagent.dev", "modelconfigs"), ("ate.dev", "workerpools"),
-                       ("source.toolkit.fluxcd.io", "ocirepositories"), netpol, ("", "serviceaccounts"),
-                       ("rbac.authorization.k8s.io", "rolebindings")):
-        for v in WRITES:
-            if (group, res, v, None) not in g:
-                fail(f"agent-manager cannot {v} {res}.{group or 'core'}")
-    if {t for t in g if t[2] in ("bind", "escalate")} != {("rbac.authorization.k8s.io", "clusterroles", "bind", "agent-platform-tenant-flux")}:
-        fail("agent-manager may bind another role than agent-platform-tenant-flux, or escalate")
-    if any(t[1] in ("namespaces",) and t[2] in WRITES for t in g):
-        fail("agent-manager writes namespaces")
-    other = {("networking.k8s.io", "networkpolicies"), ("cilium.io", "ciliumnetworkpolicies")} - {netpol}
-    if any((t[0], t[1]) in other for t in g):
-        fail(f"agent-manager writes the network policies of the other flavor than {netpol}")
-
-
 def check_meta(chart: str) -> None:
     def muster_rbac(args):
         for d in render(chart, ["-f", f"{chart}/ci/ci-values.yaml", *args]):
@@ -214,21 +182,19 @@ def check_meta(chart: str) -> None:
 def main() -> None:
     meta, conn = sys.argv[1], sys.argv[2]
     off = render(conn, CONN)
-    for kind, name in (("ClusterRole", r) for r in ROLES + ["agent-manager-tenants", "agent-platform-tenant-flux"]):
-        if find(off, kind, name):
-            fail(f"{kind} {name} renders with kagent and agent-manager off")
+    for name in ROLES:
+        if find(off, "ClusterRole", name):
+            fail(f"ClusterRole {name} renders with kagent off")
     for name in ROLES[:2]:
         if find(off, "RoleBinding", name):
             fail(f"RoleBinding {name} renders with kagent off")
     check_muster_viewer(off)
-    ok("kagent and agent-manager off: no tenant role or binding; muster's servers listed to every signed-in person")
+    ok("kagent off: no tenant role or binding; muster's servers listed to every signed-in person")
 
     on = render(conn, [*CONN, "--set", "components.kagent.enabled=true"])
     check_roles(on)
     check_platform_tenant(on, ADMINS)
     check_muster_viewer(on)
-    if find(on, "ClusterRole", "agent-manager-tenants"):
-        fail("agent-manager's tenant RBAC renders with agent-manager off")
     ok("the platform tenant: every signed-in person is a user, the admin groups are authors")
 
     team = render(conn, [*CONN, "--set", "components.kagent.enabled=true", *TEAM])
@@ -241,13 +207,6 @@ def main() -> None:
         if find(empty, "RoleBinding", name):
             fail(f"RoleBinding {name} renders with no subjects")
     ok("an empty subject list renders no binding")
-
-    am = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "components.agent-manager.enabled=true"])
-    check_reconciler(am, ("networking.k8s.io", "networkpolicies"))
-    am = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "components.agent-manager.enabled=true",
-                       "--api-versions", "cilium.io/v2"])
-    check_reconciler(am, ("cilium.io", "ciliumnetworkpolicies"))
-    ok("agent-manager's tenant reconciler: namespaces read, a tenant's objects (network policies of the flavor) written, agent-platform-tenant-flux bound only")
 
     check_meta(meta)
 
