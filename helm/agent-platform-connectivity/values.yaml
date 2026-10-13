@@ -2257,12 +2257,12 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.3.4"
+      tag: "2.3.5"
   proxy:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.3.4"
+      tag: "2.3.5"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
