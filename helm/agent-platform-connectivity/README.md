@@ -1798,7 +1798,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspaces.substrate.csiCompanion.controller.resources.limits.ephemeral-storage | string | `"256Mi"` |  |
 | workspaces.substrate.csiCompanion.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | workspaces.substrate.csiCompanion.proxy.image.repository | string | `"giantswarm/envoy"` |  |
-| workspaces.substrate.csiCompanion.proxy.image.tag | string | `"v1.39.3"` |  |
+| workspaces.substrate.csiCompanion.proxy.image.tag | string | `"v1.40.0"` |  |
 | workspaces.substrate.csiCompanion.proxy.port | int | `10000` |  |
 | workspaces.substrate.csiCompanion.proxy.clientIdentity | string | `"spiffe://cluster.local/ns/ate-system/sa/ate-api-server"` |  |
 | workspaces.substrate.csiCompanion.proxy.resources.requests.cpu | string | `"10m"` |  |
