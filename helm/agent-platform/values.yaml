@@ -3150,7 +3150,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       reverse-proxy: true
       skip-jwt-bearer-tokens: true
       skip-auth-route: "^/(health|login)$"
-      skip-auth-regex: "^/(login|_next/static|_next/image|login-bg\\.(jpg|png|webp)|logo-.*\\.png|favicon\\.ico).*$"
+      # The sign-in page loads without a session: /login and what its document
+      # fetches (the UI's Vite bundle under /assets/, env-config.js,
+      # favicon.svg). Every other path needs one.
+      skip-auth-regex: "^/(login|env-config\\.js|favicon\\.svg|assets/[^/]+\\.(js|css|svg|png|woff2?))$"
       custom-templates-dir: /templates
     service:
       type: ClusterIP
