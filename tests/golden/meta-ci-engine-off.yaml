@@ -839,6 +839,10 @@ spec:
           maxUnavailable: 1
           minAvailable: null
           unhealthyPodEvictionPolicy: AlwaysAllow
+        priorityClass:
+          enabled: true
+          name: agent-platform-worker-pool
+          value: 1000000
         replicas: 4
         sandboxClass: gvisor
         template:
@@ -1395,6 +1399,20 @@ spec:
       rustfs:
         enabled: false
     substrate-crds: {}
+    tenants:
+      platform:
+        editors:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
+        users:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: system:authenticated
+      platformTeam: []
     valkey:
       ciliumNetworkPolicy:
         enabled: false
@@ -1961,6 +1979,7 @@ spec:
               - ate-system
               topologyKey: kubernetes.io/hostname
             weight: 100
+        priorityClassName: agent-platform-worker-pool
         resources:
           limits:
             cpu: "2"
@@ -2853,8 +2872,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.11.3-rc.2 <1.12.0-0"
-    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
+    semver: ">=1.11.4 <1.12.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2877,8 +2895,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.11.3-rc.2 <1.12.0-0"
-    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
+    semver: ">=1.11.4 <1.12.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

@@ -79,13 +79,19 @@ pool is the platform's only capacity and scheduling knob, since the Generic agen
 chart 1.x carries no per-agent `runtime`, `replicas`, `resources`, `nodeSelector`
 or `tolerations`.
 
-- **One worker hosts one actor at a time.** `kagent.substrateWorkerPool.replicas`
-  (default `4`) therefore bounds the number of agents that can be *active at once*;
-  an idle agent holds no worker. Raise it for more concurrency — the node pool
-  budgets `replicas × the worker's limits`.
-- **A worker's resources are one agent's sandbox.**
-  `kagent.substrateWorkerPool.template.resources.limits` bound a single agent: the
-  memory limit its RAM, the CPU limit its vCPU count. The defaults request
+- **A worker hosts many actors at once.** A Substrate worker (`ateom`) runs up to
+  its `--max-actors` actors, default `1000`; the flag is the worker's own and no
+  `WorkerPool` field or chart value sets it, so every worker of the pool takes the
+  default and answers `worker is full` beyond it. `kagent.substrateWorkerPool.replicas`
+  (default `4`) therefore sets the pool's actor ceiling (`replicas × 1000`) and
+  its failure domain; in practice the worker's `resources.limits`, shared by the
+  actors it hosts, bound the concurrently active agents long before the count
+  does. An idle agent holds no worker. Raise `replicas` for more capacity — the
+  node pool budgets `replicas × the worker's limits`.
+- **A worker's resources are shared by its actors' sandboxes.**
+  `kagent.substrateWorkerPool.template.resources.limits` bound the worker, and with
+  it the sum of the sandboxes it hosts (a sandbox's memory is RAM of the worker,
+  its CPU counts against the worker's vCPUs). The defaults request
   `250m` / `512Mi` and limit to `2` vCPU / `2Gi`. Measured in agentlab: an idle
   worker holds ~16Mi and a golden-booted actor ~20Mi; a Go ADK turn's working set
   (the model client, tool calls and gVisor overhead) stays well under `2Gi`.
@@ -212,6 +218,20 @@ help:
   at on-demand prices for the worker nodes. Karpenter-only: **never on CAPZ,
   on-prem or a CAPA pool that cluster-aws node pools provision** — no node
   carries the label there and the workers stay `Pending`.
+- **`kagent.substrateWorkerPool.priorityClass`** (`enabled: true`, `name:
+  agent-platform-worker-pool`, `value: 1000000` — **on by default**;
+  giantswarm/agent-platform#999): a `PriorityClass` rendered by the connectivity
+  chart, which the meta chart names in the pool's `template.priorityClassName`.
+  atelet's `ate-node-critical` (`PreemptLowerPriority`) evicts the lowest-priority
+  pods of a full node to make room; without a class the workers run at the
+  default priority 0 and are among the first victims. Above 0 the ordinary
+  workloads go first; below the cluster's own classes (monitoring, the
+  platform's, atelet's `1000000000`) they still outrank a worker.
+  `preemptionPolicy: Never`: a pending worker evicts nothing itself. An
+  installation's own `template.priorityClassName` stands instead; `enabled:
+  false` renders no class and names none; the render refuses a value outside
+  1..999999999 and a `system-` name. The value is immutable on the API: change it
+  under a new name. Setting or moving the name rolls the pool once.
 
 **Every change to `template`** — a label, an annotation, a selector, the
 resources — rolls the pool's Deployment once (`RollingUpdate` 25 %/25 %, one
@@ -231,15 +251,17 @@ verbatim from it on. Recommended: hostname `maxSkew: 1`, `minDomains: 2`,
 zone `maxSkew: 1`, `ScheduleAnyway`, both with a `labelSelector` on
 `ate.dev/worker-pool: <name>` — what the fleet template renders behind its knob.
 A spread is a template change and rolls the pool's Deployment once (above).
-`make verify-workerpool` asserts all of it: the budget, the two knobs reaching the
-kagent release and the `WorkerPool` verbatim, the spread refused below the floor
-and forwarded at it, still exactly one `WorkerPool`.
+`make verify-workerpool` asserts all of it: the budget, the priority class and
+the derived class name, the two knobs reaching the kagent release and the
+`WorkerPool` verbatim, the spread refused below the floor and forwarded at it,
+still exactly one `WorkerPool`.
 
-**Atelet affinity.** A worker runs sandboxes only through the atelet on its node,
-and atelet's PriorityClass never preempts. While the atelet DaemonSet rolls on a
-node without spare CPU, a worker scheduled in the gap takes the CPU the old atelet
-pod freed: the new atelet pod stays Pending, the rollout stops at that node and
-the `substrate` release's upgrade times out (giantswarm/agent-platform#756). From
+**Atelet affinity.** A worker runs sandboxes only through the atelet on its node.
+While the atelet DaemonSet rolls on a node without spare CPU, a worker scheduled
+in the gap takes the CPU the old atelet pod freed; under a non-preempting atelet
+class (`preemptionPolicy: Never`, an installation's choice) the new atelet pod
+stays Pending, the rollout stops at that node and the `substrate` release's
+upgrade times out (giantswarm/agent-platform#756). From
 the Substrate line's `1.3.0` on (`agent-platform.substrate.workerPoolAffinityFloor`)
 the chart derives `template.podAffinity`: a preferred term (weight 100) on the
 atelet pods (`app: atelet` in `components.substrate.targetNamespace`) with
@@ -263,7 +285,7 @@ Two replicas are the long-term answer for the stateless components; the budgets 
 
 muster-valkey — muster's OAuth token store, one replica on an RWO volume — carries the same two guards (giantswarm/agent-platform#439): `karpenter.sh/do-not-disrupt` through the valkey subchart's `valkey.valkey.podAnnotations`, and a `PodDisruptionBudget muster-valkey` (`valkey.podDisruptionBudget`, `minAvailable: 1`, `AlwaysAllow`) rendered by the connectivity chart, since neither the wrapper nor the upstream subchart has a budget knob. The budget key never reaches the valkey release (`components.valkey.omitKeys`).
 
-The Substrate worker pool — four workers, one actor each, every agent's runtime — carries a budget of a different shape (giantswarm/agent-platform#472): `kagent.substrateWorkerPool.podDisruptionBudget`, `maxUnavailable: 1`, rendered by the connectivity chart in the kagent namespace on the pods labelled `ate.dev/worker-pool: <pool>`, so a voluntary drain moves one worker at a time and the pool keeps three. No `karpenter.sh/do-not-disrupt` by default — it stays a documented knob of the pool template, with the on-demand capacity-type selector, in "The one pool is the failure domain" above.
+The Substrate worker pool — four workers, each hosting many actors, every agent's runtime — carries a budget of a different shape (giantswarm/agent-platform#472): `kagent.substrateWorkerPool.podDisruptionBudget`, `maxUnavailable: 1`, rendered by the connectivity chart in the kagent namespace on the pods labelled `ate.dev/worker-pool: <pool>`, so a voluntary drain moves one worker at a time and the pool keeps three. No `karpenter.sh/do-not-disrupt` by default — it stays a documented knob of the pool template, with the on-demand capacity-type selector, in "The one pool is the failure domain" above.
 
 ## Placement of the stateful singletons
 
@@ -358,7 +380,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.11.3-rc.2 <1.12.0-0"` |  |
+| components.kagent.versionRange | string | `">=1.11.4 <1.12.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -376,12 +398,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.omitKeys[6] | string | `"remoteMcpServers"` |  |
 | components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
 | components.kagent.omitKeys[8] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
+| components.kagent.omitKeys[9] | string | `"substrateWorkerPool.priorityClass"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.11.3-rc.2 <1.12.0-0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.11.4 <1.12.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
@@ -825,6 +848,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.substrateWorkerPool.podDisruptionBudget.minAvailable | string | `nil` |  |
 | kagent.substrateWorkerPool.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | kagent.substrateWorkerPool.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
+| kagent.substrateWorkerPool.priorityClass.enabled | bool | `true` |  |
+| kagent.substrateWorkerPool.priorityClass.name | string | `"agent-platform-worker-pool"` |  |
+| kagent.substrateWorkerPool.priorityClass.value | int | `1000000` |  |
 | kagent.substrateWorkerPool.template.nodeSelector."kubernetes.io/arch" | string | `"amd64"` |  |
 | kagent.substrateWorkerPool.template.resources.requests.cpu | string | `"250m"` |  |
 | kagent.substrateWorkerPool.template.resources.requests.memory | string | `"512Mi"` |  |
@@ -1304,6 +1330,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: bound to agent-platform:user in the kagent namespace, and to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, gives this to every user. It also gives it to every ServiceAccount, so every pod in the cluster can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. To give it to people only, replace the default with an OIDC group that every user belongs to, written as the API server sees it (with the installation's OIDC groups prefix). |
+| tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects. |
+| tenants.platformTeam | list | `[]` | The customer's platform team, per installation: RBAC subjects bound to agent-platform:editor in the kagent namespace beside `platform.editors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation). |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |
