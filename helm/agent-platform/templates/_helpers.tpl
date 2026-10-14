@@ -626,7 +626,14 @@ manager writes into every grant's iss (its base URL,
 agent-platform.workspaceManager.baseURL) and the audience it writes into aud
 (workspace-manager.grant.audience; kagent, the chart's default). A value the
 kagent block sets for one of the three stands, the rest is derived: the kagent
-chart needs all three together. Emits JSON {jwksURL, issuer, audience}, or {}
+chart needs all three together. With the derived key set, allowHTTP is true:
+the kagent chart from 1.11.5 refuses a plain http jwksURL without it, and this
+one is the manager's own Service, which serves no TLS and which the controller
+reaches in-cluster (kagent-controller-to-workspace-manager); an own allowHTTP
+stands.
+An own jwksURL carries no derived allowHTTP, so an external key set stays
+https unless the kagent block opts in itself. Emits JSON {jwksURL, issuer,
+audience[, allowHTTP]}, or {}
 while nothing is derived (the switch off, no grant key, kagent off): the kagent
 block's own admission, if any, then reaches the release as written.
 Usage: include "agent-platform.kagent.sessionAdmission" . | fromJson
@@ -641,6 +648,9 @@ Usage: include "agent-platform.kagent.sessionAdmission" . | fromJson
 {{- $derived := dict "jwksURL" (include "agent-platform.workspaceManager.jwksURL" .) "issuer" (include "agent-platform.workspaceManager.baseURL" .) "audience" (toString (dig "grant" "audience" "kagent" $wm)) -}}
 {{- range $k, $v := $derived -}}
 {{- $_ := set $out $k (toString (dig $k "" $own) | default $v) -}}
+{{- end -}}
+{{- if not (toString (dig "jwksURL" "" $own)) -}}
+{{- $_ := set $out "allowHTTP" (dig "allowHTTP" true $own) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
