@@ -213,7 +213,7 @@ help:
   on-prem or a CAPA pool that cluster-aws node pools provision** — no node
   carries the label there and the workers stay `Pending`.
 - **`kagent.substrateWorkerPool.priorityClass`** (`enabled: true`, `name:
-  agent-platform-substrate-worker`, `value: 1000000` — **on by default**;
+  agent-platform-worker-pool`, `value: 1000000` — **on by default**;
   giantswarm/agent-platform#999): a `PriorityClass` rendered by the connectivity
   chart, which the meta chart names in the pool's `template.priorityClassName`.
   atelet's `ate-node-critical` (`PreemptLowerPriority`) evicts the lowest-priority
@@ -842,7 +842,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.substrateWorkerPool.podDisruptionBudget.maxUnavailable | int | `1` |  |
 | kagent.substrateWorkerPool.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
 | kagent.substrateWorkerPool.priorityClass.enabled | bool | `true` |  |
-| kagent.substrateWorkerPool.priorityClass.name | string | `"agent-platform-substrate-worker"` |  |
+| kagent.substrateWorkerPool.priorityClass.name | string | `"agent-platform-worker-pool"` |  |
 | kagent.substrateWorkerPool.priorityClass.value | int | `1000000` |  |
 | kagent.substrateWorkerPool.template.nodeSelector."kubernetes.io/arch" | string | `"amd64"` |  |
 | kagent.substrateWorkerPool.template.resources.requests.cpu | string | `"250m"` |  |

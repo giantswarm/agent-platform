@@ -1399,7 +1399,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # components.kagent.enabled is false.
     priorityClass:
       enabled: true
-      name: agent-platform-substrate-worker
+      name: agent-platform-worker-pool
       value: 1000000
 
   # Keep kagent core resources in a dedicated namespace separate from the

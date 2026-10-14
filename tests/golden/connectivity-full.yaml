@@ -3,7 +3,7 @@
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
 metadata:
-  name: agent-platform-substrate-worker
+  name: agent-platform-worker-pool
   labels:
     app: "agent-platform-connectivity"
     app.kubernetes.io/name: "agent-platform-connectivity"

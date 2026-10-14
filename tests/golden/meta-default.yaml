@@ -1052,7 +1052,7 @@ spec:
           unhealthyPodEvictionPolicy: AlwaysAllow
         priorityClass:
           enabled: true
-          name: agent-platform-substrate-worker
+          name: agent-platform-worker-pool
           value: 1000000
         replicas: 4
         sandboxClass: gvisor
