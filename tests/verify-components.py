@@ -404,6 +404,8 @@ def main(meta: str, connectivity: str) -> int:
     # --- atelet never evicts the cluster's workloads (#731) --------------------------
     if not re.search(r"^atelet:\n(?:  .*\n)*?  priorityClass:\n    preemptionPolicy: Never$", hr_values(substrate_hr), re.M):
         fail("the substrate release does not carry atelet.priorityClass.preemptionPolicy: Never; atelet's PriorityClass preempts lower-priority pods and a first enable over full nodes evicts the cluster's own workloads (#731)")
+    if not re.search(r"^atelet:\n(?:  .*\n)*?  resources:\n(?:    .*\n)*?    requests:\n      cpu: 50m\n      memory: 128Mi$", hr_values(substrate_hr), re.M):
+        fail("the substrate release does not carry atelet.resources.requests {cpu: 50m, memory: 128Mi}; under preemptionPolicy Never a larger request leaves atelet Pending for good on a full node after a roll (#993)")
     print("ok: the substrate release runs atelet on a non-preempting PriorityClass")
 
     # --- the wiring chart is released with the meta chart: one version --------------

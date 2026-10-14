@@ -1337,6 +1337,13 @@ spec:
         nodeSelector: {}
         priorityClass:
           preemptionPolicy: Never
+        resources:
+          limits:
+            cpu: "2"
+            memory: 1Gi
+          requests:
+            cpu: 50m
+            memory: 128Mi
         storageBackend: s3
         tolerations: []
       atenetEgress:
@@ -2391,6 +2398,13 @@ spec:
       nodeSelector: {}
       priorityClass:
         preemptionPolicy: Never
+      resources:
+        limits:
+          cpu: "2"
+          memory: 1Gi
+        requests:
+          cpu: 50m
+          memory: 128Mi
       storageBackend: s3
       tolerations: []
     atenetEgress:
