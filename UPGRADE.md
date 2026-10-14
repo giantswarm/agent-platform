@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.131.0 → \<next\> (kagent: releases only, from 1.11.4)
+
+`components.kagent{,-crds}.versionRange` is `>=1.11.4 <1.12.0`, kagent's releases of the 1.11 line. 4.131.0's range started at a release candidate and so admitted the line's later candidates. An installation that followed one (1.11.5-rc.1) steps back to 1.11.4 on this upgrade: the two share their CRDs and database schema, nothing is migrated and no conversation ends. An installation with `gitops.prereleases` keeps following release candidates, as for every component.
+
+### Operator action
+
+- **None.**
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.11.4`.
+
 ## 4.130.x → \<next\> (Substrate 1.10.2: the egress gateway retries a refused HTTP/2 stream)
 
 `components.substrate{,-crds}.versionRange` selects Substrate 1.10 from 1.10.2 (`>=1.10.2 <1.11.0`, giantswarm/agent-platform#996). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.10.2 (`ateom-gvisor:1.10.2`); the kagent CRDs and the kagent release are unchanged. 1.10 is the line on the same upstream pin as 1.9, so kagent 1.11, built against Substrate 1.9.0, speaks its contract. The step resets nothing: no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes, and a new conversation starts from the template's golden, kept or re-taken on the new workers. 1.10.2 brings:
