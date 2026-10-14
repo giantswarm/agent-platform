@@ -267,9 +267,12 @@ def main(meta: str, connectivity: str) -> int:
         "        url: https://gitlab.example.com:8443\n",
         "    grant:\n      signingKey:\n        key: grant\n        name: workspace-manager-keys\n",
         "    storage:\n      storageClassName: workspaces-rwx\n",
+        # The one key that is not empty: cleanupAfter, derived from kagent's
+        # session idle TTL (tests/verify-session-retention.py).
+        "    sessions:\n      cleanupAfter: 720h\n",
         "\n    global:\n",
     ), "the HelmRelease")
-    for absent in ("requiredAudiences", "authorizationServer", "\n    sync:", "\n    sessions:", "sizing:", "signInStore", "\n    networkPolicy:"):
+    for absent in ("requiredAudiences", "authorizationServer", "\n    sync:", "sizing:", "signInStore", "\n    networkPolicy:"):
         if absent in hr:
             fail(f"the HelmRelease carries {absent.strip()!r}")
     refs = 0
@@ -317,7 +320,7 @@ def main(meta: str, connectivity: str) -> int:
     if any(kind == "MCPServer" for kind, _ in on_docs):
         fail("the meta chart renders an MCPServer: the registration is the component chart's own")
     ok(f"on: one OCIRepository ({rng.group(1)}) + one HelmRelease dependsOn muster and connectivity with the block forwarded "
-       "(Service name, OAuth, the unpinned muster registration, two provider instances, the grant's key, the class), "
+       "(Service name, OAuth, the unpinned muster registration, two provider instances, the grant's key, the class, cleanupAfter from kagent's TTL), "
        f"{refs} credentials all Secret references, the namespace kagent's, empty keys not forwarded; nothing else moved, muster.* included; no MCPServer")
 
     # --- the storage slices' keys beside the switch ----------------------------------------
