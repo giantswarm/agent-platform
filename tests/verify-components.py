@@ -416,9 +416,16 @@ def main(meta: str, connectivity: str) -> int:
     chart_version = lambda d: re.search(r"^version: (\S+)$", open(f"{d}/Chart.yaml").read(), re.M).group(1).strip("'\"")
     if chart_version(meta) != chart_version(connectivity):
         fail(f"the two charts of this repository carry different Chart.yaml versions: agent-platform {chart_version(meta)}, {CONNECTIVITY} {chart_version(connectivity)} — they are published off one tag as one version")
-    conn_oci = off.get(("OCIRepository", CONNECTIVITY))
+    conn_oci = off.get(("OCIRepository", f"{CONNECTIVITY}-{chart_version(meta)}"))
     if not conn_oci or f'semver: "{chart_version(meta)}"' not in conn_oci:
-        fail(f"the connectivity OCIRepository does not carry the meta chart's own version {chart_version(meta)!r} (components.{CONNECTIVITY}.releasedWithChart)")
+        fail(f"the connectivity OCIRepository {CONNECTIVITY}-{chart_version(meta)} does not carry the meta chart's own version {chart_version(meta)!r} (components.{CONNECTIVITY}.releasedWithChart, agent-platform.sourceName)")
+    # The step's values and its chart version change in ONE HelmRelease spec
+    # change: Helm applies the HelmRelease before the OCIRepository (kind order),
+    # so with one source name for every version helm-controller applied a step's
+    # new values to the previous chart, whose closed schema refused the key the
+    # step added (#1019). The chartRef names the source of exactly this version.
+    if f"chartRef:\n    kind: OCIRepository\n    name: {CONNECTIVITY}-{chart_version(meta)}\n" not in off[("HelmRelease", CONNECTIVITY)]:
+        fail(f"the connectivity HelmRelease's chartRef does not name the OCIRepository of its exact version {CONNECTIVITY}-{chart_version(meta)}; new values would reach the previous chart (#1019)")
     # A published build: a pre-release stays (a dev build is one version for the two
     # charts), build metadata goes (helm-controller renders <version>+<oci digest>).
     with tempfile.TemporaryDirectory() as d:
@@ -426,19 +433,23 @@ def main(meta: str, connectivity: str) -> int:
         if r.returncode != 0:
             fail(f"helm package of the meta chart failed:\n{r.stderr}")
         packaged = docs(render(f"{d}/agent-platform-4.99.0-test.1+abc123.tgz", ci))
-        if 'semver: "4.99.0-test.1"' not in packaged[("OCIRepository", CONNECTIVITY)]:
-            fail("the connectivity OCIRepository of a chart packaged as 4.99.0-test.1+abc123 does not carry 4.99.0-test.1 (pre-release kept, build metadata dropped)")
+        if 'semver: "4.99.0-test.1"' not in packaged.get(("OCIRepository", f"{CONNECTIVITY}-4.99.0-test.1"), ""):
+            fail("the connectivity OCIRepository of a chart packaged as 4.99.0-test.1+abc123 is not named for and does not carry 4.99.0-test.1 (pre-release kept, build metadata dropped)")
+        if f"name: {CONNECTIVITY}-4.99.0-test.1\n" not in packaged[("HelmRelease", CONNECTIVITY)]:
+            fail("the connectivity HelmRelease of a chart packaged as 4.99.0-test.1+abc123 does not name the OCIRepository of 4.99.0-test.1")
+        if ("OCIRepository", f"{CONNECTIVITY}-{chart_version(meta)}") in packaged:
+            fail("a chart packaged at another version still renders the previous version's connectivity OCIRepository; the step would apply new values to it")
         if 'semver: ">=4.99.0-test.1 <5.0.0"' not in docs(render(f"{d}/agent-platform-4.99.0-test.1+abc123.tgz", ["--set", "gitops.self.enabled=true"]))[("OCIRepository", "t")]:
             fail("the self OCIRepository's derived range no longer floors at the chart's own version (agent-platform.chartVersion)")
     # A pin at the chart's own repository is the lagging pin; refused. The two
     # development shapes keep their knobs.
     pin = ["--set", f"components.{CONNECTIVITY}.versionRange=4.11.0"]
     render_fails(meta, [*ci, *pin], "released with this chart", "a versionRange on the connectivity component")
-    if 'semver: "4.11.0"' not in docs(render(meta, [*ci, *pin, "--set", f"components.{CONNECTIVITY}.semverFilter=.*-dev\\.x\\..*"]))[("OCIRepository", CONNECTIVITY)]:
+    if 'semver: "4.11.0"' not in docs(render(meta, [*ci, *pin, "--set", f"components.{CONNECTIVITY}.semverFilter=.*-dev\\.x\\..*"]))[("OCIRepository", f"{CONNECTIVITY}-4.11.0")]:
         fail("a connectivity versionRange together with a semverFilter (a dev channel) is not admitted")
-    if 'semver: "4.11.0"' not in docs(render(meta, [*ci, *pin, "--set", f"components.{CONNECTIVITY}.repository=oci://registry.lab.svc:5000/charts"]))[("OCIRepository", CONNECTIVITY)]:
+    if 'semver: "4.11.0"' not in docs(render(meta, [*ci, *pin, "--set", f"components.{CONNECTIVITY}.repository=oci://registry.lab.svc:5000/charts"]))[("OCIRepository", f"{CONNECTIVITY}-4.11.0")]:
         fail("a connectivity versionRange together with another repository (a chart pushed by hand) is not admitted")
-    print(f"ok: the connectivity OCIRepository carries the meta chart's own version ({chart_version(meta)} here; 4.99.0-test.1 for a build packaged as 4.99.0-test.1+abc123), the two Chart.yaml versions are one, a pin at the chart's repository is refused, a dev channel and another repository are admitted")
+    print(f"ok: the connectivity OCIRepository carries the meta chart's own version and is named for it, the HelmRelease's chartRef naming that source ({chart_version(meta)} here; 4.99.0-test.1 for a build packaged as 4.99.0-test.1+abc123), the two Chart.yaml versions are one, a pin at the chart's repository is refused, a dev channel and another repository are admitted")
 
     # --- all on ---------------------------------------------------------------
     on_manifest = render(meta, [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]])

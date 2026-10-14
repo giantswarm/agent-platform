@@ -414,10 +414,14 @@ def check_placement(meta: str) -> None:
             sys.exit(f"FAIL: {kind} {name} is not named after its release")
         if kind == "HelmRelease":
             component = name.removeprefix("wc01-agent-platform-")
-            for line in (f"  releaseName: {component}", "  targetNamespace: agent-platform", "  storageNamespace: agent-platform",
-                         f"    name: {name}"):
+            for line in (f"  releaseName: {component}", "  targetNamespace: agent-platform", "  storageNamespace: agent-platform"):
                 if f"\n{line}\n" not in f"\n{doc}\n":
                     sys.exit(f"FAIL: HelmRelease {name} lacks `{line.strip()}`")
+            # Its chart comes from its own OCIRepository: the child name, or with the
+            # version for a chart released with this one (agent-platform.sourceName).
+            ref = re.search(r"^  chartRef:\n    kind: OCIRepository\n    name: (\S+)$", doc, re.M)
+            if not ref or ("OCIRepository", ref.group(1)) not in one or not (ref.group(1) == name or ref.group(1).startswith(f"{name}-")):
+                sys.exit(f"FAIL: HelmRelease {name} does not take its chart from an OCIRepository of its own: {ref and ref.group(1)}")
             for dep in re.findall(r"^    - name: (\S+)$", doc, re.M):
                 if not dep.startswith("wc01-agent-platform-"):
                     sys.exit(f"FAIL: HelmRelease {name} depends on {dep}, not a child of its own release")
