@@ -199,7 +199,7 @@ help:
   `kubectl get pods -n kagent -l ate.dev/busy=true` lists the busy workers.
   A drift or expiry roll waits for the node's workers to go idle, or until the
   NodePool's `terminationGracePeriod` (the fleet's `30m`). Needs a Substrate
-  release with the marking (giantswarm/substrate#423); an older one ignores
+  release with the marking (giantswarm/substrate#424); an older one ignores
   the key. `{}` turns it off. Karpenter-only, harmless elsewhere.
 - **`kagent.substrateWorkerPool.template.annotations`**
   `karpenter.sh/do-not-disrupt: "true"` (**off**; an installation's choice):
