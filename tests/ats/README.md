@@ -38,7 +38,7 @@ header on muster's in-cluster URL), asserted `Accepted`.
 | Scenario | Module | What it proves |
 |---|---|---|
 | `smoke` | `test_smoke.py` | The quick start on a bare cluster. Prerequisites: the Gateway API CRDs, the lab Dex (`lab-dex.yaml`), an in-cluster registry (`registry.yaml`) the candidate archive is pushed to, together with the connectivity chart packaged from this checkout at the same version (`helm push --plain-http` through a port-forward; the two charts release off one tag and change together, and the published connectivity chart would not carry a PR's connectivity changes — `components.agent-platform-connectivity.{repository,versionRange,insecure}` point the roster at the registry). `helm install --wait` with the scenario's base values file (`helm/agent-platform/examples/kind-lab-dex.yaml` on kind) + `values-kagent.yaml` + `values-round-trips.yaml` and **self-management on against that registry** at the candidate's exact version. Then: deployed, FluxInstance Ready at a Flux 2.x, every component HelmRelease Ready as `agent-platform-flux`, the operator managing the Flux CRDs, the kagent namespace created by the engine; the **adoption** (self HelmRelease Ready, `helm history` = install + one adoption revision); the **auth round trip** (401 with the RFC 9728 chain; a Dex user through the OAuth password grant, trusted audience; the full muster login: RFC 7591 registration, code + PKCE, the Dex form); **Substrate** (the cluster serves `certificates.k8s.io/v1beta1` with `podcertificaterequests` and `clustertrustbundles`; the control plane in `ate-system`, the WorkerPool `kagent-default` with its gVisor worker Running and Ready, the platform Harness pointing at it); the **agent round trips** (a declarative `Agent` on the Harness, its template inline, against the default ModelConfig with a placeholder key, Ready; agent-manager's `create_agent` through muster as the Dex user with `toolset: [preset:read-only]` → the shared OCIRepository on `2.x` + the HelmRelease of the agent chart in `kagent`, executed as `kagent-flux` and composing `agent.harness`, Ready; the `Agent` Ready on the Harness with the display-name annotation and the RemoteMCPServer binding; the agent's `RemoteMCPServer` Accepted; `get_agent_status` `ready`, `list_agents`); the **fixpoint** two intervals after the adoption (history unchanged, the values Secret equals the values used, `helm get values` too); the **refused CLI** (`helm upgrade` fails with the admission policy's message, no revision); the **ordered teardown** (`helm uninstall --wait` rc 0 within budget, no Flux CRD left, the four operator CRDs remaining, no controller, no Job of the release, no release in any state, the policy gone; the **keep policy**: the `kagent-crds` and `substrate-crds` releases are uninstalled with the others and their eight CRDs survive with `helm.sh/resource-policy: keep`, both `Agent`s and the RemoteMCPServer survive in the kept kagent namespace (no AgentTemplate object exists: every agent of the smoke carries its template inline) — their HelmRelease objects went with the Flux CRDs — and nothing else of the runtime does: no Harness, ModelConfig, WorkerPool, worker, controller or Postgres there, no `SandboxConfig`, Substrate's control plane gone). |
-| `functional` | `test_own_flux.py` | A cluster that runs its own Flux. source-controller + helm-controller from the pinned upstream manifest (field manager `flux`), the `kagent` namespace created up front (the cluster owns its namespaces, as the fleet bases do). The chart **through a HelmRelease** in `flux-system` from the in-cluster registry with `components.flux.enabled: false`: Ready, the platform HelmReleases Ready under that Flux without a `serviceAccountName`; **no engine** (no operator, no FluxInstance, one helm-controller, the Flux CRDs' field managers exactly what `flux install` left); **an agent through that Flux** (Substrate through that Flux with its worker Ready; OCIRepository + HelmRelease of the agent chart `2.x` as `kagent-flux`, Ready; the `Agent` Ready on the platform Harness, the agent's `RemoteMCPServer` Accepted); the **render guard** — the value flipped to `true` fails the HelmRelease with `this cluster runs Flux; set components.flux.enabled=false or install the chart through it`: no operator, no FluxInstance, the platform and the agent's template still Ready, the Flux CRDs' content unchanged (helm-controller applies a chart's `crds/` before it renders, so it joins the CRDs' field managers — the same Flux version, identical content; asserted and logged as a finding); flipped back it recovers; **the way back** — the agent's HelmRelease deleted first, then the meta HelmRelease: that Flux uninstalls the seven platform releases concurrently (no hook, no order — helm-controller has no reverse-`dependsOn` uninstall) and every one goes clean because the CRD charts keep their CRDs: no `UninstallFailed`, the eight kept CRDs in place, no `SandboxConfig` or `WorkerPool` left (giantswarm/agent-platform#385); Flux removed last. |
+| `functional` | `test_own_flux.py` | A cluster that runs its own Flux. source-controller + helm-controller from the pinned upstream manifest (field manager `flux`; both with an empty `--events-addr`, what `flux install --components=source-controller,helm-controller` renders — the manifest's address names the notification-controller this install drops, and the recorder would block every reconcile that emits an event for 15 s of retries; helm-controller with the engine's args of `values-kagent.yaml`), the `kagent` namespace created up front (the cluster owns its namespaces, as the fleet bases do). The chart **through a HelmRelease** in `flux-system` from the in-cluster registry with `components.flux.enabled: false`: Ready, the platform HelmReleases Ready under that Flux without a `serviceAccountName`; **no engine** (no operator, no FluxInstance, one helm-controller, the Flux CRDs' field managers exactly what `flux install` left); **an agent through that Flux** (Substrate through that Flux with its worker Ready; OCIRepository + HelmRelease of the agent chart `2.x` as `kagent-flux`, Ready; the `Agent` Ready on the platform Harness, the agent's `RemoteMCPServer` Accepted); the **render guard** — the value flipped to `true` fails the HelmRelease with `this cluster runs Flux; set components.flux.enabled=false or install the chart through it`: no operator, no FluxInstance, the platform and the agent's template still Ready, the Flux CRDs' content unchanged (helm-controller applies a chart's `crds/` before it renders, so it joins the CRDs' field managers — the same Flux version, identical content; asserted and logged as a finding); flipped back it recovers; **the way back** — the agent's HelmRelease deleted first, then the meta HelmRelease: that Flux uninstalls the seven platform releases concurrently (no hook, no order — helm-controller has no reverse-`dependsOn` uninstall) and every one goes clean because the CRD charts keep their CRDs: no `UninstallFailed`, the eight kept CRDs in place, no `SandboxConfig` or `WorkerPool` left (giantswarm/agent-platform#385); Flux removed last. |
 
 The lab shape (`gitops.self.enabled: false`, what agentlab installs — the chart
 under test is unreleased, and a self HelmRelease following the *published*
@@ -89,6 +89,7 @@ connectivity chart the platform Harness. What the smoke sets
 | `substrate.postgres.enabled` | `auto` → the Cluster | `auto` | `postgres.enabled` puts Substrate's database on the Cluster |
 | `kagent.controller.resources.requests.cpu` | 50m | 100m | schedule next to the engine and the platform |
 | `kagent.ui.replicas` | 0 | 1 | nothing in the smoke reaches it; its image is the largest pull |
+| `flux-engine.instance.kustomizePatches` | helm-controller `--requeue-dependency=5s --concurrent=10` | none (Flux's 30 s, 4 workers) | helm-controller re-checks a HelmRelease's `dependsOn` on a fixed timer (Flux 2.9 watches no dependency), so the roster's four-level chain idles up to 30 s at every level; an install with `--wait` holds a worker for as long as the release takes. The own-Flux scenario gives the cluster's helm-controller the same args (`conftest.helm_controller_args` reads this block) |
 
 The control plane the chart renders anyway: `ate-api-server` ×2,
 `ate-controller`, `atelet` (a privileged DaemonSet), `atenet-router`,
@@ -128,21 +129,33 @@ exactly because the CRDs are kept (giantswarm/agent-platform#385; before the
 Substrate line carried the policy, `substrate` raced `substrate-crds` there).
 
 **Measured on CI** (`execute-chart-tests` on the `large` class, cold image
-pulls, [CircleCI job 6033](https://circleci.com/gh/giantswarm/agent-platform/6033)
-of PR #380; each test logs `TIMING <phase>`):
+pulls, [CircleCI job 22572](https://circleci.com/gh/giantswarm/agent-platform/22572)
+of PR #1009; each test logs `TIMING <phase>`, each install the `RELEASE` lines).
+The chain is what it costs: the roster's releases install in dependency order
+(CRDs, muster, dicebear and the CNPG operator together, then connectivity,
+Substrate, kagent, then agent-manager and model-manager), each waited for with
+`--wait`; with the engine's dependency requeue at 5 s a dependent starts
+within 5 s of its dependencies' Ready (the `RELEASE` lines show it). Before
+that requeue, and before the own-Flux controllers ran without an events
+address, the same job took 19 minutes ([job 22479](https://circleci.com/gh/giantswarm/agent-platform/22479)
+on the same commit: 18.1 min; the median of the 144 green runs before it, 19.2).
 
 | Phase | Seconds |
 |---|---|
-| kind create (the job) | 36 |
-| `helm install --wait` (engine, muster + OAuth, dicebear, connectivity, kagent + CRDs, Substrate + CRDs, agent-manager, self on) | 220 |
+| kind create (the job) | 38 |
+| `helm install --wait` (engine, muster + OAuth, dicebear, connectivity, kagent + CRDs, Substrate + CRDs, CNPG, agent-manager, model-manager, self on) | 221 |
 | Substrate ready after the install returned (ate-system, the WorkerPool's worker, the Harness) | 0 |
-| declarative `Agent` Ready on the Harness | 20 |
-| agent-manager `create_agent` → HelmRelease Ready → `Agent` Ready + `RemoteMCPServer` Accepted | 16 |
-| `helm uninstall --wait` (the ordered teardown; budget `UNINSTALL_BUDGET_S` = 120 s) | 31 |
-| own-Flux: platform HelmReleases Ready through the cluster's Flux | 289 |
-| own-Flux: agent through the cluster's Flux (HelmRelease, template Ready, server Accepted) | 36 |
-| own-Flux: the way back — the meta HelmRelease deleted, the seven platform releases uninstalled **concurrently** by the cluster's Flux, the kept CRDs in place (bound `UNINSTALL_THROUGH_FLUX_TIMEOUT_S` = 600 s; [job 6097](https://circleci.com/gh/giantswarm/agent-platform/6097) of PR #390) | 87 |
-| the whole `execute-chart-tests` job | 16:55 min |
+| declarative `Agent` Ready on the Harness | 10 |
+| agent-manager `create_agent` → HelmRelease Ready → `Agent` Ready + `RemoteMCPServer` Accepted | 21 |
+| the Harness deleted and back, both Agents Ready again (drift correction) | 16 |
+| `helm uninstall --wait` (the ordered teardown; budget `UNINSTALL_BUDGET_S` = 120 s) | 38 |
+| the smoke scenario (pytest) | 365 |
+| own-Flux: platform HelmReleases Ready through the cluster's Flux | 162 |
+| own-Flux: agent through the cluster's Flux (HelmRelease, Agent Ready, server Accepted) | 16 |
+| own-Flux: the render guard flipped on and back (refusal, nothing touched, recovery) | 14 |
+| own-Flux: the way back — the meta HelmRelease deleted, the nine platform releases uninstalled **concurrently** by the cluster's Flux, the kept CRDs in place (bound `UNINSTALL_THROUGH_FLUX_TIMEOUT_S` = 600 s) | 6 |
+| the functional scenario (pytest) | 231 |
+| the whole `execute-chart-tests` job | 11:00 min |
 
 ## Render assertions (no cluster)
 
@@ -177,7 +190,12 @@ it at real users or apply it to a cluster you care about (it replaces the
 kube-system CoreDNS Corefile).
 
 Each test logs `TIMING <phase>: <seconds>`; the last test of each module prints
-the table. [The cluster](#the-cluster-kind-with-agent-substrate) above carries
+the table. After each install the scenario logs one `RELEASE <name>` line per
+HelmRelease — created, dependencies ready and how often helm-controller found
+them not ready first, the install's start, Ready — read from the objects and
+helm-controller's log, so the chain's wall clock is readable from the CI log;
+the render guard and the way back log helm-controller's lines for the releases
+they touch. [The cluster](#the-cluster-kind-with-agent-substrate) above carries
 the measured numbers and the long pole.
 
 ## Running against any cluster: `make e2e`

@@ -159,6 +159,15 @@ WIRING_PG_GOLDEN_HOLD_NEW :=
 # and not on a golden from before; it is left out of both sides. Drop it once
 # GOLDEN_REF carries #840.
 WIRING_PG_GOLDEN_DROP := $(DASHBOARDS_GOLDEN_DROP) muster-mcp-egress
+# The RBAC of agent tenants (templates/tenants/, giantswarm/agent-platform#706), by
+# metadata.name: the cluster-scoped roles and bindings, dropped from a render
+# before asserting that the migration or the flux identity holds no other
+# RBAC. TENANT_RBAC_ALL adds muster's MCPServer viewer Role and RoleBinding,
+# which render whether kagent is on or not.
+TENANT_RBAC := agent-platform:user agent-platform:editor agent-platform:admin
+TENANT_RBAC_ALL := $(TENANT_RBAC) agent-platform:mcpserver-viewer
+# New beside GOLDEN_REF: left out of both sides of the postgres golden too.
+WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
 # golden diff (by metadata.name): the v1alpha2 agent Deployments' seccomp
 # PolicyException is gone with them, the kagent controller's ingress policy
@@ -166,9 +175,10 @@ WIRING_PG_GOLDEN_DROP := $(DASHBOARDS_GOLDEN_DROP) muster-mcp-egress
 # Substrate's egress gateway — templates/substrate/netpol.yaml), and `kagent`
 # is the platform Harness the 4.0 connectivity chart renders whenever kagent is
 # on (templates/kagent/harness.yaml — a new object with no 3.x counterpart; its
-# shape is asserted by verify-kagent-harness / verify-kagent-crds). Empty this
-# list once GOLDEN_REF carries the line.
-GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP)
+# shape is asserted by verify-kagent-harness / verify-kagent-crds). The RBAC of
+# agent tenants (#706) is new too: drop TENANT_RBAC_ALL once GOLDEN_REF carries
+# it. Empty this list once GOLDEN_REF carries the line.
+GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP) $(TENANT_RBAC_ALL)
 # Any reference is enough: the assertions read the rendered exception, not the image.
 PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
@@ -2545,6 +2555,7 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@echo "ok: identity rendered"
 	@echo "--> kagent off: neither object, and no kagent Namespace either"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=false >$(VERIFY_TMP)/vid-off.out 2>&1 || { cat $(VERIFY_TMP)/vid-off.out; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vid-off.out "$(TENANT_RBAC_ALL)"
 	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' $(VERIFY_TMP)/vid-off.out; then echo "FAIL: the identity renders with kagent off"; exit 1; else echo "ok: no identity without kagent"; fi
 	@if grep -q '^kind: Namespace$$' $(VERIFY_TMP)/vid-off.out; then echo "FAIL: the kagent Namespace renders with kagent off (an empty Helm-owned namespace)"; exit 1; else echo "ok: no kagent Namespace without kagent"; fi
 	@grep -q '^kind: Namespace$$' $(VERIFY_TMP)/vid-on.out || { echo "FAIL: the kagent Namespace is gone with kagent on"; exit 1; }
@@ -2594,6 +2605,7 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@echo "ok: muster MCP URL — one helper, one consumer (agent-manager muster.url; the portal sends none)"
 	@echo "--> empty value: no identity, agent-manager omits the ServiceAccount"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName= >$(VERIFY_TMP)/vid-empty.out 2>&1 || { cat $(VERIFY_TMP)/vid-empty.out; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vid-empty.out "$(TENANT_RBAC_ALL)"
 	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' $(VERIFY_TMP)/vid-empty.out; then echo "FAIL: an empty kagent.fluxServiceAccountName still renders the identity"; exit 1; fi
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.fluxServiceAccountName= >$(VERIFY_TMP)/vid-meta-empty.out 2>&1 || { cat $(VERIFY_TMP)/vid-meta-empty.out; exit 1; }
 	@grep -q 'helmReleaseServiceAccount: ""' $(VERIFY_TMP)/vid-meta-empty.out || { echo "FAIL: an empty value does not reach agent-manager as an empty ServiceAccount"; exit 1; }
@@ -3682,6 +3694,7 @@ verify-identity-migration: ## Assert the migration holds no cluster-scoped right
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> migration on: no ClusterRole, no ClusterRoleBinding"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vim-on.out 2>&1 || { cat $(VERIFY_TMP)/vim-on.out; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-on.out "$(TENANT_RBAC)"
 	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: a cluster-scoped RBAC object renders with the migration on"; grep -n -A3 -E '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; exit 1; fi
 	@if grep -q 'customresourcedefinitions' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: the migration is granted rights on customresourcedefinitions"; exit 1; fi
 	@echo "ok: nothing cluster-scoped"
@@ -3692,8 +3705,10 @@ verify-identity-migration: ## Assert the migration holds no cluster-scoped right
 	@echo "ok: renamed identity"
 	@echo "--> off: no ClusterRoleBinding with the migration off, with agent-manager off (verify-identity's own kagent-only case), with kagent off"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.enabled=false >$(VERIFY_TMP)/vim-off.out 2>&1 || { cat $(VERIFY_TMP)/vim-off.out; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-off.out "$(TENANT_RBAC)"
 	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-off.out; then echo "FAIL: a cluster-scoped object renders with the migration off"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) >$(VERIFY_TMP)/vim-noam.out 2>&1 || { cat $(VERIFY_TMP)/vim-noam.out; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-noam.out "$(TENANT_RBAC)"
 	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-noam.out; then echo "FAIL: a cluster-scoped object renders with agent-manager off"; exit 1; fi
 	@echo "ok: none while off"
 	@echo "ok: $@"
@@ -3820,6 +3835,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 		[ "$$(grep -c 'verbs: \["get", "list"\]' $(VERIFY_TMP)/vmig-role-$$ns.out)" = "2" ] || { echo "FAIL: the Role in $$ns grants more than get, list"; exit 1; }; \
 		$(PICK) $(VERIFY_TMP)/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: kagent-flux' || { echo "FAIL: the RoleBinding in $$ns does not bind the tenant identity"; exit 1; }; \
 	done
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vmig-gitops.out "$(TENANT_RBAC)"
 	@if grep -q '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vmig-gitops.out; then echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; fi
 	@$(PICK) $(VERIFY_TMP)/vmig-gitops.out CronJob $(MIGRATION_JOB) kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
 	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-role-flux-giantswarm.out; then echo "FAIL: the GitOps-namespace Role is a hook resource"; exit 1; fi
@@ -4324,6 +4340,13 @@ verify-kagent-oauth2-proxy-image: ## Assert kagent's oauth2-proxy runs the gsoci
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-oauth2-proxy-image.py $(CHART_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-tenant-rbac
+verify-tenant-rbac: ## Assert the RBAC of agent tenants (giantswarm/agent-platform#706): with kagent on, the three ClusterRoles agent-platform:user, :editor and :admin nest, the user writes nothing, the editor writes what agent-manager writes as the caller, the admin writes ModelConfigs and RoleBindings and binds the three roles only, none escalates; the platform tenant's RoleBindings in the kagent namespace (tenants.platform.users, tenants.platform.editors plus tenants.platformTeam; none for an empty list; none with kagent off); muster's MCPServers listed to tenants.platform.users in the release namespace; the meta chart appends tenants.platformTeam to muster's editor subjects. Needs PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-tenant-rbac.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-login-public-paths

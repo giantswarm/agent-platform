@@ -126,7 +126,10 @@ derived one, otherwise the render fails naming the single key to set — a silen
 overwrite would hide a values file that still spells the old key.
   muster: muster.extraCaFile.secret from global.identity.ca (secretName, key
     default ca.crt) while muster names no CA Secret of its own — the issuer's
-    private CA its OAuth server verifies the provider against.
+    private CA its OAuth server verifies the provider against. And
+    rbac.mcpServerEditor.subjects and rbac.workflowEditor.subjects: the
+    block's own subjects with tenants.platformTeam appended (each subject
+    once), while that list is not empty.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
                  muster.url from the muster Service (agent-platform.musterMcpUrl);
                  kagent.controllerTarget, the kagent controller its session
@@ -440,6 +443,21 @@ and muster never turns Ready (giantswarm/agent-platform#309). */ -}}
 {{- $ca := dig "identity" "ca" dict (.root.Values.global | default dict) -}}
 {{- if and $ca.secretName (not (dig "muster" "extraCaFile" "secret" "name" "" (.root.Values.muster | default dict))) -}}
 {{- $_ := set $derived "muster" (dict "extraCaFile" (dict "secret" (dict "name" $ca.secretName "key" ($ca.key | default "ca.crt")))) -}}
+{{- end -}}
+{{- /* The customer's platform team writes the servers and workflows of
+muster's namespace beside the Giant Swarm admin groups
+(giantswarm/agent-platform#706): tenants.platformTeam is appended to both
+editor bindings' subjects, so an installation names its team without
+repeating the admin groups. */ -}}
+{{- with (.root.Values.tenants | default dict).platformTeam -}}
+{{- $team := . -}}
+{{- $rbac := dict -}}
+{{- range $role := list "mcpServerEditor" "workflowEditor" -}}
+{{- $subjects := dig "rbac" $role "subjects" list ($.root.Values.muster | default dict) -}}
+{{- range $team -}}{{- if not (has . $subjects) -}}{{- $subjects = append $subjects . -}}{{- end -}}{{- end -}}
+{{- $_ := set $rbac $role (dict "subjects" $subjects) -}}
+{{- end -}}
+{{- $_ := set $derived "rbac" $rbac -}}
 {{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
