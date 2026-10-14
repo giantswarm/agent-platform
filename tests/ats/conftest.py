@@ -184,8 +184,8 @@ READY_TIMEOUT_S = SCENARIO.ready_timeout_s
 # The self HelmRelease's interval: the fixpoint test waits two of them after
 # the adoption, and 30 s lets both pass while the round trips run instead of
 # idling; two reconciles of a chart already in sync cost the engine nothing.
-SELF_INTERVAL = "1m"
-SELF_INTERVAL_S = 60
+SELF_INTERVAL = "30s"
+SELF_INTERVAL_S = 30
 
 
 def self_management_sets(version: str) -> List[str]:
