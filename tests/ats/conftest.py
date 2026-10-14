@@ -765,10 +765,9 @@ def wait_for_endpoints(kube: Kube, namespace: str, service: str, timeout: float 
 HELM_CONTROLLER_ARGS_PATH = "/spec/template/spec/containers/0/args/-"
 # The log lines that mark a HelmRelease's progress through helm-controller.
 HELM_CONTROLLER_EVENTS = ("checking ", "all dependencies are ready", "running '", "dependencies do not meet",
-                          " succeeded", "failed", "release in-sync", "uninstall", "wait", "source", "artifact",
-                          "chart", "error", "not ready", "fetch", "stored", "retry", "stall", "reconcil")
+                          " succeeded", "failed", "release in-sync", "uninstall", "error", "stall")
 # The log lines that mark a source's progress through source-controller.
-SOURCE_CONTROLLER_EVENTS = ("stored artifact", "artifact up-to-date", "fetch", "error", "reconciliation finished", "garbage")
+SOURCE_CONTROLLER_EVENTS = ("stored artifact", "error", "fail")
 
 
 def now_rfc3339() -> str:

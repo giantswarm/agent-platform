@@ -234,13 +234,23 @@ def own_flux(kube: Kube, prerequisites: None) -> Iterator[None]:
     docs = [d for d in yaml.safe_load_all(r.text) if d]
     keep = [d for d in docs if ((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/component", "") in FLUX_COMPONENTS | {""}]
     dropped = sorted({((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/component") for d in docs} - FLUX_COMPONENTS - {None})
-    # The cluster's helm-controller runs with the args the smoke gives the
-    # bundled engine (values-kagent.yaml: the dependency requeue), so the chain
-    # installs on one setting in both scenarios.
+    # Both controllers get an empty --events-addr, what `flux install
+    # --components=source-controller,helm-controller` renders: the release
+    # manifest's address names the notification-controller this install drops,
+    # and the recorder posts every event there synchronously, five attempts
+    # with backoff — 15 s out of every reconcile that emits one (an artifact
+    # stored, an install succeeded, a render refused). The cluster's
+    # helm-controller also runs with the args the smoke gives the bundled
+    # engine (values-kagent.yaml: the dependency requeue, the workers), so the
+    # chain installs on one setting in both scenarios.
     extra_args = helm_controller_args()
     for d in keep:
-        if d.get("kind") == "Deployment" and d["metadata"]["name"] == "helm-controller":
-            d["spec"]["template"]["spec"]["containers"][0].setdefault("args", []).extend(extra_args)
+        if d.get("kind") != "Deployment":
+            continue
+        container = d["spec"]["template"]["spec"]["containers"][0]
+        container["args"] = ["--events-addr=" if a.startswith("--events-addr=") else a for a in container.get("args", [])]
+        if d["metadata"]["name"] == "helm-controller":
+            container["args"].extend(extra_args)
     STATE.flux_manifest = keep
     kube.cmd(["apply", "--server-side", f"--field-manager={FLUX_FIELD_MANAGER}", "-f", "-"], stdin=yaml.safe_dump_all(keep))
     for name in sorted(FLUX_COMPONENTS):
