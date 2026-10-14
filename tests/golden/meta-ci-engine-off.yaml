@@ -1336,7 +1336,7 @@ spec:
           pinnedImages: []
         nodeSelector: {}
         priorityClass:
-          preemptionPolicy: Never
+          preemptionPolicy: PreemptLowerPriority
         resources:
           limits:
             cpu: "2"
@@ -2397,7 +2397,7 @@ spec:
       extraEnv: []
       nodeSelector: {}
       priorityClass:
-        preemptionPolicy: Never
+        preemptionPolicy: PreemptLowerPriority
       resources:
         limits:
           cpu: "2"

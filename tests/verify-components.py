@@ -401,12 +401,12 @@ def main(meta: str, connectivity: str) -> int:
     if pinned_images(["--set", f"substrate.atelet.imageCache.pinnedImages[0]={extra}"]) != [extra]:
         fail("an installation's own substrate.atelet.imageCache.pinnedImages is not forwarded verbatim")
     print("ok: the substrate release pins atelet's runtime images from the kagent release's ConfigMap, an installation's own list only when set")
-    # --- atelet never evicts the cluster's workloads (#731) --------------------------
-    if not re.search(r"^atelet:\n(?:  .*\n)*?  priorityClass:\n    preemptionPolicy: Never$", hr_values(substrate_hr), re.M):
-        fail("the substrate release does not carry atelet.priorityClass.preemptionPolicy: Never; atelet's PriorityClass preempts lower-priority pods and a first enable over full nodes evicts the cluster's own workloads (#731)")
+    # --- atelet gets its node back (#993) ------------------------------------------
+    if not re.search(r"^atelet:\n(?:  .*\n)*?  priorityClass:\n    preemptionPolicy: PreemptLowerPriority$", hr_values(substrate_hr), re.M):
+        fail("the substrate release does not carry atelet.priorityClass.preemptionPolicy: PreemptLowerPriority; under Never an atelet whose node another pod filled stays Pending for good and the node places no actor (#993)")
     if not re.search(r"^atelet:\n(?:  .*\n)*?  resources:\n(?:    .*\n)*?    requests:\n      cpu: 50m\n      memory: 128Mi$", hr_values(substrate_hr), re.M):
-        fail("the substrate release does not carry atelet.resources.requests {cpu: 50m, memory: 128Mi}; under preemptionPolicy Never a larger request leaves atelet Pending for good on a full node after a roll (#993)")
-    print("ok: the substrate release runs atelet on a non-preempting PriorityClass")
+        fail("the substrate release does not carry atelet.resources.requests {cpu: 50m, memory: 128Mi}; a larger request evicts a pod on every full node at the roll (#993)")
+    print("ok: the substrate release runs atelet on a PriorityClass that preempts lower-priority pods, at 50m / 128Mi")
 
     # --- the wiring chart is released with the meta chart: one version --------------
     # The OCIRepository carries the meta chart's own exact version, never a range
