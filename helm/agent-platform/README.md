@@ -809,6 +809,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.substrate.atenetRouterURL | string | `"http://atenet-router.ate-system.svc:80"` |  |
 | kagent.controller.auth.mode | string | `"trusted-proxy"` |  |
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
+| kagent.controller.sessionIdleTTL | string | `"720h"` |  |
 | kagent.controller.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | kagent.controller.pdb.enabled | bool | `true` |  |
 | kagent.controller.pdb.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |

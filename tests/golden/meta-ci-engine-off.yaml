@@ -615,6 +615,7 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
+        sessionIdleTTL: 720h
         substrate:
           ateApiEndpoint: dns:///api.ate-system.svc:443
           atenetRouterURL: http://atenet-router.ate-system.svc:80
@@ -1803,6 +1804,7 @@ spec:
         requests:
           cpu: 100m
           memory: 128Mi
+      sessionIdleTTL: 720h
       substrate:
         ateApiEndpoint: dns:///api.ate-system.svc:443
         atenetRouterURL: http://atenet-router.ate-system.svc:80
