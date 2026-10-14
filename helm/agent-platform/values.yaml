@@ -636,6 +636,10 @@ components:  # @schema additionalProperties: true
       # The worker PodDisruptionBudget is the connectivity chart's (the kagent
       # chart has no budget template for the WorkerPool; #472).
       - substrateWorkerPool.podDisruptionBudget
+      # The workers' PriorityClass is the connectivity chart's object too; the
+      # kagent release gets only the class name in the pool's template
+      # (agent-platform.componentDerivedValues, #999).
+      - substrateWorkerPool.priorityClass
     # The kagent chart stamps its own image references at publish (the build's
     # controller/UI tag, the Go ADK digest the Harness runs, the gVisor worker
     # of the Substrate version it was built against). An installation may
@@ -2939,9 +2943,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # pool's Deployment once (above).
     #
     # Atelet affinity. A worker runs sandboxes only through the atelet on its
-    # node, and atelet's PriorityClass never preempts: while the atelet
-    # DaemonSet rolls on a full node, a worker scheduled in the gap takes the
-    # CPU the old atelet pod freed and the rollout stops there. From the
+    # node, and while the atelet DaemonSet rolls on a full node, a worker
+    # scheduled in the gap takes the CPU the old atelet pod freed. From the
     # Substrate line's 1.3.0 on (agent-platform.substrate
     # .workerPoolAffinityFloor) the chart DERIVES template.podAffinity, a
     # preferred term (weight 100) on the atelet pods (app: atelet in
@@ -2953,11 +2956,28 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # (giantswarm/agent-platform#798). An installation's own podAffinity
     # stands instead of the derived one (keep the atelet term in it, never
     # required); below 1.3.0 the key is refused.
+    #
+    # Priority (giantswarm/agent-platform#999). atelet's PriorityClass
+    # (ate-node-critical, PreemptLowerPriority) evicts the lowest-priority pods
+    # of a full node to make room, and a worker without a class runs at the
+    # default priority 0 — among the first victims, its actor with it. The
+    # connectivity chart ships priorityClass (below; never forwarded to the
+    # kagent release) and the chart DERIVES template.priorityClassName from
+    # its name: the ordinary workloads at 0 are evicted before a worker, the
+    # cluster's own classes (monitoring, the platform's, atelet's) still
+    # outrank it. An installation's own template.priorityClassName stands
+    # instead; enabled: false renders no class and names none. Setting or
+    # moving the name is a template change: it rolls the pool's Deployment
+    # once (above).
     podDisruptionBudget:
       enabled: true
       minAvailable: null
       maxUnavailable: 1
       unhealthyPodEvictionPolicy: AlwaysAllow
+    priorityClass:
+      enabled: true
+      name: agent-platform-substrate-worker
+      value: 1000000
     template:
       nodeSelector:
         kubernetes.io/arch: amd64

@@ -1,4 +1,23 @@
 ---
+# Source: agent-platform-connectivity/templates/kagent/workerpool-priorityclass.yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: agent-platform-substrate-worker
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: substrate-worker-pool
+value: 1000000
+globalDefault: false
+preemptionPolicy: Never
+description: "The worker pods of the Substrate WorkerPool kagent's actors run on (kagent.substrateWorkerPool.priorityClass): above the default priority 0, so a pod that makes room on a full node evicts the ordinary workloads before a worker, and below the cluster's own classes. Shipped by the agent-platform connectivity chart with the kagent component."
+---
 # Source: agent-platform-connectivity/templates/namespace.yaml
 # The kagent namespace, adopted where the cluster created it (a management
 # cluster's bases, the bundled engine's kagent HelmRelease with
