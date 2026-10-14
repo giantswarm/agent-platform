@@ -248,7 +248,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.3.5
+          tag: 2.3.6
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -279,7 +279,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.3.5
+          tag: 2.3.6
       resources:
         limits:
           cpu: 500m
@@ -1624,7 +1624,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.3.5
+        tag: 2.3.6
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1677,7 +1677,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.3.5
+        tag: 2.3.6
     resources:
       limits:
         cpu: 500m
@@ -1968,7 +1968,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.9.0
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.10.2
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -2970,7 +2970,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.9.0 <1.10.0"
+    semver: ">=1.10.2 <1.11.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2993,7 +2993,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.9.0 <1.10.0"
+    semver: ">=1.10.2 <1.11.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
