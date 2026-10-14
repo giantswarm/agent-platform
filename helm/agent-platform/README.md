@@ -79,13 +79,19 @@ pool is the platform's only capacity and scheduling knob, since the Generic agen
 chart 1.x carries no per-agent `runtime`, `replicas`, `resources`, `nodeSelector`
 or `tolerations`.
 
-- **One worker hosts one actor at a time.** `kagent.substrateWorkerPool.replicas`
-  (default `4`) therefore bounds the number of agents that can be *active at once*;
-  an idle agent holds no worker. Raise it for more concurrency — the node pool
-  budgets `replicas × the worker's limits`.
-- **A worker's resources are one agent's sandbox.**
-  `kagent.substrateWorkerPool.template.resources.limits` bound a single agent: the
-  memory limit its RAM, the CPU limit its vCPU count. The defaults request
+- **A worker hosts many actors at once.** A Substrate worker (`ateom`) runs up to
+  its `--max-actors` actors, default `1000`; the flag is the worker's own and no
+  `WorkerPool` field or chart value sets it, so every worker of the pool takes the
+  default and answers `worker is full` beyond it. `kagent.substrateWorkerPool.replicas`
+  (default `4`) therefore sets the pool's actor ceiling (`replicas × 1000`) and
+  its failure domain; in practice the worker's `resources.limits`, shared by the
+  actors it hosts, bound the concurrently active agents long before the count
+  does. An idle agent holds no worker. Raise `replicas` for more capacity — the
+  node pool budgets `replicas × the worker's limits`.
+- **A worker's resources are shared by its actors' sandboxes.**
+  `kagent.substrateWorkerPool.template.resources.limits` bound the worker, and with
+  it the sum of the sandboxes it hosts (a sandbox's memory is RAM of the worker,
+  its CPU counts against the worker's vCPUs). The defaults request
   `250m` / `512Mi` and limit to `2` vCPU / `2Gi`. Measured in agentlab: an idle
   worker holds ~16Mi and a golden-booted actor ~20Mi; a Go ADK turn's working set
   (the model client, tool calls and gVisor overhead) stays well under `2Gi`.
@@ -279,7 +285,7 @@ Two replicas are the long-term answer for the stateless components; the budgets 
 
 muster-valkey — muster's OAuth token store, one replica on an RWO volume — carries the same two guards (giantswarm/agent-platform#439): `karpenter.sh/do-not-disrupt` through the valkey subchart's `valkey.valkey.podAnnotations`, and a `PodDisruptionBudget muster-valkey` (`valkey.podDisruptionBudget`, `minAvailable: 1`, `AlwaysAllow`) rendered by the connectivity chart, since neither the wrapper nor the upstream subchart has a budget knob. The budget key never reaches the valkey release (`components.valkey.omitKeys`).
 
-The Substrate worker pool — four workers, one actor each, every agent's runtime — carries a budget of a different shape (giantswarm/agent-platform#472): `kagent.substrateWorkerPool.podDisruptionBudget`, `maxUnavailable: 1`, rendered by the connectivity chart in the kagent namespace on the pods labelled `ate.dev/worker-pool: <pool>`, so a voluntary drain moves one worker at a time and the pool keeps three. No `karpenter.sh/do-not-disrupt` by default — it stays a documented knob of the pool template, with the on-demand capacity-type selector, in "The one pool is the failure domain" above.
+The Substrate worker pool — four workers, each hosting many actors, every agent's runtime — carries a budget of a different shape (giantswarm/agent-platform#472): `kagent.substrateWorkerPool.podDisruptionBudget`, `maxUnavailable: 1`, rendered by the connectivity chart in the kagent namespace on the pods labelled `ate.dev/worker-pool: <pool>`, so a voluntary drain moves one worker at a time and the pool keeps three. No `karpenter.sh/do-not-disrupt` by default — it stays a documented knob of the pool template, with the on-demand capacity-type selector, in "The one pool is the failure domain" above.
 
 ## Placement of the stateful singletons
 

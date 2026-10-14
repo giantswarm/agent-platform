@@ -1371,8 +1371,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # the kagent namespace, named after the pool and selecting
     # `ate.dev/worker-pool: <name>` — the label Substrate's ate-controller puts
     # on every worker pod (giantswarm/agent-platform#472, the #439 pattern; the
-    # kagent chart has no budget template). One worker hosts one actor at a
-    # time: with maxUnavailable: 1 a voluntary drain (Karpenter consolidation,
+    # kagent chart has no budget template). A worker hosts many actors (ateom's
+    # --max-actors, default 1000): with maxUnavailable: 1 a voluntary drain (Karpenter consolidation,
     # a node roll) moves one worker at a time instead of the whole pool;
     # AlwaysAllow keeps a worker that is not Ready evictable. Exactly one of
     # minAvailable / maxUnavailable (int or percentage); the render refuses

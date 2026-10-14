@@ -80,7 +80,7 @@ connectivity chart the platform Harness. What the smoke sets
 
 | Value | Smoke | Chart default | Why |
 |---|---|---|---|
-| `kagent.substrateWorkerPool.replicas` | 1 | 4 | one worker hosts one actor at a time; the smoke's templates boot in turn |
+| `kagent.substrateWorkerPool.replicas` | 1 | 4 | a worker hosts up to 1000 actors (`--max-actors`); one worker is enough for the smoke |
 | `kagent.substrateWorkerPool.template.resources` | 100m / 256Mi, limits 1 CPU / 1Gi | 250m / 512Mi, 2 / 2Gi | a golden boot, not a turn |
 | `kagent.harness.snapshotLocation` | `s3://ate-snapshots/kagent` | required, unset | the bundled RustFS bucket below |
 | `substrate.rustfs.enabled` | `true` | `false` | the in-cluster S3 store with the chart's static lab credentials (an installation names its own bucket) |

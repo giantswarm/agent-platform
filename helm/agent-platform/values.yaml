@@ -2807,8 +2807,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
 
   # The Substrate WorkerPool (ate.dev/v1alpha1) the platform Harness runs on,
   # rendered by the kagent chart in the kagent namespace: platform capacity,
-  # not an agent's — one worker hosts one actor at a time, so replicas bound
-  # the concurrently active agents, and a worker's resources bound a sandbox.
+  # not an agent's — a worker hosts up to ateom's --max-actors actors (default
+  # 1000, set by no value here), so replicas × that bound the actors and a
+  # worker's resources are shared by the sandboxes it hosts.
   # workerImage is the gVisor worker of the Substrate release the cluster runs:
   # the Giant Swarm Substrate line (giantswarm/substrate, published as
   # gsoci.azurecr.io/giantswarm/substrate/*, tagged with the bare version —
@@ -2883,10 +2884,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # reaches the WorkerPool as written.
     #
     # resources is the platform's capacity knob (giantswarm/agent-platform#344,
-    # bumblebee-plans#51 D5). One worker hosts one actor at a time, so a
-    # worker's limits bound one agent's sandbox — the memory limit its RAM, the
-    # CPU limit its vCPU count — and replicas (above) bound the concurrently
-    # active agents. Sizing (measured in agentlab): an idle worker holds ~16Mi
+    # bumblebee-plans#51 D5). A worker hosts up to ateom's --max-actors
+    # actors (default 1000, set by no value here), so a worker's limits are
+    # shared by the sandboxes it hosts — the memory limit their RAM, the CPU
+    # limit their vCPUs — and replicas (above) multiply the capacity. Sizing (measured in agentlab): an idle worker holds ~16Mi
     # and a golden-booted actor ~20Mi; a Go ADK turn's working set (its model
     # client, tool calls and the gVisor overhead) is what the limit bounds. The
     # defaults give one agent up to 2 vCPU / 2Gi and reserve 250m / 512Mi — the
