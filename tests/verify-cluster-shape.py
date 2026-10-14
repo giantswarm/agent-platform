@@ -57,8 +57,8 @@ SHAPES = {
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
 # kagent, agent-sandbox and postgres on, so every gated object is reachable.
 ON = [
-    "--set", "components.kagent.enabled=true",
-    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+    "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
+    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     # Agent Substrate follows kagent in the meta chart's roster; the connectivity
     # chart, rendered on its own below, reads the roster — so both are set. Its
     # four PolicyExceptions are the kyverno.io objects the Kyverno cases count.

@@ -873,12 +873,8 @@ spec:
           namespace: envoy-gateway-system
       database:
         postgres:
-          bundled:
-            image:
-              name: pgvector
-              repository: pgvector
-              tag: pg18-trixie
           vectorEnabled: true
+          vectorSchema: public
       fluxServiceAccountName: kagent-flux
       fullnameOverride: kagent
       grafana-mcp:
@@ -1552,6 +1548,13 @@ spec:
         nodeSelector: {}
         priorityClass:
           preemptionPolicy: Never
+        resources:
+          limits:
+            cpu: "2"
+            memory: 1Gi
+          requests:
+            cpu: 50m
+            memory: 128Mi
         storageBackend: s3
         tolerations: []
       atenetEgress:

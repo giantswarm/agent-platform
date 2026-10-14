@@ -98,7 +98,7 @@ FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2
               "--api-versions", "gateway.networking.k8s.io/v1", "--api-versions", "gateway.envoyproxy.io/v1alpha1"]
 # No ingress.parentRefs: the slice runs no muster, so it needs no edge Gateway
 # (#490) — its Gateway is the models Gateway.
-VM = ["--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", *FLEET_APIS]
+VM = ["--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", *FLEET_APIS]
 # The installation's platform inputs the profile is layered over.
 INSTALLATION = ["--namespace", "agent-platform", "--set", "global.domain=wc01.example.com", "--set", "global.identity.issuerUrl=https://dex.mc.example.com",
                 "--set", "gatewayApi.gateway.tls.secretName=wildcard-tls"]

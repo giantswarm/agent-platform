@@ -30,7 +30,7 @@ FIXTURE = "tests/fixtures/workspaces-values.yaml"
 BASE = [
     "--set", "components.flux.enabled=false",
     "--set", "components.klaus-gateway.enabled=true",
-    "--set", "kagent.harness.snapshotLocation=s3://ci/agents",
+    "--set", "kagent.harness.snapshotLocation=s3://ci/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
 ]
 ON = ["-f", FIXTURE]
 FLOOR = ["--set", "components.klaus-gateway.versionRange=>=4.3.0 <5.0.0"]

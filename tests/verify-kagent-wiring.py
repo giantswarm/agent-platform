@@ -92,10 +92,13 @@ LINE_IMAGES = "giantswarm/kagent"
 # another upstream release) or its release candidates, not the next major.
 ADMITTED = ["{floor}", "{floor_patch}", "{floor_patch_tenfold}"]
 REFUSED = ["{last_coupled}",
-           "{floor}-r588f3d76t20260924050320h8e763ab", "{floor_patch}-r588f3d76t20260924050320h8e763ab",
-           "{floor}-dev.giantswarm.2026-09-19.00-00-00.h0000000", "{floor_patch}-dev.giantswarm.2026-09-19.00-00-00.h0000000",
+           "{floor_base}-r588f3d76t20260924050320h8e763ab", "{floor_patch}-r588f3d76t20260924050320h8e763ab",
+           "{floor_base}-dev.giantswarm.2026-09-19.00-00-00.h0000000", "{floor_patch}-dev.giantswarm.2026-09-19.00-00-00.h0000000",
            "{next_minor}-rc.1", "{next_minor}", "{next_major}"]
 STABLE_FLOOR = "1.0.0"  # the line's first release of its own stable semver
+# agent-platform.releaseTagFilter: stable releases and release candidates, the
+# filter a release candidate's floor renders.
+RELEASE_TAG_FILTER = r"^v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$"
 LAST_COUPLED = "0.11.0-gs.22"  # the line's last release under the coupled scheme, below every stable range
 EXAMPLE_AGENTS = ["k8s-agent", "kgateway-agent", "istio-agent", "promql-agent", "observability-agent",
                   "argo-rollouts-agent", "helm-agent", "cilium-policy-agent", "cilium-manager-agent", "cilium-debug-agent"]
@@ -140,11 +143,12 @@ def scalar(lines: list[str], key: str) -> str:
     return ""
 
 
-def source(lines: list[str]) -> tuple[str, str, bool]:
+def source(lines: list[str]) -> tuple[str, str, str]:
     text = "\n".join(lines)
     url = re.search(r"^  url: (\S+)$", text, re.M).group(1)
     semver = re.search(r'^    semver: "([^"]+)"$', text, re.M).group(1)
-    return url, semver, "semverFilter" in text
+    flt = re.search(r'^    semverFilter: "(.*)"$', text, re.M)
+    return url, semver, flt.group(1).replace("\\\\", "\\") if flt else ""
 
 
 def depends_on(lines: list[str]) -> list[str]:
@@ -267,29 +271,33 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
 
 
 def check_sources(docs, kagent_range: str) -> None:
+    floor = kagent_range.split()[0].lstrip(">=")
+    rc_floor = floor != fluxsemver.base(floor)
     for name in ("kagent", "kagent-crds"):
         url, semver, filtered = source(docs[("OCIRepository", name)])
         if url != f"{LINE_REPOSITORY}/{name}":
             fail(f"{name} OCIRepository url is {url}, not {LINE_REPOSITORY}/{name} (the line's charts)")
         if semver != kagent_range:
             fail(f"{name} OCIRepository range is {semver!r}; kagent and kagent-crds are one build of the line and share {kagent_range!r}")
-        if filtered:
-            fail(f"{name} OCIRepository carries a semverFilter by default; the release range selects releases, a filter is a consumer's dev-channel knob")
-    floor = kagent_range.split()[0].lstrip(">=")
-    if floor != fluxsemver.base(floor):
-        fail(f"components.kagent.versionRange {kagent_range!r} has a prerelease floor; the line's releases are stable semver")
-    if "-" in kagent_range:
-        fail(f"components.kagent.versionRange {kagent_range!r} carries a prerelease bound: Flux's Masterminds semver evaluates every prerelease against a range as soon as one bound carries one, so a -0 here would put every installation on the line's newest dev build")
-    major, minor, patch = (int(x) for x in floor.split("."))
-    shapes = {"floor": floor, "floor_patch": f"{major}.{minor}.{patch + 7}", "floor_patch_tenfold": f"{major}.{minor}.{patch + 10}",
+        if filtered != (RELEASE_TAG_FILTER if rc_floor else ""):
+            fail(f"{name} OCIRepository semverFilter is {filtered!r}; the release range selects releases, a filter is a consumer's dev-channel knob — but a release candidate's floor, which renders the release tag filter {RELEASE_TAG_FILTER!r}")
+    if not re.fullmatch(r">=\d+\.\d+\.\d+(-rc\.\d+)? <\d+\.\d+\.0(-0)?", kagent_range) or rc_floor != kagent_range.endswith("-0"):
+        fail(f"components.kagent.versionRange {kagent_range!r} is not `>=X.Y.Z <X.(Y+1).0` or a release candidate's floor `>=X.Y.Z-rc.N <X.(Y+1).0-0`: Flux's Masterminds semver evaluates every prerelease against a range as soon as one bound carries one, so any other prerelease bound puts installations on the line's dev builds or the next minor's candidates")
+    base = fluxsemver.base(floor)
+    major, minor, patch = (int(x) for x in base.split("."))
+    shapes = {"floor": floor, "floor_base": base, "floor_patch": f"{major}.{minor}.{patch + 7}", "floor_patch_tenfold": f"{major}.{minor}.{patch + 10}",
               "last_coupled": LAST_COUPLED, "next_minor": f"{major}.{minor + 1}.0", "next_major": f"{major + 1}.0.0"}
+
+    def resolves(v: str) -> bool:
+        return (not rc_floor or re.search(RELEASE_TAG_FILTER, v) is not None) and fluxsemver.satisfies(v, kagent_range)
+
     for template in ADMITTED:
         v = template.format(**shapes)
-        if not fluxsemver.satisfies(v, kagent_range):
+        if not resolves(v):
             fail(f"components.kagent.versionRange {kagent_range!r} does not admit {v} (a release of the line's pinned upstream version)")
     for template in REFUSED:
         v = template.format(**shapes)
-        if fluxsemver.satisfies(v, kagent_range):
+        if resolves(v):
             fail(f"components.kagent.versionRange {kagent_range!r} admits {v}; the range must select the line's releases of one upstream version only")
     deps = depends_on(docs[("HelmRelease", "kagent")])
     for dep, why in (("kagent-crds", "its CRDs are their own chart"), ("substrate-crds", "its WorkerPool is an ate.dev CR"),
