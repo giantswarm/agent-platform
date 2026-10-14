@@ -333,7 +333,7 @@ spec:
   serviceAccountName: agent-platform-flux
   chartRef:
     kind: OCIRepository
-    name: agent-platform-connectivity
+    name: agent-platform-connectivity-1.1.35
     namespace: default
   install:
     createNamespace: true
@@ -2256,7 +2256,7 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
-  name: agent-platform-connectivity
+  name: agent-platform-connectivity-1.1.35
   namespace: default
   labels:
     app: "agent-platform"

@@ -3026,6 +3026,27 @@ Usage: include "agent-platform.childName" (dict "root" $ "name" $chart)
 {{- end -}}
 
 {{/*
+The name of a component's OCIRepository, which its HelmRelease's chartRef names:
+the child name, and for a chart released with this chart at an exact version
+(components.<name>.releasedWithChart) `<child>-<version>`. Helm applies the two
+objects in kind order, HelmRelease before OCIRepository, so with one name for
+every version helm-controller would apply a step's new values to the previous
+chart, whose closed schema refuses a key the step adds, and spend a retry
+(giantswarm/agent-platform#1019). A versioned name moves the version into the
+HelmRelease's own spec: helm-controller waits until the source of that name
+holds that version's artifact, and the previous source is pruned with the step.
+A range or a dev channel keeps the child name.
+Usage: include "agent-platform.sourceName" (dict "child" $child "entry" $c "semver" $semver)
+*/}}
+{{- define "agent-platform.sourceName" -}}
+{{- if and .entry.releasedWithChart (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" .semver) -}}
+{{- printf "%s-%s" .child (regexReplaceAll "[^a-z0-9.-]+" (lower (trimPrefix "v" .semver)) "-") -}}
+{{- else -}}
+{{- .child -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Render guard of the target knob: the components install into the target through
 the installation's helm-controller, so the bundled engine has no place in such a
 release — no Flux is ever installed into a workload cluster, nor into a cluster
