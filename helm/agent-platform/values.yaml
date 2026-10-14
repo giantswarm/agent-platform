@@ -2708,14 +2708,16 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # sets sessionShareMaxTTL here (klaus-gateway's thread shares renew within it).
     # sessionIdleTTL: how long a Session lives after its last activity (a Go
     # duration; running tasks and turns waiting for input do not expire, 0 never
-    # deletes one). 720h, 30 days, the retention the workspace plan gives a
-    # Session's directory; the kagent chart's own default is 168h. It is the one
-    # value of a workspace Session's retention: deleting the Session deletes its
+    # deletes one). 336h, 14 days of inactivity, after which a Session is
+    # deleted with its workspace directory; the kagent chart's own default is
+    # 168h. An installation's own period is the platform manager's choice
+    # sessions.idleTTL, rendered here. It is the one value of a workspace
+    # Session's retention: deleting the Session deletes its
     # directory at once, so the workspace-manager's sessions.cleanupAfter is
     # derived from it (with kagent on and a TTL other than 0) and an own
     # cleanupAfter longer than it fails the render — it would never apply
     # (README "Workspaces").
-    sessionIdleTTL: 720h
+    sessionIdleTTL: 336h
     # Voluntary disruption (giantswarm/agent-platform#431): the controller pod
     # holds every streaming turn (A2A SendStreamingMessage, the portal's SSE)
     # and the actor sessions behind them; an eviction mid-turn leaves the task
@@ -5533,7 +5535,7 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
     cycle: ""
   # How long a Session's directory outlives the Session's last turn (a Go
   # duration): then it is deleted, at once when the Session is. Empty, the
-  # default: kagent.controller.sessionIdleTTL (720h) with kagent on and a TTL
+  # default: kagent.controller.sessionIdleTTL (336h) with kagent on and a TTL
   # other than 0, so a directory lives exactly as long as its Session;
   # otherwise the chart's default (720h). A shorter value of its own stands; a
   # longer one fails the render, since kagent deletes the Session first.

@@ -6,11 +6,11 @@ workspace-manager removes its directory at once, so the TTL bounds every
 directory whatever workspace-manager.sessions.cleanupAfter says. One value
 drives both. Each case below pins one property:
 
-- the kagent release carries controller.sessionIdleTTL 720h by default, the 30
-  days the workspace plan keeps a directory (the kagent chart's own default is
-  168h), with workspaces off too;
+- the kagent release carries controller.sessionIdleTTL 336h by default, the 14
+  days of inactivity after which a Session goes with its directory (the kagent
+  chart's own default is 168h), with workspaces off too;
 - with workspaces on the workspace-manager release carries
-  sessions.cleanupAfter equal to the TTL: 720h by default, an installation's
+  sessions.cleanupAfter equal to the TTL: 336h by default, an installation's
   own TTL followed (240h, 1h30m);
 - an own cleanupAfter shorter than or equal to the TTL stands (72h, 90m against
   1h30m); a longer one fails the render naming both keys;
@@ -88,16 +88,16 @@ def must_fail(chart: str, flags: list, needles: tuple, what: str) -> None:
 
 def main(chart: str) -> None:
     off = helm(chart, [])
-    if session_idle_ttl(off) != "720h":
-        fail(f"the kagent release's sessionIdleTTL is {session_idle_ttl(off)!r}, not 720h, with workspaces off")
+    if session_idle_ttl(off) != "336h":
+        fail(f"the kagent release's sessionIdleTTL is {session_idle_ttl(off)!r}, not 336h, with workspaces off")
     if release(off, "workspace-manager"):
         fail("a workspace-manager release renders with workspaces off")
-    ok("kagent carries sessionIdleTTL 720h with workspaces off")
+    ok("kagent carries sessionIdleTTL 336h with workspaces off")
 
     on = helm(chart, ON)
-    if (session_idle_ttl(on), cleanup_after(on)) != ("720h", "720h"):
-        fail(f"workspaces on: sessionIdleTTL {session_idle_ttl(on)!r}, cleanupAfter {cleanup_after(on)!r}, not 720h and 720h")
-    ok("workspaces on: sessionIdleTTL 720h and cleanupAfter 720h, one value")
+    if (session_idle_ttl(on), cleanup_after(on)) != ("336h", "336h"):
+        fail(f"workspaces on: sessionIdleTTL {session_idle_ttl(on)!r}, cleanupAfter {cleanup_after(on)!r}, not 336h and 336h")
+    ok("workspaces on: sessionIdleTTL 336h and cleanupAfter 336h, one value")
 
     for ttl in ("240h", "1h30m"):
         r = helm(chart, [*ON, "--set", f"kagent.controller.sessionIdleTTL={ttl}"])
