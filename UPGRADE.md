@@ -15,6 +15,19 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.132.x → \<next\> (Substrate 1.11.0: actor JWTs on egress)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.11 (`>=1.11.0 <1.12.0`, giantswarm/agent-platform#1023). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.11.0 (`ateom-gvisor:1.11.0`); the kagent CRDs and the kagent release are unchanged. 1.11 is the line on the same upstream pin as 1.10, so kagent 1.11 speaks its contract. The step resets nothing: no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes, and a new conversation starts from the template's golden, which 1.11.0 keeps (its snapshot layout is 1.10.2's). 1.11.0 brings:
+
+- **Actor JWTs on egress** (giantswarm/substrate#421): an egress rule whose `replace_headers` entry is `actor_jwt` carries the entry's prefix plus a JWT minted for the actor, with the entry's audiences and lifetime. A failed mint denies the request: `403` when the actor is gone, `503` when ate-api is unavailable or the mint timed out, `500` otherwise.
+- **agentgateway 2.4.0** as the router and egress data plane (giantswarm/substrate#429), the agentgateway line's release that makes the same injection.
+- **Busy worker marking** (giantswarm/substrate#425): ate-controller marks the worker pods that host actors with `karpenter.sh/do-not-disrupt: "true"` and `ate.dev/busy=true` (`substrate.ateController.busyWorker`, on by default in this chart from giantswarm/agent-platform#1016; `{}` turns it off). From this step on, a node roll waits for a busy worker's actors, or for the NodePool's `terminationGracePeriod`, before Karpenter drains its node.
+
+### Operator action
+
+- **None.** The control plane, the atelet and the worker pool roll on the upgrade.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.11.0`; `kagent` and `kagent-crds` stay where they are.
+
 ## 4.131.x → \<next\> (agent tenants: roles, the platform tenant)
 
 With kagent on, the connectivity release renders the ClusterRoles `agent-platform:user`, `agent-platform:editor` and `agent-platform:admin` and binds the kagent namespace as the platform tenant; muster's MCPServers are listed to `tenants.platform.users` (giantswarm/agent-platform#706). Nothing a person sees changes until the kagent controller's authorizer is on.
