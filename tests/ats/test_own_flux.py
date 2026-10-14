@@ -71,6 +71,7 @@ from conftest import (
     RELEASE,
     SANDBOX_CONFIG,
     SCENARIO,
+    SOURCE_CONTROLLER_EVENTS,
     TIMINGS,
     TOOLSET,
     apply_placeholder_provider_secret,
@@ -83,7 +84,7 @@ from conftest import (
     helm_controller_args,
     is_ready,
     load_values,
-    log_helm_controller_events,
+    log_controller_events,
     log_release_timeline,
     now_rfc3339,
     agent_ready,
@@ -307,6 +308,8 @@ def platform_through_flux(kube: Kube, own_flux: None, pushed_chart: str, candida
         raise
     TIMINGS.record("platform HelmReleases Ready through the cluster's Flux", time.monotonic() - started)
     log_release_timeline(kube, FLUX_NAMESPACE, since, FLUX_NAMESPACE, NAMESPACE)
+    log_controller_events(kube, FLUX_NAMESPACE, "helm-controller", since, RELEASE, *COMPONENTS)
+    log_controller_events(kube, FLUX_NAMESPACE, "source-controller", since, RELEASE, *COMPONENTS, patterns=SOURCE_CONTROLLER_EVENTS)
 
 
 # ---------------------------------------------------------------------------
@@ -397,7 +400,7 @@ def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube,
         dump(kube)
         raise
     TIMINGS.record("render guard flipped on and back (refusal, nothing touched, recovery)", time.monotonic() - started)
-    log_helm_controller_events(kube, FLUX_NAMESPACE, since, RELEASE)
+    log_controller_events(kube, FLUX_NAMESPACE, "helm-controller", since, RELEASE)
 
 
 @pytest.mark.functional
@@ -451,4 +454,4 @@ def test_the_way_back_uninstalls_through_the_clusters_flux(kube: Kube, platform_
         raise
     TIMINGS.record("the way back: meta HelmRelease deleted, the platform releases uninstalled concurrently by the cluster's Flux, kept CRDs in place", elapsed)
     logger.info("the way back clean in %.0f s: releases %s gone, kept CRDs %s, no SandboxConfig, no WorkerPool", elapsed, before, sorted(KEPT_CRDS))
-    log_helm_controller_events(kube, FLUX_NAMESPACE, since, RELEASE, *COMPONENTS)
+    log_controller_events(kube, FLUX_NAMESPACE, "helm-controller", since, RELEASE, *COMPONENTS)

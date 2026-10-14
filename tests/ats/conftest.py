@@ -61,7 +61,7 @@ import textwrap
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
 import pytest
@@ -765,7 +765,10 @@ def wait_for_endpoints(kube: Kube, namespace: str, service: str, timeout: float 
 HELM_CONTROLLER_ARGS_PATH = "/spec/template/spec/containers/0/args/-"
 # The log lines that mark a HelmRelease's progress through helm-controller.
 HELM_CONTROLLER_EVENTS = ("checking ", "all dependencies are ready", "running '", "dependencies do not meet",
-                          " succeeded", "failed", "release in-sync", "uninstall")
+                          " succeeded", "failed", "release in-sync", "uninstall", "wait", "source", "artifact",
+                          "chart", "error", "not ready", "fetch", "stored", "retry", "stall", "reconcil")
+# The log lines that mark a source's progress through source-controller.
+SOURCE_CONTROLLER_EVENTS = ("stored artifact", "artifact up-to-date", "fetch", "error", "reconciliation finished", "garbage")
 
 
 def now_rfc3339() -> str:
@@ -791,17 +794,20 @@ def helm_controller_args() -> List[str]:
     return args
 
 
-def helm_controller_events(kube: Kube, flux_namespace: str, since: str = "") -> List[Dict[str, str]]:
-    """helm-controller's progress lines (its JSON log: ts, name, msg) from
-    ``since`` (RFC 3339, UTC) on."""
+def controller_events(kube: Kube, namespace: str, deployment: str, since: str = "",
+                      patterns: Sequence[str] = HELM_CONTROLLER_EVENTS) -> List[Dict[str, str]]:
+    """A Flux controller's progress lines (its JSON log: ts, name, msg, and
+    the error when there is one) from ``since`` (RFC 3339, UTC) on."""
     events: List[Dict[str, str]] = []
-    for line in kube.logs(flux_namespace, "deployment/helm-controller", tail=10000).splitlines():
+    for line in kube.logs(namespace, f"deployment/{deployment}", tail=10000).splitlines():
         try:
             rec = json.loads(line)
         except ValueError:
             continue
         ts, msg = str(rec.get("ts", "")), str(rec.get("msg", ""))
-        if ts[:19] >= since[:19] and any(p in msg for p in HELM_CONTROLLER_EVENTS):
+        if rec.get("error"):
+            msg = f"{msg}: {rec['error']}"
+        if ts[:19] >= since[:19] and any(p in msg for p in patterns):
             events.append({"ts": ts, "name": str(rec.get("name", "")), "msg": msg})
     return events
 
@@ -811,7 +817,7 @@ def log_release_timeline(kube: Kube, flux_namespace: str, since: str, *namespace
     Ready: created, dependencies ready (and how often helm-controller found
     them not ready first), the install's start, Ready — the chain's wall
     clock, from the objects and helm-controller's log in ``flux_namespace``."""
-    events = helm_controller_events(kube, flux_namespace, since)
+    events = controller_events(kube, flux_namespace, "helm-controller", since)
     hrs = [hr for ns in namespaces for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=ns)]
     for hr in sorted(hrs, key=lambda h: condition(h).get("lastTransitionTime", "")):
         name = hr["metadata"]["name"]
@@ -826,11 +832,12 @@ def log_release_timeline(kube: Kube, flux_namespace: str, since: str, *namespace
                     first("running 'install'"), condition(hr).get("lastTransitionTime", "")[11:19], condition(hr).get("reason", ""))
 
 
-def log_helm_controller_events(kube: Kube, flux_namespace: str, since: str, *names: str) -> None:
-    """helm-controller's progress lines for the named HelmReleases since ``since``."""
-    for e in helm_controller_events(kube, flux_namespace, since):
+def log_controller_events(kube: Kube, namespace: str, deployment: str, since: str, *names: str,
+                          patterns: Sequence[str] = HELM_CONTROLLER_EVENTS) -> None:
+    """A Flux controller's progress lines for the named objects since ``since``."""
+    for e in controller_events(kube, namespace, deployment, since, patterns):
         if e["name"] in names:
-            logger.info("helm-controller %s %-28s %s", e["ts"][11:19], e["name"], e["msg"][:160])
+            logger.info("%s %s %-28s %s", deployment, e["ts"][11:19], e["name"], e["msg"][:200])
 
 
 # ---------------------------------------------------------------------------
