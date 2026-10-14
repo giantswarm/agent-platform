@@ -15,13 +15,39 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
-## 4.127.x → \<next\> (agent tenants: roles, the platform tenant)
+## 4.131.x → \<next\> (agent tenants: roles, the platform tenant)
 
 With kagent on, the connectivity release renders the ClusterRoles `agent-platform-user`, `agent-platform-author` and `agent-platform-tenant-admin` and binds the kagent namespace as the platform tenant; muster's MCPServers are listed to `tenants.platform.users` (giantswarm/agent-platform#706). Nothing a person sees changes until the kagent controller's authorizer is on.
 
 ### Operator action
 
 - **An installation with a customer platform team**: name its group in `tenants.platformTeam` (RBAC subjects, with the installation's OIDC groups prefix). It becomes an author in the kagent namespace and an editor of muster's servers and workflows.
+
+## 4.130.x → \<next\> (Substrate 1.10.2: the egress gateway retries a refused HTTP/2 stream)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.10 from 1.10.2 (`>=1.10.2 <1.11.0`, giantswarm/agent-platform#996). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.10.2 (`ateom-gvisor:1.10.2`); the kagent CRDs and the kagent release are unchanged. 1.10 is the line on the same upstream pin as 1.9, so kagent 1.11, built against Substrate 1.9.0, speaks its contract. The step resets nothing: no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes, and a new conversation starts from the template's golden, kept or re-taken on the new workers. 1.10.2 brings:
+
+- **The router and the egress gateway run agentgateway 2.3.6** (giantswarm/substrate#401): a request the upstream refused before processing it (a refused HTTP/2 stream, or one above the upstream's `GOAWAY`) is retried once on a fresh connection. Before it, an actor's `git-upload-pack` to github.com was answered `503` when a pooled connection the upstream was closing refused its stream.
+- **Suspend, pause and release survive their worker going away**: the lifecycle RPCs answer `NotFound` only for a missing actor, a suspend or pause whose worker is deleted under it commits instead of failing, and a suspended or paused actor carries no stale crash record.
+- **A golden take whose sandbox did not take the actor's network is retaken** (giantswarm/substrate#418): the boot fails at once naming the cause, a transient crash, and the template reconciler retakes the golden instead of failing the template for good with `GoldenActorCrashed`; a resume that crashed for it returns the actor to its snapshot.
+
+### Operator action
+
+- **None.** The control plane, the atelet and the worker pool roll on the upgrade.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.10.2`; `kagent` and `kagent-crds` stay where they are.
+
+## 4.128.x → \<next\> (kagent 1.11: its tables move to the `kagent` schema)
+
+`components.kagent{,-crds}.versionRange` selects kagent 1.11 from 1.11.3-rc.2 (`>=1.11.3-rc.2 <1.12.0-0`; the kagent line on upstream `main@92dd6caa`). A range on a release candidate's floor renders the release tag filter, so Flux resolves releases and release candidates only, never the line's branch builds, and the `-0` upper bound keeps 1.12's candidates out. 1.11.3-rc.2 keeps the legacy `kagent.dev/worker-pool` label on the chart's WorkerPool beside the two new ones (giantswarm/kagent-upstream#534), so a Session open across the step resumes on its first turn instead of waiting for a worker, and the UI accepts the gRPC-Web content type an Envoy `grpc_web` filter rewrote (giantswarm/kagent-upstream#532). `components.substrate{,-crds}.versionRange` selects Substrate 1.9 from 1.9.0, the release kagent 1.11 requires: the Substrate control plane, the atelet and the kagent WorkerPool roll to 1.9.0 (`ateom-gvisor:1.9.0`) with it. kagent 1.11 keeps its tables in a `kagent` schema instead of `public`. At its first start the controller moves an installation's tables, sequences and migration tracking from `public` into `kagent` in one transaction under its migration lock, and adds the push notification tables a database migrated before 1.11 lacks (giantswarm/kagent-upstream#456). The step resets nothing: every Agent, Session, conversation and memory is kept, and a second start changes nothing. pgvector stays in `public`, where the CNPG Database creates it as the superuser: the meta chart sets `kagent.database.postgres.vectorSchema: public`, because kagent's role cannot move an extension it does not own, and kagent's own default `extensions` would stop the controller (`must be owner of extension vector`).
+
+### Operator action
+
+- **None** for an installation on the platform's CloudNativePG database (`postgres.enabled`), the fleet's shape.
+- **An installation on the kagent 1.10 chart's bundled PostgreSQL** (no `postgres.enabled`, no own `kagent.database.postgres` connection): the render now fails naming CloudNativePG, and the release stays on its current version. The 1.11 chart deploys no PostgreSQL, and its upgrade would delete the bundled claim `kagent-postgresql` with every conversation. Move the data to the platform's Cluster (or an own database) first, then turn `postgres.enabled` on.
+- **An installation that overrides `kagent.database.postgres`**: keep `vectorSchema: public` unless pgvector's owner moved it to another schema first.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.11.3-rc.2`, and `substrate` and `substrate-crds` with them to the Substrate 1.9 release of the range.
+- **A rollback to kagent 1.10** after the move finds `public` empty: move the tables back first, as kagent's chart README describes.
+- **A step to 1.11 after a rollback that did not move the tables back**: the 1.10 controller created a fresh set in `public`, and 1.11 refuses to start (`tables are split between two schemas`). Keep the copy that holds the newer conversations (normally `public`, where 1.10 wrote last), rename the other schema aside (`ALTER SCHEMA kagent RENAME TO kagent_aside`), and start 1.11 again: it moves the kept copy into `kagent`.
 
 ## 4.127.x → \<next\> (klaus-gateway 4.3.0: Slack Sessions start through start_session)
 

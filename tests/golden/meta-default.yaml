@@ -460,7 +460,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.3.5
+          tag: 2.3.6
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -491,7 +491,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.3.5
+          tag: 2.3.6
       resources:
         limits:
           cpu: 500m
@@ -873,12 +873,8 @@ spec:
           namespace: envoy-gateway-system
       database:
         postgres:
-          bundled:
-            image:
-              name: pgvector
-              repository: pgvector
-              tag: pg18-trixie
           vectorEnabled: true
+          vectorSchema: public
       fluxServiceAccountName: kagent-flux
       fullnameOverride: kagent
       grafana-mcp:
@@ -1551,7 +1547,14 @@ spec:
           pinnedImages: []
         nodeSelector: {}
         priorityClass:
-          preemptionPolicy: Never
+          preemptionPolicy: PreemptLowerPriority
+        resources:
+          limits:
+            cpu: "2"
+            memory: 1Gi
+          requests:
+            cpu: 50m
+            memory: 128Mi
         storageBackend: s3
         tolerations: []
       atenetEgress:
@@ -1729,7 +1732,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.3.5
+        tag: 2.3.6
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1782,7 +1785,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.3.5
+        tag: 2.3.6
     resources:
       limits:
         cpu: 500m

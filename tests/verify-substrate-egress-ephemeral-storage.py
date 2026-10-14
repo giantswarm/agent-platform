@@ -52,7 +52,7 @@ def load(name: str):
 cc = load("verify-components-charts")
 worker = load("verify-worker-image")
 
-KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "ingress.parentRefs[0].name=x"]
+KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "ingress.parentRefs[0].name=x"]
 KNOBS_NULL = ["--set", "substrate.atenetEgress.resources=null",
               "--set", "substrate.atenetEgress.extProc.resources=null",
               "--set", "substrate.atenetEgress.drainSignal.sizeLimit=null"]

@@ -59,7 +59,7 @@ _spec = importlib.util.spec_from_file_location("components_charts", os.path.join
 cc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cc)
 
-KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "ingress.parentRefs[0].name=x"]
+KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "ingress.parentRefs[0].name=x"]
 REGISTRY = "gsoci.azurecr.io"
 REPOSITORY = "giantswarm/substrate"
 WORKER = "ateom-gvisor"
@@ -74,8 +74,11 @@ FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # giantswarm/agent-platform#756); the next re-pin is 1.4. 1.8 is the line on
 # kagent-dev/substrate v0.4.0-alpha1, 1.7's upstream (the snapshot layout and
 # its restore conversion are the line's own), so kagent 1.8, published against
-# 1.7.0, speaks its ate-api contract.
-SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}, (1, 8): {(1, 7)}}
+# 1.7.0, speaks its ate-api contract. 1.10 is the line on kagent-dev/substrate
+# v0.5.0-alpha2, 1.9's upstream (the egress contract's credential path prefix
+# is the line's own and additive), so kagent 1.11, published against 1.9.0,
+# speaks its ate-api contract.
+SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}, (1, 8): {(1, 7)}, (1, 10): {(1, 9)}}
 
 
 def tuple_of(version: str) -> str:
@@ -207,9 +210,13 @@ def main(meta: str) -> int:
         chart_meta = yaml.safe_load(open(os.path.join(chart_dir, "kagent", "Chart.yaml"), encoding="utf-8"))
         stamped = yaml.safe_load(open(os.path.join(chart_dir, "kagent", "values.yaml"), encoding="utf-8"))
         stamp = ((stamped.get("substrateWorkerPool") or {}).get("workerImage")) or ""
+        # A build that vendors Substrate names it as a Chart.yaml dependency; since
+        # upstream dropped the subchart, the line stamps it as the tag of its worker image.
         built_against = next((d.get("version") for d in chart_meta.get("dependencies") or [] if d.get("name") == "substrate"), "")
+        if not built_against and stamp.startswith(f"{REGISTRY}/{REPOSITORY}/{WORKER}:"):
+            built_against = stamp.rsplit(":", 1)[1]
         if not built_against:
-            cc.fail(f"the kagent chart {resolved} names no substrate dependency in Chart.yaml; the line stamps the Substrate it was published against there")
+            cc.fail(f"the kagent chart {resolved} names no substrate dependency in Chart.yaml and stamps no {REGISTRY}/{REPOSITORY}/{WORKER} tag as substrateWorkerPool.workerImage; the line records the Substrate it was published against in one of them")
         print(f"ok: the kagent chart {resolved} (the range {kagent_rng!r}) renders the one WorkerPool with workerImage {derived} — its own stamp {stamp or '(none)'} overridden; published against Substrate {built_against}")
         built, pinned = ints_of(built_against), ints_of(floor)
         line = {pinned[:2], *SAME_UPSTREAM.get(pinned[:2], set())}

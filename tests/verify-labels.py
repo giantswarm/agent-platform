@@ -89,7 +89,7 @@ def main(meta: str, connectivity: str) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         for chart_dir, name, flags in (
             (meta, "agent-platform", ["-f", f"{meta}/ci/ci-values.yaml"]),
-            (connectivity, "agent-platform-connectivity", ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true"]),
+            (connectivity, "agent-platform-connectivity", ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]),
         ):
             for version in versions_cutting_on(name, "_-."):
                 manifest = render(chart_dir, version, flags, tmp)

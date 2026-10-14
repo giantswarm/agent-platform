@@ -36,7 +36,7 @@ def load(name: str):
 
 cc = load("verify-components-charts")
 
-KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "ingress.parentRefs[0].name=x"]
+KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "ingress.parentRefs[0].name=x"]
 KEYS = ("skip-auth-route", "skip-auth-regex")
 
 ADMITTED = [

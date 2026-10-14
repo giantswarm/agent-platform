@@ -85,7 +85,7 @@ ORGS = "tests/fixtures/workspaces-organizations-values.yaml"
 BOM = "helm/agent-platform/examples/customer-bom.yaml"
 CI = ["--set", "components.flux.enabled=false"]
 ON = ["-f", FIXTURE]
-KAGENT = ["--set", "components.kagent.enabled=true", "--set", "kagent.harness.snapshotLocation=s3://ci/agents"]
+KAGENT = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "kagent.harness.snapshotLocation=s3://ci/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
 IDENTITY = [
     "--set", "global.domain=ci.example.com",
     "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
@@ -439,7 +439,7 @@ def main(meta: str, connectivity: str) -> int:
     conn_on_flags = ["--set", "ingress.parentRefs[0].name=x", "--set", f"components.{NAME}.enabled=true", "-f", FIXTURE, *IDENTITY]
     prefix = "agent-platform-connectivity"
     for flavor, kind in (("cilium", "CiliumNetworkPolicy"), ("kubernetes", "NetworkPolicy")):
-        flags = [*conn_on_flags, "--set", f"networkPolicy.flavor={flavor}", "--set", "components.kagent.enabled=true"]
+        flags = [*conn_on_flags, "--set", f"networkPolicy.flavor={flavor}", "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
         docs = documents(helm(connectivity, flags, ci_values=False))
         names = {n for k, n in docs if k == kind and NAME in n}
         want = {f"{prefix}-{NAME}-ingress", f"{prefix}-{NAME}-egress", f"{prefix}-muster-to-{NAME}", f"{prefix}-kagent-controller-to-{NAME}",

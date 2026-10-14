@@ -45,7 +45,7 @@ import yaml
 
 DIGEST = "localhost:5001/golang-adk@sha256:" + "a" * 64
 SNAPSHOT = "s3://bucket/agents"
-CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true"]
+CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
 MONITORING_API = ["--api-versions", "monitoring.coreos.com/v1"]  # the observability platform: the auto knobs resolve on
 ENV_PROPAGATE = {"name": "KAGENT_PROPAGATE_TOKEN", "value": "true"}
 ENV_HEADERS = {"name": "OTEL_EXPORTER_OTLP_HEADERS", "value": "X-Scope-OrgID=giantswarm"}

@@ -51,7 +51,7 @@ TOOLS_LABEL = "app.kubernetes.io/name: kagent-tools"
 # The two egress policies that open the server: the controller's, the actors'.
 POLICIES = ("agent-platform-connectivity-kagent-controller-egress", "substrate-atenet-egress")
 TOOLS_ON = [
-    "--set", "components.kagent.enabled=true", "--set", "kagent.kagent-tools.enabled=true",
+    "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "kagent.kagent-tools.enabled=true",
     # The connectivity chart's routes need the cluster's public Gateway; the
     # meta chart forwards it through `global` (an installation input).
     "--set-json", 'global.gatewayApi.parentRefs=[{"name": "public", "namespace": "envoy-gateway-system"}]',

@@ -1717,6 +1717,34 @@ A first install and an installation already on the line render as before.
 Skipped with gitops.target set (the lookups see the installation, not the
 target); `lookup` is empty under `helm template`, where the guard is silent.
 */}}
+{{- /*
+agent-platform.validateKagentDatabase: the kagent chart deploys no PostgreSQL
+from 1.11 on (the 1.10 chart's bundled instance is gone, and its claim with
+it). kagent on a range that admits 1.11 or later therefore needs the platform's
+CloudNativePG database (postgres.enabled with postgres.databases.kagent-v2) or
+an own connection (kagent.database.postgres.urlFile or connectionStringSecretRef);
+anything else fails the render here instead of leaving the controller without
+a database.
+*/ -}}
+{{- define "agent-platform.validateKagentDatabase" -}}
+{{- if eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true" -}}
+{{- $range := index .Values.components "kagent" "versionRange" | default "" -}}
+{{- $probes := list "1.11.0" "1.11.99999" -}}
+{{- range (regexFindAll "[0-9]+\\.[0-9]+" $range -1) -}}
+{{- if semverCompare ">=1.11.0-0" (printf "%s.0" .) -}}
+{{- $probes = append (append $probes (printf "%s.0" .)) (printf "%s.99999" .) -}}
+{{- end -}}
+{{- end -}}
+{{- $bundleless := false -}}
+{{- range $probes }}{{ if semverCompare $range . }}{{ $bundleless = true }}{{ end }}{{ end -}}
+{{- $pg := dig "database" "postgres" dict (.Values.kagent | default dict) -}}
+{{- $platform := and .Values.postgres.enabled (ne (dig "databases" "kagent-v2" "enabled" true .Values.postgres) false) -}}
+{{- if and $bundleless (not $platform) (not $pg.urlFile) (not (dig "connectionStringSecretRef" "name" "" $pg)) -}}
+{{- fail (printf "components.kagent selects kagent %s, whose chart deploys no PostgreSQL: run kagent on the platform's CloudNativePG database, the supported shape (postgres.enabled: true with postgres.databases.kagent-v2, and the CloudNativePG operator on the cluster or components.cloudnative-pg.enabled: true), or point kagent.database.postgres.urlFile or connectionStringSecretRef at an own database. An installation still on the 1.10 chart's bundled PostgreSQL moves its data first: the 1.11 chart's upgrade deletes the bundled claim" $range) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "agent-platform.validateKagentLineCrossing" -}}
 {{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
 {{- $range := index .Values.components "kagent" "versionRange" | default "" -}}

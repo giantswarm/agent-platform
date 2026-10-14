@@ -45,7 +45,7 @@ FIXTURE = f"{CONN}/ci/test-model-serving-oci-values.yaml"
 # every render needs.
 SERVING = [
     "--namespace", "agent-platform",
-    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     "--set", "global.gatewayApi.parentRefs[0].name=giantswarm-default",
     "--set", "global.gatewayApi.parentRefs[0].namespace=envoy-gateway-system",
     "--set", "components.kserve-llmisvc-crd.enabled=true",

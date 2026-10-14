@@ -558,7 +558,7 @@ components:  # @schema additionalProperties: true
     # chart takes its OTel settings in the SDK-spec shape kagent.otel below
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
     # ignores them and exports nothing.
-    versionRange: ">=1.10.0 <1.11.0"
+    versionRange: ">=1.11.3-rc.2 <1.12.0-0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -668,7 +668,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.10.0 <1.11.0"
+    versionRange: ">=1.11.3-rc.2 <1.12.0-0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -719,7 +719,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.8.2 <1.9.0"
+    versionRange: ">=1.10.2 <1.11.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
     # release Flux resolved (ateController.gvisorWorker.followRelease, on by
@@ -746,7 +746,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.8.2 <1.9.0"
+    versionRange: ">=1.10.2 <1.11.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -2603,26 +2603,15 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
 # The kagent.dev + kmcp CRDs ship with the kagent app chart itself (app-owned
 # CRDs), so enabling kagent installs them too.
 #
-# When postgres.enabled is true, configure the CNPG DSN wiring below so kagent
-# uses the platform Postgres instead of its bundled instance. The controller's
-# database is kagent_v2 (postgres.databases); the connectivity chart derives
-# its connection Secret `kagent-pg-kagent-v2-app` in the kagent namespace from
-# the Cluster's bootstrap Secret. Mount its `uri` key:
-#
-#   kagent:
-#     database:
-#       postgres:
-#         urlFile: /etc/cnpg/uri       # POSTGRES_DATABASE_URL_FILE
-#         vectorEnabled: true          # mirror of postgres.vector.enabled
-#         bundled: { enabled: false }  # disable bundled postgres:18.3-alpine
-#     controller:
-#       volumes:
-#         - name: cnpg-dsn
-#           secret:
-#             secretName: kagent-pg-kagent-v2-app
-#             items: [{ key: uri, path: uri }]
-#       volumeMounts:
-#         - { name: cnpg-dsn, mountPath: /etc/cnpg, readOnly: true }
+# kagent's database: the kagent chart deploys no PostgreSQL, so kagent runs on
+# the platform's CloudNativePG Cluster (postgres.enabled), the supported shape,
+# or on an own database through kagent.database.postgres.urlFile or
+# connectionStringSecretRef; anything else fails the render
+# (agent-platform.validateKagentDatabase). On the Cluster the controller's
+# database is kagent_v2 (postgres.databases): the connectivity chart derives its
+# connection Secret `kagent-pg-kagent-v2-app` in the kagent namespace, and the
+# meta chart forwards it as connectionStringSecretRef with the role
+# postgres.applicationDatabase.owner.
 # kagent is forwarded verbatim to the kagent component release (an upstream
 # chart with many more keys than mirrored here), so unknown keys must stay
 # allowed.
@@ -2980,19 +2969,16 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           cpu: "2"
           memory: 2Gi
 
-  # The kagent line's memory API needs pgvector. With the bundled Postgres (the
-  # chart's default) the image has to carry the extension, so the bundled
-  # instance runs the pgvector image; with the platform CNPG Cluster
-  # (postgres.enabled) set postgres.vector.enabled as well and turn the
-  # bundled instance off — the CNPG note above.
+  # The kagent line's memory API needs pgvector: on the platform's CNPG Cluster
+  # set postgres.vector.enabled as well (the database note above).
   database:
     postgres:
       vectorEnabled: true
-      bundled:
-        image:
-          repository: pgvector
-          name: pgvector
-          tag: pg18-trixie
+      # pgvector stays in public, where the CNPG Database creates it as the
+      # superuser: kagent's role does not own the extension and cannot move it
+      # to the chart's default `extensions`. kagent's tables move from public to
+      # its `kagent` schema at the controller's first start on 1.11.
+      vectorSchema: public
 
   # Keep kagent core resources in a dedicated namespace separate from the
   # umbrella release namespace. NOTE: the bundled agent subcharts each need
@@ -3618,9 +3604,9 @@ dashboards:
 
 # Platform Postgres — CloudNativePG Cluster for kagent (and future Klaus sessions).
 # The CNPG operator and its CRDs are a cluster-level prerequisite (like Gateway
-# API CRDs): they must be installed before enabling this. Flip `enabled: false`
-# to use kagent's bundled Postgres or an external DSN (set kagent.database.postgres
-# accordingly). When `enabled: true`, set `postgres.namespace` to match
+# API CRDs, or components.cloudnative-pg): they must be installed before enabling
+# this. kagent needs it, or an own database in kagent.database.postgres (the
+# kagent chart deploys no PostgreSQL). When `enabled: true`, set `postgres.namespace` to match
 # `kagent.namespaceOverride` so the generated DSN Secret is co-located with the
 # kagent controller that mounts it.
 postgres:
@@ -4140,7 +4126,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.3.5"
+      tag: "2.3.6"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -4174,7 +4160,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.3.5"
+      tag: "2.3.6"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -6062,16 +6048,31 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     nodeSelector: {}
     tolerations: []
     affinity: {}
-    # atelet's PriorityClass (the Substrate line from 1.1.3). Never: atelet
-    # keeps its priority (1000000000), so it schedules ahead of every other
-    # pending pod, but it evicts nothing: on a node without room for its
-    # requests (50m CPU, 128Mi) it stays Pending until the autoscaler adds
-    # capacity or a pod leaves. The class is ate-node-critical-non-preempting.
-    # PreemptLowerPriority, the Substrate chart's default, lets a first enable
-    # over full nodes evict the cluster's own workloads (monitoring, admission
-    # webhooks) to make room (giantswarm/agent-platform#731).
+    # atelet's PriorityClass. PreemptLowerPriority (the class
+    # ate-node-critical, value 1000000000): an atelet pod on a node without
+    # room for its requests evicts lower-priority pods, the scheduler taking
+    # the lowest-priority victims first — the ordinary workloads at the
+    # default priority 0 before monitoring and the platform's own classes —
+    # and honouring PodDisruptionBudgets where it can. A node without atelet
+    # places no actor, and no autoscaler adds a node for a pending DaemonSet
+    # pod: with Never (ate-node-critical-non-preempting, giantswarm/agent-platform#731)
+    # atelet stays Pending for good on a node another pod filled first
+    # (giantswarm/agent-platform#993). Never remains an installation's choice.
     priorityClass:
-      preemptionPolicy: Never
+      preemptionPolicy: PreemptLowerPriority
+    # atelet's container resources, merged over the Substrate chart's. The
+    # request stays at what the running atelets hold (50m CPU, 128Mi): a roll
+    # (maxSurge 0) frees the old pod's request before it places the new one,
+    # and a larger request would evict a pod on every
+    # full node. The Substrate line's 1.9 default asks 256Mi
+    # (giantswarm/agent-platform#993). An installation sizes it here.
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: "2"
+        memory: 1Gi
     # An S3-compatible store that is not AWS S3: its endpoint and credentials
     # for atelet's AWS credential chain, e.g.
     #   - {name: AWS_ENDPOINT_URL, value: https://store.example.com}

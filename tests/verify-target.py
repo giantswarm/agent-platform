@@ -56,7 +56,7 @@ FLEET_APIS = [
 ]
 # Makefile.custom.mk's VM: the all-modes ingress guard satisfied, the Harness's
 # snapshot store set, the fleet's API groups served.
-VM = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", *FLEET_APIS]
+VM = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", *FLEET_APIS]
 ENGINE_OFF = ["--set", "components.flux.enabled=false"]
 FLUX_KINDS = {"OCIRepository", "HelmRelease"}
 # The hook identity and its policy (hooks/*.yaml), the only objects an engine-off
@@ -71,7 +71,7 @@ KNOB_KEY = ["--set", "gitops.target.kubeConfig.secretRef.key=value"]
 CONN_FULL = [
     *VM,
     "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster",
-    "--set", "components.kagent.enabled=true", "--set", "components.substrate.enabled=true",
+    "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "components.substrate.enabled=true",
     "--set", "components.substrate-crds.enabled=true", "--set", "networkPolicy.musterInClusterMcpPorts[0]=8080",
 ]
 # Makefile.custom.mk's WIRING_BACKSTAGE: the portal on, whose CSP carries the avatars host.

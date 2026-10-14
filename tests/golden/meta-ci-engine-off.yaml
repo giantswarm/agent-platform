@@ -248,7 +248,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.3.5
+          tag: 2.3.6
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -279,7 +279,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.3.5
+          tag: 2.3.6
       resources:
         limits:
           cpu: 500m
@@ -661,12 +661,9 @@ spec:
           namespace: envoy-gateway-system
       database:
         postgres:
-          bundled:
-            image:
-              name: pgvector
-              repository: pgvector
-              tag: pg18-trixie
+          urlFile: /etc/kagent-db/uri
           vectorEnabled: true
+          vectorSchema: public
       fluxServiceAccountName: kagent-flux
       fullnameOverride: kagent
       grafana-mcp:
@@ -1339,7 +1336,14 @@ spec:
           pinnedImages: []
         nodeSelector: {}
         priorityClass:
-          preemptionPolicy: Never
+          preemptionPolicy: PreemptLowerPriority
+        resources:
+          limits:
+            cpu: "2"
+            memory: 1Gi
+          requests:
+            cpu: 50m
+            memory: 128Mi
         storageBackend: s3
         tolerations: []
       atenetEgress:
@@ -1634,7 +1638,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.3.5
+        tag: 2.3.6
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1687,7 +1691,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.3.5
+        tag: 2.3.6
     resources:
       limits:
         cpu: 500m
@@ -1815,12 +1819,9 @@ spec:
         enabled: true
     database:
       postgres:
-        bundled:
-          image:
-            name: pgvector
-            repository: pgvector
-            tag: pg18-trixie
+        urlFile: /etc/kagent-db/uri
         vectorEnabled: true
+        vectorSchema: public
     fullnameOverride: kagent
     global:
       domain: ""
@@ -1981,7 +1982,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.8.2
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.10.2
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -2410,7 +2411,14 @@ spec:
       extraEnv: []
       nodeSelector: {}
       priorityClass:
-        preemptionPolicy: Never
+        preemptionPolicy: PreemptLowerPriority
+      resources:
+        limits:
+          cpu: "2"
+          memory: 1Gi
+        requests:
+          cpu: 50m
+          memory: 128Mi
       storageBackend: s3
       tolerations: []
     atenetEgress:
@@ -2859,7 +2867,8 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.10.0 <1.11.0"
+    semver: ">=1.11.3-rc.2 <1.12.0-0"
+    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2882,7 +2891,8 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.10.0 <1.11.0"
+    semver: ">=1.11.3-rc.2 <1.12.0-0"
+    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2974,7 +2984,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.8.2 <1.9.0"
+    semver: ">=1.10.2 <1.11.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2997,7 +3007,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.8.2 <1.9.0"
+    semver: ">=1.10.2 <1.11.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
