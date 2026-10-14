@@ -1374,10 +1374,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controller.vpa.maxAllowed.memory | string | `"1280Mi"` |  |
 | kagent.ui.image.repository | string | `"kagent-ui"` |  |
 | kagent.substrateWorkerPool.name | string | `"kagent-default"` |  |
-| kagent.substrateWorkerPool.podDisruptionBudget.enabled | bool | `true` |  |
-| kagent.substrateWorkerPool.podDisruptionBudget.minAvailable | string | `nil` |  |
-| kagent.substrateWorkerPool.podDisruptionBudget.maxUnavailable | int | `1` |  |
-| kagent.substrateWorkerPool.podDisruptionBudget.unhealthyPodEvictionPolicy | string | `"AlwaysAllow"` |  |
+| kagent.substrateWorkerPool.podDisruptionBudget | object | `{"enabled":true,"maxUnavailable":1,"minAvailable":null,"unhealthyPodEvictionPolicy":"AlwaysAllow"}` | max-actors, default 1000): with maxUnavailable: 1 a voluntary drain (Karpenter consolidation, a node roll) moves one worker at a time instead of the whole pool; AlwaysAllow keeps a worker that is not Ready evictable. Exactly one of minAvailable / maxUnavailable (int or percentage); the render refuses both, neither, and a policy outside the API's enum. `enabled: false` removes the budget. Inert while components.kagent.enabled is false. A spot reclaim is not a voluntary eviction — the pool template's capacity-type selector is the knob for that (the meta chart's values). |
 | kagent.substrateWorkerPool.priorityClass.enabled | bool | `true` |  |
 | kagent.substrateWorkerPool.priorityClass.name | string | `"agent-platform-worker-pool"` |  |
 | kagent.substrateWorkerPool.priorityClass.value | int | `1000000` |  |
