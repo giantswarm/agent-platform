@@ -77,8 +77,8 @@ FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # 1.7.0, speaks its ate-api contract. 1.10 is the line on kagent-dev/substrate
 # v0.5.0-alpha2, 1.9's upstream (the egress contract's credential path prefix
 # is the line's own and additive), so kagent 1.11, published against 1.9.0,
-# speaks its ate-api contract.
-SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}, (1, 8): {(1, 7)}, (1, 10): {(1, 9)}}
+# speaks its ate-api contract. 1.11 stays on v0.5.0-alpha2 too (the actor JWT minting and the busy-worker marking are additive; `MintActorJWTRequest.audiences` keeps its field number), so kagent 1.11 speaks its contract as well.
+SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}, (1, 8): {(1, 7)}, (1, 10): {(1, 9)}, (1, 11): {(1, 9), (1, 10)}}
 
 
 def tuple_of(version: str) -> str:
