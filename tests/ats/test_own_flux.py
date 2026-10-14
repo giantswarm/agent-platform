@@ -80,8 +80,12 @@ from conftest import (
     condition,
     connectivity_values,
     dump_agents,
+    helm_controller_args,
     is_ready,
     load_values,
+    log_helm_controller_events,
+    log_release_timeline,
+    now_rfc3339,
     agent_ready,
     agent_state,
     wait_for,
@@ -229,6 +233,13 @@ def own_flux(kube: Kube, prerequisites: None) -> Iterator[None]:
     docs = [d for d in yaml.safe_load_all(r.text) if d]
     keep = [d for d in docs if ((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/component", "") in FLUX_COMPONENTS | {""}]
     dropped = sorted({((d.get("metadata") or {}).get("labels") or {}).get("app.kubernetes.io/component") for d in docs} - FLUX_COMPONENTS - {None})
+    # The cluster's helm-controller runs with the args the smoke gives the
+    # bundled engine (values-kagent.yaml: the dependency requeue), so the chain
+    # installs on one setting in both scenarios.
+    extra_args = helm_controller_args()
+    for d in keep:
+        if d.get("kind") == "Deployment" and d["metadata"]["name"] == "helm-controller":
+            d["spec"]["template"]["spec"]["containers"][0].setdefault("args", []).extend(extra_args)
     STATE.flux_manifest = keep
     kube.cmd(["apply", "--server-side", f"--field-manager={FLUX_FIELD_MANAGER}", "-f", "-"], stdin=yaml.safe_dump_all(keep))
     for name in sorted(FLUX_COMPONENTS):
@@ -249,7 +260,7 @@ def own_flux(kube: Kube, prerequisites: None) -> Iterator[None]:
     wait_for_namespaces_settled(kube, KAGENT_NAMESPACE, ATE_NAMESPACE, PODCERT_NAMESPACE)
     kube.apply({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": KAGENT_NAMESPACE}})
     TIMINGS.record(f"flux install ({', '.join(sorted(FLUX_COMPONENTS))} {FLUX_VERSION}; {len(keep)} objects, components dropped: {dropped})", time.monotonic() - started)
-    logger.info("Flux CRD managers after flux install: %s", sorted({m for ms in STATE.crd_managers.values() for m in ms}))
+    logger.info("Flux CRD managers after flux install: %s; helm-controller args added: %s", sorted({m for ms in STATE.crd_managers.values() for m in ms}), extra_args)
     yield
     # The way back is test_the_way_back_uninstalls_through_the_clusters_flux's
     # (the last test): this is what is left when it passed — nothing but the
@@ -272,7 +283,7 @@ def own_flux(kube: Kube, prerequisites: None) -> Iterator[None]:
 @pytest.fixture(scope="module")
 def platform_through_flux(kube: Kube, own_flux: None, pushed_chart: str, candidate_version: str) -> None:
     """The chart installed through the cluster's Flux with the engine off."""
-    started = time.monotonic()
+    started, since = time.monotonic(), now_rfc3339()
     kube.apply(meta_helmrelease(candidate_version, engine=False))
     try:
         def meta_ready() -> Any:
@@ -295,6 +306,7 @@ def platform_through_flux(kube: Kube, own_flux: None, pushed_chart: str, candida
         dump(kube)
         raise
     TIMINGS.record("platform HelmReleases Ready through the cluster's Flux", time.monotonic() - started)
+    log_release_timeline(kube, FLUX_NAMESPACE, since, FLUX_NAMESPACE, NAMESPACE)
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +372,7 @@ def test_agent_deploys_through_the_clusters_flux(kube: Kube, platform_through_fl
 
 @pytest.mark.functional
 def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube, platform_through_flux: None, candidate_version: str) -> None:
-    started = time.monotonic()
+    started, since = time.monotonic(), now_rfc3339()
     kube.apply(meta_helmrelease(candidate_version, engine=True))
     try:
         def guard_fired() -> Any:
@@ -385,6 +397,7 @@ def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube,
         dump(kube)
         raise
     TIMINGS.record("render guard flipped on and back (refusal, nothing touched, recovery)", time.monotonic() - started)
+    log_helm_controller_events(kube, FLUX_NAMESPACE, since, RELEASE)
 
 
 @pytest.mark.functional
@@ -405,7 +418,7 @@ def test_the_way_back_uninstalls_through_the_clusters_flux(kube: Kube, platform_
     timed out — the way back then deleted the components in dependency waves
     itself. The agent goes first, by hand, while the kagent controller still
     runs (its template's cleanup on Substrate needs it), as an operator does."""
-    started = time.monotonic()
+    started, since = time.monotonic(), now_rfc3339()
     kube.delete("helmreleases.helm.toolkit.fluxcd.io", AGENT, namespace=KAGENT_NAMESPACE, timeout="3m")
     kube.delete("ocirepositories.source.toolkit.fluxcd.io", "agent", namespace=KAGENT_NAMESPACE, timeout="1m")
     before = sorted(hr["metadata"]["name"] for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE))
@@ -438,3 +451,4 @@ def test_the_way_back_uninstalls_through_the_clusters_flux(kube: Kube, platform_
         raise
     TIMINGS.record("the way back: meta HelmRelease deleted, the platform releases uninstalled concurrently by the cluster's Flux, kept CRDs in place", elapsed)
     logger.info("the way back clean in %.0f s: releases %s gone, kept CRDs %s, no SandboxConfig, no WorkerPool", elapsed, before, sorted(KEPT_CRDS))
+    log_helm_controller_events(kube, FLUX_NAMESPACE, since, RELEASE, *COMPONENTS)

@@ -181,6 +181,9 @@ READY_TIMEOUT_S = SCENARIO.ready_timeout_s
 # semver — Flux's — never matches a prerelease against a release-only bound
 # (`>=X <4.0.0`), so the derived range would find no tag. A released chart
 # has no prerelease; verify-self asserts the derived range offline.
+# The self HelmRelease's interval: the fixpoint test waits two of them after
+# the adoption, and 30 s lets both pass while the round trips run instead of
+# idling; two reconciles of a chart already in sync cost the engine nothing.
 SELF_INTERVAL = "1m"
 SELF_INTERVAL_S = 60
 
@@ -753,6 +756,81 @@ def wait_for_endpoints(kube: Kube, namespace: str, service: str, timeout: float 
         ep = kube.get("endpoints", service, namespace=namespace)
         return bool(ep and any(s.get("addresses") for s in ep.get("subsets") or []))
     wait_for(f"ready endpoints of {namespace}/{service}", ready, timeout)
+
+
+# ---------------------------------------------------------------------------
+# The engine's helm-controller: its CI flags and the install timeline it logs
+# ---------------------------------------------------------------------------
+
+HELM_CONTROLLER_ARGS_PATH = "/spec/template/spec/containers/0/args/-"
+# The log lines that mark a HelmRelease's progress through helm-controller.
+HELM_CONTROLLER_EVENTS = ("checking ", "all dependencies are ready", "running '", "dependencies do not meet",
+                          " succeeded", "failed", "release in-sync", "uninstall")
+
+
+def now_rfc3339() -> str:
+    """The wall clock as the cluster's objects and helm-controller's log stamp it (UTC)."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def helm_controller_args() -> List[str]:
+    """The args values-kagent.yaml adds to the bundled engine's helm-controller
+    (flux-engine.instance.kustomizePatches): every JSON6902 `add` to the
+    container's args of a patch targeting the helm-controller Deployment. The
+    own-Flux scenario gives the cluster's helm-controller the same args."""
+    values = yaml.safe_load(scenarios.KAGENT_VALUES.read_text()) or {}
+    patches = ((values.get("flux-engine") or {}).get("instance") or {}).get("kustomizePatches") or []
+    args: List[str] = []
+    for patch in patches:
+        target = patch.get("target") or {}
+        if target.get("kind") != "Deployment" or not re.fullmatch(str(target.get("name", "")), "helm-controller"):
+            continue
+        for op in yaml.safe_load(patch.get("patch") or "") or []:
+            if op.get("op") == "add" and op.get("path") == HELM_CONTROLLER_ARGS_PATH:
+                args.append(str(op["value"]))
+    return args
+
+
+def helm_controller_events(kube: Kube, flux_namespace: str, since: str = "") -> List[Dict[str, str]]:
+    """helm-controller's progress lines (its JSON log: ts, name, msg) from
+    ``since`` (RFC 3339, UTC) on."""
+    events: List[Dict[str, str]] = []
+    for line in kube.logs(flux_namespace, "deployment/helm-controller", tail=10000).splitlines():
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        ts, msg = str(rec.get("ts", "")), str(rec.get("msg", ""))
+        if ts[:19] >= since[:19] and any(p in msg for p in HELM_CONTROLLER_EVENTS):
+            events.append({"ts": ts, "name": str(rec.get("name", "")), "msg": msg})
+    return events
+
+
+def log_release_timeline(kube: Kube, flux_namespace: str, since: str, *namespaces: str) -> None:
+    """One line per HelmRelease of ``namespaces`` in the order they became
+    Ready: created, dependencies ready (and how often helm-controller found
+    them not ready first), the install's start, Ready — the chain's wall
+    clock, from the objects and helm-controller's log in ``flux_namespace``."""
+    events = helm_controller_events(kube, flux_namespace, since)
+    hrs = [hr for ns in namespaces for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=ns)]
+    for hr in sorted(hrs, key=lambda h: condition(h).get("lastTransitionTime", "")):
+        name = hr["metadata"]["name"]
+        own = [e for e in events if e["name"] == name]
+
+        def first(marker: str) -> str:
+            return next((e["ts"][11:19] for e in own if marker in e["msg"]), "-")
+
+        waits = sum("dependencies do not meet" in e["msg"] for e in own)
+        logger.info("RELEASE %-30s created %s  deps ready %s (%d waits)  install %s  ready %s  %s",
+                    name, hr["metadata"]["creationTimestamp"][11:19], first("all dependencies are ready"), waits,
+                    first("running 'install'"), condition(hr).get("lastTransitionTime", "")[11:19], condition(hr).get("reason", ""))
+
+
+def log_helm_controller_events(kube: Kube, flux_namespace: str, since: str, *names: str) -> None:
+    """helm-controller's progress lines for the named HelmReleases since ``since``."""
+    for e in helm_controller_events(kube, flux_namespace, since):
+        if e["name"] in names:
+            logger.info("helm-controller %s %-28s %s", e["ts"][11:19], e["name"], e["msg"][:160])
 
 
 # ---------------------------------------------------------------------------
