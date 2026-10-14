@@ -265,11 +265,11 @@ EGRESS_VALID = {"enabled": True, "namespace": "kyverno", "podSelector": {"app": 
 BASE = [
     "--namespace", "agent-platform",
     "--set", "ingress.parentRefs[0].name=x",
-    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     "--set", "components.modelServing.enabled=true",
     "--set", "components.kserve-llmisvc-crd.enabled=true",
     "--set", "components.kserve-llmisvc-resources.enabled=true",
-    "--set", "components.kagent.enabled=true",
+    "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     "--set", f"modelServing.namespace.name={NS}",
     "--api-versions", "kyverno.io/v1",
     "--api-versions", "gateway.networking.k8s.io/v1",

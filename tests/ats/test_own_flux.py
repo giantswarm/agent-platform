@@ -101,9 +101,13 @@ GUARD_MESSAGE = "this cluster runs Flux; set components.flux.enabled=false or in
 # The component HelmReleases the smoke's base + kagent values turn on (no
 # agent-manager here: it belongs to the round-trips values of the smoke).
 # model-manager is on by default with no backend (giantswarm/agent-platform#329).
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "model-manager")
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "cloudnative-pg", "model-manager")
+# The platform's CloudNativePG Cluster, kagent's and Substrate's database: the
+# connectivity release renders it with helm.sh/resource-policy: keep, so the
+# conversations outlive an uninstall.
+POSTGRES_CLUSTER = "kagent-pg"
 AGENT = "ats-flux-agent"
-# The way back's bound: helm-controller uninstalls the seven releases
+# The way back's bound: helm-controller uninstalls the platform releases
 # concurrently and the meta release's uninstall waits for their HelmRelease
 # objects to be gone. Well above what the bundled engine's ordered teardown
 # measures (~30 s with five waves), below the meta HelmRelease's own Helm
@@ -425,10 +429,12 @@ def test_the_way_back_uninstalls_through_the_clusters_flux(kube: Kube, platform_
         assert not kube.items("workerpools.ate.dev", all_namespaces=True), "a WorkerPool survived the kagent release's uninstall"
         assert kube.get("deployment", "muster", namespace=NAMESPACE) is None, "muster survived the uninstall"
         wait_for(f"Substrate's control plane gone from {ATE_NAMESPACE}", lambda: not kube.items("pods", namespace=ATE_NAMESPACE), 180, interval=3)
-        wait_for(f"no workload left in {KAGENT_NAMESPACE} (the controller, the UI, its Postgres, the WorkerPool's workers)",
-                 lambda: not (kube.items("deployments", namespace=KAGENT_NAMESPACE) or kube.items("statefulsets", namespace=KAGENT_NAMESPACE) or kube.items("pods", namespace=KAGENT_NAMESPACE)), 180, interval=3)
+        assert kube.get("clusters.postgresql.cnpg.io", POSTGRES_CLUSTER, namespace=KAGENT_NAMESPACE), f"the CloudNativePG Cluster {POSTGRES_CLUSTER} went with the uninstall; it must be kept (it holds the Sessions)"
+        wait_for(f"no workload left in {KAGENT_NAMESPACE} but the kept Cluster {POSTGRES_CLUSTER} (the controller, the UI, the WorkerPool's workers)",
+                 lambda: not (kube.items("deployments", namespace=KAGENT_NAMESPACE) or kube.items("statefulsets", namespace=KAGENT_NAMESPACE)
+                              or [p for p in kube.items("pods", namespace=KAGENT_NAMESPACE) if (p["metadata"].get("labels") or {}).get("cnpg.io/cluster") != POSTGRES_CLUSTER]), 180, interval=3)
     except AssertionError:
         dump(kube)
         raise
-    TIMINGS.record("the way back: meta HelmRelease deleted, the seven platform releases uninstalled concurrently by the cluster's Flux, kept CRDs in place", elapsed)
+    TIMINGS.record("the way back: meta HelmRelease deleted, the platform releases uninstalled concurrently by the cluster's Flux, kept CRDs in place", elapsed)
     logger.info("the way back clean in %.0f s: releases %s gone, kept CRDs %s, no SandboxConfig, no WorkerPool", elapsed, before, sorted(KEPT_CRDS))

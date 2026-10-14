@@ -84,16 +84,19 @@ connectivity chart the platform Harness. What the smoke sets
 | `kagent.substrateWorkerPool.template.resources` | 100m / 256Mi, limits 1 CPU / 1Gi | 250m / 512Mi, 2 / 2Gi | a golden boot, not a turn |
 | `kagent.harness.snapshotLocation` | `s3://ate-snapshots/kagent` | required, unset | the bundled RustFS bucket below |
 | `substrate.rustfs.enabled` | `true` | `false` | the in-cluster S3 store with the chart's static lab credentials (an installation names its own bucket) |
-| `substrate.postgres.enabled` | `auto` → bundled | `auto` | no CNPG Cluster in the smoke (`postgres.enabled: false`) |
-| `substrate.postgres.resources.requests` | 100m / 256Mi | 1 CPU / 1Gi | the chart asks for a full CPU of the node's four |
-| `kagent.controller.resources.requests.cpu`, `kagent.database.postgres.bundled.resources.requests.cpu` | 50m | 100m, 250m | schedule next to the engine and the platform |
+| `postgres.enabled`, `components.cloudnative-pg.enabled` | `true`, `true` | `false`, `false` | kagent's and Substrate's database on a CloudNativePG Cluster, the supported shape (the kagent chart deploys no PostgreSQL); the kind cluster gets the operator from the component |
+| `postgres.instances`, `postgres.storage.size`, `postgres.resources.requests` | 1, 1Gi, 50m / 256Mi | 3, 20Gi, 100m / 512Mi | one instance on the one node |
+| `substrate.postgres.enabled` | `auto` → the Cluster | `auto` | `postgres.enabled` puts Substrate's database on the Cluster |
+| `kagent.controller.resources.requests.cpu` | 50m | 100m | schedule next to the engine and the platform |
 | `kagent.ui.replicas` | 0 | 1 | nothing in the smoke reaches it; its image is the largest pull |
 
 The control plane the chart renders anyway: `ate-api-server` ×2,
 `ate-controller`, `atelet` (a privileged DaemonSet), `atenet-router`,
-`atenet-egress`, `dns`, the bundled `postgres-0` and `rustfs`, one worker pod
-(`ate.dev/worker-pool=kagent-default`) — two PVCs (1Gi each, kind's local-path
-provisioner).
+`atenet-egress`, `dns` and `rustfs`, one worker pod
+(`ate.dev/worker-pool=kagent-default`); the CloudNativePG operator and the
+Cluster's instance `kagent-pg-1` in `kagent` — two PVCs (1Gi each, kind's
+local-path provisioner). The Cluster carries `helm.sh/resource-policy: keep`
+and outlives the uninstall with the Sessions it holds.
 
 **What an uninstall leaves behind, and why the own-Flux scenario is a
 reinstall.** `helm uninstall` (the smoke's ordered teardown, the bundled engine

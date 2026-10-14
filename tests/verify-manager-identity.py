@@ -42,6 +42,7 @@ ALL_ON = sets(
     "ingress.mode=agentgateway-muster",
     "components.agentgateway.enabled=true",
     "components.kagent.enabled=true",
+    "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     "components.agent-manager.enabled=true",
     "components.vm-manager.enabled=true",
     "components.cluster-manager.enabled=true",
@@ -163,7 +164,7 @@ def main() -> None:
         ("no client", sets("muster.muster.oauth.server.dex.clientId="), ("model-manager.oauth.dex.clientID is empty", "set muster.muster.oauth.server.dex.clientId")),
         ("no base URL (muster-direct, no domain)", sets("ingress.mode=muster-direct", "global.domain="), ("model-manager.oauth.baseURL is empty", "set global.domain")),
     ):
-        flags = [*base, *LOGIN, *sets("components.kagent.enabled=true", "global.domain=ci.example.com", "ingress.mode=agentgateway-muster", "components.agentgateway.enabled=true"), *extra]
+        flags = [*base, *LOGIN, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "global.domain=ci.example.com", "ingress.mode=agentgateway-muster", "components.agentgateway.enabled=true"), *extra]
         rels = releases(meta, flags)
         result = connectivity(conn, rels["agent-platform-connectivity"], base)
         if result.returncode == 0 or not all(f in result.stderr for f in fragments):
@@ -171,7 +172,7 @@ def main() -> None:
         print(f"ok: absent, {what}")
 
     print("--> no login named (muster's issuer unset): nothing filled, the guard stays silent")
-    rels = releases(meta, [*base, *sets("components.kagent.enabled=true")])
+    rels = releases(meta, [*base, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri")])
     expect("model-manager oauth.dex", oauth(rels, "model-manager").get("dex"), {"allowPrivateURLs": True})
     result = connectivity(conn, rels["agent-platform-connectivity"], base)
     if result.returncode != 0:

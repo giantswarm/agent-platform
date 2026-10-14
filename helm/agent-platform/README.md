@@ -358,7 +358,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.10.0 <1.11.0"` |  |
+| components.kagent.versionRange | string | `">=1.11.3-rc.2 <1.12.0-0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -381,19 +381,19 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.10.0 <1.11.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.11.3-rc.2 <1.12.0-0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.8.2 <1.9.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.9.0 <1.10.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.8.2 <1.9.0"` |  |
+| components.substrate.versionRange | string | `">=1.9.0 <1.10.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -831,9 +831,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.substrateWorkerPool.template.resources.limits.cpu | string | `"2"` |  |
 | kagent.substrateWorkerPool.template.resources.limits.memory | string | `"2Gi"` |  |
 | kagent.database.postgres.vectorEnabled | bool | `true` |  |
-| kagent.database.postgres.bundled.image.repository | string | `"pgvector"` |  |
-| kagent.database.postgres.bundled.image.name | string | `"pgvector"` |  |
-| kagent.database.postgres.bundled.image.tag | string | `"pg18-trixie"` |  |
+| kagent.database.postgres.vectorSchema | string | `"public"` |  |
 | kagent.namespaceOverride | string | `"kagent"` |  |
 | kagent.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | kagent.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1506,6 +1504,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.atelet.tolerations | list | `[]` |  |
 | substrate.atelet.affinity | object | `{}` |  |
 | substrate.atelet.priorityClass.preemptionPolicy | string | `"Never"` |  |
+| substrate.atelet.resources.requests.cpu | string | `"50m"` |  |
+| substrate.atelet.resources.requests.memory | string | `"128Mi"` |  |
+| substrate.atelet.resources.limits.cpu | string | `"2"` |  |
+| substrate.atelet.resources.limits.memory | string | `"1Gi"` |  |
 | substrate.atelet.extraEnv | list | `[]` |  |
 | substrate.atelet.imageCache.pinnedImages | list | `[]` |  |
 | substrate-crds | object | `{}` |  |
