@@ -15,6 +15,14 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.131.x → \<next\> (agent tenants: roles, the platform tenant)
+
+With kagent on, the connectivity release renders the ClusterRoles `agent-platform:user`, `agent-platform:editor` and `agent-platform:admin` and binds the kagent namespace as the platform tenant; muster's MCPServers are listed to `tenants.platform.users` (giantswarm/agent-platform#706). Nothing a person sees changes until the kagent controller's authorizer is on.
+
+### Operator action
+
+- **An installation with a customer platform team**: name its group in `tenants.platformTeam` (RBAC subjects, with the installation's OIDC groups prefix). It becomes an editor in the kagent namespace and of muster's servers and workflows.
+
 ## 4.131.0 → \<next\> (kagent: releases only, from 1.11.4)
 
 `components.kagent{,-crds}.versionRange` is `>=1.11.4 <1.12.0`, kagent's releases of the 1.11 line. 4.131.0's range started at a release candidate and so admitted the line's later candidates. An installation that followed one (1.11.5-rc.1) steps back to 1.11.4 on this upgrade: the two share their CRDs and database schema, nothing is migrated and no conversation ends. An installation with `gitops.prereleases` keeps following release candidates, as for every component.
