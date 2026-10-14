@@ -19,10 +19,11 @@ route hostname. */}}
 # global.identity, one installation (backstage.installationName, default the
 # release name), the matching in-cluster Kubernetes entry (the frontend mints
 # the kagent token from it), the muster installation, the pg database block
-# when the Backstage chart's postgresql engine is on, app.extensions limited to
-# the Agent Platform pages, and the Agent Platform plugin's own block (the
-# tenant identity of the agents' HelmReleases, the skill repositories, the
-# kagent and model-manager API routes). The backstage chart mounts it through
+# when the Backstage chart's postgresql engine is on, the Agent Platform shell
+# (app.portals), app.extensions limited to the Agent Platform pages, and the
+# Agent Platform plugin's own block (the tenant identity of the agents'
+# HelmReleases, the skill repositories, the kagent and model-manager API
+# routes). The backstage chart mounts it through
 # backstage.extraAppConfig; the ConfigMap name and the file name are fixed
 # there. The Backstage release's pod checksums never see this ConfigMap —
 # changes here reach the running pod through the config-reload hook
@@ -40,6 +41,12 @@ data:
       title: Agent Platform
       baseUrl: https://{{ $hostname }}
       rootRedirect: /agent-platform
+      {{- /* The Agent Platform shell: from backstage 3.0.0 the platform's pages
+      are routed in the shell alone, which is off by default, so without this a
+      3.x portal shows no Agent Platform. The classic portal keeps its default.
+      An earlier backstage ignores the key. */}}
+      portals:
+        agentPlatform: true
       extensions:
         - page:agent-platform
         - nav-item:agent-platform
