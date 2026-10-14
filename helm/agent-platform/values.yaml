@@ -2684,7 +2684,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # kagent), with allowHTTP true for that in-cluster plain http key set (the
     # kagent chart from 1.11.5 refuses one without it) — and a value set here
     # for any of the three stands, the rest is derived; an own allowHTTP stands,
-    # and an own jwksURL carries no derived allowHTTP (README "Workspaces"). The grant names the person by email, the
+    # and an own jwksURL other than the derived one carries no derived
+    # allowHTTP (README "Workspaces"). The grant names the person by email, the
     # userIdClaim above, which the controller compares with the caller: another
     # claim fails the render, as does a kagent range whose floor is below
     # 1.6.0. Without workspaces nothing is forwarded, and the controller

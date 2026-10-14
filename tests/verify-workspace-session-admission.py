@@ -28,7 +28,8 @@ below pins one property:
   components.workspace-manager.targetNamespace (the key set), global.domain (the
   issuer) and grant.audience; a value the kagent block sets for one of the three
   stands and the rest is derived; an own allowHTTP stands, and an own jwksURL carries no
-  derived allowHTTP (an external key set stays https unless the block opts in);
+  derived allowHTTP unless it names the derived key set (an external key set stays https
+  unless the block opts in);
 - without the derivation an own block reaches the release as written, and one set in
   part fails the render naming the keys (the kagent chart needs all three);
 - the guards: a kagent range whose floor is below 1.6.0
@@ -240,12 +241,15 @@ def main(meta: str) -> int:
     own = admission(kagent_release([*base, "--set", f"{JWT}.jwksURL=http://keys.example.com/jwks.json"], meta))
     if "allowHTTP" in own:
         fail(f"an own plain http key set carries a derived allowHTTP: {own}")
+    own = admission(kagent_release([*base, "--set", f"{JWT}.jwksURL={JWKS}"], meta))
+    if own != WANT:
+        fail(f"an own jwksURL that names the derived key set carries no derived allowHTTP: {own}")
     own = admission(kagent_release([*base, "--set", f"{JWT}.allowHTTP=false"], meta))
     if own != {**WANT, "allowHTTP": "false"}:
         fail(f"an own allowHTTP does not stand: {own}")
     ok(f"the key set follows {NAME}.fullnameOverride, service.port, gitops.targetNamespace and components.{NAME}.targetNamespace, "
        f"the issuer global.domain without oauth.baseURL, the audience {NAME}.grant.audience; a value the kagent block sets stands per key; "
-       f"an own jwksURL carries no derived allowHTTP")
+       f"another own jwksURL carries no derived allowHTTP, one naming the derived key set does")
 
     # --- an own block without the derivation -----------------------------------------------------
     full = ["--set", f"{JWT}.jwksURL=https://keys.example.com/jwks.json", "--set", f"{JWT}.issuer=https://wm.example.com", "--set", f"{JWT}.audience=kagent"]
