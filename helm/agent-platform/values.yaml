@@ -5444,6 +5444,13 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       auth:
         forwardToken: true
+        # The cross-client audience a portal session's id_token carries (the
+        # kube-apiserver's, like the other managers'): muster requests it at
+        # login and the chart trusts it next to oauth.trustedAudiences, so a
+        # forwarded portal token is accepted. Users sign in once more after
+        # it changes.
+        requiredAudiences:
+          - dex-k8s-authenticator
   # The keys that seal each person's provider sign-ins and the sign-in flow's
   # state: a Secret in the platform's namespace whose data entries are key ids
   # (a lower-case DNS label of at most 32 characters), each 32 random bytes.
