@@ -326,10 +326,11 @@ def check_toggles(meta: str, connectivity: str) -> None:
         if marker in off:
             sys.exit(f"FAIL: connectivity still renders {marker!r} with components.muster.enabled=false")
     # Without muster there is no ingress topology (#252): the data plane in front
-    # of it goes with the /mcp route, whatever ingress.mode says.
+    # of it goes with the /mcp route, whatever ingress.mode says. The Role that
+    # lists muster's MCPServers to every signed-in person (#706) goes too.
     kinds = {kind for kind, _ in documents(on)} - {kind for kind, _ in documents(off)}
-    if kinds != {"HTTPRoute", "Gateway", "AgentgatewayParameters", "AgentgatewayPolicy"}:
-        sys.exit(f"FAIL: muster off dropped {sorted(kinds)} from the connectivity render; expected the /mcp HTTPRoute and the data plane in front of muster")
+    if kinds != {"HTTPRoute", "Gateway", "AgentgatewayParameters", "AgentgatewayPolicy", "Role"}:
+        sys.exit(f"FAIL: muster off dropped {sorted(kinds)} from the connectivity render; expected the /mcp HTTPRoute, the data plane in front of muster and the MCPServer viewer Role")
     ok("connectivity with muster off: no /mcp route, no data plane, no muster egress policy, no rule selecting muster pods")
 
     on = helm(connectivity, CONN_BACKSTAGE)

@@ -3021,6 +3021,39 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
       cidrs: []
 
+# === Agent tenants (giantswarm/agent-platform#706) ===
+# The RBAC of agent tenants: with kagent on, the three ClusterRoles
+# agent-platform:user, agent-platform:editor and agent-platform:admin
+# (templates/tenants/clusterroles.yaml) and the platform tenant's
+# RoleBindings in the kagent namespace; muster's MCPServers listed to every
+# signed-in person in muster's namespace. The meta chart's copy of this block
+# documents every key and forwards it.
+tenants:
+  platform:
+    # -- Every signed-in person: agent-platform:user in the kagent namespace,
+    # list (get, watch) on muster's MCPServers in muster's namespace. The
+    # default, system:authenticated, includes every ServiceAccount: every pod
+    # with a token can read the platform tenant's Agents, RemoteMCPServer URLs
+    # and muster's MCPServer specs. An installation can set its OIDC
+    # "everyone" group instead.
+    users:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: system:authenticated
+    # -- The platform's operators: agent-platform:editor in the kagent
+    # namespace.
+    editors:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: giantswarm-ad:giantswarm-admins
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: giantswarm-github:giantswarm:giantswarm-admins
+  # -- The customer's platform team: agent-platform:editor in the kagent
+  # namespace beside platform.editors (the meta chart also adds it to muster's
+  # editor bindings).
+  platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories
 # mirrored on one shared read-write-many volume in the kagent namespace, a

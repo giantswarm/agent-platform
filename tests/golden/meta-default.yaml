@@ -1610,6 +1610,20 @@ spec:
       rustfs:
         enabled: false
     substrate-crds: {}
+    tenants:
+      platform:
+        editors:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
+        users:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: system:authenticated
+      platformTeam: []
     valkey:
       ciliumNetworkPolicy:
         enabled: false

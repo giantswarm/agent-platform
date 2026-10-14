@@ -5015,6 +5015,58 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
       cidrs: []
 
+# === Agent tenants (giantswarm/agent-platform#706) ===
+# Who sees, runs and writes agents, by Kubernetes RBAC. A tenant is a
+# namespace: the kagent namespace (the platform tenant, the agents for
+# everyone) and every namespace labelled giantswarm.io/organization (an
+# Organization's, whose objects agent-manager's tenant reconciler keeps). With
+# kagent on, the connectivity release renders the three ClusterRoles a tenant's
+# RoleBindings refer to:
+#   - agent-platform:user: see the tenant's agents, templates, RemoteMCPServers,
+#     ModelConfigs and muster MCPServers, and start a Session with an agent;
+#   - agent-platform:editor: the above, plus the writes agent-manager performs
+#     as the caller (HelmReleases, OCIRepositories, Agents, AgentTemplates,
+#     RemoteMCPServers);
+#   - agent-platform:admin: the above, plus ModelConfigs and the
+#     tenant's RoleBindings, which may bind these three roles only.
+# An Organization's RoleBindings are the installation's (they name the
+# customer's groups); the chart binds the platform tenant only, below. The
+# kagent controller answers from these roles once its authorizer is on (the
+# kagent setting of giantswarm/giantswarm#37761, not yet released): until then
+# the bindings change nothing a person sees.
+tenants:
+  platform:
+    # -- Every signed-in person: bound to agent-platform:user in the kagent
+    # namespace, and to `list` (with get and watch) on muster's MCPServers in
+    # muster's namespace (the servers for everyone). RBAC subjects. The
+    # default, system:authenticated, gives this to every user. It also gives
+    # it to every ServiceAccount, so every pod in the cluster can read the
+    # platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer
+    # specs. To give it to people only, replace the default with an OIDC
+    # group that every user belongs to, written as the API server sees it
+    # (with the installation's OIDC groups prefix).
+    users:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: system:authenticated
+    # -- The platform's operators: bound to agent-platform:editor in the
+    # kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in
+    # muster.rbac.*.subjects.
+    editors:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: giantswarm-ad:giantswarm-admins
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: giantswarm-github:giantswarm:giantswarm-admins
+  # -- The customer's platform team, per installation: RBAC subjects bound to
+  # agent-platform:editor in the kagent namespace beside `platform.editors`,
+  # and added to muster's mcpserver-editor and workflow-editor subjects beside
+  # muster.rbac.*.subjects (the meta chart appends them to the muster
+  # release's values). Empty by default. A group is written as the API server
+  # sees it (with the OIDC groups prefix of the installation).
+  platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories
 # mirrored on one shared read-write-many volume in the kagent namespace, a
