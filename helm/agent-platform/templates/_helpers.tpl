@@ -387,6 +387,19 @@ installation's own podAffinity stands instead. */ -}}
 {{- $_ := set $pool "template" (dict "podAffinity" $affinity) -}}
 {{- $_ := set $derived "substrateWorkerPool" $pool -}}
 {{- end -}}
+{{- /* Workers above the default priority 0, so a pod making room on a full
+node (atelet) evicts the ordinary workloads first (giantswarm/agent-platform#999):
+the PriorityClass the connectivity chart ships (kagent.substrateWorkerPool
+.priorityClass); an installation's own template.priorityClassName stands
+instead. */ -}}
+{{- $pc := dig "substrateWorkerPool" "priorityClass" dict (.root.Values.kagent | default dict) -}}
+{{- if and $pc.enabled $pc.name (not (dig "substrateWorkerPool" "template" "priorityClassName" "" (.root.Values.kagent | default dict))) -}}
+{{- $pool := get $derived "substrateWorkerPool" | default dict -}}
+{{- $template := get $pool "template" | default dict -}}
+{{- $_ := set $template "priorityClassName" $pc.name -}}
+{{- $_ := set $pool "template" $template -}}
+{{- $_ := set $derived "substrateWorkerPool" $pool -}}
+{{- end -}}
 {{- /* The jwt Session admission a Session with a workspace passes: the
 workspace-manager's key set, issuer and audience, while workspaces are on and
 the manager signs grants (agent-platform.kagent.sessionAdmission); the block's
@@ -626,7 +639,15 @@ manager writes into every grant's iss (its base URL,
 agent-platform.workspaceManager.baseURL) and the audience it writes into aud
 (workspace-manager.grant.audience; kagent, the chart's default). A value the
 kagent block sets for one of the three stands, the rest is derived: the kagent
-chart needs all three together. Emits JSON {jwksURL, issuer, audience}, or {}
+chart needs all three together. With the derived key set (derived, or an own
+jwksURL that names the same URL), allowHTTP is true:
+the kagent chart from 1.11.5 refuses a plain http jwksURL without it, and this
+one is the manager's own Service, which serves no TLS and which the controller
+reaches in-cluster (kagent-controller-to-workspace-manager); an own allowHTTP
+stands.
+Another own jwksURL carries no derived allowHTTP, so an external key set stays
+https unless the kagent block opts in itself. Emits JSON {jwksURL, issuer,
+audience[, allowHTTP]}, or {}
 while nothing is derived (the switch off, no grant key, kagent off): the kagent
 block's own admission, if any, then reaches the release as written.
 Usage: include "agent-platform.kagent.sessionAdmission" . | fromJson
@@ -641,6 +662,9 @@ Usage: include "agent-platform.kagent.sessionAdmission" . | fromJson
 {{- $derived := dict "jwksURL" (include "agent-platform.workspaceManager.jwksURL" .) "issuer" (include "agent-platform.workspaceManager.baseURL" .) "audience" (toString (dig "grant" "audience" "kagent" $wm)) -}}
 {{- range $k, $v := $derived -}}
 {{- $_ := set $out $k (toString (dig $k "" $own) | default $v) -}}
+{{- end -}}
+{{- if eq $out.jwksURL $derived.jwksURL -}}
+{{- $_ := set $out "allowHTTP" (dig "allowHTTP" true $own) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -1205,10 +1229,10 @@ The worker pods' preferred affinity to the atelet pod on their node, as JSON
 ({} while the pinned Substrate release predates
 agent-platform.substrate.workerPoolAffinityFloor; a release candidate of that
 release carries the field too). A worker runs sandboxes only
-through its node's atelet, and atelet's PriorityClass never preempts: when the
-atelet DaemonSet rolls on a node without spare CPU, a worker scheduled in the
-gap takes the CPU the old atelet pod freed, the new atelet pod stays Pending,
-the rollout stops at that node and the substrate release's upgrade times out
+through its node's atelet: when the atelet DaemonSet rolls on a node without
+spare CPU, a worker scheduled in the gap takes the CPU the old atelet pod
+freed, and under a non-preempting atelet class the new atelet pod stays
+Pending and the substrate release's upgrade times out
 (giantswarm/agent-platform#756). The term, weight 100, steers a worker to a node
 where an atelet pod is bound whenever one has room; a running worker is never
 evicted by it. It is preferred, not required: Karpenter cannot see a
