@@ -1843,6 +1843,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspace-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| workspace-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | workspace-manager.signin.keys.secretName | string | `"workspace-manager-signin-keys"` |  |
 | workspace-manager.signin.keys.current | string | `"key-1"` |  |
 | workspace-manager.providers | list | `[]` |  |

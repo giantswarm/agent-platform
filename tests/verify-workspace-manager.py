@@ -260,7 +260,7 @@ def main(meta: str, connectivity: str) -> int:
         "  dependsOn:\n    - name: muster\n    - name: agent-platform-connectivity\n",
         f"    fullnameOverride: {NAME}\n",
         "    oauth:\n      baseURL: https://workspaces.ci.example.com\n      dex:\n        allowPrivateURLs: true\n      enabled: true\n      sso:\n        allowPrivateIPs: true\n",
-        "    muster:\n      mcpServer:\n        auth:\n          forwardToken: true\n        enabled: true\n",
+        "    muster:\n      mcpServer:\n        auth:\n          forwardToken: true\n          requiredAudiences:\n          - dex-k8s-authenticator\n        enabled: true\n",
         "    workspaces:\n      namespace: kagent\n",
         "    - kind: github\n      name: github\n",
         "    - kind: gitlab\n      name: gitlab\n",
@@ -272,7 +272,7 @@ def main(meta: str, connectivity: str) -> int:
         "    sessions:\n      cleanupAfter: 336h\n",
         "\n    global:\n",
     ), "the HelmRelease")
-    for absent in ("requiredAudiences", "authorizationServer", "\n    sync:", "sizing:", "signInStore", "\n    networkPolicy:"):
+    for absent in ("authorizationServer", "\n    sync:", "sizing:", "signInStore", "\n    networkPolicy:"):
         if absent in hr:
             fail(f"the HelmRelease carries {absent.strip()!r}")
     refs = 0
