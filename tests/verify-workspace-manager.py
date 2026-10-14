@@ -269,7 +269,7 @@ def main(meta: str, connectivity: str) -> int:
         "    storage:\n      storageClassName: workspaces-rwx\n",
         # The one key that is not empty: cleanupAfter, derived from kagent's
         # session idle TTL (tests/verify-session-retention.py).
-        "    sessions:\n      cleanupAfter: 720h\n",
+        "    sessions:\n      cleanupAfter: 336h\n",
         "\n    global:\n",
     ), "the HelmRelease")
     for absent in ("requiredAudiences", "authorizationServer", "\n    sync:", "sizing:", "signInStore", "\n    networkPolicy:"):
