@@ -392,6 +392,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.omitKeys[6] | string | `"remoteMcpServers"` |  |
 | components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
 | components.kagent.omitKeys[8] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
+| components.kagent.omitKeys[9] | string | `"substrateWorkerPool.priorityClass"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
