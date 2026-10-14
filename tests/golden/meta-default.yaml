@@ -1544,6 +1544,10 @@ spec:
         extensionImage:
           reference: ""
     substrate:
+      ateController:
+        busyWorker:
+          annotations:
+            karpenter.sh/do-not-disrupt: "true"
       atelet:
         affinity: {}
         extraEnv: []
