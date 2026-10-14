@@ -2696,8 +2696,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # refuses every Session that names a volume source.
     # The line's session lifecycle knobs travel as written (the block is the
     # kagent chart's; the chart renders each as its KAGENT_* env): sessionIdleTTL
-    # (KAGENT_SESSION_IDLE_TTL, 168h: an idle session is deleted; running tasks
-    # and turns waiting for input do not expire), sessionShareMaxTTL
+    # (KAGENT_SESSION_IDLE_TTL, below), sessionShareMaxTTL
     # (KAGENT_SESSION_SHARE_MAX_TTL, 0: the longest lifetime a session share may
     # request, and the lifetime a share created without one receives; 0 leaves a
     # share valid until revoked or the session is deleted), stalledTurnTimeout
@@ -2705,8 +2704,18 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # for that long is failed so the session takes its next message) and
     # pausedRuntimeTTL (KAGENT_PAUSED_RUNTIME_TTL, 2m: a runtime paused for input
     # is suspended to a durable snapshot once its pause is older than this). The
-    # platform sets none; an installation that bounds its shares sets
-    # sessionShareMaxTTL here (klaus-gateway's thread shares renew within it).
+    # platform sets only sessionIdleTTL; an installation that bounds its shares
+    # sets sessionShareMaxTTL here (klaus-gateway's thread shares renew within it).
+    # sessionIdleTTL: how long a Session lives after its last activity (a Go
+    # duration; running tasks and turns waiting for input do not expire, 0 never
+    # deletes one). 720h, 30 days, the retention the workspace plan gives a
+    # Session's directory; the kagent chart's own default is 168h. It is the one
+    # value of a workspace Session's retention: deleting the Session deletes its
+    # directory at once, so the workspace-manager's sessions.cleanupAfter is
+    # derived from it (with kagent on and a TTL other than 0) and an own
+    # cleanupAfter longer than it fails the render — it would never apply
+    # (README "Workspaces").
+    sessionIdleTTL: 720h
     # Voluntary disruption (giantswarm/agent-platform#431): the controller pod
     # holds every streaming turn (A2A SendStreamingMessage, the portal's SSE)
     # and the actor sessions behind them; an eviction mid-turn leaves the task
@@ -5523,8 +5532,11 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   sync:
     cycle: ""
   # How long a Session's directory outlives the Session's last turn (a Go
-  # duration; 30 days, 720h, is the chart's default): then it is deleted, at
-  # once when the Session is. Empty takes the chart's default.
+  # duration): then it is deleted, at once when the Session is. Empty, the
+  # default: kagent.controller.sessionIdleTTL (720h) with kagent on and a TTL
+  # other than 0, so a directory lives exactly as long as its Session;
+  # otherwise the chart's default (720h). A shorter value of its own stands; a
+  # longer one fails the render, since kagent deletes the Session first.
   sessions:
     cleanupAfter: ""
   # The size a workspace volume is created with where the StorageClass

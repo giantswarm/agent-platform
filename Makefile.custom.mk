@@ -1473,6 +1473,12 @@ verify-workspace-storage: ## Assert the workspace StorageClass value and its pre
 	@LIVE_CONTEXT=$(LIVE_CONTEXT) python3 tests/verify-workspace-storage.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "workspace storage verified."
 
+.PHONY: verify-session-retention
+verify-session-retention: ## Assert a workspace Session's directory lives as long as its Session (giantswarm/agent-platform#1007): the kagent release carries controller.sessionIdleTTL 720h by default (the kagent chart's is 168h), workspaces off too; with workspaces on the workspace-manager release's sessions.cleanupAfter is the TTL (an own TTL followed); an own cleanupAfter not longer than the TTL stands, a longer one fails naming both keys; a TTL of 0 reaches kagent and derives none; a TTL that is not a Go duration fails naming the key. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-session-retention.py $(CHART_DIR)
+	@echo "session retention verified."
+
 .PHONY: verify-mcp-kubernetes-registration
 verify-mcp-kubernetes-registration: ## Assert the bundled mcp-kubernetes registration's three shapes (giantswarm/agent-platform#403): the family-less singleton mcp-kubernetes by default; with mcp-kubernetes.mcpServer.managementCluster a member of muster's kubernetes family as agent-platform-mcps renders one (<name>-mcp-kubernetes, the management-cluster label, spec.family {kubernetes, management_cluster}, url and auth unchanged); none with enabled false or with the component or muster off; a managementCluster that is not a DNS label fails naming the key; the meta chart forwards the block to connectivity and drops it from the mcp-kubernetes release. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"

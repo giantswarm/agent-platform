@@ -286,6 +286,26 @@ PersistentVolumeClaim names. */ -}}
 {{- end -}}
 {{- $_ := set $derived "storage" (dict "storageClassName" .) -}}
 {{- end -}}
+{{- /* A Session's directory lives as long as the Session: kagent deletes an
+idle Session after kagent.controller.sessionIdleTTL and its directory goes at
+once, so that TTL is sessions.cleanupAfter unless the block sets a shorter one
+(a longer one would never apply). 0 never deletes a Session and derives
+nothing: the manager refuses a cleanupAfter of 0. */ -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent") -}}
+{{- $ttl := toString (dig "controller" "sessionIdleTTL" "" (.root.Values.kagent | default dict)) -}}
+{{- $ttlSeconds := include "agent-platform.durationSeconds" $ttl -}}
+{{- if and $ttl (not $ttlSeconds) -}}
+{{- fail (printf "kagent.controller.sessionIdleTTL (%s) is not a Go duration such as 720h" $ttl) -}}
+{{- end -}}
+{{- if and $ttlSeconds (gt (float64 $ttlSeconds) 0.0) -}}
+{{- $own := toString (dig "sessions" "cleanupAfter" "" (index .root.Values "workspace-manager" | default dict)) -}}
+{{- if not $own -}}
+{{- $_ := set $derived "sessions" (dict "cleanupAfter" $ttl) -}}
+{{- else if gt (float64 (include "agent-platform.durationSeconds" $own | default "0")) (float64 $ttlSeconds) -}}
+{{- fail (printf "workspace-manager.sessions.cleanupAfter (%s) is longer than kagent.controller.sessionIdleTTL (%s): kagent deletes the idle Session first and its directory with it, so the cleanup never applies — leave workspace-manager.sessions.cleanupAfter unset (it follows the TTL) or raise the TTL" $own $ttl) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- /* The Organizations whose members manage workspaces, from
 workspaces.organizations: the manager checks a caller's groups against them. */ -}}
 {{- with (include "agent-platform.workspaces.organizations" .root | fromJson) -}}
@@ -2821,6 +2841,25 @@ workspace-manager.kagent.address (agent-platform.componentDerivedValues). One
 line, no comment inside the define.
 */}}
 {{- define "agent-platform.workspaceManager.kagentFloor" -}}0.4.0{{- end -}}
+
+{{/*
+A Go duration (time.ParseDuration: 720h, 1h30m, 0, 1.5h) in seconds, empty
+for anything else (a sign, a day unit, a bare number other than 0).
+Usage: include "agent-platform.durationSeconds" "720h"
+*/}}
+{{- define "agent-platform.durationSeconds" -}}
+{{- $d := toString . -}}
+{{- $unit := dict "h" 3600.0 "m" 60.0 "s" 1.0 "ms" 0.001 "us" 0.000001 "µs" 0.000001 "ns" 0.000000001 -}}
+{{- $num := "([0-9]+(\\.[0-9]*)?|\\.[0-9]+)" -}}
+{{- if eq $d "0" -}}0
+{{- else if regexMatch (printf "^(%s(ns|us|µs|ms|h|m|s))+$" $num) $d -}}
+{{- $total := 0.0 -}}
+{{- range regexFindAll (printf "%s(ns|us|µs|ms|h|m|s)" $num) $d -1 -}}
+{{- $total = addf $total (mulf (float64 (regexFind $num .)) (get $unit (regexReplaceAll (printf "^%s" $num) . ""))) -}}
+{{- end -}}
+{{- $total -}}
+{{- end -}}
+{{- end -}}
 
 {{/*
 The first release of the workspace-manager line whose manager has the provider
