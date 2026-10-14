@@ -12,8 +12,8 @@
 # cluster without the API).
 #
 # Sized for the CI executor (the `large` class, one 4-vCPU / 15 GB node): one
-# gVisor worker with modest requests — one worker hosts one actor at a time and
-# the smoke's Agents boot in turn — under the Substrate control plane the
+# gVisor worker with modest requests — a worker hosts many actors (ateom's
+# --max-actors, default 1000) and the smoke's Agents boot in turn — under the Substrate control plane the
 # chart renders (single replicas, ate-api-server two), its bundled Postgres at a
 # fraction of the chart's 1-CPU request, the bundled RustFS as the snapshot
 # store (a lab's shape; an installation names its own bucket), the kagent UI at
