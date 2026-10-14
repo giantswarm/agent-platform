@@ -198,6 +198,20 @@ help:
   at on-demand prices for the worker nodes. Karpenter-only: **never on CAPZ,
   on-prem or a CAPA pool that cluster-aws node pools provision** — no node
   carries the label there and the workers stay `Pending`.
+- **`kagent.substrateWorkerPool.priorityClass`** (`enabled: true`, `name:
+  agent-platform-worker-pool`, `value: 1000000` — **on by default**;
+  giantswarm/agent-platform#999): a `PriorityClass` rendered by the connectivity
+  chart, which the meta chart names in the pool's `template.priorityClassName`.
+  atelet's `ate-node-critical` (`PreemptLowerPriority`) evicts the lowest-priority
+  pods of a full node to make room; without a class the workers run at the
+  default priority 0 and are among the first victims. Above 0 the ordinary
+  workloads go first; below the cluster's own classes (monitoring, the
+  platform's, atelet's `1000000000`) they still outrank a worker.
+  `preemptionPolicy: Never`: a pending worker evicts nothing itself. An
+  installation's own `template.priorityClassName` stands instead; `enabled:
+  false` renders no class and names none; the render refuses a value outside
+  1..999999999 and a `system-` name. The value is immutable on the API: change it
+  under a new name. Setting or moving the name rolls the pool once.
 
 **Every change to `template`** — a label, an annotation, a selector, the
 resources — rolls the pool's Deployment once (`RollingUpdate` 25 %/25 %, one
@@ -217,15 +231,17 @@ verbatim from it on. Recommended: hostname `maxSkew: 1`, `minDomains: 2`,
 zone `maxSkew: 1`, `ScheduleAnyway`, both with a `labelSelector` on
 `ate.dev/worker-pool: <name>` — what the fleet template renders behind its knob.
 A spread is a template change and rolls the pool's Deployment once (above).
-`make verify-workerpool` asserts all of it: the budget, the two knobs reaching the
-kagent release and the `WorkerPool` verbatim, the spread refused below the floor
-and forwarded at it, still exactly one `WorkerPool`.
+`make verify-workerpool` asserts all of it: the budget, the priority class and
+the derived class name, the two knobs reaching the kagent release and the
+`WorkerPool` verbatim, the spread refused below the floor and forwarded at it,
+still exactly one `WorkerPool`.
 
-**Atelet affinity.** A worker runs sandboxes only through the atelet on its node,
-and atelet's PriorityClass never preempts. While the atelet DaemonSet rolls on a
-node without spare CPU, a worker scheduled in the gap takes the CPU the old atelet
-pod freed: the new atelet pod stays Pending, the rollout stops at that node and
-the `substrate` release's upgrade times out (giantswarm/agent-platform#756). From
+**Atelet affinity.** A worker runs sandboxes only through the atelet on its node.
+While the atelet DaemonSet rolls on a node without spare CPU, a worker scheduled
+in the gap takes the CPU the old atelet pod freed; under a non-preempting atelet
+class (`preemptionPolicy: Never`, an installation's choice) the new atelet pod
+stays Pending, the rollout stops at that node and the `substrate` release's
+upgrade times out (giantswarm/agent-platform#756). From
 the Substrate line's `1.3.0` on (`agent-platform.substrate.workerPoolAffinityFloor`)
 the chart derives `template.podAffinity`: a preferred term (weight 100) on the
 atelet pods (`app: atelet` in `components.substrate.targetNamespace`) with

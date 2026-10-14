@@ -70,4 +70,24 @@ producing a silently-broken release.
       {{- fail (printf "postgres.namespace (%s) must equal kagent.namespaceOverride (%s) so the CNPG-generated DSN Secret is co-located with the kagent controller that mounts it." $pgNs $kagentNs) }}
     {{- end }}
   {{- end }}
+
+  {{- /* The worker pods' PriorityClass (workerpool-priorityclass.yaml): above
+         the default priority 0, so a pod making room evicts the ordinary
+         workloads first, and below 1000000000, atelet's ate-node-critical and
+         the cluster's critical classes, which keep preempting a worker; the
+         name is what the pool's template.priorityClassName names (system- is
+         the API's reserved prefix). value is immutable on the API: change it
+         under a new name. */ -}}
+  {{- $pc := .Values.kagent.substrateWorkerPool.priorityClass }}
+  {{- if $pc.enabled }}
+    {{- if not (regexMatch "^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$" (toString $pc.name)) }}
+      {{- fail (printf "kagent.substrateWorkerPool.priorityClass.name %q is not a DNS-1123 subdomain (lowercase letters, digits, - and .); the pool's template.priorityClassName names it" (toString $pc.name)) }}
+    {{- end }}
+    {{- if hasPrefix "system-" (toString $pc.name) }}
+      {{- fail (printf "kagent.substrateWorkerPool.priorityClass.name %q: the system- prefix is reserved for the API's own priority classes" (toString $pc.name)) }}
+    {{- end }}
+    {{- if or (not (kindIs "float64" $pc.value)) (ne (float64 $pc.value) (float64 (int $pc.value))) (le (int $pc.value) 0) (ge (int $pc.value) 1000000000) }}
+      {{- fail (printf "kagent.substrateWorkerPool.priorityClass.value must be a whole number above 0 and below 1000000000 (got %v): at or below the default priority 0 a pod making room on a full node (atelet, ate-node-critical) evicts the workers before the ordinary workloads, and at atelet's 1000000000 or above atelet could no longer preempt a worker for its node" $pc.value) }}
+    {{- end }}
+  {{- end }}
 {{- end }}

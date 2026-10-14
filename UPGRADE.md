@@ -21,7 +21,16 @@ With kagent on, the connectivity release renders the ClusterRoles `agent-platfor
 
 ### Operator action
 
-- **An installation with a customer platform team**: name its group in `tenants.platformTeam` (RBAC subjects, with the installation's OIDC groups prefix). It becomes an editor in the kagent namespace and an editor of muster's servers and workflows.
+- **An installation with a customer platform team**: name its group in `tenants.platformTeam` (RBAC subjects, with the installation's OIDC groups prefix). It becomes an editor in the kagent namespace and of muster's servers and workflows.
+
+## 4.131.0 → \<next\> (kagent: releases only, from 1.11.4)
+
+`components.kagent{,-crds}.versionRange` is `>=1.11.4 <1.12.0`, kagent's releases of the 1.11 line. 4.131.0's range started at a release candidate and so admitted the line's later candidates. An installation that followed one (1.11.5-rc.1) steps back to 1.11.4 on this upgrade: the two share their CRDs and database schema, nothing is migrated and no conversation ends. An installation with `gitops.prereleases` keeps following release candidates, as for every component.
+
+### Operator action
+
+- **None.**
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.11.4`.
 
 ## 4.130.x → \<next\> (Substrate 1.10.2: the egress gateway retries a refused HTTP/2 stream)
 

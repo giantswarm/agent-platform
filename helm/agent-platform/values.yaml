@@ -558,7 +558,7 @@ components:  # @schema additionalProperties: true
     # chart takes its OTel settings in the SDK-spec shape kagent.otel below
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
     # ignores them and exports nothing.
-    versionRange: ">=1.11.3-rc.2 <1.12.0-0"
+    versionRange: ">=1.11.4 <1.12.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -636,6 +636,10 @@ components:  # @schema additionalProperties: true
       # The worker PodDisruptionBudget is the connectivity chart's (the kagent
       # chart has no budget template for the WorkerPool; #472).
       - substrateWorkerPool.podDisruptionBudget
+      # The workers' PriorityClass is the connectivity chart's object too; the
+      # kagent release gets only the class name in the pool's template
+      # (agent-platform.componentDerivedValues, #999).
+      - substrateWorkerPool.priorityClass
     # The kagent chart stamps its own image references at publish (the build's
     # controller/UI tag, the Go ADK digest the Harness runs, the gVisor worker
     # of the Substrate version it was built against). An installation may
@@ -668,7 +672,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.11.3-rc.2 <1.12.0-0"
+    versionRange: ">=1.11.4 <1.12.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -2681,8 +2685,11 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # the issuer the manager writes into every grant's iss (its base URL,
     # workspace-manager.oauth.baseURL or https://workspace-manager.<global.domain>)
     # and the audience it writes into aud (workspace-manager.grant.audience,
-    # kagent) — and a value set here for any of the three stands, the rest is
-    # derived (README "Workspaces"). The grant names the person by email, the
+    # kagent), with allowHTTP true for that in-cluster plain http key set (the
+    # kagent chart from 1.11.5 refuses one without it) — and a value set here
+    # for any of the three stands, the rest is derived; an own allowHTTP stands,
+    # and an own jwksURL other than the derived one carries no derived
+    # allowHTTP (README "Workspaces"). The grant names the person by email, the
     # userIdClaim above, which the controller compares with the caller: another
     # claim fails the render, as does a kagent range whose floor is below
     # 1.6.0. Without workspaces nothing is forwarded, and the controller
@@ -2939,9 +2946,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # pool's Deployment once (above).
     #
     # Atelet affinity. A worker runs sandboxes only through the atelet on its
-    # node, and atelet's PriorityClass never preempts: while the atelet
-    # DaemonSet rolls on a full node, a worker scheduled in the gap takes the
-    # CPU the old atelet pod freed and the rollout stops there. From the
+    # node, and while the atelet DaemonSet rolls on a full node, a worker
+    # scheduled in the gap takes the CPU the old atelet pod freed. From the
     # Substrate line's 1.3.0 on (agent-platform.substrate
     # .workerPoolAffinityFloor) the chart DERIVES template.podAffinity, a
     # preferred term (weight 100) on the atelet pods (app: atelet in
@@ -2953,11 +2959,28 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # (giantswarm/agent-platform#798). An installation's own podAffinity
     # stands instead of the derived one (keep the atelet term in it, never
     # required); below 1.3.0 the key is refused.
+    #
+    # Priority (giantswarm/agent-platform#999). atelet's PriorityClass
+    # (ate-node-critical, PreemptLowerPriority) evicts the lowest-priority pods
+    # of a full node to make room, and a worker without a class runs at the
+    # default priority 0 — among the first victims, its actor with it. The
+    # connectivity chart ships priorityClass (below; never forwarded to the
+    # kagent release) and the chart DERIVES template.priorityClassName from
+    # its name: the ordinary workloads at 0 are evicted before a worker, the
+    # cluster's own classes (monitoring, the platform's, atelet's) still
+    # outrank it. An installation's own template.priorityClassName stands
+    # instead; enabled: false renders no class and names none. Setting or
+    # moving the name is a template change: it rolls the pool's Deployment
+    # once (above).
     podDisruptionBudget:
       enabled: true
       minAvailable: null
       maxUnavailable: 1
       unhealthyPodEvictionPolicy: AlwaysAllow
+    priorityClass:
+      enabled: true
+      name: agent-platform-worker-pool
+      value: 1000000
     template:
       nodeSelector:
         kubernetes.io/arch: amd64
