@@ -1979,9 +1979,9 @@
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
-                        "authors": {
+                        "editors": {
                             "type": "array",
-                            "description": "The platform's operators: agent-platform-author in the kagent namespace.",
+                            "description": "The platform's operators: agent-platform:editor in the kagent namespace.",
                             "items": {
                                 "type": "object",
                                 "required": [
@@ -2007,7 +2007,7 @@
                         },
                         "users": {
                             "type": "array",
-                            "description": "Every signed-in person: agent-platform-user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC \"everyone\" group instead.",
+                            "description": "Every signed-in person: agent-platform:user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC \"everyone\" group instead.",
                             "items": {
                                 "type": "object",
                                 "required": [
@@ -2035,7 +2035,7 @@
                 },
                 "platformTeam": {
                     "type": "array",
-                    "description": "The customer's platform team: agent-platform-author in the kagent namespace beside platform.authors (the meta chart also adds it to muster's editor bindings).",
+                    "description": "The customer's platform team: agent-platform:editor in the kagent namespace beside platform.editors (the meta chart also adds it to muster's editor bindings).",
                     "items": {
                         "type": "object",
                         "required": [

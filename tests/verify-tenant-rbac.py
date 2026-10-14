@@ -4,16 +4,16 @@
 Each case pins one property of the render:
 
 - with kagent on, the connectivity chart renders the three ClusterRoles
-  agent-platform-user, agent-platform-author and agent-platform-tenant-admin:
+  agent-platform:user, agent-platform:editor and agent-platform:admin:
   each role holds every rule of the one before it; the user reads agents,
   templates, RemoteMCPServers, ModelConfigs and muster MCPServers and creates
-  Sessions, and writes nothing; the author writes HelmReleases,
-  OCIRepositories, Agents, AgentTemplates and RemoteMCPServers; the tenant
-  admin also writes ModelConfigs and RoleBindings, may `bind` the three roles
+  Sessions, and writes nothing; the editor writes HelmReleases,
+  OCIRepositories, Agents, AgentTemplates and RemoteMCPServers; the admin
+  also writes ModelConfigs and RoleBindings, may `bind` the three roles
   only, and no role carries `escalate`;
-- the platform tenant: in the kagent namespace, agent-platform-user is bound
-  to tenants.platform.users and agent-platform-author to
-  tenants.platform.authors plus tenants.platformTeam; an empty list renders no
+- the platform tenant: in the kagent namespace, agent-platform:user is bound
+  to tenants.platform.users and agent-platform:editor to
+  tenants.platform.editors plus tenants.platformTeam; an empty list renders no
   binding; with kagent off, none of the roles and bindings render;
 - muster's MCPServers: `list` (get, watch) in the release namespace for
   tenants.platform.users, whether kagent is on or not;
@@ -50,7 +50,7 @@ TEAM = [
     "--set", "tenants.platformTeam[1].name=giantswarm-ad:giantswarm-admins",
 ]
 ADMINS = ["giantswarm-ad:giantswarm-admins", "giantswarm-github:giantswarm:giantswarm-admins"]
-ROLES = ["agent-platform-user", "agent-platform-author", "agent-platform-tenant-admin"]
+ROLES = ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
 WRITES = {"create", "update", "patch", "delete"}
 
 
@@ -102,65 +102,65 @@ def check_roles(docs: list) -> None:
         sets[name] = grants(role["rules"])
         if any(v == "escalate" for _, _, v, _ in sets[name]):
             fail(f"ClusterRole {name} carries escalate")
-    user, author, admin = (sets[n] for n in ROLES)
-    if not user <= author <= admin:
-        fail("the roles do not nest: user within author within tenant-admin")
+    user, editor, admin = (sets[n] for n in ROLES)
+    if not user <= editor <= admin:
+        fail("the roles do not nest: user within editor within admin")
     for res in ("agents", "agenttemplates", "remotemcpservers", "modelconfigs"):
         for v in ("get", "list", "watch"):
             if ("api.kagent.dev", res, v, None) not in user:
-                fail(f"agent-platform-user cannot {v} {res}.api.kagent.dev")
+                fail(f"agent-platform:user cannot {v} {res}.api.kagent.dev")
     for v in ("get", "list", "watch"):
         if ("muster.giantswarm.io", "mcpservers", v, None) not in user:
-            fail(f"agent-platform-user cannot {v} mcpservers.muster.giantswarm.io")
+            fail(f"agent-platform:user cannot {v} mcpservers.muster.giantswarm.io")
     if ("api.kagent.dev", "sessions", "create", None) not in user:
-        fail("agent-platform-user cannot create sessions.api.kagent.dev")
+        fail("agent-platform:user cannot create sessions.api.kagent.dev")
     user_writes = {t for t in user if t[2] in WRITES or t[2] == "bind"} - {("api.kagent.dev", "sessions", "create", None)}
     if user_writes:
-        fail(f"agent-platform-user writes {sorted(user_writes)}")
-    ok("agent-platform-user reads the tenant's agents and servers, starts a Session, writes nothing")
+        fail(f"agent-platform:user writes {sorted(user_writes)}")
+    ok("agent-platform:user reads the tenant's agents and servers, starts a Session, writes nothing")
     for g, res in (("helm.toolkit.fluxcd.io", "helmreleases"), ("source.toolkit.fluxcd.io", "ocirepositories"),
                    ("api.kagent.dev", "agents"), ("api.kagent.dev", "agenttemplates"), ("api.kagent.dev", "remotemcpservers")):
         for v in WRITES:
-            if (g, res, v, None) not in author:
-                fail(f"agent-platform-author cannot {v} {res}.{g}")
-    for t in author:
+            if (g, res, v, None) not in editor:
+                fail(f"agent-platform:editor cannot {v} {res}.{g}")
+    for t in editor:
         if t[1] in ("modelconfigs", "rolebindings", "clusterroles") and t[2] in WRITES | {"bind"}:
-            fail(f"agent-platform-author holds {t}")
-    ok("agent-platform-author writes what agent-manager writes as the caller, and no ModelConfig or RoleBinding")
+            fail(f"agent-platform:editor holds {t}")
+    ok("agent-platform:editor writes what agent-manager writes as the caller, and no ModelConfig or RoleBinding")
     for g, res in (("api.kagent.dev", "modelconfigs"), ("rbac.authorization.k8s.io", "rolebindings")):
         for v in WRITES:
             if (g, res, v, None) not in admin:
-                fail(f"agent-platform-tenant-admin cannot {v} {res}.{g}")
+                fail(f"agent-platform:admin cannot {v} {res}.{g}")
     binds = {t[3] for t in admin if t[2] == "bind"}
     if binds != set(ROLES):
-        fail(f"agent-platform-tenant-admin binds {sorted(binds, key=str)}, want the three roles only")
-    ok("agent-platform-tenant-admin writes ModelConfigs and RoleBindings and binds the three roles only")
+        fail(f"agent-platform:admin binds {sorted(binds, key=str)}, want the three roles only")
+    ok("agent-platform:admin writes ModelConfigs and RoleBindings and binds the three roles only")
 
 
-def check_platform_tenant(docs: list, want_authors: list) -> None:
-    user = find(docs, "RoleBinding", "agent-platform-user", "kagent")
-    author = find(docs, "RoleBinding", "agent-platform-author", "kagent")
-    if user is None or author is None:
+def check_platform_tenant(docs: list, want_editors: list) -> None:
+    user = find(docs, "RoleBinding", "agent-platform:user", "kagent")
+    editor = find(docs, "RoleBinding", "agent-platform:editor", "kagent")
+    if user is None or editor is None:
         fail("the platform tenant's RoleBindings are missing from the kagent namespace")
-    if user["roleRef"] != {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "agent-platform-user"}:
-        fail(f"RoleBinding agent-platform-user refers to {user['roleRef']}")
+    if user["roleRef"] != {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "agent-platform:user"}:
+        fail(f"RoleBinding agent-platform:user refers to {user['roleRef']}")
     if subject_names(user) != ["system:authenticated"]:
-        fail(f"agent-platform-user is bound to {subject_names(user)}, want every signed-in person")
-    if author["roleRef"]["name"] != "agent-platform-author":
-        fail(f"RoleBinding agent-platform-author refers to {author['roleRef']}")
-    if subject_names(author) != want_authors:
-        fail(f"agent-platform-author is bound to {subject_names(author)}, want {want_authors}")
+        fail(f"agent-platform:user is bound to {subject_names(user)}, want every signed-in person")
+    if editor["roleRef"]["name"] != "agent-platform:editor":
+        fail(f"RoleBinding agent-platform:editor refers to {editor['roleRef']}")
+    if subject_names(editor) != want_editors:
+        fail(f"agent-platform:editor is bound to {subject_names(editor)}, want {want_editors}")
 
 
 def check_muster_viewer(docs: list) -> None:
-    role = find(docs, "Role", "agent-platform-mcpserver-viewer", "agent-platform")
-    rb = find(docs, "RoleBinding", "agent-platform-mcpserver-viewer", "agent-platform")
+    role = find(docs, "Role", "agent-platform:mcpserver-viewer", "agent-platform")
+    rb = find(docs, "RoleBinding", "agent-platform:mcpserver-viewer", "agent-platform")
     if role is None or rb is None:
         fail("muster's MCPServers are not listed to every signed-in person in the release namespace")
     if grants(role["rules"]) != {("muster.giantswarm.io", "mcpservers", v, None) for v in ("get", "list", "watch")}:
-        fail(f"Role agent-platform-mcpserver-viewer grants {role['rules']}")
+        fail(f"Role agent-platform:mcpserver-viewer grants {role['rules']}")
     if subject_names(rb) != ["system:authenticated"]:
-        fail(f"agent-platform-mcpserver-viewer is bound to {subject_names(rb)}")
+        fail(f"agent-platform:mcpserver-viewer is bound to {subject_names(rb)}")
 
 
 def check_meta(chart: str) -> None:
@@ -195,15 +195,15 @@ def main() -> None:
     check_roles(on)
     check_platform_tenant(on, ADMINS)
     check_muster_viewer(on)
-    ok("the platform tenant: every signed-in person is a user, the admin groups are authors")
+    ok("the platform tenant: every signed-in person is a user, the admin groups are editors")
 
     team = render(conn, [*CONN, "--set", "components.kagent.enabled=true", *TEAM])
     check_platform_tenant(team, ADMINS + ["acme:platform"])
-    ok("tenants.platformTeam joins the platform tenant's authors, each subject once")
+    ok("tenants.platformTeam joins the platform tenant's editors, each subject once")
 
     empty = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "tenants.platform.users=null",
-                          "--set", "tenants.platform.authors=null"])
-    for name in ("agent-platform-user", "agent-platform-author", "agent-platform-mcpserver-viewer"):
+                          "--set", "tenants.platform.editors=null"])
+    for name in ("agent-platform:user", "agent-platform:editor", "agent-platform:mcpserver-viewer"):
         if find(empty, "RoleBinding", name):
             fail(f"RoleBinding {name} renders with no subjects")
     ok("an empty subject list renders no binding")

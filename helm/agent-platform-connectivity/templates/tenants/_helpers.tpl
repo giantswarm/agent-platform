@@ -4,7 +4,7 @@ Helpers of the agent tenants' RBAC (templates/tenants/, giantswarm/agent-platfor
 */}}
 
 {{/*
-The rules of agent-platform-user: see the tenant's agents, templates,
+The rules of agent-platform:user: see the tenant's agents, templates,
 RemoteMCPServers, ModelConfigs and muster MCPServers; start a Session.
 */}}
 {{- define "agent-platform.tenants.userRules" -}}
@@ -20,10 +20,10 @@ RemoteMCPServers, ModelConfigs and muster MCPServers; start a Session.
 {{- end -}}
 
 {{/*
-The rules agent-platform-author adds: the writes and reads agent-manager
+The rules agent-platform:editor adds: the writes and reads agent-manager
 performs as the caller.
 */}}
-{{- define "agent-platform.tenants.authorRules" -}}
+{{- define "agent-platform.tenants.editorRules" -}}
 - apiGroups: ["helm.toolkit.fluxcd.io"]
   resources: ["helmreleases"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -43,7 +43,7 @@ performs as the caller.
 
 {{/*
 The subjects of a binding, as a YAML list: the lists given, each subject once.
-Usage: include "agent-platform.tenants.subjects" (list .Values.tenants.platform.authors .Values.tenants.platformTeam)
+Usage: include "agent-platform.tenants.subjects" (list .Values.tenants.platform.editors .Values.tenants.platformTeam)
 */}}
 {{- define "agent-platform.tenants.subjects" -}}
 {{- $subjects := list -}}

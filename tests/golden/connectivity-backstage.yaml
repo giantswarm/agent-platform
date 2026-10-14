@@ -10835,7 +10835,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: agent-platform-mcpserver-viewer
+  name: agent-platform:mcpserver-viewer
   namespace: agent-platform
   labels:
     app: "agent-platform-connectivity"
@@ -10854,7 +10854,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: agent-platform-mcpserver-viewer
+  name: agent-platform:mcpserver-viewer
   namespace: agent-platform
   labels:
     app: "agent-platform-connectivity"
@@ -10867,7 +10867,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: agent-platform-mcpserver-viewer
+  name: agent-platform:mcpserver-viewer
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group

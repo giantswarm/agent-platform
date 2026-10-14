@@ -17,11 +17,11 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## 4.131.x → \<next\> (agent tenants: roles, the platform tenant)
 
-With kagent on, the connectivity release renders the ClusterRoles `agent-platform-user`, `agent-platform-author` and `agent-platform-tenant-admin` and binds the kagent namespace as the platform tenant; muster's MCPServers are listed to `tenants.platform.users` (giantswarm/agent-platform#706). Nothing a person sees changes until the kagent controller's authorizer is on.
+With kagent on, the connectivity release renders the ClusterRoles `agent-platform:user`, `agent-platform:editor` and `agent-platform:admin` and binds the kagent namespace as the platform tenant; muster's MCPServers are listed to `tenants.platform.users` (giantswarm/agent-platform#706). Nothing a person sees changes until the kagent controller's authorizer is on.
 
 ### Operator action
 
-- **An installation with a customer platform team**: name its group in `tenants.platformTeam` (RBAC subjects, with the installation's OIDC groups prefix). It becomes an author in the kagent namespace and an editor of muster's servers and workflows.
+- **An installation with a customer platform team**: name its group in `tenants.platformTeam` (RBAC subjects, with the installation's OIDC groups prefix). It becomes an editor in the kagent namespace and an editor of muster's servers and workflows.
 
 ## 4.130.x → \<next\> (Substrate 1.10.2: the egress gateway retries a refused HTTP/2 stream)
 
