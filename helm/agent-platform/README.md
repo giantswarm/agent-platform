@@ -1503,7 +1503,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.atelet.nodeSelector | object | `{}` |  |
 | substrate.atelet.tolerations | list | `[]` |  |
 | substrate.atelet.affinity | object | `{}` |  |
-| substrate.atelet.priorityClass.preemptionPolicy | string | `"Never"` |  |
+| substrate.atelet.priorityClass.preemptionPolicy | string | `"PreemptLowerPriority"` |  |
 | substrate.atelet.resources.requests.cpu | string | `"50m"` |  |
 | substrate.atelet.resources.requests.memory | string | `"128Mi"` |  |
 | substrate.atelet.resources.limits.cpu | string | `"2"` |  |
