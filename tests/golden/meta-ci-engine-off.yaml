@@ -1334,6 +1334,10 @@ spec:
         extensionImage:
           reference: ""
     substrate:
+      ateController:
+        busyWorker:
+          annotations:
+            karpenter.sh/do-not-disrupt: "true"
       atelet:
         affinity: {}
         extraEnv: []
@@ -2413,6 +2417,10 @@ spec:
       optional: true
       valuesKey: substrate-values.yaml
   values:
+    ateController:
+      busyWorker:
+        annotations:
+          karpenter.sh/do-not-disrupt: "true"
     atelet:
       affinity: {}
       extraEnv: []

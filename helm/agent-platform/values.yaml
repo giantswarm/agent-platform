@@ -5921,6 +5921,18 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
         # Mimir routes a scrape by this label; a monitor without it writes to
         # no tenant of the GS observability platform.
         observability.giantswarm.io/tenant: giantswarm
+  # The busy-worker marking (the Substrate line from the release carrying
+  # giantswarm/substrate#425; an older chart ignores the key): ate-controller
+  # sets these annotations on a WorkerPool worker pod while it hosts at least
+  # one actor, with the label ate.dev/busy=true, and removes them once it
+  # hosts none. A worker's SIGTERM stops the actors on it, so Karpenter's
+  # consolidation, drift and expiry leave a busy worker's node alone, and an
+  # idle pool still scales down (giantswarm/agent-platform#1014). Inert
+  # without Karpenter; {} (or null) turns the marking off.
+  ateController:
+    busyWorker:
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
   # The credential provider (the Substrate line from 1.1.0): the egress
   # gateway injects an agent's credentials — model keys, MCP headers, the
   # skills' git credentials — into the request from Secrets it reads on the

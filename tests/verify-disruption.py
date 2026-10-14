@@ -10,7 +10,10 @@ reaches the chart), kagent's controller.pdb on the chart's own default. muster-v
 (giantswarm/agent-platform#439): karpenter.sh/do-not-disrupt through the valkey
 subchart's podAnnotations (valkey.valkey.podAnnotations); its budget is the
 connectivity chart's (valkey.podDisruptionBudget travels to the connectivity
-release and never to the valkey release — components.valkey.omitKeys).
+release and never to the valkey release — components.valkey.omitKeys). The
+Substrate worker pool (giantswarm/agent-platform#1014): ate-controller's
+busy-worker marking, karpenter.sh/do-not-disrupt on a worker pod only while it
+hosts an actor, through the substrate chart's ateController.busyWorker.annotations.
 
 Placement of the stateful singletons (#439): scheduling.singletons.nodeSelector
 / tolerations are merged into the four components' own scheduling knobs on
@@ -138,6 +141,15 @@ def check_valkey(manifest: str, off: bool) -> None:
     expect("unhealthyPodEvictionPolicy: AlwaysAllow" in pdb, "connectivity: the valkey budget does not keep unhealthy pods evictable")
 
 
+def check_busy_worker(manifest: str, off: bool) -> None:
+    """The substrate release carries the busy-worker marking — or, switched off, nothing."""
+    ann = stripped(values(helm_release(manifest, "substrate")), "ateController", "busyWorker", "annotations")
+    if off:
+        expect(ANNOTATION not in ann, "substrate: the busy-worker marking still travels with the key set to null")
+    else:
+        expect(ANNOTATION in ann, "substrate: no karpenter.sh/do-not-disrupt on ateController.busyWorker.annotations (a busy worker's node would be consolidated under its actors)")
+
+
 def main(argv: list[str]) -> int:
     off = "--off" in argv
     placement = "--placement" in argv
@@ -149,6 +161,7 @@ def main(argv: list[str]) -> int:
         return 0
     check_placement(manifest, on=False)
     check_valkey(manifest, off)
+    check_busy_worker(manifest, off)
 
     muster = values(helm_release(manifest, "muster"))
     kagent = values(helm_release(manifest, "kagent"))
@@ -191,7 +204,7 @@ def main(argv: list[str]) -> int:
     # Karpenter's consolidation, drift and expiry and the budget would never be reached.
     expect(ANNOTATION not in [l.strip() for l in block(connectivity, "gateway", "parameters", "podAnnotations")], "connectivity: the meta chart still forwards karpenter.sh/do-not-disrupt onto the HA data plane")
 
-    print("ok: muster, kagent-controller, klaus-gateway and muster-valkey carry do-not-disrupt (the HA data plane does not) and their budgets travel where their charts read them" + (" (switched off)" if off else "") + "; scheduling.singletons empty forwards no placement")
+    print("ok: muster, kagent-controller, klaus-gateway and muster-valkey carry do-not-disrupt, busy Substrate workers are marked (the HA data plane is not) and their budgets travel where their charts read them" + (" (switched off)" if off else "") + "; scheduling.singletons empty forwards no placement")
     return 0
 
 
