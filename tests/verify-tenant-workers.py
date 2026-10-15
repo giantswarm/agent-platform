@@ -26,8 +26,9 @@ With tenants.organizations.enabled, in both flavors:
   ephemeral container, execs or attaches to a worker (an Organization's admins
   hold cluster-admin there, and ate-controller builds the workers from the
   WorkerPool);
-- with the value on, no other object selects the label.
-Off (the default), nothing selects the label. What the policies' CEL decides
+- with the value on, no other object selects the label but the tenants'
+  egress credential admission (verify-tenant-rbac asserts it).
+Off (the default), no Substrate object selects the label. What the policies' CEL decides
 is proven on a real API server by tests/prove-tenant-workers.py
 (make prove-tenant-workers). Needs PyYAML. HELM selects the
 binary.
@@ -228,6 +229,14 @@ def check_admission(docs, pool="kagent-default"):
         fail(f"{COPY_POLICY}: matches {rules}, not the WorkerPools' creates and updates")
 
 
+# The tenants' credential admission (giantswarm/agent-platform#1040) selects
+# the label with kagent on, whatever tenants.organizations says (the platform
+# Secrets' policy also needs agent-manager on, which this render leaves off;
+# verify-tenant-rbac asserts it).
+EGRESS_POLICIES = ("agent-platform-tenant-egress-credentials", "agent-platform-tenant-model-credentials",
+                   "agent-platform-tenant-credentials")
+
+
 def main():
     chart = sys.argv[1]
     for flavor in ("cilium", "kubernetes"):
@@ -240,7 +249,8 @@ def main():
         on = render(chart, args + ON)
         selecting = {(d["kind"], d["metadata"]["name"]) for d in on if ORG in yaml.safe_dump(d)}
         want = {(kind, name) for kind, name, _, _ in HOPS[flavor]} | {("PolicyException", "substrate-workers")} | {
-            ("ValidatingAdmissionPolicy", WORKERS_POLICY), ("ValidatingAdmissionPolicy", COPY_POLICY)}
+            ("ValidatingAdmissionPolicy", WORKERS_POLICY), ("ValidatingAdmissionPolicy", COPY_POLICY)} | {
+            ("ValidatingAdmissionPolicy", n) for n in EGRESS_POLICIES}
         if selecting != want:
             fail(f"tenants.organizations on ({flavor}): {sorted(selecting)} select {ORG}, not exactly {sorted(want)}")
         check_hops(flavor, on)

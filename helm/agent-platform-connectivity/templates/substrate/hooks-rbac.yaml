@@ -75,6 +75,14 @@ rules:
     resourceNames: [{{ include "agent-platform.modelServing.prepull.name" . | quote }}]
     verbs: ["delete"]
   {{- end }}
+  {{- if include "agent-platform.llmRouting.modelConfigs" . }}
+  # The ModelConfig reconcile of llmRouting
+  # (templates/llm/modelconfig-routing-hook.yaml) lists the ModelConfigs and
+  # merge-patches the baseUrl and its mark. Never create or delete.
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["modelconfigs"]
+    verbs: ["get", "list", "patch"]
+  {{- end }}
   - apiGroups: ["certificates.k8s.io"]
     resources: ["clustertrustbundles"]
     verbs: ["get", "list", "watch", "create", "patch"]

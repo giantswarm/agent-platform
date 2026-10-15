@@ -5,10 +5,24 @@ Helpers of the agent tenants' RBAC (templates/tenants/, giantswarm/agent-platfor
 
 {{/*
 The rules of agent-platform:user: see the tenant's agents, templates,
-RemoteMCPServers, ModelConfigs, Harnesses and muster MCPServers; start a
-Session.
+RemoteMCPServers, ModelConfigs, Harnesses, EgressPolicies (what its Agents may
+select) and muster MCPServers; start a Session. The kagent namespace binds
+agent-platform:platform-user instead, without the EgressPolicies.
 */}}
 {{- define "agent-platform.tenants.userRules" -}}
+{{ include "agent-platform.tenants.platformUserRules" . }}
+- apiGroups: ["api.kagent.dev"]
+  resources: ["egresspolicies"]
+  verbs: ["get", "list", "watch"]
+{{- end -}}
+
+{{/*
+The rules of agent-platform:platform-user, what every signed-in person holds
+in the kagent namespace (platform-tenant.yaml): agent-platform:user's but the
+EgressPolicies. The platform tenant's policies name the platform's egress
+origins and the Secrets they authenticate with; its editors read them.
+*/}}
+{{- define "agent-platform.tenants.platformUserRules" -}}
 - apiGroups: ["api.kagent.dev"]
   resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
   verbs: ["get", "list", "watch"]
@@ -37,6 +51,27 @@ performs as the caller.
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["get", "list", "watch"]
+{{- end -}}
+
+{{/*
+The prefix of the Secrets a tenant's credential references may name
+(giantswarm/agent-platform#1040): the tenant's own credentials. Every other
+Secret of a tenant namespace, the platform's copied model key among them, is
+the platform's.
+*/}}
+{{- define "agent-platform.tenants.credentialPrefix" -}}
+tenant-credential-
+{{- end -}}
+
+{{/*
+The key Secret of the default ModelConfig, kagent.providers.<default>.apiKeySecretRef:
+the platform Secret agent-manager's tenant reconciler copies into a tenant
+namespace that holds an agent (the meta chart derives the reconciler's
+tenants.modelConfig.apiKeySecretName from the same key). Empty when unset.
+*/}}
+{{- define "agent-platform.tenants.modelSecretName" -}}
+{{- $providers := dig "providers" dict (.Values.kagent | default dict) | default dict -}}
+{{- dig (toString (dig "default" "" $providers)) "apiKeySecretRef" "" $providers -}}
 {{- end -}}
 
 {{/*

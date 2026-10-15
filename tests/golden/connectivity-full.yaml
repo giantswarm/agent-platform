@@ -13076,6 +13076,33 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["sessions"]
     verbs: ["create"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["egresspolicies"]
+    verbs: ["get", "list", "watch"]
+---
+# Source: agent-platform-connectivity/templates/tenants/clusterroles.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:platform-user
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+rules:
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["muster.giantswarm.io"]
+    resources: ["mcpservers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["sessions"]
+    verbs: ["create"]
 ---
 # Source: agent-platform-connectivity/templates/tenants/clusterroles.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -13100,6 +13127,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["sessions"]
     verbs: ["create"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["egresspolicies"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["helm.toolkit.fluxcd.io"]
     resources: ["helmreleases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -13136,6 +13166,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["sessions"]
     verbs: ["create"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["egresspolicies"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["helm.toolkit.fluxcd.io"]
     resources: ["helmreleases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -13149,7 +13182,10 @@ rules:
     resources: ["events"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["api.kagent.dev"]
-    resources: ["modelconfigs"]
+    resources: ["modelconfigs", "egresspolicies"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
     verbs: ["create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
@@ -13259,7 +13295,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: agent-platform:user
+  name: agent-platform:platform-user
   namespace: kagent
   labels:
     app: "agent-platform-connectivity"
@@ -13272,7 +13308,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: agent-platform:user
+  name: agent-platform:platform-user
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
@@ -14396,11 +14432,14 @@ spec:
 # on 8443; every connection an actor opens leaves from here, so this is where
 # the actors' destinations are allowed: muster (tool calls as the caller), the
 # kagent controller (A2A, sessions), the LLM provider — through the
-# agentgateway LLM listener when llmRouting is on, the provider's endpoint on
-# world:443 either way — the built-in tool server when it is on, the OTLP
-# gateway of kagent's exporters (the actors' traces and logs), and
-# cluster:443/10443 (muster's OAuth endpoints on the public hostname resolve to
-# an internal LB VIP; 10443 is the Envoy listener after an Azure LB DNAT).
+# agentgateway LLM listener when llmRouting is on, the provider's endpoint in
+# the world either way — the built-in tool server when it is on, the OTLP
+# gateway of kagent's exporters (the actors' traces and logs), the world on
+# every TCP port (the origins the actors' egress policies declare, on whatever
+# port they name: the policy is the control, this rule does not second-guess
+# it), and cluster:443/10443 (muster's OAuth endpoints on the public hostname
+# resolve to an internal LB VIP; 10443 is the Envoy listener after an Azure LB
+# DNAT).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -14509,11 +14548,13 @@ spec:
         - ports:
             - port: "4317"
               protocol: TCP
+    # Every TCP port (port 0 is Cilium's wildcard): the actors' egress policy
+    # decides which origin, on which port, an actor reaches.
     - toEntities:
         - world
       toPorts:
         - ports:
-            - port: "443"
+            - port: "0"
               protocol: TCP
     - toEntities:
         - cluster
@@ -14523,6 +14564,15 @@ spec:
               protocol: TCP
             - port: "10443"
               protocol: TCP
+  # The node's cloud identity stays out of reach whatever an egress policy
+  # declares: the instance metadata services (link-local, AWS's IPv6 endpoint)
+  # and Azure's WireServer serve plaintext on ports the world rule above now
+  # admits. A deny wins over every allow.
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 169.254.0.0/16
+        - cidr: 168.63.129.16/32
+        - cidr: fd00:ec2::254/128
 ---
 # Source: agent-platform-connectivity/templates/substrate/netpol.yaml
 # dns: the actors' resolver (CoreDNS with a controller that writes the
@@ -15233,6 +15283,179 @@ spec:
         selector:
           matchLabels:
             app: k8s-credential-provider
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-egress-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kagent"]
+    resourceRules:
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["egresspolicies"]
+  variables:
+    # The Secret references of the policy's destinations (read untyped: the
+    # policy admits every served version).
+    - name: refs
+      expression: >-
+        has(object.spec) && has(object.spec.destinations) ?
+        dyn(object.spec.destinations).filter(d, has(d.authentication) && has(d.authentication.secretKeyRef))
+        .map(d, d.authentication.secretKeyRef) : []
+    - name: platform
+      expression: >-
+        variables.refs.filter(r, !has(r.name) || !r.name.startsWith('tenant-credential-'))
+  validations:
+    - expression: size(variables.platform) == 0
+      reason: Forbidden
+      messageExpression: >-
+        'an EgressPolicy in an Organization namespace names only tenant credentials, Secrets named tenant-credential-*, never a platform Secret: ' +
+        variables.platform.map(r, has(r.name) ? r.name : '<no name>').join(', ')
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-model-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kagent"]
+    resourceRules:
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["modelconfigs"]
+  variables:
+    - name: secret
+      expression: >-
+        has(object.spec) && has(object.spec.apiKeySecret) ? string(dyn(object.spec).apiKeySecret) : ''
+  validations:
+    - expression: >-
+        variables.secret == '' || variables.secret.startsWith('tenant-credential-')
+      reason: Forbidden
+      messageExpression: >-
+        'a ModelConfig in an Organization namespace names only a tenant credential, a Secret named tenant-credential-*, as its apiKeySecret. Refused for ' + request.userInfo.username + ': apiKeySecret ' + variables.secret
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kagent"]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["secrets"]
+  matchConditions:
+    - name: tenant-credential
+      expression: "object.metadata.name.startsWith('tenant-credential-')"
+  validations:
+    - expression: "!has(object.type) || object.type == 'Opaque'"
+      reason: Forbidden
+      messageExpression: >-
+        'a tenant credential (a Secret named tenant-credential-* in an Organization namespace) is of type Opaque, not ' + object.type
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-egress-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-tenant-egress-credentials
+  validationActions: [Deny]
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-model-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-tenant-model-credentials
+  validationActions: [Deny]
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-tenant-credentials
+  validationActions: [Deny]
 ---
 # Source: agent-platform-connectivity/templates/substrate/hooks-rbac.yaml
 apiVersion: v1

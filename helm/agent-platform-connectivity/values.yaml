@@ -673,6 +673,10 @@ llmRouting:
   # llmRouting.models; each writes only when the ModelConfig's provider is its
   # own and the baseUrl is absent (an OpenAI ModelConfig gets the listener's
   # URL with /v1). An object that names its own baseUrl is never touched.
+  # Each write is marked (annotation
+  # agent-platform.giantswarm.io/llm-routing-base-url), and the hook
+  # <release>-llm-routing-modelconfigs takes a marked baseUrl back off once
+  # routing is off or its provider is no longer served (giantswarm/agent-platform#1057).
   #
   # Rendered only where the API server serves
   # admissionregistration.k8s.io/v1/MutatingAdmissionPolicy, which is Kubernetes
