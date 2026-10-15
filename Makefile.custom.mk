@@ -1480,7 +1480,7 @@ verify-session-retention: ## Assert a workspace Session's directory lives as lon
 	@echo "session retention verified."
 
 .PHONY: verify-mcp-kubernetes-registration
-verify-mcp-kubernetes-registration: ## Assert the bundled mcp-kubernetes registration's three shapes (giantswarm/agent-platform#403): the family-less singleton mcp-kubernetes by default; with mcp-kubernetes.mcpServer.managementCluster a member of muster's kubernetes family as agent-platform-mcps renders one (<name>-mcp-kubernetes, the management-cluster label, spec.family {kubernetes, management_cluster}, url and auth unchanged); none with enabled false or with the component or muster off; a managementCluster that is not a DNS label fails naming the key; the meta chart forwards the block to connectivity and drops it from the mcp-kubernetes release. HELM selects the binary.
+verify-mcp-kubernetes-registration: ## Assert the bundled mcp-kubernetes registration's three shapes (giantswarm/agent-platform#403): the family-less singleton mcp-kubernetes by default; with mcp-kubernetes.mcpServer.managementCluster a member of muster's kubernetes family as agent-platform-mcps renders one (<name>-mcp-kubernetes, the management-cluster label, spec.family {kubernetes, management_cluster}, url and auth unchanged); either shape carries mcp-kubernetes.mcpServer.displayName (Kubernetes, the kubernetes family's) as ui.giantswarm.io/display-name, none when empty; none with enabled false or with the component or muster off; a managementCluster that is not a DNS label fails naming the key; the meta chart forwards the block to connectivity and drops it from the mcp-kubernetes release. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-mcp-kubernetes-registration.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "mcp-kubernetes registration shapes verified."
@@ -2025,7 +2025,7 @@ define kagent_route_doc
 endef
 
 .PHONY: verify-kagent-route
-verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by the kagent API v2 + A2A v1 services (one service-only match per service by default, one exact service/method match per listed RPC as the fallback) on both hops, the bearer passthrough without a protocol pin, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, kagent's MCP server (the in-cluster /kagent/mcp HTTPRoute under a twin of the JWT policy, MCPServer kagent in the agent-platform tool group), and the guards.
+verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by the kagent API v2 + A2A v1 services (one service-only match per service by default, one exact service/method match per listed RPC as the fallback) on both hops, the bearer passthrough without a protocol pin, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, kagent's MCP server (the in-cluster /kagent/mcp HTTPRoute under a twin of the JWT policy, MCPServer kagent in the agent-platform tool group, named Agent Sessions by its ui.giantswarm.io/display-name annotation, none with an empty kagent.controllerRoute.mcp.displayName), and the guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> the default shape: GRPCRoutes on both hops, no REST route, no path prefix"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set ingress.backendTrafficPolicy.enabled=true >$(VERIFY_TMP)/vkr.out 2>&1 || { cat $(VERIFY_TMP)/vkr.out; exit 1; }
@@ -2115,7 +2115,7 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@grep -q 'app.kubernetes.io/component: ui' $(VERIFY_TMP)/vkr-np-k8s-ingress.out || { echo "FAIL: the kubernetes controller ingress does not admit the UI"; exit 1; }
 	@if grep -q '^              app: kagent$$' $(VERIFY_TMP)/vkr-np-k8s-ingress.out; then echo "FAIL: the kubernetes controller ingress still admits app: kagent pods"; exit 1; fi
 	@echo "ok: controller ingress in both flavors"
-	@echo "--> kagent's MCP server: an in-cluster HTTPRoute at /kagent/mcp rewritten to /mcp on the kagent backend, under a twin of the JWT policy, and MCPServer kagent in the agent-platform tool group with the forwarded token; off with the switch, muster or the route off"
+	@echo "--> kagent's MCP server: an in-cluster HTTPRoute at /kagent/mcp rewritten to /mcp on the kagent backend, under a twin of the JWT policy, and MCPServer kagent in the agent-platform tool group with the forwarded token and its display name; off with the switch, muster or the route off"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set components.muster.enabled=true >$(VERIFY_TMP)/vkr-mcp.out 2>&1 || { cat $(VERIFY_TMP)/vkr-mcp.out; exit 1; }
 	$(call kagent_route_doc,HTTPRoute,kagent-mcp,$(VERIFY_TMP)/vkr-mcp.out,$(VERIFY_TMP)/vkr-mcp-route.out)
 	$(call kagent_route_doc,MCPServer,kagent,$(VERIFY_TMP)/vkr-mcp.out,$(VERIFY_TMP)/vkr-mcp-cr.out)
@@ -2125,9 +2125,12 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 		grep -q -- "$$pattern" $(VERIFY_TMP)/vkr-mcp-route.out || { echo "FAIL: the kagent-mcp HTTPRoute lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q '^  hostnames:' $(VERIFY_TMP)/vkr-mcp-route.out; then echo "FAIL: the kagent-mcp HTTPRoute is hostname-scoped (muster dials the agentgateway Service by its cluster-DNS name)"; exit 1; fi
-	@for pattern in 'agent-platform.giantswarm.io/tool-group: agent-platform' 'muster.giantswarm.io/type: kagent' 'type: streamable-http' 'timeout: 300$$' 'url: http://agentgateway.agent-platform.svc.cluster.local:8080/kagent/mcp$$' 'type: oauth' 'forwardToken: true'; do \
+	@for pattern in 'agent-platform.giantswarm.io/tool-group: agent-platform' 'muster.giantswarm.io/type: kagent' 'type: streamable-http' 'timeout: 300$$' 'url: http://agentgateway.agent-platform.svc.cluster.local:8080/kagent/mcp$$' 'type: oauth' 'forwardToken: true' '^    ui.giantswarm.io/display-name: "Agent Sessions"$$'; do \
 		grep -q -- "$$pattern" $(VERIFY_TMP)/vkr-mcp-cr.out || { echo "FAIL: MCPServer kagent lacks $$pattern"; exit 1; }; \
 	done
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set components.muster.enabled=true --set kagent.controllerRoute.mcp.displayName= >$(VERIFY_TMP)/vkr-mcp-noname.out 2>&1 || { cat $(VERIFY_TMP)/vkr-mcp-noname.out; exit 1; }
+	$(call kagent_route_doc,MCPServer,kagent,$(VERIFY_TMP)/vkr-mcp-noname.out,$(VERIFY_TMP)/vkr-mcp-noname-cr.out)
+	@if grep -q '^  annotations:' $(VERIFY_TMP)/vkr-mcp-noname-cr.out; then echo "FAIL: MCPServer kagent carries annotations with an empty kagent.controllerRoute.mcp.displayName"; exit 1; fi
 	@grep -A3 'targetRefs:' $(VERIFY_TMP)/vkr-mcp-jwt.out | grep -q 'kind: HTTPRoute' && grep -A3 'targetRefs:' $(VERIFY_TMP)/vkr-mcp-jwt.out | grep -q 'name: kagent-mcp$$' || { echo "FAIL: kagent-mcp-jwt does not target the kagent-mcp HTTPRoute"; exit 1; }
 	@[ "$$(grep -c '^    - group: ' $(VERIFY_TMP)/vkr-mcp-grpc-jwt.out)" = "1" ] || { echo "FAIL: kagent-controller-jwt targets more than the GRPCRoute (the CRD takes one kind of target per policy)"; exit 1; }
 	@sed -n '/^  traffic:/,$$p' $(VERIFY_TMP)/vkr-mcp-jwt.out >$(VERIFY_TMP)/vkr-mcp-jwt-traffic.out; sed -n '/^  traffic:/,$$p' $(VERIFY_TMP)/vkr-mcp-grpc-jwt.out >$(VERIFY_TMP)/vkr-mcp-grpc-jwt-traffic.out
