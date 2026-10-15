@@ -5096,7 +5096,11 @@ tenants:
     # older Kyverno matches the exception's namespaceSelector against no
     # labels, so the exception never applies and the workers are refused. The
     # namespaces are selected by the label, never listed; a namespace without
-    # the label gets nothing. Off, the default, nothing changes.
+    # the label gets nothing. Off, the default, nothing changes. Risk: an
+    # Organization's admins can write WorkerPools in their namespace, and
+    # ate-controller builds the workers from them, so with this on they can
+    # run a pod with the workers' rights (root, the gVisor capabilities, a
+    # hostPath); docs/substrate-security.md.
     enabled: false
 
 # === Workspaces (workspaces, workspace-manager) ===

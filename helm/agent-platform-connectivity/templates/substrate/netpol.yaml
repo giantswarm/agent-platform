@@ -86,8 +86,8 @@ agent-platform.kagentTools.* helpers, _helpers.tpl). */}}
 agent-platform#1036): agent-manager's tenant reconciler puts a WorkerPool in
 each labelled namespace that holds an agent, with a copy of the workers' own
 policy (its tenants.networkPolicy.names: substrate-workers in the cilium
-flavor, substrate-workers-ingress in the kubernetes one). The policies here admit them wherever they admit the
-kagent namespace's workers. */}}
+flavor, substrate-workers-ingress in the kubernetes one). The policies here
+admit them wherever they admit the kagent namespace's workers. */}}
 {{- $orgs := include "agent-platform.tenants.organizations" . }}
 {{- /* The host model servers an actor may dial for inference: the address
 model-manager writes into the ModelConfigs (agentHost, falling back to the
