@@ -188,13 +188,21 @@ Rendered as YAML list items; the caller provides the indentation.
 
 {{/*
 The user agent-manager's ServiceAccount authenticates as:
-system:serviceaccount:<release namespace>:<agent-manager.serviceAccount.name,
-else agent-manager.fullnameOverride>. The component runs in the release
-namespace, as its PodDisruptionBudget assumes. Its tenant reconciler is the
-only writer of WorkerPools in the Organizations' namespaces
+system:serviceaccount:<release namespace>:<name>, the name as the component
+chart chooses it (agent-manager.serviceAccount.name, else
+agent-manager.fullnameOverride, or `default` when serviceAccount.create is
+false). The component runs in the release namespace, as its
+PodDisruptionBudget assumes. Its tenant reconciler is the only writer of
+WorkerPools in the Organizations' namespaces
 (templates/substrate/tenant-workers-admission.yaml).
 */}}
 {{- define "agent-platform.agentManager.serviceAccountUser" -}}
 {{- $chart := include "agent-platform.agentManager.chartValues" . | fromJson -}}
-{{- printf "system:serviceaccount:%s:%s" .Release.Namespace (dig "serviceAccount" "name" "" $chart | default (include "agent-platform.agentManager.fullname" .)) -}}
+{{- $name := dig "serviceAccount" "name" "" $chart -}}
+{{- if dig "serviceAccount" "create" true $chart -}}
+{{- $name = $name | default (include "agent-platform.agentManager.fullname" .) -}}
+{{- else -}}
+{{- $name = $name | default "default" -}}
+{{- end -}}
+{{- printf "system:serviceaccount:%s:%s" .Release.Namespace $name -}}
 {{- end -}}

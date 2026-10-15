@@ -3068,9 +3068,9 @@ tenants:
     # WorkerPool, as a copy of kagent.substrateWorkerPool.name in the kagent
     # namespace (only replicas may differ), and only Substrate's controllers
     # write a Deployment, ReplicaSet or Pod labelled `ate.dev/worker-pool`; no
-    # one adds an ephemeral container to a worker or execs into one
-    # (Kubernetes 1.30 or later). A namespace without the label gets nothing.
-    # Off, the render is that of a chart without the key.
+    # one adds an ephemeral container to a worker, execs into one or
+    # attaches to one (Kubernetes 1.30 or later). A namespace without the
+    # label gets nothing. Off, the render is that of a chart without the key.
     enabled: false
 
 # === Workspaces (workspaces, workspace-manager) ===

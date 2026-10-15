@@ -28,7 +28,8 @@ With tenants.organizations.enabled, in both flavors:
   WorkerPool);
 - with the value on, no other object selects the label.
 Off (the default), nothing selects the label. What the policies' CEL decides
-is proven on a real API server, not here. Needs PyYAML. HELM selects the
+is proven on a real API server by tests/prove-tenant-workers.py
+(make prove-tenant-workers). Needs PyYAML. HELM selects the
 binary.
 
 Usage: verify-tenant-workers.py CONNECTIVITY_CHART
