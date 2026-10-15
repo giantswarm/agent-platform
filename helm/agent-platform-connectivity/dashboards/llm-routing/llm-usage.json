@@ -80,7 +80,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval]))",
+          "expr": "sum(rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval]))",
           "instant": false,
           "legendFormat": "tokens/s",
           "range": true,
@@ -148,7 +148,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval])) * 3600",
+          "expr": "sum(rate(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval])) * 3600",
           "instant": false,
           "legendFormat": "USD/h",
           "range": true,
@@ -216,7 +216,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(agentgateway_gen_ai_server_request_duration_count{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval]))",
+          "expr": "sum(rate(agentgateway_gen_ai_server_request_duration_count{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval]))",
           "instant": false,
           "legendFormat": "req/s",
           "range": true,
@@ -283,7 +283,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "count(count by (agent) (rate(agentgateway_gen_ai_client_token_usage_count{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval]) > 0))",
+          "expr": "count(count by (agent) (rate(agentgateway_gen_ai_client_token_usage_count{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval]) > 0))",
           "instant": false,
           "legendFormat": "agents",
           "range": true,
@@ -350,7 +350,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "count(count by (gen_ai_response_model) (rate(agentgateway_gen_ai_client_token_usage_count{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval]) > 0))",
+          "expr": "count(count by (gen_ai_response_model) (rate(agentgateway_gen_ai_client_token_usage_count{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval]) > 0))",
           "instant": false,
           "legendFormat": "models",
           "range": true,
@@ -499,7 +499,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__range]))",
+          "expr": "sum(increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range]))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -567,7 +567,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__range]))",
+          "expr": "sum(increase(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range]))",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -635,7 +635,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__range])) / clamp_min(sum(increase(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__range])), 1) * 1e6",
+          "expr": "sum(increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range])) / clamp_min(sum(increase(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range])), 1) * 1e6",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -736,7 +736,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (agent) (increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__interval]))",
+          "expr": "sum by (agent) (increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__interval]))",
           "instant": false,
           "legendFormat": "{{agent}}",
           "range": true,
@@ -837,7 +837,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (gen_ai_response_model) (increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__interval]))",
+          "expr": "sum by (gen_ai_response_model) (increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__interval]))",
           "instant": false,
           "legendFormat": "{{gen_ai_response_model}}",
           "range": true,
@@ -961,7 +961,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (gen_ai_response_model) (increase(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__range]))",
+          "expr": "sum by (gen_ai_response_model) (increase(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -974,7 +974,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (gen_ai_response_model) (increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__range]))",
+          "expr": "sum by (gen_ai_response_model) (increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1137,7 +1137,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (agent_namespace, agent, gen_ai_response_model) (increase(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__range]))",
+          "expr": "sum by (agent_namespace, agent, gen_ai_response_model) (increase(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1150,7 +1150,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (agent_namespace, agent, gen_ai_response_model) (increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__range]))",
+          "expr": "sum by (agent_namespace, agent, gen_ai_response_model) (increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1279,7 +1279,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (agent) (rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval]))",
+          "expr": "sum by (agent) (rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval]))",
           "instant": false,
           "legendFormat": "{{agent}}",
           "range": true,
@@ -1380,7 +1380,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (agent) (rate(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval])) * 3600",
+          "expr": "sum by (agent) (rate(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval])) * 3600",
           "instant": false,
           "legendFormat": "{{agent}}",
           "range": true,
@@ -1511,7 +1511,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (agent_namespace, agent) (increase(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__range]))",
+          "expr": "sum by (agent_namespace, agent) (increase(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1524,7 +1524,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (agent_namespace, agent) (increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__range]))",
+          "expr": "sum by (agent_namespace, agent) (increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range]))",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -1556,6 +1556,385 @@
         "w": 24,
         "x": 0,
         "y": 43
+      },
+      "id": 33,
+      "panels": [],
+      "title": "Usage by person",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The person behind the call: for an agent's model call through the Substrate egress, the person of the turn as the kagent runtime sends it in `x-kagent-user`. An accounting identity, not a verified one. `unknown` means a turn the runtime ran for no person, or a caller that is not the egress.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 1,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "id": 34,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (user) (rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval]))",
+          "instant": false,
+          "legendFormat": "{{user}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Tokens per second by person",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The person behind the call: for an agent's model call through the Substrate egress, the person of the turn as the kagent runtime sends it in `x-kagent-user`. An accounting identity, not a verified one. `unknown` means a turn the runtime ran for no person, or a caller that is not the egress.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "decimals": 3,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "id": 35,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "pluginVersion": "12.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (user) (rate(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval])) * 3600",
+          "instant": false,
+          "legendFormat": "{{user}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Estimated cost per hour by person",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Totals for the selected time range, per person and agent.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #tokens"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Tokens"
+              },
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value #cost"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Cost (USD)"
+              },
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "decimals",
+                "value": 4
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "user"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Person"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "agent"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Agent"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "id": 36,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Cost (USD)"
+          }
+        ]
+      },
+      "pluginVersion": "12.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (user, agent) (increase(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "range": false,
+          "refId": "tokens"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "sum by (user, agent) (increase(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__range]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "range": false,
+          "refId": "cost"
+        }
+      ],
+      "title": "Tokens and cost by person and agent, over the window",
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 60
       },
       "id": 12,
       "panels": [],
@@ -1626,7 +2005,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 44
+        "y": 61
       },
       "id": 13,
       "options": {
@@ -1652,7 +2031,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (gen_ai_response_model) (rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval]))",
+          "expr": "sum by (gen_ai_response_model) (rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval]))",
           "instant": false,
           "legendFormat": "{{gen_ai_response_model}}",
           "range": true,
@@ -1726,7 +2105,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 44
+        "y": 61
       },
       "id": 14,
       "options": {
@@ -1752,7 +2131,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (gen_ai_response_model) (rate(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval])) * 3600",
+          "expr": "sum by (gen_ai_response_model) (rate(agentgateway_gen_ai_client_cost_usd_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval])) * 3600",
           "instant": false,
           "legendFormat": "{{gen_ai_response_model}}",
           "range": true,
@@ -1826,7 +2205,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 69
       },
       "id": 15,
       "options": {
@@ -1853,7 +2232,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (gen_ai_token_type) (rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval]))",
+          "expr": "sum by (gen_ai_token_type) (rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval]))",
           "instant": false,
           "legendFormat": "{{gen_ai_token_type}}",
           "range": true,
@@ -1927,7 +2306,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 69
       },
       "id": 16,
       "options": {
@@ -1953,7 +2332,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\", gen_ai_token_type=\"input_cache_read\"}[$__rate_interval])) / clamp_min(sum(rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\", gen_ai_token_type=~\"input|input_cache_read|input_cache_write\"}[$__rate_interval])), 1)",
+          "expr": "sum(rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\", gen_ai_token_type=\"input_cache_read\"}[$__rate_interval])) / clamp_min(sum(rate(agentgateway_gen_ai_client_token_usage_sum{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\", gen_ai_token_type=~\"input|input_cache_read|input_cache_write\"}[$__rate_interval])), 1)",
           "instant": false,
           "legendFormat": "cache read share",
           "range": true,
@@ -1969,7 +2348,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 77
       },
       "id": 17,
       "panels": [],
@@ -2039,7 +2418,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 61
+        "y": 78
       },
       "id": 18,
       "options": {
@@ -2065,7 +2444,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (gen_ai_response_model, le) (rate(agentgateway_gen_ai_server_time_to_first_token_bucket{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (gen_ai_response_model, le) (rate(agentgateway_gen_ai_server_time_to_first_token_bucket{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval])))",
           "instant": false,
           "legendFormat": "p50 {{gen_ai_response_model}}",
           "range": true,
@@ -2077,7 +2456,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (gen_ai_response_model, le) (rate(agentgateway_gen_ai_server_time_to_first_token_bucket{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (gen_ai_response_model, le) (rate(agentgateway_gen_ai_server_time_to_first_token_bucket{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval])))",
           "instant": false,
           "legendFormat": "p95 {{gen_ai_response_model}}",
           "range": true,
@@ -2150,7 +2529,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 61
+        "y": 78
       },
       "id": 19,
       "options": {
@@ -2176,7 +2555,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.50, sum by (gen_ai_response_model, le) (rate(agentgateway_gen_ai_server_request_duration_bucket{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (gen_ai_response_model, le) (rate(agentgateway_gen_ai_server_request_duration_bucket{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval])))",
           "instant": false,
           "legendFormat": "p50 {{gen_ai_response_model}}",
           "range": true,
@@ -2188,7 +2567,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (gen_ai_response_model, le) (rate(agentgateway_gen_ai_server_request_duration_bucket{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (gen_ai_response_model, le) (rate(agentgateway_gen_ai_server_request_duration_bucket{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval])))",
           "instant": false,
           "legendFormat": "p95 {{gen_ai_response_model}}",
           "range": true,
@@ -2261,7 +2640,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 69
+        "y": 86
       },
       "id": 20,
       "options": {
@@ -2287,7 +2666,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (gen_ai_response_model, le) (rate(agentgateway_gen_ai_server_time_per_output_token_bucket{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", gen_ai_response_model=~\"$model\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (gen_ai_response_model, le) (rate(agentgateway_gen_ai_server_time_per_output_token_bucket{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", gen_ai_response_model=~\"$model\"}[$__rate_interval])))",
           "instant": false,
           "legendFormat": "p95 {{gen_ai_response_model}}",
           "range": true,
@@ -2361,7 +2740,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 69
+        "y": 86
       },
       "id": 21,
       "options": {
@@ -2403,7 +2782,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 77
+        "y": 94
       },
       "id": 22,
       "panels": [],
@@ -2474,7 +2853,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 78
+        "y": 95
       },
       "id": 23,
       "options": {
@@ -2500,7 +2879,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (status) (rate(agentgateway_cost_catalog_lookups_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\"}[$__rate_interval]))",
+          "expr": "sum by (status) (rate(agentgateway_cost_catalog_lookups_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\"}[$__rate_interval]))",
           "instant": false,
           "legendFormat": "{{status}}",
           "range": true,
@@ -2595,7 +2974,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 78
+        "y": 95
       },
       "id": 24,
       "options": {
@@ -2619,7 +2998,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum by (gen_ai_request_model, gen_ai_response_model, status) (increase(agentgateway_cost_catalog_lookups_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", status!=\"Exact\"}[$__range])) > 0",
+          "expr": "sum by (gen_ai_request_model, gen_ai_response_model, status) (increase(agentgateway_cost_catalog_lookups_total{gateway=~\"$gateway\", agent_namespace=~\"$agent_namespace\", agent=~\"$agent\", user=~\"$user\", status!=\"Exact\"}[$__range])) > 0",
           "format": "table",
           "instant": true,
           "legendFormat": "",
@@ -2763,6 +3142,34 @@
         "options": [],
         "query": {
           "query": "label_values(agentgateway_gen_ai_client_token_usage_count,agent)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(agentgateway_gen_ai_client_token_usage_count,user)",
+        "description": "The person behind the call: for an agent's model call through the Substrate egress, the person of the turn as the kagent runtime sends it in `x-kagent-user`. An accounting identity, not a verified one. `unknown` means a turn the runtime ran for no person, or a caller that is not the egress.",
+        "includeAll": true,
+        "label": "Person",
+        "multi": true,
+        "name": "user",
+        "options": [],
+        "query": {
+          "query": "label_values(agentgateway_gen_ai_client_token_usage_count,user)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,
