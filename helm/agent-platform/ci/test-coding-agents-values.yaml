@@ -1,5 +1,6 @@
-# A coding agent's Harness, the entry an installation copies from
-# kagent.harnesses in values.yaml (verify-kagent-harness,
+# A coding agent's Harnesses, the entries an installation copies from
+# kagent.harnesses in values.yaml, and each one's egress origins from
+# agent-manager.harness.egress (verify-kagent-harness,
 # verify-components-charts).
 kagent:
   harnesses:
@@ -9,3 +10,22 @@ kagent:
       env:
         - name: KAGENT_PROPAGATE_TOKEN
           value: "true"
+    - name: codex
+      runtime: codex
+      snapshotLocation: s3://ci-agent-snapshots/codex
+      env:
+        - name: KAGENT_PROPAGATE_TOKEN
+          value: "true"
+agent-manager:
+  harness:
+    egress:
+      claude:
+        - https://github.com
+        - https://api.github.com
+        - https://codeload.github.com
+        - https://*.githubusercontent.com
+      codex:
+        - https://github.com
+        - https://api.github.com
+        - https://codeload.github.com
+        - https://*.githubusercontent.com

@@ -143,12 +143,17 @@ KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
-UNRELEASED: dict[str, str] = {}
+UNRELEASED: dict[str, str] = {
+    "kagent": "1.13.0",  # runtime: codex in harnesses[] (giantswarm/kagent-upstream#606)
+    "kagent-crds": "1.13.0",
+}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
 RENDER_AGAINST: dict[str, str] = {
     "agent-manager": "1.9.3-rf107e304t20261006134136h2486711",  # giantswarm/agent-manager#101
+    "kagent": "1.13.0-rc.3",  # giantswarm/kagent-upstream#606
+    "kagent-crds": "1.13.0-rc.3",
 }
 # The layer every OCIRepository of the meta chart selects, and the manifest
 # types a Helm chart artifact is fetched as.
@@ -165,8 +170,8 @@ STRICT = False
 UNRELEASED_ANNOTATION = "agent-platform.giantswarm.io/unreleased"
 WAITS: dict[str, dict[str, str]] = {}
 WRITE = False
-# A coding agent's Harness on top of the reference shape: the kagent block it
-# forwards is rendered at the range with the others.
+# A coding agent's Harnesses on top of the reference shape: the kagent and
+# agent-manager blocks it forwards are rendered at the range with the others.
 CODING_AGENTS = "coding agents (ci/test-coding-agents-values.yaml)"
 
 
@@ -540,9 +545,10 @@ def check_harnesses(manifest: str, values: str, what: str) -> None:
     kagent.harnesses entry, each valid against the pinned Harness CRD. The
     platform Harness carries no admission selector: an Agent names its Harness
     by spec.harnessRef, and the line's CRD has no allowedAgentTemplates. A
-    claude entry reaches its Harness as forwarded (snapshot location, env) and
-    takes the chart's claude-harness image at its digest; it carries no turn
-    limits, which the line withdrew from the Harness API in 1.12.0."""
+    claude or codex entry reaches its Harness as forwarded (snapshot location,
+    env) and takes the chart's claude-harness or codex-harness image at its
+    digest; a claude one carries no turn limits, which the line withdrew from
+    the Harness API in 1.12.0."""
     entries = (yaml.safe_load(values) or {}).get("harnesses") or []
     rendered = [d for d in yaml.safe_load_all(manifest) if isinstance(d, dict) and d.get("kind") == "Harness"]
     if len(rendered) != 1 + len(entries):
@@ -557,20 +563,21 @@ def check_harnesses(manifest: str, values: str, what: str) -> None:
         spec = by_name.get(entry["name"], {}).get("spec")
         if spec is None:
             fail(f"{what} renders no Harness for the kagent.harnesses entry {entry['name']!r}")
-        if entry.get("runtime", "claude") != "claude":
+        runtime = entry.get("runtime", "claude")
+        if runtime not in ("claude", "codex"):
             continue
         got = {
-            "claude": "claude" in spec,
+            "runtime": [r for r in ("kagent", "claude", "codex", "byo") if r in spec],
             "snapshotLocation": spec.get("substrate", {}).get("snapshotPolicy", {}).get("location"),
             "env": spec.get("env"),
-            "limits": spec.get("claude", {}).get("limits"),
+            "settings": spec.get(runtime),
         }
-        want = {"claude": True, "snapshotLocation": entry.get("snapshotLocation"), "env": entry.get("env"), "limits": None}
+        want = {"runtime": [runtime], "snapshotLocation": entry.get("snapshotLocation"), "env": entry.get("env"), "settings": {}}
         if got != want:
-            fail(f"{what} renders the claude Harness {entry['name']!r} off its entry:\n  got      {got}\n  expected {want}")
+            fail(f"{what} renders the {runtime} Harness {entry['name']!r} off its entry:\n  got      {got}\n  expected {want}")
         image = spec.get("workload", {}).get("image", "")
-        if "image" not in entry and not re.search(r"/claude-harness@sha256:[0-9a-f]{64}$", image):
-            fail(f"{what} renders the claude Harness {entry['name']!r} with image {image!r}, not the chart's claude-harness at its digest")
+        if "image" not in entry and not re.search(rf"/{runtime}-harness@sha256:[0-9a-f]{{64}}$", image):
+            fail(f"{what} renders the {runtime} Harness {entry['name']!r} with image {image!r}, not the chart's {runtime}-harness at its digest")
     module, crds = kagent_crds()
     if errors := [e for h in rendered for e in module.validate(h, crds, what)]:
         fail("a rendered Harness does not validate against the pinned Harness CRD:\n  " + "\n  ".join(errors))
@@ -663,7 +670,7 @@ def main(meta: str) -> int:
         for shape, (w, p) in renders.items():
             blocks.setdefault(("range", hr_values(w[("HelmRelease", chart)])), []).append(shape)
             blocks.setdefault(("BOM pin", hr_values(p[("HelmRelease", chart)])), []).append(shape)
-        if name == "kagent":
+        if name in ("kagent", "agent-manager"):
             blocks.setdefault(("range", hr_values(coding[("HelmRelease", chart)])), []).append(CODING_AGENTS)
         if name in released:
             # One version matters, the working tree's: every distinct block of
