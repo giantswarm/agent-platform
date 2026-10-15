@@ -3413,7 +3413,7 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@echo "====> $@"
 	@echo "--> off by default: no Crossplane object of the store in the substrate render, nothing derived"
 	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml >$(VERIFY_TMP)/vss-off.out 2>&1 || { cat $(VERIFY_TMP)/vss-off.out; exit 1; }
-	@if grep -qE '^  name: giantswarm-ci-substrate$$|agent-platform-substrate' $(VERIFY_TMP)/vss-off.out; then echo "FAIL: the snapshot store renders with the block off"; exit 1; fi
+	@python3 tests/verify-substrate-store-objects.py $(VERIFY_TMP)/vss-off.out || { echo "FAIL: the snapshot store renders with the block off"; exit 1; }
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) >$(VERIFY_TMP)/vss-meta-off.out 2>&1 || { cat $(VERIFY_TMP)/vss-meta-off.out; exit 1; }
 	@grep -q 'snapshotLocation: s3://ci-agent-snapshots/agents' $(VERIFY_TMP)/vss-meta-off.out || { echo "FAIL: the explicit snapshotLocation does not reach the kagent release with the store off"; exit 1; }
 	@if grep -q 'eks.amazonaws.com/role-arn' $(VERIFY_TMP)/vss-meta-off.out; then echo "FAIL: a role annotation is derived with the store off"; exit 1; fi
