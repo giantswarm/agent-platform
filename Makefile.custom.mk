@@ -1589,7 +1589,7 @@ verify-release-floors: ## Assert, on a release tag, that every component range a
 	@echo "every component floor and BOM pin is published; the release is installable."
 
 .PHONY: verify-components-charts
-verify-components-charts: ## Render every component chart with the values the meta chart forwards to it — the roster is values.yaml's, the BOM must pin all of it (both ways) — at the range's resolution and at the BOM pin, in every shape (vanilla and fleet --api-versions, the CNPG Cluster and the bundled Postgres), resolved the way Flux does (the tag and the layer the OCIRepository selects); a chart released with the meta chart (releasedWithChart) from the working tree. The kagent chart also renders the coding-agents block (ci/test-coding-agents-values.yaml): one Harness per kagent.harnesses entry, a claude one carrying its snapshot location, env and limits at the chart's claude-harness digest, every Harness valid against the pinned Harness CRD. A forwarded key a closed schema does not declare fails the release on every installation, which a meta-only render cannot see. A range rendered against a fallback (UNRELEASED) must be named in Chart.yaml's agent-platform.giantswarm.io/unreleased, and nothing else (`make sync-unreleased`): a dev build of the branch says what it waits for and refuses its install. Network: gsoci.azurecr.io (ghcr.io for the CloudNativePG chart).
+verify-components-charts: ## Render every component chart with the values the meta chart forwards to it — the roster is values.yaml's, the BOM must pin all of it (both ways) — at the range's resolution and at the BOM pin, in every shape (vanilla and fleet --api-versions, the CNPG Cluster and the bundled Postgres), resolved the way Flux does (the tag and the layer the OCIRepository selects); a chart released with the meta chart (releasedWithChart) from the working tree. The kagent and agent-manager charts also render the coding-agents block (ci/test-coding-agents-values.yaml): one Harness per kagent.harnesses entry, a claude or codex one carrying its snapshot location and env at the chart's claude-harness or codex-harness digest, every Harness valid against the pinned Harness CRD; agent-manager takes each Harness's egress origins. A forwarded key a closed schema does not declare fails the release on every installation, which a meta-only render cannot see. A range rendered against a fallback (UNRELEASED) must be named in Chart.yaml's agent-platform.giantswarm.io/unreleased, and nothing else (`make sync-unreleased`): a dev build of the branch says what it waits for and refuses its install. Network: gsoci.azurecr.io (ghcr.io for the CloudNativePG chart).
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."
@@ -2250,6 +2250,14 @@ verify-kagent-database: ## Assert kagent always has a database (agent-platform.v
 	@python3 tests/verify-kagent-database.py $(CHART_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-llm-routing-modelconfigs
+verify-llm-routing-modelconfigs: ## Assert the ModelConfig reconcile of llmRouting (giantswarm/agent-platform#1057): the modelconfig-llm-routing policies mark the baseUrl they write; the post-install/post-upgrade hook <release>-llm-routing-modelconfigs renders on and off wherever the policies would, with get, list and patch on modelconfigs for the hook identity; run against a stub kubectl, off removes a marked baseUrl and an unmarked listener URL on an object Helm does not manage and keeps every other baseUrl, on marks the chart's listener URLs, unroutes a provider no longer served and routes nothing new, a second run changes nothing, and without the ModelConfig API it exits 0.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@command -v jq >/dev/null || { echo "FAIL: jq is not installed; the hook script runs it"; exit 1; }
+	@python3 tests/verify-llm-routing-modelconfigs.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-kagent-harness
 verify-llm-rate-limit: ## Assert the LLM endpoint's rate limits (giantswarm/giantswarm#38004): llmRouting.rateLimits empty renders no policy; entries render one <name>-llm-rate-limit AgentgatewayPolicy on the data-plane Gateway's LLM listener (sectionName) with traffic.rateLimit.local as written, a key through tpl (the per-agent key behind the Substrate egress predicate); llmRouting.external.rateLimits renders <name>-llm-external-rate-limit on the external HTTPRoute alone, none with the endpoint off; llmRouting off renders neither; the schema refuses both or neither of tokens and requests, a zero, an unknown unit, an empty key and an unknown field; the entry schema's fields are those of agentgateway.dev_agentgatewaypolicies at the floor of components.agentgateway.versionRange, and both policies validate against that CRD; the meta chart forwards both lists as written. Network: gsoci.azurecr.io.
 	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
@@ -2257,7 +2265,7 @@ verify-llm-rate-limit: ## Assert the LLM endpoint's rate limits (giantswarm/gian
 	@python3 tests/verify-llm-rate-limit.py $(CONNECTIVITY_DIR) $(CHART_DIR)
 	@echo "ok: $@"
 
-verify-kagent-harness: ## Assert the platform Harness is the kagent chart's since 4.8.0: the connectivity chart renders none, the meta chart forwards the GS policy only (create, snapshot location, KAGENT_PROPAGATE_TOKEN, the admission label; no image by default, an override digest when set) and kagent.harnesses reaches the kagent release unchanged (empty by default: no further Harness).
+verify-kagent-harness: ## Assert the platform Harness is the kagent chart's since 4.8.0: the connectivity chart renders none, the meta chart forwards the GS policy only (create, snapshot location, KAGENT_PROPAGATE_TOKEN, the admission label; no image by default, an override digest when set) and kagent.harnesses reaches the kagent release unchanged (empty by default: no further Harness; the coding-agents values a claude and a codex entry), agent-manager.harness.egress the agent-manager release with an entry for every coding Harness.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-harness.py $(CONNECTIVITY_DIR) $(CHART_DIR)

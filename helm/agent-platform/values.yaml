@@ -557,8 +557,10 @@ components:  # @schema additionalProperties: true
     # thinking before every answer or replying with nothing. From 1.2.0 the
     # chart takes its OTel settings in the SDK-spec shape kagent.otel below
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
-    # ignores them and exports nothing.
-    versionRange: ">=1.12.0 <1.13.0"
+    # ignores them and exports nothing. From 1.13.0 a kagent.harnesses entry
+    # takes runtime: codex on the chart's codex-harness image
+    # (giantswarm/kagent-upstream#606).
+    versionRange: ">=1.13.0 <1.14.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -672,7 +674,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.12.0 <1.13.0"
+    versionRange: ">=1.13.0 <1.14.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -3626,24 +3628,34 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   description: "external MCP server"
 
   # --- Coding agents: further Harnesses (the kagent chart's harnesses[]) ---
-  # A coding agent is an Agent whose spec.harnessRef names a claude Harness:
-  # Claude Code run headless by the kagent line's claude-harness image in a
-  # Substrate actor, calling muster as the person who sent the turn
-  # (giantswarm/giantswarm#37625; bumblebee-plans#60). This list is forwarded
-  # to the kagent chart as it is: one entry per further Harness, with the
-  # policy shape of harness.* above plus runtime: claude (the default) or
-  # kagent. A claude entry takes the chart's claude-harness image at its
+  # A coding agent is an Agent whose spec.harnessRef names a coding Harness:
+  # Claude Code (claude) or the codex CLI (codex) run headless by the kagent
+  # line's claude-harness or codex-harness image in a Substrate actor, calling
+  # muster as the person who sent the turn (giantswarm/giantswarm#37625,
+  # giantswarm/giantswarm#38449). This list is forwarded to the kagent chart as
+  # it is: one entry per further Harness, with the policy shape of harness.*
+  # above plus runtime: claude (the default), codex or kagent. A claude or
+  # codex entry takes the chart's claude-harness or codex-harness image at its
   # published digest; its snapshotLocation is its own (a snapshot is the
   # actor's whole memory and filesystem, and each store has its own
-  # retention). An Agent declares its own egress (spec.egress, the agent chart's
-  # agent.egress); a Harness carries none. Empty (the default) renders no
-  # further Harness.
+  # retention). An Agent declares its own egress (spec.egress, which
+  # agent-manager writes from agent-manager.harness.egress.<Harness name>); a
+  # Harness carries none. A codex agent's model is a Responses API ModelConfig
+  # (kagent.modelConfigs[].apiFormat: responses). kagent refuses a share of a
+  # Session on a coding Harness. Empty (the default) renders no further
+  # Harness: an installation opts into each runtime here.
   harnesses: []
   # - name: claude
   #   runtime: claude
   #   snapshotLocation: s3://<bucket>/claude
   #   env:
   #     - name: KAGENT_PROPAGATE_TOKEN          # tool calls to muster as the person
+  #       value: "true"
+  # - name: codex
+  #   runtime: codex
+  #   snapshotLocation: s3://<bucket>/codex
+  #   env:
+  #     - name: KAGENT_PROPAGATE_TOKEN
   #       value: "true"
 
 # === The platform's own Grafana boards ===
@@ -4714,14 +4726,18 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # values change that rolls agent-manager on the cut-over.
     apiVersion: v1alpha3
   harness:
-    # -- The origins a coding agent on a claude Harness reaches, by Harness name
-    # ({claude: [https://github.com, …]}): the installation's forge and git
-    # hosts plus the toolchain's registries. agent-manager writes the list into
-    # the Agent's spec.egress and refuses any other origin; a claude Harness
-    # without an entry reaches none. Empty (the default) is not forwarded and
-    # the agent-manager chart's own list applies: GitHub plus the Go and npm
-    # registries for claude-go and claude-node. An installation whose forge is
-    # not GitHub sets every Harness it serves here: Helm merges the map into the
+    # -- The origins a coding agent reaches, by the name of its Harness
+    # ({claude: [https://github.com, …], codex: […]}): the installation's
+    # forge and git hosts plus the toolchain's registries; the model host is
+    # not listed (kagent adds the ModelConfig's destination). agent-manager
+    # writes the list into the Agent's spec.egress and the Substrate egress
+    # gate refuses any other origin with a 403; agent-manager refuses an agent
+    # on a coding Harness without an entry. Empty (the default) is not
+    # forwarded and the agent-manager chart's own list applies: GitHub for
+    # claude (and codex from agent-manager 2.2.0) plus the Go and npm registries
+    # for claude-go and claude-node. Each kagent.harnesses entry an
+    # installation adds gets its entry here; an installation whose forge is not
+    # GitHub sets every Harness it serves: Helm merges the map into the
     # chart's, so a Harness left out keeps the GitHub list. Needs agent-manager
     # 1.11.0 or later.
     egress: {}  # @schema additionalProperties: true
