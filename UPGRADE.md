@@ -15,7 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
-## 4.135.x → \<next\> (kagent 1.13.0: the codex Harness)
+## 4.138.x → \<next\> (kagent 1.14.0: the omp Harness, the codex agent label)
+
+`components.kagent{,-crds}.versionRange` is `>=1.14.0 <1.15.0`, kagent's releases of the 1.14 line. The kagent chart accepts `runtime: byo` in `kagent.harnesses` (an image of the entry's own, its `command` and its `displayName`, giantswarm/kagent-upstream#623), which is how oh-my-pi runs, and the codex runtime names its agent on every model call (giantswarm/kagent-upstream#614). Same upstream pin as 1.13.0, no CRD field, API or persisted format changes: the kagent-crds and kagent releases roll in place, and a suspended agent resumes with its conversation. Nothing renders an omp Harness until an installation adds the entry.
+
+### Operator action
+
+- **An installation that opts into omp**: add a `kagent.harnesses` entry (`name: omp`, `runtime: byo`, `displayName: oh-my-pi`, `image` the release's `omp-harness` at `runtimeImages.ompHarness.digest`, `command: [/usr/local/bin/kagent-omp]`, its own `snapshotLocation`), and its origins under `agent-manager.harness.egress.omp`. Its agents use the Anthropic ModelConfig a claude agent uses.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.14.0`, `kagent-crds` first or with it.
+
+## 4.135.x → 4.137.0 (kagent 1.13.0: the codex Harness)
 
 `components.kagent{,-crds}.versionRange` is `>=1.13.0 <1.14.0`, kagent's releases of the 1.13 line (giantswarm/kagent-upstream#606). The kagent chart carries the codex-harness image's digest and accepts `runtime: codex` in `kagent.harnesses`. Same upstream pin as 1.12.0, no CRD field, API or persisted format changes: the kagent-crds and kagent releases roll in place, Substrate stays on 1.11.4, and a suspended agent resumes with its conversation. Nothing renders a codex Harness until an installation adds the entry.
 

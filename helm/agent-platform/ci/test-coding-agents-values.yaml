@@ -16,6 +16,15 @@ kagent:
       env:
         - name: KAGENT_PROPAGATE_TOKEN
           value: "true"
+    # omp is a BYO Harness: the kagent line's omp-harness by digest (the
+    # 1.14.0 line's runtimeImages.ompHarness.digest), its command and the
+    # display name the portal shows.
+    - name: omp
+      runtime: byo
+      displayName: oh-my-pi
+      image: gsoci.azurecr.io/giantswarm/kagent/omp-harness@sha256:66116922f6981fede08da37939f042483cc6ca5e9ea0ba3c048cef32d4da1fe1
+      command: [/usr/local/bin/kagent-omp]
+      snapshotLocation: s3://ci-agent-snapshots/omp
 agent-manager:
   harness:
     egress:
@@ -25,6 +34,11 @@ agent-manager:
         - https://codeload.github.com
         - https://*.githubusercontent.com
       codex:
+        - https://github.com
+        - https://api.github.com
+        - https://codeload.github.com
+        - https://*.githubusercontent.com
+      omp:
         - https://github.com
         - https://api.github.com
         - https://codeload.github.com

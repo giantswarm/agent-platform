@@ -25,9 +25,10 @@ by spec.harnessRef; the Harness has no admission selector. This test asserts:
     digest) reaches the kagent release's harness.image verbatim;
   - kagent.substrateWorkerPool.name follows an override (the Harness's
     workerPoolRef defaults to it in the chart);
-  - kagent.harnesses (a coding agent's claude and codex Harnesses,
+  - kagent.harnesses (a coding agent's claude, codex and omp Harnesses,
     ci/test-coding-agents-values.yaml) reaches the kagent release's harnesses
-    unchanged, with no null, a codex entry beside the claude one; by default
+    unchanged, with no null, a codex entry and a BYO omp entry (its own image,
+    command and displayName) beside the claude one; by default
     the release carries no further Harness (harnesses empty or absent) and
     the agent-manager release no harness.egress of the chart's own;
   - agent-manager.harness.egress reaches the agent-manager release with an
@@ -183,9 +184,11 @@ def main(connectivity: str, meta: str) -> int:
     if paths := nulls(values):
         fail(f"the kagent release's values carry a null at {', '.join(paths)} with kagent.harnesses set (#418)")
     runtimes = {e.get("runtime", "claude") for e in entries}
-    if not {"claude", "codex"} <= runtimes:
-        fail(f"{coding} carries the runtimes {sorted(runtimes)}; the coding-agents values render a codex entry beside the claude one")
-    print("ok: kagent.harnesses (claude and codex) reaches the kagent release unchanged, with no null; by default the release carries no further Harness")
+    if not {"claude", "codex", "byo"} <= runtimes:
+        fail(f"{coding} carries the runtimes {sorted(runtimes)}; the coding-agents values render a codex entry and a BYO omp entry beside the claude one")
+    if incomplete := [e["name"] for e in entries if e.get("runtime") == "byo" and not all(e.get(k) for k in ("image", "command", "displayName"))]:
+        fail(f"{coding}: the BYO entries {incomplete} lack an image, a command or a displayName; the kagent chart requires all three on a BYO entry")
+    print("ok: kagent.harnesses (claude, codex and a BYO omp) reaches the kagent release unchanged, with no null; by default the release carries no further Harness")
 
     am_on = ["--set", "components.agent-manager.enabled=true"]
     egress = yaml.safe_load(open(coding))["agent-manager"]["harness"]["egress"]
