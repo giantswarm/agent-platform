@@ -52,17 +52,14 @@ A tenant's workers therefore run what the platform WorkerPool held when agent-ma
 
 ## What an actor can reach, and how a refusal looks
 
-An actor's outbound traffic is HTTPS on port 443 plus the listed in-cluster destinations (muster, the kagent controller, the agentgateway LLM listener, the OTLP gateway, the cluster entity on 443 and 10443). `substrate-atenet-egress` opens `world` on 443/TCP only, and that rule is the contract actors are written against: the cluster policy is enforced at the node, below the actor's own egress policy, and applies whatever the actor's policy allows.
+An actor's outbound traffic is whatever its egress policy declares, on any TCP port, plus the listed in-cluster destinations (muster, the kagent controller, the agentgateway LLM listener, the OTLP gateway, the cluster entity on 443 and 10443). `substrate-atenet-egress` opens `world` on every TCP port: the egress gateway, which resolves the connecting actor and applies its egress policy in the request path, is the control on where an actor connects, and the cluster policy does not second-guess it with a port list of its own.
 
 | Request | What the actor sees |
 |---|---|
-| HTTPS (443) to an allowed destination | the response |
-| Denied by the actor's egress policy | `403` at once, naming the policy denial |
-| Plaintext HTTP (port 80) or any other port, to a host outside the listed destinations | the gateway's upstream connection is dropped at the node and times out: a `503` from the egress gateway after about 11 s |
+| An origin the actor's egress policy declares, on any port (`https://host:8443`, `http://host`) | the response |
+| A destination the actor's egress policy does not declare, on any port | `403` at once, naming the policy denial |
 
-The 503 is not an outage and no retry helps. The way out is HTTPS on 443; a host model server is opened by its own rule in the chart, from the address the ModelConfigs carry, not by a port on the actor's egress policy. Only a cluster with Cilium enforcing the chart's policies shows it: agentlab renders and enforces none, so an actor author first meets it on a real cluster.
-
-The egress gateway does not refuse such a port at once. It terminates the actor's CONNECT and dials upstream; whether a node drops the dial is decided by the CNI after the gateway has handed the connection over, so the gateway has no signal to refuse on short of a second, hand-kept copy of the cluster policy's port list inside the egress policy. That copy would drift from the chart's policy and is not carried; the documented 443-only contract and the 503 signature stand instead.
+A host model server is opened by its own rule in the chart, from the address the ModelConfigs carry, since it may sit on a node of the cluster, which the `world` entity does not include.
 
 ## Open upstream items (state at the pin)
 

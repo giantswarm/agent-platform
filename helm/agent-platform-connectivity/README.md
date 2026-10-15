@@ -198,7 +198,7 @@ On the installation, after the cutover:
   does not enforce a key's `allowedModels` on the Kubernetes API-key contract
   yet (giantswarm/giantswarm#37742), so putting a paid provider model next to
   consumer keys is the installation's decision.
-- Agent pods keep their `world:443` egress, so a direct call to the provider
+- The actors keep their `world` egress, so a direct call to the provider
   still works. The listener is the paved road, not a wall. Egress tightening is
   a separate change.
 - The LLM path adds no `frontend.metrics` policy: the data plane honours one
