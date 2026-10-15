@@ -15,6 +15,20 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.135.x → \<next\> (Substrate 1.12.0: the Organizations' credentials by label)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.12 from 1.12.0 (`>=1.12.0 <1.13.0`, giantswarm/agent-platform#1041). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.12.0 (`ateom-gvisor:1.12.0`); the kagent CRDs and the kagent release are unchanged. 1.12 stays on 1.11's upstream pin and changes no persisted format, CRD, schema or snapshot layout: the step resets nothing, no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.12.0 brings:
+
+- **Namespace policies by label** (giantswarm/substrate#456): a policy of the credential provider can carry an `ownNamespaceSelector` (each namespace it matches is read by the atespace of the same name only) or, beside `atespace`, an `allowedNamespaceSelector` (that atespace reads every namespace it matches). The provider matches a namespace's labels at each request, so a namespace created or labelled later needs no chart change and no restart. With a selector the chart adds the ClusterRole and ClusterRoleBinding `<release>-k8s-credential-provider-namespace-reader` (list and watch on namespaces).
+
+With `tenants.organizations.enabled` the meta chart now uses them: the substrate release's `credentialProvider.namespacePolicies` gains an `ownNamespaceSelector` entry on `giantswarm.io/organization` Exists, and the same selector as `allowedNamespaceSelector` on the `ate-golden` entry. An agent in an Organization's namespace gets its model key, MCP headers and git credentials from its own namespace, and its template's golden actor from the same. The switch off, the policies are as before.
+
+### Operator action
+
+- **None.** The control plane, the atelet and the worker pool roll on the upgrade.
+- **An installation with its own `substrate.credentialProvider.namespacePolicies` and the switch on**: the entries stay; the meta chart adds the selector to its `ate-golden` entry (an entry when there is none). An `ate-golden` entry with an `allowedNamespaceSelector` on other namespaces fails the render: drop that selector.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.12.0`; `kagent` and `kagent-crds` stay where they are.
+
 ## 4.133.x → \<next\> (agent-manager 2.1.0: bounded get_session, the claude Harness egress guard)
 
 `components.agent-manager.versionRange` selects agent-manager 2.x from 2.1.0 (`>=2.1.0 <3.0.0`), and the connectivity release's `agent-manager migrate` run takes the same image. `get_session` answers a bounded summary of each turn by default; a caller that reads `tasks` passes `detail: full` (giantswarm/agent-manager#150). `get_info`'s `namespaces.managed` lists only the namespaces where the caller may create agents (giantswarm/agent-manager#71). An agent on a Harness that runs Claude Code is refused when `agent-manager.harness.egress` has no entry for that Harness (giantswarm/agent-manager#148). The portal and the gateway read sessions from kagent and call neither field. The agent-manager chart's new keys (`tenants`, `muster.mcpServer.displayName`) default to off and `Agent Manager`. agent-manager keeps no state of its own: the release rolls in place, and the agents, their Sessions and their conversations stay as they are; the migrate run finds every release on the 2.x chart already and rewrites nothing.

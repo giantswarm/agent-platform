@@ -4369,6 +4369,13 @@ verify-tenant-workers: ## Assert the workers of the Organizations' namespaces (g
 	@HELM="$(HELM)" python3 tests/verify-tenant-workers.py $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-tenant-credentials
+verify-tenant-credentials: ## Assert Substrate's credential provider follows tenants.organizations.enabled (giantswarm/agent-platform#1041): off, the substrate release carries the two static namespacePolicies and the switch changes nothing else in its values; on, an ownNamespaceSelector entry on giantswarm.io/organization and the same selector as allowedNamespaceSelector on the ate-golden entry; an installation's own policies stay, an ate-golden entry is added when none exists, a derived entry is not repeated, and an ate-golden allowedNamespaceSelector on other namespaces fails the render naming the key; the Substrate chart the meta chart renders against writes both entries into its policy file and grants list/watch on namespaces. Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-tenant-credentials.py $(CHART_DIR)
+	@echo "ok: $@"
+
 .PHONY: prove-tenant-workers
 prove-tenant-workers: ## Prove on a kind cluster what the admission policies of the Organizations' workers decide (giantswarm/agent-platform#1036; opt-in, not in CI): with the WorkerPool CRD of the Substrate floor and the policies the connectivity chart renders with tenants.organizations.enabled, in a namespace labelled giantswarm.io/organization only agent-manager's ServiceAccount writes a WorkerPool, only as a copy of kagent/<kagent.substrateWorkerPool.name> (refused without it; the proof renames the pool), only ate-controller and the Deployment and ReplicaSet controllers write a labelled Deployment, ReplicaSet or Pod (a real worker Deployment rolls out), no one adds an ephemeral container, execs or attaches to a worker, orphaning, foreground and namespace deletes complete, and the kagent and unlabelled namespaces are not held. Needs docker, kind, kubectl, PyYAML and gsoci.azurecr.io. KIND_IMAGE selects the node image, HELM the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
