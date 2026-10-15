@@ -103,9 +103,8 @@ LINE = {
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, ">=2.1.0 <3.0.0", ["muster", "kagent"]),
     # The Google access-token credential provider plugin beside Substrate
-    # (giantswarm/substrate-credential-providers): 0.2.0 is its first release.
-    "google-access-token-credential-provider": (GSOCI, ">=0.2.0 <1.0.0", ["substrate"]),
-    "agent-manager": (GSOCI, ">=1.13.0 <2.0.0", ["muster", "kagent"]),
+    # (giantswarm/substrate-credential-providers): 0.1.0 is its first release.
+    "google-access-token-credential-provider": (GSOCI, ">=0.1.0 <1.0.0", ["substrate"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).

@@ -144,7 +144,7 @@ KAGENT = ["kagent-crds", "kagent"]
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
 UNRELEASED: dict[str, str] = {
-    "google-access-token-credential-provider": "0.2.0",  # giantswarm/substrate-credential-providers, its first release
+    "google-access-token-credential-provider": "0.1.0",  # giantswarm/substrate-credential-providers, its first release
 }
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a

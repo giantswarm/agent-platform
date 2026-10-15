@@ -43,12 +43,12 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 - **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.12.0`, `kagent-crds` first or with it.
 ## 4.133.x → \<next\> (the Google access-token credential provider runs beside Substrate)
 
-`components.google-access-token-credential-provider` deploys the Substrate credential provider plugin for the class `google-access-token.k8s.io` (giantswarm/substrate-credential-providers 0.2.0) in `ate-system`, following `components.kagent` (giantswarm/giantswarm#38547). Nothing is routed to it yet: the Substrate line's bundled provider still serves the class on 1.11, and the routing entry lands with the move to Substrate 1.12, which drops the bundled name.
+`components.google-access-token-credential-provider` deploys the Substrate credential provider plugin for the class `google-access-token.k8s.io` (giantswarm/substrate-credential-providers 0.1.0) in `ate-system`, following `components.kagent` (giantswarm/giantswarm#38547). Nothing is routed to it yet: the Substrate line's bundled provider still serves the class on 1.11, and the routing entry lands with the move to Substrate 1.12, which drops the bundled name.
 
 ### Operator action
 
 - **None.** One Deployment, one Service and the policies appear in `ate-system`; Vertex AI ModelConfigs keep resolving through the bundled provider until the next Substrate floor move.
-- **An installation that pins the BOM**: add `google-access-token-credential-provider: { versionRange: "0.2.0" }`.
+- **An installation that pins the BOM**: add `google-access-token-credential-provider: { versionRange: "0.1.0" }`.
 
 ## 4.133.x → \<next\> (Substrate 1.11.4: a CONNECT tunnel ends when the actor closes)
 

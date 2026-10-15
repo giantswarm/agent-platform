@@ -809,7 +809,7 @@ components:  # @schema additionalProperties: true
     # provider served the name itself): the plugin is deployed first and routed
     # with the floor bump.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: ">=0.2.0 <1.0.0"
+    versionRange: ">=0.1.0 <1.0.0"
     valuesFrom: google-access-token-credential-provider
     injectGlobal: false
     targetNamespace: ate-system
