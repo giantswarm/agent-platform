@@ -574,9 +574,15 @@ llmRouting:
   # through untouched, so reach to the listener grants no spend. Candidates are tried in name order and the first
   # whose `match` takes the model wins, so a `*` entry would shadow every model
   # named after it — a served model (model-manager, the LLMEndpoint
-  # document) joins under its preset's name. The first entry's
-  # provider is the one whose ModelConfigs ride the listener
-  # (kagent.modelConfigs, modelConfigPolicy).
+  # document) joins under its preset's name. Every entry's provider rides the
+  # listener: its ModelConfigs (kagent.modelConfigs, modelConfigPolicy) get
+  # the listener as baseUrl. An OpenAI entry serves the Responses route
+  # (/v1/responses) a codex agent calls, metered and rate-limited like the
+  # rest:
+  #   - name: openai
+  #     provider: OpenAI
+  #     baseURL: https://api.openai.com/v1
+  #     match: gpt-*
   models:  # @schema minItems: 1; item: object; itemProperties: {"name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63}, "provider": {"type": "string", "enum": ["Anthropic", "Baseten", "Cerebras", "Cohere", "Deepinfra", "Deepseek", "Fireworks", "Gemini", "Groq", "Huggingface", "Mistral", "OpenAI", "Openrouter", "TogetherAI", "XAI"]}, "baseURL": {"type": "string", "pattern": "^https?://[^/]+/.+"}, "match": {"type": "string"}, "visibility": {"type": "string", "enum": ["Public", "Internal"]}}
     - name: anthropic
       provider: Anthropic
@@ -663,9 +669,14 @@ llmRouting:
   # A MutatingAdmissionPolicy that sends a ModelConfig this chart does NOT
   # render through the LLM listener — one created by Backstage, agent-manager or
   # kubectl. Chart-owned entries already carry the baseUrl (kagent.modelConfigs
-  # below), so the policy never touches them. It writes only when the provider
-  # is the first llmRouting.models entry's and the baseUrl is absent. An object that
-  # names its own baseUrl is never touched.
+  # below), so the policy never touches them. One policy per provider of
+  # llmRouting.models; each writes only when the ModelConfig's provider is its
+  # own and the baseUrl is absent (an OpenAI ModelConfig gets the listener's
+  # URL with /v1). An object that names its own baseUrl is never touched.
+  # Each write is marked (annotation
+  # agent-platform.giantswarm.io/llm-routing-base-url), and the hook
+  # <release>-llm-routing-modelconfigs takes a marked baseUrl back off once
+  # routing is off or its provider is no longer served (giantswarm/agent-platform#1057).
   #
   # Rendered only where the API server serves
   # admissionregistration.k8s.io/v1/MutatingAdmissionPolicy, which is Kubernetes
@@ -1843,8 +1854,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # llmRouting.enabled the chart fills in the LLM listener, so the gateway
   #   # meters this model's usage. Set it to reach a different upstream: the
   #   # provider's own URL is how a model stays on the direct, unmetered path.
-  #   # An entry whose provider differs from the first llmRouting.models entry's stays
-  #   # direct either way: the listener forwards to one provider. Only the
+  #   # An entry whose provider no llmRouting.models entry serves stays direct
+  #   # either way; an OpenAI entry's listener URL ends in /v1. Only the
   #   # Anthropic, Mistral, OpenAI and SAPAICore providers carry a baseUrl in
   #   # ModelConfigSpec, under the CRD's block key (anthropic, mistral, openAI,
   #   # sapAICore); the render fails for a baseUrl on any other provider.
@@ -1861,6 +1872,17 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # inherits kagent.providers.anthropic.config.maxTokens; unset everywhere,
   #   # kagent's built-in 8192 applies. Any other provider refuses the key.
   #   maxTokens: 32000
+  #   # Optional (OpenAI). The OpenAI HTTP API the runtime speaks:
+  #   # chatCompletions (the CRD's default) or responses. A model a codex agent
+  #   # uses needs responses and no maxTokens: the codex compiler refuses any
+  #   # other OpenAI option. Any other provider refuses the key.
+  #   apiFormat: responses
+  # - name: openai-gpt-5-5   # a codex model, through the llm listener's
+  #   provider: OpenAI       # OpenAI entry (llmRouting.models)
+  #   model: gpt-5.5
+  #   apiKeySecret: kagent-openai
+  #   apiKeySecretKey: OPENAI_API_KEY
+  #   apiFormat: responses
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it

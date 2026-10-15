@@ -13068,7 +13068,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "egresspolicies"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13092,7 +13092,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "egresspolicies"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13131,7 +13131,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "egresspolicies"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13155,7 +13155,10 @@ rules:
     resources: ["events"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["api.kagent.dev"]
-    resources: ["modelconfigs"]
+    resources: ["modelconfigs", "egresspolicies"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
     verbs: ["create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
@@ -15239,6 +15242,123 @@ spec:
         selector:
           matchLabels:
             app: k8s-credential-provider
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-egress-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kagent"]
+    resourceRules:
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["egresspolicies"]
+  variables:
+    # The Secret references of the policy's destinations (read untyped: the
+    # policy admits every served version).
+    - name: refs
+      expression: >-
+        has(object.spec) && has(object.spec.destinations) ?
+        dyn(object.spec.destinations).filter(d, has(d.authentication) && has(d.authentication.secretKeyRef))
+        .map(d, d.authentication.secretKeyRef) : []
+    - name: platform
+      expression: >-
+        variables.refs.filter(r, !has(r.name) || !r.name.startsWith('tenant-credential-'))
+  validations:
+    - expression: size(variables.platform) == 0
+      reason: Forbidden
+      messageExpression: >-
+        'an EgressPolicy in an Organization namespace names only tenant credentials, Secrets named tenant-credential-*, never a platform Secret: ' +
+        variables.platform.map(r, has(r.name) ? r.name : '<no name>').join(', ')
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kagent"]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["secrets"]
+  matchConditions:
+    - name: tenant-credential
+      expression: "object.metadata.name.startsWith('tenant-credential-')"
+  validations:
+    - expression: "!has(object.type) || object.type == 'Opaque'"
+      reason: Forbidden
+      messageExpression: >-
+        'a tenant credential (a Secret named tenant-credential-* in an Organization namespace) is of type Opaque, not ' + object.type
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-egress-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-tenant-egress-credentials
+  validationActions: [Deny]
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-tenant-credentials
+  validationActions: [Deny]
 ---
 # Source: agent-platform-connectivity/templates/substrate/hooks-rbac.yaml
 apiVersion: v1
