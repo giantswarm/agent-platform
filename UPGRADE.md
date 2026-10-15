@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.133.x → \<next\> (agent-manager 2.1.0: bounded get_session, the claude Harness egress guard)
+
+`components.agent-manager.versionRange` selects agent-manager 2.x from 2.1.0 (`>=2.1.0 <3.0.0`), and the connectivity release's `agent-manager migrate` run takes the same image. `get_session` answers a bounded summary of each turn by default; a caller that reads `tasks` passes `detail: full` (giantswarm/agent-manager#150). `get_info`'s `namespaces.managed` lists only the namespaces where the caller may create agents (giantswarm/agent-manager#71). An agent on a Harness that runs Claude Code is refused when `agent-manager.harness.egress` has no entry for that Harness (giantswarm/agent-manager#148). The portal and the gateway read sessions from kagent and call neither field. The agent-manager chart's new keys (`tenants`, `muster.mcpServer.displayName`) default to off and `Agent Manager`. agent-manager keeps no state of its own: the release rolls in place, and the agents, their Sessions and their conversations stay as they are; the migrate run finds every release on the 2.x chart already and rewrites nothing.
+
+### Operator action
+
+- **An installation with its own claude Harness** (a `harnesses[]` entry with `runtime: claude` other than `claude`, `claude-go` or `claude-node`): add its origins under `agent-manager.harness.egress.<name>` (an empty list for none), or its agents' creates and updates are refused.
+- **An installation that pins the BOM**: move `agent-manager` to `2.1.0`.
+
 ## 4.133.x → \<next\> (Substrate 1.11.4: a CONNECT tunnel ends when the actor closes)
 
 `components.substrate{,-crds}.versionRange` selects Substrate 1.11 from 1.11.4 (`>=1.11.4 <1.12.0`, giantswarm/agent-platform#1034). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.11.4 (`ateom-gvisor:1.11.4`); the kagent CRDs and the kagent release are unchanged. The patch is on 1.11.0's upstream pin and changes no persisted format, CRD, schema or snapshot layout: the step resets nothing, no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.11.4 brings:
