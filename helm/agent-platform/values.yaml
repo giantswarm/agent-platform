@@ -5135,13 +5135,26 @@ tenants:
   # sees it (with the OIDC groups prefix of the installation).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
   organizations:
-    # -- Admit the agent workers of the Organizations' namespaces. Turn it on
-    # with agent-manager's tenant reconciler (agent-manager's
-    # `tenants.enabled`), which puts a WorkerPool in each namespace labelled
-    # `giantswarm.io/organization` that holds an agent, and copies the
-    # workers' own policy into it (its `tenants.networkPolicy.names`: the
-    # CiliumNetworkPolicy `substrate-workers` in the cilium flavor, the
-    # NetworkPolicy `substrate-workers-ingress` in the kubernetes flavor). On,
+    # -- Admit the agent workers of the Organizations' namespaces and turn on
+    # agent-manager's tenant reconciler. With components.agent-manager on,
+    # the agent-manager release gets `tenants.enabled` (agent-manager 2.1.0
+    # or later), which puts a WorkerPool in each namespace labelled
+    # `giantswarm.io/organization` that holds an agent, with copies of the
+    # kagent namespace's default ModelConfig (`default-model-config`, its
+    # key Secret kagent.providers.<default>.apiKeySecretRef, which must be
+    # set in these values: the kagent chart's own provider defaults are not
+    # read) and of the workers' own policy (the CiliumNetworkPolicy
+    # `substrate-workers` in the cilium flavor, which needs cilium.io/v2
+    # served or agent-manager does not start; the NetworkPolicy
+    # `substrate-workers-ingress` in the kubernetes flavor; none with
+    # networkPolicy.enabled off). Each tenant that holds an agent keeps 1
+    # warm worker unless agent-manager.tenants.workerPoolReplicas sets
+    # another count. The render fails, naming the key, below agent-manager
+    # 2.1.0, with kagent off, with agent-manager's OAuth or downstream OAuth
+    # off, without kagent.fluxServiceAccountName or without that key Secret.
+    # agent-manager.tenants.workerPoolReplicas and .interval are yours; any
+    # other agent-manager.tenants key is derived and must be unset or equal.
+    # On,
     # with Agent Substrate on, the connectivity release lets the worker pods
     # of every such namespace reach the atenet router's tunnel, the egress
     # gateway and the actors' dns, as the kagent namespace's workers do (both
