@@ -15,6 +15,19 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.133.x → \<next\> (Substrate 1.11.3: a crashed actor is seen and recovered)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.11 from 1.11.3 (`>=1.11.3 <1.12.0`, giantswarm/agent-platform#1031). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.11.3 (`ateom-gvisor:1.11.3`); the kagent CRDs and the kagent release are unchanged. The patches are on 1.11.0's upstream pin and change no persisted format: the step resets nothing, no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.11.1 to 1.11.3 bring:
+
+- **A failed restore can be terminated**: atelet records an actor's sandbox before the restore, so a Terminate after a restore whose sandbox died tears it down instead of answering `failed to read sandbox record`.
+- **A running actor's sandbox exit is reported**: ateom-gvisor watches the sandbox of every actor it hosts, and ate-api-server crashes the RUNNING actor whose sandbox exited, so a request to it no longer waits out its caller's deadline and the client's crash recovery starts.
+- **A crashed actor's resume refusal is not resumable**, so a client recovers the actor instead of retrying the resume.
+
+### Operator action
+
+- **None.** The control plane, the atelet and the worker pool roll on the upgrade.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.11.3`; `kagent` and `kagent-crds` stay where they are.
+
 ## 4.132.x → \<next\> (Substrate 1.11.0: actor JWTs on egress)
 
 `components.substrate{,-crds}.versionRange` selects Substrate 1.11 (`>=1.11.0 <1.12.0`, giantswarm/agent-platform#1023). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.11.0 (`ateom-gvisor:1.11.0`); the kagent CRDs and the kagent release are unchanged. 1.11 is the line on the same upstream pin as 1.10, so kagent 1.11 speaks its contract. The step resets nothing: no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes, and a new conversation starts from the template's golden, which 1.11.0 keeps (its snapshot layout is 1.10.2's). 1.11.0 brings:
