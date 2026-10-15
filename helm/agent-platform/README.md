@@ -465,7 +465,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.upgradeRemediation.retries | int | `3` |  |
 | components.google-access-token-credential-provider.chart | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.google-access-token-credential-provider.versionRange | string | `">=0.2.0 <1.0.0"` |  |
+| components.google-access-token-credential-provider.versionRange | string | `">=0.1.0 <1.0.0"` |  |
 | components.google-access-token-credential-provider.valuesFrom | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.injectGlobal | bool | `false` |  |
 | components.google-access-token-credential-provider.targetNamespace | string | `"ate-system"` |  |
