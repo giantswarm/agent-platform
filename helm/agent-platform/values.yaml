@@ -1864,9 +1864,15 @@ llmRouting:
   # through untouched, so reach to the listener grants no spend. Candidates are tried in name order and the first
   # whose `match` takes the model wins, so a `*` entry would shadow every model
   # named after it — a served model (model-manager, the LLMEndpoint
-  # document) joins under its preset's name. The first entry's
-  # provider is the one whose ModelConfigs ride the listener
-  # (kagent.modelConfigs, modelConfigPolicy).
+  # document) joins under its preset's name. Every entry's provider rides the
+  # listener: its ModelConfigs (kagent.modelConfigs, modelConfigPolicy) get
+  # the listener as baseUrl. An OpenAI entry serves the Responses route
+  # (/v1/responses) a codex agent calls, metered and rate-limited like the
+  # rest:
+  #   - name: openai
+  #     provider: OpenAI
+  #     baseURL: https://api.openai.com/v1
+  #     match: gpt-*
   models:  # @schema minItems: 1; item: object; itemProperties: {"name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63}, "provider": {"type": "string", "enum": ["Anthropic", "Baseten", "Cerebras", "Cohere", "Deepinfra", "Deepseek", "Fireworks", "Gemini", "Groq", "Huggingface", "Mistral", "OpenAI", "Openrouter", "TogetherAI", "XAI"]}, "baseURL": {"type": "string", "pattern": "^https?://[^/]+/.+"}, "match": {"type": "string"}, "visibility": {"type": "string", "enum": ["Public", "Internal"]}}
     - name: anthropic
       provider: Anthropic
@@ -3599,6 +3605,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   model: claude-sonnet-4-6
   #   apiKeySecret: kagent-anthropic
   #   apiKeySecretKey: ANTHROPIC_API_KEY
+  # - name: openai-gpt-5-5   # a codex model: the Responses API, through the
+  #   provider: OpenAI       # llm listener's OpenAI entry (llmRouting.models)
+  #   model: gpt-5.5
+  #   apiKeySecret: kagent-openai
+  #   apiKeySecretKey: OPENAI_API_KEY
+  #   apiFormat: responses
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it

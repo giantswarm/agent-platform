@@ -10,17 +10,23 @@ its feature gate, so the policy would exist and mutate nothing. An absent object
 is honest; a silent one is not. Confirm with:
 
   kubernetes_feature_enabled{name="MutatingAdmissionPolicy", job="apiserver"} */ -}}
-{{- $urlKey := include "agent-platform.modelConfigBaseUrlKey" (include "agent-platform.llmRouting.provider" .) }}
-{{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.llmRouting.modelConfigPolicy.enabled $urlKey (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy") }}
+{{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.llmRouting.modelConfigPolicy.enabled (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy") }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
-{{- $provider := include "agent-platform.llmRouting.provider" . }}
-{{- $name := printf "%s-modelconfig-llm-routing" (include "name" .) }}
+{{- /* One policy per provider the listener serves
+(agent-platform.llmRouting.providers): the block that carries baseUrl and the
+URL differ by provider (an OpenAI ModelConfig's ends in /v1). The first keeps
+the unsuffixed name. */}}
+{{- range $i, $provider := include "agent-platform.llmRouting.providers" . | fromJsonArray }}
+{{- $urlKey := include "agent-platform.modelConfigBaseUrlKey" $provider }}
+{{- $name := printf "%s-modelconfig-llm-routing" (include "name" $) }}
+{{- if $i }}{{ $name = printf "%s-%s" $name $provider }}{{ end }}
+---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingAdmissionPolicy
 metadata:
   name: {{ $name }}
   labels:
-    {{- include "labels.common" . | nindent 4 }}
+    {{- include "labels.common" $ | nindent 4 }}
 spec:
   {{- /* A model that keeps the direct path costs unmetered usage. A model that
   cannot be created costs an outage. Ignore is the cheaper failure. */}}
@@ -51,7 +57,7 @@ spec:
       applyConfiguration:
         expression: >-
           Object{spec: Object.spec{ {{ $urlKey }}: Object.spec.{{ $urlKey }}{
-            baseUrl: {{ include "agent-platform.llmBaseUrl" . | quote }}
+            baseUrl: {{ include "agent-platform.llmListenerUrl" (dict "root" $ "provider" $provider) | quote }}
           }}}
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -59,11 +65,12 @@ kind: MutatingAdmissionPolicyBinding
 metadata:
   name: {{ $name }}
   labels:
-    {{- include "labels.common" . | nindent 4 }}
+    {{- include "labels.common" $ | nindent 4 }}
 spec:
   policyName: {{ $name }}
   matchResources:
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: {{ $ns }}
+{{- end }}
 {{- end }}
