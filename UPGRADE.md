@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.133.x → \<next\> (agent-manager 2.1.0: bounded get_session, the claude Harness egress guard)
+
+`components.agent-manager.versionRange` selects agent-manager 2.x from 2.1.0 (`>=2.1.0 <3.0.0`), and the connectivity release's `agent-manager migrate` run takes the same image. `get_session` answers a bounded summary of each turn by default; a caller that reads `tasks` passes `detail: full` (giantswarm/agent-manager#150). `get_info`'s `namespaces.managed` lists only the namespaces where the caller may create agents (giantswarm/agent-manager#71). An agent on a Harness that runs Claude Code is refused when `agent-manager.harness.egress` has no entry for that Harness (giantswarm/agent-manager#148). The portal and the gateway read sessions from kagent and call neither field. The agent-manager chart's new keys (`tenants`, `muster.mcpServer.displayName`) default to off and `Agent Manager`. agent-manager keeps no state of its own: the release rolls in place, and the agents, their Sessions and their conversations stay as they are; the migrate run finds every release on the 2.x chart already and rewrites nothing.
+
+### Operator action
+
+- **An installation with its own claude Harness** (a `harnesses[]` entry with `runtime: claude` other than `claude`, `claude-go` or `claude-node`): add its origins under `agent-manager.harness.egress.<name>` (an empty list for none), or its agents' creates and updates are refused.
+- **An installation that pins the BOM**: move `agent-manager` to `2.1.0`.
+
 ## 4.133.x → \<next\> (kagent 1.12.0: the Harness turn limits are withdrawn)
 
 `components.kagent{,-crds}.versionRange` is `>=1.12.0 <1.13.0`, kagent's releases of the 1.12 line (giantswarm/kagent-upstream#502). The `Harness` API no longer declares `spec.claude.limits`: the claude harness runs a turn without the turn and budget caps, and the kagent-crds release drops the field from the CRD before the kagent release upgrades (`dependsOn`). The 1.12.0 kagent chart ignores `kagent.harnesses[].limits` and renders `claude: {}`, so an installation whose values still set it upgrades. Substrate stays on 1.11.4: kagent 1.12.0 is built against Substrate 1.11.1. No persisted format, schema or snapshot layout changes: a suspended agent resumes with its conversation.
