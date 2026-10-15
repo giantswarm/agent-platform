@@ -41,6 +41,20 @@ Nothing else is excepted: no `app: kagent` selector remains (the v1alpha2 agent 
 - **One architecture per pool.** The WorkerPool is pinned to the installation's CPU architecture: a mixed pool wedges the actors whose snapshot was taken on the other.
 - **Render-time refusals.** The chart refuses kagent without Substrate, Substrate without its CRDs or a database, kagent without a snapshot store, and — where the render is live — a cluster that does not serve `certificates.k8s.io/v1beta1/PodCertificateRequest`.
 
+## What an actor can reach, and how a refusal looks
+
+An actor's outbound traffic is HTTPS on port 443 plus the listed in-cluster destinations (muster, the kagent controller, the agentgateway LLM listener, the OTLP gateway, the cluster entity on 443 and 10443). `substrate-atenet-egress` opens `world` on 443/TCP only, and that rule is the contract actors are written against: the cluster policy is enforced at the node, below the actor's own egress policy, and applies whatever the actor's policy allows.
+
+| Request | What the actor sees |
+|---|---|
+| HTTPS (443) to an allowed destination | the response |
+| Denied by the actor's egress policy | `403` at once, naming the policy denial |
+| Plaintext HTTP (port 80) or any other port, to a host outside the listed destinations | the gateway's upstream connection is dropped at the node and times out: a `503` from the egress gateway after about 11 s |
+
+The 503 is not an outage and no retry helps. The way out is HTTPS on 443; a host model server is opened by its own rule in the chart, from the address the ModelConfigs carry, not by a port on the actor's egress policy. Only a cluster with Cilium enforcing the chart's policies shows it: agentlab renders and enforces none, so an actor author first meets it on a real cluster.
+
+The egress gateway does not refuse such a port at once. It terminates the actor's CONNECT and dials upstream; whether a node drops the dial is decided by the CNI after the gateway has handed the connection over, so the gateway has no signal to refuse on short of a second, hand-kept copy of the cluster policy's port list inside the egress policy. That copy would drift from the chart's policy and is not carried; the documented 443-only contract and the 503 signature stand instead.
+
 ## Open upstream items (state at the pin)
 
 Substrate is an early project; its own [threat model](https://github.com/kagent-dev/substrate/blob/main/docs/threat-model.md) states that it "has little to no security hardening at this time". What matters for an installation:
