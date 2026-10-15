@@ -24,6 +24,15 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 - **An installation with its own claude Harness** (a `harnesses[]` entry with `runtime: claude` other than `claude`, `claude-go` or `claude-node`): add its origins under `agent-manager.harness.egress.<name>` (an empty list for none), or its agents' creates and updates are refused.
 - **An installation that pins the BOM**: move `agent-manager` to `2.1.0`.
 
+## 4.133.x → \<next\> (kagent 1.12.0: the Harness turn limits are withdrawn)
+
+`components.kagent{,-crds}.versionRange` is `>=1.12.0 <1.13.0`, kagent's releases of the 1.12 line (giantswarm/kagent-upstream#502). The `Harness` API no longer declares `spec.claude.limits`: the claude harness runs a turn without the turn and budget caps, and the kagent-crds release drops the field from the CRD before the kagent release upgrades (`dependsOn`). The 1.12.0 kagent chart ignores `kagent.harnesses[].limits` and renders `claude: {}`, so an installation whose values still set it upgrades. Substrate stays on 1.11.4: kagent 1.12.0 is built against Substrate 1.11.1. No persisted format, schema or snapshot layout changes: a suspended agent resumes with its conversation.
+
+### Operator action
+
+- **An installation that sets `kagent.harnesses[].limits`**: drop the key after the upgrade; it has no effect from 1.12.0.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.12.0`, `kagent-crds` first or with it.
+
 ## 4.133.x → \<next\> (Substrate 1.11.4: a CONNECT tunnel ends when the actor closes)
 
 `components.substrate{,-crds}.versionRange` selects Substrate 1.11 from 1.11.4 (`>=1.11.4 <1.12.0`, giantswarm/agent-platform#1034). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.11.4 (`ateom-gvisor:1.11.4`); the kagent CRDs and the kagent release are unchanged. The patch is on 1.11.0's upstream pin and changes no persisted format, CRD, schema or snapshot layout: the step resets nothing, no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.11.4 brings:
