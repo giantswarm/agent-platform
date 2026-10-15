@@ -758,6 +758,27 @@ provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
 {{- end -}}
 
 {{/*
+Truthy when this chart routes the ModelConfigs it does not render, routing on
+or off: kagent is a component, the modelconfig-llm-routing policies are wanted
+(llmRouting.modelConfigPolicy) and the API server serves their GA group. With
+routing on the policies render (templates/llm/modelconfig-policy.yaml); either
+way the reconcile hook runs (templates/llm/modelconfig-routing-hook.yaml),
+which takes a baseUrl the policies wrote back off a ModelConfig once the
+listener no longer serves it.
+*/}}
+{{- define "agent-platform.llmRouting.modelConfigs" -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.llmRouting.modelConfigPolicy.enabled (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy") -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The annotation that marks a ModelConfig's baseUrl as the listener URL this
+chart wrote (the modelconfig-llm-routing policies, the reconcile hook), with the
+URL as its value: the hook removes exactly such a baseUrl once routing is off,
+and never one an operator set.
+*/}}
+{{- define "agent-platform.llmRouting.baseUrlMark" -}}agent-platform.giantswarm.io/llm-routing-base-url{{- end -}}
+
+{{/*
 Truthy when the LLM endpoint is also published outside the cluster
 (llmRouting.external).
 */}}

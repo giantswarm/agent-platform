@@ -9,8 +9,14 @@ Rendered only where the API server serves the GA group. On a beta API server
 its feature gate, so the policy would exist and mutate nothing. An absent object
 is honest; a silent one is not. Confirm with:
 
-  kubernetes_feature_enabled{name="MutatingAdmissionPolicy", job="apiserver"} */ -}}
-{{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.llmRouting.modelConfigPolicy.enabled (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy") }}
+  kubernetes_feature_enabled{name="MutatingAdmissionPolicy", job="apiserver"}
+
+Every write marks the baseUrl it sets (agent-platform.llmRouting.baseUrlMark):
+turning routing off removes these policies and the listener, and the reconcile
+hook (modelconfig-routing-hook.yaml) takes exactly the marked baseUrls off
+again, which Helm cannot: it never owned them. */ -}}
+{{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.llmRouting.modelConfigs" .) }}
+{{- $mark := include "agent-platform.llmRouting.baseUrlMark" . }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- /* One policy per provider the listener serves
 (agent-platform.llmRouting.providers): the block that carries baseUrl and the
@@ -18,6 +24,7 @@ URL differ by provider (an OpenAI ModelConfig's ends in /v1). The first keeps
 the unsuffixed name. */}}
 {{- range $i, $provider := include "agent-platform.llmRouting.providers" . | fromJsonArray }}
 {{- $urlKey := include "agent-platform.modelConfigBaseUrlKey" $provider }}
+{{- $url := include "agent-platform.llmListenerUrl" (dict "root" $ "provider" $provider) }}
 {{- $name := printf "%s-modelconfig-llm-routing" (include "name" $) }}
 {{- if $i }}{{ $name = printf "%s-%s" $name $provider }}{{ end }}
 ---
@@ -56,9 +63,11 @@ spec:
     - patchType: ApplyConfiguration
       applyConfiguration:
         expression: >-
-          Object{spec: Object.spec{ {{ $urlKey }}: Object.spec.{{ $urlKey }}{
-            baseUrl: {{ include "agent-platform.llmListenerUrl" (dict "root" $ "provider" $provider) | quote }}
-          }}}
+          Object{
+            metadata: Object.metadata{annotations: { {{ $mark | quote }}: {{ $url | quote }} }},
+            spec: Object.spec{ {{ $urlKey }}: Object.spec.{{ $urlKey }}{
+              baseUrl: {{ $url | quote }}
+            }}}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingAdmissionPolicyBinding

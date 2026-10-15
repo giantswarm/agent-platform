@@ -2242,6 +2242,14 @@ verify-kagent-database: ## Assert kagent always has a database (agent-platform.v
 	@python3 tests/verify-kagent-database.py $(CHART_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-llm-routing-modelconfigs
+verify-llm-routing-modelconfigs: ## Assert the ModelConfig reconcile of llmRouting (giantswarm/agent-platform#1057): the modelconfig-llm-routing policies mark the baseUrl they write; the post-install/post-upgrade hook <release>-llm-routing-modelconfigs renders on and off wherever the policies would, with get, list and patch on modelconfigs for the hook identity; run against a stub kubectl, off removes a marked baseUrl and an unmarked listener URL on an object Helm does not manage and keeps every other baseUrl, on marks the chart's listener URLs, unroutes a provider no longer served and routes nothing new, a second run changes nothing, and without the ModelConfig API it exits 0.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@command -v jq >/dev/null || { echo "FAIL: jq is not installed; the hook script runs it"; exit 1; }
+	@python3 tests/verify-llm-routing-modelconfigs.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-kagent-harness
 verify-llm-rate-limit: ## Assert the LLM endpoint's rate limits (giantswarm/giantswarm#38004): llmRouting.rateLimits empty renders no policy; entries render one <name>-llm-rate-limit AgentgatewayPolicy on the data-plane Gateway's LLM listener (sectionName) with traffic.rateLimit.local as written, a key through tpl (the per-agent key behind the Substrate egress predicate); llmRouting.external.rateLimits renders <name>-llm-external-rate-limit on the external HTTPRoute alone, none with the endpoint off; llmRouting off renders neither; the schema refuses both or neither of tokens and requests, a zero, an unknown unit, an empty key and an unknown field; the entry schema's fields are those of agentgateway.dev_agentgatewaypolicies at the floor of components.agentgateway.versionRange, and both policies validate against that CRD; the meta chart forwards both lists as written. Network: gsoci.azurecr.io.
 	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
