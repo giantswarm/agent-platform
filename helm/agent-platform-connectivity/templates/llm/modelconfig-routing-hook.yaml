@@ -1,0 +1,60 @@
+{{- /*
+Takes the listener URL the modelconfig-llm-routing policies wrote back off the
+ModelConfigs of the kagent namespace once the listener no longer serves them,
+after every install and upgrade, routing on or off
+(agent-platform.llmRouting.modelConfigs).
+
+The policies (modelconfig-policy.yaml) write the listener URL into a
+ModelConfig without a baseUrl. Helm never owns that field: turning routing off
+removes the policies and the listener, and every such ModelConfig would keep
+calling the removed listener and fail each turn.
+
+The hook (files/llm/modelconfig-routing.jq): off, or for a provider the
+listener no longer serves, a baseUrl the chart wrote is removed with its mark;
+on, it follows a moved listener and marks what the policies wrote before the
+mark existed. It never routes a ModelConfig without a baseUrl: the policies do
+at its next write. A baseUrl the chart wrote carries the mark
+(agent-platform.llmRouting.baseUrlMark); one written before the mark existed
+is the listener URL on an object Helm does not manage. Any other baseUrl is the
+operator's and stays, a Helm-managed one included: it is a release's value
+(kagent.providers.<default>.config.baseUrl, the cutover's second step), which
+that release removes itself.
+
+Each patch is a merge patch preconditioned on the object's resourceVersion: a
+ModelConfig written in between fails the run, and the Job's retry reads it
+again. The log names every ModelConfig it changed.
+*/ -}}
+{{- if include "agent-platform.llmRouting.modelConfigs" . }}
+{{- $mode := ternary "on" "off" (eq (include "agent-platform.llmRouting" .) "true") }}
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" "llm-routing-modelconfigs" "hook" "post-install,post-upgrade" "timeout" 300
+      "about" (printf "llmRouting %s: take the listener URL the chart wrote off every ModelConfig the LLM listener no longer serves" $mode)
+      "script" (include "agent-platform.llmRouting.modelConfigs.script" (dict "root" $ "mode" $mode))) }}
+{{- end }}
+
+{{- define "agent-platform.llmRouting.modelConfigs.script" -}}
+{{- $root := .root -}}
+{{- $program := $root.Files.Get "files/llm/modelconfig-routing.jq" -}}
+{{- if contains "'" $program }}{{ fail "files/llm/modelconfig-routing.jq carries a single quote; the hook passes it to jq inside one" }}{{ end -}}
+ns={{ $root.Values.kagent.namespaceOverride | default $root.Release.Namespace | quote }}
+served={{ ternary (include "agent-platform.llmRouting.providers" $root) "[]" (eq .mode "on") | squote }}
+# The kagent release installs the CRD, possibly after this one on a first
+# install: nothing to reconcile then.
+cd "$(mktemp -d)"
+resources=$(kubectl api-resources --api-group=api.kagent.dev -o name)
+if ! printf '%s\n' "$resources" | grep -qx 'modelconfigs.api.kagent.dev'; then
+  echo "no ModelConfig API yet: nothing to reconcile"
+  exit 0
+fi
+kubectl -n "$ns" get modelconfigs.api.kagent.dev -o json >modelconfigs
+jq -c --arg mode {{ .mode | quote }} --argjson served "$served" \
+  --arg origin {{ include "agent-platform.llmBaseUrl" $root | quote }} \
+  --arg mark {{ include "agent-platform.llmRouting.baseUrlMark" $root | quote }} '
+{{ $program | indent 6 }}' modelconfigs >patches
+while IFS= read -r line; do
+  name=$(printf '%s' "$line" | jq -r .name)
+  printf '%s' "$line" | jq -c .patch >patch
+  kubectl -n "$ns" patch modelconfigs.api.kagent.dev "$name" --type=merge --patch-file=patch >/dev/null
+  echo "ModelConfig $ns/$name: baseUrl $(jq -r '.metadata.annotations[] // "removed, the provider is called directly"' patch)"
+done <patches
+echo "ModelConfigs reconciled to llmRouting {{ .mode }}: $(wc -l <patches) changed"
+{{- end -}}

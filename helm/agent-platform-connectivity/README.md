@@ -82,6 +82,20 @@ Two values turn the path on, and the order matters.
 
 Roll back by removing the second value. The listener may stay.
 
+Turning `llmRouting.enabled` off afterwards also takes back what the
+`<release>-modelconfig-llm-routing` policies wrote: they mark every `baseUrl`
+they set with the annotation `agent-platform.giantswarm.io/llm-routing-base-url`
+(the URL itself), and the post-install/post-upgrade hook
+`<release>-llm-routing-modelconfigs` removes a marked `baseUrl`, and the
+listener URL on a ModelConfig Helm does not manage that the policies wrote
+before they marked it, so every such ModelConfig calls its provider directly
+again; its log names each one. Helm cannot: it never owned the field. A
+`baseUrl` an operator set, and one a Helm release renders (the second value
+above included), is never touched: remove the second value first. With routing
+on, the hook also takes the listener URL off a ModelConfig whose provider no
+`llmRouting.models` entry serves any more. It never routes a ModelConfig: the
+policies do at its next write.
+
 ### Acceptance
 
 On the installation, after the cutover:
