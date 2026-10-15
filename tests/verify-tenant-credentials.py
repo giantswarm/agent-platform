@@ -15,8 +15,11 @@ Organizations' workers (giantswarm/agent-platform#1036):
   an ate-golden entry gains the selector (one is added when none names
   ate-golden), a derived entry it already carries is not repeated, and an
   ate-golden entry selecting other namespaces fails the render naming the key;
-- the Substrate chart the meta chart renders against (RENDER_AGAINST's release
-  candidate while 1.12.0 is unpublished, else the range's floor) takes the
+- a Substrate floor below 1.12.0 fails the render with the switch on: the
+  older provider refuses the selectors at start;
+- the Substrate chart at the range's floor (while the floor is unpublished,
+  the chart verify-components-charts renders against: UNRELEASED,
+  RENDER_AGAINST) takes the
   forwarded values: its policy file carries both entries and it grants the
   provider list/watch on namespaces.
 
@@ -40,7 +43,6 @@ cc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cc)
 
 HELM = os.environ.get("HELM", "helm")
-SUBSTRATE_CHART = "oci://gsoci.azurecr.io/giantswarm/substrate/helm/substrate"
 
 BASE = [
     "--namespace", "agent-platform",
@@ -132,20 +134,26 @@ def main() -> None:
         expect("on, own policies already carrying the derived entries", policies(substrate(meta, [*ON, *own_policies(tmp, "same", TENANTS)])), TENANTS)
         print("ok: own policies")
 
-        print("--> on: an ate-golden entry selecting other namespaces is refused")
+        print("--> on: an ate-golden entry selecting other namespaces, and a Substrate floor below 1.12.0, are refused")
         other = {"atespace": "ate-golden", "allowedNamespaceSelector": {"matchLabels": {"team": "a"}}}
         r = helm("template", "t", meta, *BASE, *ON, *own_policies(tmp, "other", [other]))
         if r.returncode == 0:
             fail("an ate-golden allowedNamespaceSelector other than the Organizations' renders")
         if "substrate.credentialProvider.namespacePolicies[0] (ate-golden) has an allowedNamespaceSelector" not in r.stderr:
             fail(f"an ate-golden allowedNamespaceSelector other than the Organizations' failed without naming the key\n{r.stderr}")
+        r = helm("template", "t", meta, *BASE, *ON, "--set", "components.substrate.versionRange=>=1.11.4 <1.12.0")
+        if r.returncode == 0 or "tenants.organizations.enabled needs Substrate 1.12.0 or later" not in r.stderr:
+            fail(f"a Substrate floor below 1.12.0 with the switch on is not refused naming the floor\n{r.stderr}")
         print("ok: refused")
 
-        version = cc.RENDER_AGAINST.get("substrate") or cc.floor(yaml.safe_load(open(os.path.join(meta, "values.yaml"), encoding="utf-8"))["components"]["substrate"]["versionRange"])
+        rendered = cc.docs(cc.render_meta(meta, [*BASE[2:], *ON]))
+        url, rng = cc.source(rendered[("OCIRepository", "substrate")])
+        tags = cc.registry_tags(url)
+        version = cc.floor(rng)
+        if version not in tags:
+            version = cc.fallback("substrate", url, rng, tags, "")
         print(f"--> the Substrate chart {version} takes the forwarded policies")
-        r = helm("pull", SUBSTRATE_CHART, "--version", version, "--untar", "--untardir", tmp)
-        if r.returncode != 0:
-            fail(f"could not pull {SUBSTRATE_CHART} {version}\n{r.stderr}")
+        cc.pull(url, version, tmp)
         values = os.path.join(tmp, "forwarded.yaml")
         with open(values, "w", encoding="utf-8") as f:
             yaml.safe_dump(on, f)

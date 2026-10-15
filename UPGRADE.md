@@ -17,7 +17,7 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## 4.135.x → \<next\> (Substrate 1.12.0: the Organizations' credentials by label)
 
-`components.substrate{,-crds}.versionRange` selects Substrate 1.12 from 1.12.0 (`>=1.12.0 <1.13.0`, giantswarm/agent-platform#1041). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.12.0 (`ateom-gvisor:1.12.0`); the kagent CRDs and the kagent release are unchanged. 1.12 stays on 1.11's upstream pin and changes no persisted format, CRD, schema or snapshot layout: the step resets nothing, no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.12.0 brings:
+`components.substrate{,-crds}.versionRange` selects Substrate 1.12 from 1.12.0 (`>=1.12.0 <1.13.0`, giantswarm/agent-platform#1041). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.12.0 (`ateom-gvisor:1.12.0`); the kagent CRDs and the kagent release are unchanged. 1.12 stays on 1.11's upstream pin and changes no persisted format, CRD, schema or snapshot layout: no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.12.0 brings:
 
 - **Namespace policies by label** (giantswarm/substrate#456): a policy of the credential provider can carry an `ownNamespaceSelector` (each namespace it matches is read by the atespace of the same name only) or, beside `atespace`, an `allowedNamespaceSelector` (that atespace reads every namespace it matches). The provider matches a namespace's labels at each request, so a namespace created or labelled later needs no chart change and no restart. With a selector the chart adds the ClusterRole and ClusterRoleBinding `<release>-k8s-credential-provider-namespace-reader` (list and watch on namespaces).
 
@@ -26,7 +26,8 @@ With `tenants.organizations.enabled` the meta chart now uses them: the substrate
 ### Operator action
 
 - **None.** The control plane, the atelet and the worker pool roll on the upgrade.
-- **An installation with its own `substrate.credentialProvider.namespacePolicies` and the switch on**: the entries stay; the meta chart adds the selector to its `ate-golden` entry (an entry when there is none). An `ate-golden` entry with an `allowedNamespaceSelector` on other namespaces fails the render: drop that selector.
+- **An installation with its own `substrate.credentialProvider.namespacePolicies` and the switch on**: the entries stay; the meta chart adds the selector to its `ate-golden` entry (an entry when there is none), so a `secretSelector` on that entry also narrows what `ate-golden` reads in the Organizations' namespaces. An `ate-golden` entry with an `allowedNamespaceSelector` on other namespaces fails the render: drop that selector.
+- **An installation that keeps Substrate below 1.12.0 with the switch on** (an own `components.substrate.versionRange`, or a BOM pin): the render fails, because the older credential provider refuses the selectors at start. Move Substrate to 1.12.0 with the switch, or keep the switch off.
 - **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.12.0`; `kagent` and `kagent-crds` stay where they are.
 
 ## 4.133.x → \<next\> (agent-manager 2.1.0: bounded get_session, the claude Harness egress guard)

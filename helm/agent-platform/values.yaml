@@ -6013,9 +6013,10 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # namespaces by their label giantswarm.io/organization (the Substrate line
   # from 1.12.0): an ownNamespaceSelector entry, so each is read by the
   # atespace of its own name only, and the same selector as
-  # allowedNamespaceSelector on the ate-golden entry. The policies set here
-  # stay; an ate-golden allowedNamespaceSelector on other namespaces fails
-  # the render.
+  # allowedNamespaceSelector on the ate-golden entry (a secretSelector there
+  # narrows ate-golden's reads in the Organizations' namespaces too). The
+  # policies set here stay; an ate-golden allowedNamespaceSelector on other
+  # namespaces, or a Substrate floor below 1.12.0, fails the render.
   credentialProvider:
     namespacePolicies:
       - atespace: kagent

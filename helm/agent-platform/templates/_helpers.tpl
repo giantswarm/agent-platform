@@ -213,7 +213,8 @@ overwrite would hide a values file that still spells the old key.
     the ate-golden entry with allowedNamespaceSelector on the label
     giantswarm.io/organization (an entry added when none names ate-golden; a
     different selector there fails the render), and an ownNamespaceSelector
-    entry on the same label, each derived entry once. Its
+    entry on the same label, each derived entry once; a Substrate floor below
+    1.12.0 fails the render. Its
     atelet.imageCache.pinnedImages is NOT derived here: the kagent release's
     ConfigMap kagent-images feeds it through the HelmRelease's valuesFrom
     (components.substrate.valuesFromRefs), so no copy of a digest lives here.
@@ -519,8 +520,14 @@ repeating the admin groups. */ -}}
 namespace labelled giantswarm.io/organization is read by the atespace of its
 own name only (an ownNamespaceSelector entry), and ate-golden, where every
 template's golden actor boots, reads them all (allowedNamespaceSelector on
-its entry). The installation's own policies stay, each derived entry once; an
-ate-golden entry that selects other namespaces fails. */ -}}
+its entry, so that entry's secretSelector narrows it there too). The
+installation's own policies stay, each derived entry once; an ate-golden entry
+that selects other namespaces fails, and so does a Substrate floor below 1.12.0,
+whose provider refuses the selectors. */ -}}
+{{- $pin := include "agent-platform.substrate.pinnedVersion" .root -}}
+{{- if semverCompare "<1.12.0-0" $pin -}}
+{{- fail (printf "tenants.organizations.enabled needs Substrate 1.12.0 or later, whose credential provider reads namespace policies by label: components.substrate.versionRange selects %s, whose provider refuses the policy file at start" $pin) -}}
+{{- end -}}
 {{- $sel := dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists")) -}}
 {{- $policies := list -}}
 {{- $golden := false -}}
