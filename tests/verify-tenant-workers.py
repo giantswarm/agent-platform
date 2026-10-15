@@ -195,7 +195,8 @@ def cel_writers(policy):
     return yaml.safe_load(expr.replace("'", '"'))
 
 
-def check_admission(docs):
+def check_admission(docs, pool="kagent-default"):
+    """The admission policies; pool is kagent.substrateWorkerPool.name, the platform WorkerPool."""
     policies = {}
     for name in (WORKERS_POLICY, COPY_POLICY):
         policy = find(docs, "ValidatingAdmissionPolicy", name)["spec"]
@@ -215,13 +216,13 @@ def check_admission(docs):
     if not any(f"variables.writer == '{RECONCILER}'" in v["expression"] for v in policy["validations"]):
         fail(f"{WORKERS_POLICY}: no validation lets {RECONCILER} alone write WorkerPools")
     # A CONNECT request names the pod only: the workers are the pods named after the pool.
-    if not any("!request.name.startsWith('kagent-default-')" in v["expression"] for v in policy["validations"]):
-        fail(f"{WORKERS_POLICY}: no validation refuses exec into the workers (kagent-default-*)")
+    if not any(f"!request.name.startsWith('{pool}-')" in v["expression"] for v in policy["validations"]):
+        fail(f"{WORKERS_POLICY}: no validation refuses exec into the workers of the WorkerPool {pool} ({pool}-*)")
     policy, binding = policies[COPY_POLICY]
     if policy.get("paramKind") != {"apiVersion": "ate.dev/v1alpha1", "kind": "WorkerPool"}:
         fail(f"{COPY_POLICY}: the parameter is not a WorkerPool: {policy.get('paramKind')}")
-    if binding.get("paramRef") != {"name": "kagent-default", "namespace": "kagent", "parameterNotFoundAction": "Deny"}:
-        fail(f"{COPY_POLICY}: the parameter is not the platform WorkerPool kagent/kagent-default, refused when missing: {binding.get('paramRef')}")
+    if binding.get("paramRef") != {"name": pool, "namespace": "kagent", "parameterNotFoundAction": "Deny"}:
+        fail(f"{COPY_POLICY}: the parameter is not the platform WorkerPool kagent/{pool}, refused when missing: {binding.get('paramRef')}")
     rules = [(r["apiGroups"], r["operations"], r["resources"]) for r in policy["matchConstraints"]["resourceRules"]]
     if rules != [(["ate.dev"], ["CREATE", "UPDATE"], ["workerpools"])]:
         fail(f"{COPY_POLICY}: matches {rules}, not the WorkerPools' creates and updates")
@@ -245,6 +246,15 @@ def main():
         check_hops(flavor, on)
         check_exception(on, off)
         check_admission(on)
+        # A renamed platform WorkerPool (kagent.substrateWorkerPool.name): the
+        # copy's parameter and the workers' exec prefix follow it.
+        check_admission(render(chart, args + ON + ["--set", "kagent.substrateWorkerPool.name=org-workers"]), pool="org-workers")
+        # A pool name the API server would cut from the pods' names fails the render.
+        long = "w" * 58
+        r = subprocess.run([HELM, "template", "t", chart, *BASE, *args, *ON, "--set", f"kagent.substrateWorkerPool.name={long}"], capture_output=True, text=True)
+        if r.returncode == 0 or "longer than 57 characters" not in r.stderr:
+            fail(f"a 58-character kagent.substrateWorkerPool.name renders ({flavor}): the exec rule would match no worker")
+        check_admission(render(chart, args + ON + ["--set", f"kagent.substrateWorkerPool.name={long[:57]}"]), pool=long[:57])
         print(f"ok: the Organizations' workers admitted on the router, the egress gateway, the dns and the PolicyException, written only by Substrate's controllers from agent-manager's copy of the platform WorkerPool, nothing off ({flavor})")
 
 

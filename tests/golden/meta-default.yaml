@@ -866,6 +866,7 @@ spec:
               enabled: false
           mode: Strict
         mcp:
+          displayName: Agent Sessions
           enabled: true
           pathPrefix: /kagent/mcp
           timeout: 300
@@ -1408,6 +1409,10 @@ spec:
       musterInClusterMcpPorts:
       - 8080
       - 8443
+      substrate:
+        credentialProvider:
+          egressFQDNs:
+          - matchName: oauth2.googleapis.com
     postgres:
       affinity: {}
       applicationDatabase:

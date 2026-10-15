@@ -654,6 +654,7 @@ spec:
               enabled: false
           mode: Strict
         mcp:
+          displayName: Agent Sessions
           enabled: true
           pathPrefix: /kagent/mcp
           timeout: 300
@@ -1197,6 +1198,10 @@ spec:
       musterInClusterMcpPorts:
       - 8080
       - 8443
+      substrate:
+        credentialProvider:
+          egressFQDNs:
+          - matchName: oauth2.googleapis.com
     postgres:
       affinity: {}
       applicationDatabase:
@@ -2884,7 +2889,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.11.4 <1.12.0"
+    semver: ">=1.12.0 <1.13.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2907,7 +2912,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.11.4 <1.12.0"
+    semver: ">=1.12.0 <1.13.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

@@ -290,7 +290,8 @@ the agent labels have: an actor's model call through the Substrate egress
 carries the person of the turn as the kagent runtime sends it in
 `x-kagent-user`, read behind the same predicate, so on a kagent API v2
 installation tokens and cost carry the person too; a turn the runtime runs for
-no person reads `unknown`.
+no person reads `unknown`. The LLM usage board's "Usage by person" row and its
+Person filter read it.
 
 On the installation (`route` is `<namespace>/<name>`):
 
@@ -1222,6 +1223,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.flavor | string | `"auto"` | `auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor. |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
+| networkPolicy.substrate.credentialProvider.egressFQDNs[0].matchName | string | `"oauth2.googleapis.com"` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
 | networkPolicy.musterInClusterMcpPorts[1] | int | `8443` |  |
 | networkPolicy.mcpBackends | object | `{}` |  |
@@ -1479,6 +1481,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controllerRoute.mcp.enabled | bool | `true` |  |
 | kagent.controllerRoute.mcp.pathPrefix | string | `"/kagent/mcp"` |  |
 | kagent.controllerRoute.mcp.timeout | int | `300` |  |
+| kagent.controllerRoute.mcp.displayName | string | `"Agent Sessions"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
@@ -1886,6 +1889,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
 | mcp-kubernetes.mcpServer.enabled | bool | `true` |  |
 | mcp-kubernetes.mcpServer.managementCluster | string | `""` |  |
+| mcp-kubernetes.mcpServer.displayName | string | `"Kubernetes"` |  |
 | cloudnative-pg | object | `{}` |  |
 | kagent-crds | object | `{}` |  |
 | substrate.createNamespace | bool | `false` |  |

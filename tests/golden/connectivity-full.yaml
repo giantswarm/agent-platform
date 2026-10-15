@@ -14592,7 +14592,7 @@ spec:
 # Source: agent-platform-connectivity/templates/substrate/netpol.yaml
 # k8s-credential-provider: the egress gateway asks it (50051, mTLS) for the
 # Secret values a policy's credential injection names; it reads those Secrets
-# from the apiserver and nothing else. Prometheus scrapes 9090.
+# from the apiserver. Prometheus scrapes 9090.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -14645,8 +14645,17 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
     - toEntities:
         - kube-apiserver
+    - toFQDNs:
+        - matchName: oauth2.googleapis.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
 ---
 # Source: agent-platform-connectivity/templates/substrate/netpol.yaml
 # podcertificate-controller: signs the Substrate pods' PodCertificateRequests

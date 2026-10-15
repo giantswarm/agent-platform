@@ -1481,6 +1481,35 @@
                     "items": {
                         "type": "integer"
                     }
+                },
+                "substrate": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "credentialProvider": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "egressFQDNs": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "matchName": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "matchPattern": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },
