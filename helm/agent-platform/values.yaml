@@ -2003,6 +2003,21 @@ networkPolicy:
   #   additionalEgressFQDNs:
   #     - matchName: dex.example.gigantic.io
   additionalEgressFQDNs: []
+  # Substrate's credential provider (k8s-credential-provider, ate-system),
+  # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) it reaches
+  # on 443/TCP besides the apiserver and DNS, through the DNS proxy rule the
+  # policy renders with them. The default is the token endpoint it exchanges a
+  # Vertex AI service account key at (google-access-token.k8s.io, for
+  # AnthropicVertexAI and GeminiVertexAI ModelConfigs); kagent refuses a key
+  # whose token_uri names another host. A list replaces the default as a
+  # whole: keep oauth2.googleapis.com when adding a name. [] leaves the
+  # provider the apiserver and DNS only, and every Vertex AI call fails with
+  # "could not exchange the service account key for an access token". Ignored
+  # by the kubernetes flavor, which renders no egress policy for Substrate.
+  substrate:
+    credentialProvider:
+      egressFQDNs:  # @schema item: object; itemProperties: {"matchName": {"type": "string", "minLength": 1}, "matchPattern": {"type": "string", "minLength": 1}}
+        - matchName: oauth2.googleapis.com
   # Extra in-cluster egress ports for muster -> MCP backends reached via a
   # ClusterIP whose pod listens on a non-80/443 port (e.g. the in-cluster
   # pro / runbooks MCP servers on 8080, or tunnelport RemoteApp tunnels whose

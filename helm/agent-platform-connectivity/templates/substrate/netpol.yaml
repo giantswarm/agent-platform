@@ -638,7 +638,7 @@ spec:
 ---
 # k8s-credential-provider: the egress gateway asks it (50051, mTLS) for the
 # Secret values a policy's credential injection names; it reads those Secrets
-# from the apiserver and nothing else. Prometheus scrapes 9090.
+# from the apiserver. Prometheus scrapes 9090.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -665,9 +665,21 @@ spec:
             - port: "9090"
               protocol: TCP
   egress:
+    {{- with ((((.Values.networkPolicy).substrate).credentialProvider).egressFQDNs) }}
+    {{- include "agent-platform.dnsEgressWithProxy" $ | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- else }}
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
     - toEntities:
         - kube-apiserver
+    {{- end }}
 ---
 # podcertificate-controller: signs the Substrate pods' PodCertificateRequests
 # from the two CA pools; it needs the apiserver and nothing else.
