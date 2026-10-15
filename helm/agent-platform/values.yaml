@@ -5113,8 +5113,7 @@ tenants:
     # warm worker unless agent-manager.tenants.workerPoolReplicas sets
     # another count. The render fails, naming the key, below agent-manager
     # 2.1.0, with kagent off, with agent-manager's OAuth or downstream OAuth
-    # off, without
-    # kagent.fluxServiceAccountName or without that key Secret.
+    # off, without kagent.fluxServiceAccountName or without that key Secret.
     # agent-manager.tenants.workerPoolReplicas and .interval are yours; any
     # other agent-manager.tenants key is derived and must be unset or equal.
     # On,
