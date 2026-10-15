@@ -59,7 +59,7 @@ An actor's outbound traffic is whatever its egress policy declares, on any TCP p
 | An origin the actor's egress policy declares, on any port (`https://host:8443`, `http://host`) | the response |
 | A destination the actor's egress policy does not declare, on any port | `403` at once, naming the policy denial |
 
-A host model server is opened by its own rule in the chart, from the address the ModelConfigs carry, since it may sit on a node of the cluster, which the `world` entity does not include.
+The instance metadata services (`169.254.0.0/16`, `fd00:ec2::254`) and Azure's WireServer (`168.63.129.16`) are denied to the egress gateway (`egressDeny`), whatever an egress policy declares: they hand out the node's cloud identity. A host model server is opened by its own rule in the chart, from the address the ModelConfigs carry, since it may sit on a node of the cluster, which the `world` entity does not include.
 
 ## Open upstream items (state at the pin)
 

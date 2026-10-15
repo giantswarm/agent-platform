@@ -56,8 +56,9 @@ above, and the actor's egress policy is the control on where an actor
 connects: an origin it declares on any port is reached, one it does not
 declare answers 403 at once. A host model server, which may sit on a node of
 the cluster outside the world entity, is opened by its own rule, from the
-address the ModelConfigs carry. docs/substrate-security.md ("What an actor can reach, and how a refusal
-looks") carries the table.
+address the ModelConfigs carry. The instance metadata services and Azure's WireServer are denied
+whatever a policy declares. docs/substrate-security.md ("What an actor can
+reach, and how a refusal looks") carries the table.
 
 The kubernetes flavour renders the ingress policies only — the chart's
 kubernetes flavour restricts what reaches a workload and leaves egress open,
@@ -621,6 +622,15 @@ spec:
               protocol: TCP
             - port: "10443"
               protocol: TCP
+  # The node's cloud identity stays out of reach whatever an egress policy
+  # declares: the instance metadata services (link-local, AWS's IPv6 endpoint)
+  # and Azure's WireServer serve plaintext on ports the world rule above now
+  # admits. A deny wins over every allow.
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 169.254.0.0/16
+        - cidr: 168.63.129.16/32
+        - cidr: fd00:ec2::254/128
 ---
 # dns: the actors' resolver (CoreDNS with a controller that writes the
 # Corefile from the router's Service); it forwards to the cluster DNS.
