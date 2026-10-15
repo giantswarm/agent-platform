@@ -1725,6 +1725,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # so the default is the CRD's maximum; a longer turn runs through the
       # MCP Tasks extension.
       timeout: 300
+      # The name the Dev Portal shows for the server (the MCPServer's
+      # ui.giantswarm.io/display-name annotation); empty renders none.
+      displayName: Agent Sessions
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
@@ -3465,6 +3468,10 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
   mcpServer:
     enabled: true
     managementCluster: ""
+    # The name the Dev Portal shows for the server (the MCPServer's
+    # ui.giantswarm.io/display-name annotation): agent-platform-mcps' kubernetes
+    # family's, which a family member shares. Empty renders none.
+    displayName: Kubernetes
 
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
 # The kagent-crds component's values (kagent main ships its CRDs as their own
