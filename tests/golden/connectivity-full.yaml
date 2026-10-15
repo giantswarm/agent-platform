@@ -13068,7 +13068,34 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "egresspolicies"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["muster.giantswarm.io"]
+    resources: ["mcpservers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["sessions"]
+    verbs: ["create"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["egresspolicies"]
+    verbs: ["get", "list", "watch"]
+---
+# Source: agent-platform-connectivity/templates/tenants/clusterroles.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:platform-user
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+rules:
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13092,7 +13119,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "egresspolicies"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13100,6 +13127,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["sessions"]
     verbs: ["create"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["egresspolicies"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["helm.toolkit.fluxcd.io"]
     resources: ["helmreleases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -13131,7 +13161,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "egresspolicies"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13139,6 +13169,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["sessions"]
     verbs: ["create"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["egresspolicies"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["helm.toolkit.fluxcd.io"]
     resources: ["helmreleases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -13268,7 +13301,7 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: agent-platform:user
+  name: agent-platform:platform-user
   namespace: kagent
   labels:
     app: "agent-platform-connectivity"
@@ -13281,7 +13314,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: agent-platform:user
+  name: agent-platform:platform-user
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: Group
@@ -15293,6 +15326,45 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
+  name: agent-platform-tenant-model-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kagent"]
+    resourceRules:
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["modelconfigs"]
+  variables:
+    - name: secret
+      expression: >-
+        has(object.spec) && has(object.spec.apiKeySecret) ? string(dyn(object.spec).apiKeySecret) : ''
+  validations:
+    - expression: >-
+        variables.secret == '' || variables.secret.startsWith('tenant-credential-')
+      reason: Forbidden
+      messageExpression: >-
+        'a ModelConfig in an Organization namespace names only a tenant credential, a Secret named tenant-credential-*, as its apiKeySecret. Refused for ' + request.userInfo.username + ': apiKeySecret ' + variables.secret
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
   name: agent-platform-tenant-credentials
   labels:
     app: "agent-platform-connectivity"
@@ -15341,6 +15413,23 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 spec:
   policyName: agent-platform-tenant-egress-credentials
+  validationActions: [Deny]
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-model-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-tenant-model-credentials
   validationActions: [Deny]
 ---
 # Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
