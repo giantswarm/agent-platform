@@ -912,7 +912,7 @@ components:  # @schema additionalProperties: true
     # agents as Flux HelmReleases of the agent chart, as REST and MCP. Off by
     # default: it needs the kagent component and Flux on the cluster.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # agent-manager 1.x is the kagent API v2 line (kagent.dev/v1alpha3
+    # agent-manager 1.x and 2.x are the kagent API v2 line (kagent.dev/v1alpha3
     # AgentTemplates through the Generic agent chart 1.x, the agent unit); 0.x
     # composes agents for kagent 0.10 (v1alpha2) and never meets this chart.
     # Until 1.0.0 is published the range resolves nothing (the component is
@@ -931,8 +931,13 @@ components:  # @schema additionalProperties: true
     # volume (giantswarm/agent-manager#134). 1.13.0 starts a Session without a
     # first message, answering the created Session only, so a surface sends
     # the first turn itself (giantswarm/agent-manager#138), and bounds MCP
-    # request bodies at 1 MiB (giantswarm/agent-manager#141).
-    versionRange: ">=1.13.0 <2.0.0"
+    # request bodies at 1 MiB (giantswarm/agent-manager#141). 2.x bounds
+    # get_session (a summary by default, `detail: full` for every task) and
+    # adds get_session_turn and delete_session; 2.1.0 lists in get_info's
+    # namespaces.managed only where the caller may create agents and refuses
+    # an agent on a claude Harness without a harness.egress entry
+    # (giantswarm/agent-manager#150, #71, #148).
+    versionRange: ">=2.1.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -4874,7 +4879,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.13.0
+      tag: 2.1.0
     dryRun: false
     gitopsNamespaces: []
 
