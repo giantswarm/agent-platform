@@ -13,7 +13,12 @@ Agent, so `create` on sessions is what starting a conversation asks for. The
 editor's writes are the ones agent-manager performs as the caller
 (oauth.downstream): the agent's HelmRelease and the shared OCIRepository, the
 Agent and RemoteMCPServer it deletes when a release leaves them behind, and
-the reads it reports on (Harnesses, events). No role carries `escalate`.
+the reads it reports on (Harnesses, events). The admin also owns the
+tenant's egress: it writes EgressPolicies and places the Secrets they name,
+which it may create, replace and delete but never read back (no get, list or
+watch on Secrets); admission lets a tenant's EgressPolicy name only its
+`tenant-credential-` Secrets (egress-policy-admission.yaml). No role carries
+`escalate`.
 */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
 ---
@@ -46,7 +51,10 @@ rules:
   {{- include "agent-platform.tenants.userRules" . | nindent 2 }}
   {{- include "agent-platform.tenants.editorRules" . | nindent 2 }}
   - apiGroups: ["api.kagent.dev"]
-    resources: ["modelconfigs"]
+    resources: ["modelconfigs", "egresspolicies"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
     verbs: ["create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
