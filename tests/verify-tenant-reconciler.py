@@ -49,7 +49,6 @@ BASE = [
     "--set", "postgres.enabled=true",
     "--set", "components.kagent.enabled=true",
     "--set", "components.agent-manager.enabled=true",
-    "--set", f"components.agent-manager.versionRange=>={TENANTS_FLOOR} <3.0.0",
 ]
 CILIUM = ["--api-versions", "cilium.io/v2"]
 ON = ["--set", "tenants.organizations.enabled=true"]
