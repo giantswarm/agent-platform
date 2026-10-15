@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.135.x → \<next\> (kagent 1.13.0: the codex Harness)
+
+`components.kagent{,-crds}.versionRange` is `>=1.13.0 <1.14.0`, kagent's releases of the 1.13 line (giantswarm/kagent-upstream#606). The kagent chart carries the codex-harness image's digest and accepts `runtime: codex` in `kagent.harnesses`. Same upstream pin as 1.12.0, no CRD field, API or persisted format changes: the kagent-crds and kagent releases roll in place, Substrate stays on 1.11.4, and a suspended agent resumes with its conversation. Nothing renders a codex Harness until an installation adds the entry.
+
+### Operator action
+
+- **An installation that opts into codex**: add a `kagent.harnesses` entry (`name: codex`, `runtime: codex`, its own `snapshotLocation`, `env` with `KAGENT_PROPAGATE_TOKEN: "true"`), its origins under `agent-manager.harness.egress.codex` (the forge and git hosts; the model host is not listed), and a Responses API ModelConfig for its agents (`kagent.modelConfigs[].apiFormat: responses`).
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.13.0`, `kagent-crds` first or with it.
+
 ## 4.133.x → \<next\> (agent-manager 2.1.0: bounded get_session, the claude Harness egress guard)
 
 `components.agent-manager.versionRange` selects agent-manager 2.x from 2.1.0 (`>=2.1.0 <3.0.0`), and the connectivity release's `agent-manager migrate` run takes the same image. `get_session` answers a bounded summary of each turn by default; a caller that reads `tasks` passes `detail: full` (giantswarm/agent-manager#150). `get_info`'s `namespaces.managed` lists only the namespaces where the caller may create agents (giantswarm/agent-manager#71). An agent on a Harness that runs Claude Code is refused when `agent-manager.harness.egress` has no entry for that Harness (giantswarm/agent-manager#148). The portal and the gateway read sessions from kagent and call neither field. The agent-manager chart's new keys (`tenants`, `muster.mcpServer.displayName`) default to off and `Agent Manager`. agent-manager keeps no state of its own: the release rolls in place, and the agents, their Sessions and their conversations stay as they are; the migrate run finds every release on the 2.x chart already and rewrites nothing.
