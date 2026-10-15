@@ -10,7 +10,7 @@ then writes as the people and the controllers involved (impersonated; RBAC is
 not under test, every identity is cluster-admin):
 
 - WorkerPools in a labelled namespace: only agent-manager's ServiceAccount,
-  only as a copy of the platform WorkerPool kagent/kagent-default (name and
+  only as a copy of the platform WorkerPool kagent/<POOL> (name and
   spec, replicas aside); the namespace controller may delete one; the status
   and scale subresources stay open; without the platform WorkerPool every
   write is refused; the kagent and unlabelled namespaces are not held;
@@ -49,6 +49,9 @@ ATE = "system:serviceaccount:ate-system:ate-controller"
 RSC = "system:serviceaccount:kube-system:replicaset-controller"
 NSC = "system:serviceaccount:kube-system:namespace-controller"
 PERSON = ["--as=jose", "--as-group=system:masters"]
+# The platform WorkerPool, renamed from the chart's default: the policies take
+# its name from kagent.substrateWorkerPool.name.
+POOL = "org-workers"
 results = []
 
 
@@ -76,21 +79,21 @@ def case(name, rc_out, allowed, needle=None):
 
 
 def wp(ns, image="ghcr.io/x/ateom:1", replicas=1, template=None):
-    return {"apiVersion": "ate.dev/v1alpha1", "kind": "WorkerPool", "metadata": {"name": "kagent-default", "namespace": ns},
+    return {"apiVersion": "ate.dev/v1alpha1", "kind": "WorkerPool", "metadata": {"name": POOL, "namespace": ns},
             "spec": {"replicas": replicas, "workerImage": image,
                      "template": template if template is not None else {"labels": {"team": "x"}, "serviceAccountName": "workers"}}}
 
 
 def deploy(ns, name, meta_label=True, tmpl_label=True):
-    labels = {"ate.dev/worker-pool": "kagent-default"} if meta_label else {}
-    tl = {"app": name, **({"ate.dev/worker-pool": "kagent-default"} if tmpl_label else {})}
+    labels = {"ate.dev/worker-pool": POOL} if meta_label else {}
+    tl = {"app": name, **({"ate.dev/worker-pool": POOL} if tmpl_label else {})}
     return {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": name, "namespace": ns, "labels": labels},
             "spec": {"replicas": 1, "selector": {"matchLabels": {"app": name}},
                      "template": {"metadata": {"labels": tl}, "spec": {"containers": [{"name": "c", "image": "registry.k8s.io/pause:3.10"}]}}}}
 
 
 def pod(ns, name):
-    return {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": name, "namespace": ns, "labels": {"ate.dev/worker-pool": "kagent-default"}},
+    return {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": name, "namespace": ns, "labels": {"ate.dev/worker-pool": POOL}},
             "spec": {"containers": [{"name": "c", "image": "registry.k8s.io/pause:3.10"}]}}
 
 
@@ -135,6 +138,7 @@ def prove(chart, crd):
                         "--set", "kagent.namespaceOverride=kagent", "--set", "components.kagent.enabled=true",
                         "--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true",
                         "--set", "tenants.organizations.enabled=true",
+                        "--set", f"kagent.substrateWorkerPool.name={POOL}",
                         "--show-only", "templates/substrate/tenant-workers-admission.yaml"], capture_output=True, text=True, check=True)
     policies = [d for d in yaml.safe_load_all(r.stdout) if d]
     if len(policies) != 4:
@@ -167,18 +171,18 @@ def prove(chart, crd):
 
     # WorkerPools
     case("WP: a person (cluster-admin) creates a copy in org-acme", apply(wp("org-acme"), as_="person", dry=True), False, "only agent-manager")
-    case("WP: the reconciler creates another image", apply(wp("org-acme", image="evil:1"), as_=REC, dry=True), False, "is a copy of the WorkerPool kagent/kagent-default")
+    case("WP: the reconciler creates another image", apply(wp("org-acme", image="evil:1"), as_=REC, dry=True), False, f"is a copy of the WorkerPool kagent/{POOL}")
     case("WP: the reconciler creates another template", apply(wp("org-acme", template={"nodeSelector": {"a": "b"}, "serviceAccountName": "workers", "labels": {"team": "x"}}), as_=REC, dry=True), False, "is a copy")
     case("WP: the reconciler creates no template", apply(wp("org-acme", template={}), as_=REC, dry=True), False, "is a copy")
     other = wp("org-acme"); other["metadata"]["name"] = "other"
     case("WP: the reconciler creates a copy under another name", apply(other, as_=REC, dry=True), False, "is a copy")
     case("WP: the reconciler creates the copy (other replicas)", apply(wp("org-acme", replicas=3), as_=REC), True)
-    case("WP: the reconciler updates the copy's replicas", kubectl(["patch", "workerpool", "kagent-default", "-n", "org-acme", "--type=merge", "-p", '{"spec":{"replicas":1}}'], as_=REC), True)
-    case("WP: a person patches the copy's image", kubectl(["patch", "workerpool", "kagent-default", "-n", "org-acme", "--type=merge", "-p", '{"spec":{"workerImage":"evil:1"}}'], as_="person"), False, "ValidatingAdmissionPolicy")
-    case("WP: a person scales the copy (scale subresource)", kubectl(["scale", "workerpool", "kagent-default", "-n", "org-acme", "--replicas=2"], as_="person"), True)
-    case("WP: a person writes the status subresource", kubectl(["patch", "workerpool", "kagent-default", "-n", "org-acme", "--subresource=status", "--type=merge", "-p", '{"status":{"readyReplicas":0}}'], as_="person"), True)
-    case("WP: a person deletes the copy", kubectl(["delete", "workerpool", "kagent-default", "-n", "org-acme", "--dry-run=server"], as_="person"), False, "only agent-manager")
-    case("WP: the namespace controller deletes the copy", kubectl(["delete", "workerpool", "kagent-default", "-n", "org-acme", "--dry-run=server"], as_=NSC), True)
+    case("WP: the reconciler updates the copy's replicas", kubectl(["patch", "workerpool", POOL, "-n", "org-acme", "--type=merge", "-p", '{"spec":{"replicas":1}}'], as_=REC), True)
+    case("WP: a person patches the copy's image", kubectl(["patch", "workerpool", POOL, "-n", "org-acme", "--type=merge", "-p", '{"spec":{"workerImage":"evil:1"}}'], as_="person"), False, "ValidatingAdmissionPolicy")
+    case("WP: a person scales the copy (scale subresource)", kubectl(["scale", "workerpool", POOL, "-n", "org-acme", "--replicas=2"], as_="person"), True)
+    case("WP: a person writes the status subresource", kubectl(["patch", "workerpool", POOL, "-n", "org-acme", "--subresource=status", "--type=merge", "-p", '{"status":{"readyReplicas":0}}'], as_="person"), True)
+    case("WP: a person deletes the copy", kubectl(["delete", "workerpool", POOL, "-n", "org-acme", "--dry-run=server"], as_="person"), False, "only agent-manager")
+    case("WP: the namespace controller deletes the copy", kubectl(["delete", "workerpool", POOL, "-n", "org-acme", "--dry-run=server"], as_=NSC), True)
     case("WP: a person in an unlabelled namespace", apply(wp("plain", image="any:1"), as_="person", dry=True), True)
 
     # Workers
@@ -186,19 +190,19 @@ def prove(chart, crd):
     case("Deploy: a person creates a Deployment labelled on its template only", apply(deploy("org-acme", "p2", meta_label=False), as_="person", dry=True), False, "only Substrate controllers")
     case("Deploy: a person creates an unlabelled Deployment", apply(deploy("org-acme", "p3", False, False), as_="person", dry=True), True)
     case("Deploy: a person creates a labelled Deployment in kagent", apply(deploy("kagent", "p4"), as_="person", dry=True), True)
-    case("Deploy: ate-controller creates the worker Deployment", apply(deploy("org-acme", "kagent-default"), as_=ATE), True)
+    case("Deploy: ate-controller creates the worker Deployment", apply(deploy("org-acme", POOL), as_=ATE), True)
     rs = pods = None
     for _ in range(60):
-        _, rs = kubectl(["get", "rs", "-n", "org-acme", "-l", "app=kagent-default", "-o", "name"])
-        _, pods = kubectl(["get", "pods", "-n", "org-acme", "-l", "app=kagent-default", "-o", "name"])
+        _, rs = kubectl(["get", "rs", "-n", "org-acme", "-l", f"app={POOL}", "-o", "name"])
+        _, pods = kubectl(["get", "pods", "-n", "org-acme", "-l", f"app={POOL}", "-o", "name"])
         if rs.strip() and pods.strip():
             break
         time.sleep(1)
     case("Chain: the deployment controller made the ReplicaSet and the ReplicaSet controller the Pod", (0 if rs.strip() and pods.strip() else 1, f"{rs.strip()} {pods.strip()}"), True)
     podname = pods.strip().split("/")[-1]
-    case("Deploy: a person removes the label from the worker Deployment", kubectl(["label", "deployment", "kagent-default", "-n", "org-acme", "ate.dev/worker-pool-"], as_="person"), False, "only Substrate controllers")
-    case("Deploy: a person changes the worker image", kubectl(["set", "image", "deployment/kagent-default", "-n", "org-acme", "c=evil:1"], as_="person"), False, "only Substrate controllers")
-    case("Deploy: a person scales the worker Deployment", kubectl(["scale", "deployment", "kagent-default", "-n", "org-acme", "--replicas=1"], as_="person"), True)
+    case("Deploy: a person removes the label from the worker Deployment", kubectl(["label", "deployment", POOL, "-n", "org-acme", "ate.dev/worker-pool-"], as_="person"), False, "only Substrate controllers")
+    case("Deploy: a person changes the worker image", kubectl(["set", "image", f"deployment/{POOL}", "-n", "org-acme", "c=evil:1"], as_="person"), False, "only Substrate controllers")
+    case("Deploy: a person scales the worker Deployment", kubectl(["scale", "deployment", POOL, "-n", "org-acme", "--replicas=1"], as_="person"), True)
     case("Pod: a person creates a labelled Pod", apply(pod("org-acme", "pp"), as_="person", dry=True), False, "only Substrate controllers write pods")
     case("Pod: the ReplicaSet controller creates a labelled Pod", apply(pod("org-acme", "pp"), as_=RSC, dry=True), True)
     case("Pod: ate-controller marks a worker busy", kubectl(["label", "pod", podname, "-n", "org-acme", "ate.dev/busy=true"], as_=ATE), True)
@@ -213,20 +217,20 @@ def prove(chart, crd):
     case("Pod: a person deletes a worker pod", kubectl(["delete", "pod", podname, "-n", "org-acme", "--wait=false"], as_="person"), True)
 
     # Garbage collector: an orphaning delete edits the ReplicaSet's owner references.
-    case("GC: orphan the worker Deployment", kubectl(["delete", "deployment", "kagent-default", "-n", "org-acme", "--cascade=orphan", "--timeout=60s"]), True)
+    case("GC: orphan the worker Deployment", kubectl(["delete", "deployment", POOL, "-n", "org-acme", "--cascade=orphan", "--timeout=60s"]), True)
     owned = "x"
     for _ in range(30):
-        _, owned = kubectl(["get", "rs", "-n", "org-acme", "-l", "app=kagent-default", "-o", "jsonpath={range .items[*]}{.metadata.name}={.metadata.ownerReferences}{end}"])
+        _, owned = kubectl(["get", "rs", "-n", "org-acme", "-l", f"app={POOL}", "-o", "jsonpath={range .items[*]}{.metadata.name}={.metadata.ownerReferences}{end}"])
         if owned.strip().endswith("="):
             break
         time.sleep(1)
     case("GC: the ReplicaSet lost its owner reference", (0 if owned.strip().endswith("=") else 1, owned), True)
-    case("GC: foreground delete of the ReplicaSet completes", kubectl(["delete", "rs", "-n", "org-acme", "-l", "app=kagent-default", "--cascade=foreground", "--timeout=60s"]), True)
+    case("GC: foreground delete of the ReplicaSet completes", kubectl(["delete", "rs", "-n", "org-acme", "-l", f"app={POOL}", "--cascade=foreground", "--timeout=60s"]), True)
 
     # Without the platform pool every WorkerPool write in a tenant is refused.
-    kubectl(["delete", "workerpool", "kagent-default", "-n", "kagent"])
+    kubectl(["delete", "workerpool", POOL, "-n", "kagent"])
     time.sleep(2)
-    case("Param: no platform pool, the reconciler updates the copy", kubectl(["patch", "workerpool", "kagent-default", "-n", "org-acme", "--type=merge", "-p", '{"spec":{"replicas":2}}'], as_=REC), False, "kagent-default")
+    case("Param: no platform pool, the reconciler updates the copy", kubectl(["patch", "workerpool", POOL, "-n", "org-acme", "--type=merge", "-p", '{"spec":{"replicas":2}}'], as_=REC), False, POOL)
     case("Namespace: org-acme with a WorkerPool and workers is deleted", kubectl(["delete", "namespace", "org-acme", "--timeout=120s"]), True)
 
 

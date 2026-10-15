@@ -19,10 +19,14 @@ kagent namespace, the platform tenant whose workers the platform writes:
     before or after the write; the garbage collector may also update one (it
     only edits owner references and finalizers). No one adds an ephemeral
     container to such a pod, and no one execs into or attaches to a pod
-    named after the platform WorkerPool (<pool>-*, the workers: a CONNECT
-    request names the pod but carries none of its labels). This holds for
-    every requester, cluster-admin included. Deletes of the workers, their
-    status, scale and port-forward stay with RBAC.
+    named after the platform WorkerPool (kagent.substrateWorkerPool.name,
+    the name the kagent chart gives the WorkerPool and ate-controller gives
+    its Deployment: the workers are <name>-<hash>-<id>; a CONNECT request
+    names the pod but carries none of its labels). This holds for every
+    requester, cluster-admin and Giant Swarm staff included: a tenant's
+    worker is debugged through its logs or a node debug pod (kubectl debug
+    node/<node>), never from inside. Deletes of the workers, their status,
+    scale and port-forward stay with RBAC.
   * agent-platform-tenant-workerpool-copy: a WorkerPool written there is a
     copy of the platform WorkerPool (kagent.substrateWorkerPool.name in the
     kagent namespace, the policy's parameter): the same name, workerImage,
