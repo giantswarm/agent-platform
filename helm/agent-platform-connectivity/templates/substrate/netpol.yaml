@@ -50,6 +50,15 @@ what (the substrate chart's arguments and Service definitions):
   k8s-credential-provider 9090, the agentgateway sidecars 15020) —
   admitted from the cluster entity, as the platform's other metrics ports are.
 
+Contract for actor authors: an actor reaches the world on 443/TCP only (the
+substrate-atenet-egress rule below), plus the destinations listed above. The
+cluster policy is enforced at the node, before the actor's egress policy is
+consulted: plaintext HTTP to port 80, or any other port, is dropped and the
+actor sees a 503 from the egress gateway after about 11 s, where a denial by
+the actor's egress policy answers 403 at once. The way out is HTTPS; a host
+model server is opened by its own rule, from the address the ModelConfigs carry. docs/substrate-security.md
+("What an actor can reach, and how a refusal looks") carries the table.
+
 The kubernetes flavour renders the ingress policies only — the chart's
 kubernetes flavour restricts what reaches a workload and leaves egress open,
 as it does for kagent. The kagent controller's ingress from atenet-egress is
