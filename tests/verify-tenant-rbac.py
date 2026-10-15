@@ -28,8 +28,11 @@ Each case pins one property of the render:
   (Fail, Deny) in the same namespaces lets only agent-manager's ServiceAccount
   (and the namespace and garbage collectors' deletes) write a Secret labelled
   agent-manager.giantswarm.io/tenant-object or named as the default
-  ModelConfig's key Secret; off, it does not render; a key Secret named with
-  the tenant-credential- prefix fails the render;
+  ModelConfig's key Secret, and agent-platform-tenant-platform-secret-refs
+  refuses an Agent's or AgentTemplate's git credentialRef or a
+  RemoteMCPServer's headersFrom Secret naming that key Secret; off, neither
+  renders; a key Secret named with the tenant-credential- prefix fails the
+  render;
 - the platform tenant: in the kagent namespace, agent-platform:platform-user
   is bound to tenants.platform.users (no agent-platform:user binding there,
   so no signed-in person reads its EgressPolicies) and agent-platform:editor to
@@ -255,6 +258,23 @@ def check_platform_secrets(docs: list) -> None:
         if want not in val:
             fail(f"{name} does not admit {want}: {val}")
     ok(f"{name} lets only agent-manager write the platform Secrets of the Organizations' namespaces but kagent")
+    name = "agent-platform-tenant-platform-secret-refs"
+    vap = find(docs, "ValidatingAdmissionPolicy", name)
+    vapb = find(docs, "ValidatingAdmissionPolicyBinding", name)
+    if vap is None or vapb is None:
+        fail(f"ValidatingAdmissionPolicy {name} or its binding missing with tenants.organizations.enabled")
+    spec = vap["spec"]
+    if spec.get("failurePolicy") != "Fail" or vapb["spec"].get("validationActions") != ["Deny"]:
+        fail(f"{name} does not fail closed and deny")
+    if spec["matchConstraints"].get("namespaceSelector", {}).get("matchExpressions") != want_ns:
+        fail(f"{name} selects {spec['matchConstraints'].get('namespaceSelector')}, want the Organizations' namespaces but kagent")
+    if spec["matchConstraints"].get("resourceRules") != [{"apiGroups": ["api.kagent.dev"], "apiVersions": ["*"], "operations": ["CREATE", "UPDATE"], "resources": ["agents", "agenttemplates", "remotemcpservers"]}]:
+        fail(f"{name} matches {spec['matchConstraints'].get('resourceRules')}, want Agent, AgentTemplate and RemoteMCPServer creates and updates")
+    cel = " ".join(v["expression"] for v in spec.get("variables", []) + spec["validations"])
+    for want in ("credentialRef", "headersFrom", "h.valueFrom.type == 'Secret'", "'kagent-anthropic' in variables.refs"):
+        if want not in cel:
+            fail(f"{name} does not hold {want}: {cel}")
+    ok(f"{name} refuses a git credentialRef or a headersFrom Secret naming the copied model key there")
 
 
 def check_platform_tenant(docs: list, want_editors: list) -> None:
@@ -311,7 +331,8 @@ def main() -> None:
         if find(off, "RoleBinding", name):
             fail(f"RoleBinding {name} renders with kagent off")
     for name in ("agent-platform-tenant-egress-credentials", "agent-platform-tenant-credentials",
-                 "agent-platform-tenant-model-credentials", "agent-platform-tenant-platform-secrets"):
+                 "agent-platform-tenant-model-credentials", "agent-platform-tenant-platform-secrets",
+                 "agent-platform-tenant-platform-secret-refs"):
         if find(off, "ValidatingAdmissionPolicy", name):
             fail(f"{name} renders with kagent off")
     check_muster_viewer(off)
@@ -322,8 +343,9 @@ def main() -> None:
     check_egress_admission(on)
     check_platform_tenant(on, ADMINS)
     check_muster_viewer(on)
-    if find(on, "ValidatingAdmissionPolicy", "agent-platform-tenant-platform-secrets"):
-        fail("agent-platform-tenant-platform-secrets renders without tenants.organizations.enabled")
+    for name in ("agent-platform-tenant-platform-secrets", "agent-platform-tenant-platform-secret-refs"):
+        if find(on, "ValidatingAdmissionPolicy", name):
+            fail(f"{name} renders without tenants.organizations.enabled")
     ok("the platform tenant: every signed-in person is a platform user, the admin groups are editors")
 
     orgs = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "components.agent-manager.enabled=true", *ORGS])
