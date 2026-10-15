@@ -5086,12 +5086,17 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # kagent on, the connectivity release renders the three ClusterRoles a tenant's
 # RoleBindings refer to:
 #   - agent-platform:user: see the tenant's agents, templates, RemoteMCPServers,
-#     ModelConfigs and muster MCPServers, and start a Session with an agent;
+#     ModelConfigs, EgressPolicies and muster MCPServers, and start a Session
+#     with an agent;
 #   - agent-platform:editor: the above, plus the writes agent-manager performs
 #     as the caller (HelmReleases, OCIRepositories, Agents, AgentTemplates,
 #     RemoteMCPServers);
-#   - agent-platform:admin: the above, plus ModelConfigs and the
+#   - agent-platform:admin: the above, plus ModelConfigs, EgressPolicies, the
+#     tenant's Secrets (create, replace, delete; never read back) and the
 #     tenant's RoleBindings, which may bind these three roles only.
+# In an Organization's namespace an EgressPolicy names only Secrets named
+# tenant-credential-*; admission refuses any other (the platform's copied
+# model key among them), for every requester.
 # An Organization's RoleBindings are the installation's (they name the
 # customer's groups); the chart binds the platform tenant only, below. The
 # kagent controller answers from these roles once its authorizer is on (the
