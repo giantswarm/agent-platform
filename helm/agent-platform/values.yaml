@@ -5536,8 +5536,10 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   # The controller's reconcile period (a Go duration; 10m is the chart's
   # default): how often it reconciles every Workspace without an event, so a
   # claim deleted out from under a Workspace is made again by then. It is not
-  # how often mirrors are fetched: each Workspace's own spec.sync (nightly,
-  # weekly or custom) says that. Empty takes the chart's default.
+  # how often mirrors are fetched: nothing syncs on a schedule. A Workspace
+  # syncs after every change, on sync_workspace, and when a Session starts on
+  # it more than the refresh threshold (1h) after its last sync. Empty takes
+  # the chart's default.
   sync:
     cycle: ""
   # How long a Session's directory outlives the Session's last turn (a Go
