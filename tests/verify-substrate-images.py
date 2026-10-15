@@ -132,8 +132,6 @@ def published(reference: str) -> bool:
 def admitted_releases(url: str, rng: str) -> list[str]:
     """Every release tag of the substrate chart the range admits, newest last."""
     tags = [t for t in cc.registry_tags(url) if fluxsemver.satisfies(t, rng)]
-    if not tags:
-        cc.fail(f"{url} publishes no version in {rng!r}")
     return sorted(tags, key=lambda t: fluxsemver.parse(t))
 
 
@@ -238,6 +236,12 @@ def main(meta: str) -> int:
     url, rng = cc.source(rendered[("OCIRepository", "substrate")])
     floor = worker.floor_of(rng)
     releases = admitted_releases(url, rng)
+    if not releases:
+        # A range re-pinned ahead of its release (verify-components-charts'
+        # UNRELEASED): the chart it renders against stands in for the floor;
+        # any other range that admits nothing fails there.
+        floor = cc.fallback("substrate", url, rng, cc.registry_tags(url), "")
+        releases = [floor]
     if floor not in releases:
         cc.fail(f"{url} does not publish {floor}, the floor of {rng!r}")
     with tempfile.TemporaryDirectory() as tmp:

@@ -212,7 +212,13 @@ overwrite would hide a values file that still spells the old key.
     logs in as (postgres.applicationDatabase.owner): ate-api-server runs
     SET ROLE on every connection, and the chart's default `postgres` is a
     role the Cluster's application role is not a member of (a differing
-    explicit role fails the render). Its
+    explicit role fails the render). With tenants.organizations.enabled,
+    credentialProvider.namespacePolicies: the installation's own policies,
+    the ate-golden entry with allowedNamespaceSelector on the label
+    giantswarm.io/organization (an entry added when none names ate-golden; a
+    different selector there fails the render), and an ownNamespaceSelector
+    entry on the same label, each derived entry once; a Substrate floor below
+    1.12.0 fails the render. Its
     atelet.imageCache.pinnedImages is NOT derived here: the kagent release's
     ConfigMap kagent-images feeds it through the HelmRelease's valuesFrom
     (components.substrate.valuesFromRefs), so no copy of a digest lives here.
@@ -527,6 +533,38 @@ repeating the admin groups. */ -}}
 {{- end -}}
 {{- end -}}
 {{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref "readWriteRole" $role "ownerRole" $role) -}}
+{{- end -}}
+{{- if and (eq .name "substrate") (dig "organizations" "enabled" false (.root.Values.tenants | default dict)) -}}
+{{- /* The Organizations' agents (giantswarm/agent-platform#1041): each
+namespace labelled giantswarm.io/organization is read by the atespace of its
+own name only (an ownNamespaceSelector entry), and ate-golden, where every
+template's golden actor boots, reads them all (allowedNamespaceSelector on
+its entry, so that entry's secretSelector narrows it there too). The
+installation's own policies stay, each derived entry once; an ate-golden entry
+that selects other namespaces fails, and so does a Substrate floor below 1.12.0,
+whose provider refuses the selectors. */ -}}
+{{- $pin := include "agent-platform.substrate.pinnedVersion" .root -}}
+{{- if semverCompare "<1.12.0-0" $pin -}}
+{{- fail (printf "tenants.organizations.enabled needs Substrate 1.12.0 or later, whose credential provider reads namespace policies by label: components.substrate.versionRange selects %s, whose provider refuses the policy file at start" $pin) -}}
+{{- end -}}
+{{- $sel := dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists")) -}}
+{{- $policies := list -}}
+{{- $golden := false -}}
+{{- $own := false -}}
+{{- range $i, $p := dig "credentialProvider" "namespacePolicies" list ($.root.Values.substrate | default dict) -}}
+{{- if eq (toJson ($p.ownNamespaceSelector | default dict)) (toJson $sel) -}}{{- $own = true -}}{{- end -}}
+{{- if eq ($p.atespace | default "") "ate-golden" -}}
+{{- if and $p.allowedNamespaceSelector (ne (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
+{{- fail (printf "substrate.credentialProvider.namespacePolicies[%d] (ate-golden) has an allowedNamespaceSelector (%s) other than the Organizations' namespaces (%s), which tenants.organizations.enabled sets on it: leave it unset" $i (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
+{{- end -}}
+{{- $p = merge (dict "allowedNamespaceSelector" $sel) $p -}}
+{{- $golden = true -}}
+{{- end -}}
+{{- $policies = append $policies $p -}}
+{{- end -}}
+{{- if not $golden -}}{{- $policies = append $policies (dict "atespace" "ate-golden" "allowedNamespaceSelector" $sel) -}}{{- end -}}
+{{- if not $own -}}{{- $policies = append $policies (dict "ownNamespaceSelector" $sel) -}}{{- end -}}
+{{- $_ := set $derived "credentialProvider" (dict "namespacePolicies" $policies) -}}
 {{- end -}}
 {{- if and (eq .name "kserve-llmisvc-resources") (include "agent-platform.componentEnabled" (dict "root" .root "name" "modelServing")) -}}
 {{- /* The models Gateway (modelServing.modelsGateway, rendered by the
