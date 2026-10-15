@@ -6,7 +6,7 @@ Each case pins one property of the render:
 - with kagent on, the connectivity chart renders the three ClusterRoles
   agent-platform:user, agent-platform:editor and agent-platform:admin:
   each role holds every rule of the one before it; the user reads agents,
-  templates, RemoteMCPServers, ModelConfigs and muster MCPServers and creates
+  templates, RemoteMCPServers, ModelConfigs, Harnesses and muster MCPServers and creates
   Sessions, and writes nothing; the editor writes HelmReleases,
   OCIRepositories, Agents, AgentTemplates and RemoteMCPServers; the admin
   also writes ModelConfigs and RoleBindings, may `bind` the three roles
@@ -105,7 +105,7 @@ def check_roles(docs: list) -> None:
     user, editor, admin = (sets[n] for n in ROLES)
     if not user <= editor <= admin:
         fail("the roles do not nest: user within editor within admin")
-    for res in ("agents", "agenttemplates", "remotemcpservers", "modelconfigs"):
+    for res in ("agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"):
         for v in ("get", "list", "watch"):
             if ("api.kagent.dev", res, v, None) not in user:
                 fail(f"agent-platform:user cannot {v} {res}.api.kagent.dev")
@@ -117,7 +117,7 @@ def check_roles(docs: list) -> None:
     user_writes = {t for t in user if t[2] in WRITES or t[2] == "bind"} - {("api.kagent.dev", "sessions", "create", None)}
     if user_writes:
         fail(f"agent-platform:user writes {sorted(user_writes)}")
-    ok("agent-platform:user reads the tenant's agents and servers, starts a Session, writes nothing")
+    ok("agent-platform:user reads the tenant's agents, servers and Harnesses, starts a Session, writes nothing")
     for g, res in (("helm.toolkit.fluxcd.io", "helmreleases"), ("source.toolkit.fluxcd.io", "ocirepositories"),
                    ("api.kagent.dev", "agents"), ("api.kagent.dev", "agenttemplates"), ("api.kagent.dev", "remotemcpservers")):
         for v in WRITES:

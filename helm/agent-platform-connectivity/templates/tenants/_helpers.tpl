@@ -5,11 +5,12 @@ Helpers of the agent tenants' RBAC (templates/tenants/, giantswarm/agent-platfor
 
 {{/*
 The rules of agent-platform:user: see the tenant's agents, templates,
-RemoteMCPServers, ModelConfigs and muster MCPServers; start a Session.
+RemoteMCPServers, ModelConfigs, Harnesses and muster MCPServers; start a
+Session.
 */}}
 {{- define "agent-platform.tenants.userRules" -}}
 - apiGroups: ["api.kagent.dev"]
-  resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+  resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
   verbs: ["get", "list", "watch"]
 - apiGroups: ["muster.giantswarm.io"]
   resources: ["mcpservers"]
@@ -33,9 +34,6 @@ performs as the caller.
 - apiGroups: ["api.kagent.dev"]
   resources: ["agents", "agenttemplates", "remotemcpservers"]
   verbs: ["create", "update", "patch", "delete"]
-- apiGroups: ["api.kagent.dev"]
-  resources: ["harnesses"]
-  verbs: ["get", "list", "watch"]
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["get", "list", "watch"]

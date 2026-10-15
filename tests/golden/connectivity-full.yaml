@@ -13068,7 +13068,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13092,7 +13092,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13109,9 +13109,6 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["agents", "agenttemplates", "remotemcpservers"]
     verbs: ["create", "update", "patch", "delete"]
-  - apiGroups: ["api.kagent.dev"]
-    resources: ["harnesses"]
-    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
@@ -13131,7 +13128,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13148,9 +13145,6 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["agents", "agenttemplates", "remotemcpservers"]
     verbs: ["create", "update", "patch", "delete"]
-  - apiGroups: ["api.kagent.dev"]
-    resources: ["harnesses"]
-    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
