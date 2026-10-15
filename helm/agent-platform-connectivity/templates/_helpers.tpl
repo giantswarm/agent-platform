@@ -839,13 +839,37 @@ validateLlmRouting holds it to exactly one.
 {{- end -}}
 
 {{/*
-The provider whose ModelConfigs ride the LLM listener: the first
-llmRouting.models entry's, lower-cased (anthropic). kagent.modelConfigs entries
-and the MutatingAdmissionPolicy point a ModelConfig of this provider at the
-listener; a ModelConfig of another provider keeps its own path.
+The providers whose ModelConfigs ride the LLM listener, as a JSON list: every
+llmRouting.models entry's provider that has a baseUrl in ModelConfigSpec
+(agent-platform.modelConfigBaseUrlKey), lower-cased, once each, in the entries'
+order (["anthropic","openai"]). kagent.modelConfigs entries and the
+MutatingAdmissionPolicies point a ModelConfig of such a provider at the
+listener; a ModelConfig of any other provider keeps its own path.
+Usage: include "agent-platform.llmRouting.providers" . | fromJsonArray
 */}}
-{{- define "agent-platform.llmRouting.provider" -}}
-{{- with .Values.llmRouting.models -}}{{- lower (first .).provider -}}{{- end -}}
+{{- define "agent-platform.llmRouting.providers" -}}
+{{- $out := list -}}
+{{- range .Values.llmRouting.models -}}
+{{- $p := lower .provider -}}
+{{- if and (include "agent-platform.modelConfigBaseUrlKey" $p) (not (has $p $out)) -}}
+{{- $out = append $out $p -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
+The baseUrl a ModelConfig of a provider (any case) reaches the LLM listener at:
+agent-platform.llmBaseUrl plus the path the provider's client expects in its
+base URL. The OpenAI clients (the kagent runtime's and codex's) append
+`/responses` or `/chat/completions` to a base that ends in its version, as
+https://api.openai.com/v1 does, so an OpenAI ModelConfig takes `/v1`; the
+Anthropic client appends `/v1/messages` to the bare origin.
+*/}}
+{{- define "agent-platform.llmListenerUrl" -}}
+{{- $root := .root -}}
+{{- $suffix := dict "openai" "/v1" -}}
+{{- printf "%s%s" (include "agent-platform.llmBaseUrl" $root) (dig (lower .provider) "" $suffix) -}}
 {{- end -}}
 
 {{/*
@@ -988,6 +1012,17 @@ kagent's own default in silence, so the template refuses it instead.
 {{- define "agent-platform.modelConfigMaxTokensKey" -}}
 {{- $keys := dict "anthropic" "anthropic" "anthropicvertexai" "anthropicVertexAI" "azureopenai" "azureOpenAI" "mistral" "mistral" "openai" "openAI" -}}
 {{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
+{{- end -}}
+
+{{/*
+Key of the ModelConfigSpec provider block that carries apiFormat (the OpenAI
+HTTP API the runtime speaks: chatCompletions, the CRD's default, or responses,
+which codex requires), for a spec.provider value in any case: OpenAI only.
+Emits nothing for every other provider (empty string = falsy), which the
+template refuses rather than letting the API server prune the field.
+*/}}
+{{- define "agent-platform.modelConfigApiFormatKey" -}}
+{{- if eq (lower .) "openai" -}}openAI{{- end -}}
 {{- end -}}
 
 {{/*
