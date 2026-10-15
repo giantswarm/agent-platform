@@ -158,12 +158,14 @@ def prove(chart, crd):
         rc, out = apply(p, verb="apply")
         if rc != 0:
             sys.exit(f"FAIL: the API server refuses {p['kind']} {p['metadata']['name']}:\n{out}")
-    # The API server's policy informer: wait for the first refusal.
-    for _ in range(100):
-        rc, out = apply(wp("org-acme"), as_="person", dry=True)
-        if rc != 0:
-            break
-        time.sleep(0.3)
+    # The API server's policy and parameter informers: wait for the first
+    # refusal of each policy (each binding syncs on its own).
+    for writer, image in (("person", "ghcr.io/x/ateom:1"), (REC, "evil:1")):
+        for _ in range(100):
+            rc, out = apply(wp("org-acme", image=image), as_=writer, dry=True)
+            if rc != 0:
+                break
+            time.sleep(0.3)
     for name in ("agent-platform-tenant-workers", "agent-platform-tenant-workerpool-copy"):
         _, out = kubectl(["get", "validatingadmissionpolicy", name, "-o", "json"])
         tc = json.loads(out).get("status", {}).get("typeChecking", {})

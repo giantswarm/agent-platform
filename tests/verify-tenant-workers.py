@@ -249,6 +249,12 @@ def main():
         # A renamed platform WorkerPool (kagent.substrateWorkerPool.name): the
         # copy's parameter and the workers' exec prefix follow it.
         check_admission(render(chart, args + ON + ["--set", "kagent.substrateWorkerPool.name=org-workers"]), pool="org-workers")
+        # A pool name the API server would cut from the pods' names fails the render.
+        long = "w" * 58
+        r = subprocess.run([HELM, "template", "t", chart, *BASE, *args, *ON, "--set", f"kagent.substrateWorkerPool.name={long}"], capture_output=True, text=True)
+        if r.returncode == 0 or "longer than 57 characters" not in r.stderr:
+            fail(f"a 58-character kagent.substrateWorkerPool.name renders ({flavor}): the exec rule would match no worker")
+        check_admission(render(chart, args + ON + ["--set", f"kagent.substrateWorkerPool.name={long[:57]}"]), pool=long[:57])
         print(f"ok: the Organizations' workers admitted on the router, the egress gateway, the dns and the PolicyException, written only by Substrate's controllers from agent-manager's copy of the platform WorkerPool, nothing off ({flavor})")
 
 
