@@ -144,14 +144,12 @@ KAGENT = ["kagent-crds", "kagent"]
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
 UNRELEASED: dict[str, str] = {
-    "google-access-token-credential-provider": "0.1.0",  # giantswarm/substrate-credential-providers, its first release
 }
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
 RENDER_AGAINST: dict[str, str] = {
     "agent-manager": "1.9.3-rf107e304t20261006134136h2486711",  # giantswarm/agent-manager#101
-    "google-access-token-credential-provider": "0.0.0-r6ffbb4a3t20261015133225h7f669d5",  # giantswarm/substrate-credential-providers#2
 }
 # The layer every OCIRepository of the meta chart selects, and the manifest
 # types a Helm chart artifact is fetched as.
