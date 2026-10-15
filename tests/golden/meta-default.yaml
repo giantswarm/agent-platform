@@ -1409,6 +1409,10 @@ spec:
       musterInClusterMcpPorts:
       - 8080
       - 8443
+      substrate:
+        credentialProvider:
+          egressFQDNs:
+          - matchName: oauth2.googleapis.com
     postgres:
       affinity: {}
       applicationDatabase:
