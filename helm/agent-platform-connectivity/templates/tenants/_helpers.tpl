@@ -5,11 +5,12 @@ Helpers of the agent tenants' RBAC (templates/tenants/, giantswarm/agent-platfor
 
 {{/*
 The rules of agent-platform:user: see the tenant's agents, templates,
-RemoteMCPServers, ModelConfigs and muster MCPServers; start a Session.
+RemoteMCPServers, ModelConfigs, EgressPolicies (what its Agents may select)
+and muster MCPServers; start a Session.
 */}}
 {{- define "agent-platform.tenants.userRules" -}}
 - apiGroups: ["api.kagent.dev"]
-  resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+  resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "egresspolicies"]
   verbs: ["get", "list", "watch"]
 - apiGroups: ["muster.giantswarm.io"]
   resources: ["mcpservers"]
@@ -39,6 +40,16 @@ performs as the caller.
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["get", "list", "watch"]
+{{- end -}}
+
+{{/*
+The prefix of the Secrets a tenant's credential references may name
+(giantswarm/agent-platform#1040): the tenant's own credentials. Every other
+Secret of a tenant namespace, the platform's copied model key among them, is
+the platform's.
+*/}}
+{{- define "agent-platform.tenants.credentialPrefix" -}}
+tenant-credential-
 {{- end -}}
 
 {{/*

@@ -6,11 +6,19 @@ Each case pins one property of the render:
 - with kagent on, the connectivity chart renders the three ClusterRoles
   agent-platform:user, agent-platform:editor and agent-platform:admin:
   each role holds every rule of the one before it; the user reads agents,
-  templates, RemoteMCPServers, ModelConfigs and muster MCPServers and creates
-  Sessions, and writes nothing; the editor writes HelmReleases,
-  OCIRepositories, Agents, AgentTemplates and RemoteMCPServers; the admin
-  also writes ModelConfigs and RoleBindings, may `bind` the three roles
-  only, and no role carries `escalate`;
+  templates, RemoteMCPServers, ModelConfigs, EgressPolicies and muster
+  MCPServers and creates Sessions, and writes nothing; the editor writes
+  HelmReleases, OCIRepositories, Agents, AgentTemplates and RemoteMCPServers;
+  the admin also writes ModelConfigs, EgressPolicies and RoleBindings, places
+  Secrets (create, update, patch, delete) and reads none, may `bind` the
+  three roles only, and no role carries `escalate` or reads a Secret;
+- the ValidatingAdmissionPolicy agent-platform-tenant-egress-credentials
+  (Fail, bound with Deny) admits egresspolicies.api.kagent.dev of every
+  version in every namespace labelled giantswarm.io/organization but kagent,
+  and refuses a secretKeyRef without the tenant-credential- prefix; with
+  kagent off it does not render; agent-platform-tenant-credentials (Fail,
+  Deny) in the same namespaces refuses a Secret named tenant-credential-*
+  of any type but Opaque (what the CEL decides is proven in the agentlab);
 - the platform tenant: in the kagent namespace, agent-platform:user is bound
   to tenants.platform.users and agent-platform:editor to
   tenants.platform.editors plus tenants.platformTeam; an empty list renders no
@@ -102,10 +110,13 @@ def check_roles(docs: list) -> None:
         sets[name] = grants(role["rules"])
         if any(v == "escalate" for _, _, v, _ in sets[name]):
             fail(f"ClusterRole {name} carries escalate")
+        reads = {t for t in sets[name] if t[1] == "secrets" and t[2] in ("get", "list", "watch")}
+        if reads:
+            fail(f"ClusterRole {name} reads Secrets: {sorted(reads, key=str)}")
     user, editor, admin = (sets[n] for n in ROLES)
     if not user <= editor <= admin:
         fail("the roles do not nest: user within editor within admin")
-    for res in ("agents", "agenttemplates", "remotemcpservers", "modelconfigs"):
+    for res in ("agents", "agenttemplates", "remotemcpservers", "modelconfigs", "egresspolicies"):
         for v in ("get", "list", "watch"):
             if ("api.kagent.dev", res, v, None) not in user:
                 fail(f"agent-platform:user cannot {v} {res}.api.kagent.dev")
@@ -124,17 +135,61 @@ def check_roles(docs: list) -> None:
             if (g, res, v, None) not in editor:
                 fail(f"agent-platform:editor cannot {v} {res}.{g}")
     for t in editor:
-        if t[1] in ("modelconfigs", "rolebindings", "clusterroles") and t[2] in WRITES | {"bind"}:
+        if t[1] in ("modelconfigs", "egresspolicies", "secrets", "rolebindings", "clusterroles") and t[2] in WRITES | {"bind"}:
             fail(f"agent-platform:editor holds {t}")
-    ok("agent-platform:editor writes what agent-manager writes as the caller, and no ModelConfig or RoleBinding")
-    for g, res in (("api.kagent.dev", "modelconfigs"), ("rbac.authorization.k8s.io", "rolebindings")):
+    ok("agent-platform:editor writes what agent-manager writes as the caller, and no ModelConfig, EgressPolicy, Secret or RoleBinding")
+    for g, res in (("api.kagent.dev", "modelconfigs"), ("api.kagent.dev", "egresspolicies"), ("", "secrets"),
+                   ("rbac.authorization.k8s.io", "rolebindings")):
         for v in WRITES:
             if (g, res, v, None) not in admin:
                 fail(f"agent-platform:admin cannot {v} {res}.{g}")
     binds = {t[3] for t in admin if t[2] == "bind"}
     if binds != set(ROLES):
         fail(f"agent-platform:admin binds {sorted(binds, key=str)}, want the three roles only")
-    ok("agent-platform:admin writes ModelConfigs and RoleBindings and binds the three roles only")
+    ok("agent-platform:admin writes ModelConfigs, EgressPolicies and RoleBindings, places Secrets it cannot read, "
+       "and binds the three roles only")
+
+
+def check_egress_admission(docs: list) -> None:
+    name = "agent-platform-tenant-egress-credentials"
+    vap = find(docs, "ValidatingAdmissionPolicy", name)
+    vapb = find(docs, "ValidatingAdmissionPolicyBinding", name)
+    if vap is None or vapb is None:
+        fail(f"ValidatingAdmissionPolicy {name} or its binding missing with kagent on")
+    spec = vap["spec"]
+    if spec.get("failurePolicy") != "Fail":
+        fail(f"{name} failurePolicy is {spec.get('failurePolicy')}, want Fail")
+    if vapb["spec"].get("policyName") != name or vapb["spec"].get("validationActions") != ["Deny"]:
+        fail(f"{name}'s binding is {vapb['spec']}, want the policy with Deny")
+    want_ns = [{"key": "giantswarm.io/organization", "operator": "Exists"},
+               {"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": ["kagent"]}]
+    if spec["matchConstraints"].get("namespaceSelector", {}).get("matchExpressions") != want_ns:
+        fail(f"{name} selects {spec['matchConstraints'].get('namespaceSelector')}, want the Organizations' namespaces but kagent")
+    want_rules = [{"apiGroups": ["api.kagent.dev"], "apiVersions": ["*"], "operations": ["CREATE", "UPDATE"],
+                   "resources": ["egresspolicies"]}]
+    if spec["matchConstraints"].get("resourceRules") != want_rules:
+        fail(f"{name} matches {spec['matchConstraints'].get('resourceRules')}, want {want_rules}")
+    cel = " ".join(v["expression"] for v in spec.get("variables", []))
+    if "secretKeyRef" not in cel or "startsWith('tenant-credential-')" not in cel:
+        fail(f"{name} does not hold secretKeyRef to the tenant-credential- prefix: {cel}")
+    ok(f"{name} refuses, in the Organizations' namespaces but kagent, an EgressPolicy naming a non-tenant-credential- Secret")
+    name = "agent-platform-tenant-credentials"
+    vap = find(docs, "ValidatingAdmissionPolicy", name)
+    vapb = find(docs, "ValidatingAdmissionPolicyBinding", name)
+    if vap is None or vapb is None:
+        fail(f"ValidatingAdmissionPolicy {name} or its binding missing with kagent on")
+    spec = vap["spec"]
+    if spec.get("failurePolicy") != "Fail" or vapb["spec"].get("validationActions") != ["Deny"]:
+        fail(f"{name} does not fail closed and deny")
+    if spec["matchConstraints"].get("namespaceSelector", {}).get("matchExpressions") != want_ns:
+        fail(f"{name} selects {spec['matchConstraints'].get('namespaceSelector')}, want the Organizations' namespaces but kagent")
+    if spec["matchConstraints"].get("resourceRules") != [{"apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE", "UPDATE"], "resources": ["secrets"]}]:
+        fail(f"{name} matches {spec['matchConstraints'].get('resourceRules')}, want Secret creates and updates")
+    if [c["expression"] for c in spec.get("matchConditions", [])] != ["object.metadata.name.startsWith('tenant-credential-')"]:
+        fail(f"{name} does not select the tenant-credential- Secrets only: {spec.get('matchConditions')}")
+    if "object.type == 'Opaque'" not in " ".join(v["expression"] for v in spec["validations"]):
+        fail(f"{name} does not hold the tenant credentials to type Opaque")
+    ok(f"{name} keeps a tenant-credential- Secret of type Opaque in the Organizations' namespaces but kagent")
 
 
 def check_platform_tenant(docs: list, want_editors: list) -> None:
@@ -188,11 +243,15 @@ def main() -> None:
     for name in ROLES[:2]:
         if find(off, "RoleBinding", name):
             fail(f"RoleBinding {name} renders with kagent off")
+    for name in ("agent-platform-tenant-egress-credentials", "agent-platform-tenant-credentials"):
+        if find(off, "ValidatingAdmissionPolicy", name):
+            fail(f"{name} renders with kagent off")
     check_muster_viewer(off)
     ok("kagent off: no tenant role or binding; muster's servers listed to every signed-in person")
 
     on = render(conn, [*CONN, "--set", "components.kagent.enabled=true"])
     check_roles(on)
+    check_egress_admission(on)
     check_platform_tenant(on, ADMINS)
     check_muster_viewer(on)
     ok("the platform tenant: every signed-in person is a user, the admin groups are editors")
