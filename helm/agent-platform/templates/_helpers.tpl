@@ -2936,7 +2936,7 @@ Usage: include "agent-platform.agentManager.tenants" $root | fromJson
 {{- $provider := toString (dig "default" "" $providers) -}}
 {{- $secret := dig $provider "apiKeySecretRef" "" $providers -}}
 {{- if not $secret -}}
-{{- fail (printf "tenants.organizations.enabled needs kagent.providers.%s.apiKeySecretRef (kagent.providers.default %q): the Secret with the key of the default ModelConfig, which agent-manager copies into a tenant with its first agent" $provider $provider) -}}
+{{- fail (printf "tenants.organizations.enabled needs kagent.providers.%s.apiKeySecretRef (kagent.providers.default %q): the Secret with the key of the default ModelConfig, which agent-manager copies into a tenant with its first agent; set it in this chart's values, which do not read the kagent chart's own provider defaults" $provider $provider) -}}
 {{- end -}}
 {{- $tenants := dict "enabled" true "modelConfig" (dict "name" "default-model-config" "apiKeySecretName" $secret) -}}
 {{- if and .Values.networkPolicy.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
