@@ -18,6 +18,12 @@ HelmRelease's ServiceAccount included. A reference never names another
 namespace: secretKeyRef is a SecretKeySelector, and the CRD's schema prunes a
 namespace from it; the controller resolves it in the policy's namespace.
 
+agent-platform-tenant-credentials keeps what such a reference reaches a
+tenant's own value: there a Secret named with the prefix is of type Opaque,
+created or updated. A service-account-token Secret (the token controller
+fills it with a ServiceAccount's token) or any other typed Secret under the
+prefix is refused, so no policy sends a token the cluster minted.
+
 The policy reads the object untyped (apiVersions "*"): it admits every version
 of egresspolicies.api.kagent.dev, and matches nothing on a cluster that does
 not serve them. Kubernetes 1.30 or later (admissionregistration.k8s.io/v1).
@@ -73,5 +79,45 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   policyName: agent-platform-tenant-egress-credentials
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-credentials
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [{{ $kagentNs | quote }}]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["secrets"]
+  matchConditions:
+    - name: tenant-credential
+      expression: {{ printf "object.metadata.name.startsWith('%s')" $prefix | quote }}
+  validations:
+    - expression: "!has(object.type) || object.type == 'Opaque'"
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'a tenant credential (a Secret named %s* in an Organization namespace) is of type Opaque, not ' + object.type" $prefix }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-credentials
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-tenant-credentials
   validationActions: [Deny]
 {{- end }}

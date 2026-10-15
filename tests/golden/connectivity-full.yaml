@@ -15291,6 +15291,43 @@ spec:
 ---
 # Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kagent"]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["secrets"]
+  matchConditions:
+    - name: tenant-credential
+      expression: "object.metadata.name.startsWith('tenant-credential-')"
+  validations:
+    - expression: "!has(object.type) || object.type == 'Opaque'"
+      reason: Forbidden
+      messageExpression: >-
+        'a tenant credential (a Secret named tenant-credential-* in an Organization namespace) is of type Opaque, not ' + object.type
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
   name: agent-platform-tenant-egress-credentials
@@ -15304,6 +15341,23 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 spec:
   policyName: agent-platform-tenant-egress-credentials
+  validationActions: [Deny]
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-credentials
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-tenant-credentials
   validationActions: [Deny]
 ---
 # Source: agent-platform-connectivity/templates/substrate/hooks-rbac.yaml

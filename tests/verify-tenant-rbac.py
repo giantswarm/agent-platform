@@ -16,8 +16,9 @@ Each case pins one property of the render:
   (Fail, bound with Deny) admits egresspolicies.api.kagent.dev of every
   version in every namespace labelled giantswarm.io/organization but kagent,
   and refuses a secretKeyRef without the tenant-credential- prefix; with
-  kagent off it does not render (what its CEL decides is proven in the
-  agentlab);
+  kagent off it does not render; agent-platform-tenant-credentials (Fail,
+  Deny) in the same namespaces refuses a Secret named tenant-credential-*
+  of any type but Opaque (what the CEL decides is proven in the agentlab);
 - the platform tenant: in the kagent namespace, agent-platform:user is bound
   to tenants.platform.users and agent-platform:editor to
   tenants.platform.editors plus tenants.platformTeam; an empty list renders no
@@ -172,6 +173,23 @@ def check_egress_admission(docs: list) -> None:
     if "secretKeyRef" not in cel or "startsWith('tenant-credential-')" not in cel:
         fail(f"{name} does not hold secretKeyRef to the tenant-credential- prefix: {cel}")
     ok(f"{name} refuses, in the Organizations' namespaces but kagent, an EgressPolicy naming a non-tenant-credential- Secret")
+    name = "agent-platform-tenant-credentials"
+    vap = find(docs, "ValidatingAdmissionPolicy", name)
+    vapb = find(docs, "ValidatingAdmissionPolicyBinding", name)
+    if vap is None or vapb is None:
+        fail(f"ValidatingAdmissionPolicy {name} or its binding missing with kagent on")
+    spec = vap["spec"]
+    if spec.get("failurePolicy") != "Fail" or vapb["spec"].get("validationActions") != ["Deny"]:
+        fail(f"{name} does not fail closed and deny")
+    if spec["matchConstraints"].get("namespaceSelector", {}).get("matchExpressions") != want_ns:
+        fail(f"{name} selects {spec['matchConstraints'].get('namespaceSelector')}, want the Organizations' namespaces but kagent")
+    if spec["matchConstraints"].get("resourceRules") != [{"apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE", "UPDATE"], "resources": ["secrets"]}]:
+        fail(f"{name} matches {spec['matchConstraints'].get('resourceRules')}, want Secret creates and updates")
+    if [c["expression"] for c in spec.get("matchConditions", [])] != ["object.metadata.name.startsWith('tenant-credential-')"]:
+        fail(f"{name} does not select the tenant-credential- Secrets only: {spec.get('matchConditions')}")
+    if "object.type == 'Opaque'" not in " ".join(v["expression"] for v in spec["validations"]):
+        fail(f"{name} does not hold the tenant credentials to type Opaque")
+    ok(f"{name} keeps a tenant-credential- Secret of type Opaque in the Organizations' namespaces but kagent")
 
 
 def check_platform_tenant(docs: list, want_editors: list) -> None:
@@ -225,8 +243,9 @@ def main() -> None:
     for name in ROLES[:2]:
         if find(off, "RoleBinding", name):
             fail(f"RoleBinding {name} renders with kagent off")
-    if find(off, "ValidatingAdmissionPolicy", "agent-platform-tenant-egress-credentials"):
-        fail("agent-platform-tenant-egress-credentials renders with kagent off")
+    for name in ("agent-platform-tenant-egress-credentials", "agent-platform-tenant-credentials"):
+        if find(off, "ValidatingAdmissionPolicy", name):
+            fail(f"{name} renders with kagent off")
     check_muster_viewer(off)
     ok("kagent off: no tenant role or binding; muster's servers listed to every signed-in person")
 
