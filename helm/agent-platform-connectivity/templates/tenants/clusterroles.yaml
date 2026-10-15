@@ -3,7 +3,9 @@ The three roles of an agent tenant (giantswarm/agent-platform#706; the
 agent-permissions plan, D2). A tenant is a namespace: the kagent namespace (the
 platform tenant) or one labelled giantswarm.io/organization. A tenant's
 RoleBindings bind groups to these ClusterRoles in its namespace; the chart
-binds the platform tenant only (platform-tenant.yaml). The names are fixed:
+binds the platform tenant only (platform-tenant.yaml), its signed-in people
+to agent-platform:platform-user, the user's role without the platform's
+EgressPolicies. The names are fixed:
 the bindings an installation declares refer to them, and the admin role's
 `bind` names them.
 
@@ -30,6 +32,15 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 rules:
   {{- include "agent-platform.tenants.userRules" . | nindent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:platform-user
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+rules:
+  {{- include "agent-platform.tenants.platformUserRules" . | nindent 2 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
