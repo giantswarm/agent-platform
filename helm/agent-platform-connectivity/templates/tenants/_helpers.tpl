@@ -84,3 +84,20 @@ Usage: include "agent-platform.tenants.organizationWorkers" "cilium"
         operator: Exists
 {{- end -}}
 {{- end -}}
+
+{{/*
+The writers of the Substrate workers in the Organizations' namespaces
+(tenants.organizations.enabled), by kind, as JSON {kind: [ServiceAccount
+subject]}: Substrate's controller chain. ate-controller writes the Deployment
+(and marks the busy workers' pods), the deployment controller the ReplicaSet
+(and the Deployment's revision), the ReplicaSet controller the Pods. The
+substrate-workers PolicyException excepts only these writers there, and the
+admission policy agent-platform-tenant-workers lets no one else write a worker
+there.
+*/}}
+{{- define "agent-platform.tenants.workerWriters" -}}
+{{- $ateController := dict "kind" "ServiceAccount" "name" "ate-controller" "namespace" (include "agent-platform.substrate.namespace" .) -}}
+{{- $deploymentController := dict "kind" "ServiceAccount" "name" "deployment-controller" "namespace" "kube-system" -}}
+{{- $replicaSetController := dict "kind" "ServiceAccount" "name" "replicaset-controller" "namespace" "kube-system" -}}
+{{- dict "Deployment" (list $ateController $deploymentController) "ReplicaSet" (list $deploymentController) "Pod" (list $replicaSetController $ateController) | toJson -}}
+{{- end -}}

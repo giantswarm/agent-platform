@@ -109,15 +109,11 @@ spec:
     kyverno/kyverno#13975). An Organization's admins may write pods there, so
     a matching label is no proof that Substrate made the pod: each kind is
     excepted only when its writer is the controller chain that makes the
-    workers — ate-controller writes the Deployment (and marks the busy
-    workers' pods), the deployment controller the ReplicaSet (and the
-    Deployment's revision), the ReplicaSet controller the Pods. A Deployment,
-    ReplicaSet or Pod a person writes there with the label is judged like any
-    other. A background scan has no writer, so it reports these workers. */}}
-    {{- $ateController := dict "kind" "ServiceAccount" "name" "ate-controller" "namespace" $ns }}
-    {{- $deploymentController := dict "kind" "ServiceAccount" "name" "deployment-controller" "namespace" "kube-system" }}
-    {{- $replicaSetController := dict "kind" "ServiceAccount" "name" "replicaset-controller" "namespace" "kube-system" }}
-    {{- range $kind, $writers := dict "Deployment" (list $ateController $deploymentController) "ReplicaSet" (list $deploymentController) "Pod" (list $replicaSetController $ateController) }}
+    workers (agent-platform.tenants.workerWriters). The admission policy
+    agent-platform-tenant-workers refuses a labelled Deployment, ReplicaSet or
+    Pod there from any other writer (tenant-workers-admission.yaml). A
+    background scan has no writer, so it reports these workers. */}}
+    {{- range $kind, $writers := include "agent-platform.tenants.workerWriters" . | fromJson }}
     - resources:
         kinds:
         - {{ $kind }}

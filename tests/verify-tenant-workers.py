@@ -18,8 +18,17 @@ With tenants.organizations.enabled, in both flavors:
   deployment controller the ReplicaSet, the ReplicaSet controller the Pods (an
   Organization's admins may write pods there; a labelled pod they write is
   judged like any other);
+- two ValidatingAdmissionPolicies hold the writes there, in every labelled
+  namespace but the kagent one: only agent-manager's ServiceAccount writes a
+  WorkerPool, and only as a copy of the platform WorkerPool (the policy's
+  parameter, refused without it); only the writers the PolicyException
+  excepts write a labelled Deployment, ReplicaSet or Pod, and no one adds an
+  ephemeral container, execs or attaches to a worker (an Organization's admins
+  hold cluster-admin there, and ate-controller builds the workers from the
+  WorkerPool);
 - with the value on, no other object selects the label.
-Off (the default), nothing selects the label. Needs PyYAML. HELM selects the
+Off (the default), nothing selects the label. What the policies' CEL decides
+is proven on a real API server, not here. Needs PyYAML. HELM selects the
 binary.
 
 Usage: verify-tenant-workers.py CONNECTIVITY_CHART
@@ -162,6 +171,61 @@ def check_exception(on, off):
         fail(f"substrate-workers: the Organizations' workers are excepted for writers {got}, not Substrate's controller chain {WRITERS}; anyone who writes a labelled pod there would get the workers' exception")
 
 
+# The policies' namespaces: every labelled namespace but the kagent one, whose
+# workers the platform writes.
+POLICY_NAMESPACES = {"matchExpressions": [
+    {"key": ORG, "operator": "Exists"},
+    {"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": ["kagent"]},
+]}
+RECONCILER = "system:serviceaccount:agent-platform:agent-manager"
+WORKERS_POLICY = "agent-platform-tenant-workers"
+COPY_POLICY = "agent-platform-tenant-workerpool-copy"
+WORKERS_RULES = [
+    (["ate.dev"], ["CREATE", "UPDATE", "DELETE"], ["workerpools"]),
+    (["apps"], ["CREATE", "UPDATE"], ["deployments", "replicasets"]),
+    ([""], ["CREATE", "UPDATE"], ["pods", "pods/ephemeralcontainers"]),
+    ([""], ["CONNECT"], ["pods/exec", "pods/attach"]),
+]
+
+
+def cel_writers(policy):
+    """The writers variable of the workers policy spec, a CEL map literal, as a dict."""
+    expr = next(v["expression"] for v in policy["variables"] if v["name"] == "writers")
+    return yaml.safe_load(expr.replace("'", '"'))
+
+
+def check_admission(docs):
+    policies = {}
+    for name in (WORKERS_POLICY, COPY_POLICY):
+        policy = find(docs, "ValidatingAdmissionPolicy", name)["spec"]
+        binding = find(docs, "ValidatingAdmissionPolicyBinding", name)["spec"]
+        if policy.get("failurePolicy") != "Fail" or binding.get("policyName") != name or binding.get("validationActions") != ["Deny"]:
+            fail(f"{name}: the policy does not refuse (failurePolicy Fail, binding Deny)")
+        if policy["matchConstraints"].get("namespaceSelector") != POLICY_NAMESPACES or binding.get("matchResources"):
+            fail(f"{name}: the policy does not hold every labelled namespace but kagent: {policy['matchConstraints'].get('namespaceSelector')}")
+        policies[name] = (policy, binding)
+    policy, _ = policies[WORKERS_POLICY]
+    rules = [(r["apiGroups"], r["operations"], r["resources"]) for r in policy["matchConstraints"]["resourceRules"]]
+    if rules != WORKERS_RULES:
+        fail(f"{WORKERS_POLICY}: matches {rules}, not {WORKERS_RULES}")
+    want = {f"{kind.lower()}s": [f"system:serviceaccount:{s['namespace']}:{s['name']}" for s in subjects] for kind, subjects in WRITERS.items()}
+    if cel_writers(policy) != want:
+        fail(f"{WORKERS_POLICY}: the workers' writers are {cel_writers(policy)}, not the PolicyException's {want}")
+    if not any(f"variables.writer == '{RECONCILER}'" in v["expression"] for v in policy["validations"]):
+        fail(f"{WORKERS_POLICY}: no validation lets {RECONCILER} alone write WorkerPools")
+    # A CONNECT request names the pod only: the workers are the pods named after the pool.
+    if not any("!request.name.startsWith('kagent-default-')" in v["expression"] for v in policy["validations"]):
+        fail(f"{WORKERS_POLICY}: no validation refuses exec into the workers (kagent-default-*)")
+    policy, binding = policies[COPY_POLICY]
+    if policy.get("paramKind") != {"apiVersion": "ate.dev/v1alpha1", "kind": "WorkerPool"}:
+        fail(f"{COPY_POLICY}: the parameter is not a WorkerPool: {policy.get('paramKind')}")
+    if binding.get("paramRef") != {"name": "kagent-default", "namespace": "kagent", "parameterNotFoundAction": "Deny"}:
+        fail(f"{COPY_POLICY}: the parameter is not the platform WorkerPool kagent/kagent-default, refused when missing: {binding.get('paramRef')}")
+    rules = [(r["apiGroups"], r["operations"], r["resources"]) for r in policy["matchConstraints"]["resourceRules"]]
+    if rules != [(["ate.dev"], ["CREATE", "UPDATE"], ["workerpools"])]:
+        fail(f"{COPY_POLICY}: matches {rules}, not the WorkerPools' creates and updates")
+
+
 def main():
     chart = sys.argv[1]
     for flavor in ("cilium", "kubernetes"):
@@ -169,14 +233,18 @@ def main():
         off = render(chart, args)
         if any(ORG in yaml.safe_dump(d) for d in off if d["metadata"]["name"].startswith("substrate-")):
             fail(f"tenants.organizations off ({flavor}): a Substrate policy or exception selects {ORG}")
+        if any(d["metadata"]["name"] in (WORKERS_POLICY, COPY_POLICY) for d in off):
+            fail(f"tenants.organizations off ({flavor}): the admission policies render")
         on = render(chart, args + ON)
         selecting = {(d["kind"], d["metadata"]["name"]) for d in on if ORG in yaml.safe_dump(d)}
-        want = {(kind, name) for kind, name, _, _ in HOPS[flavor]} | {("PolicyException", "substrate-workers")}
+        want = {(kind, name) for kind, name, _, _ in HOPS[flavor]} | {("PolicyException", "substrate-workers")} | {
+            ("ValidatingAdmissionPolicy", WORKERS_POLICY), ("ValidatingAdmissionPolicy", COPY_POLICY)}
         if selecting != want:
             fail(f"tenants.organizations on ({flavor}): {sorted(selecting)} select {ORG}, not exactly {sorted(want)}")
         check_hops(flavor, on)
         check_exception(on, off)
-        print(f"ok: the Organizations' workers admitted on the router, the egress gateway, the dns and the PolicyException, nothing off ({flavor})")
+        check_admission(on)
+        print(f"ok: the Organizations' workers admitted on the router, the egress gateway, the dns and the PolicyException, written only by Substrate's controllers from agent-manager's copy of the platform WorkerPool, nothing off ({flavor})")
 
 
 if __name__ == "__main__":
