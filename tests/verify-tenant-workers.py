@@ -229,9 +229,12 @@ def check_admission(docs, pool="kagent-default"):
         fail(f"{COPY_POLICY}: matches {rules}, not the WorkerPools' creates and updates")
 
 
-# The tenants' egress credential admission (giantswarm/agent-platform#1040)
-# selects the label with kagent on, whatever tenants.organizations says.
-EGRESS_POLICIES = ("agent-platform-tenant-egress-credentials", "agent-platform-tenant-credentials")
+# The tenants' credential admission (giantswarm/agent-platform#1040) selects
+# the label with kagent on, whatever tenants.organizations says (the platform
+# Secrets' policy also needs agent-manager on, which this render leaves off;
+# verify-tenant-rbac asserts it).
+EGRESS_POLICIES = ("agent-platform-tenant-egress-credentials", "agent-platform-tenant-model-credentials",
+                   "agent-platform-tenant-credentials")
 
 
 def main():
