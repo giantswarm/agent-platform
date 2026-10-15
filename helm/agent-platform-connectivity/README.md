@@ -193,8 +193,19 @@ On the installation, after the cutover:
 - `ingress.httpRoute.timeouts` reaches the external routes only: the in-cluster
   path has no `HTTPRoute` to carry route timeouts.
 - An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
-  own `baseUrl` or names a provider other than the first `llmRouting.models`
-  entry's.
+  own `baseUrl` or names a provider no `llmRouting.models` entry serves; the
+  MutatingAdmissionPolicy does the same for a ModelConfig created elsewhere,
+  one policy per served provider. An OpenAI ModelConfig's listener URL ends in
+  `/v1`, the base its client appends `/responses` or `/chat/completions` to.
+- **codex**: the codex runtime speaks the Responses API only. An `OpenAI` entry
+  on the listener (`baseURL: https://api.openai.com/v1`, `match: gpt-*`) and a
+  `kagent.modelConfigs[]` entry with `provider: OpenAI` and `apiFormat:
+  responses` give codex agents a model whose calls take the listener's
+  Responses route (`/v1/responses`): priced by the gateway's catalog, in the
+  GenAI usage metrics, under `llmRouting.rateLimits`. The codex compiler
+  refuses any other OpenAI option (`maxTokens` included), `defaultHeaders`,
+  `tls` and `apiKeyPassthrough`; the chart renders none of them for such an
+  entry, and refuses `apiFormat` on any other provider.
   The `baseUrl` lands under the CRD's block for the entry's provider —
   `anthropic`, `mistral`, `openAI`, `sapAICore`, the four `ModelConfigSpec` gives one —
   never the lower-cased provider name, which the API server would prune; the
