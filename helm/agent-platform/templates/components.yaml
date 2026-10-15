@@ -24,7 +24,11 @@ knowledge:
       #441, #339 — three breaks in three runs); one ahead may have retired a
       key the older meta chart still forwards. Flux re-resolves the exact
       version on every reconcile, so the connectivity release rolls exactly
-      when this chart does. versionRange stays empty; a versionRange set on
+      when this chart does. An exact version also names the OCIRepository
+      (agent-platform.sourceName), so the values and the chart version change
+      in one HelmRelease spec change and helm-controller never applies new
+      values to the previous chart (giantswarm/agent-platform#1019).
+      versionRange stays empty; a versionRange set on
       such an entry is REFUSED when it would pull from the repository this
       chart's own releases come from (gitops.self.repository) with no
       semverFilter — that is the lagging pin. The two development shapes keep
@@ -364,11 +368,12 @@ against such a range, the branch builds of the repository included. */ -}}
 {{- else if and $semver (not $filter) (regexMatch "(^|[ ,])[<>=~^]+v?[0-9]+(\\.[0-9]+){0,2}-" $semver) }}
 {{- $filter = include "agent-platform.releaseTagFilter" $root }}
 {{- end }}
+{{- $source := include "agent-platform.sourceName" (dict "child" $child "entry" $c "semver" $semver) }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
-  name: {{ $child }}
+  name: {{ $source }}
   namespace: {{ $ns }}
   labels:
     {{- include "labels.common" $root | nindent 4 }}
@@ -418,7 +423,7 @@ spec:
   {{- end }}
   chartRef:
     kind: OCIRepository
-    name: {{ $child }}
+    name: {{ $source }}
     namespace: {{ $ns }}
   install:
     createNamespace: true

@@ -110,7 +110,13 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # The tenth (giantswarm/agent-platform#455 follow-up): the kagent controller
 # VPA's memory cap moves from 480Mi to 1280Mi. Both sides render with the new
 # cap (the key exists on both sides), and verify-kagent-vpa asserts the default.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi
+# The eleventh (giantswarm/agent-platform#999): the Substrate workers'
+# PriorityClass this chart renders by default with kagent on
+# (templates/kagent/workerpool-priorityclass.yaml). Both sides render with
+# kagent.substrateWorkerPool.priorityClass.enabled=false (the kagent block is
+# additionalProperties: true), and verify-workerpool asserts the class on, off
+# and its guards.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 GOLDEN_REF ?= origin/main
@@ -153,6 +159,15 @@ WIRING_PG_GOLDEN_HOLD_NEW :=
 # and not on a golden from before; it is left out of both sides. Drop it once
 # GOLDEN_REF carries #840.
 WIRING_PG_GOLDEN_DROP := $(DASHBOARDS_GOLDEN_DROP) muster-mcp-egress
+# The RBAC of agent tenants (templates/tenants/, giantswarm/agent-platform#706), by
+# metadata.name: the cluster-scoped roles and bindings, dropped from a render
+# before asserting that the migration or the flux identity holds no other
+# RBAC. TENANT_RBAC_ALL adds muster's MCPServer viewer Role and RoleBinding,
+# which render whether kagent is on or not.
+TENANT_RBAC := agent-platform:user agent-platform:editor agent-platform:admin
+TENANT_RBAC_ALL := $(TENANT_RBAC) agent-platform:mcpserver-viewer
+# New beside GOLDEN_REF: left out of both sides of the postgres golden too.
+WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
 # golden diff (by metadata.name): the v1alpha2 agent Deployments' seccomp
 # PolicyException is gone with them, the kagent controller's ingress policy
@@ -160,9 +175,10 @@ WIRING_PG_GOLDEN_DROP := $(DASHBOARDS_GOLDEN_DROP) muster-mcp-egress
 # Substrate's egress gateway — templates/substrate/netpol.yaml), and `kagent`
 # is the platform Harness the 4.0 connectivity chart renders whenever kagent is
 # on (templates/kagent/harness.yaml — a new object with no 3.x counterpart; its
-# shape is asserted by verify-kagent-harness / verify-kagent-crds). Empty this
-# list once GOLDEN_REF carries the line.
-GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP)
+# shape is asserted by verify-kagent-harness / verify-kagent-crds). The RBAC of
+# agent tenants (#706) is new too: drop TENANT_RBAC_ALL once GOLDEN_REF carries
+# it. Empty this list once GOLDEN_REF carries the line.
+GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP) $(TENANT_RBAC_ALL)
 # Any reference is enough: the assertions read the rendered exception, not the image.
 PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
@@ -1457,6 +1473,12 @@ verify-workspace-storage: ## Assert the workspace StorageClass value and its pre
 	@LIVE_CONTEXT=$(LIVE_CONTEXT) python3 tests/verify-workspace-storage.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "workspace storage verified."
 
+.PHONY: verify-session-retention
+verify-session-retention: ## Assert a workspace Session's directory lives as long as its Session (giantswarm/agent-platform#1007): the kagent release carries controller.sessionIdleTTL 720h by default (the kagent chart's is 168h), workspaces off too; with workspaces on the workspace-manager release's sessions.cleanupAfter is the TTL (an own TTL followed); an own cleanupAfter not longer than the TTL stands, a longer one fails naming both keys; a TTL of 0 reaches kagent and derives none; a TTL that is not a Go duration fails naming the key. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-session-retention.py $(CHART_DIR)
+	@echo "session retention verified."
+
 .PHONY: verify-mcp-kubernetes-registration
 verify-mcp-kubernetes-registration: ## Assert the bundled mcp-kubernetes registration's three shapes (giantswarm/agent-platform#403): the family-less singleton mcp-kubernetes by default; with mcp-kubernetes.mcpServer.managementCluster a member of muster's kubernetes family as agent-platform-mcps renders one (<name>-mcp-kubernetes, the management-cluster label, spec.family {kubernetes, management_cluster}, url and auth unchanged); none with enabled false or with the component or muster off; a managementCluster that is not a DNS label fails naming the key; the meta chart forwards the block to connectivity and drops it from the mcp-kubernetes release. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
@@ -1667,7 +1689,7 @@ verify-klausgateway-workspaces: ## Assert the gateway's workspace tools prefix (
 	@python3 tests/verify-klausgateway-workspaces.py $(CHART_DIR)
 	@echo "$@: all passed"
 
-verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-platform#431): karpenter.sh/do-not-disrupt on muster, kagent-controller, klaus-gateway and muster-valkey (their charts' podAnnotations) and NOT on the agentgateway data plane, which is HA instead (two replicas + budget + spread, verify-dataplane-ha) though its annotation knob still travels when set; PodDisruptionBudgets from the muster, kagent and klaus-gateway charts' knobs and the connectivity chart's own for agent-manager and muster-valkey (#439); every knob off = nothing; the budgets' guards. And the placement of the stateful singletons (#439): scheduling.singletons.nodeSelector / tolerations reach muster, muster-valkey, the kagent controller and klaus-gateway as their charts' knobs (a component's own keys win), never the connectivity release; empty = nothing forwarded.
+verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-platform#431): karpenter.sh/do-not-disrupt on muster, kagent-controller, klaus-gateway and muster-valkey (their charts' podAnnotations), on a Substrate worker pod only while it hosts an actor (#1014, the substrate chart's ateController.busyWorker.annotations), and NOT on the agentgateway data plane, which is HA instead (two replicas + budget + spread, verify-dataplane-ha) though its annotation knob still travels when set; PodDisruptionBudgets from the muster, kagent and klaus-gateway charts' knobs and the connectivity chart's own for agent-manager and muster-valkey (#439); every knob off = nothing; the budgets' guards. And the placement of the stateful singletons (#439): scheduling.singletons.nodeSelector / tolerations reach muster, muster-valkey, the kagent controller and klaus-gateway as their charts' knobs (a component's own keys win), never the connectivity release; empty = nothing forwarded.
 	@echo "====> $@ ($(CONNECTIVITY_DIR) + $(CHART_DIR))"
 	@echo "--> connectivity, agent-manager on: the HA data plane carries NO do-not-disrupt, and the agent-manager budget renders"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) >$(VERIFY_TMP)/vd-on.out 2>&1 || { cat $(VERIFY_TMP)/vd-on.out; exit 1; }
@@ -1746,7 +1768,7 @@ verify-disruption: ## Assert the voluntary-disruption guards (giantswarm/agent-p
 	@$(HELM) template t $(CHART_DIR) $(VM) --set components.kagent.enabled=true --set components.klaus-gateway.enabled=true --set components.agent-manager.enabled=true --set components.agentgateway.enabled=true >$(VERIFY_TMP)/vd-meta.out 2>&1 || { cat $(VERIFY_TMP)/vd-meta.out; exit 1; }
 	@python3 tests/verify-disruption.py $(VERIFY_TMP)/vd-meta.out
 	@echo "--> meta chart: a component's knob off leaves its HelmRelease without it"
-	@$(HELM) template t $(CHART_DIR) $(VM) --set components.kagent.enabled=true --set components.klaus-gateway.enabled=true --set components.agent-manager.enabled=true --set components.agentgateway.enabled=true --set muster.podDisruptionBudget.enabled=false --set kagent.controller.pdb.enabled=false --set klausGateway.podDisruptionBudget.enabled=false --set valkey.podDisruptionBudget.enabled=false --set 'muster.podAnnotations.karpenter\.sh/do-not-disrupt=null' --set 'valkey.valkey.podAnnotations.karpenter\.sh/do-not-disrupt=null' >$(VERIFY_TMP)/vd-meta-off.out 2>&1 || { cat $(VERIFY_TMP)/vd-meta-off.out; exit 1; }
+	@$(HELM) template t $(CHART_DIR) $(VM) --set components.kagent.enabled=true --set components.klaus-gateway.enabled=true --set components.agent-manager.enabled=true --set components.agentgateway.enabled=true --set muster.podDisruptionBudget.enabled=false --set kagent.controller.pdb.enabled=false --set klausGateway.podDisruptionBudget.enabled=false --set valkey.podDisruptionBudget.enabled=false --set substrate.ateController.busyWorker.annotations=null --set 'muster.podAnnotations.karpenter\.sh/do-not-disrupt=null' --set 'valkey.valkey.podAnnotations.karpenter\.sh/do-not-disrupt=null' >$(VERIFY_TMP)/vd-meta-off.out 2>&1 || { cat $(VERIFY_TMP)/vd-meta-off.out; exit 1; }
 	@python3 tests/verify-disruption.py --off $(VERIFY_TMP)/vd-meta-off.out
 	@echo "--> meta chart: scheduling.singletons (#439) reaches the four singletons as their charts' nodeSelector / tolerations — merged under a component's own keys (muster keeps its spot + zone selector, the kagent controller its own toleration first) — and never the connectivity release"
 	@$(HELM) template t $(CHART_DIR) $(VM) --set components.kagent.enabled=true --set components.klaus-gateway.enabled=true --set components.agent-manager.enabled=true --set components.agentgateway.enabled=true --set 'scheduling.singletons.nodeSelector.karpenter\.sh/capacity-type=on-demand' --set 'scheduling.singletons.tolerations[0].key=dedicated' --set 'scheduling.singletons.tolerations[0].operator=Equal' --set 'scheduling.singletons.tolerations[0].value=singletons' --set 'scheduling.singletons.tolerations[0].effect=NoSchedule' --set 'muster.nodeSelector.karpenter\.sh/capacity-type=spot' --set 'muster.nodeSelector.topology\.kubernetes\.io/zone=eu-central-1a' --set 'kagent.controller.tolerations[0].key=own' --set 'kagent.controller.tolerations[0].operator=Exists' >$(VERIFY_TMP)/vd-meta-place.out 2>&1 || { cat $(VERIFY_TMP)/vd-meta-place.out; exit 1; }
@@ -2533,6 +2555,7 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@echo "ok: identity rendered"
 	@echo "--> kagent off: neither object, and no kagent Namespace either"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=false >$(VERIFY_TMP)/vid-off.out 2>&1 || { cat $(VERIFY_TMP)/vid-off.out; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vid-off.out "$(TENANT_RBAC_ALL)"
 	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' $(VERIFY_TMP)/vid-off.out; then echo "FAIL: the identity renders with kagent off"; exit 1; else echo "ok: no identity without kagent"; fi
 	@if grep -q '^kind: Namespace$$' $(VERIFY_TMP)/vid-off.out; then echo "FAIL: the kagent Namespace renders with kagent off (an empty Helm-owned namespace)"; exit 1; else echo "ok: no kagent Namespace without kagent"; fi
 	@grep -q '^kind: Namespace$$' $(VERIFY_TMP)/vid-on.out || { echo "FAIL: the kagent Namespace is gone with kagent on"; exit 1; }
@@ -2582,6 +2605,7 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@echo "ok: muster MCP URL — one helper, one consumer (agent-manager muster.url; the portal sends none)"
 	@echo "--> empty value: no identity, agent-manager omits the ServiceAccount"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName= >$(VERIFY_TMP)/vid-empty.out 2>&1 || { cat $(VERIFY_TMP)/vid-empty.out; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vid-empty.out "$(TENANT_RBAC_ALL)"
 	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' $(VERIFY_TMP)/vid-empty.out; then echo "FAIL: an empty kagent.fluxServiceAccountName still renders the identity"; exit 1; fi
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.fluxServiceAccountName= >$(VERIFY_TMP)/vid-meta-empty.out 2>&1 || { cat $(VERIFY_TMP)/vid-meta-empty.out; exit 1; }
 	@grep -q 'helmReleaseServiceAccount: ""' $(VERIFY_TMP)/vid-meta-empty.out || { echo "FAIL: an empty value does not reach agent-manager as an empty ServiceAccount"; exit 1; }
@@ -3389,7 +3413,7 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@echo "====> $@"
 	@echo "--> off by default: no Crossplane object of the store in the substrate render, nothing derived"
 	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml >$(VERIFY_TMP)/vss-off.out 2>&1 || { cat $(VERIFY_TMP)/vss-off.out; exit 1; }
-	@if grep -qE '^  name: giantswarm-ci-substrate$$|agent-platform-substrate' $(VERIFY_TMP)/vss-off.out; then echo "FAIL: the snapshot store renders with the block off"; exit 1; fi
+	@python3 tests/verify-substrate-store-objects.py $(VERIFY_TMP)/vss-off.out || { echo "FAIL: the snapshot store renders with the block off"; exit 1; }
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) >$(VERIFY_TMP)/vss-meta-off.out 2>&1 || { cat $(VERIFY_TMP)/vss-meta-off.out; exit 1; }
 	@grep -q 'snapshotLocation: s3://ci-agent-snapshots/agents' $(VERIFY_TMP)/vss-meta-off.out || { echo "FAIL: the explicit snapshotLocation does not reach the kagent release with the store off"; exit 1; }
 	@if grep -q 'eks.amazonaws.com/role-arn' $(VERIFY_TMP)/vss-meta-off.out; then echo "FAIL: a role annotation is derived with the store off"; exit 1; fi
@@ -3670,6 +3694,7 @@ verify-identity-migration: ## Assert the migration holds no cluster-scoped right
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> migration on: no ClusterRole, no ClusterRoleBinding"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vim-on.out 2>&1 || { cat $(VERIFY_TMP)/vim-on.out; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-on.out "$(TENANT_RBAC)"
 	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: a cluster-scoped RBAC object renders with the migration on"; grep -n -A3 -E '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; exit 1; fi
 	@if grep -q 'customresourcedefinitions' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: the migration is granted rights on customresourcedefinitions"; exit 1; fi
 	@echo "ok: nothing cluster-scoped"
@@ -3680,8 +3705,10 @@ verify-identity-migration: ## Assert the migration holds no cluster-scoped right
 	@echo "ok: renamed identity"
 	@echo "--> off: no ClusterRoleBinding with the migration off, with agent-manager off (verify-identity's own kagent-only case), with kagent off"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.enabled=false >$(VERIFY_TMP)/vim-off.out 2>&1 || { cat $(VERIFY_TMP)/vim-off.out; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-off.out "$(TENANT_RBAC)"
 	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-off.out; then echo "FAIL: a cluster-scoped object renders with the migration off"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) >$(VERIFY_TMP)/vim-noam.out 2>&1 || { cat $(VERIFY_TMP)/vim-noam.out; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-noam.out "$(TENANT_RBAC)"
 	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-noam.out; then echo "FAIL: a cluster-scoped object renders with agent-manager off"; exit 1; fi
 	@echo "ok: none while off"
 	@echo "ok: $@"
@@ -3711,7 +3738,7 @@ verify-workspace-grant-key: ## Assert the workspace grant signing key (giantswar
 	@echo "workspace grant signing key verified."
 
 .PHONY: verify-workspace-session-admission
-verify-workspace-session-admission: ## Assert kagent's jwt Session admission follows the workspaces switch (giantswarm/agent-platform#890): with workspaces.enabled and a grant signing key (the installation's own reference, or the connectivity release's with providers and oauth.enabled) the kagent release carries controller.session.admission.jwt — jwksURL the workspace-manager's key set through its Service in-cluster (http://<workspace-manager.fullnameOverride>.<platform namespace>.svc:<workspace-manager.service.port>/.well-known/jwks.json, following fullnameOverride, service.port, gitops.targetNamespace and components.workspace-manager.targetNamespace), issuer the manager's resolved base URL (workspace-manager.oauth.baseURL, else https://workspace-manager.<global.domain>) and audience workspace-manager.grant.audience (kagent) —, a value the kagent block sets for one of the three stands and the rest is derived, no null anywhere in the release's values, NOTES prints the admission, and the kagent chart at the range's floor renders the three KAGENT_SESSION_ADMISSION_JWT_* entries of the controller ConfigMap from the forwarded block; nothing with the switch off, without a grant key (no providers, oauth off, grantKey.create false) or with kagent off, and an own block then reaches the release as written; the guards name the key: a kagent range whose floor is below 1.6.0 (agent-platform.kagent.sessionAdmissionFloor; a release candidate of 1.6.0 passes), no issuer, a userIdClaim other than email, an own block set in part without the derivation. Network: gsoci.azurecr.io (the kagent chart at the floor). HELM selects the binary.
+verify-workspace-session-admission: ## Assert kagent's jwt Session admission follows the workspaces switch (giantswarm/agent-platform#890): with workspaces.enabled and a grant signing key (the installation's own reference, or the connectivity release's with providers and oauth.enabled) the kagent release carries controller.session.admission.jwt — jwksURL the workspace-manager's key set through its Service in-cluster (http://<workspace-manager.fullnameOverride>.<platform namespace>.svc:<workspace-manager.service.port>/.well-known/jwks.json, following fullnameOverride, service.port, gitops.targetNamespace and components.workspace-manager.targetNamespace), issuer the manager's resolved base URL (workspace-manager.oauth.baseURL, else https://workspace-manager.<global.domain>) and audience workspace-manager.grant.audience (kagent), allowHTTP true with that key set (giantswarm/agent-platform#1003) —, a value the kagent block sets for one of the three stands and the rest is derived, an own allowHTTP stands and an own jwksURL other than the derived one carries no derived allowHTTP, no null anywhere in the release's values, NOTES prints the admission, and the kagent chart at the range's floor renders the three KAGENT_SESSION_ADMISSION_JWT_* entries of the controller ConfigMap from the forwarded block and the kagent chart 1.11.5-rc.1 KAGENT_SESSION_ADMISSION_JWT_ALLOW_HTTP "true"; nothing with the switch off, without a grant key (no providers, oauth off, grantKey.create false) or with kagent off, and an own block then reaches the release as written; the guards name the key: a kagent range whose floor is below 1.6.0 (agent-platform.kagent.sessionAdmissionFloor; a release candidate of 1.6.0 passes), no issuer, a userIdClaim other than email, an own block set in part without the derivation. Network: gsoci.azurecr.io (the kagent chart at the floor). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-workspace-session-admission.py $(CHART_DIR)
 	@echo "kagent's Session admission verified."
@@ -3808,6 +3835,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 		[ "$$(grep -c 'verbs: \["get", "list"\]' $(VERIFY_TMP)/vmig-role-$$ns.out)" = "2" ] || { echo "FAIL: the Role in $$ns grants more than get, list"; exit 1; }; \
 		$(PICK) $(VERIFY_TMP)/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: kagent-flux' || { echo "FAIL: the RoleBinding in $$ns does not bind the tenant identity"; exit 1; }; \
 	done
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vmig-gitops.out "$(TENANT_RBAC)"
 	@if grep -q '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vmig-gitops.out; then echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; fi
 	@$(PICK) $(VERIFY_TMP)/vmig-gitops.out CronJob $(MIGRATION_JOB) kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
 	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-role-flux-giantswarm.out; then echo "FAIL: the GitOps-namespace Role is a hook resource"; exit 1; fi
@@ -4312,6 +4340,13 @@ verify-kagent-oauth2-proxy-image: ## Assert kagent's oauth2-proxy runs the gsoci
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-oauth2-proxy-image.py $(CHART_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-tenant-rbac
+verify-tenant-rbac: ## Assert the RBAC of agent tenants (giantswarm/agent-platform#706): with kagent on, the three ClusterRoles agent-platform:user, :editor and :admin nest, the user writes nothing, the editor writes what agent-manager writes as the caller, the admin writes ModelConfigs and RoleBindings and binds the three roles only, none escalates; the platform tenant's RoleBindings in the kagent namespace (tenants.platform.users, tenants.platform.editors plus tenants.platformTeam; none for an empty list; none with kagent off); muster's MCPServers listed to tenants.platform.users in the release namespace; the meta chart appends tenants.platformTeam to muster's editor subjects. Needs PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-tenant-rbac.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-login-public-paths

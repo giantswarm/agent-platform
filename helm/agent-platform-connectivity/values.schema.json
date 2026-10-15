@@ -1971,6 +1971,96 @@
             "type": "object",
             "additionalProperties": true
         },
+        "tenants": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "platform": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "editors": {
+                            "type": "array",
+                            "description": "The platform's operators: agent-platform:editor in the kagent namespace.",
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "kind",
+                                    "name"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "apiGroup": {
+                                        "type": "string"
+                                    },
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "namespace": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        },
+                        "users": {
+                            "type": "array",
+                            "description": "Every signed-in person: agent-platform:user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC \"everyone\" group instead.",
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "kind",
+                                    "name"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "apiGroup": {
+                                        "type": "string"
+                                    },
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "namespace": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "platformTeam": {
+                    "type": "array",
+                    "description": "The customer's platform team: agent-platform:editor in the kagent namespace beside platform.editors (the meta chart also adds it to muster's editor bindings).",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "kind",
+                            "name"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "apiGroup": {
+                                "type": "string"
+                            },
+                            "kind": {
+                                "type": "string"
+                            },
+                            "name": {
+                                "type": "string"
+                            },
+                            "namespace": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "valkey": {
             "type": "object",
             "additionalProperties": true

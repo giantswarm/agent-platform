@@ -333,7 +333,7 @@ spec:
   serviceAccountName: agent-platform-flux
   chartRef:
     kind: OCIRepository
-    name: agent-platform-connectivity
+    name: agent-platform-connectivity-1.1.35
     namespace: default
   install:
     createNamespace: true
@@ -460,7 +460,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.3.5
+          tag: 2.3.6
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -491,7 +491,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.3.5
+          tag: 2.3.6
       resources:
         limits:
           cpu: 500m
@@ -827,6 +827,7 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
+        sessionIdleTTL: 336h
         substrate:
           ateApiEndpoint: dns:///api.ate-system.svc:443
           atenetRouterURL: http://atenet-router.ate-system.svc:80
@@ -1050,6 +1051,10 @@ spec:
           maxUnavailable: 1
           minAvailable: null
           unhealthyPodEvictionPolicy: AlwaysAllow
+        priorityClass:
+          enabled: true
+          name: agent-platform-worker-pool
+          value: 1000000
         replicas: 4
         sandboxClass: gvisor
         template:
@@ -1540,6 +1545,10 @@ spec:
         extensionImage:
           reference: ""
     substrate:
+      ateController:
+        busyWorker:
+          annotations:
+            karpenter.sh/do-not-disrupt: "true"
       atelet:
         affinity: {}
         extraEnv: []
@@ -1547,7 +1556,7 @@ spec:
           pinnedImages: []
         nodeSelector: {}
         priorityClass:
-          preemptionPolicy: Never
+          preemptionPolicy: PreemptLowerPriority
         resources:
           limits:
             cpu: "2"
@@ -1606,6 +1615,20 @@ spec:
       rustfs:
         enabled: false
     substrate-crds: {}
+    tenants:
+      platform:
+        editors:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
+        users:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: system:authenticated
+      platformTeam: []
     valkey:
       ciliumNetworkPolicy:
         enabled: false
@@ -1718,7 +1741,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.3.5
+        tag: 2.3.6
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1771,7 +1794,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.3.5
+        tag: 2.3.6
     resources:
       limits:
         cpu: 500m
@@ -2233,7 +2256,7 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
-  name: agent-platform-connectivity
+  name: agent-platform-connectivity-1.1.35
   namespace: default
   labels:
     app: "agent-platform"

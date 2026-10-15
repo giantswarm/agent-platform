@@ -119,7 +119,7 @@ spec:
   targetNamespace: default
   chartRef:
     kind: OCIRepository
-    name: agent-platform-connectivity
+    name: agent-platform-connectivity-1.1.35
     namespace: default
   install:
     createNamespace: true
@@ -248,7 +248,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.3.5
+          tag: 2.3.6
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -279,7 +279,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.3.5
+          tag: 2.3.6
       resources:
         limits:
           cpu: 500m
@@ -615,6 +615,7 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
+        sessionIdleTTL: 336h
         substrate:
           ateApiEndpoint: dns:///api.ate-system.svc:443
           atenetRouterURL: http://atenet-router.ate-system.svc:80
@@ -839,6 +840,10 @@ spec:
           maxUnavailable: 1
           minAvailable: null
           unhealthyPodEvictionPolicy: AlwaysAllow
+        priorityClass:
+          enabled: true
+          name: agent-platform-worker-pool
+          value: 1000000
         replicas: 4
         sandboxClass: gvisor
         template:
@@ -1329,6 +1334,10 @@ spec:
         extensionImage:
           reference: ""
     substrate:
+      ateController:
+        busyWorker:
+          annotations:
+            karpenter.sh/do-not-disrupt: "true"
       atelet:
         affinity: {}
         extraEnv: []
@@ -1336,7 +1345,7 @@ spec:
           pinnedImages: []
         nodeSelector: {}
         priorityClass:
-          preemptionPolicy: Never
+          preemptionPolicy: PreemptLowerPriority
         resources:
           limits:
             cpu: "2"
@@ -1395,6 +1404,20 @@ spec:
       rustfs:
         enabled: false
     substrate-crds: {}
+    tenants:
+      platform:
+        editors:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
+        users:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: system:authenticated
+      platformTeam: []
     valkey:
       ciliumNetworkPolicy:
         enabled: false
@@ -1624,7 +1647,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.3.5
+        tag: 2.3.6
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1677,7 +1700,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.3.5
+        tag: 2.3.6
     resources:
       limits:
         cpu: 500m
@@ -1799,6 +1822,7 @@ spec:
         requests:
           cpu: 100m
           memory: 128Mi
+      sessionIdleTTL: 336h
       substrate:
         ateApiEndpoint: dns:///api.ate-system.svc:443
         atenetRouterURL: http://atenet-router.ate-system.svc:80
@@ -1961,6 +1985,7 @@ spec:
               - ate-system
               topologyKey: kubernetes.io/hostname
             weight: 100
+        priorityClassName: agent-platform-worker-pool
         resources:
           limits:
             cpu: "2"
@@ -1968,7 +1993,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.9.0
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.11.3
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -2392,12 +2417,16 @@ spec:
       optional: true
       valuesKey: substrate-values.yaml
   values:
+    ateController:
+      busyWorker:
+        annotations:
+          karpenter.sh/do-not-disrupt: "true"
     atelet:
       affinity: {}
       extraEnv: []
       nodeSelector: {}
       priorityClass:
-        preemptionPolicy: Never
+        preemptionPolicy: PreemptLowerPriority
       resources:
         limits:
           cpu: "2"
@@ -2721,7 +2750,7 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
-  name: agent-platform-connectivity
+  name: agent-platform-connectivity-1.1.35
   namespace: default
   labels:
     app: "agent-platform"
@@ -2853,8 +2882,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.11.3-rc.2 <1.12.0-0"
-    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
+    semver: ">=1.11.4 <1.12.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2877,8 +2905,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.11.3-rc.2 <1.12.0-0"
-    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
+    semver: ">=1.11.4 <1.12.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2970,7 +2997,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.9.0 <1.10.0"
+    semver: ">=1.11.3 <1.12.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2993,7 +3020,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.9.0 <1.10.0"
+    semver: ">=1.11.3 <1.12.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

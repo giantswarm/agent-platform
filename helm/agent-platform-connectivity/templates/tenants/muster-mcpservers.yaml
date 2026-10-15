@@ -1,0 +1,38 @@
+{{- /*
+muster's MCPServers are the servers for everyone (giantswarm/agent-platform#706;
+the agent-permissions plan, D9): every signed-in person (tenants.platform.users)
+may list them in muster's namespace, so none disappears once muster lists
+servers as the caller (giantswarm/muster#1494). Reading only: who writes them
+is muster's mcpserver-editor binding, which the meta chart extends with
+tenants.platformTeam.
+*/ -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
+{{- with include "agent-platform.tenants.subjects" (list .Values.tenants.platform.users) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-platform:mcpserver-viewer
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+rules:
+  - apiGroups: ["muster.giantswarm.io"]
+    resources: ["mcpservers"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-platform:mcpserver-viewer
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-platform:mcpserver-viewer
+subjects:
+  {{- . | nindent 2 }}
+{{- end }}
+{{- end }}

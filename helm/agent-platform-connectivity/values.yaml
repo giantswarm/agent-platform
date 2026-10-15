@@ -1371,8 +1371,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # the kagent namespace, named after the pool and selecting
     # `ate.dev/worker-pool: <name>` — the label Substrate's ate-controller puts
     # on every worker pod (giantswarm/agent-platform#472, the #439 pattern; the
-    # kagent chart has no budget template). One worker hosts one actor at a
-    # time: with maxUnavailable: 1 a voluntary drain (Karpenter consolidation,
+    # kagent chart has no budget template). A worker hosts many actors (ateom's
+    # --max-actors, default 1000): with maxUnavailable: 1 a voluntary drain (Karpenter consolidation,
     # a node roll) moves one worker at a time instead of the whole pool;
     # AlwaysAllow keeps a worker that is not Ready evictable. Exactly one of
     # minAvailable / maxUnavailable (int or percentage); the render refuses
@@ -1385,6 +1385,22 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       minAvailable: null
       maxUnavailable: 1
       unhealthyPodEvictionPolicy: AlwaysAllow
+    # The PriorityClass the pool's worker pods run at, rendered by this chart
+    # (cluster-scoped; giantswarm/agent-platform#999); the meta chart names it
+    # in the pool's template.priorityClassName unless an installation names
+    # its own. value: above the default priority 0, so a pod making room on a
+    # full node (atelet, ate-node-critical, PreemptLowerPriority) evicts the
+    # ordinary workloads before a worker, and below the cluster's own classes
+    # (monitoring, the platform's, atelet's 1000000000); the render refuses
+    # anything outside 1..999999999. preemptionPolicy Never and globalDefault
+    # false are the chart's. value is immutable on the API: change it under a
+    # new name. enabled: false renders none, and the meta chart then names
+    # none: the workers run at priority 0. Inert while
+    # components.kagent.enabled is false.
+    priorityClass:
+      enabled: true
+      name: agent-platform-worker-pool
+      value: 1000000
 
   # Keep kagent core resources in a dedicated namespace separate from the
   # umbrella release namespace. NOTE: the bundled agent subcharts each need
@@ -2299,12 +2315,12 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.3.5"
+      tag: "2.3.6"
   proxy:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.3.5"
+      tag: "2.3.6"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -3005,6 +3021,39 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
       cidrs: []
 
+# === Agent tenants (giantswarm/agent-platform#706) ===
+# The RBAC of agent tenants: with kagent on, the three ClusterRoles
+# agent-platform:user, agent-platform:editor and agent-platform:admin
+# (templates/tenants/clusterroles.yaml) and the platform tenant's
+# RoleBindings in the kagent namespace; muster's MCPServers listed to every
+# signed-in person in muster's namespace. The meta chart's copy of this block
+# documents every key and forwards it.
+tenants:
+  platform:
+    # -- Every signed-in person: agent-platform:user in the kagent namespace,
+    # list (get, watch) on muster's MCPServers in muster's namespace. The
+    # default, system:authenticated, includes every ServiceAccount: every pod
+    # with a token can read the platform tenant's Agents, RemoteMCPServer URLs
+    # and muster's MCPServer specs. An installation can set its OIDC
+    # "everyone" group instead.
+    users:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: system:authenticated
+    # -- The platform's operators: agent-platform:editor in the kagent
+    # namespace.
+    editors:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: giantswarm-ad:giantswarm-admins
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: giantswarm-github:giantswarm:giantswarm-admins
+  # -- The customer's platform team: agent-platform:editor in the kagent
+  # namespace beside platform.editors (the meta chart also adds it to muster's
+  # editor bindings).
+  platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories
 # mirrored on one shared read-write-many volume in the kagent namespace, a
@@ -3165,6 +3214,13 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       auth:
         forwardToken: true
+        # The cross-client audience a portal session's id_token carries (the
+        # kube-apiserver's, like the other managers'): muster requests it at
+        # login and the chart trusts it next to oauth.trustedAudiences, so a
+        # forwarded portal token is accepted. Users sign in once more after
+        # it changes.
+        requiredAudiences:
+          - dex-k8s-authenticator
   # The sign-in keys Secret (workspaceManager.signinKeys creates it): its name
   # and the id of the key that seals.
   signin:

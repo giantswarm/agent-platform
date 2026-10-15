@@ -1,4 +1,23 @@
 ---
+# Source: agent-platform-connectivity/templates/kagent/workerpool-priorityclass.yaml
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: agent-platform-worker-pool
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: substrate-worker-pool
+value: 1000000
+globalDefault: false
+preemptionPolicy: Never
+description: "The worker pods of the Substrate WorkerPool kagent's actors run on (kagent.substrateWorkerPool.priorityClass): above the default priority 0, so a pod that makes room on a full node evicts the ordinary workloads before a worker, and below the cluster's own classes. Shipped by the agent-platform connectivity chart with the kagent component."
+---
 # Source: agent-platform-connectivity/templates/namespace.yaml
 # The kagent namespace, adopted where the cluster created it (a management
 # cluster's bases, the bundled engine's kagent HelmRelease with
@@ -13034,6 +13053,121 @@ rules:
   - patch
   - update
 ---
+# Source: agent-platform-connectivity/templates/tenants/clusterroles.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:user
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+rules:
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["muster.giantswarm.io"]
+    resources: ["mcpservers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["sessions"]
+    verbs: ["create"]
+---
+# Source: agent-platform-connectivity/templates/tenants/clusterroles.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:editor
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+rules:
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["muster.giantswarm.io"]
+    resources: ["mcpservers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["sessions"]
+    verbs: ["create"]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["ocirepositories"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "agenttemplates", "remotemcpservers"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["harnesses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+---
+# Source: agent-platform-connectivity/templates/tenants/clusterroles.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:admin
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+rules:
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["muster.giantswarm.io"]
+    resources: ["mcpservers"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["sessions"]
+    verbs: ["create"]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["ocirepositories"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "agenttemplates", "remotemcpservers"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["harnesses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["modelconfigs"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # The admin binds members to the three roles and nothing else: the API
+  # server refuses a RoleBinding to any other role whose rights the admin does
+  # not hold.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
+---
 # Source: agent-platform-connectivity/templates/agentgateway/clusterrole-listenerset.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -13055,6 +13189,25 @@ subjects:
 - kind: ServiceAccount
   name: agentgateway-controller
   namespace: default
+---
+# Source: agent-platform-connectivity/templates/tenants/muster-mcpservers.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-platform:mcpserver-viewer
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+rules:
+  - apiGroups: ["muster.giantswarm.io"]
+    resources: ["mcpservers"]
+    verbs: ["get", "list", "watch"]
 ---
 # Source: agent-platform-connectivity/templates/kagent/flux-service-account.yaml
 # Namespace-scoped admin: a RoleBinding to the built-in cluster-admin ClusterRole
@@ -13085,6 +13238,78 @@ subjects:
     name: kagent-flux
     namespace: kagent
 ---
+# Source: agent-platform-connectivity/templates/tenants/muster-mcpservers.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-platform:mcpserver-viewer
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-platform:mcpserver-viewer
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: system:authenticated
+---
+# Source: agent-platform-connectivity/templates/tenants/platform-tenant.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-platform:user
+  namespace: kagent
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-platform:user
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: system:authenticated
+---
+# Source: agent-platform-connectivity/templates/tenants/platform-tenant.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-platform:editor
+  namespace: kagent
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-platform:editor
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: giantswarm-ad:giantswarm-admins
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: giantswarm-github:giantswarm:giantswarm-admins
+---
 # Source: agent-platform-connectivity/templates/agentgateway/agentgatewayparameters.yaml
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayParameters
@@ -13103,7 +13328,7 @@ spec:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/agentgateway-upstream/agentgateway
-    tag: 2.3.5
+    tag: 2.3.6
   service:
     spec:
       type: ClusterIP

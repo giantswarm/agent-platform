@@ -83,7 +83,7 @@ CONNECTIVITY = "agent-platform-connectivity"
 # 0.x from 0.20.0, dual-version), klaus-gateway 2.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=1.11.3-rc.2 <1.12.0-0"
+KAGENT_RANGE = ">=1.11.4 <1.12.0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin,
 # both landing in ate-system, both following components.kagent. The pin is the
@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=1.11.3-rc.2 <1.12.0-0"
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=1.9.0 <1.10.0"
-SUBSTRATE_PIN = "1.9.0"  # the range's floor, the BOM pin and the worker image's tag: the release that retries a golden take or a session resume a rolling worker pool interrupts (a draining worker, an atelet without an IP, a missing ateom socket, a cancelled wakeup probe) and clears a recorded terminal golden error of such a cause on start (giantswarm/substrate#292, #294, #297); before it 1.8.1, the release that converts a 1.7-layout durable snapshot on its first restore and re-takes a golden written in the old layout (giantswarm/substrate#277, #282), so the step from 1.7 needs no snapshot reset (1.8.0 refuses a 1.7 restore); before it 1.7.0, the release kagent 1.6 is built against, with an existing volume mounted per actor at a sub-path; before it the line on kagent-dev/substrate v0.4.0-alpha1 (giantswarm/substrate#210, the 2026-10-08 re-pin) with the sandbox resolver fix in the worker (giantswarm/substrate#216) and the sandbox's pause image as a value, defaulting to its gsoci copy (giantswarm/substrate#224); the 1.0 and 1.3 lines stay on release-1.0 and release-1.3
+SUBSTRATE_RANGE = ">=1.11.3 <1.12.0"
+SUBSTRATE_PIN = "1.11.3"  # the range's floor, the BOM pin and the worker image's tag: the release that marks a crashed actor's resume refusal not resumable, whose ateom-gvisor reports a running actor's sandbox exit and whose atelet terminates an actor whose restore failed, and the floor at or above the Substrate kagent 1.11.6 is built against (1.11.1); before it 1.11.0, the release whose egress gateway mints and injects actor JWTs (an actor_jwt entry of replace_headers, giantswarm/substrate#421) on agentgateway 2.4.0, and whose ate-controller can mark the worker pods that host actors (giantswarm/substrate#425)
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
@@ -401,12 +401,12 @@ def main(meta: str, connectivity: str) -> int:
     if pinned_images(["--set", f"substrate.atelet.imageCache.pinnedImages[0]={extra}"]) != [extra]:
         fail("an installation's own substrate.atelet.imageCache.pinnedImages is not forwarded verbatim")
     print("ok: the substrate release pins atelet's runtime images from the kagent release's ConfigMap, an installation's own list only when set")
-    # --- atelet never evicts the cluster's workloads (#731) --------------------------
-    if not re.search(r"^atelet:\n(?:  .*\n)*?  priorityClass:\n    preemptionPolicy: Never$", hr_values(substrate_hr), re.M):
-        fail("the substrate release does not carry atelet.priorityClass.preemptionPolicy: Never; atelet's PriorityClass preempts lower-priority pods and a first enable over full nodes evicts the cluster's own workloads (#731)")
+    # --- atelet gets its node back (#993) ------------------------------------------
+    if not re.search(r"^atelet:\n(?:  .*\n)*?  priorityClass:\n    preemptionPolicy: PreemptLowerPriority$", hr_values(substrate_hr), re.M):
+        fail("the substrate release does not carry atelet.priorityClass.preemptionPolicy: PreemptLowerPriority; under Never an atelet whose node another pod filled stays Pending for good and the node places no actor (#993)")
     if not re.search(r"^atelet:\n(?:  .*\n)*?  resources:\n(?:    .*\n)*?    requests:\n      cpu: 50m\n      memory: 128Mi$", hr_values(substrate_hr), re.M):
-        fail("the substrate release does not carry atelet.resources.requests {cpu: 50m, memory: 128Mi}; under preemptionPolicy Never a larger request leaves atelet Pending for good on a full node after a roll (#993)")
-    print("ok: the substrate release runs atelet on a non-preempting PriorityClass")
+        fail("the substrate release does not carry atelet.resources.requests {cpu: 50m, memory: 128Mi}; a larger request evicts a pod on every full node at the roll (#993)")
+    print("ok: the substrate release runs atelet on a PriorityClass that preempts lower-priority pods, at 50m / 128Mi")
 
     # --- the wiring chart is released with the meta chart: one version --------------
     # The OCIRepository carries the meta chart's own exact version, never a range
@@ -416,9 +416,16 @@ def main(meta: str, connectivity: str) -> int:
     chart_version = lambda d: re.search(r"^version: (\S+)$", open(f"{d}/Chart.yaml").read(), re.M).group(1).strip("'\"")
     if chart_version(meta) != chart_version(connectivity):
         fail(f"the two charts of this repository carry different Chart.yaml versions: agent-platform {chart_version(meta)}, {CONNECTIVITY} {chart_version(connectivity)} — they are published off one tag as one version")
-    conn_oci = off.get(("OCIRepository", CONNECTIVITY))
+    conn_oci = off.get(("OCIRepository", f"{CONNECTIVITY}-{chart_version(meta)}"))
     if not conn_oci or f'semver: "{chart_version(meta)}"' not in conn_oci:
-        fail(f"the connectivity OCIRepository does not carry the meta chart's own version {chart_version(meta)!r} (components.{CONNECTIVITY}.releasedWithChart)")
+        fail(f"the connectivity OCIRepository {CONNECTIVITY}-{chart_version(meta)} does not carry the meta chart's own version {chart_version(meta)!r} (components.{CONNECTIVITY}.releasedWithChart, agent-platform.sourceName)")
+    # The step's values and its chart version change in ONE HelmRelease spec
+    # change: Helm applies the HelmRelease before the OCIRepository (kind order),
+    # so with one source name for every version helm-controller applied a step's
+    # new values to the previous chart, whose closed schema refused the key the
+    # step added (#1019). The chartRef names the source of exactly this version.
+    if f"chartRef:\n    kind: OCIRepository\n    name: {CONNECTIVITY}-{chart_version(meta)}\n" not in off[("HelmRelease", CONNECTIVITY)]:
+        fail(f"the connectivity HelmRelease's chartRef does not name the OCIRepository of its exact version {CONNECTIVITY}-{chart_version(meta)}; new values would reach the previous chart (#1019)")
     # A published build: a pre-release stays (a dev build is one version for the two
     # charts), build metadata goes (helm-controller renders <version>+<oci digest>).
     with tempfile.TemporaryDirectory() as d:
@@ -426,19 +433,23 @@ def main(meta: str, connectivity: str) -> int:
         if r.returncode != 0:
             fail(f"helm package of the meta chart failed:\n{r.stderr}")
         packaged = docs(render(f"{d}/agent-platform-4.99.0-test.1+abc123.tgz", ci))
-        if 'semver: "4.99.0-test.1"' not in packaged[("OCIRepository", CONNECTIVITY)]:
-            fail("the connectivity OCIRepository of a chart packaged as 4.99.0-test.1+abc123 does not carry 4.99.0-test.1 (pre-release kept, build metadata dropped)")
+        if 'semver: "4.99.0-test.1"' not in packaged.get(("OCIRepository", f"{CONNECTIVITY}-4.99.0-test.1"), ""):
+            fail("the connectivity OCIRepository of a chart packaged as 4.99.0-test.1+abc123 is not named for and does not carry 4.99.0-test.1 (pre-release kept, build metadata dropped)")
+        if f"name: {CONNECTIVITY}-4.99.0-test.1\n" not in packaged[("HelmRelease", CONNECTIVITY)]:
+            fail("the connectivity HelmRelease of a chart packaged as 4.99.0-test.1+abc123 does not name the OCIRepository of 4.99.0-test.1")
+        if ("OCIRepository", f"{CONNECTIVITY}-{chart_version(meta)}") in packaged:
+            fail("a chart packaged at another version still renders the previous version's connectivity OCIRepository; the step would apply new values to it")
         if 'semver: ">=4.99.0-test.1 <5.0.0"' not in docs(render(f"{d}/agent-platform-4.99.0-test.1+abc123.tgz", ["--set", "gitops.self.enabled=true"]))[("OCIRepository", "t")]:
             fail("the self OCIRepository's derived range no longer floors at the chart's own version (agent-platform.chartVersion)")
     # A pin at the chart's own repository is the lagging pin; refused. The two
     # development shapes keep their knobs.
     pin = ["--set", f"components.{CONNECTIVITY}.versionRange=4.11.0"]
     render_fails(meta, [*ci, *pin], "released with this chart", "a versionRange on the connectivity component")
-    if 'semver: "4.11.0"' not in docs(render(meta, [*ci, *pin, "--set", f"components.{CONNECTIVITY}.semverFilter=.*-dev\\.x\\..*"]))[("OCIRepository", CONNECTIVITY)]:
+    if 'semver: "4.11.0"' not in docs(render(meta, [*ci, *pin, "--set", f"components.{CONNECTIVITY}.semverFilter=.*-dev\\.x\\..*"]))[("OCIRepository", f"{CONNECTIVITY}-4.11.0")]:
         fail("a connectivity versionRange together with a semverFilter (a dev channel) is not admitted")
-    if 'semver: "4.11.0"' not in docs(render(meta, [*ci, *pin, "--set", f"components.{CONNECTIVITY}.repository=oci://registry.lab.svc:5000/charts"]))[("OCIRepository", CONNECTIVITY)]:
+    if 'semver: "4.11.0"' not in docs(render(meta, [*ci, *pin, "--set", f"components.{CONNECTIVITY}.repository=oci://registry.lab.svc:5000/charts"]))[("OCIRepository", f"{CONNECTIVITY}-4.11.0")]:
         fail("a connectivity versionRange together with another repository (a chart pushed by hand) is not admitted")
-    print(f"ok: the connectivity OCIRepository carries the meta chart's own version ({chart_version(meta)} here; 4.99.0-test.1 for a build packaged as 4.99.0-test.1+abc123), the two Chart.yaml versions are one, a pin at the chart's repository is refused, a dev channel and another repository are admitted")
+    print(f"ok: the connectivity OCIRepository carries the meta chart's own version and is named for it, the HelmRelease's chartRef naming that source ({chart_version(meta)} here; 4.99.0-test.1 for a build packaged as 4.99.0-test.1+abc123), the two Chart.yaml versions are one, a pin at the chart's repository is refused, a dev channel and another repository are admitted")
 
     # --- all on ---------------------------------------------------------------
     on_manifest = render(meta, [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]])
