@@ -893,6 +893,10 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 # between agentgateway releases), so the platform renders exactly one,
 # <release>-metrics, and no other policy of the chart may carry the section.
 METRICS_POLICIES := python3 -c 'import re,sys; docs=open(sys.argv[1]).read().split("\n---\n"); [print(re.search(r"^  name: (\S+)", d, re.M).group(1)) for d in docs if "kind: AgentgatewayPolicy\n" in d and re.search(r"^  frontend:\n(?:.*\n)*?    metrics:", d, re.M)]'
+# The templates of the chart with a frontend.metrics section (a `  frontend:`
+# line followed by a `    metrics:` line), one path per line. grep -A1, not
+# grep -P: BSD grep has no -P.
+METRICS_TEMPLATES := for f in $(CONNECTIVITY_DIR)/templates/*/*.yaml; do if grep -A1 -E '^  frontend:$$' "$$f" | grep -qE '^    metrics:'; then echo "$$f"; fi; done
 # The document of the -metrics policy, from a render.
 METRICS_DOC := awk '/^  name: agent-platform-connectivity-metrics$$/{f=1} f&&/^---/{exit} f'
 # name=expression of every label the -metrics policy adds, parsed: toYaml folds an expression longer than a line across lines, so a grep of the rendered text cannot hold one.
@@ -1004,7 +1008,7 @@ verify-metric-labels: ## Assert the data plane's metric labels: one Gateway-scop
 	@echo "--> with llmRouting on the labels stay on the -metrics policy and the LLM policy carries none; one template of the chart carries a frontend.metrics section"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(LLM_VM) >$(VERIFY_TMP)/vml-llm.out 2>&1 || { cat $(VERIFY_TMP)/vml-llm.out; exit 1; }
 	@[ "$$($(METRICS_POLICIES) $(VERIFY_TMP)/vml-llm.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: with llmRouting on, the policies with a frontend.metrics section are [$$($(METRICS_POLICIES) $(VERIFY_TMP)/vml-llm.out | tr '\n' ' ')], not the metrics policy alone"; exit 1; }
-	@[ "$$(grep -lPz '(?m)^  frontend:\n    metrics:' $(CONNECTIVITY_DIR)/templates/*/*.yaml | wc -l | tr -d ' ')" = "1" ] || { echo "FAIL: more than one template of the chart carries a frontend.metrics section: $$(grep -lPz '(?m)^  frontend:\n    metrics:' $(CONNECTIVITY_DIR)/templates/*/*.yaml | tr '\n' ' '); a second metrics policy is dropped in silence by the data plane"; exit 1; }
+	@[ "$$($(METRICS_TEMPLATES) | wc -l | tr -d ' ')" = "1" ] || { echo "FAIL: more than one template of the chart carries a frontend.metrics section: $$($(METRICS_TEMPLATES) | tr '\n' ' '); a second metrics policy is dropped in silence by the data plane"; exit 1; }
 	@echo "ok: one metrics policy, one template"
 	@echo "--> a name YAML 1.1 reads as a boolean is rendered quoted"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VML_ON) >$(VERIFY_TMP)/vml-quoted.out 2>&1 || { cat $(VERIFY_TMP)/vml-quoted.out; exit 1; }
@@ -1391,8 +1395,12 @@ verify-flux-crds: ## Assert the flux-engine subchart's crds/ are byte for byte t
 	@echo "====> $@ ($(FLUX_ENGINE_DIR))"
 	@HELM="$(HELM)" python3 tests/verify-flux-crds.py $(FLUX_ENGINE_DIR)
 	@echo "--> a deliberately stale CRD in each file fails naming the file and the release"
+	@# The first served: true of each file becomes false: sed's 1,/re/ range ends
+	@# at the first match after line 1, and line 1 of a crds/ file is always its
+	@# generated header comment (tests/verify-flux-crds.py), never served: true.
+	@# One file per sed: BSD sed has no per-file range reset.
 	@stale="$(VERIFY_TMP)/verify-flux-crds-stale"; rm -rf "$$stale" && cp -r $(FLUX_ENGINE_DIR) "$$stale" && \
-	sed -i '0,/served: true/s//served: false/' "$$stale/crds/flux-operator.yaml" "$$stale/crds/flux.yaml" && \
+	for f in "$$stale/crds/flux-operator.yaml" "$$stale/crds/flux.yaml"; do sed -i.bak '1,/served: true/s/served: true/served: false/' "$$f" && rm "$$f.bak" || exit 1; done && \
 	if HELM="$(HELM)" python3 tests/verify-flux-crds.py "$$stale" >"$$stale.out" 2>&1; then cat "$$stale.out"; echo "FAIL: a stale CRD passed"; exit 1; fi; \
 	grep -q "FAIL: $$stale/crds/flux-operator.yaml is not the CRDs of the Flux Operator v" "$$stale.out" && \
 	grep -q "FAIL: $$stale/crds/flux.yaml is not the CRDs of Flux v" "$$stale.out" && \
@@ -3015,7 +3023,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@grep -q -- '--selector=app=backstage' $(VERIFY_TMP)/vw-bs-job.out || { echo "FAIL: the config-reload Job does not select the Backstage Deployment by label (a missing Deployment must be a no-op)"; exit 1; }
 	@grep -qE 'AGENT_PLATFORM_APP_CONFIG_CHECKSUM=[0-9a-f]{64}' $(VERIFY_TMP)/vw-bs-job.out || { echo "FAIL: the config-reload Job carries no app-config checksum"; exit 1; }
 	@echo "--> the checksum covers the app-config data only: a chart-version bump keeps it, an app-config change moves it (#424)"
-	@rm -rf $(VERIFY_TMP)/vw-bs-vbump && cp -r $(CONNECTIVITY_DIR) $(VERIFY_TMP)/vw-bs-vbump && sed -i 's/^version: .*/version: 0.0.0-verify/' $(VERIFY_TMP)/vw-bs-vbump/Chart.yaml
+	@rm -rf $(VERIFY_TMP)/vw-bs-vbump && cp -r $(CONNECTIVITY_DIR) $(VERIFY_TMP)/vw-bs-vbump && sed -i.bak 's/^version: .*/version: 0.0.0-verify/' $(VERIFY_TMP)/vw-bs-vbump/Chart.yaml && rm $(VERIFY_TMP)/vw-bs-vbump/Chart.yaml.bak
 	@$(HELM) template t $(VERIFY_TMP)/vw-bs-vbump $(WIRING_BACKSTAGE_FULL) >$(VERIFY_TMP)/vw-bs-vbump.out 2>&1 || { cat $(VERIFY_TMP)/vw-bs-vbump.out; exit 1; }
 	@grep -q 'helm.sh/chart: "agent-platform-connectivity-0.0.0-verify"' $(VERIFY_TMP)/vw-bs-vbump.out || { echo "FAIL: the version bump did not reach the rendered labels (the assertion below would pass vacuously)"; exit 1; }
 	@base=$$(grep -o 'AGENT_PLATFORM_APP_CONFIG_CHECKSUM=[0-9a-f]*' $(VERIFY_TMP)/vw-bs-job.out); \
@@ -3073,7 +3081,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		grep -q -e "$$pattern" $(VERIFY_TMP)/vw-ms.out || { echo "FAIL: the model serving render lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -qE 'serving\.kserve\.io|ClusterServingRuntime|kind: InferenceService|kserve-controller-manager|spec\.runtime|^      runtimes?:' $(VERIFY_TMP)/vw-ms.out; then echo "FAIL: the serving render carries a classic serving object or key"; grep -nE 'serving\.kserve\.io|ClusterServingRuntime|InferenceService|kserve-controller-manager|runtimes?:' $(VERIFY_TMP)/vw-ms.out | head; exit 1; fi
-	@want=$$(ls $(CONNECTIVITY_DIR)/files/model-serving/presets/*.yaml | wc -l); got=$$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' $(VERIFY_TMP)/vw-ms.out); [ "$$got" = "$$want" ] || { echo "FAIL: expected the $$want shipped presets (one per file), got $$got"; exit 1; }
+	@want=$$(ls $(CONNECTIVITY_DIR)/files/model-serving/presets/*.yaml | wc -l | tr -d ' '); got=$$(grep -c 'agent-platform.giantswarm.io/serving-preset: "true"' $(VERIFY_TMP)/vw-ms.out); [ "$$got" = "$$want" ] || { echo "FAIL: expected the $$want shipped presets (one per file), got $$got"; exit 1; }
 	@if grep -q 'kind: NetworkPolicy' $(VERIFY_TMP)/vw-ms.out; then echo "FAIL: a kubernetes NetworkPolicy rendered under the cilium flavor"; exit 1; fi
 	@if grep -q '^kind: PersistentVolumeClaim' $(VERIFY_TMP)/vw-ms.out; then echo "FAIL: the cache claim rendered as a release resource (Helm's wait would wait for a Bind only the first predictor brings: #483)"; exit 1; fi
 	@echo "ok: model serving fleet shape"
@@ -3542,7 +3550,7 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@if grep -qE 'helm.sh/chart|app.kubernetes.io/version' $(VERIFY_TMP)/vss-capz-podmeta.out; then echo "FAIL: the façade's pod template carries a chart-version label (helm.sh/chart, app.kubernetes.io/version): every release would roll it (#941)"; exit 1; fi
 	@grep -q 'helm.sh/chart' $(VERIFY_TMP)/vss-capz-deploy.out || { echo "FAIL: the façade's Deployment lost helm.sh/chart from its own metadata"; exit 1; }
 	@[ "$$(awk '/^  selector:$$/{s=1;next} s&&/^  [a-z]/{s=0} s' $(VERIFY_TMP)/vss-capz-deploy.out)" = "$$(printf '    matchLabels:\n      app.kubernetes.io/component: snapshot-store\n      app.kubernetes.io/name: s3proxy')" ] || { echo "FAIL: the façade's selector moved (spec.selector is immutable: an upgrade would be refused)"; exit 1; }
-	@rm -rf $(VERIFY_TMP)/vss-bump && cp -r $(CONNECTIVITY_DIR) $(VERIFY_TMP)/vss-bump && sed -i -e 's/^version: .*/version: 99.0.0/' -e 's/^appVersion: .*/appVersion: "99.0.0"/' $(VERIFY_TMP)/vss-bump/Chart.yaml
+	@rm -rf $(VERIFY_TMP)/vss-bump && cp -r $(CONNECTIVITY_DIR) $(VERIFY_TMP)/vss-bump && sed -i.bak -e 's/^version: .*/version: 99.0.0/' -e 's/^appVersion: .*/appVersion: "99.0.0"/' $(VERIFY_TMP)/vss-bump/Chart.yaml && rm $(VERIFY_TMP)/vss-bump/Chart.yaml.bak
 	@$(HELM) template t $(VERIFY_TMP)/vss-bump -f $(SUBSTRATE_STORE_CAPZ_CI) 2>&1 | awk '/^kind: Deployment$$/,/^---/' | awk '/^  template:$$/{t=1} t' >$(VERIFY_TMP)/vss-bump-tpl.out
 	@awk '/^  template:$$/{t=1} t' $(VERIFY_TMP)/vss-capz-deploy.out | diff - $(VERIFY_TMP)/vss-bump-tpl.out || { echo "FAIL: the façade's pod template differs between two chart versions: a release alone would roll it (#941)"; exit 1; }
 	@[ "$$($(HELM) template t $(CONNECTIVITY_DIR) -f $(SUBSTRATE_STORE_CAPZ_CI) --set kagent.harness.snapshotStore.s3proxy.resources.limits.ephemeral-storage=2Gi 2>&1 | awk '/^kind: Deployment$$/,/^---/' | grep -c 'sizeLimit: "2Gi"')" = "2" ] || { echo "FAIL: the emptyDirs' sizeLimit does not follow s3proxy.resources.limits.ephemeral-storage"; exit 1; }
@@ -4402,6 +4410,13 @@ verify-tenant-credentials: ## Assert Substrate's credential provider follows ten
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-tenant-credentials.py $(CHART_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-tenant-reconciler
+verify-tenant-reconciler: ## Assert agent-manager's tenant reconciler follows tenants.organizations.enabled (giantswarm/agent-platform#1044): off, the agent-manager release carries no tenants key and the switch changes nothing else in its values; on, tenants.enabled with the kagent namespace's default ModelConfig and its key Secret, the workers' network policy in the resolved flavor (substrate-workers on cilium, substrate-workers-ingress on kubernetes, none with networkPolicy.enabled off) and 1 warm worker per tenant, the operator's workerPoolReplicas and interval standing; the agent-manager chart of the reconciler's release takes the forwarded values and starts with --multi-tenant; the render refuses, naming the key, agent-manager.tenants.enabled against the switch, a range below the reconciler's release, kagent off, OAuth or downstream OAuth off, no kagent.fluxServiceAccountName, a default provider without apiKeySecretRef and an own tenants value that differs. Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-tenant-reconciler.py $(CHART_DIR)
 	@echo "ok: $@"
 
 .PHONY: prove-tenant-workers
