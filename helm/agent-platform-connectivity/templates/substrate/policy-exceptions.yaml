@@ -37,7 +37,8 @@ renders for a WorkerPool) and holds the lists to them:
 
 With tenants.organizations.enabled the worker pods' exception also matches the
 same workers in every namespace labelled giantswarm.io/organization, by a
-namespaceSelector (agent-platform#1036).
+namespaceSelector, and only when Substrate's controller chain writes them
+(agent-platform#1036; the comment at the entries says why).
 
 Kinds: the Pod and the controller kind of each workload (Kyverno evaluates the
 controller through its autogen rules, then the pod). A selector is matched
@@ -102,15 +103,24 @@ spec:
           - key: ate.dev/worker-pool
             operator: Exists
     {{- if include "agent-platform.tenants.organizations" . }}
-    # The same workers in the Organizations' namespaces
-    # (tenants.organizations.enabled): selected by the namespace's label,
-    # never listed. Kyverno matches an exception's namespaceSelector from
-    # 1.15.2 (kyverno/kyverno#13975).
+    {{- /* The same workers in the Organizations' namespaces
+    (tenants.organizations.enabled): selected by the namespace's label, never
+    listed (Kyverno matches an exception's namespaceSelector from 1.15.2,
+    kyverno/kyverno#13975). An Organization's admins may write pods there, so
+    a matching label is no proof that Substrate made the pod: each kind is
+    excepted only when its writer is the controller chain that makes the
+    workers — ate-controller writes the Deployment (and marks the busy
+    workers' pods), the deployment controller the ReplicaSet (and the
+    Deployment's revision), the ReplicaSet controller the Pods. A Deployment,
+    ReplicaSet or Pod a person writes there with the label is judged like any
+    other. A background scan has no writer, so it reports these workers. */}}
+    {{- $ateController := dict "kind" "ServiceAccount" "name" "ate-controller" "namespace" $ns }}
+    {{- $deploymentController := dict "kind" "ServiceAccount" "name" "deployment-controller" "namespace" "kube-system" }}
+    {{- $replicaSetController := dict "kind" "ServiceAccount" "name" "replicaset-controller" "namespace" "kube-system" }}
+    {{- range $kind, $writers := dict "Deployment" (list $ateController $deploymentController) "ReplicaSet" (list $deploymentController) "Pod" (list $replicaSetController $ateController) }}
     - resources:
         kinds:
-        - Pod
-        - Deployment
-        - ReplicaSet
+        - {{ $kind }}
         namespaceSelector:
           matchExpressions:
           - key: giantswarm.io/organization
@@ -119,6 +129,9 @@ spec:
           matchExpressions:
           - key: ate.dev/worker-pool
             operator: Exists
+      subjects:
+      {{- toYaml $writers | nindent 6 }}
+    {{- end }}
     {{- end }}
 ---
 apiVersion: kyverno.io/v2

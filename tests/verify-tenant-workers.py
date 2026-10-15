@@ -12,8 +12,13 @@ With tenants.organizations.enabled, in both flavors:
   pods (ate.dev/worker-pool exists) of every namespace that carries the label
   (exists), on the same ports: the namespaces are selected by the label, never
   listed, and only worker pods are selected;
-- the substrate-workers PolicyException matches the same kinds and pods in
-  those namespaces by a namespaceSelector, and excepts the same rules.
+- the substrate-workers PolicyException matches the same pods in those
+  namespaces by a namespaceSelector, excepts the same rules, and only when
+  Substrate's controller chain writes them: ate-controller the Deployment, the
+  deployment controller the ReplicaSet, the ReplicaSet controller the Pods (an
+  Organization's admins may write pods there; a labelled pod they write is
+  judged like any other);
+- with the value on, no other object selects the label.
 Off (the default), nothing selects the label. Needs PyYAML. HELM selects the
 binary.
 
@@ -119,18 +124,42 @@ def check_hops(flavor, docs):
             fail(f"{name} ({flavor}): the Organizations' workers are not admitted; a tenant's first agent never turns Ready")
 
 
+# The writers of the workers in an Organization's namespace, per kind: an
+# Organization's admins may write pods there, so only Substrate's controller
+# chain is excepted.
+ATE_CONTROLLER = {"kind": "ServiceAccount", "name": "ate-controller", "namespace": "ate-system"}
+DEPLOYMENT_CONTROLLER = {"kind": "ServiceAccount", "name": "deployment-controller", "namespace": "kube-system"}
+REPLICASET_CONTROLLER = {"kind": "ServiceAccount", "name": "replicaset-controller", "namespace": "kube-system"}
+WRITERS = {
+    "Deployment": [ATE_CONTROLLER, DEPLOYMENT_CONTROLLER],
+    "ReplicaSet": [DEPLOYMENT_CONTROLLER],
+    "Pod": [REPLICASET_CONTROLLER, ATE_CONTROLLER],
+}
+
+
 def check_exception(on, off):
     polex_on = find(on, "PolicyException", "substrate-workers")["spec"]
     polex_off = find(off, "PolicyException", "substrate-workers")["spec"]
     if polex_on["exceptions"] != polex_off["exceptions"]:
         fail("the PolicyException excepts other rules with tenants.organizations on")
     kagent, *rest = polex_on["match"]["any"]
-    if len(rest) != 1:
-        fail(f"substrate-workers: expected one match entry for the Organizations' namespaces, got {rest}")
-    want = {k: v for k, v in kagent["resources"].items() if k != "namespaces"}
-    want["namespaceSelector"] = {"matchExpressions": [{"key": ORG, "operator": "Exists"}]}
-    if rest[0] != {"resources": want}:
-        fail(f"substrate-workers: the Organizations' entry is {rest[0]}, not the kagent workers' kinds and pods in every labelled namespace {want}")
+    if kagent != polex_off["match"]["any"][0]:
+        fail("the kagent namespace's entry of substrate-workers changed with tenants.organizations on")
+    got = {}
+    for entry in rest:
+        res = entry.get("resources") or {}
+        if res.get("namespaces") or res.get("namespaceSelector") != {"matchExpressions": [{"key": ORG, "operator": "Exists"}]}:
+            fail(f"substrate-workers: an Organizations' entry does not select every labelled namespace by the label: {entry}")
+        if res.get("selector") != kagent["resources"]["selector"]:
+            fail(f"substrate-workers: an Organizations' entry selects other pods than the kagent workers': {entry}")
+        if set(entry) != {"resources", "subjects"}:
+            fail(f"substrate-workers: an Organizations' entry is not limited to its writers: {entry}")
+        for kind in res.get("kinds") or []:
+            if kind in got:
+                fail(f"substrate-workers: {kind} matched twice in the Organizations' namespaces")
+            got[kind] = entry["subjects"]
+    if got != WRITERS:
+        fail(f"substrate-workers: the Organizations' workers are excepted for writers {got}, not Substrate's controller chain {WRITERS}; anyone who writes a labelled pod there would get the workers' exception")
 
 
 def main():
@@ -141,6 +170,10 @@ def main():
         if any(ORG in yaml.safe_dump(d) for d in off if d["metadata"]["name"].startswith("substrate-")):
             fail(f"tenants.organizations off ({flavor}): a Substrate policy or exception selects {ORG}")
         on = render(chart, args + ON)
+        selecting = {(d["kind"], d["metadata"]["name"]) for d in on if ORG in yaml.safe_dump(d)}
+        want = {(kind, name) for kind, name, _, _ in HOPS[flavor]} | {("PolicyException", "substrate-workers")}
+        if selecting != want:
+            fail(f"tenants.organizations on ({flavor}): {sorted(selecting)} select {ORG}, not exactly {sorted(want)}")
         check_hops(flavor, on)
         check_exception(on, off)
         print(f"ok: the Organizations' workers admitted on the router, the egress gateway, the dns and the PolicyException, nothing off ({flavor})")
