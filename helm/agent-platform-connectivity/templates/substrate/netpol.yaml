@@ -4,7 +4,7 @@ what (the substrate chart's arguments and Service definitions):
 
   actors ── (atunnel, CONNECT) ──▶ atenet-egress :8443 ──▶ the actors' destinations:
         muster (tool calls), the kagent controller :8083 (A2A, task and session
-        state), the LLM provider (world:443, or the agentgateway LLM listener),
+        state), the LLM provider (world, or the agentgateway LLM listener),
         the built-in tool server when it is on, cluster:443/10443 (a public
         hostname behind an internal LB), the OTLP gateway kagent's exporters
         send to (the actors' traces and logs, kagent.otel — the pods of the
@@ -50,14 +50,15 @@ what (the substrate chart's arguments and Service definitions):
   k8s-credential-provider 9090, the agentgateway sidecars 15020) —
   admitted from the cluster entity, as the platform's other metrics ports are.
 
-Contract for actor authors: an actor reaches the world on 443/TCP only (the
-substrate-atenet-egress rule below), plus the destinations listed above. The
-cluster policy is enforced at the node, before the actor's egress policy is
-consulted: plaintext HTTP to port 80, or any other port, is dropped and the
-actor sees a 503 from the egress gateway after about 11 s, where a denial by
-the actor's egress policy answers 403 at once. The way out is HTTPS; a host
-model server is opened by its own rule, from the address the ModelConfigs carry. docs/substrate-security.md
-("What an actor can reach, and how a refusal looks") carries the table.
+Contract for actor authors: the egress gateway reaches the world on every TCP
+port (the substrate-atenet-egress rule below), plus the destinations listed
+above, and the actor's egress policy is the control on where an actor
+connects: an origin it declares on any port is reached, one it does not
+declare answers 403 at once. A host model server, which may sit on a node of
+the cluster outside the world entity, is opened by its own rule, from the
+address the ModelConfigs carry. The instance metadata services and Azure's WireServer are denied
+whatever a policy declares. docs/substrate-security.md ("What an actor can
+reach, and how a refusal looks") carries the table.
 
 The kubernetes flavour renders the ingress policies only — the chart's
 kubernetes flavour restricts what reaches a workload and leaves egress open,
@@ -449,11 +450,14 @@ spec:
 # on 8443; every connection an actor opens leaves from here, so this is where
 # the actors' destinations are allowed: muster (tool calls as the caller), the
 # kagent controller (A2A, sessions), the LLM provider — through the
-# agentgateway LLM listener when llmRouting is on, the provider's endpoint on
-# world:443 either way — the built-in tool server when it is on, the OTLP
-# gateway of kagent's exporters (the actors' traces and logs), and
-# cluster:443/10443 (muster's OAuth endpoints on the public hostname resolve to
-# an internal LB VIP; 10443 is the Envoy listener after an Azure LB DNAT).
+# agentgateway LLM listener when llmRouting is on, the provider's endpoint in
+# the world either way — the built-in tool server when it is on, the OTLP
+# gateway of kagent's exporters (the actors' traces and logs), the world on
+# every TCP port (the origins the actors' egress policies declare, on whatever
+# port they name: the policy is the control, this rule does not second-guess
+# it), and cluster:443/10443 (muster's OAuth endpoints on the public hostname
+# resolve to an internal LB VIP; 10443 is the Envoy listener after an Azure LB
+# DNAT).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -545,7 +549,7 @@ spec:
     {{- end }}
     {{- if (include "agent-platform.llmRouting" .) }}
     # Model inference through the agentgateway LLM listener. Additive: the
-    # world:443 rule below still stands, so a direct call to the provider keeps
+    # world rule below still stands, so a direct call to the provider keeps
     # working.
     - toEndpoints:
         - matchLabels:
@@ -568,8 +572,9 @@ spec:
             - port: {{ $toolsPort | quote }}
               protocol: TCP
     {{- end }}
-    {{- /* A host model server is neither on 443 nor HTTPS, so the world rule
-           below does not reach it: an actor whose ModelConfig points at an
+    {{- /* A host model server may sit on a node of the cluster (the host or
+           remote-node entity) or behind a name that resolves into it, where
+           the world rule below does not reach it: an actor whose ModelConfig points at an
            Ollama, a Lemonade Server or an LM Studio on the host needs that
            address and port opened. model-manager's own policy opens the
            endpoint it manages models through; this is the inference path, at
@@ -601,11 +606,13 @@ spec:
               protocol: TCP
     {{- end }}
     {{- end }}
+    # Every TCP port (port 0 is Cilium's wildcard): the actors' egress policy
+    # decides which origin, on which port, an actor reaches.
     - toEntities:
         - world
       toPorts:
         - ports:
-            - port: "443"
+            - port: "0"
               protocol: TCP
     - toEntities:
         - cluster
@@ -615,6 +622,15 @@ spec:
               protocol: TCP
             - port: "10443"
               protocol: TCP
+  # The node's cloud identity stays out of reach whatever an egress policy
+  # declares: the instance metadata services (link-local, AWS's IPv6 endpoint)
+  # and Azure's WireServer serve plaintext on ports the world rule above now
+  # admits. A deny wins over every allow.
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 169.254.0.0/16
+        - cidr: 168.63.129.16/32
+        - cidr: fd00:ec2::254/128
 ---
 # dns: the actors' resolver (CoreDNS with a controller that writes the
 # Corefile from the router's Service); it forwards to the cluster DNS.

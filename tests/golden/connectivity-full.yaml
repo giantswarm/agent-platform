@@ -14438,11 +14438,14 @@ spec:
 # on 8443; every connection an actor opens leaves from here, so this is where
 # the actors' destinations are allowed: muster (tool calls as the caller), the
 # kagent controller (A2A, sessions), the LLM provider — through the
-# agentgateway LLM listener when llmRouting is on, the provider's endpoint on
-# world:443 either way — the built-in tool server when it is on, the OTLP
-# gateway of kagent's exporters (the actors' traces and logs), and
-# cluster:443/10443 (muster's OAuth endpoints on the public hostname resolve to
-# an internal LB VIP; 10443 is the Envoy listener after an Azure LB DNAT).
+# agentgateway LLM listener when llmRouting is on, the provider's endpoint in
+# the world either way — the built-in tool server when it is on, the OTLP
+# gateway of kagent's exporters (the actors' traces and logs), the world on
+# every TCP port (the origins the actors' egress policies declare, on whatever
+# port they name: the policy is the control, this rule does not second-guess
+# it), and cluster:443/10443 (muster's OAuth endpoints on the public hostname
+# resolve to an internal LB VIP; 10443 is the Envoy listener after an Azure LB
+# DNAT).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -14551,11 +14554,13 @@ spec:
         - ports:
             - port: "4317"
               protocol: TCP
+    # Every TCP port (port 0 is Cilium's wildcard): the actors' egress policy
+    # decides which origin, on which port, an actor reaches.
     - toEntities:
         - world
       toPorts:
         - ports:
-            - port: "443"
+            - port: "0"
               protocol: TCP
     - toEntities:
         - cluster
@@ -14565,6 +14570,15 @@ spec:
               protocol: TCP
             - port: "10443"
               protocol: TCP
+  # The node's cloud identity stays out of reach whatever an egress policy
+  # declares: the instance metadata services (link-local, AWS's IPv6 endpoint)
+  # and Azure's WireServer serve plaintext on ports the world rule above now
+  # admits. A deny wins over every allow.
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 169.254.0.0/16
+        - cidr: 168.63.129.16/32
+        - cidr: fd00:ec2::254/128
 ---
 # Source: agent-platform-connectivity/templates/substrate/netpol.yaml
 # dns: the actors' resolver (CoreDNS with a controller that writes the
