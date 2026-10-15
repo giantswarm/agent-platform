@@ -10,7 +10,8 @@ release (giantswarm/agent-platform#1036):
 - on: tenants.enabled, the kagent namespace's default ModelConfig and its key
   Secret (kagent.providers), the workers' own network policy in the resolved
   flavor (substrate-workers on cilium, substrate-workers-ingress on kubernetes,
-  none with networkPolicy.enabled off) and kagent.substrateWorkerPool.replicas;
+  none with networkPolicy.enabled off) and 1 warm worker per tenant (not
+  kagent.substrateWorkerPool.replicas);
   the operator's own workerPoolReplicas and interval stand;
 - the agent-manager chart of the reconciler's release (TENANTS_FLOOR, pulled
   from the registry) accepts the forwarded values and starts with
@@ -81,7 +82,7 @@ def tenants(want_policy):
     block = {
         "enabled": True,
         "modelConfig": {"name": "default-model-config", "apiKeySecretName": "kagent-anthropic"},
-        "workerPoolReplicas": 4,
+        "workerPoolReplicas": 1,
     }
     if want_policy:
         block["networkPolicy"] = want_policy
@@ -105,9 +106,9 @@ def main() -> None:
            tenants({"flavor": "kubernetes", "names": ["substrate-workers-ingress"]}))
     expect("on, networkPolicy.enabled=false: tenants",
            agent_manager(meta, [*CILIUM, *ON, "--set", "networkPolicy.enabled=false"])["tenants"], tenants(None))
-    own = agent_manager(meta, [*CILIUM, *ON, "--set", "agent-manager.tenants.workerPoolReplicas=1",
+    own = agent_manager(meta, [*CILIUM, *ON, "--set", "agent-manager.tenants.workerPoolReplicas=3",
                                "--set", "agent-manager.tenants.interval=5m"])["tenants"]
-    expect("on: the operator's workerPoolReplicas", own.get("workerPoolReplicas"), 1)
+    expect("on: the operator's workerPoolReplicas", own.get("workerPoolReplicas"), 3)
     expect("on: the operator's interval", own.get("interval"), "5m")
     expect("on: an own value equal to the derived one", agent_manager(
         meta, [*CILIUM, *ON, "--set", "agent-manager.tenants.modelConfig.name=default-model-config"])["tenants"],
@@ -127,7 +128,7 @@ def main() -> None:
         if r.returncode != 0:
             fail(f"agent-manager {TENANTS_FLOOR} rejects the forwarded values\n{r.stderr}")
         for flag in ("--multi-tenant=true", "--tenant-model-config=default-model-config",
-                     "--tenant-model-secret=kagent-anthropic", "--tenant-worker-pool-replicas=4",
+                     "--tenant-model-secret=kagent-anthropic", "--tenant-worker-pool-replicas=1",
                      "--tenant-network-policy-flavor=cilium", "--tenant-network-policies=substrate-workers",
                      "--helmrelease-service-account=kagent-flux"):
             if flag not in r.stdout:

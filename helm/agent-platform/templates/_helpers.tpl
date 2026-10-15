@@ -2875,8 +2875,9 @@ On, from what this chart already has for the kagent namespace:
                              cilium, names [substrate-workers]; flavor
                              kubernetes, names [substrate-workers-ingress];
                              none with networkPolicy.enabled off;
-  workerPoolReplicas         kagent.substrateWorkerPool.replicas, a default:
-                             agent-manager.tenants.workerPoolReplicas stands.
+  workerPoolReplicas         1, the warm workers of each tenant that holds an
+                             agent; a default: agent-manager.tenants.workerPoolReplicas
+                             stands.
 agent-manager.tenants.interval is the operator's (the chart's default without
 it). Every other key is single-source: an own value in agent-manager.tenants
 that differs fails the render, and so does agent-manager.tenants.enabled set
@@ -2951,7 +2952,7 @@ Usage: include "agent-platform.agentManager.tenants" $root | fromJson
 {{- end -}}
 {{- end -}}
 {{- if not (hasKey $own "workerPoolReplicas") -}}
-{{- $_ := set $tenants "workerPoolReplicas" (dig "substrateWorkerPool" "replicas" 1 .Values.kagent) -}}
+{{- $_ := set $tenants "workerPoolReplicas" 1 -}}
 {{- end -}}
 {{- toJson $tenants -}}
 {{- end -}}
