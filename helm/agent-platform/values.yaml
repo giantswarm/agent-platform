@@ -3500,7 +3500,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       timeout: 300
       # The name the Dev Portal shows for the server (the MCPServer's
       # ui.giantswarm.io/display-name annotation); empty renders none.
-      displayName: Agent Sessions
+      displayName: Kagent
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for

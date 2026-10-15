@@ -866,7 +866,7 @@ spec:
               enabled: false
           mode: Strict
         mcp:
-          displayName: Agent Sessions
+          displayName: Kagent
           enabled: true
           pathPrefix: /kagent/mcp
           timeout: 300
