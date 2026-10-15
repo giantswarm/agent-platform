@@ -4408,6 +4408,13 @@ verify-tenant-workers: ## Assert the workers of the Organizations' namespaces (g
 	@HELM="$(HELM)" python3 tests/verify-tenant-workers.py $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-tenant-credentials
+verify-tenant-credentials: ## Assert Substrate's credential provider follows tenants.organizations.enabled (giantswarm/agent-platform#1041): off, the substrate release carries the two static namespacePolicies and the switch changes nothing else in its values; on, an ownNamespaceSelector entry on giantswarm.io/organization and the same selector as allowedNamespaceSelector on the ate-golden entry; an installation's own policies stay, an ate-golden entry is added when none exists, a derived entry is not repeated, and an ate-golden allowedNamespaceSelector on other namespaces fails the render naming the key; the Substrate chart the meta chart renders against writes both entries into its policy file and grants list/watch on namespaces. Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-tenant-credentials.py $(CHART_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-tenant-reconciler
 verify-tenant-reconciler: ## Assert agent-manager's tenant reconciler follows tenants.organizations.enabled (giantswarm/agent-platform#1044): off, the agent-manager release carries no tenants key and the switch changes nothing else in its values; on, tenants.enabled with the kagent namespace's default ModelConfig and its key Secret, the workers' network policy in the resolved flavor (substrate-workers on cilium, substrate-workers-ingress on kubernetes, none with networkPolicy.enabled off) and 1 warm worker per tenant, the operator's workerPoolReplicas and interval standing; the agent-manager chart of the reconciler's release takes the forwarded values and starts with --multi-tenant; the render refuses, naming the key, agent-manager.tenants.enabled against the switch, a range below the reconciler's release, kagent off, OAuth or downstream OAuth off, no kagent.fluxServiceAccountName, a default provider without apiKeySecretRef and an own tenants value that differs. Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io.
 	@echo "====> $@ ($(CHART_DIR))"

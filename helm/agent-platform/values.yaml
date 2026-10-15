@@ -725,7 +725,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.11.4 <1.12.0"
+    versionRange: ">=1.12.0 <1.13.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
     # release Flux resolved (ateController.gvisorWorker.followRelease, on by
@@ -752,7 +752,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.11.4 <1.12.0"
+    versionRange: ">=1.12.0 <1.13.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -5154,8 +5154,7 @@ tenants:
     # off, without kagent.fluxServiceAccountName or without that key Secret.
     # agent-manager.tenants.workerPoolReplicas and .interval are yours; any
     # other agent-manager.tenants key is derived and must be unset or equal.
-    # On,
-    # with Agent Substrate on, the connectivity release lets the worker pods
+    # On, with Agent Substrate on, the connectivity release lets the worker pods
     # of every such namespace reach the atenet router's tunnel, the egress
     # gateway and the actors' dns, as the kagent namespace's workers do (both
     # flavors), and the workers' Kyverno PolicyException covers them there
@@ -5172,8 +5171,11 @@ tenants:
     # differ), and only Substrate's controllers write a Deployment,
     # ReplicaSet or Pod labelled ate.dev/worker-pool; no one adds an
     # ephemeral container to a worker, execs into one or attaches to one
-    # (Kubernetes 1.30 or later; docs/substrate-security.md). Off, the
-    # default, nothing changes.
+    # (Kubernetes 1.30 or later; docs/substrate-security.md). On, Substrate's
+    # credential provider also reads each such namespace's Secrets for the
+    # atespace of the same name, and for ate-golden, where every template's
+    # golden actor boots (substrate.credentialProvider.namespacePolicies).
+    # Off, the default, nothing changes.
     enabled: false
 
 # === Workspaces (workspaces, workspace-manager) ===
@@ -6052,6 +6054,14 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # ate-golden and fetches the template's git skills with the same
   # credentials, so ate-golden needs every one of those namespaces too. The
   # default covers the kagent namespace, where the agent charts install.
+  # With tenants.organizations.enabled the meta chart adds the Organizations'
+  # namespaces by their label giantswarm.io/organization (the Substrate line
+  # from 1.12.0): an ownNamespaceSelector entry, so each is read by the
+  # atespace of its own name only, and the same selector as
+  # allowedNamespaceSelector on the ate-golden entry (a secretSelector there
+  # narrows ate-golden's reads in the Organizations' namespaces too). The
+  # policies set here stay; an ate-golden allowedNamespaceSelector on other
+  # namespaces, or a Substrate floor below 1.12.0, fails the render.
   credentialProvider:
     namespacePolicies:
       - atespace: kagent
