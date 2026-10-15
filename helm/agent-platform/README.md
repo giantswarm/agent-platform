@@ -1004,7 +1004,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controllerRoute.mcp.enabled | bool | `true` |  |
 | kagent.controllerRoute.mcp.pathPrefix | string | `"/kagent/mcp"` |  |
 | kagent.controllerRoute.mcp.timeout | int | `300` |  |
-| kagent.controllerRoute.mcp.displayName | string | `"Agent Sessions"` |  |
+| kagent.controllerRoute.mcp.displayName | string | `"Kagent"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
