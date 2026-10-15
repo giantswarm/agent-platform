@@ -818,9 +818,9 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@echo "ok: routed by default"
 	@echo "--> an explicit baseUrl wins (the escape hatch), and an entry for another provider stays direct"
 	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out | grep -q 'baseUrl: "https://api.anthropic.com"' || { echo "FAIL: an explicit baseUrl was overwritten by the listener default; a model could never leave the gateway"; exit 1; }
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].provider=OpenAI' >$(VERIFY_TMP)/vl-other.out 2>&1 || { cat $(VERIFY_TMP)/vl-other.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].provider=Mistral' >$(VERIFY_TMP)/vl-other.out 2>&1 || { cat $(VERIFY_TMP)/vl-other.out; exit 1; }
 	@if awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-other.out | grep -q 'baseUrl:'; then \
-		echo "FAIL: a non-Anthropic model was pointed at the Anthropic listener; it would reach the wrong upstream"; exit 1; \
+		echo "FAIL: a model of a provider no llmRouting.models entry serves was pointed at the listener; it would reach the wrong upstream"; exit 1; \
 	else echo "ok: explicit URL and foreign provider"; fi
 	@echo "--> an entry whose provider has no baseUrl in ModelConfigSpec fails the render, naming the entry"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].provider=Ollama' >$(VERIFY_TMP)/vl-nourl.out 2>&1; then \
@@ -831,8 +831,23 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out | grep -A1 '^  openAI:$$' | grep -q 'baseUrl: "https://api.openai.com/v1"' || { echo "FAIL: the OpenAI entry's baseUrl is not under spec.openAI; the API server would prune it and the model would stay direct in silence"; exit 1; }
 	@if grep -qE '^  (openai|sapaicore):$$' $(VERIFY_TMP)/vl-ci.out; then echo "FAIL: a lower-cased provider block rendered; the CRD knows openAI and sapAICore only"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set-json 'llmRouting.models=[{"name":"openai","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"gpt-*"}]' --set 'kagent.modelConfigs[0].provider=OpenAI' >$(VERIFY_TMP)/vl-openai-routed.out 2>&1 || { cat $(VERIFY_TMP)/vl-openai-routed.out; exit 1; }
-	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-openai-routed.out | grep -A1 '^  openAI:$$' | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: the routed default for an OpenAI listener is not under spec.openAI; every routed OpenAI model would be pruned to the direct path"; exit 1; }
+	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-openai-routed.out | grep -A1 '^  openAI:$$' | grep -q 'baseUrl: "http://agentgateway.default.svc:8081/v1"' || { echo "FAIL: the routed default for an OpenAI listener is not spec.openAI.baseUrl ending in /v1; an OpenAI client appends /responses to it and would miss the listener's routes"; exit 1; }
 	@echo "ok: openAI block key, explicit and routed"
+	@echo "--> a codex model rides the listener's OpenAI entry: the Responses API format, the listener URL with /v1, nothing the codex compiler refuses"
+	@awk '/name: "openai-gpt-codex"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out >$(VERIFY_TMP)/vl-codex.out
+	@grep -A2 '^  openAI:$$' $(VERIFY_TMP)/vl-codex.out | grep -q 'apiFormat: responses' || { cat $(VERIFY_TMP)/vl-codex.out; echo "FAIL: the codex ModelConfig carries no openAI.apiFormat: responses; the codex compiler refuses it"; exit 1; }
+	@grep -A2 '^  openAI:$$' $(VERIFY_TMP)/vl-codex.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081/v1"' || { cat $(VERIFY_TMP)/vl-codex.out; echo "FAIL: the codex ModelConfig does not reach the listener at /v1; its calls would bypass the metering and the rate limits"; exit 1; }
+	@if grep -qE '^  (defaultHeaders|tls|apiKeyPassthrough):|maxTokens|maxCompletionTokens' $(VERIFY_TMP)/vl-codex.out; then cat $(VERIFY_TMP)/vl-codex.out; echo "FAIL: the codex ModelConfig carries a field the codex compiler refuses"; exit 1; fi
+	@awk '/^kind: AgentgatewayModel$$/{f=1} f&&/^---/{f=0} f' $(VERIFY_TMP)/vl-ci.out | grep -q '^  provider: OpenAI$$' || { echo "FAIL: no OpenAI AgentgatewayModel on the listener; a codex call has no Responses upstream"; exit 1; }
+	@echo "ok: codex ModelConfig"
+	@echo "--> guard: apiFormat on a provider without it, or outside the CRD's enum, fails the render naming the entry"
+	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].apiFormat=responses' >$(VERIFY_TMP)/vl-fmt.out 2>&1; then \
+		echo "FAIL: apiFormat rendered on an Anthropic entry; the API server would prune it in silence"; exit 1; \
+	else grep -q 'anthropic-sonnet' $(VERIFY_TMP)/vl-fmt.out || { cat $(VERIFY_TMP)/vl-fmt.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
+	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[3].apiFormat=Responses' >$(VERIFY_TMP)/vl-fmt.out 2>&1; then \
+		echo "FAIL: apiFormat outside the CRD's enum rendered; the API server refuses it at admission"; exit 1; \
+	else grep -q 'openai-gpt-codex' $(VERIFY_TMP)/vl-fmt.out || { cat $(VERIFY_TMP)/vl-fmt.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
+	@echo "ok: apiFormat guards"
 	@echo "--> guard: a provider outside the CRD's enum fails the render, naming the entry and the enum"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].provider=openai' >$(VERIFY_TMP)/vl-enum.out 2>&1; then \
 		echo "FAIL: provider 'openai' rendered; the API server refuses it at admission (the enum is case-sensitive) after the chart said nothing"; exit 1; \
@@ -856,6 +871,7 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@grep -q 'kubernetes.io/metadata.name: kagent' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy is not scoped to the kagent namespace"; exit 1; }
 	@grep -q 'base-url-absent' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy has no baseUrl guard; it would overwrite a model pointed at another upstream"; exit 1; }
 	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy writes the wrong listener URL"; exit 1; }
+	@awk '/^kind: MutatingAdmissionPolicy$$/{f=1} f&&/^  name: .*-modelconfig-llm-routing-openai$$/{g=1} g&&/^---/{exit} g' $(VERIFY_TMP)/vl-map.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081/v1"' || { echo "FAIL: no policy for the listener's OpenAI entry writing the listener URL with /v1; a codex ModelConfig created by agent-manager or Backstage would bypass the listener"; exit 1; }
 	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set llmRouting.modelConfigPolicy.enabled=false 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
 		echo "FAIL: llmRouting.modelConfigPolicy.enabled=false still rendered the policy"; exit 1; \
 	else echo "ok: admission policy gated on the GA group and its own toggle"; fi
