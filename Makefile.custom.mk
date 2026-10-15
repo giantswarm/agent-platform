@@ -3873,7 +3873,18 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@if grep -q 'GITHUB_TOKEN' $(VERIFY_TMP)/vmig-vals-job.out; then echo "FAIL: a left-over githubToken value still renders GITHUB_TOKEN"; exit 1; fi
 	@grep -A1 'name: AGENT_MANAGER_MANAGED_NAMESPACES' $(VERIFY_TMP)/vmig-vals-job.out | grep -q 'value: team-a,team-b' || { echo "FAIL: the additional namespaces do not reach the Job"; exit 1; }
 	@grep -q 'serviceAccountName: tenant-x' $(VERIFY_TMP)/vmig-vals-job.out || { echo "FAIL: the Job's ServiceAccount did not follow the renamed identity"; exit 1; }
+	@if grep -q 'AGENT_MANAGER_SKILLS_GIT_AUTH' $(VERIFY_TMP)/vmig-vals-job.out; then echo "FAIL: a skills credential reaches the Job although agent-manager has none"; exit 1; fi
 	@echo "ok: values"
+	@echo "--> the skills credential: minted, the run moves agents from <fullname>-skills-token to tenant-credential-<fullname>-skills-token; provisioned, from the listed earlier names"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agent-manager.skills.mintGitAuthSecret=true >$(VERIFY_TMP)/vmig-mint.out 2>&1 || { cat $(VERIFY_TMP)/vmig-mint.out; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/vmig-mint.out CronJob $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-mint-job.out || { echo "FAIL: no Job with minting on"; exit 1; }
+	@grep -A1 'name: AGENT_MANAGER_SKILLS_GIT_AUTH_SECRET_NAME' $(VERIFY_TMP)/vmig-mint-job.out | grep -q 'value: tenant-credential-agent-manager-skills-token' || { echo "FAIL: the minted credential's current name does not reach the Job"; exit 1; }
+	@grep -A1 'name: AGENT_MANAGER_SKILLS_GIT_AUTH_PREVIOUS_SECRET_NAMES' $(VERIFY_TMP)/vmig-mint-job.out | grep -q 'value: agent-manager-skills-token$$' || { echo "FAIL: the minted credential's earlier name does not reach the Job"; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agent-manager.skills.gitAuthSecretName=tenant-credential-skills --set 'agent-manager.skills.previousGitAuthSecretNames[0]=kagent-skills-token' >$(VERIFY_TMP)/vmig-prov.out 2>&1 || { cat $(VERIFY_TMP)/vmig-prov.out; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/vmig-prov.out CronJob $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-prov-job.out || { echo "FAIL: no Job with a provisioned credential"; exit 1; }
+	@grep -A1 'name: AGENT_MANAGER_SKILLS_GIT_AUTH_SECRET_NAME' $(VERIFY_TMP)/vmig-prov-job.out | grep -q 'value: tenant-credential-skills' || { echo "FAIL: the provisioned credential does not reach the Job"; exit 1; }
+	@grep -A1 'name: AGENT_MANAGER_SKILLS_GIT_AUTH_PREVIOUS_SECRET_NAMES' $(VERIFY_TMP)/vmig-prov-job.out | grep -q 'value: kagent-skills-token$$' || { echo "FAIL: the provisioned credential's earlier name does not reach the Job"; exit 1; }
+	@echo "ok: skills credential"
 	@echo "--> RBAC: nothing cluster-scoped (verify-identity-migration) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
 	@if $(PICK) $(VERIFY_TMP)/vmig-on.out Role $(MIGRATION_JOB) >/dev/null 2>&1; then echo "FAIL: a GitOps-namespace Role renders with an empty gitopsNamespaces"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' --set 'agentManager.migration.gitopsNamespaces[1]=flux-team' >$(VERIFY_TMP)/vmig-gitops.out 2>&1 || { cat $(VERIFY_TMP)/vmig-gitops.out; exit 1; }
