@@ -873,9 +873,10 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 # between agentgateway releases), so the platform renders exactly one,
 # <release>-metrics, and no other policy of the chart may carry the section.
 METRICS_POLICIES := python3 -c 'import re,sys; docs=open(sys.argv[1]).read().split("\n---\n"); [print(re.search(r"^  name: (\S+)", d, re.M).group(1)) for d in docs if "kind: AgentgatewayPolicy\n" in d and re.search(r"^  frontend:\n(?:.*\n)*?    metrics:", d, re.M)]'
-# The templates of the chart with a frontend.metrics section, one path per line
-# (Python, not grep -P: BSD grep has no -P).
-METRICS_TEMPLATES := python3 -c 'import re,sys; [print(p) for p in sys.argv[1:] if re.search(r"^  frontend:\n    metrics:", open(p).read(), re.M)]'
+# The templates of the chart with a frontend.metrics section (a `  frontend:`
+# line followed by a `    metrics:` line), one path per line. grep -A1, not
+# grep -P: BSD grep has no -P.
+METRICS_TEMPLATES := for f in $(CONNECTIVITY_DIR)/templates/*/*.yaml; do if grep -A1 -E '^  frontend:$$' "$$f" | grep -qE '^    metrics:'; then echo "$$f"; fi; done
 # The document of the -metrics policy, from a render.
 METRICS_DOC := awk '/^  name: agent-platform-connectivity-metrics$$/{f=1} f&&/^---/{exit} f'
 # name=expression of every label the -metrics policy adds, parsed: toYaml folds an expression longer than a line across lines, so a grep of the rendered text cannot hold one.
@@ -987,7 +988,7 @@ verify-metric-labels: ## Assert the data plane's metric labels: one Gateway-scop
 	@echo "--> with llmRouting on the labels stay on the -metrics policy and the LLM policy carries none; one template of the chart carries a frontend.metrics section"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(LLM_VM) >$(VERIFY_TMP)/vml-llm.out 2>&1 || { cat $(VERIFY_TMP)/vml-llm.out; exit 1; }
 	@[ "$$($(METRICS_POLICIES) $(VERIFY_TMP)/vml-llm.out)" = "agent-platform-connectivity-metrics" ] || { echo "FAIL: with llmRouting on, the policies with a frontend.metrics section are [$$($(METRICS_POLICIES) $(VERIFY_TMP)/vml-llm.out | tr '\n' ' ')], not the metrics policy alone"; exit 1; }
-	@[ "$$($(METRICS_TEMPLATES) $(CONNECTIVITY_DIR)/templates/*/*.yaml | wc -l | tr -d ' ')" = "1" ] || { echo "FAIL: more than one template of the chart carries a frontend.metrics section: $$($(METRICS_TEMPLATES) $(CONNECTIVITY_DIR)/templates/*/*.yaml | tr '\n' ' '); a second metrics policy is dropped in silence by the data plane"; exit 1; }
+	@[ "$$($(METRICS_TEMPLATES) | wc -l | tr -d ' ')" = "1" ] || { echo "FAIL: more than one template of the chart carries a frontend.metrics section: $$($(METRICS_TEMPLATES) | tr '\n' ' '); a second metrics policy is dropped in silence by the data plane"; exit 1; }
 	@echo "ok: one metrics policy, one template"
 	@echo "--> a name YAML 1.1 reads as a boolean is rendered quoted"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VML_ON) >$(VERIFY_TMP)/vml-quoted.out 2>&1 || { cat $(VERIFY_TMP)/vml-quoted.out; exit 1; }
@@ -1374,8 +1375,12 @@ verify-flux-crds: ## Assert the flux-engine subchart's crds/ are byte for byte t
 	@echo "====> $@ ($(FLUX_ENGINE_DIR))"
 	@HELM="$(HELM)" python3 tests/verify-flux-crds.py $(FLUX_ENGINE_DIR)
 	@echo "--> a deliberately stale CRD in each file fails naming the file and the release"
+	@# The first served: true of each file becomes false: sed's 1,/re/ range ends
+	@# at the first match after line 1, and line 1 of a crds/ file is always its
+	@# generated header comment (tests/verify-flux-crds.py), never served: true.
+	@# One file per sed: BSD sed has no per-file range reset.
 	@stale="$(VERIFY_TMP)/verify-flux-crds-stale"; rm -rf "$$stale" && cp -r $(FLUX_ENGINE_DIR) "$$stale" && \
-	python3 -c 'import pathlib,sys; [p.write_text(p.read_text().replace("served: true", "served: false", 1)) for p in map(pathlib.Path, sys.argv[1:])]' "$$stale/crds/flux-operator.yaml" "$$stale/crds/flux.yaml" && \
+	for f in "$$stale/crds/flux-operator.yaml" "$$stale/crds/flux.yaml"; do sed -i.bak '1,/served: true/s/served: true/served: false/' "$$f" && rm "$$f.bak" || exit 1; done && \
 	if HELM="$(HELM)" python3 tests/verify-flux-crds.py "$$stale" >"$$stale.out" 2>&1; then cat "$$stale.out"; echo "FAIL: a stale CRD passed"; exit 1; fi; \
 	grep -q "FAIL: $$stale/crds/flux-operator.yaml is not the CRDs of the Flux Operator v" "$$stale.out" && \
 	grep -q "FAIL: $$stale/crds/flux.yaml is not the CRDs of Flux v" "$$stale.out" && \
