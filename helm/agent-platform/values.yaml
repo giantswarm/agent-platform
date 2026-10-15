@@ -5079,13 +5079,22 @@ tenants:
   # sees it (with the OIDC groups prefix of the installation).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
   organizations:
-    # -- Admit the agent workers of the Organizations' namespaces. Turn it on
-    # with agent-manager's tenant reconciler (agent-manager's
-    # `tenants.enabled`), which puts a WorkerPool in each namespace labelled
-    # `giantswarm.io/organization` that holds an agent, and copies the
-    # workers' own policy into it (its `tenants.networkPolicy.names`: the
-    # CiliumNetworkPolicy `substrate-workers` in the cilium flavor, the
-    # NetworkPolicy `substrate-workers-ingress` in the kubernetes flavor). On,
+    # -- Admit the agent workers of the Organizations' namespaces and turn on
+    # agent-manager's tenant reconciler. With components.agent-manager on,
+    # the agent-manager release gets `tenants.enabled` (agent-manager 2.1.0
+    # or later), which puts a WorkerPool in each namespace labelled
+    # `giantswarm.io/organization` that holds an agent, with copies of the
+    # kagent namespace's default ModelConfig (`default-model-config`, its
+    # key Secret kagent.providers.<default>.apiKeySecretRef) and of the
+    # workers' own policy (the CiliumNetworkPolicy `substrate-workers` in the
+    # cilium flavor, the NetworkPolicy `substrate-workers-ingress` in the
+    # kubernetes flavor, none with networkPolicy.enabled off); its
+    # workerPoolReplicas is kagent.substrateWorkerPool.replicas unless
+    # agent-manager.tenants.workerPoolReplicas sets it. The render fails,
+    # naming the key, below agent-manager 2.1.0, with kagent off, with
+    # agent-manager's OAuth or downstream OAuth off, without
+    # kagent.fluxServiceAccountName or without that key Secret; set no
+    # other agent-manager.tenants key. On,
     # with Agent Substrate on, the connectivity release lets the worker pods
     # of every such namespace reach the atenet router's tunnel, the egress
     # gateway and the actors' dns, as the kagent namespace's workers do (both
