@@ -607,6 +607,8 @@ spec:
         enabled: true
       gateway-api-crds:
         enabled: false
+      google-access-token-credential-provider:
+        enabled: false
       gpu-operator:
         enabled: false
       kagent:
@@ -766,6 +768,8 @@ spec:
             protocol: grpc
             tenant: giantswarm
       registry: gsoci.azurecr.io
+    google-access-token-credential-provider:
+      namespacePolicies: []
     hooks:
       kubectlImage:
         registry: gsoci.azurecr.io

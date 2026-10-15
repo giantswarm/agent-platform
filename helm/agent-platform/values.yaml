@@ -791,6 +791,29 @@ components:  # @schema additionalProperties: true
     # good one (strategy rollback, remediateLastFailure: Flux's defaults).
     upgradeRemediation:  # @schema additionalProperties: true
       retries: 3
+  google-access-token-credential-provider:  # @schema additionalProperties: true
+    chart: google-access-token-credential-provider
+    # The Google access-token credential provider: an Agent Substrate
+    # credential provider plugin (giantswarm/substrate-credential-providers,
+    # upstream's internal/plugins shape) serving the class
+    # google-access-token.k8s.io, a Google access token minted from the service
+    # account key a Secret holds, which a Vertex AI ModelConfig's actor needs
+    # (giantswarm/giantswarm#38547). Follows components.kagent like the
+    # Substrate entries and lands beside Substrate in ate-system: the egress
+    # gateway dials it there over mTLS, its serving certificate and its callers'
+    # trust bundle come from Substrate's signers, and its grants are derived
+    # from substrate.credentialProvider.namespacePolicies
+    # (agent-platform.componentDerivedValues). The Substrate chart routes the
+    # class to it through substrate.credentialProvider.additionalProviders
+    # below, which a Substrate release before 1.12.0 refuses (its bundled
+    # provider served the name itself): the plugin is deployed first and routed
+    # with the floor bump.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    versionRange: ">=0.2.0 <1.0.0"
+    valuesFrom: google-access-token-credential-provider
+    injectGlobal: false
+    targetNamespace: ate-system
+    dependsOn: [substrate]
   klaus-gateway:  # @schema additionalProperties: true
     chart: klaus-gateway
     repository: oci://gsoci.azurecr.io/charts/giantswarm
@@ -6253,6 +6276,13 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
       pinnedImages: []
 # The substrate-crds chart takes no values.
 substrate-crds: {}  # @schema skipProperties: true; additionalProperties: true
+
+# The Google access-token credential provider (components.google-access-token
+# -credential-provider), forwarded verbatim. namespacePolicies is derived from
+# substrate.credentialProvider.namespacePolicies (the two providers grant the
+# same atespaces the same namespaces); a copy set here must equal it.
+google-access-token-credential-provider:  # @schema skipProperties: true; additionalProperties: true
+  namespacePolicies: []
 
 # === Hook Jobs of the connectivity release ===
 # The images of the connectivity chart's hook Jobs (read there): kubectl with

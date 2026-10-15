@@ -143,7 +143,9 @@ KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
-UNRELEASED: dict[str, str] = {}
+UNRELEASED: dict[str, str] = {
+    "google-access-token-credential-provider": "0.2.0",  # giantswarm/substrate-credential-providers, its first release
+}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
@@ -416,7 +418,14 @@ def registry_tags(url: str) -> list[str]:
     host, _, path = url.removeprefix("oci://").partition("/")
     next_url, tags = f"https://{host}/v2/{path}/tags/list?n=1000", []
     for _ in range(100):
-        body, headers = registry_get(url, next_url)
+        try:
+            body, headers = registry_get(url, next_url)
+        except urllib.error.HTTPError as e:
+            # A repository nothing was ever pushed to: a chart with no release
+            # yet is UNRELEASED like one whose range admits none.
+            if e.code == 404:
+                return tags
+            raise
         tags += body.get("tags") or []
         m = re.search(r"<([^>]+)>", headers.get("Link", ""))
         if not m:
@@ -684,6 +693,13 @@ def main(meta: str) -> int:
         if pin != pins[name]:
             fail(f"{name}: the BOM render carries {pin!r} while examples/customer-bom.yaml pins {pins[name]!r} — the pin did not reach the OCIRepository")
         tags = registry_tags(url)
+        if not tags and name in UNRELEASED and not STRICT:
+            # A chart nobody has published yet: nothing to render the forwarded
+            # block against until its first build. The release waits for it.
+            own = components[name]["versionRange"]
+            WAITS[name] = {"versionRange": own, "waitsFor": floor(own)}
+            print(f"NOTE: {name}: {url} publishes nothing yet (waits for {UNRELEASED[name]}); the forwarded block is rendered once a build exists")
+            return
         version_range = fluxsemver.resolve(resolve_tags(tags, rng), rng)
         if not version_range:
             version_range = fallback(name, url, rng, tags, kagent_tag)

@@ -395,6 +395,8 @@ spec:
         enabled: false
       gateway-api-crds:
         enabled: false
+      google-access-token-credential-provider:
+        enabled: true
       gpu-operator:
         enabled: false
       kagent:
@@ -554,6 +556,8 @@ spec:
             protocol: grpc
             tenant: giantswarm
       registry: gsoci.azurecr.io
+    google-access-token-credential-provider:
+      namespacePolicies: []
     hooks:
       kubectlImage:
         registry: gsoci.azurecr.io
@@ -1764,6 +1768,50 @@ spec:
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
+  name: google-access-token-credential-provider
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: google-access-token-credential-provider
+  targetNamespace: ate-system
+  storageNamespace: ate-system
+  chartRef:
+    kind: OCIRepository
+    name: google-access-token-credential-provider
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: substrate
+  values:
+    namespacePolicies:
+    - allowedNamespaces:
+      - kagent
+      atespace: kagent
+    - allowedNamespaces:
+      - kagent
+      atespace: ate-golden
+    substrate:
+      namespace: ate-system
+      releaseName: substrate
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
   name: kagent
   namespace: default
   labels:
@@ -2867,6 +2915,29 @@ spec:
     operation: copy
   ref:
     semver: "0.x"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: google-access-token-credential-provider
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 1m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/google-access-token-credential-provider
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    semver: ">=0.2.0 <1.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
