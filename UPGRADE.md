@@ -15,6 +15,17 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.133.x → \<next\> (Substrate 1.11.4: a CONNECT tunnel ends when the actor closes)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.11 from 1.11.4 (`>=1.11.4 <1.12.0`, giantswarm/agent-platform#1034). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.11.4 (`ateom-gvisor:1.11.4`); the kagent CRDs and the kagent release are unchanged. The patch is on 1.11.0's upstream pin and changes no persisted format, CRD, schema or snapshot layout: the step resets nothing, no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.11.4 brings:
+
+- **A CONNECT tunnel ends when the actor closes its connection**: atunnel's relay closes the router's side as soon as the actor stops sending, so a call to an actor that closed or reset its connection fails at once instead of waiting out its caller's deadline. The relay runs in the worker's ateom: an actor gets the fix once its worker runs 1.11.4.
+
+### Operator action
+
+- **None.** The control plane, the atelet and the worker pool roll on the upgrade.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.11.4`; `kagent` and `kagent-crds` stay where they are.
+
 ## 4.133.x → \<next\> (Substrate 1.11.3: a crashed actor is seen and recovered)
 
 `components.substrate{,-crds}.versionRange` selects Substrate 1.11 from 1.11.3 (`>=1.11.3 <1.12.0`, giantswarm/agent-platform#1031). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.11.3 (`ateom-gvisor:1.11.3`); the kagent CRDs and the kagent release are unchanged. The patches are on 1.11.0's upstream pin and change no persisted format: the step resets nothing, no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.11.1 to 1.11.3 bring:

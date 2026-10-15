@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=1.11.4 <1.12.0"
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=1.11.3 <1.12.0"
-SUBSTRATE_PIN = "1.11.3"  # the range's floor, the BOM pin and the worker image's tag: the release that marks a crashed actor's resume refusal not resumable, whose ateom-gvisor reports a running actor's sandbox exit and whose atelet terminates an actor whose restore failed, and the floor at or above the Substrate kagent 1.11.6 is built against (1.11.1); before it 1.11.0, the release whose egress gateway mints and injects actor JWTs (an actor_jwt entry of replace_headers, giantswarm/substrate#421) on agentgateway 2.4.0, and whose ate-controller can mark the worker pods that host actors (giantswarm/substrate#425)
+SUBSTRATE_RANGE = ">=1.11.4 <1.12.0"
+SUBSTRATE_PIN = "1.11.4"  # the range's floor, the BOM pin and the worker image's tag: the release whose atunnel ends a CONNECT tunnel once the actor closes its connection (giantswarm/substrate#451); before it 1.11.3, the release that marks a crashed actor's resume refusal not resumable, whose ateom-gvisor reports a running actor's sandbox exit and whose atelet terminates an actor whose restore failed, and the floor at or above the Substrate kagent 1.11.6 is built against (1.11.1); before it 1.11.0, the release whose egress gateway mints and injects actor JWTs (an actor_jwt entry of replace_headers, giantswarm/substrate#421) on agentgateway 2.4.0, and whose ate-controller can mark the worker pods that host actors (giantswarm/substrate#425)
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
