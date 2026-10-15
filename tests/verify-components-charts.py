@@ -540,8 +540,9 @@ def check_harnesses(manifest: str, values: str, what: str) -> None:
     kagent.harnesses entry, each valid against the pinned Harness CRD. The
     platform Harness carries no admission selector: an Agent names its Harness
     by spec.harnessRef, and the line's CRD has no allowedAgentTemplates. A
-    claude entry reaches its Harness as forwarded (snapshot location, env,
-    limits) and takes the chart's claude-harness image at its digest."""
+    claude entry reaches its Harness as forwarded (snapshot location, env) and
+    takes the chart's claude-harness image at its digest; it carries no turn
+    limits, which the line withdrew from the Harness API in 1.12.0."""
     entries = (yaml.safe_load(values) or {}).get("harnesses") or []
     rendered = [d for d in yaml.safe_load_all(manifest) if isinstance(d, dict) and d.get("kind") == "Harness"]
     if len(rendered) != 1 + len(entries):
@@ -564,7 +565,7 @@ def check_harnesses(manifest: str, values: str, what: str) -> None:
             "env": spec.get("env"),
             "limits": spec.get("claude", {}).get("limits"),
         }
-        want = {"claude": True, "snapshotLocation": entry.get("snapshotLocation"), "env": entry.get("env"), "limits": entry.get("limits")}
+        want = {"claude": True, "snapshotLocation": entry.get("snapshotLocation"), "env": entry.get("env"), "limits": None}
         if got != want:
             fail(f"{what} renders the claude Harness {entry['name']!r} off its entry:\n  got      {got}\n  expected {want}")
         image = spec.get("workload", {}).get("image", "")
