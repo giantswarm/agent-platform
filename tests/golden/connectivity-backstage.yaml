@@ -27,10 +27,11 @@ spec:
 # global.identity, one installation (backstage.installationName, default the
 # release name), the matching in-cluster Kubernetes entry (the frontend mints
 # the kagent token from it), the muster installation, the pg database block
-# when the Backstage chart's postgresql engine is on, app.extensions limited to
-# the Agent Platform pages, and the Agent Platform plugin's own block (the
-# tenant identity of the agents' HelmReleases, the skill repositories, the
-# kagent and model-manager API routes). The backstage chart mounts it through
+# when the Backstage chart's postgresql engine is on, the Agent Platform shell
+# (app.portals), app.extensions limited to the Agent Platform pages, and the
+# Agent Platform plugin's own block (the tenant identity of the agents'
+# HelmReleases, the skill repositories, the kagent and model-manager API
+# routes). The backstage chart mounts it through
 # backstage.extraAppConfig; the ConfigMap name and the file name are fixed
 # there. The Backstage release's pod checksums never see this ConfigMap —
 # changes here reach the running pod through the config-reload hook
@@ -55,6 +56,8 @@ data:
       title: Agent Platform
       baseUrl: https://backstage.ci.example.com
       rootRedirect: /agent-platform
+      portals:
+        agentPlatform: true
       extensions:
         - page:agent-platform
         - nav-item:agent-platform
@@ -10831,6 +10834,48 @@ subjects:
   name: agentgateway-controller
   namespace: agent-platform
 ---
+# Source: agent-platform-connectivity/templates/tenants/muster-mcpservers.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-platform:mcpserver-viewer
+  namespace: agent-platform
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+rules:
+  - apiGroups: ["muster.giantswarm.io"]
+    resources: ["mcpservers"]
+    verbs: ["get", "list", "watch"]
+---
+# Source: agent-platform-connectivity/templates/tenants/muster-mcpservers.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-platform:mcpserver-viewer
+  namespace: agent-platform
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-platform:mcpserver-viewer
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: system:authenticated
+---
 # Source: agent-platform-connectivity/templates/agentgateway/agentgatewayparameters.yaml
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayParameters
@@ -10849,7 +10894,7 @@ spec:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/agentgateway-upstream/agentgateway
-    tag: 2.3.5
+    tag: 2.3.6
   service:
     spec:
       type: ClusterIP
@@ -11851,7 +11896,7 @@ spec:
             - --namespace=agent-platform
             - --selector=app=backstage
             - --overwrite
-            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=ef632ed5c3ea94aafc7b3382a3c301f8e17ae990a68ef6632fb0b036eb1193d9
+            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=5922d9131c090f246dfb28b32abbef09fd8bdb13d32b02f836291b5b9d8407bd
           env:
             # kubectl keeps its discovery/http cache under $HOME; the root
             # filesystem is read-only.

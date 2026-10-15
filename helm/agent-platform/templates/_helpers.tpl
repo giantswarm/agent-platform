@@ -126,7 +126,10 @@ derived one, otherwise the render fails naming the single key to set — a silen
 overwrite would hide a values file that still spells the old key.
   muster: muster.extraCaFile.secret from global.identity.ca (secretName, key
     default ca.crt) while muster names no CA Secret of its own — the issuer's
-    private CA its OAuth server verifies the provider against.
+    private CA its OAuth server verifies the provider against. And
+    rbac.mcpServerEditor.subjects and rbac.workflowEditor.subjects: the
+    block's own subjects with tenants.platformTeam appended (each subject
+    once), while that list is not empty.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
                  muster.url from the muster Service (agent-platform.musterMcpUrl);
                  kagent.controllerTarget, the kagent controller its session
@@ -283,6 +286,26 @@ PersistentVolumeClaim names. */ -}}
 {{- end -}}
 {{- $_ := set $derived "storage" (dict "storageClassName" .) -}}
 {{- end -}}
+{{- /* A Session's directory lives as long as the Session: kagent deletes an
+idle Session after kagent.controller.sessionIdleTTL and its directory goes at
+once, so that TTL is sessions.cleanupAfter unless the block sets a shorter one
+(a longer one would never apply). 0 never deletes a Session and derives
+nothing: the manager refuses a cleanupAfter of 0. */ -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent") -}}
+{{- $ttl := toString (dig "controller" "sessionIdleTTL" "" (.root.Values.kagent | default dict)) -}}
+{{- $ttlSeconds := include "agent-platform.durationSeconds" $ttl -}}
+{{- if and $ttl (not $ttlSeconds) -}}
+{{- fail (printf "kagent.controller.sessionIdleTTL (%s) is not a Go duration such as 720h" $ttl) -}}
+{{- end -}}
+{{- if and $ttlSeconds (gt (float64 $ttlSeconds) 0.0) -}}
+{{- $own := toString (dig "sessions" "cleanupAfter" "" (index .root.Values "workspace-manager" | default dict)) -}}
+{{- if not $own -}}
+{{- $_ := set $derived "sessions" (dict "cleanupAfter" $ttl) -}}
+{{- else if gt (float64 (include "agent-platform.durationSeconds" $own | default "0")) (float64 $ttlSeconds) -}}
+{{- fail (printf "workspace-manager.sessions.cleanupAfter (%s) is longer than kagent.controller.sessionIdleTTL (%s): kagent deletes the idle Session first and its directory with it, so the cleanup never applies — leave workspace-manager.sessions.cleanupAfter unset (it follows the TTL) or raise the TTL" $own $ttl) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- /* The Organizations whose members manage workspaces, from
 workspaces.organizations: the manager checks a caller's groups against them. */ -}}
 {{- with (include "agent-platform.workspaces.organizations" .root | fromJson) -}}
@@ -387,6 +410,19 @@ installation's own podAffinity stands instead. */ -}}
 {{- $_ := set $pool "template" (dict "podAffinity" $affinity) -}}
 {{- $_ := set $derived "substrateWorkerPool" $pool -}}
 {{- end -}}
+{{- /* Workers above the default priority 0, so a pod making room on a full
+node (atelet) evicts the ordinary workloads first (giantswarm/agent-platform#999):
+the PriorityClass the connectivity chart ships (kagent.substrateWorkerPool
+.priorityClass); an installation's own template.priorityClassName stands
+instead. */ -}}
+{{- $pc := dig "substrateWorkerPool" "priorityClass" dict (.root.Values.kagent | default dict) -}}
+{{- if and $pc.enabled $pc.name (not (dig "substrateWorkerPool" "template" "priorityClassName" "" (.root.Values.kagent | default dict))) -}}
+{{- $pool := get $derived "substrateWorkerPool" | default dict -}}
+{{- $template := get $pool "template" | default dict -}}
+{{- $_ := set $template "priorityClassName" $pc.name -}}
+{{- $_ := set $pool "template" $template -}}
+{{- $_ := set $derived "substrateWorkerPool" $pool -}}
+{{- end -}}
 {{- /* The jwt Session admission a Session with a workspace passes: the
 workspace-manager's key set, issuer and audience, while workspaces are on and
 the manager signs grants (agent-platform.kagent.sessionAdmission); the block's
@@ -407,6 +443,21 @@ and muster never turns Ready (giantswarm/agent-platform#309). */ -}}
 {{- $ca := dig "identity" "ca" dict (.root.Values.global | default dict) -}}
 {{- if and $ca.secretName (not (dig "muster" "extraCaFile" "secret" "name" "" (.root.Values.muster | default dict))) -}}
 {{- $_ := set $derived "muster" (dict "extraCaFile" (dict "secret" (dict "name" $ca.secretName "key" ($ca.key | default "ca.crt")))) -}}
+{{- end -}}
+{{- /* The customer's platform team writes the servers and workflows of
+muster's namespace beside the Giant Swarm admin groups
+(giantswarm/agent-platform#706): tenants.platformTeam is appended to both
+editor bindings' subjects, so an installation names its team without
+repeating the admin groups. */ -}}
+{{- with (.root.Values.tenants | default dict).platformTeam -}}
+{{- $team := . -}}
+{{- $rbac := dict -}}
+{{- range $role := list "mcpServerEditor" "workflowEditor" -}}
+{{- $subjects := dig "rbac" $role "subjects" list ($.root.Values.muster | default dict) -}}
+{{- range $team -}}{{- if not (has . $subjects) -}}{{- $subjects = append $subjects . -}}{{- end -}}{{- end -}}
+{{- $_ := set $rbac $role (dict "subjects" $subjects) -}}
+{{- end -}}
+{{- $_ := set $derived "rbac" $rbac -}}
 {{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
@@ -626,7 +677,15 @@ manager writes into every grant's iss (its base URL,
 agent-platform.workspaceManager.baseURL) and the audience it writes into aud
 (workspace-manager.grant.audience; kagent, the chart's default). A value the
 kagent block sets for one of the three stands, the rest is derived: the kagent
-chart needs all three together. Emits JSON {jwksURL, issuer, audience}, or {}
+chart needs all three together. With the derived key set (derived, or an own
+jwksURL that names the same URL), allowHTTP is true:
+the kagent chart from 1.11.5 refuses a plain http jwksURL without it, and this
+one is the manager's own Service, which serves no TLS and which the controller
+reaches in-cluster (kagent-controller-to-workspace-manager); an own allowHTTP
+stands.
+Another own jwksURL carries no derived allowHTTP, so an external key set stays
+https unless the kagent block opts in itself. Emits JSON {jwksURL, issuer,
+audience[, allowHTTP]}, or {}
 while nothing is derived (the switch off, no grant key, kagent off): the kagent
 block's own admission, if any, then reaches the release as written.
 Usage: include "agent-platform.kagent.sessionAdmission" . | fromJson
@@ -641,6 +700,9 @@ Usage: include "agent-platform.kagent.sessionAdmission" . | fromJson
 {{- $derived := dict "jwksURL" (include "agent-platform.workspaceManager.jwksURL" .) "issuer" (include "agent-platform.workspaceManager.baseURL" .) "audience" (toString (dig "grant" "audience" "kagent" $wm)) -}}
 {{- range $k, $v := $derived -}}
 {{- $_ := set $out $k (toString (dig $k "" $own) | default $v) -}}
+{{- end -}}
+{{- if eq $out.jwksURL $derived.jwksURL -}}
+{{- $_ := set $out "allowHTTP" (dig "allowHTTP" true $own) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -1205,10 +1267,10 @@ The worker pods' preferred affinity to the atelet pod on their node, as JSON
 ({} while the pinned Substrate release predates
 agent-platform.substrate.workerPoolAffinityFloor; a release candidate of that
 release carries the field too). A worker runs sandboxes only
-through its node's atelet, and atelet's PriorityClass never preempts: when the
-atelet DaemonSet rolls on a node without spare CPU, a worker scheduled in the
-gap takes the CPU the old atelet pod freed, the new atelet pod stays Pending,
-the rollout stops at that node and the substrate release's upgrade times out
+through its node's atelet: when the atelet DaemonSet rolls on a node without
+spare CPU, a worker scheduled in the gap takes the CPU the old atelet pod
+freed, and under a non-preempting atelet class the new atelet pod stays
+Pending and the substrate release's upgrade times out
 (giantswarm/agent-platform#756). The term, weight 100, steers a worker to a node
 where an atelet pod is bound whenever one has room; a running worker is never
 evicted by it. It is preferred, not required: Karpenter cannot see a
@@ -2781,6 +2843,25 @@ line, no comment inside the define.
 {{- define "agent-platform.workspaceManager.kagentFloor" -}}0.4.0{{- end -}}
 
 {{/*
+A Go duration (time.ParseDuration: 720h, 1h30m, 0, 1.5h) in seconds, empty
+for anything else (a sign, a day unit, a bare number other than 0).
+Usage: include "agent-platform.durationSeconds" "720h"
+*/}}
+{{- define "agent-platform.durationSeconds" -}}
+{{- $d := toString . -}}
+{{- $unit := dict "h" 3600.0 "m" 60.0 "s" 1.0 "ms" 0.001 "us" 0.000001 "µs" 0.000001 "ns" 0.000000001 -}}
+{{- $num := "([0-9]+(\\.[0-9]*)?|\\.[0-9]+)" -}}
+{{- if eq $d "0" -}}0
+{{- else if regexMatch (printf "^(%s(ns|us|µs|ms|h|m|s))+$" $num) $d -}}
+{{- $total := 0.0 -}}
+{{- range regexFindAll (printf "%s(ns|us|µs|ms|h|m|s)" $num) $d -1 -}}
+{{- $total = addf $total (mulf (float64 (regexFind $num .)) (get $unit (regexReplaceAll (printf "^%s" $num) . ""))) -}}
+{{- end -}}
+{{- $total -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The first release of the workspace-manager line whose manager has the provider
 kind gitlab (gitlab.com or a self-managed GitLab: url, apiURL, a group access
 token as the sync credential, an OAuth application as the sign-in); an earlier
@@ -2941,6 +3022,27 @@ Usage: include "agent-platform.childName" (dict "root" $ "name" $chart)
 {{- printf "%s-%s" (dig "target" "name" "" .root.Values.gitops | default .root.Release.Name) .name -}}
 {{- else -}}
 {{- .name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The name of a component's OCIRepository, which its HelmRelease's chartRef names:
+the child name, and for a chart released with this chart at an exact version
+(components.<name>.releasedWithChart) `<child>-<version>`. Helm applies the two
+objects in kind order, HelmRelease before OCIRepository, so with one name for
+every version helm-controller would apply a step's new values to the previous
+chart, whose closed schema refuses a key the step adds, and spend a retry
+(giantswarm/agent-platform#1019). A versioned name moves the version into the
+HelmRelease's own spec: helm-controller waits until the source of that name
+holds that version's artifact, and the previous source is pruned with the step.
+A range or a dev channel keeps the child name.
+Usage: include "agent-platform.sourceName" (dict "child" $child "entry" $c "semver" $semver)
+*/}}
+{{- define "agent-platform.sourceName" -}}
+{{- if and .entry.releasedWithChart (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" .semver) -}}
+{{- printf "%s-%s" .child (regexReplaceAll "[^a-z0-9.-]+" (lower (trimPrefix "v" .semver)) "-") -}}
+{{- else -}}
+{{- .child -}}
 {{- end -}}
 {{- end -}}
 

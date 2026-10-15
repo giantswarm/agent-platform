@@ -19,14 +19,17 @@ below pins one property:
   (http://<workspace-manager.fullnameOverride>.<platform namespace>.svc:<workspace-manager.service.port>/.well-known/jwks.json),
   issuer the manager's resolved base URL (workspace-manager.oauth.baseURL, else
   https://workspace-manager.<global.domain>), audience workspace-manager.grant.audience
-  (kagent); NOTES prints them; no null anywhere in the release's values;
+  (kagent), and allowHTTP true: the kagent chart from 1.11.5 refuses the plain http key set
+  without it; NOTES prints them; no null anywhere in the release's values;
 - the same with the connectivity release's key (no own reference, providers and
   oauth.enabled); nothing without a grant key: no providers, oauth off,
   grantKey.create false; nothing with kagent off;
 - the derivation follows fullnameOverride, service.port, gitops.targetNamespace and
   components.workspace-manager.targetNamespace (the key set), global.domain (the
   issuer) and grant.audience; a value the kagent block sets for one of the three
-  stands and the rest is derived;
+  stands and the rest is derived; an own allowHTTP stands, and an own jwksURL carries no
+  derived allowHTTP unless it names the derived key set (an external key set stays https
+  unless the block opts in);
 - without the derivation an own block reaches the release as written, and one set in
   part fails the render naming the keys (the kagent chart needs all three);
 - the guards: a kagent range whose floor is below 1.6.0
@@ -34,7 +37,9 @@ below pins one property:
   of 1.6.0 judged alike), no issuer (neither global.domain nor oauth.baseURL), a
   userIdClaim other than email — each only with the admission derived;
 - the kagent chart at the range's floor renders the three KAGENT_SESSION_ADMISSION_JWT_*
-  entries of the controller ConfigMap from the forwarded block (network: gsoci).
+  entries of the controller ConfigMap from the forwarded block, and the first chart that
+  takes the opt-in renders KAGENT_SESSION_ADMISSION_JWT_ALLOW_HTTP "true" from it
+  (network: gsoci).
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
@@ -65,7 +70,10 @@ NO_OWN = ["--set", f"{NAME}.grant.signingKey=null"]
 JWT = "kagent.controller.session.admission.jwt"
 JWKS = f"http://{NAME}.{NAMESPACE}.svc:8080/.well-known/jwks.json"
 ISSUER = "https://workspaces.ci.example.com"
-WANT = {"jwksURL": JWKS, "issuer": ISSUER, "audience": "kagent"}
+WANT = {"jwksURL": JWKS, "issuer": ISSUER, "audience": "kagent", "allowHTTP": "true"}
+# The first kagent chart whose Session admission refuses a plain http jwksURL without
+# controller.session.admission.jwt.allowHTTP.
+ALLOW_HTTP_CHART = "1.11.5-rc.1"
 ENV = {"jwksURL": "KAGENT_SESSION_ADMISSION_JWT_JWKS_URL", "issuer": "KAGENT_SESSION_ADMISSION_JWT_ISSUER",
        "audience": "KAGENT_SESSION_ADMISSION_JWT_AUDIENCE"}
 
@@ -198,7 +206,7 @@ def main(meta: str) -> int:
     if admission(kagent_release([*base, *NO_OWN], meta)) != WANT:
         fail("with no own reference the connectivity release's key (providers, oauth.enabled, grantKey.create) derives no admission")
     ok(f"with the switch on and a grant signing key (own or created) the kagent release carries {JWT}: "
-       f"jwksURL {JWKS}, issuer {ISSUER}, audience kagent; NOTES prints it; no null in the release's values")
+       f"jwksURL {JWKS}, issuer {ISSUER}, audience kagent, allowHTTP true; NOTES prints it; no null in the release's values")
 
     # --- nothing without a grant key, or without kagent ------------------------------------------
     for flags, what in (([*NO_OWN, "--set", f"{NAME}.providers=null", "--set", "workspaceManager.route.enabled=false"], "without providers"),
@@ -225,13 +233,23 @@ def main(meta: str) -> int:
     if aud["audience"] != "platform-kagent":
         fail(f"the audience does not follow {NAME}.grant.audience: {aud}")
     own = admission(kagent_release([*base, "--set", f"{JWT}.issuer=https://wm.example.com", "--set", f"{JWT}.audience=other"], meta))
-    if own != {"jwksURL": JWKS, "issuer": "https://wm.example.com", "audience": "other"}:
+    if own != {"jwksURL": JWKS, "issuer": "https://wm.example.com", "audience": "other", "allowHTTP": "true"}:
         fail(f"an own issuer and audience do not stand beside the derived key set: {own}")
     own = admission(kagent_release([*base, "--set", f"{JWT}.jwksURL=https://keys.example.com/jwks.json"], meta))
     if own != {"jwksURL": "https://keys.example.com/jwks.json", "issuer": ISSUER, "audience": "kagent"}:
-        fail(f"an own key set does not stand beside the derived issuer and audience: {own}")
+        fail(f"an own key set does not stand beside the derived issuer and audience, or carries a derived allowHTTP: {own}")
+    own = admission(kagent_release([*base, "--set", f"{JWT}.jwksURL=http://keys.example.com/jwks.json"], meta))
+    if "allowHTTP" in own:
+        fail(f"an own plain http key set carries a derived allowHTTP: {own}")
+    own = admission(kagent_release([*base, "--set", f"{JWT}.jwksURL={JWKS}"], meta))
+    if own != WANT:
+        fail(f"an own jwksURL that names the derived key set carries no derived allowHTTP: {own}")
+    own = admission(kagent_release([*base, "--set", f"{JWT}.allowHTTP=false"], meta))
+    if own != {**WANT, "allowHTTP": "false"}:
+        fail(f"an own allowHTTP does not stand: {own}")
     ok(f"the key set follows {NAME}.fullnameOverride, service.port, gitops.targetNamespace and components.{NAME}.targetNamespace, "
-       f"the issuer global.domain without oauth.baseURL, the audience {NAME}.grant.audience; a value the kagent block sets stands per key")
+       f"the issuer global.domain without oauth.baseURL, the audience {NAME}.grant.audience; a value the kagent block sets stands per key; "
+       f"another own jwksURL carries no derived allowHTTP, one naming the derived key set does")
 
     # --- an own block without the derivation -----------------------------------------------------
     full = ["--set", f"{JWT}.jwksURL=https://keys.example.com/jwks.json", "--set", f"{JWT}.issuer=https://wm.example.com", "--set", f"{JWT}.audience=kagent"]
@@ -265,6 +283,11 @@ def main(meta: str) -> int:
         if f'{env}: "{WANT[key]}"' not in cm[0]:
             fail(f"the kagent chart {floor} does not render {env} from the forwarded {JWT}.{key}:\n{cm[0]}")
     ok(f"the kagent chart {floor} renders the three KAGENT_SESSION_ADMISSION_JWT_* entries of the controller ConfigMap from the forwarded block")
+    render = kagent_chart_render(hr, ALLOW_HTTP_CHART)
+    cm = [d for d in render.split("\n---\n") if re.search(r"^kind: ConfigMap$", d, re.M) and "KAGENT_CONTROLLER_NAME:" in d]
+    if not cm or 'KAGENT_SESSION_ADMISSION_JWT_ALLOW_HTTP: "true"' not in cm[0]:
+        fail(f"the kagent chart {ALLOW_HTTP_CHART} does not render KAGENT_SESSION_ADMISSION_JWT_ALLOW_HTTP from the forwarded {JWT}.allowHTTP:\n{cm[0] if cm else render}")
+    ok(f"the kagent chart {ALLOW_HTTP_CHART}, the first that refuses a plain http key set, renders KAGENT_SESSION_ADMISSION_JWT_ALLOW_HTTP \"true\" from the forwarded block")
     return 0
 
 

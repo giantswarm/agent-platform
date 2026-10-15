@@ -558,7 +558,7 @@ components:  # @schema additionalProperties: true
     # chart takes its OTel settings in the SDK-spec shape kagent.otel below
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
     # ignores them and exports nothing.
-    versionRange: ">=1.11.3-rc.2 <1.12.0-0"
+    versionRange: ">=1.11.4 <1.12.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -636,6 +636,10 @@ components:  # @schema additionalProperties: true
       # The worker PodDisruptionBudget is the connectivity chart's (the kagent
       # chart has no budget template for the WorkerPool; #472).
       - substrateWorkerPool.podDisruptionBudget
+      # The workers' PriorityClass is the connectivity chart's object too; the
+      # kagent release gets only the class name in the pool's template
+      # (agent-platform.componentDerivedValues, #999).
+      - substrateWorkerPool.priorityClass
     # The kagent chart stamps its own image references at publish (the build's
     # controller/UI tag, the Go ADK digest the Harness runs, the gVisor worker
     # of the Substrate version it was built against). An installation may
@@ -668,7 +672,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.11.3-rc.2 <1.12.0-0"
+    versionRange: ">=1.11.4 <1.12.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -719,7 +723,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.9.0 <1.10.0"
+    versionRange: ">=1.11.3 <1.12.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
     # release Flux resolved (ateController.gvisorWorker.followRelease, on by
@@ -746,7 +750,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.9.0 <1.10.0"
+    versionRange: ">=1.11.3 <1.12.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -2681,16 +2685,18 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # the issuer the manager writes into every grant's iss (its base URL,
     # workspace-manager.oauth.baseURL or https://workspace-manager.<global.domain>)
     # and the audience it writes into aud (workspace-manager.grant.audience,
-    # kagent) — and a value set here for any of the three stands, the rest is
-    # derived (README "Workspaces"). The grant names the person by email, the
+    # kagent), with allowHTTP true for that in-cluster plain http key set (the
+    # kagent chart from 1.11.5 refuses one without it) — and a value set here
+    # for any of the three stands, the rest is derived; an own allowHTTP stands,
+    # and an own jwksURL other than the derived one carries no derived
+    # allowHTTP (README "Workspaces"). The grant names the person by email, the
     # userIdClaim above, which the controller compares with the caller: another
     # claim fails the render, as does a kagent range whose floor is below
     # 1.6.0. Without workspaces nothing is forwarded, and the controller
     # refuses every Session that names a volume source.
     # The line's session lifecycle knobs travel as written (the block is the
     # kagent chart's; the chart renders each as its KAGENT_* env): sessionIdleTTL
-    # (KAGENT_SESSION_IDLE_TTL, 168h: an idle session is deleted; running tasks
-    # and turns waiting for input do not expire), sessionShareMaxTTL
+    # (KAGENT_SESSION_IDLE_TTL, below), sessionShareMaxTTL
     # (KAGENT_SESSION_SHARE_MAX_TTL, 0: the longest lifetime a session share may
     # request, and the lifetime a share created without one receives; 0 leaves a
     # share valid until revoked or the session is deleted), stalledTurnTimeout
@@ -2698,8 +2704,20 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # for that long is failed so the session takes its next message) and
     # pausedRuntimeTTL (KAGENT_PAUSED_RUNTIME_TTL, 2m: a runtime paused for input
     # is suspended to a durable snapshot once its pause is older than this). The
-    # platform sets none; an installation that bounds its shares sets
-    # sessionShareMaxTTL here (klaus-gateway's thread shares renew within it).
+    # platform sets only sessionIdleTTL; an installation that bounds its shares
+    # sets sessionShareMaxTTL here (klaus-gateway's thread shares renew within it).
+    # sessionIdleTTL: how long a Session lives after its last activity (a Go
+    # duration; running tasks and turns waiting for input do not expire, 0 never
+    # deletes one). 336h, 14 days of inactivity, after which a Session is
+    # deleted with its workspace directory; the kagent chart's own default is
+    # 168h. An installation's own period is the platform manager's choice
+    # sessions.idleTTL, rendered here. It is the one value of a workspace
+    # Session's retention: deleting the Session deletes its
+    # directory at once, so the workspace-manager's sessions.cleanupAfter is
+    # derived from it (with kagent on and a TTL other than 0) and an own
+    # cleanupAfter longer than it fails the render — it would never apply
+    # (README "Workspaces").
+    sessionIdleTTL: 336h
     # Voluntary disruption (giantswarm/agent-platform#431): the controller pod
     # holds every streaming turn (A2A SendStreamingMessage, the portal's SSE)
     # and the actor sessions behind them; an eviction mid-turn leaves the task
@@ -2800,8 +2818,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
 
   # The Substrate WorkerPool (ate.dev/v1alpha1) the platform Harness runs on,
   # rendered by the kagent chart in the kagent namespace: platform capacity,
-  # not an agent's — one worker hosts one actor at a time, so replicas bound
-  # the concurrently active agents, and a worker's resources bound a sandbox.
+  # not an agent's — a worker hosts up to ateom's --max-actors actors (default
+  # 1000, set by no value here), so replicas × that bound the actors and a
+  # worker's resources are shared by the sandboxes it hosts.
   # workerImage is the gVisor worker of the Substrate release the cluster runs:
   # the Giant Swarm Substrate line (giantswarm/substrate, published as
   # gsoci.azurecr.io/giantswarm/substrate/*, tagged with the bare version —
@@ -2876,10 +2895,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # reaches the WorkerPool as written.
     #
     # resources is the platform's capacity knob (giantswarm/agent-platform#344,
-    # bumblebee-plans#51 D5). One worker hosts one actor at a time, so a
-    # worker's limits bound one agent's sandbox — the memory limit its RAM, the
-    # CPU limit its vCPU count — and replicas (above) bound the concurrently
-    # active agents. Sizing (measured in agentlab): an idle worker holds ~16Mi
+    # bumblebee-plans#51 D5). A worker hosts up to ateom's --max-actors
+    # actors (default 1000, set by no value here), so a worker's limits are
+    # shared by the sandboxes it hosts — the memory limit their RAM, the CPU
+    # limit their vCPUs — and replicas (above) multiply the capacity. Sizing (measured in agentlab): an idle worker holds ~16Mi
     # and a golden-booted actor ~20Mi; a Go ADK turn's working set (its model
     # client, tool calls and the gVisor overhead) is what the limit bounds. The
     # defaults give one agent up to 2 vCPU / 2Gi and reserve 250m / 512Mi — the
@@ -2939,9 +2958,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # pool's Deployment once (above).
     #
     # Atelet affinity. A worker runs sandboxes only through the atelet on its
-    # node, and atelet's PriorityClass never preempts: while the atelet
-    # DaemonSet rolls on a full node, a worker scheduled in the gap takes the
-    # CPU the old atelet pod freed and the rollout stops there. From the
+    # node, and while the atelet DaemonSet rolls on a full node, a worker
+    # scheduled in the gap takes the CPU the old atelet pod freed. From the
     # Substrate line's 1.3.0 on (agent-platform.substrate
     # .workerPoolAffinityFloor) the chart DERIVES template.podAffinity, a
     # preferred term (weight 100) on the atelet pods (app: atelet in
@@ -2953,11 +2971,28 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # (giantswarm/agent-platform#798). An installation's own podAffinity
     # stands instead of the derived one (keep the atelet term in it, never
     # required); below 1.3.0 the key is refused.
+    #
+    # Priority (giantswarm/agent-platform#999). atelet's PriorityClass
+    # (ate-node-critical, PreemptLowerPriority) evicts the lowest-priority pods
+    # of a full node to make room, and a worker without a class runs at the
+    # default priority 0 — among the first victims, its actor with it. The
+    # connectivity chart ships priorityClass (below; never forwarded to the
+    # kagent release) and the chart DERIVES template.priorityClassName from
+    # its name: the ordinary workloads at 0 are evicted before a worker, the
+    # cluster's own classes (monitoring, the platform's, atelet's) still
+    # outrank it. An installation's own template.priorityClassName stands
+    # instead; enabled: false renders no class and names none. Setting or
+    # moving the name is a template change: it rolls the pool's Deployment
+    # once (above).
     podDisruptionBudget:
       enabled: true
       minAvailable: null
       maxUnavailable: 1
       unhealthyPodEvictionPolicy: AlwaysAllow
+    priorityClass:
+      enabled: true
+      name: agent-platform-worker-pool
+      value: 1000000
     template:
       nodeSelector:
         kubernetes.io/arch: amd64
@@ -4126,7 +4161,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.3.5"
+      tag: "2.3.6"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -4160,7 +4195,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.3.5"
+      tag: "2.3.6"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -4992,6 +5027,58 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
       cidrs: []
 
+# === Agent tenants (giantswarm/agent-platform#706) ===
+# Who sees, runs and writes agents, by Kubernetes RBAC. A tenant is a
+# namespace: the kagent namespace (the platform tenant, the agents for
+# everyone) and every namespace labelled giantswarm.io/organization (an
+# Organization's, whose objects agent-manager's tenant reconciler keeps). With
+# kagent on, the connectivity release renders the three ClusterRoles a tenant's
+# RoleBindings refer to:
+#   - agent-platform:user: see the tenant's agents, templates, RemoteMCPServers,
+#     ModelConfigs and muster MCPServers, and start a Session with an agent;
+#   - agent-platform:editor: the above, plus the writes agent-manager performs
+#     as the caller (HelmReleases, OCIRepositories, Agents, AgentTemplates,
+#     RemoteMCPServers);
+#   - agent-platform:admin: the above, plus ModelConfigs and the
+#     tenant's RoleBindings, which may bind these three roles only.
+# An Organization's RoleBindings are the installation's (they name the
+# customer's groups); the chart binds the platform tenant only, below. The
+# kagent controller answers from these roles once its authorizer is on (the
+# kagent setting of giantswarm/giantswarm#37761, not yet released): until then
+# the bindings change nothing a person sees.
+tenants:
+  platform:
+    # -- Every signed-in person: bound to agent-platform:user in the kagent
+    # namespace, and to `list` (with get and watch) on muster's MCPServers in
+    # muster's namespace (the servers for everyone). RBAC subjects. The
+    # default, system:authenticated, gives this to every user. It also gives
+    # it to every ServiceAccount, so every pod in the cluster can read the
+    # platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer
+    # specs. To give it to people only, replace the default with an OIDC
+    # group that every user belongs to, written as the API server sees it
+    # (with the installation's OIDC groups prefix).
+    users:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: system:authenticated
+    # -- The platform's operators: bound to agent-platform:editor in the
+    # kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in
+    # muster.rbac.*.subjects.
+    editors:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: giantswarm-ad:giantswarm-admins
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: giantswarm-github:giantswarm:giantswarm-admins
+  # -- The customer's platform team, per installation: RBAC subjects bound to
+  # agent-platform:editor in the kagent namespace beside `platform.editors`,
+  # and added to muster's mcpserver-editor and workflow-editor subjects beside
+  # muster.rbac.*.subjects (the meta chart appends them to the muster
+  # release's values). Empty by default. A group is written as the API server
+  # sees it (with the OIDC groups prefix of the installation).
+  platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories
 # mirrored on one shared read-write-many volume in the kagent namespace, a
@@ -5357,6 +5444,13 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       auth:
         forwardToken: true
+        # The cross-client audience a portal session's id_token carries (the
+        # kube-apiserver's, like the other managers'): muster requests it at
+        # login and the chart trusts it next to oauth.trustedAudiences, so a
+        # forwarded portal token is accepted. Users sign in once more after
+        # it changes.
+        requiredAudiences:
+          - dex-k8s-authenticator
   # The keys that seal each person's provider sign-ins and the sign-in flow's
   # state: a Secret in the platform's namespace whose data entries are key ids
   # (a lower-case DNS label of at most 32 characters), each 32 random bytes.
@@ -5447,8 +5541,11 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   sync:
     cycle: ""
   # How long a Session's directory outlives the Session's last turn (a Go
-  # duration; 30 days, 720h, is the chart's default): then it is deleted, at
-  # once when the Session is. Empty takes the chart's default.
+  # duration): then it is deleted, at once when the Session is. Empty, the
+  # default: kagent.controller.sessionIdleTTL (336h) with kagent on and a TTL
+  # other than 0, so a directory lives exactly as long as its Session;
+  # otherwise the chart's default (720h). A shorter value of its own stands; a
+  # longer one fails the render, since kagent deletes the Session first.
   sessions:
     cleanupAfter: ""
   # The size a workspace volume is created with where the StorageClass
@@ -5833,6 +5930,18 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
         # Mimir routes a scrape by this label; a monitor without it writes to
         # no tenant of the GS observability platform.
         observability.giantswarm.io/tenant: giantswarm
+  # The busy-worker marking (the Substrate line from the release carrying
+  # giantswarm/substrate#425; an older chart ignores the key): ate-controller
+  # sets these annotations on a WorkerPool worker pod while it hosts at least
+  # one actor, with the label ate.dev/busy=true, and removes them once it
+  # hosts none. A worker's SIGTERM stops the actors on it, so Karpenter's
+  # consolidation, drift and expiry leave a busy worker's node alone, and an
+  # idle pool still scales down (giantswarm/agent-platform#1014). Inert
+  # without Karpenter; {} (or null) turns the marking off.
+  ateController:
+    busyWorker:
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
   # The credential provider (the Substrate line from 1.1.0): the egress
   # gateway injects an agent's credentials — model keys, MCP headers, the
   # skills' git credentials — into the request from Secrets it reads on the
@@ -5996,21 +6105,23 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     nodeSelector: {}
     tolerations: []
     affinity: {}
-    # atelet's PriorityClass (the Substrate line from 1.1.3). Never: atelet
-    # keeps its priority (1000000000), so it schedules ahead of every other
-    # pending pod, but it evicts nothing: on a node without room for its
-    # requests it stays Pending until a pod leaves — no autoscaler adds a node
-    # for a pending DaemonSet pod. The class is ate-node-critical-non-preempting.
-    # PreemptLowerPriority, the Substrate chart's default, lets a first enable
-    # over full nodes evict the cluster's own workloads (monitoring, admission
-    # webhooks) to make room (giantswarm/agent-platform#731).
+    # atelet's PriorityClass. PreemptLowerPriority (the class
+    # ate-node-critical, value 1000000000): an atelet pod on a node without
+    # room for its requests evicts lower-priority pods, the scheduler taking
+    # the lowest-priority victims first — the ordinary workloads at the
+    # default priority 0 before monitoring and the platform's own classes —
+    # and honouring PodDisruptionBudgets where it can. A node without atelet
+    # places no actor, and no autoscaler adds a node for a pending DaemonSet
+    # pod: with Never (ate-node-critical-non-preempting, giantswarm/agent-platform#731)
+    # atelet stays Pending for good on a node another pod filled first
+    # (giantswarm/agent-platform#993). Never remains an installation's choice.
     priorityClass:
-      preemptionPolicy: Never
+      preemptionPolicy: PreemptLowerPriority
     # atelet's container resources, merged over the Substrate chart's. The
     # request stays at what the running atelets hold (50m CPU, 128Mi): a roll
     # (maxSurge 0) frees the old pod's request before it places the new one,
-    # and under Never a larger request leaves atelet Pending for good on a
-    # node with no more room. The Substrate line's 1.9 default asks 256Mi
+    # and a larger request would evict a pod on every
+    # full node. The Substrate line's 1.9 default asks 256Mi
     # (giantswarm/agent-platform#993). An installation sizes it here.
     resources:
       requests:

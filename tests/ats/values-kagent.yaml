@@ -12,8 +12,8 @@
 # cluster without the API).
 #
 # Sized for the CI executor (the `large` class, one 4-vCPU / 15 GB node): one
-# gVisor worker with modest requests — one worker hosts one actor at a time and
-# the smoke's Agents boot in turn — under the Substrate control plane the
+# gVisor worker with modest requests — a worker hosts many actors (ateom's
+# --max-actors, default 1000) and the smoke's Agents boot in turn — under the Substrate control plane the
 # chart renders (single replicas, ate-api-server two), its bundled Postgres at a
 # fraction of the chart's 1-CPU request, the bundled RustFS as the snapshot
 # store (a lab's shape; an installation names its own bucket), the kagent UI at
@@ -71,3 +71,28 @@ substrate:
   # platform's CNPG Cluster above: substrate.postgres.enabled `auto` resolves to it.
   rustfs:
     enabled: true
+
+# The engine's helm-controller re-checks a HelmRelease's dependsOn on a fixed
+# timer (--requeue-dependency, 30 s upstream; Flux 2.9 watches no dependency),
+# so the roster's chain — CRDs and muster, then connectivity, Substrate, kagent,
+# then agent-manager — idles up to 30 s at every level. 5 s here: the install's
+# wall clock on the executor, not its order (dependsOn still gates every step).
+# Ten workers (--concurrent, 4 upstream): an install with --wait holds a worker
+# for as long as the release takes, and with four the roster's ten releases
+# queue behind the slow ones while their dependents cannot even check. The
+# own-Flux scenario gives the cluster's helm-controller the same args
+# (conftest.helm_controller_args reads this block), so both scenarios install
+# the chain on one setting.
+flux-engine:
+  instance:
+    kustomizePatches:
+      - target:
+          kind: Deployment
+          name: helm-controller
+        patch: |
+          - op: add
+            path: /spec/template/spec/containers/0/args/-
+            value: --requeue-dependency=5s
+          - op: add
+            path: /spec/template/spec/containers/0/args/-
+            value: --concurrent=10

@@ -122,7 +122,9 @@ from conftest import (
     is_ready,
     jwt_claims,
     load_values,
+    log_release_timeline,
     login_through_muster,
+    now_rfc3339,
     self_management_sets,
     substrate_trust_bundles,
     agent_state,
@@ -225,12 +227,14 @@ def test_the_scenario_installs_the_example_file() -> None:
 def app_deployment(kube: Kube, helm: Helm, prerequisites: None, chart_archive: Path, pushed_chart: str, smoke_sets: List[str]) -> float:
     """`helm install --wait` of the candidate, the quick start's way. Returns the seconds it took."""
     assert not kube.flux_crds(), "the smoke needs a cluster without Flux CRDs; another Flux is present"
+    since = now_rfc3339()
     try:
         elapsed = helm.install(str(chart_archive), SMOKE_VALUES, smoke_sets)
     except AssertionError:
         dump_platform(kube)
         raise
     TIMINGS.record(f"helm install --wait (engine, muster+OAuth, {', '.join(c for c in COMPONENTS if c != 'muster')}, self on)", elapsed)
+    log_release_timeline(kube, NAMESPACE, since, NAMESPACE)
     return elapsed
 
 

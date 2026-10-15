@@ -33,13 +33,27 @@ Nothing else is excepted: no `app: kagent` selector remains (the v1alpha2 agent 
 
 ## Compensating controls
 
-- **The sandbox is the boundary.** An agent's code runs under gVisor (`runsc`), a user-space kernel; the worker pod's capabilities serve the sandbox's construction, not the agent. The worker pod is a long-lived shell that hosts one actor at a time and is replaced between actors' lifetimes by the controller; it carries a `default` ServiceAccount token that nothing inside the sandbox can reach without escaping it.
+- **The sandbox is the boundary.** An agent's code runs under gVisor (`runsc`), a user-space kernel; the worker pod's capabilities serve the sandbox's construction, not the agent. The worker pod is a long-lived shell that hosts up to `--max-actors` actors (default 1000) and is replaced by the controller when the pool rolls; it carries a `default` ServiceAccount token that nothing inside the sandbox can reach without escaping it.
 - **Every hop is authenticated.** Pod certificates (mTLS) between `atelet`, `ate-api-server`, the router and the egress gateway; actors authenticate to ate-api with the cluster's ServiceAccount tokens for the audience `api.ate-system.svc`, verified against the apiserver's issuer; the router authorizes a request against the actor assigned to the worker before it tunnels it; the egress gateway resolves the connecting actor and applies the egress policy in the request path.
 - **Network policies in both flavours** (`templates/substrate/netpol.yaml`): the control plane accepts only its peers; the worker pods reach only the egress gateway, the dns and the cluster DNS — an actor's outbound connections all leave through `atenet-egress`, where the actors' allow-list lives (muster, the kagent controller, the LLM provider or the agentgateway LLM listener, DNS); the kagent controller admits the gateway on its API port and nothing else of Substrate's. The router admits a turn on 8080 only from the kagent controller (`app.kubernetes.io/name: kagent`, `app.kubernetes.io/component: controller`) in the namespace the kagent chart renders it into, `kagent.namespaceOverride` (the meta chart's `kagent`); any other pod, a debugging pod in the same namespace included, is dropped, while a `kubectl port-forward` to the router enters the pod's network namespace and is not subject to the policy, so it proves the router, not the path. Rendered on every installation; enforced where Cilium enforces (agentlab does not).
 - **Namespace scoping.** Substrate's control plane and its pools live in two namespaces of their own; the WorkerPool and the workers in the kagent namespace with the agents' other objects; the hook that bootstraps the pools holds its rights for the seconds it runs (a ClusterRole on secrets, configmaps and namespaces, created and removed with the hook).
 - **Roots that are minted once.** The CA and JWT pools are created when missing and never rotated by the chart — a rotation is an operational procedure of Substrate that re-issues every dependent identity, not something an upgrade may do by accident.
 - **One architecture per pool.** The WorkerPool is pinned to the installation's CPU architecture: a mixed pool wedges the actors whose snapshot was taken on the other.
 - **Render-time refusals.** The chart refuses kagent without Substrate, Substrate without its CRDs or a database, kagent without a snapshot store, and — where the render is live — a cluster that does not serve `certificates.k8s.io/v1beta1/PodCertificateRequest`.
+
+## What an actor can reach, and how a refusal looks
+
+An actor's outbound traffic is HTTPS on port 443 plus the listed in-cluster destinations (muster, the kagent controller, the agentgateway LLM listener, the OTLP gateway, the cluster entity on 443 and 10443). `substrate-atenet-egress` opens `world` on 443/TCP only, and that rule is the contract actors are written against: the cluster policy is enforced at the node, below the actor's own egress policy, and applies whatever the actor's policy allows.
+
+| Request | What the actor sees |
+|---|---|
+| HTTPS (443) to an allowed destination | the response |
+| Denied by the actor's egress policy | `403` at once, naming the policy denial |
+| Plaintext HTTP (port 80) or any other port, to a host outside the listed destinations | the gateway's upstream connection is dropped at the node and times out: a `503` from the egress gateway after about 11 s |
+
+The 503 is not an outage and no retry helps. The way out is HTTPS on 443; a host model server is opened by its own rule in the chart, from the address the ModelConfigs carry, not by a port on the actor's egress policy. Only a cluster with Cilium enforcing the chart's policies shows it: agentlab renders and enforces none, so an actor author first meets it on a real cluster.
+
+The egress gateway does not refuse such a port at once. It terminates the actor's CONNECT and dials upstream; whether a node drops the dial is decided by the CNI after the gateway has handed the connection over, so the gateway has no signal to refuse on short of a second, hand-kept copy of the cluster policy's port list inside the egress policy. That copy would drift from the chart's policy and is not carried; the documented 443-only contract and the 503 signature stand instead.
 
 ## Open upstream items (state at the pin)
 

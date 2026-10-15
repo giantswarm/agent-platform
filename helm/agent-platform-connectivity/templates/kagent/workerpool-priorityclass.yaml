@@ -1,0 +1,30 @@
+{{- /* The PriorityClass the worker pods of the Substrate WorkerPool run at
+(kagent.substrateWorkerPool.priorityClass; giantswarm/agent-platform#999). The
+meta chart names it in the pool's template.priorityClassName unless an
+installation names its own. Without a class the workers run at the default
+priority 0, the lowest of the cluster, and atelet's PriorityClass
+(ate-node-critical, PreemptLowerPriority) evicts them first when it makes room
+on a full node — a worker takes its actors with it. Above 0, the ordinary
+workloads go first; below the cluster's own classes (monitoring, the platform's,
+atelet's), which keep preempting a worker. preemptionPolicy Never: a pending
+worker schedules ahead of the default-priority pods but evicts nothing itself —
+the provisioner adds a node for it. A PriorityClass is cluster-scoped, so it is
+rendered by the platform's release with the kagent component; the kagent chart
+renders the WorkerPool and none. Inert while components.kagent is off; the meta
+chart never forwards the block to the kagent release
+(components.kagent.omitKeys). */ -}}
+{{- $pc := .Values.kagent.substrateWorkerPool.priorityClass }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) $pc.enabled }}
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ $pc.name }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: substrate-worker-pool
+value: {{ $pc.value | int }}
+globalDefault: false
+preemptionPolicy: Never
+description: "The worker pods of the Substrate WorkerPool kagent's actors run on (kagent.substrateWorkerPool.priorityClass): above the default priority 0, so a pod that makes room on a full node evicts the ordinary workloads before a worker, and below the cluster's own classes. Shipped by the agent-platform connectivity chart with the kagent component."
+{{- end }}

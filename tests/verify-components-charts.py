@@ -593,6 +593,19 @@ def render_component(name: str, chart_dir: str, values: str, what: str, tmp: str
     print(f"ok: {what} renders the forwarded values ({r.stdout.count(chr(10) + 'kind: ')} objects)")
 
 
+def chart_ref(manifest: dict[tuple[str, str], str], chart: str) -> str:
+    """The OCIRepository a chart's HelmRelease names (spec.chartRef.name)."""
+    m = re.search(r"^  chartRef:\n    kind: OCIRepository\n    name: (\S+)$", manifest.get(("HelmRelease", chart), ""), re.M)
+    if not m:
+        fail(f"the {chart} HelmRelease names no OCIRepository in its chartRef")
+    return m.group(1)
+
+
+def oci(manifest: dict[tuple[str, str], str], chart: str) -> str:
+    """The OCIRepository a chart's HelmRelease installs from."""
+    return manifest[("OCIRepository", chart_ref(manifest, chart))]
+
+
 def main(meta: str) -> int:
     components = roster(meta)
     released = {n for n, c in components.items() if c.get("releasedWithChart")}
@@ -616,17 +629,20 @@ def main(meta: str) -> int:
         coding = docs(coding_render.result())
     renders = {shape: (next(manifests), next(manifests)) for shape in SHAPES}
     wide, pinned = next(iter(renders.values()))
-    # The OCIRepository and the HelmRelease are named after the entry's chart.
+    # The HelmRelease is named after the entry's chart, and its chartRef names the
+    # OCIRepository (the chart's name; with the chart's version for one released
+    # with it, agent-platform.sourceName).
     charts = {n: c["chart"] for n, c in components.items()}
     for shape, (w, _) in renders.items():
         rendered = {n for kind, n in w if kind == "OCIRepository" and n != RELEASE}
-        if rendered != set(charts.values()):
-            fail(f"the {shape} render's OCIRepositories {sorted(rendered)} are not the roster's charts {sorted(charts.values())}")
+        refs = {c: chart_ref(w, c) for c in charts.values()}
+        if rendered != set(refs.values()) or any(r != c and not r.startswith(f"{c}-") for c, r in refs.items()):
+            fail(f"the {shape} render's OCIRepositories {sorted(rendered)} are not the ones the roster's HelmReleases name {sorted(refs.values())}")
     for w, p in renders.values():
         for (kind, _), doc in [*w.items(), *p.items()]:
             if kind == "OCIRepository":
                 layer_selector(doc)
-    kagent_oci = wide.get(("OCIRepository", charts.get("kagent", "kagent")))
+    kagent_oci = wide.get(("OCIRepository", chart_ref(wide, charts.get("kagent", "kagent"))))
     kagent_tag = source(kagent_oci)[1].split()[0].lstrip(">=") if kagent_oci else ""  # the range's floor = the build the values name
     print(f"--> {len(components)} components (the meta chart's roster): {len(pins)} pinned by the BOM, {len(released)} released with the chart")
     print(f"--> {len(SHAPES)} shapes ({', '.join(SHAPES)}): each distinct forwarded block rendered once")
@@ -636,10 +652,10 @@ def main(meta: str) -> int:
         """One component: its range and its BOM pin resolved, pulled and
         rendered with every distinct block the meta chart forwards to it."""
         chart = charts[name]
-        url, rng = source(wide[("OCIRepository", chart)])
-        _, pin = source(pinned[("OCIRepository", chart)])
+        url, rng = source(oci(wide, chart))
+        _, pin = source(oci(pinned, chart))
         for shape, (w, p) in renders.items():
-            if (source(w[("OCIRepository", chart)])[1], source(p[("OCIRepository", chart)])[1]) != (rng, pin):
+            if (source(oci(w, chart))[1], source(oci(p, chart))[1]) != (rng, pin):
                 fail(f"{name}: the {shape} render gives another range or pin than the {next(iter(SHAPES))} render — a shape must not move a version")
         # (axis, values) -> the shapes that forward them, in SHAPES order.
         blocks: dict[tuple[str, str], list[str]] = {}
@@ -686,7 +702,7 @@ def main(meta: str) -> int:
         for (version, values), forwarded in jobs.items():
             chart_dir = f"{tmp}/{name}/{version}"
             if version not in pulled:
-                flux_layer(name, url, version, wide[("OCIRepository", chart)])
+                flux_layer(name, url, version, oci(wide, chart))
                 pulled[version] = pull(url, version, chart_dir)
             render_component(name, f"{chart_dir}/{chart}", values, f"{name} {pulled[version]} ({where(forwarded)})", tmp)
 
