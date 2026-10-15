@@ -1591,6 +1591,9 @@ spec:
             ephemeral-storage: 16Mi
       createNamespace: false
       credentialProvider:
+        additionalProviders:
+        - host: google-access-token-credential-provider.ate-system.svc:50051
+          uriAuthority: google-access-token.k8s.io
         namespacePolicies:
         - allowedNamespaces:
           - kagent
