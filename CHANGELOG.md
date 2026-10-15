@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The installation's skills credential follows the tenant credential naming convention.** The agent-manager component's range starts at 2.3.0 (`>=2.3.0 <3.0.0`) and the migrate run's BOM pin is 2.3.0: with `agent-manager.skills.mintGitAuthSecret` agent-manager mints `tenant-credential-agent-manager-skills-token`, composes it onto every git-skill agent and keeps its earlier name `agent-manager-skills-token` filled. The connectivity chart's `agent-manager migrate` run gets the current name and the earlier ones (`AGENT_MANAGER_SKILLS_GIT_AUTH_SECRET_NAME`, `AGENT_MANAGER_SKILLS_GIT_AUTH_PREVIOUS_SECRET_NAMES`, derived as agent-manager's chart derives them, `agent-manager.skills.previousGitAuthSecretNames` included) and moves every agent naming an earlier name to the current one once that Secret exists; a GitOps-owned agent gets the diff in the run's report. Nothing is done by hand; the earlier Secret keeps working until no agent names it. `make verify-migration` asserts the run's inputs.
+
 ### Added
 
 - **`tenants.organizations.enabled`: an agent in an Organization's namespace gets its credentials** (giantswarm/agent-platform#1041). On, Substrate's credential provider reads each namespace labelled `giantswarm.io/organization` for the atespace of the same name only (an `ownNamespaceSelector` entry in `substrate.credentialProvider.namespacePolicies`), and for `ate-golden`, where every template's golden actor boots (an `allowedNamespaceSelector` on its entry). Its model key, MCP headers and git skills' credentials are injected from its own namespace; a new Organization's namespace needs no chart change. An installation's own policies stay; an `ate-golden` selector on other namespaces fails the render. Off, the policies are as before.
