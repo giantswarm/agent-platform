@@ -1405,6 +1405,8 @@ spec:
         enabled: false
     substrate-crds: {}
     tenants:
+      organizations:
+        enabled: false
       platform:
         editors:
         - apiGroup: rbac.authorization.k8s.io

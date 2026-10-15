@@ -4349,6 +4349,13 @@ verify-tenant-rbac: ## Assert the RBAC of agent tenants (giantswarm/agent-platfo
 	@HELM="$(HELM)" python3 tests/verify-tenant-rbac.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-tenant-workers
+verify-tenant-workers: ## Assert the workers of the Organizations' namespaces (giantswarm/agent-platform#1036): with tenants.organizations.enabled and Agent Substrate on, every rule that admits the kagent namespace's workers (the atenet router's egress, the egress gateway's and the dns's ingress; both flavors) also admits the worker pods of every namespace labelled giantswarm.io/organization (selected by the label, on the same ports), and the substrate-workers PolicyException matches the same pods there by a namespaceSelector with the same rules; off, nothing selects the label. Needs PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-tenant-workers.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-kagent-login-public-paths
 verify-kagent-login-public-paths: ## Assert kagent's oauth2-proxy serves the sign-in page without a session and nothing else (giantswarm/agent-platform#989): the skip-auth arguments the kagent HelmRelease carries, the same in the connectivity chart's values, admit /login, /env-config.js, /favicon.svg and the Vite bundle under /assets/, and refuse the app's pages, /api and anything deeper under /assets/. Needs PyYAML.
 	@echo "====> $@ ($(CHART_DIR))"

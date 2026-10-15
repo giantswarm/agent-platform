@@ -3053,6 +3053,16 @@ tenants:
   # namespace beside platform.editors (the meta chart also adds it to muster's
   # editor bindings).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+  organizations:
+    # -- The worker pods of the namespaces labelled
+    # `giantswarm.io/organization` (agent-manager's tenants, its
+    # `tenants.enabled`): with Agent Substrate on, the router, the egress
+    # gateway and the actors' dns admit them as they admit the kagent
+    # namespace's workers, and the workers' Kyverno PolicyException covers
+    # them (it needs Kyverno 1.15.2 or later, the first that matches an
+    # exception's namespaceSelector). A namespace without the label gets
+    # nothing. Off, the render is that of a chart without the key.
+    enabled: false
 
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories

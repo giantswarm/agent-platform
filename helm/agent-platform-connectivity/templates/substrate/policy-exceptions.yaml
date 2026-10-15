@@ -35,6 +35,10 @@ renders for a WorkerPool) and holds the lists to them:
     the Substrate line from 1.1.0): non-root user, drops ALL,
     allowPrivilegeEscalation false, read-only root — but no seccompProfile.
 
+With tenants.organizations.enabled the worker pods' exception also matches the
+same workers in every namespace labelled giantswarm.io/organization, by a
+namespaceSelector (agent-platform#1036).
+
 Kinds: the Pod and the controller kind of each workload (Kyverno evaluates the
 controller through its autogen rules, then the pod). A selector is matched
 against the controller's OWN labels at its admission, so a workload whose
@@ -97,6 +101,25 @@ spec:
           matchExpressions:
           - key: ate.dev/worker-pool
             operator: Exists
+    {{- if include "agent-platform.tenants.organizations" . }}
+    # The same workers in the Organizations' namespaces
+    # (tenants.organizations.enabled): selected by the namespace's label,
+    # never listed. Kyverno matches an exception's namespaceSelector from
+    # 1.15.2 (kyverno/kyverno#13975).
+    - resources:
+        kinds:
+        - Pod
+        - Deployment
+        - ReplicaSet
+        namespaceSelector:
+          matchExpressions:
+          - key: giantswarm.io/organization
+            operator: Exists
+        selector:
+          matchExpressions:
+          - key: ate.dev/worker-pool
+            operator: Exists
+    {{- end }}
 ---
 apiVersion: kyverno.io/v2
 kind: PolicyException

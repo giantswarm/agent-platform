@@ -2854,6 +2854,16 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
+                "organizations": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "Admit the agent workers of the Organizations' namespaces. Turn it on with agent-manager's tenant reconciler (agent-manager's `tenants.enabled`), which puts a WorkerPool in each namespace labelled `giantswarm.io/organization` that holds an agent. On, with Agent Substrate on, the connectivity release lets the worker pods of every such namespace reach the atenet router's tunnel, the egress gateway and the actors' dns, as the kagent namespace's workers do (both network policy flavors), and the workers' Kyverno PolicyException covers those namespaces (Kyverno 1.15.2 or later: an older Kyverno ignores the exception's namespaceSelector and refuses the workers). The namespaces are selected by the label, never listed; a namespace without the label gets nothing. Off, the default, nothing changes."
+                        }
+                    }
+                },
                 "platform": {
                     "type": "object",
                     "additionalProperties": false,

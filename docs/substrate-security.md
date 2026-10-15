@@ -31,6 +31,8 @@ A Giant Swarm cluster enforces the restricted standard through Kyverno. The conn
 
 Nothing else is excepted: no `app: kagent` selector remains (the v1alpha2 agent Deployments' exception is gone with them), the exceptions are scoped to the two Substrate namespaces (the control plane matched by workload name — its Deployments carry no labels of their own) and the WorkerPool label in the kagent namespace, and the hook Jobs of the connectivity release run under the restricted profile themselves.
 
+With `tenants.organizations.enabled` (agent-manager's tenants, giantswarm/agent-platform#1036) the worker pods' exception also matches the same WorkerPool label in every namespace labelled `giantswarm.io/organization`, by a namespaceSelector (Kyverno 1.15.2 or later); the router, the egress gateway and the dns admit those workers as they admit the kagent namespace's. Anyone who can create a pod with the WorkerPool label in such a namespace then gets the workers' exception there, as in the kagent namespace.
+
 ## Compensating controls
 
 - **The sandbox is the boundary.** An agent's code runs under gVisor (`runsc`), a user-space kernel; the worker pod's capabilities serve the sandbox's construction, not the agent. The worker pod is a long-lived shell that hosts up to `--max-actors` actors (default 1000) and is replaced by the controller when the pool rolls; it carries a `default` ServiceAccount token that nothing inside the sandbox can reach without escaping it.
