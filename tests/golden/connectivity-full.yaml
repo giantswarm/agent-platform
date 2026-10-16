@@ -14438,11 +14438,14 @@ spec:
 # on 8443; every connection an actor opens leaves from here, so this is where
 # the actors' destinations are allowed: muster (tool calls as the caller), the
 # kagent controller (A2A, sessions), the LLM provider — through the
-# agentgateway LLM listener when llmRouting is on, the provider's endpoint on
-# world:443 either way — the built-in tool server when it is on, the OTLP
-# gateway of kagent's exporters (the actors' traces and logs), and
-# cluster:443/10443 (muster's OAuth endpoints on the public hostname resolve to
-# an internal LB VIP; 10443 is the Envoy listener after an Azure LB DNAT).
+# agentgateway LLM listener when llmRouting is on, the provider's endpoint in
+# the world either way — the built-in tool server when it is on, the OTLP
+# gateway of kagent's exporters (the actors' traces and logs), the world on
+# every TCP port (the origins the actors' egress policies declare, on whatever
+# port they name: the policy is the control, this rule does not second-guess
+# it), and cluster:443/10443 (muster's OAuth endpoints on the public hostname
+# resolve to an internal LB VIP; 10443 is the Envoy listener after an Azure LB
+# DNAT).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -14551,11 +14554,13 @@ spec:
         - ports:
             - port: "4317"
               protocol: TCP
+    # Every TCP port (port 0 is Cilium's wildcard): the actors' egress policy
+    # decides which origin, on which port, an actor reaches.
     - toEntities:
         - world
       toPorts:
         - ports:
-            - port: "443"
+            - port: "0"
               protocol: TCP
     - toEntities:
         - cluster
@@ -14565,6 +14570,15 @@ spec:
               protocol: TCP
             - port: "10443"
               protocol: TCP
+  # The node's cloud identity stays out of reach whatever an egress policy
+  # declares: the instance metadata services (link-local, AWS's IPv6 endpoint)
+  # and Azure's WireServer serve plaintext on ports the world rule above now
+  # admits. A deny wins over every allow.
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 169.254.0.0/16
+        - cidr: 168.63.129.16/32
+        - cidr: fd00:ec2::254/128
 ---
 # Source: agent-platform-connectivity/templates/substrate/netpol.yaml
 # dns: the actors' resolver (CoreDNS with a controller that writes the
@@ -15400,6 +15414,63 @@ spec:
 ---
 # Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-credential-refs
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kagent"]
+    resourceRules:
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["agents", "agenttemplates", "remotemcpservers"]
+  # The objects read untyped: the policy matches three kinds of every served
+  # version.
+  variables:
+    - name: spec
+      expression: "has(object.spec) ? dyn(object.spec) : dyn({})"
+    # An Agent carries its template inline under spec.template.
+    - name: template
+      expression: >-
+        request.resource.resource == 'agents' ?
+        ('template' in variables.spec ? dyn(variables.spec.template) : dyn({})) : variables.spec
+    - name: sources
+      expression: >-
+        ('skills' in variables.template ? dyn(variables.template.skills) : dyn([])) +
+        ('plugins' in variables.template ? dyn(variables.template.plugins) : dyn([]))
+    - name: refs
+      expression: >-
+        variables.sources.filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
+        .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '') +
+        (request.resource.resource == 'remotemcpservers' && 'headersFrom' in variables.spec ?
+        dyn(variables.spec.headersFrom).filter(h, has(h.valueFrom) && has(h.valueFrom.type) && h.valueFrom.type == 'Secret')
+        .map(h, has(h.valueFrom.name) ? string(h.valueFrom.name) : '') : dyn([]))
+    - name: foreign
+      expression: "variables.refs.filter(n, !n.startsWith('tenant-credential-'))"
+  validations:
+    - expression: "has(object.metadata.deletionTimestamp) || size(variables.foreign) == 0"
+      reason: Forbidden
+      messageExpression: >-
+        'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named tenant-credential-*, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ')
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
   name: agent-platform-tenant-egress-credentials
@@ -15447,6 +15518,23 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 spec:
   policyName: agent-platform-tenant-credentials
+  validationActions: [Deny]
+---
+# Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-credential-refs
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-tenant-credential-refs
   validationActions: [Deny]
 ---
 # Source: agent-platform-connectivity/templates/substrate/hooks-rbac.yaml

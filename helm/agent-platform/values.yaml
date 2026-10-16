@@ -961,8 +961,10 @@ components:  # @schema additionalProperties: true
     # adds get_session_turn and delete_session; 2.1.0 lists in get_info's
     # namespaces.managed only where the caller may create agents and refuses
     # an agent on a claude Harness without a harness.egress entry
-    # (giantswarm/agent-manager#150, #71, #148).
-    versionRange: ">=2.1.0 <3.0.0"
+    # (giantswarm/agent-manager#150, #71, #148). 2.3.0 names the minted
+    # skills credential tenant-credential-agent-manager-skills-token, keeps
+    # its earlier name filled, and its migrate moves the agents over.
+    versionRange: ">=2.3.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -4930,7 +4932,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.1.0
+      tag: 2.3.0
     dryRun: false
     gitopsNamespaces: []
 

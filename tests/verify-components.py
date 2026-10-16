@@ -101,7 +101,7 @@ LINE = {
     "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
-    "agent-manager": (GSOCI, ">=2.1.0 <3.0.0", ["muster", "kagent"]),
+    "agent-manager": (GSOCI, ">=2.3.0 <3.0.0", ["muster", "kagent"]),
     # The Google access-token credential provider plugin beside Substrate
     # (giantswarm/substrate-credential-providers): 0.1.0 is its first release.
     "google-access-token-credential-provider": (GSOCI, ">=0.1.0 <1.0.0", ["substrate"]),

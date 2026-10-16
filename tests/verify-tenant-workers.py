@@ -234,7 +234,7 @@ def check_admission(docs, pool="kagent-default"):
 # Secrets' policy also needs agent-manager on, which this render leaves off;
 # verify-tenant-rbac asserts it).
 EGRESS_POLICIES = ("agent-platform-tenant-egress-credentials", "agent-platform-tenant-model-credentials",
-                   "agent-platform-tenant-credentials")
+                   "agent-platform-tenant-credentials", "agent-platform-tenant-credential-refs")
 
 
 def main():

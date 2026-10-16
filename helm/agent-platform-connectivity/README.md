@@ -198,7 +198,7 @@ On the installation, after the cutover:
   does not enforce a key's `allowedModels` on the Kubernetes API-key contract
   yet (giantswarm/giantswarm#37742), so putting a paid provider model next to
   consumer keys is the installation's decision.
-- Agent pods keep their `world:443` egress, so a direct call to the provider
+- The actors keep their `world` egress, so a direct call to the provider
   still works. The listener is the paved road, not a wall. Egress tightening is
   a separate change.
 - The LLM path adds no `frontend.metrics` policy: the data plane honours one
@@ -1766,7 +1766,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.1.0"` |  |
+| agentManager.migration.image.tag | string | `"2.3.0"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
