@@ -665,6 +665,44 @@ The connectivity chart renders that tenant identity whenever kagent is on (`temp
 
 The platform's own component `HelmRelease`s are the second tenant. On a Giant Swarm management cluster they live in the exempt `flux-giantswarm` namespace (`gitops.namespace`) and need no identity of their own; a cluster whose Flux the chart brings itself gives them one, `agent-platform-flux`, with the bundled engine.
 
+### A tenant's own model
+
+Every tenant's agents use the platform's default ModelConfig: agent-manager's tenant reconciler copies `default-model-config` and its key Secret into each Organization namespace (labelled `giantswarm.io/organization`) that holds an agent. A tenant that pays for its own model usage adds its own ModelConfig and key Secret in its namespace. Its agents select it by name; another tenant's agents cannot, because an agent's template names a ModelConfig of its own namespace only.
+
+Turn it on with `tenants.organizations.modelConfigs.enabled` (off by default). It needs Kubernetes 1.30 or later (GA ValidatingAdmissionPolicy) and `llmRouting.enabled`; the render fails otherwise, and with `tenants.organizations.enabled` it also fails when the default ModelConfig's provider is not one the `llm` listener serves. On, these rules hold in every Organization namespace (not in the `kagent` namespace), for every requester:
+
+- A ModelConfig names a provider the listener serves (an `llmRouting.models` entry: Anthropic, OpenAI, Mistral or SAPAICore) and the listener as its `spec.<provider>.baseUrl`. Any other provider, Bedrock included, is refused. So every model call of the tenant is metered on the listener under the tenant's namespace, and the tenant's own key passes the listener untouched.
+- The ModelConfig's `apiKeySecret` names a Secret prefixed `tenant-credential-`, as an Agent's or AgentTemplate's `credentialRef` and a RemoteMCPServer's `headersFrom` do (these three rules hold whether the switch is on or off). Only agent-manager's own `default-model-config` names the platform's key copy.
+- A `tenant-credential-` Secret is of type `Opaque`. A Secret without the prefix is created only by a requester who may already read that Secret in the namespace: Helm, GitOps and the cluster's controllers keep writing as before.
+
+The two objects, with the listener URL of the installation (`http://<gateway.name>.<release namespace>.svc:<llmRouting.listener.port>`; an OpenAI ModelConfig adds `/v1`). The refusal message of a wrong `baseUrl` names the URL.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tenant-credential-anthropic
+  namespace: org-acme
+type: Opaque
+stringData:
+  ANTHROPIC_API_KEY: <the tenant's key>
+---
+apiVersion: api.kagent.dev/v1alpha3
+kind: ModelConfig
+metadata:
+  name: acme-sonnet
+  namespace: org-acme
+spec:
+  provider: Anthropic
+  model: claude-sonnet-4-6
+  apiKeySecret: tenant-credential-anthropic
+  apiKeySecretKey: ANTHROPIC_API_KEY
+  anthropic:
+    baseUrl: http://agentgateway.agent-platform.svc:8081
+```
+
+**Still open: how the key reaches the namespace.** The plan's team discussion (T3 in giantswarm/bumblebee-plans `agent-permissions`) has not decided how a tenant's key Secret gets into its namespace: through the installation's secret management with the ModelConfig in a pull request, or through the Dev Portal writing it as the tenant's admin. This chart changes no role for it. `make prove-tenant-modelconfigs` proves the rules above on a cluster.
+
 ### Gateway API CR ownership
 
 Of the resources the umbrella manages, **only `AgentgatewayParameters` is vendor-specific** to agentgateway. Everything else is standard Gateway API / standard Cilium.

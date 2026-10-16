@@ -4439,6 +4439,19 @@ verify-tenant-reconciler: ## Assert agent-manager's tenant reconciler follows te
 	@HELM="$(HELM)" python3 tests/verify-tenant-reconciler.py $(CHART_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-tenant-modelconfigs
+verify-tenant-modelconfigs: ## Assert the render of a tenant's own ModelConfig (giantswarm/agent-platform#759): off, neither agent-platform-tenant-model-routing nor agent-platform-tenant-secret-creation renders and agent-manager's key exception is unchanged; on (tenants.organizations.modelConfigs.enabled), both (Fail, Deny) select every Organization namespace but kagent, the routing policy carries each listener provider's block and URL, the Secret policy asks the authorizer on creations outside the tenant-credential- prefix, and only agent-manager's default-model-config names the platform's key; the render fails below Kubernetes 1.30, with llmRouting off, and with a default ModelConfig provider the listener does not serve. What the CEL decides is proven by make prove-tenant-modelconfigs. Needs PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-tenant-modelconfigs.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: prove-tenant-modelconfigs
+prove-tenant-modelconfigs: ## Prove on a cluster that serves kagent's CRDs what the admission policies of a tenant's own ModelConfig decide (giantswarm/agent-platform#759; opt-in, not in CI): under names of the run and in a namespace of its own, a ModelConfig names a listener provider and the listener as its baseUrl (Bedrock, Gemini, a direct or missing baseUrl refused), a tenant credential as its key (only agent-manager's default-model-config names the platform's key), a Secret outside the tenant-credential- prefix is created only by a requester who may read it, a tenant credential is Opaque, and a RemoteMCPServer's headersFrom names a tenant credential. KUBE_CONTEXT (required) and KUBECONFIG select the cluster, e.g. KUBECONFIG=<agentlab>/state/kubeconfig KUBE_CONTEXT=kind-agentlab. Needs kubectl and PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@HELM="$(HELM)" python3 tests/prove-tenant-modelconfigs.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
 .PHONY: prove-tenant-workers
 prove-tenant-workers: ## Prove on a kind cluster what the admission policies of the Organizations' workers decide (giantswarm/agent-platform#1036; opt-in, not in CI): with the WorkerPool CRD of the Substrate floor and the policies the connectivity chart renders with tenants.organizations.enabled, in a namespace labelled giantswarm.io/organization only agent-manager's ServiceAccount writes a WorkerPool, only as a copy of kagent/<kagent.substrateWorkerPool.name> (refused without it; the proof renames the pool), only ate-controller and the Deployment and ReplicaSet controllers write a labelled Deployment, ReplicaSet or Pod (a real worker Deployment rolls out), no one adds an ephemeral container, execs or attaches to a worker, orphaning, foreground and namespace deletes complete, and the kagent and unlabelled namespaces are not held. Needs docker, kind, kubectl, PyYAML and gsoci.azurecr.io. KIND_IMAGE selects the node image, HELM the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"

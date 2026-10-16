@@ -78,6 +78,26 @@ tenants.modelConfig.apiKeySecretName from the same key). Empty when unset.
 {{- end -}}
 
 {{/*
+The name of the default ModelConfig agent-manager's tenant reconciler copies
+into a tenant namespace that holds an agent: the ModelConfig the kagent chart
+renders from kagent.providers (the meta chart derives the reconciler's
+tenants.modelConfig.name with the same name).
+*/}}
+{{- define "agent-platform.tenants.modelConfigName" -}}
+default-model-config
+{{- end -}}
+
+{{/*
+"true" when a tenant's own ModelConfigs are admitted under the platform's
+rules (tenants.organizations.modelConfigs.enabled;
+giantswarm/agent-platform#759, templates/tenants/modelconfig-admission.yaml),
+else empty.
+*/}}
+{{- define "agent-platform.tenants.modelConfigs" -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (dig "organizations" "modelConfigs" "enabled" false (.Values.tenants | default dict)) }}true{{ end -}}
+{{- end -}}
+
+{{/*
 The subjects of a binding, as a YAML list: the lists given, each subject once.
 Usage: include "agent-platform.tenants.subjects" (list .Values.tenants.platform.editors .Values.tenants.platformTeam)
 */}}
