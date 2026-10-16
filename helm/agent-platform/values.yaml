@@ -5407,7 +5407,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/envoy
-          tag: v1.39.3
+          tag: v1.40.0
         # The listener's port in the pod; the Service (service.port) fronts it.
         port: 10000
         clientIdentity: spiffe://cluster.local/ns/ate-system/sa/ate-api-server
@@ -5459,7 +5459,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/livenessprobe
-          tag: v2.19.0
+          tag: v2.20.0
         # The node plugin is on the node's network: its probe listens on
         # localhost at this port (the controller's, in its pod, on 9808).
         nodePort: 29662
