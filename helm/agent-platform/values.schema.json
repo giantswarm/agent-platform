@@ -519,6 +519,36 @@
                         }
                     }
                 },
+                "google-access-token-credential-provider": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "targetNamespace": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "gpu-operator": {
                     "type": "object",
                     "additionalProperties": true,
@@ -1804,6 +1834,10 @@
                     "type": "string"
                 }
             }
+        },
+        "google-access-token-credential-provider": {
+            "type": "object",
+            "additionalProperties": true
         },
         "gpu-operator": {
             "type": "object",

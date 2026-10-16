@@ -183,6 +183,26 @@ What follows from it:
   kagent build the range admits was published against another Substrate release
   than the chart pins (its `Chart.yaml` names it), so the two are moved together.
 
+### The Google access-token credential provider runs beside Substrate (giantswarm/giantswarm#38547)
+
+A Vertex AI `ModelConfig` (`GeminiVertexAI`, `AnthropicVertexAI`) with a
+service account key binds `ate-secret://google-access-token.k8s.io/...` on
+the Vertex AI hostname, and the egress gateway injects an access token minted
+from the key. The minting is a Substrate credential provider plugin of its own,
+`components.google-access-token-credential-provider`
+([giantswarm/substrate-credential-providers](https://github.com/giantswarm/substrate-credential-providers)),
+in upstream's plugin shape: a Deployment in `ate-system` behind mutual TLS,
+serving the class the Substrate chart routes to it through
+`substrate.credentialProvider.additionalProviders`. It follows
+`components.kagent` like the Substrate entries and takes its grants from
+`substrate.credentialProvider.namespacePolicies` (one list for both providers;
+`agent-platform.componentDerivedValues`). Its CiliumNetworkPolicy opens
+`oauth2.googleapis.com:443` for the exchange, which the bundled provider of
+Substrate 1.11 and earlier had no rule for (giantswarm/agent-platform#1042).
+The Substrate line served the class from its bundled provider until 1.11: the
+plugin is deployed first, and the routing entry lands with the floor move to
+1.12, where the bundled name is gone.
+
 ### The one pool is the failure domain (giantswarm/agent-platform#472)
 
 Every agent runs on this one pool, and a worker that goes loses the turn in flight
@@ -443,6 +463,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.substrate.timeout | string | `"15m"` |  |
 | components.substrate.upgradeRemediation.retries | int | `3` |  |
+| components.google-access-token-credential-provider.chart | string | `"google-access-token-credential-provider"` |  |
+| components.google-access-token-credential-provider.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.google-access-token-credential-provider.versionRange | string | `">=0.1.0 <1.0.0"` |  |
+| components.google-access-token-credential-provider.valuesFrom | string | `"google-access-token-credential-provider"` |  |
+| components.google-access-token-credential-provider.injectGlobal | bool | `false` |  |
+| components.google-access-token-credential-provider.targetNamespace | string | `"ate-system"` |  |
+| components.google-access-token-credential-provider.dependsOn[0] | string | `"substrate"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.klaus-gateway.versionRange | string | `">=4.3.0 <5.0.0"` |  |
@@ -1560,6 +1587,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.atelet.extraEnv | list | `[]` |  |
 | substrate.atelet.imageCache.pinnedImages | list | `[]` |  |
 | substrate-crds | object | `{}` |  |
+| google-access-token-credential-provider.namespacePolicies | list | `[]` |  |
 | hooks.kubectlImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.kubectlImage.repository | string | `"giantswarm/alpine-k8s"` |  |
 | hooks.kubectlImage.tag | string | `"1.37.1"` |  |

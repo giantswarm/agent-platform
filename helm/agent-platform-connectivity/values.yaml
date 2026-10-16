@@ -3560,6 +3560,10 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     extraEnv: []
 # The substrate-crds component's values (none); forwarded, read by nothing here.
 substrate-crds: {}  # @schema skipProperties: true; additionalProperties: true
+# The Google access-token credential provider's values (components.google-access
+# -token-credential-provider): forwarded to its own release, nothing here reads
+# them.
+google-access-token-credential-provider: {}  # @schema skipProperties: true; additionalProperties: true
 kserve-llmisvc-crd: {}  # @schema skipProperties: true; additionalProperties: true
 # The llm-d controller chart's values; this chart reads
 # kserve.createSharedResources and kserve.controller.deploymentMode for its

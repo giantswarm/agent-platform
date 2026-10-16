@@ -1928,6 +1928,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | substrate.atelet.affinity | object | `{}` |  |
 | substrate.atelet.extraEnv | list | `[]` |  |
 | substrate-crds | object | `{}` |  |
+| google-access-token-credential-provider | object | `{}` |  |
 | kserve-llmisvc-crd | object | `{}` |  |
 | kserve-llmisvc-resources | object | `{}` |  |
 | modelServing.kserve.requireApi | bool | `true` | api-versions serving.kserve.io/v1alpha2; false skips it. |

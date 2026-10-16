@@ -139,11 +139,11 @@ from scenarios import EXAMPLES_DIR, KIND_LAB_VALUES
 logger = logging.getLogger(__name__)
 
 # The component HelmReleases the smoke values turn on: the quick start's three,
-# kagent with its CRD chart, Agent Substrate with its CRD chart (both follow
-# components.kagent), the CloudNativePG operator for kagent's and Substrate's
+# kagent with its CRD chart, Agent Substrate with its CRD chart and the Google
+# access-token credential provider (all follow components.kagent), the CloudNativePG operator for kagent's and Substrate's
 # database, agent-manager, and model-manager — on by default with no backend
 # (giantswarm/agent-platform#329), nothing in the smoke values names it.
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "cloudnative-pg", "agent-manager", "model-manager")
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "google-access-token-credential-provider", "cloudnative-pg", "agent-manager", "model-manager")
 # The platform's CloudNativePG Cluster, kagent's and Substrate's database: the
 # connectivity release renders it with helm.sh/resource-policy: keep, so the
 # conversations outlive an uninstall.

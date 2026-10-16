@@ -955,6 +955,10 @@
                 }
             }
         },
+        "google-access-token-credential-provider": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "hooks": {
             "type": "object",
             "additionalProperties": false,

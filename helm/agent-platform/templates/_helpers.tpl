@@ -83,11 +83,12 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- if $c -}}
 {{- $on := true -}}
 {{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}
-{{- else if has .name (list "kagent-crds" "substrate" "substrate-crds") }}
+{{- else if has .name (list "kagent-crds" "substrate" "substrate-crds" "google-access-token-credential-provider") }}
 {{- /* The kagent line ships its CRDs as their own chart and has no runtime
-       without Agent Substrate; without an explicit switch these three follow
-       components.kagent, so a consumer turns on kagent and gets its CRDs and
-       its runtime (an explicit false with kagent on is refused by
+       without Agent Substrate; without an explicit switch these follow
+       components.kagent, so a consumer turns on kagent and gets its CRDs, its
+       runtime and the credential provider its Vertex AI actors need (an
+       explicit false on the first three with kagent on is refused by
        agent-platform.validateKagentCrds / agent-platform.validateSubstrate). */ -}}
 {{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true" }}
 {{- else if eq .name "workspace-manager" }}
@@ -225,6 +226,18 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
 {{- $derived := dict -}}
+{{- if eq .name "google-access-token-credential-provider" -}}
+{{- /* The plugin resolves keys under the same atespace-to-namespace grants as
+Substrate's bundled provider: one list, Substrate's. The Substrate release's
+name and namespace tell the plugin which egress gateway may call it. */ -}}
+{{- $grants := dig "credentialProvider" "namespacePolicies" list (.root.Values.substrate | default dict) -}}
+{{- $own := dig "namespacePolicies" list (index .root.Values "google-access-token-credential-provider" | default dict) -}}
+{{- if and $own (ne (toJson $own) (toJson $grants)) -}}
+{{- fail (printf "google-access-token-credential-provider.namespacePolicies (%s) differs from substrate.credentialProvider.namespacePolicies (%s): an atespace resolves Google service account keys under the grants it resolves every other Secret under — set substrate.credentialProvider.namespacePolicies and leave google-access-token-credential-provider.namespacePolicies unset" (toJson $own) (toJson $grants)) -}}
+{{- end -}}
+{{- $_ := set $derived "namespacePolicies" $grants -}}
+{{- $_ := set $derived "substrate" (dict "releaseName" "substrate" "namespace" (dig "substrate" "targetNamespace" "ate-system" .root.Values.components)) -}}
+{{- end -}}
 {{- if eq .name "agent-manager" -}}
 {{- $sa := include "agent-platform.kagent.fluxServiceAccountName" .root -}}
 {{- $own := dig "flux" "helmReleaseServiceAccount" "" (index .root.Values "agent-manager" | default dict) -}}

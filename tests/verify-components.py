@@ -102,6 +102,9 @@ LINE = {
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
     "agent-manager": (GSOCI, ">=2.3.0 <3.0.0", ["muster", "kagent"]),
+    # The Google access-token credential provider plugin beside Substrate
+    # (giantswarm/substrate-credential-providers): 0.1.0 is its first release.
+    "google-access-token-credential-provider": (GSOCI, ">=0.1.0 <1.0.0", ["substrate"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).
@@ -154,7 +157,7 @@ NOT_CONSUMED = {
     "agent-platform-connectivity": ["kagent", "substrate"],
 }
 # Roster entries without their own switch that follow components.kagent.
-FOLLOW_KAGENT = ["kagent-crds", "substrate", "substrate-crds"]
+FOLLOW_KAGENT = ["kagent-crds", "substrate", "substrate-crds", "google-access-token-credential-provider"]
 
 # The wiring's own keys that live in a component chart's block and must be
 # dropped from the values forwarded to that chart (components.<name>.omitKeys).
@@ -371,7 +374,7 @@ def main(meta: str, connectivity: str) -> int:
         if got_on is not own:
             fail(f"{peer} on: the model-manager release carries {path}: {got_on!r}, expected the block's own {own!r} (nothing derived)")
     print("ok: kagent off derives kagent.disableWiring: true, muster off muster.mcpServer.enabled: false, muster's OAuth server off oauth.enabled: false for model-manager; with the peer on the block's own value stands")
-    for name in ("substrate", "substrate-crds"):
+    for name in ("substrate", "substrate-crds", "google-access-token-credential-provider"):
         hr = off.get(("HelmRelease", name))
         if not hr or f"\n  targetNamespace: {SUBSTRATE_NAMESPACE}\n" not in hr:
             fail(f"the {name} release does not target {SUBSTRATE_NAMESPACE} (components.{name}.targetNamespace; the substrate chart's Roles and Services name it)")
@@ -383,6 +386,19 @@ def main(meta: str, connectivity: str) -> int:
                  "kagent on with substrate-crds off")
     render_fails(meta, [*ci, "--set", "kagent.harness.snapshotLocation="], "kagent.harness.snapshotLocation is required",
                  "kagent on without a snapshot location")
+    # The credential provider plugin takes Substrate's grants (derived) and the
+    # Substrate release that may call it; a copy of the grants that disagrees fails.
+    grants = ["--set", "substrate.credentialProvider.namespacePolicies[0].atespace=team-a",
+              "--set", "substrate.credentialProvider.namespacePolicies[0].allowedNamespaces[0]=team-a-secrets"]
+    gatp = yaml.safe_load(hr_values(docs(render(meta, [*ci, *grants]))[("HelmRelease", "google-access-token-credential-provider")]))
+    if gatp.get("namespacePolicies") != [{"atespace": "team-a", "allowedNamespaces": ["team-a-secrets"]}]:
+        fail(f"the google-access-token-credential-provider release does not carry Substrate's grants (got {gatp.get('namespacePolicies')!r})")
+    if gatp.get("substrate") != {"releaseName": "substrate", "namespace": SUBSTRATE_NAMESPACE}:
+        fail(f"the google-access-token-credential-provider release does not name the Substrate release and namespace (got {gatp.get('substrate')!r})")
+    render_fails(meta, [*ci, *grants, "--set", "google-access-token-credential-provider.namespacePolicies[0].atespace=team-b",
+                        "--set", "google-access-token-credential-provider.namespacePolicies[0].allowedNamespaces[0]=other"],
+                 "differs from substrate.credentialProvider.namespacePolicies", "a copy of the grants that disagrees")
+    print("ok: the google-access-token credential provider follows components.kagent, lands in ate-system, takes Substrate's grants and names its release")
     print("ok: kagent-crds, substrate and substrate-crds follow components.kagent — on with it, off without it, the roster says which; the Substrate releases land in ate-system; the guards refuse kagent without its runtime or a snapshot location")
 
     # --- atelet's pinned images come from the kagent release's ConfigMap; an own list travels only when set ---
