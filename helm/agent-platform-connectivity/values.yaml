@@ -3194,7 +3194,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/envoy
-          tag: v1.39.3
+          tag: v1.40.0
         port: 10000
         clientIdentity: spiffe://cluster.local/ns/ate-system/sa/ate-api-server
         resources:  # @schema additionalProperties: true
@@ -3229,7 +3229,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/livenessprobe
-          tag: v2.19.0
+          tag: v2.20.0
         nodePort: 29662
         resources:  # @schema additionalProperties: true
           requests:

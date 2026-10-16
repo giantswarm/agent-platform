@@ -1413,7 +1413,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaces.substrate.csiCompanion.controller.resources.limits.ephemeral-storage | string | `"256Mi"` |  |
 | workspaces.substrate.csiCompanion.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | workspaces.substrate.csiCompanion.proxy.image.repository | string | `"giantswarm/envoy"` |  |
-| workspaces.substrate.csiCompanion.proxy.image.tag | string | `"v1.39.3"` |  |
+| workspaces.substrate.csiCompanion.proxy.image.tag | string | `"v1.40.0"` |  |
 | workspaces.substrate.csiCompanion.proxy.port | int | `10000` |  |
 | workspaces.substrate.csiCompanion.proxy.clientIdentity | string | `"spiffe://cluster.local/ns/ate-system/sa/ate-api-server"` |  |
 | workspaces.substrate.csiCompanion.proxy.resources.requests.cpu | string | `"10m"` |  |
@@ -1437,7 +1437,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaces.substrate.csiCompanion.node.resources.limits.ephemeral-storage | string | `"256Mi"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.image.registry | string | `"gsoci.azurecr.io"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.image.repository | string | `"giantswarm/livenessprobe"` |  |
-| workspaces.substrate.csiCompanion.livenessProbe.image.tag | string | `"v2.19.0"` |  |
+| workspaces.substrate.csiCompanion.livenessProbe.image.tag | string | `"v2.20.0"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.nodePort | int | `29662` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.resources.requests.cpu | string | `"5m"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.resources.requests.memory | string | `"16Mi"` |  |
