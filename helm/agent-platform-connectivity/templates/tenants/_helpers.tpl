@@ -5,8 +5,8 @@ Helpers of the agent tenants' RBAC (templates/tenants/, giantswarm/agent-platfor
 
 {{/*
 The rules of agent-platform:user: see the tenant's agents, templates,
-RemoteMCPServers, ModelConfigs, EgressPolicies (what its Agents may select)
-and muster MCPServers; start a Session. The kagent namespace binds
+RemoteMCPServers, ModelConfigs, Harnesses, EgressPolicies (what its Agents may
+select) and muster MCPServers; start a Session. The kagent namespace binds
 agent-platform:platform-user instead, without the EgressPolicies.
 */}}
 {{- define "agent-platform.tenants.userRules" -}}
@@ -24,7 +24,7 @@ origins and the Secrets they authenticate with; its editors read them.
 */}}
 {{- define "agent-platform.tenants.platformUserRules" -}}
 - apiGroups: ["api.kagent.dev"]
-  resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+  resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
   verbs: ["get", "list", "watch"]
 - apiGroups: ["muster.giantswarm.io"]
   resources: ["mcpservers"]
@@ -48,9 +48,6 @@ performs as the caller.
 - apiGroups: ["api.kagent.dev"]
   resources: ["agents", "agenttemplates", "remotemcpservers"]
   verbs: ["create", "update", "patch", "delete"]
-- apiGroups: ["api.kagent.dev"]
-  resources: ["harnesses"]
-  verbs: ["get", "list", "watch"]
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["get", "list", "watch"]
