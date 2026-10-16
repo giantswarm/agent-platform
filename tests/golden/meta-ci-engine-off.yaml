@@ -195,7 +195,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 1.13.0
+          tag: 2.3.0
       networkPolicy:
         egress:
           cidrs: []
@@ -654,6 +654,7 @@ spec:
               enabled: false
           mode: Strict
         mcp:
+          displayName: Kagent
           enabled: true
           pathPrefix: /kagent/mcp
           timeout: 300
@@ -1197,6 +1198,10 @@ spec:
       musterInClusterMcpPorts:
       - 8080
       - 8443
+      substrate:
+        credentialProvider:
+          egressFQDNs:
+          - matchName: oauth2.googleapis.com
     postgres:
       affinity: {}
       applicationDatabase:
@@ -1405,6 +1410,8 @@ spec:
         enabled: false
     substrate-crds: {}
     tenants:
+      organizations:
+        enabled: false
       platform:
         editors:
         - apiGroup: rbac.authorization.k8s.io
@@ -1993,7 +2000,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.11.3
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.12.0
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -2744,7 +2751,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.13.0 <2.0.0"
+    semver: ">=2.3.0 <3.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2882,7 +2889,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.11.4 <1.12.0"
+    semver: ">=1.13.0 <1.14.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2905,7 +2912,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.11.4 <1.12.0"
+    semver: ">=1.13.0 <1.14.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2997,7 +3004,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.11.3 <1.12.0"
+    semver: ">=1.12.0 <1.13.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3020,7 +3027,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.11.3 <1.12.0"
+    semver: ">=1.12.0 <1.13.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

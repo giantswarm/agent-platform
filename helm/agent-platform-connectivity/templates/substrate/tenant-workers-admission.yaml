@@ -1,0 +1,184 @@
+{{- /*
+Who may write the Substrate workers of the Organizations' namespaces
+(tenants.organizations.enabled, giantswarm/agent-platform#1036). There the
+substrate-workers PolicyException lets the worker pods run as root with the
+gVisor capabilities and a hostPath, and ate-controller builds those pods from
+a WorkerPool. An Organization's admins hold cluster-admin in their namespace,
+and so does rbac-operator's `automation` ServiceAccount, which the members
+bound to agent-platform:editor reach. RBAC cannot take a namespace's write away
+from them, so two ValidatingAdmissionPolicies do, in every namespace labelled
+giantswarm.io/organization (selected by the label, never listed) except the
+kagent namespace, the platform tenant whose workers the platform writes:
+
+  * agent-platform-tenant-workers: only agent-manager's tenant reconciler
+    creates, updates or deletes a WorkerPool (the namespace and garbage
+    collectors may also delete one, so a namespace can go). Only Substrate's
+    controller chain (agent-platform.tenants.workerWriters, the writers the
+    PolicyException excepts) creates or updates a Deployment, ReplicaSet or
+    Pod that carries ate.dev/worker-pool, on itself or on its pod template,
+    before or after the write; the garbage collector may also update one (it
+    only edits owner references and finalizers). No one adds an ephemeral
+    container to such a pod, and no one execs into or attaches to a pod
+    named after the platform WorkerPool (kagent.substrateWorkerPool.name,
+    the name the kagent chart gives the WorkerPool and ate-controller gives
+    its Deployment: the workers are <name>-<hash>-<id>; a CONNECT request
+    names the pod but carries none of its labels, so any pod named <name>-*
+    there is held, a tenant's own included; the render refuses a name longer
+    than 57 characters, which the pods' names would not keep). This holds for every
+    requester, cluster-admin and Giant Swarm staff included: a tenant's
+    worker is debugged through its logs or a node debug pod (kubectl debug
+    node/<node>), never from inside. Deletes of the workers, their status,
+    scale and port-forward stay with RBAC.
+  * agent-platform-tenant-workerpool-copy: a WorkerPool written there is a
+    copy of the platform WorkerPool (kagent.substrateWorkerPool.name in the
+    kagent namespace, the policy's parameter): the same name, workerImage,
+    template and sandboxClass; only replicas may differ. agent-manager is
+    reachable over the network, and this keeps its ServiceAccount from
+    choosing what runs on a node. Without the platform WorkerPool every
+    WorkerPool write there is refused.
+
+Admission runs every validating policy and webhook on a request: Kyverno and
+these policies each refuse on their own. Kubernetes 1.30 or later
+(admissionregistration.k8s.io/v1).
+*/ -}}
+{{- if and (include "agent-platform.substrate.enabled" .) (include "agent-platform.tenants.organizations" .) }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $reconciler := include "agent-platform.agentManager.serviceAccountUser" . }}
+{{- $pool := required "kagent.substrateWorkerPool.name must be set with tenants.organizations.enabled: a tenant's WorkerPool is a copy of this pool" .Values.kagent.substrateWorkerPool.name }}
+{{- /* A worker pod is <pool>-<ReplicaSet hash>-<id>, and the API server cuts a
+generateName to 58 characters: a longer pool name would leave the pods
+without the <pool>- prefix the exec rule matches. */}}
+{{- if gt (len $pool) 57 }}
+{{- fail (printf "kagent.substrateWorkerPool.name %q is longer than 57 characters with tenants.organizations.enabled: the API server cuts the worker pods' names before <name>-, and the rule that refuses exec into the Organizations' workers would match none" $pool) }}
+{{- end }}
+{{- /* The writers as a CEL map {'<resource>': ['<user>', ...]}. */}}
+{{- $writers := list }}
+{{- range $kind, $subjects := include "agent-platform.tenants.workerWriters" . | fromJson }}
+{{- $users := list }}
+{{- range $subjects }}{{ $users = append $users (printf "'system:serviceaccount:%s:%s'" .namespace .name) }}{{ end }}
+{{- $writers = append $writers (printf "'%ss': [%s]" (lower $kind) (join ", " $users)) }}
+{{- end }}
+{{- $namespaces := dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists") (dict "key" "kubernetes.io/metadata.name" "operator" "NotIn" "values" (list $kagentNs))) }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-workers
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      {{- toYaml $namespaces | nindent 6 }}
+    resourceRules:
+      - apiGroups: ["ate.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["workerpools"]
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "replicasets"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods", "pods/ephemeralcontainers"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CONNECT"]
+        resources: ["pods/exec", "pods/attach"]
+  variables:
+    - name: writer
+      expression: request.userInfo.username
+    # The request carries no subResource for the object itself.
+    - name: subresource
+      expression: "has(request.subResource) ? request.subResource : ''"
+    # The writers of a worker, by resource.
+    - name: writers
+      expression: {{ printf "{%s}" (join ", " $writers) | quote }}
+    # A worker: the label on the object or on its pod template, before or
+    # after the write (read untyped: the policy matches several kinds).
+    - name: worker
+      expression: >-
+        [dyn(object), dyn(oldObject)].exists(o, o != null &&
+        ((has(o.metadata.labels) && 'ate.dev/worker-pool' in o.metadata.labels) ||
+        (has(o.spec) && has(o.spec.template) && has(o.spec.template.metadata) &&
+        has(o.spec.template.metadata.labels) && 'ate.dev/worker-pool' in o.spec.template.metadata.labels)))
+  validations:
+    - expression: >-
+        request.resource.resource != 'workerpools' || variables.writer == {{ squote $reconciler }} ||
+        (request.operation == 'DELETE' && variables.writer in
+        ['system:serviceaccount:kube-system:namespace-controller', 'system:serviceaccount:kube-system:generic-garbage-collector'])
+      reason: Forbidden
+      messageExpression: {{ printf "'in an Organization namespace only agent-manager (%s) writes WorkerPools, not ' + variables.writer" $reconciler | quote }}
+    - expression: >-
+        request.resource.resource == 'workerpools' || request.operation == 'CONNECT' || !variables.worker ||
+        (variables.subresource == '' && (variables.writer in variables.writers[request.resource.resource] ||
+        (request.operation == 'UPDATE' && variables.writer == 'system:serviceaccount:kube-system:generic-garbage-collector')))
+      reason: Forbidden
+      messageExpression: >-
+        'in an Organization namespace only Substrate controllers write ' + request.resource.resource +
+        (variables.subresource == '' ? '' : '/' + variables.subresource) +
+        ' labelled ate.dev/worker-pool, not ' + variables.writer
+    # A CONNECT request carries no pod, only its name: the workers are the
+    # pods of the one WorkerPool a tenant may hold, named after it.
+    - expression: {{ printf "request.operation != 'CONNECT' || !request.name.startsWith('%s-')" $pool | quote }}
+      reason: Forbidden
+      messageExpression: {{ printf "'in an Organization namespace no one execs into or attaches to a Substrate worker (%s-*), not ' + variables.writer" $pool | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-workers
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-tenant-workers
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-workerpool-copy
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: ate.dev/v1alpha1
+    kind: WorkerPool
+  matchConstraints:
+    namespaceSelector:
+      {{- toYaml $namespaces | nindent 6 }}
+    resourceRules:
+      - apiGroups: ["ate.dev"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["workerpools"]
+  validations:
+    # Every field of the spec but replicas, as the platform pool has it (read
+    # untyped: CEL compares typed objects of two schemas field by field only).
+    - expression: >-
+        object.metadata.name == params.metadata.name &&
+        dyn(params.spec).all(k, k == 'replicas' || (k in dyn(object.spec) && dyn(object.spec)[k] == dyn(params.spec)[k])) &&
+        dyn(object.spec).all(k, k == 'replicas' || k in dyn(params.spec))
+      reason: Forbidden
+      message: >-
+        a WorkerPool in an Organization namespace is a copy of the WorkerPool {{ $kagentNs }}/{{ $pool }}:
+        the same name and spec (workerImage, template, sandboxClass), only replicas may differ
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-workerpool-copy
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-tenant-workerpool-copy
+  paramRef:
+    name: {{ $pool }}
+    namespace: {{ $kagentNs }}
+    parameterNotFoundAction: Deny
+  validationActions: [Deny]
+{{- end }}

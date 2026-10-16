@@ -83,7 +83,7 @@ CONNECTIVITY = "agent-platform-connectivity"
 # 0.x from 0.20.0, dual-version), klaus-gateway 2.x (A2A v1 over gRPC). kagent-crds
 # follows components.kagent and takes no `global` (a chart of two subchart switches).
 KAGENT_LINE = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=1.11.4 <1.12.0"
+KAGENT_RANGE = ">=1.13.0 <1.14.0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
 # (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin,
 # both landing in ate-system, both following components.kagent. The pin is the
@@ -92,8 +92,8 @@ KAGENT_RANGE = ">=1.11.4 <1.12.0"
 # ateom-gvisor image from it, never from the kagent chart's stamp (#466;
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=1.11.3 <1.12.0"
-SUBSTRATE_PIN = "1.11.3"  # the range's floor, the BOM pin and the worker image's tag: the release that marks a crashed actor's resume refusal not resumable, whose ateom-gvisor reports a running actor's sandbox exit and whose atelet terminates an actor whose restore failed, and the floor at or above the Substrate kagent 1.11.6 is built against (1.11.1); before it 1.11.0, the release whose egress gateway mints and injects actor JWTs (an actor_jwt entry of replace_headers, giantswarm/substrate#421) on agentgateway 2.4.0, and whose ate-controller can mark the worker pods that host actors (giantswarm/substrate#425)
+SUBSTRATE_RANGE = ">=1.12.0 <1.13.0"
+SUBSTRATE_PIN = "1.12.0"  # the range's floor, the BOM pin and the worker image's tag: the release whose credential provider grants namespaces selected by label (ownNamespaceSelector, allowedNamespaceSelector; giantswarm/substrate#456), on 1.11's upstream pin; before it 1.11.4, the release whose atunnel ends a CONNECT tunnel once the actor closes its connection (giantswarm/substrate#451); before it 1.11.3, the release that marks a crashed actor's resume refusal not resumable, whose ateom-gvisor reports a running actor's sandbox exit and whose atelet terminates an actor whose restore failed, and the floor at or above the Substrate kagent 1.12.0 is built against (1.11.1); before it 1.11.0, the release whose egress gateway mints and injects actor JWTs (an actor_jwt entry of replace_headers, giantswarm/substrate#421) on agentgateway 2.4.0, and whose ate-controller can mark the worker pods that host actors (giantswarm/substrate#425)
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
@@ -101,7 +101,7 @@ LINE = {
     "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
     "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
     "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
-    "agent-manager": (GSOCI, ">=1.13.0 <2.0.0", ["muster", "kagent"]),
+    "agent-manager": (GSOCI, ">=2.3.0 <3.0.0", ["muster", "kagent"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).

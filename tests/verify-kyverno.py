@@ -277,6 +277,8 @@ def substrate_release(meta: str) -> tuple[str, str, str]:
 def substrate_workloads(url: str, constraint: str, values: str) -> list[dict]:
     tags = charts.registry_tags(url)
     version = fluxsemver.resolve(tags, constraint)
+    if not version and "substrate" in charts.UNRELEASED:
+        version = charts.fallback("substrate", url, constraint, tags, "")
     if not version:
         fail(f"no published substrate chart satisfies {constraint!r} at {url}")
     with tempfile.TemporaryDirectory() as d:
