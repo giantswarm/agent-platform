@@ -255,7 +255,7 @@ spec:
     - expression: "has(object.metadata.deletionTimestamp) || size(variables.foreign) == 0"
       reason: Forbidden
       messageExpression: >-
-        {{ printf "'in an Organization namespace a ' + request.resource.resource + ' names only tenant credentials, Secrets named %s*, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ')" $prefix }}
+        {{ printf "'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named %s*, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ')" $prefix }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
