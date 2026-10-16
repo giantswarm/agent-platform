@@ -166,10 +166,10 @@ WIRING_PG_GOLDEN_DROP := $(DASHBOARDS_GOLDEN_DROP) muster-mcp-egress
 # which render whether kagent is on or not.
 TENANT_RBAC := agent-platform:user agent-platform:platform-user agent-platform:editor agent-platform:admin
 TENANT_RBAC_ALL := $(TENANT_RBAC) agent-platform:mcpserver-viewer
-# The admission of a tenant's EgressPolicy and ModelConfig credentials
+# The admission of a tenant's EgressPolicy, ModelConfig, Agent, AgentTemplate and RemoteMCPServer credentials
 # (giantswarm/agent-platform#1040), an intended change of the default render with kagent on (verify-tenant-rbac asserts
 # it); dropped from the golden until GOLDEN_REF carries it.
-TENANT_EGRESS_ADMISSION := agent-platform-tenant-egress-credentials agent-platform-tenant-model-credentials agent-platform-tenant-credentials
+TENANT_EGRESS_ADMISSION := agent-platform-tenant-egress-credentials agent-platform-tenant-model-credentials agent-platform-tenant-credentials agent-platform-tenant-credential-refs
 # New beside GOLDEN_REF: left out of both sides of the postgres golden too.
 WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
