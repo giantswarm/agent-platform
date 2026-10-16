@@ -156,6 +156,11 @@ def main() -> None:
             "a default ModelConfig without the listener baseUrl, and no MutatingAdmissionPolicy to fill it in, fails the render")
     refused(chart, RAW + ["--set", "kagent.providers.anthropic.config.baseUrl=https://api.anthropic.com"] + MAP,
             ["kagent.providers.anthropic.config.baseUrl", LISTENER], "a default ModelConfig straight to the provider fails the render")
+    refused(chart, RAW + ["--set", "kagent.providers.default=claude", "--set", "kagent.providers.claude.provider=Anthropic",
+                          "--set", "kagent.providers.claude.model=m", "--set", "kagent.providers.claude.apiKeySecretRef=k",
+                          "--set", f"kagent.providers.claude.config.baseUrl={LISTENER}"],
+            ["kagent.providers.claude.config.baseUrl", "spec.anthropic"],
+            "a default baseUrl under a providers key the API server drops fails the render")
     if helm(chart, RAW + MAP).returncode != 0:
         fail("an empty default baseUrl that the modelconfig-llm-routing policy fills in is refused")
     ok("an empty default baseUrl renders where the modelconfig-llm-routing policy fills it in")

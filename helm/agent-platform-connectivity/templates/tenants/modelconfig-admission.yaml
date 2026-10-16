@@ -59,6 +59,12 @@ that is empty, what the modelconfig-llm-routing policy fills in (only where
 the API server serves GA MutatingAdmissionPolicy). */}}
 {{- $listener := include "agent-platform.llmListenerUrl" (dict "root" $ "provider" $default) }}
 {{- $baseUrl := dig $defaultKey "config" "baseUrl" "" $kp }}
+{{- /* The kagent chart writes config under a block named after the providers
+key, and the API server prunes a block that is not the provider's own. */}}
+{{- $block := include "agent-platform.modelConfigBaseUrlKey" $default }}
+{{- if and $baseUrl (ne $defaultKey $block) }}
+{{- fail (printf "tenants.organizations.modelConfigs.enabled with tenants.organizations.enabled needs the default ModelConfig on the listener, and kagent.providers.%s.config.baseUrl does not reach it: the kagent chart writes it under spec.%s, which a %s ModelConfig does not have (its block is spec.%s), so the API server drops it. Name the provider entry %s" $defaultKey $defaultKey $default $block $block) }}
+{{- end }}
 {{- if not (or (eq $baseUrl $listener) (and (not $baseUrl) (include "agent-platform.llmRouting.modelConfigs" .))) }}
 {{- fail (printf "tenants.organizations.modelConfigs.enabled with tenants.organizations.enabled needs the default ModelConfig on the listener: agent-manager copies it into the Organizations' namespaces, where a ModelConfig whose baseUrl is not the listener is refused. Set kagent.providers.%s.config.baseUrl to %s (it is %q; the modelconfig-llm-routing policy fills an empty one only where the API server serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, Kubernetes 1.36)" $defaultKey $listener $baseUrl) }}
 {{- end }}
