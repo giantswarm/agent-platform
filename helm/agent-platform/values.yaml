@@ -2164,8 +2164,8 @@ kyvernoPolicies:
     app-armor: restrict-apparmor-profiles
 
 # === Placement of the stateful singletons (giantswarm/agent-platform#439) ===
-# Where the platform's single-replica stateful pods run: muster (the MCP
-# aggregator, hostNetwork), muster-valkey (muster's OAuth token store, an RWO
+# Where the platform's stateful pods run: muster (the MCP aggregator, two
+# replicas since giantswarm/agent-platform#1080), muster-valkey (muster's OAuth token store, an RWO
 # volume), the kagent controller (every streaming turn) and klaus-gateway (the
 # Slack turns in flight, an RWO volume). #431's guards
 # (karpenter.sh/do-not-disrupt, PodDisruptionBudget minAvailable: 1) hold off
@@ -2284,23 +2284,42 @@ muster:  # @schema skipProperties: true; additionalProperties: true
       allowClusterIngress: true
   podAnnotations:
     application.giantswarm.io/team: bumblebee
-    # Voluntary disruption (giantswarm/agent-platform#431): muster is one
-    # replica (hostNetwork, maxSurge 0) and every MCP session of every agent
-    # and person runs through it. Karpenter's consolidation works around the
-    # node instead of evicting the pod mid-session; set "false" to opt out.
-    karpenter.sh/do-not-disrupt: "true"
-  # The muster chart's PodDisruptionBudget: maxUnavailable: 1 lets a node drain (a cluster upgrade rolling its
-  # machines) evict the single replica and go on, where minAvailable: 1 would
-  # refuse every eviction and hold the drain until its timeout. Karpenter's
-  # consolidation is kept away by the pod's do-not-disrupt annotation, not by
-  # the budget. The empty minAvailable clears the
-  # chart's default of 1 (a null is consumed by Helm before the value reaches
-  # the chart). Two replicas with minAvailable: 1 is the HA shape once muster
-  # runs them. `enabled: false` removes the budget.
+  # Availability (giantswarm/agent-platform#1080): every MCP session of every
+  # agent and person runs through muster, so it runs two replicas behind its
+  # Service, preferably on different nodes, with a budget that keeps one of
+  # them serving: a voluntary disruption (Karpenter's consolidation, drift or
+  # expiry, a node drain) evicts one pod at a time and the other answers
+  # meanwhile. The replicas share every session through Valkey (the session
+  # auth and capability stores, the OAuth state; muster.oauth.server.storage
+  # below), and a request on the other replica re-establishes the session's
+  # downstream connections there. No karpenter.sh/do-not-disrupt: next to two
+  # replicas and the budget it would pin both pods' nodes against
+  # consolidation, drift and expiry indefinitely (as for the agentgateway data
+  # plane). The Deployment's default RollingUpdate surges first, so a rollout
+  # keeps one serving.
+  replicaCount: 2
+  # Preferred, not required: two pods on one node beat one pod, and a cluster
+  # with a single schedulable node (or scheduling.singletons pinning muster to
+  # one) still schedules both; a drain of that node then waits on the budget
+  # for the evicted pod's replacement elsewhere.
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: muster
+  # The muster chart's PodDisruptionBudget: minAvailable: 1 (the chart's
+  # default) next to two replicas lets a drain evict one pod and waits for its
+  # replacement before the second. An installation running one replica sets
+  # minAvailable: "" and maxUnavailable: 1, or the budget refuses every
+  # eviction and holds a drain until its timeout. `enabled: false` removes the
+  # budget.
   podDisruptionBudget:
     enabled: true
-    minAvailable: ""
-    maxUnavailable: 1
+    minAvailable: 1
   # Disabled: the umbrella owns muster's public route now (see ingress.*). Gates
   # only muster's HTTPRoute + its BackendTrafficPolicy; Service/Deployment untouched.
   gatewayAPI:
