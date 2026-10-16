@@ -1598,6 +1598,12 @@ verify-components-charts: ## Render every component chart with the values the me
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."
 
+.PHONY: verify-registry-retry
+verify-registry-retry: ## Assert that tests/verify-components-charts.py's registry calls survive a throttled registry: a 429 or 503 is retried after its Retry-After (seconds or an HTTP date, capped), else with exponential backoff, the token request included; one that stays throttled fails with its 429 after the bounded attempts; any other error raises at once. Offline: a local HTTP server plays the registry.
+	@echo "====> $@"
+	@python3 tests/verify-registry-retry.py
+	@echo "registry calls retry throttled answers with bounded backoff."
+
 .PHONY: sync-unreleased
 sync-unreleased: ## Write Chart.yaml's agent-platform.giantswarm.io/unreleased from the registries: every component whose range admits no published chart (UNRELEASED), with the version it waits for; drop it when nothing waits. The rest of verify-components-charts runs with it. Network: gsoci.azurecr.io.
 	@python3 tests/verify-components-charts.py $(CHART_DIR) --write

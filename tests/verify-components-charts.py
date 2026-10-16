@@ -94,7 +94,9 @@ applies anything. A release ignores it: --strict passed, so it waits for nothing
 
 Network: pulls from gsoci.azurecr.io, and from ghcr.io for the CloudNativePG
 chart (three attempts each); the tag
-list comes from the registry's anonymous `/v2/<repo>/tags/list`. Every Helm call
+list comes from the registry's anonymous `/v2/<repo>/tags/list`, and a throttled
+answer (429, 503) of the distribution API is retried with bounded backoff,
+honouring Retry-After (registry_open; tests/verify-registry-retry.py). Every Helm call
 is bounded (TIMEOUT). PyYAML is in the CI image (the job installs python3-yaml).
 
 The components are independent, and the work is registry round trips and Helm
@@ -105,6 +107,7 @@ in roster order that fails ends the run with its FAIL, as before.
 """
 
 import concurrent.futures
+import email.utils
 import hashlib
 import importlib.util
 import io
@@ -388,24 +391,68 @@ def resolve_tags(tags: list[str], constraint: str) -> list[str]:
 
 # Anonymous bearer tokens, one per OCI repository (`oci://host/path`).
 TOKENS: dict[str, str] = {}
+# A throttled registry answers 429 Too Many Requests with a Retry-After (ACR
+# throttles every anonymous request to a registry as one identity, so this
+# check shares gsoci.azurecr.io's anonymous budget with every anonymous puller),
+# or 503 while it sheds load. Such an answer is retried, REGISTRY_ATTEMPTS calls in
+# all, after the wait its Retry-After names, else REGISTRY_BACKOFF seconds
+# doubling per retry; no wait is longer than REGISTRY_MAX_WAIT. The last
+# throttled answer is the error, so a registry that stays throttled still ends
+# in a FAIL line, about two minutes later.
+REGISTRY_THROTTLED = frozenset({429, 503})
+REGISTRY_ATTEMPTS = 6
+REGISTRY_BACKOFF = 2.0
+REGISTRY_MAX_WAIT = 60.0
+
+
+def retry_wait(e: urllib.error.HTTPError, retry: int) -> float:
+    """Seconds to wait before retrying a throttled answer: its Retry-After
+    (delay-seconds or an HTTP date), else the backoff of the retry'th retry."""
+    value = (e.headers.get("Retry-After") or "").strip() if e.headers else ""
+    if value.isdigit():
+        wait = float(value)
+    else:
+        try:
+            wait = email.utils.parsedate_to_datetime(value).timestamp() - time.time()
+        except (TypeError, ValueError, AttributeError):
+            wait = REGISTRY_BACKOFF * 2 ** retry
+    return min(max(wait, 0.0), REGISTRY_MAX_WAIT)
+
+
+def registry_open(target: str | urllib.request.Request):
+    """urlopen against a registry, retrying a throttled answer (see
+    REGISTRY_THROTTLED); any other error, and the last throttled one, raise."""
+    for retry in range(REGISTRY_ATTEMPTS):
+        try:
+            return urllib.request.urlopen(target, timeout=60)
+        except urllib.error.HTTPError as e:
+            if e.code not in REGISTRY_THROTTLED or retry == REGISTRY_ATTEMPTS - 1:
+                raise
+            wait = retry_wait(e, retry)
+            e.close()
+            url = target.full_url if isinstance(target, urllib.request.Request) else target
+            print(f"NOTE: {url.split('?', 1)[0]}: HTTP {e.code}, retry {retry + 1}/{REGISTRY_ATTEMPTS - 1} in {wait:.0f}s")
+            time.sleep(wait)
+    raise AssertionError("unreachable")
 
 
 def registry_get(url: str, target: str, accept: str = "application/json") -> tuple[dict, dict]:
     """GET one distribution API URL of an OCI repository (`oci://host/path`)
     anonymously, answering the token challenge (again, once, when a held token
-    is refused); the JSON body and the response headers."""
+    is refused); the JSON body and the response headers. A throttled answer,
+    the token's included, is retried with backoff (registry_open)."""
     for attempt in range(2):
         headers = {"Accept": accept}
         if url in TOKENS:
             headers["Authorization"] = f"Bearer {TOKENS[url]}"
         try:
-            with urllib.request.urlopen(urllib.request.Request(target, headers=headers), timeout=60) as r:
+            with registry_open(urllib.request.Request(target, headers=headers)) as r:
                 return json.load(r), r.headers
         except urllib.error.HTTPError as e:
             if e.code != 401 or attempt:
                 raise
             challenge = dict(re.findall(r'(\w+)="([^"]*)"', e.headers.get("Www-Authenticate", "")))
-            with urllib.request.urlopen(f"{challenge['realm']}?service={challenge['service']}&scope={challenge['scope']}", timeout=60) as t:
+            with registry_open(f"{challenge['realm']}?service={challenge['service']}&scope={challenge['scope']}") as t:
                 body = json.load(t)
             TOKENS[url] = body.get("access_token") or body.get("token")
     raise AssertionError("unreachable")
