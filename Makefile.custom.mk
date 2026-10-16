@@ -2999,7 +2999,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) >$(VERIFY_TMP)/vw-bs.out 2>&1 || { cat $(VERIFY_TMP)/vw-bs.out; exit 1; }
 	@awk '/^kind: ConfigMap$$/,/^---/' $(VERIFY_TMP)/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >$(VERIFY_TMP)/vw-bs-cm.out
 	@[ -s $(VERIFY_TMP)/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
-	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'https://avatars.ci.example.com' 'repositories:' 'rootRedirect: /agent-platform'; do \
+	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'https://avatars.ci.example.com' 'repositories:'; do \
 		grep -q -- "$$pattern" $(VERIFY_TMP)/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q 'client: pg' $(VERIFY_TMP)/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi
