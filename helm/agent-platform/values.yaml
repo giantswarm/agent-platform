@@ -5218,7 +5218,13 @@ tenants:
       # cluster's controllers keep writing as today). With
       # tenants.organizations.enabled, only agent-manager's copy of
       # `default-model-config` names the platform's key there, and the
-      # default ModelConfig's provider must be one the listener serves. Needs
+      # default ModelConfig must be on the listener: a provider it serves, and
+      # kagent.providers.<default>.config.baseUrl the listener URL (or empty
+      # where the API server serves GA MutatingAdmissionPolicy and the
+      # modelconfig-llm-routing policy fills it in). Point every ModelConfig
+      # already in an Organization namespace at the listener, or delete it,
+      # before you turn this on: later updates of one that is not are
+      # refused. Needs
       # Kubernetes 1.30 or later (GA ValidatingAdmissionPolicy) and
       # llmRouting.enabled; the render fails otherwise. Off, the default,
       # nothing changes.

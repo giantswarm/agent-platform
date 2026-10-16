@@ -17,8 +17,9 @@ directly, unmetered. The chart's routing policy
 kagent namespace only; here the writer sets it, and the refusal names the
 field and the URL. The tenant's own key passes the listener untouched. The
 copy of the platform's default ModelConfig that agent-manager's tenant
-reconciler writes is held the same way, so it needs a default provider the
-listener serves (the render fails otherwise) and its listener baseUrl.
+reconciler writes is held the same way, so the default ModelConfig needs a
+provider the listener serves and the listener as its baseUrl (the render
+fails otherwise).
 
 agent-platform-tenant-secret-creation admits the creation of a Secret whose
 name lacks the tenant-credential- prefix only for a requester who may already
@@ -43,13 +44,23 @@ Kubernetes 1.30): the render fails below it, and without llmRouting.enabled
 {{- end }}
 {{- $providers := include "agent-platform.llmRouting.providers" . | fromJsonArray }}
 {{- if not $providers }}
-{{- fail "tenants.organizations.modelConfigs.enabled needs an llmRouting.models entry whose provider a ModelConfig can point at the listener (Anthropic, Mistral, OpenAI or SAPAICore): no other ModelConfig is admitted in an Organization namespace" }}
+{{- fail "tenants.organizations.modelConfigs.enabled needs an llmRouting.models entry whose provider a ModelConfig can point at the listener (Anthropic, Mistral or OpenAI): no other ModelConfig is admitted in an Organization namespace" }}
 {{- end }}
 {{- if include "agent-platform.tenants.organizations" . }}
 {{- $kp := dig "providers" dict (.Values.kagent | default dict) | default dict }}
 {{- $default := dig (toString (dig "default" "" $kp)) "provider" "" $kp }}
+{{- $defaultKey := toString (dig "default" "" $kp) }}
 {{- if not (has (lower $default) $providers) }}
-{{- fail (printf "tenants.organizations.modelConfigs.enabled with tenants.organizations.enabled needs the default ModelConfig's provider (kagent.providers.%s.provider %q) among the listener's (%s): agent-manager copies that ModelConfig into the Organizations' namespaces, where only a ModelConfig the listener serves is admitted" (toString (dig "default" "" $kp)) $default (join ", " $providers)) }}
+{{- fail (printf "tenants.organizations.modelConfigs.enabled with tenants.organizations.enabled needs the default ModelConfig's provider (kagent.providers.%s.provider %q) among the listener's (%s): agent-manager copies that ModelConfig into the Organizations' namespaces, where only a ModelConfig the listener serves is admitted" $defaultKey $default (join ", " $providers)) }}
+{{- end }}
+{{- /* The copy carries the default ModelConfig's spec as it is in the kagent
+namespace: its baseUrl is kagent.providers.<default>.config.baseUrl, or, when
+that is empty, what the modelconfig-llm-routing policy fills in (only where
+the API server serves GA MutatingAdmissionPolicy). */}}
+{{- $listener := include "agent-platform.llmListenerUrl" (dict "root" $ "provider" $default) }}
+{{- $baseUrl := dig $defaultKey "config" "baseUrl" "" $kp }}
+{{- if not (or (eq $baseUrl $listener) (and (not $baseUrl) (include "agent-platform.llmRouting.modelConfigs" .))) }}
+{{- fail (printf "tenants.organizations.modelConfigs.enabled with tenants.organizations.enabled needs the default ModelConfig on the listener: agent-manager copies it into the Organizations' namespaces, where a ModelConfig whose baseUrl is not the listener is refused. Set kagent.providers.%s.config.baseUrl to %s (it is %q; the modelconfig-llm-routing policy fills an empty one only where the API server serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, Kubernetes 1.36)" $defaultKey $listener $baseUrl) }}
 {{- end }}
 {{- end }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}

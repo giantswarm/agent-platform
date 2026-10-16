@@ -17,8 +17,11 @@ cluster; this script pins what the connectivity chart renders:
   agent-manager's exception in agent-platform-tenant-model-credentials holds
   to the name default-model-config;
 - the render fails, naming the key, below Kubernetes 1.30, with llmRouting
-  off, and with tenants.organizations.enabled when the default ModelConfig's
-  provider is not one the listener serves.
+  off, and with tenants.organizations.enabled when agent-manager's copy of
+  the default ModelConfig would be refused: its provider not one the listener
+  serves, or its baseUrl (kagent.providers.<default>.config.baseUrl) not the
+  listener, unless empty where the modelconfig-llm-routing
+  MutatingAdmissionPolicy fills it in.
 
 Needs PyYAML. HELM selects the binary.
 
@@ -45,7 +48,10 @@ BASE = [
     "--set", "global.identity.existingSecret=platform-oauth",
     "--set", "tenants.organizations.enabled=true",
 ]
-ON = ["--set", "llmRouting.enabled=true", "--set", "tenants.organizations.modelConfigs.enabled=true"]
+RAW = ["--set", "llmRouting.enabled=true", "--set", "tenants.organizations.modelConfigs.enabled=true"]
+LISTENER = "http://agentgateway.agent-platform.svc:8081"
+ON = RAW + ["--set", f"kagent.providers.anthropic.config.baseUrl={LISTENER}"]
+MAP = ["--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
 OPENAI = ["--set", "llmRouting.models[0].name=anthropic", "--set", "llmRouting.models[0].provider=Anthropic",
           "--set", "llmRouting.models[0].baseURL=https://api.anthropic.com/v1",
           "--set", "llmRouting.models[1].name=openai", "--set", "llmRouting.models[1].provider=OpenAI",
@@ -54,7 +60,6 @@ NEW = ["agent-platform-tenant-model-routing", "agent-platform-tenant-secret-crea
 ORG_NS = [{"key": "giantswarm.io/organization", "operator": "Exists"},
           {"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": ["kagent"]}]
 RECONCILER = "system:serviceaccount:agent-platform:agent-manager"
-LISTENER = "http://agentgateway.agent-platform.svc:8081"
 
 
 def fail(msg: str) -> None:
@@ -143,10 +148,17 @@ def main() -> None:
     check_on(chart)
     refused(chart, ON + ["--kube-version", "1.29.0"], ["tenants.organizations.modelConfigs.enabled", "1.30", "v1.29.0"],
             "below Kubernetes 1.30 the render fails")
-    ok_render = helm(chart, ON + ["--kube-version", "1.30.0"])
-    if ok_render.returncode != 0:
-        fail(f"Kubernetes 1.30 refused:\n{ok_render.stderr}")
-    ok("Kubernetes 1.30 renders")
+    for version in ("1.30.0", "1.30.0-eks-1"):
+        if helm(chart, ON + ["--kube-version", version]).returncode != 0:
+            fail(f"Kubernetes {version} refused")
+    ok("Kubernetes 1.30, a provider's build of it included, renders")
+    refused(chart, RAW, ["kagent.providers.anthropic.config.baseUrl", LISTENER],
+            "a default ModelConfig without the listener baseUrl, and no MutatingAdmissionPolicy to fill it in, fails the render")
+    refused(chart, RAW + ["--set", "kagent.providers.anthropic.config.baseUrl=https://api.anthropic.com"] + MAP,
+            ["kagent.providers.anthropic.config.baseUrl", LISTENER], "a default ModelConfig straight to the provider fails the render")
+    if helm(chart, RAW + MAP).returncode != 0:
+        fail("an empty default baseUrl that the modelconfig-llm-routing policy fills in is refused")
+    ok("an empty default baseUrl renders where the modelconfig-llm-routing policy fills it in")
     refused(chart, ["--set", "tenants.organizations.modelConfigs.enabled=true"], ["tenants.organizations.modelConfigs.enabled needs llmRouting.enabled"],
             "with llmRouting off the render fails")
     refused(chart, ON + ["--set", "kagent.providers.default=bedrock", "--set", "kagent.providers.bedrock.provider=Bedrock",

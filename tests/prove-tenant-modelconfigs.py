@@ -114,6 +114,7 @@ def render(chart):
                         "--set", "llmRouting.models[1].name=openai", "--set", "llmRouting.models[1].provider=OpenAI",
                         "--set", "llmRouting.models[1].baseURL=https://api.openai.com/v1",
                         "--set", "tenants.organizations.enabled=true",
+                        "--set", f"kagent.providers.anthropic.config.baseUrl={ANTHROPIC}",
                         "--set", "tenants.organizations.modelConfigs.enabled=true"], capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit(f"FAIL: helm template:\n{r.stderr}")
