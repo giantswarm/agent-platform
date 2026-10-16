@@ -3112,6 +3112,20 @@ tenants:
     # attaches to one (Kubernetes 1.30 or later). A namespace without the
     # label gets nothing. Off, the render is that of a chart without the key.
     enabled: false
+    modelConfigs:
+      # -- A tenant's own ModelConfig and model key, metered on the `llm`
+      # listener (giantswarm/agent-platform#759). On, two
+      # ValidatingAdmissionPolicies hold every namespace labelled
+      # `giantswarm.io/organization` but kagent: a ModelConfig there names a
+      # provider the listener serves and the listener as its baseUrl (any
+      # other provider, Bedrock included, is refused), and only a requester
+      # who may read a namespace's Secrets creates one there without the
+      # tenant-credential- prefix. With tenants.organizations.enabled,
+      # agent-manager's copy of the default ModelConfig is the only one that
+      # names the platform's key. Needs Kubernetes 1.30 or later and
+      # llmRouting.enabled; the render fails otherwise. The meta chart's copy
+      # documents it. Off, the render is that of a chart without the key.
+      enabled: false
 
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories
