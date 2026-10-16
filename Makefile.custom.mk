@@ -400,6 +400,13 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 	@if grep -qE '^      value: /mcp' $(VERIFY_TMP)/vg-edge.out; then echo "FAIL: layer-1 /mcp route rendered with the edge as data plane"; exit 1; fi
 	@grep -B4 -A4 '"world", "cluster"' $(VERIFY_TMP)/vg-edge.out | grep -q '"443"' || { echo "FAIL: edge network policy does not admit world traffic on 443"; exit 1; }
 	@echo "ok: edge mode"
+	@echo "--> edge mode without the avatar renderer's route answers 404 on the avatars host (not the MCP catch-all's 406)"
+	@sed -n '/avatars-notfound.yaml/,/^---/p' $(VERIFY_TMP)/vg-edge.out | grep -q '"avatars.ci.example.com"' || { echo "FAIL: the avatars host has no 404 route on the edge with the renderer's route off"; exit 1; }
+	@sed -n '/avatars-notfound.yaml/,/^---/p' $(VERIFY_TMP)/vg-edge.out | grep -q 'status: 404' || { echo "FAIL: the avatars 404 route has no directResponse 404"; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set components.dicebear.enabled=false --set dicebear.route.enabled=true 2>/dev/null | grep -q 'avatars-notfound' || { echo "FAIL: the avatars 404 route is missing with components.dicebear.enabled=false"; exit 1; }
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set dicebear.route.enabled=true 2>/dev/null | grep -q 'avatars-notfound'; then echo "FAIL: the avatars 404 route rendered beside the renderer's own route"; exit 1; fi
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(GLOBAL_VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true 2>/dev/null | grep -q 'avatars-notfound'; then echo "FAIL: the avatars 404 route rendered without the edge as data plane"; exit 1; fi
+	@echo "ok: avatars host 404"
 	@echo "--> edge guards: the certificate Secret and the agentgateway mode are required"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set gatewayApi.gateway.tls.secretName= >$(VERIFY_TMP)/vg-tls.out 2>&1; then \
 		echo "FAIL: gateway.create without tls.secretName accepted"; exit 1; \
