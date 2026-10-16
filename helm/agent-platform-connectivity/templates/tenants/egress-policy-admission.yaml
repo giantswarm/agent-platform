@@ -48,13 +48,17 @@ Organization's admins and cluster-admin included. Every other Secret of the
 namespace stays with RBAC: a tenant's tenant-credential-* Secrets, Helm's
 release storage, the cluster's own.
 
-agent-platform-tenant-platform-secret-refs keeps the copied key from being
-sent elsewhere by the objects a tenant's editor writes there: an Agent or
-AgentTemplate whose skill or plugin git source names it as credentialRef (the
-credential goes to the source's URL), and a RemoteMCPServer whose headersFrom
-names it as a Secret (the header goes to the server's URL), are refused for
-every requester. Other Secrets stay referable: agent-manager names the
-installation's skills credential there.
+agent-platform-tenant-credential-refs holds the other objects that send a
+Secret of their namespace to a URL their writer chooses the same way: an
+Agent's or AgentTemplate's skill or plugin git source names only a
+tenant-credential-* Secret as credentialRef (the credential goes to the
+source's host), and a RemoteMCPServer's headersFrom names only such a Secret
+(the header goes to the server's URL). This holds for every requester, in the
+same namespaces: the platform names the installation's skills credential
+there, and agent-manager mints it under the prefix. An object already being
+deleted is admitted, so its controllers can release their finalizers; any
+other change of an object that still names another Secret is refused until
+the reference is renamed. It reads the three kinds untyped (apiVersions "*").
 
 The EgressPolicy policy reads the object untyped (apiVersions "*"): it admits
 every version of egresspolicies.api.kagent.dev, and matches nothing on a
@@ -202,6 +206,66 @@ metadata:
 spec:
   policyName: agent-platform-tenant-credentials
   validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-credential-refs
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [{{ $kagentNs | quote }}]
+    resourceRules:
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["agents", "agenttemplates", "remotemcpservers"]
+  # The objects read untyped: the policy matches three kinds of every served
+  # version.
+  variables:
+    - name: spec
+      expression: "has(object.spec) ? dyn(object.spec) : dyn({})"
+    # An Agent carries its template inline under spec.template.
+    - name: template
+      expression: >-
+        request.resource.resource == 'agents' ?
+        ('template' in variables.spec ? dyn(variables.spec.template) : dyn({})) : variables.spec
+    - name: sources
+      expression: >-
+        ('skills' in variables.template ? dyn(variables.template.skills) : dyn([])) +
+        ('plugins' in variables.template ? dyn(variables.template.plugins) : dyn([]))
+    - name: refs
+      expression: >-
+        variables.sources.filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
+        .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '') +
+        (request.resource.resource == 'remotemcpservers' && 'headersFrom' in variables.spec ?
+        dyn(variables.spec.headersFrom).filter(h, has(h.valueFrom) && has(h.valueFrom.type) && h.valueFrom.type == 'Secret')
+        .map(h, has(h.valueFrom.name) ? string(h.valueFrom.name) : '') : dyn([]))
+    - name: foreign
+      expression: {{ printf "variables.refs.filter(n, !n.startsWith('%s'))" $prefix | quote }}
+  validations:
+    - expression: "has(object.metadata.deletionTimestamp) || size(variables.foreign) == 0"
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named %s*, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ')" $prefix }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-credential-refs
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-tenant-credential-refs
+  validationActions: [Deny]
 {{- if $reconciler }}
 {{- $modelSecret := include "agent-platform.tenants.modelSecretName" . }}
 {{- if and $modelSecret (hasPrefix $prefix $modelSecret) }}
@@ -255,64 +319,5 @@ metadata:
 spec:
   policyName: agent-platform-tenant-platform-secrets
   validationActions: [Deny]
-{{- with $modelSecret }}
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  name: agent-platform-tenant-platform-secret-refs
-  labels:
-    {{- include "labels.common" $ | nindent 4 }}
-spec:
-  failurePolicy: Fail
-  matchConstraints:
-    namespaceSelector:
-      matchExpressions:
-        - key: giantswarm.io/organization
-          operator: Exists
-        - key: kubernetes.io/metadata.name
-          operator: NotIn
-          values: [{{ $kagentNs | quote }}]
-    resourceRules:
-      - apiGroups: ["api.kagent.dev"]
-        apiVersions: ["*"]
-        operations: ["CREATE", "UPDATE"]
-        resources: ["agents", "agenttemplates", "remotemcpservers"]
-  # The objects read untyped: the policy matches three kinds of every served
-  # version.
-  variables:
-    - name: spec
-      expression: "has(object.spec) ? dyn(object.spec) : dyn({})"
-    # An Agent carries its template inline under spec.template.
-    - name: template
-      expression: >-
-        request.resource.resource == 'agents' ?
-        ('template' in variables.spec ? dyn(variables.spec.template) : dyn({})) : variables.spec
-    - name: sources
-      expression: >-
-        ('skills' in variables.template ? dyn(variables.template.skills) : dyn([])) +
-        ('plugins' in variables.template ? dyn(variables.template.plugins) : dyn([]))
-    - name: refs
-      expression: >-
-        variables.sources.filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef) &&
-        has(s.source.git.credentialRef.name)).map(s, s.source.git.credentialRef.name) +
-        (request.resource.resource == 'remotemcpservers' && 'headersFrom' in variables.spec ?
-        dyn(variables.spec.headersFrom).filter(h, has(h.valueFrom) && h.valueFrom.type == 'Secret').map(h, h.valueFrom.name) : dyn([]))
-  validations:
-    - expression: {{ printf "!(%s in variables.refs)" (squote .) | quote }}
-      reason: Forbidden
-      messageExpression: >-
-        {{ printf "'in an Organization namespace the platform Secret %s is not a credential of a ' + request.resource.resource + ' (a git credentialRef or a headersFrom Secret); name a tenant credential, a Secret named %s*. Refused for ' + request.userInfo.username" . $prefix }}
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  name: agent-platform-tenant-platform-secret-refs
-  labels:
-    {{- include "labels.common" $ | nindent 4 }}
-spec:
-  policyName: agent-platform-tenant-platform-secret-refs
-  validationActions: [Deny]
-{{- end }}
 {{- end }}
 {{- end }}
