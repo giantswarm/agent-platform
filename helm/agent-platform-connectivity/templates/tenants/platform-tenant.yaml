@@ -1,7 +1,9 @@
 {{- /*
 The platform tenant (giantswarm/agent-platform#706; the agent-permissions plan,
 D4): the kagent namespace keeps the platform's agents for everyone. Every
-signed-in person (tenants.platform.users) is agent-platform:user there; the
+signed-in person (tenants.platform.users) is agent-platform:platform-user
+there, agent-platform:user without the EgressPolicies, which name the
+platform's egress origins and the Secrets they authenticate with; the
 platform's operators (tenants.platform.editors) and the customer's platform
 team (tenants.platformTeam) are agent-platform:editor. A list left empty
 renders no binding.
@@ -14,14 +16,14 @@ renders no binding.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: agent-platform:user
+  name: agent-platform:platform-user
   namespace: {{ $kagentNs }}
   labels:
     {{- include "labels.common" $ | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: agent-platform:user
+  name: agent-platform:platform-user
 subjects:
   {{- . | nindent 2 }}
 {{- end }}

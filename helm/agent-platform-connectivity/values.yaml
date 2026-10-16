@@ -574,9 +574,15 @@ llmRouting:
   # through untouched, so reach to the listener grants no spend. Candidates are tried in name order and the first
   # whose `match` takes the model wins, so a `*` entry would shadow every model
   # named after it — a served model (model-manager, the LLMEndpoint
-  # document) joins under its preset's name. The first entry's
-  # provider is the one whose ModelConfigs ride the listener
-  # (kagent.modelConfigs, modelConfigPolicy).
+  # document) joins under its preset's name. Every entry's provider rides the
+  # listener: its ModelConfigs (kagent.modelConfigs, modelConfigPolicy) get
+  # the listener as baseUrl. An OpenAI entry serves the Responses route
+  # (/v1/responses) a codex agent calls, metered and rate-limited like the
+  # rest:
+  #   - name: openai
+  #     provider: OpenAI
+  #     baseURL: https://api.openai.com/v1
+  #     match: gpt-*
   models:  # @schema minItems: 1; item: object; itemProperties: {"name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63}, "provider": {"type": "string", "enum": ["Anthropic", "Baseten", "Cerebras", "Cohere", "Deepinfra", "Deepseek", "Fireworks", "Gemini", "Groq", "Huggingface", "Mistral", "OpenAI", "Openrouter", "TogetherAI", "XAI"]}, "baseURL": {"type": "string", "pattern": "^https?://[^/]+/.+"}, "match": {"type": "string"}, "visibility": {"type": "string", "enum": ["Public", "Internal"]}}
     - name: anthropic
       provider: Anthropic
@@ -663,9 +669,14 @@ llmRouting:
   # A MutatingAdmissionPolicy that sends a ModelConfig this chart does NOT
   # render through the LLM listener — one created by Backstage, agent-manager or
   # kubectl. Chart-owned entries already carry the baseUrl (kagent.modelConfigs
-  # below), so the policy never touches them. It writes only when the provider
-  # is the first llmRouting.models entry's and the baseUrl is absent. An object that
-  # names its own baseUrl is never touched.
+  # below), so the policy never touches them. One policy per provider of
+  # llmRouting.models; each writes only when the ModelConfig's provider is its
+  # own and the baseUrl is absent (an OpenAI ModelConfig gets the listener's
+  # URL with /v1). An object that names its own baseUrl is never touched.
+  # Each write is marked (annotation
+  # agent-platform.giantswarm.io/llm-routing-base-url), and the hook
+  # <release>-llm-routing-modelconfigs takes a marked baseUrl back off once
+  # routing is off or its provider is no longer served (giantswarm/agent-platform#1057).
   #
   # Rendered only where the API server serves
   # admissionregistration.k8s.io/v1/MutatingAdmissionPolicy, which is Kubernetes
@@ -719,6 +730,21 @@ networkPolicy:
   #   additionalEgressFQDNs:
   #     - matchName: dex.example.gigantic.io
   additionalEgressFQDNs: []
+  # Substrate's credential provider (k8s-credential-provider, ate-system),
+  # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) it reaches
+  # on 443/TCP besides the apiserver and DNS, through the DNS proxy rule the
+  # policy renders with them. The default is the token endpoint it exchanges a
+  # Vertex AI service account key at (google-access-token.k8s.io, for
+  # AnthropicVertexAI and GeminiVertexAI ModelConfigs); kagent refuses a key
+  # whose token_uri names another host. A list replaces the default as a
+  # whole: keep oauth2.googleapis.com when adding a name. [] leaves the
+  # provider the apiserver and DNS only, and every Vertex AI call fails with
+  # "could not exchange the service account key for an access token". Ignored
+  # by the kubernetes flavor, which renders no egress policy for Substrate.
+  substrate:
+    credentialProvider:
+      egressFQDNs:  # @schema item: object; itemProperties: {"matchName": {"type": "string", "minLength": 1}, "matchPattern": {"type": "string", "minLength": 1}}
+        - matchName: oauth2.googleapis.com
   # Extra in-cluster egress ports for muster -> MCP backends reached via a
   # ClusterIP whose pod listens on a non-80/443 port (e.g. the in-cluster
   # pro / runbooks MCP servers on 8080, or tunnelport RemoteApp tunnels whose
@@ -1725,6 +1751,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # so the default is the CRD's maximum; a longer turn runs through the
       # MCP Tasks extension.
       timeout: 300
+      # The name the Dev Portal shows for the server (the MCPServer's
+      # ui.giantswarm.io/display-name annotation); empty renders none.
+      displayName: Kagent
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
@@ -1825,8 +1854,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # llmRouting.enabled the chart fills in the LLM listener, so the gateway
   #   # meters this model's usage. Set it to reach a different upstream: the
   #   # provider's own URL is how a model stays on the direct, unmetered path.
-  #   # An entry whose provider differs from the first llmRouting.models entry's stays
-  #   # direct either way: the listener forwards to one provider. Only the
+  #   # An entry whose provider no llmRouting.models entry serves stays direct
+  #   # either way; an OpenAI entry's listener URL ends in /v1. Only the
   #   # Anthropic, Mistral, OpenAI and SAPAICore providers carry a baseUrl in
   #   # ModelConfigSpec, under the CRD's block key (anthropic, mistral, openAI,
   #   # sapAICore); the render fails for a baseUrl on any other provider.
@@ -1843,6 +1872,17 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # inherits kagent.providers.anthropic.config.maxTokens; unset everywhere,
   #   # kagent's built-in 8192 applies. Any other provider refuses the key.
   #   maxTokens: 32000
+  #   # Optional (OpenAI). The OpenAI HTTP API the runtime speaks:
+  #   # chatCompletions (the CRD's default) or responses. A model a codex agent
+  #   # uses needs responses and no maxTokens: the codex compiler refuses any
+  #   # other OpenAI option. Any other provider refuses the key.
+  #   apiFormat: responses
+  # - name: openai-gpt-5-5   # a codex model, through the llm listener's
+  #   provider: OpenAI       # OpenAI entry (llmRouting.models)
+  #   model: gpt-5.5
+  #   apiKeySecret: kagent-openai
+  #   apiKeySecretKey: OPENAI_API_KEY
+  #   apiFormat: responses
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
@@ -2864,7 +2904,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.13.0
+      tag: 2.3.0
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
@@ -3053,6 +3093,25 @@ tenants:
   # namespace beside platform.editors (the meta chart also adds it to muster's
   # editor bindings).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+  organizations:
+    # -- The worker pods of the namespaces labelled
+    # `giantswarm.io/organization` (agent-manager's tenants, its
+    # `tenants.enabled`; it copies the workers' own policy into them,
+    # `substrate-workers` in the cilium flavor, `substrate-workers-ingress` in
+    # the kubernetes flavor): with Agent Substrate on, the router, the egress
+    # gateway and the actors' dns admit them as they admit the kagent
+    # namespace's workers, and the workers' Kyverno PolicyException covers
+    # them when Substrate's controllers write them (Kyverno 1.15.2 or later;
+    # an older Kyverno never applies the exception and the workers are
+    # refused). Two ValidatingAdmissionPolicies hold the workers there for
+    # every requester: only agent-manager's ServiceAccount writes a
+    # WorkerPool, as a copy of kagent.substrateWorkerPool.name in the kagent
+    # namespace (only replicas may differ), and only Substrate's controllers
+    # write a Deployment, ReplicaSet or Pod labelled `ate.dev/worker-pool`; no
+    # one adds an ephemeral container to a worker, execs into one or
+    # attaches to one (Kubernetes 1.30 or later). A namespace without the
+    # label gets nothing. Off, the render is that of a chart without the key.
+    enabled: false
 
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories
@@ -3465,6 +3524,10 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
   mcpServer:
     enabled: true
     managementCluster: ""
+    # The name the Dev Portal shows for the server (the MCPServer's
+    # ui.giantswarm.io/display-name annotation): agent-platform-mcps' kubernetes
+    # family's, which a family member shares. Empty renders none.
+    displayName: Kubernetes
 
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
 # The kagent-crds component's values (kagent main ships its CRDs as their own

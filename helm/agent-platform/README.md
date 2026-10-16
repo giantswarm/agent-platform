@@ -394,7 +394,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.11.4 <1.12.0"` |  |
+| components.kagent.versionRange | string | `">=1.13.0 <1.14.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -418,19 +418,19 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.11.4 <1.12.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.13.0 <1.14.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.11.3 <1.12.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.12.0 <1.13.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.11.3 <1.12.0"` |  |
+| components.substrate.versionRange | string | `">=1.12.0 <1.13.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -467,7 +467,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `">=1.13.0 <2.0.0"` |  |
+| components.agent-manager.versionRange | string | `">=2.3.0 <3.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.omitEmptyKeys[0] | string | `"harness.egress"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
@@ -696,6 +696,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | networkPolicy.flavor | string | `"auto"` | `auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor. |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
+| networkPolicy.substrate.credentialProvider.egressFQDNs[0].matchName | string | `"oauth2.googleapis.com"` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
 | networkPolicy.musterInClusterMcpPorts[1] | int | `8443` |  |
 | networkPolicy.mcpBackends | object | `{}` |  |
@@ -1003,6 +1004,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controllerRoute.mcp.enabled | bool | `true` |  |
 | kagent.controllerRoute.mcp.pathPrefix | string | `"/kagent/mcp"` |  |
 | kagent.controllerRoute.mcp.timeout | int | `300` |  |
+| kagent.controllerRoute.mcp.displayName | string | `"Kagent"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
@@ -1271,7 +1273,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.observability.otel.headers | string | `"auto"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
 | agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
-| agent-manager.harness.egress | object | `{}` | The origins a coding agent on a claude Harness reaches, by Harness name ({claude: [https://github.com, …]}): the installation's forge and git hosts plus the toolchain's registries. agent-manager writes the list into the Agent's spec.egress and refuses any other origin; a claude Harness without an entry reaches none. Empty (the default) is not forwarded and the agent-manager chart's own list applies: GitHub plus the Go and npm registries for claude-go and claude-node. An installation whose forge is not GitHub sets every Harness it serves here: Helm merges the map into the chart's, so a Harness left out keeps the GitHub list. Needs agent-manager 1.11.0 or later. |
+| agent-manager.harness.egress | object | `{}` | The origins a coding agent reaches, by the name of its Harness ({claude: [https://github.com, …], codex: […]}): the installation's forge and git hosts plus the toolchain's registries; the model host is not listed (kagent adds the ModelConfig's destination). agent-manager writes the list into the Agent's spec.egress and the Substrate egress gate refuses any other origin with a 403; agent-manager refuses an agent on a coding Harness without an entry. Empty (the default) is not forwarded and the agent-manager chart's own list applies: GitHub for claude (and codex from agent-manager 2.2.0) plus the Go and npm registries for claude-go and claude-node. Each kagent.harnesses entry an installation adds gets its entry here; an installation whose forge is not GitHub sets every Harness it serves: Helm merges the map into the chart's, so a Harness left out keeps the GitHub list. Needs agent-manager 1.11.0 or later. |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
 | agent-manager.agentChart.semver | string | `">=2.0.0 <3.0.0"` |  |
 | agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
@@ -1313,7 +1315,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"1.13.0"` |  |
+| agentManager.migration.image.tag | string | `"2.3.0"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
@@ -1348,6 +1350,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: bound to agent-platform:user in the kagent namespace, and to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, gives this to every user. It also gives it to every ServiceAccount, so every pod in the cluster can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. To give it to people only, replace the default with an OIDC group that every user belongs to, written as the API server sees it (with the installation's OIDC groups prefix). |
 | tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects. |
 | tenants.platformTeam | list | `[]` | The customer's platform team, per installation: RBAC subjects bound to agent-platform:editor in the kagent namespace beside `platform.editors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation). |
+| tenants.organizations.enabled | bool | `false` | Admit the agent workers of the Organizations' namespaces and turn on agent-manager's tenant reconciler. With components.agent-manager on, the agent-manager release gets `tenants.enabled` (agent-manager 2.1.0 or later), which puts a WorkerPool in each namespace labelled `giantswarm.io/organization` that holds an agent, with copies of the kagent namespace's default ModelConfig (`default-model-config`, its key Secret kagent.providers.<default>.apiKeySecretRef, which must be set in these values: the kagent chart's own provider defaults are not read) and of the workers' own policy (the CiliumNetworkPolicy `substrate-workers` in the cilium flavor, which needs cilium.io/v2 served or agent-manager does not start; the NetworkPolicy `substrate-workers-ingress` in the kubernetes flavor; none with networkPolicy.enabled off). Each tenant that holds an agent keeps 1 warm worker unless agent-manager.tenants.workerPoolReplicas sets another count. The render fails, naming the key, below agent-manager 2.1.0, with kagent off, with agent-manager's OAuth or downstream OAuth off, without kagent.fluxServiceAccountName or without that key Secret. agent-manager.tenants.workerPoolReplicas and .interval are yours; any other agent-manager.tenants key is derived and must be unset or equal. On, with Agent Substrate on, the connectivity release lets the worker pods of every such namespace reach the atenet router's tunnel, the egress gateway and the actors' dns, as the kagent namespace's workers do (both flavors), and the workers' Kyverno PolicyException covers them there when Substrate's controllers write them (ate-controller, the Deployment and ReplicaSet controllers); a labelled pod a person writes there is judged like any other. It needs Kyverno 1.15.2 or later: an older Kyverno matches the exception's namespaceSelector against no labels, so the exception never applies and the workers are refused. The namespaces are selected by the label, never listed; a namespace without the label gets nothing. Two ValidatingAdmissionPolicies hold the workers there for every requester, cluster-admin included: only agent-manager's ServiceAccount writes a WorkerPool, as a copy of the platform WorkerPool (kagent.substrateWorkerPool.name; only replicas may differ), and only Substrate's controllers write a Deployment, ReplicaSet or Pod labelled ate.dev/worker-pool; no one adds an ephemeral container to a worker, execs into one or attaches to one (Kubernetes 1.30 or later; docs/substrate-security.md). On, Substrate's credential provider also reads each such namespace's Secrets for the atespace of the same name, and for ate-golden, where every template's golden actor boots (substrate.credentialProvider.namespacePolicies). Off, the default, nothing changes. |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |

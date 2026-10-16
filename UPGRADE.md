@@ -15,6 +15,59 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## 4.135.x → \<next\> (Substrate 1.12.0: the Organizations' credentials by label)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.12 from 1.12.0 (`>=1.12.0 <1.13.0`, giantswarm/agent-platform#1041). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.12.0 (`ateom-gvisor:1.12.0`); the kagent CRDs and the kagent release are unchanged. 1.12 stays on 1.11's upstream pin and changes no persisted format, CRD, schema or snapshot layout: no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.12.0 brings:
+
+- **Namespace policies by label** (giantswarm/substrate#456): a policy of the credential provider can carry an `ownNamespaceSelector` (each namespace it matches is read by the atespace of the same name only) or, beside `atespace`, an `allowedNamespaceSelector` (that atespace reads every namespace it matches). The provider matches a namespace's labels at each request, so a namespace created or labelled later needs no chart change and no restart. With a selector the chart adds the ClusterRole and ClusterRoleBinding `<release>-k8s-credential-provider-namespace-reader` (list and watch on namespaces).
+
+With `tenants.organizations.enabled` the meta chart now uses them: the substrate release's `credentialProvider.namespacePolicies` gains an `ownNamespaceSelector` entry on `giantswarm.io/organization` Exists, and the same selector as `allowedNamespaceSelector` on the `ate-golden` entry. An agent in an Organization's namespace gets its model key, MCP headers and git credentials from its own namespace, and its template's golden actor from the same. The switch off, the policies are as before.
+
+### Operator action
+
+- **None.** The control plane, the atelet and the worker pool roll on the upgrade.
+- **An installation with its own `substrate.credentialProvider.namespacePolicies` and the switch on**: the entries stay; the meta chart adds the selector to its `ate-golden` entry (an entry when there is none), so a `secretSelector` on that entry also narrows what `ate-golden` reads in the Organizations' namespaces. An `ate-golden` entry with an `allowedNamespaceSelector` on other namespaces fails the render: drop that selector.
+- **An installation that keeps Substrate below 1.12.0 with the switch on** (an own `components.substrate.versionRange`, or a BOM pin): the render fails, because the older credential provider refuses the selectors at start. Move Substrate to 1.12.0 with the switch, or keep the switch off.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.12.0`; `kagent` and `kagent-crds` stay where they are.
+
+## 4.135.x → \<next\> (kagent 1.13.0: the codex Harness)
+
+`components.kagent{,-crds}.versionRange` is `>=1.13.0 <1.14.0`, kagent's releases of the 1.13 line (giantswarm/kagent-upstream#606). The kagent chart carries the codex-harness image's digest and accepts `runtime: codex` in `kagent.harnesses`. Same upstream pin as 1.12.0, no CRD field, API or persisted format changes: the kagent-crds and kagent releases roll in place, Substrate stays on 1.11.4, and a suspended agent resumes with its conversation. Nothing renders a codex Harness until an installation adds the entry.
+
+### Operator action
+
+- **An installation that opts into codex**: add a `kagent.harnesses` entry (`name: codex`, `runtime: codex`, its own `snapshotLocation`, `env` with `KAGENT_PROPAGATE_TOKEN: "true"`), its origins under `agent-manager.harness.egress.codex` (the forge and git hosts; the model host is not listed), and a Responses API ModelConfig for its agents (`kagent.modelConfigs[].apiFormat: responses`).
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.13.0`, `kagent-crds` first or with it.
+
+## 4.133.x → \<next\> (agent-manager 2.1.0: bounded get_session, the claude Harness egress guard)
+
+`components.agent-manager.versionRange` selects agent-manager 2.x from 2.1.0 (`>=2.1.0 <3.0.0`), and the connectivity release's `agent-manager migrate` run takes the same image. `get_session` answers a bounded summary of each turn by default; a caller that reads `tasks` passes `detail: full` (giantswarm/agent-manager#150). `get_info`'s `namespaces.managed` lists only the namespaces where the caller may create agents (giantswarm/agent-manager#71). An agent on a Harness that runs Claude Code is refused when `agent-manager.harness.egress` has no entry for that Harness (giantswarm/agent-manager#148). The portal and the gateway read sessions from kagent and call neither field. The agent-manager chart's new keys (`tenants`, `muster.mcpServer.displayName`) default to off and `Agent Manager`. agent-manager keeps no state of its own: the release rolls in place, and the agents, their Sessions and their conversations stay as they are; the migrate run finds every release on the 2.x chart already and rewrites nothing.
+
+### Operator action
+
+- **An installation with its own claude Harness** (a `harnesses[]` entry with `runtime: claude` other than `claude`, `claude-go` or `claude-node`): add its origins under `agent-manager.harness.egress.<name>` (an empty list for none), or its agents' creates and updates are refused.
+- **An installation that pins the BOM**: move `agent-manager` to `2.1.0`.
+
+## 4.133.x → \<next\> (kagent 1.12.0: the Harness turn limits are withdrawn)
+
+`components.kagent{,-crds}.versionRange` is `>=1.12.0 <1.13.0`, kagent's releases of the 1.12 line (giantswarm/kagent-upstream#502). The `Harness` API no longer declares `spec.claude.limits`: the claude harness runs a turn without the turn and budget caps, and the kagent-crds release drops the field from the CRD before the kagent release upgrades (`dependsOn`). The 1.12.0 kagent chart ignores `kagent.harnesses[].limits` and renders `claude: {}`, so an installation whose values still set it upgrades. Substrate stays on 1.11.4: kagent 1.12.0 is built against Substrate 1.11.1. No persisted format, schema or snapshot layout changes: a suspended agent resumes with its conversation.
+
+### Operator action
+
+- **An installation that sets `kagent.harnesses[].limits`**: drop the key after the upgrade; it has no effect from 1.12.0.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.12.0`, `kagent-crds` first or with it.
+
+## 4.133.x → \<next\> (Substrate 1.11.4: a CONNECT tunnel ends when the actor closes)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.11 from 1.11.4 (`>=1.11.4 <1.12.0`, giantswarm/agent-platform#1034). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.11.4 (`ateom-gvisor:1.11.4`); the kagent CRDs and the kagent release are unchanged. The patch is on 1.11.0's upstream pin and changes no persisted format, CRD, schema or snapshot layout: the step resets nothing, no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.11.4 brings:
+
+- **A CONNECT tunnel ends when the actor closes its connection**: atunnel's relay closes the router's side as soon as the actor stops sending, so a call to an actor that closed or reset its connection fails at once instead of waiting out its caller's deadline. The relay runs in the worker's ateom: an actor gets the fix once its worker runs 1.11.4.
+
+### Operator action
+
+- **None.** The control plane, the atelet and the worker pool roll on the upgrade.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.11.4`; `kagent` and `kagent-crds` stay where they are.
+
 ## 4.133.x → \<next\> (Substrate 1.11.3: a crashed actor is seen and recovered)
 
 `components.substrate{,-crds}.versionRange` selects Substrate 1.11 from 1.11.3 (`>=1.11.3 <1.12.0`, giantswarm/agent-platform#1031). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.11.3 (`ateom-gvisor:1.11.3`); the kagent CRDs and the kagent release are unchanged. The patches are on 1.11.0's upstream pin and change no persisted format: the step resets nothing, no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.11.1 to 1.11.3 bring:

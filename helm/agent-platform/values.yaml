@@ -557,8 +557,10 @@ components:  # @schema additionalProperties: true
     # thinking before every answer or replying with nothing. From 1.2.0 the
     # chart takes its OTel settings in the SDK-spec shape kagent.otel below
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
-    # ignores them and exports nothing.
-    versionRange: ">=1.11.4 <1.12.0"
+    # ignores them and exports nothing. From 1.13.0 a kagent.harnesses entry
+    # takes runtime: codex on the chart's codex-harness image
+    # (giantswarm/kagent-upstream#606).
+    versionRange: ">=1.13.0 <1.14.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -672,7 +674,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.11.4 <1.12.0"
+    versionRange: ">=1.13.0 <1.14.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -723,7 +725,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.11.3 <1.12.0"
+    versionRange: ">=1.12.0 <1.13.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
     # release Flux resolved (ateController.gvisorWorker.followRelease, on by
@@ -750,7 +752,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.11.3 <1.12.0"
+    versionRange: ">=1.12.0 <1.13.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -912,7 +914,7 @@ components:  # @schema additionalProperties: true
     # agents as Flux HelmReleases of the agent chart, as REST and MCP. Off by
     # default: it needs the kagent component and Flux on the cluster.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # agent-manager 1.x is the kagent API v2 line (kagent.dev/v1alpha3
+    # agent-manager 1.x and 2.x are the kagent API v2 line (kagent.dev/v1alpha3
     # AgentTemplates through the Generic agent chart 1.x, the agent unit); 0.x
     # composes agents for kagent 0.10 (v1alpha2) and never meets this chart.
     # Until 1.0.0 is published the range resolves nothing (the component is
@@ -931,8 +933,15 @@ components:  # @schema additionalProperties: true
     # volume (giantswarm/agent-manager#134). 1.13.0 starts a Session without a
     # first message, answering the created Session only, so a surface sends
     # the first turn itself (giantswarm/agent-manager#138), and bounds MCP
-    # request bodies at 1 MiB (giantswarm/agent-manager#141).
-    versionRange: ">=1.13.0 <2.0.0"
+    # request bodies at 1 MiB (giantswarm/agent-manager#141). 2.x bounds
+    # get_session (a summary by default, `detail: full` for every task) and
+    # adds get_session_turn and delete_session; 2.1.0 lists in get_info's
+    # namespaces.managed only where the caller may create agents and refuses
+    # an agent on a claude Harness without a harness.egress entry
+    # (giantswarm/agent-manager#150, #71, #148). 2.3.0 names the minted
+    # skills credential tenant-credential-agent-manager-skills-token, keeps
+    # its earlier name filled, and its migrate moves the agents over.
+    versionRange: ">=2.3.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -1859,9 +1868,15 @@ llmRouting:
   # through untouched, so reach to the listener grants no spend. Candidates are tried in name order and the first
   # whose `match` takes the model wins, so a `*` entry would shadow every model
   # named after it — a served model (model-manager, the LLMEndpoint
-  # document) joins under its preset's name. The first entry's
-  # provider is the one whose ModelConfigs ride the listener
-  # (kagent.modelConfigs, modelConfigPolicy).
+  # document) joins under its preset's name. Every entry's provider rides the
+  # listener: its ModelConfigs (kagent.modelConfigs, modelConfigPolicy) get
+  # the listener as baseUrl. An OpenAI entry serves the Responses route
+  # (/v1/responses) a codex agent calls, metered and rate-limited like the
+  # rest:
+  #   - name: openai
+  #     provider: OpenAI
+  #     baseURL: https://api.openai.com/v1
+  #     match: gpt-*
   models:  # @schema minItems: 1; item: object; itemProperties: {"name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63}, "provider": {"type": "string", "enum": ["Anthropic", "Baseten", "Cerebras", "Cohere", "Deepinfra", "Deepseek", "Fireworks", "Gemini", "Groq", "Huggingface", "Mistral", "OpenAI", "Openrouter", "TogetherAI", "XAI"]}, "baseURL": {"type": "string", "pattern": "^https?://[^/]+/.+"}, "match": {"type": "string"}, "visibility": {"type": "string", "enum": ["Public", "Internal"]}}
     - name: anthropic
       provider: Anthropic
@@ -1998,6 +2013,21 @@ networkPolicy:
   #   additionalEgressFQDNs:
   #     - matchName: dex.example.gigantic.io
   additionalEgressFQDNs: []
+  # Substrate's credential provider (k8s-credential-provider, ate-system),
+  # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) it reaches
+  # on 443/TCP besides the apiserver and DNS, through the DNS proxy rule the
+  # policy renders with them. The default is the token endpoint it exchanges a
+  # Vertex AI service account key at (google-access-token.k8s.io, for
+  # AnthropicVertexAI and GeminiVertexAI ModelConfigs); kagent refuses a key
+  # whose token_uri names another host. A list replaces the default as a
+  # whole: keep oauth2.googleapis.com when adding a name. [] leaves the
+  # provider the apiserver and DNS only, and every Vertex AI call fails with
+  # "could not exchange the service account key for an access token". Ignored
+  # by the kubernetes flavor, which renders no egress policy for Substrate.
+  substrate:
+    credentialProvider:
+      egressFQDNs:  # @schema item: object; itemProperties: {"matchName": {"type": "string", "minLength": 1}, "matchPattern": {"type": "string", "minLength": 1}}
+        - matchName: oauth2.googleapis.com
   # Extra in-cluster egress ports for muster -> MCP backends reached via a
   # ClusterIP whose pod listens on a non-80/443 port (e.g. the in-cluster
   # pro / runbooks MCP servers on 8080, or tunnelport RemoteApp tunnels whose
@@ -3483,6 +3513,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # so the default is the CRD's maximum; a longer turn runs through the
       # MCP Tasks extension.
       timeout: 300
+      # The name the Dev Portal shows for the server (the MCPServer's
+      # ui.giantswarm.io/display-name annotation); empty renders none.
+      displayName: Kagent
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
@@ -3576,6 +3609,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   model: claude-sonnet-4-6
   #   apiKeySecret: kagent-anthropic
   #   apiKeySecretKey: ANTHROPIC_API_KEY
+  # - name: openai-gpt-5-5   # a codex model: the Responses API, through the
+  #   provider: OpenAI       # llm listener's OpenAI entry (llmRouting.models)
+  #   model: gpt-5.5
+  #   apiKeySecret: kagent-openai
+  #   apiKeySecretKey: OPENAI_API_KEY
+  #   apiFormat: responses
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
@@ -3591,24 +3630,34 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   description: "external MCP server"
 
   # --- Coding agents: further Harnesses (the kagent chart's harnesses[]) ---
-  # A coding agent is an Agent whose spec.harnessRef names a claude Harness:
-  # Claude Code run headless by the kagent line's claude-harness image in a
-  # Substrate actor, calling muster as the person who sent the turn
-  # (giantswarm/giantswarm#37625; bumblebee-plans#60). This list is forwarded
-  # to the kagent chart as it is: one entry per further Harness, with the
-  # policy shape of harness.* above plus runtime: claude (the default) or
-  # kagent. A claude entry takes the chart's claude-harness image at its
+  # A coding agent is an Agent whose spec.harnessRef names a coding Harness:
+  # Claude Code (claude) or the codex CLI (codex) run headless by the kagent
+  # line's claude-harness or codex-harness image in a Substrate actor, calling
+  # muster as the person who sent the turn (giantswarm/giantswarm#37625,
+  # giantswarm/giantswarm#38449). This list is forwarded to the kagent chart as
+  # it is: one entry per further Harness, with the policy shape of harness.*
+  # above plus runtime: claude (the default), codex or kagent. A claude or
+  # codex entry takes the chart's claude-harness or codex-harness image at its
   # published digest; its snapshotLocation is its own (a snapshot is the
   # actor's whole memory and filesystem, and each store has its own
-  # retention). An Agent declares its own egress (spec.egress, the agent chart's
-  # agent.egress); a Harness carries none. Empty (the default) renders no
-  # further Harness.
+  # retention). An Agent declares its own egress (spec.egress, which
+  # agent-manager writes from agent-manager.harness.egress.<Harness name>); a
+  # Harness carries none. A codex agent's model is a Responses API ModelConfig
+  # (kagent.modelConfigs[].apiFormat: responses). kagent refuses a share of a
+  # Session on a coding Harness. Empty (the default) renders no further
+  # Harness: an installation opts into each runtime here.
   harnesses: []
   # - name: claude
   #   runtime: claude
   #   snapshotLocation: s3://<bucket>/claude
   #   env:
   #     - name: KAGENT_PROPAGATE_TOKEN          # tool calls to muster as the person
+  #       value: "true"
+  # - name: codex
+  #   runtime: codex
+  #   snapshotLocation: s3://<bucket>/codex
+  #   env:
+  #     - name: KAGENT_PROPAGATE_TOKEN
   #       value: "true"
 
 # === The platform's own Grafana boards ===
@@ -4679,14 +4728,18 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # values change that rolls agent-manager on the cut-over.
     apiVersion: v1alpha3
   harness:
-    # -- The origins a coding agent on a claude Harness reaches, by Harness name
-    # ({claude: [https://github.com, …]}): the installation's forge and git
-    # hosts plus the toolchain's registries. agent-manager writes the list into
-    # the Agent's spec.egress and refuses any other origin; a claude Harness
-    # without an entry reaches none. Empty (the default) is not forwarded and
-    # the agent-manager chart's own list applies: GitHub plus the Go and npm
-    # registries for claude-go and claude-node. An installation whose forge is
-    # not GitHub sets every Harness it serves here: Helm merges the map into the
+    # -- The origins a coding agent reaches, by the name of its Harness
+    # ({claude: [https://github.com, …], codex: […]}): the installation's
+    # forge and git hosts plus the toolchain's registries; the model host is
+    # not listed (kagent adds the ModelConfig's destination). agent-manager
+    # writes the list into the Agent's spec.egress and the Substrate egress
+    # gate refuses any other origin with a 403; agent-manager refuses an agent
+    # on a coding Harness without an entry. Empty (the default) is not
+    # forwarded and the agent-manager chart's own list applies: GitHub for
+    # claude (and codex from agent-manager 2.2.0) plus the Go and npm registries
+    # for claude-go and claude-node. Each kagent.harnesses entry an
+    # installation adds gets its entry here; an installation whose forge is not
+    # GitHub sets every Harness it serves: Helm merges the map into the
     # chart's, so a Harness left out keeps the GitHub list. Needs agent-manager
     # 1.11.0 or later.
     egress: {}  # @schema additionalProperties: true
@@ -4856,7 +4909,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.13.0
+      tag: 2.3.0
     dryRun: false
     gitopsNamespaces: []
 
@@ -5035,12 +5088,17 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # kagent on, the connectivity release renders the three ClusterRoles a tenant's
 # RoleBindings refer to:
 #   - agent-platform:user: see the tenant's agents, templates, RemoteMCPServers,
-#     ModelConfigs and muster MCPServers, and start a Session with an agent;
+#     ModelConfigs, EgressPolicies and muster MCPServers, and start a Session
+#     with an agent;
 #   - agent-platform:editor: the above, plus the writes agent-manager performs
 #     as the caller (HelmReleases, OCIRepositories, Agents, AgentTemplates,
 #     RemoteMCPServers);
-#   - agent-platform:admin: the above, plus ModelConfigs and the
+#   - agent-platform:admin: the above, plus ModelConfigs, EgressPolicies, the
+#     tenant's Secrets (create, replace, delete; never read back) and the
 #     tenant's RoleBindings, which may bind these three roles only.
+# In an Organization's namespace an EgressPolicy names only Secrets named
+# tenant-credential-*; admission refuses any other (the platform's copied
+# model key among them), for every requester.
 # An Organization's RoleBindings are the installation's (they name the
 # customer's groups); the chart binds the platform tenant only, below. The
 # kagent controller answers from these roles once its authorizer is on (the
@@ -5078,6 +5136,49 @@ tenants:
   # release's values). Empty by default. A group is written as the API server
   # sees it (with the OIDC groups prefix of the installation).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+  organizations:
+    # -- Admit the agent workers of the Organizations' namespaces and turn on
+    # agent-manager's tenant reconciler. With components.agent-manager on,
+    # the agent-manager release gets `tenants.enabled` (agent-manager 2.1.0
+    # or later), which puts a WorkerPool in each namespace labelled
+    # `giantswarm.io/organization` that holds an agent, with copies of the
+    # kagent namespace's default ModelConfig (`default-model-config`, its
+    # key Secret kagent.providers.<default>.apiKeySecretRef, which must be
+    # set in these values: the kagent chart's own provider defaults are not
+    # read) and of the workers' own policy (the CiliumNetworkPolicy
+    # `substrate-workers` in the cilium flavor, which needs cilium.io/v2
+    # served or agent-manager does not start; the NetworkPolicy
+    # `substrate-workers-ingress` in the kubernetes flavor; none with
+    # networkPolicy.enabled off). Each tenant that holds an agent keeps 1
+    # warm worker unless agent-manager.tenants.workerPoolReplicas sets
+    # another count. The render fails, naming the key, below agent-manager
+    # 2.1.0, with kagent off, with agent-manager's OAuth or downstream OAuth
+    # off, without kagent.fluxServiceAccountName or without that key Secret.
+    # agent-manager.tenants.workerPoolReplicas and .interval are yours; any
+    # other agent-manager.tenants key is derived and must be unset or equal.
+    # On, with Agent Substrate on, the connectivity release lets the worker pods
+    # of every such namespace reach the atenet router's tunnel, the egress
+    # gateway and the actors' dns, as the kagent namespace's workers do (both
+    # flavors), and the workers' Kyverno PolicyException covers them there
+    # when Substrate's controllers write them (ate-controller, the
+    # Deployment and ReplicaSet controllers); a labelled pod a person writes
+    # there is judged like any other. It needs Kyverno 1.15.2 or later: an
+    # older Kyverno matches the exception's namespaceSelector against no
+    # labels, so the exception never applies and the workers are refused. The
+    # namespaces are selected by the label, never listed; a namespace without
+    # the label gets nothing. Two ValidatingAdmissionPolicies hold the
+    # workers there for every requester, cluster-admin included: only
+    # agent-manager's ServiceAccount writes a WorkerPool, as a copy of the
+    # platform WorkerPool (kagent.substrateWorkerPool.name; only replicas may
+    # differ), and only Substrate's controllers write a Deployment,
+    # ReplicaSet or Pod labelled ate.dev/worker-pool; no one adds an
+    # ephemeral container to a worker, execs into one or attaches to one
+    # (Kubernetes 1.30 or later; docs/substrate-security.md). On, Substrate's
+    # credential provider also reads each such namespace's Secrets for the
+    # atespace of the same name, and for ate-golden, where every template's
+    # golden actor boots (substrate.credentialProvider.namespacePolicies).
+    # Off, the default, nothing changes.
+    enabled: false
 
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories
@@ -5536,8 +5637,10 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   # The controller's reconcile period (a Go duration; 10m is the chart's
   # default): how often it reconciles every Workspace without an event, so a
   # claim deleted out from under a Workspace is made again by then. It is not
-  # how often mirrors are fetched: each Workspace's own spec.sync (nightly,
-  # weekly or custom) says that. Empty takes the chart's default.
+  # how often mirrors are fetched: nothing syncs on a schedule. A Workspace
+  # syncs after every change, on sync_workspace, and when a Session starts on
+  # it more than the refresh threshold (1h) after its last sync. Empty takes
+  # the chart's default.
   sync:
     cycle: ""
   # How long a Session's directory outlives the Session's last turn (a Go
@@ -5953,6 +6056,14 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # ate-golden and fetches the template's git skills with the same
   # credentials, so ate-golden needs every one of those namespaces too. The
   # default covers the kagent namespace, where the agent charts install.
+  # With tenants.organizations.enabled the meta chart adds the Organizations'
+  # namespaces by their label giantswarm.io/organization (the Substrate line
+  # from 1.12.0): an ownNamespaceSelector entry, so each is read by the
+  # atespace of its own name only, and the same selector as
+  # allowedNamespaceSelector on the ate-golden entry (a secretSelector there
+  # narrows ate-golden's reads in the Organizations' namespaces too). The
+  # policies set here stay; an ate-golden allowedNamespaceSelector on other
+  # namespaces, or a Substrate floor below 1.12.0, fails the render.
   credentialProvider:
     namespacePolicies:
       - atespace: kagent

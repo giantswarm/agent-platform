@@ -6,7 +6,8 @@ through kagent's A2A gateway, synchronous or through the MCP Tasks extension;
 hence mcp.timeout, the seconds muster waits, at the CRD's maximum by default)
 and the checkpoint and fork tools. Registered, every session whose toolset includes the agent-platform
 preset lists and messages the person's other sessions as x_kagent_<tool>, and
-the Dev Portal's MCP servers page lists it in the Agent Platform group.
+the Dev Portal's MCP servers page lists it in the Agent Platform group, by
+mcp.displayName (the ui.giantswarm.io/display-name annotation) when set.
 
 The path is the data plane's, never the controller's directly: an HTTPRoute at
 pathPrefix, rewritten to /mcp, on the kagent AgentgatewayBackend
@@ -75,6 +76,10 @@ metadata:
     muster.giantswarm.io/type: kagent
     agent-platform.giantswarm.io/tool-group: agent-platform
     {{- include "labels.common" . | nindent 4 }}
+  {{- with $mcp.displayName }}
+  annotations:
+    ui.giantswarm.io/display-name: {{ . | quote }}
+  {{- end }}
 spec:
   autoStart: true
   type: streamable-http

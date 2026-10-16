@@ -131,6 +131,9 @@ overwrite would hide a values file that still spells the old key.
     block's own subjects with tenants.platformTeam appended (each subject
     once), while that list is not empty.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
+                 tenants, the tenant reconciler, while
+                 tenants.organizations.enabled is on
+                 (agent-platform.agentManager.tenants);
                  muster.url from the muster Service (agent-platform.musterMcpUrl);
                  kagent.controllerTarget, the kagent controller its session
                  tools call, from the agentgateway data plane
@@ -208,7 +211,13 @@ overwrite would hide a values file that still spells the old key.
     logs in as (postgres.applicationDatabase.owner): ate-api-server runs
     SET ROLE on every connection, and the chart's default `postgres` is a
     role the Cluster's application role is not a member of (a differing
-    explicit role fails the render). Its
+    explicit role fails the render). With tenants.organizations.enabled,
+    credentialProvider.namespacePolicies: the installation's own policies,
+    the ate-golden entry with allowedNamespaceSelector on the label
+    giantswarm.io/organization (an entry added when none names ate-golden; a
+    different selector there fails the render), and an ownNamespaceSelector
+    entry on the same label, each derived entry once; a Substrate floor below
+    1.12.0 fails the render. Its
     atelet.imageCache.pinnedImages is NOT derived here: the kagent release's
     ConfigMap kagent-images feeds it through the HelmRelease's valuesFrom
     (components.substrate.valuesFromRefs), so no copy of a digest lives here.
@@ -235,6 +244,9 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- fail (printf "agent-manager.kagent.controllerTarget (%s) differs from the platform's kagent controller target (%q): agent-manager's session tools reach the controller through the agentgateway data plane this chart installs, on kagent.controllerRoute; the target follows gateway.name and gateway.listeners[0].port; leave agent-manager.kagent.controllerTarget unset" $ownTarget $target) -}}
 {{- end -}}
 {{- $_ := set $derived "kagent" (dict "controllerTarget" $target) -}}
+{{- with (include "agent-platform.agentManager.tenants" .root | fromJson) -}}
+{{- $_ := set $derived "tenants" . -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "cluster-manager" -}}
 {{- /* model-manager's namespace: where the model-manager component lands — the
@@ -508,6 +520,38 @@ repeating the admin groups. */ -}}
 {{- end -}}
 {{- end -}}
 {{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref "readWriteRole" $role "ownerRole" $role) -}}
+{{- end -}}
+{{- if and (eq .name "substrate") (dig "organizations" "enabled" false (.root.Values.tenants | default dict)) -}}
+{{- /* The Organizations' agents (giantswarm/agent-platform#1041): each
+namespace labelled giantswarm.io/organization is read by the atespace of its
+own name only (an ownNamespaceSelector entry), and ate-golden, where every
+template's golden actor boots, reads them all (allowedNamespaceSelector on
+its entry, so that entry's secretSelector narrows it there too). The
+installation's own policies stay, each derived entry once; an ate-golden entry
+that selects other namespaces fails, and so does a Substrate floor below 1.12.0,
+whose provider refuses the selectors. */ -}}
+{{- $pin := include "agent-platform.substrate.pinnedVersion" .root -}}
+{{- if semverCompare "<1.12.0-0" $pin -}}
+{{- fail (printf "tenants.organizations.enabled needs Substrate 1.12.0 or later, whose credential provider reads namespace policies by label: components.substrate.versionRange selects %s, whose provider refuses the policy file at start" $pin) -}}
+{{- end -}}
+{{- $sel := dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists")) -}}
+{{- $policies := list -}}
+{{- $golden := false -}}
+{{- $own := false -}}
+{{- range $i, $p := dig "credentialProvider" "namespacePolicies" list ($.root.Values.substrate | default dict) -}}
+{{- if eq (toJson ($p.ownNamespaceSelector | default dict)) (toJson $sel) -}}{{- $own = true -}}{{- end -}}
+{{- if eq ($p.atespace | default "") "ate-golden" -}}
+{{- if and $p.allowedNamespaceSelector (ne (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
+{{- fail (printf "substrate.credentialProvider.namespacePolicies[%d] (ate-golden) has an allowedNamespaceSelector (%s) other than the Organizations' namespaces (%s), which tenants.organizations.enabled sets on it: leave it unset" $i (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
+{{- end -}}
+{{- $p = merge (dict "allowedNamespaceSelector" $sel) $p -}}
+{{- $golden = true -}}
+{{- end -}}
+{{- $policies = append $policies $p -}}
+{{- end -}}
+{{- if not $golden -}}{{- $policies = append $policies (dict "atespace" "ate-golden" "allowedNamespaceSelector" $sel) -}}{{- end -}}
+{{- if not $own -}}{{- $policies = append $policies (dict "ownNamespaceSelector" $sel) -}}{{- end -}}
+{{- $_ := set $derived "credentialProvider" (dict "namespacePolicies" $policies) -}}
 {{- end -}}
 {{- if and (eq .name "kserve-llmisvc-resources") (include "agent-platform.componentEnabled" (dict "root" .root "name" "modelServing")) -}}
 {{- /* The models Gateway (modelServing.modelsGateway, rendered by the
@@ -2841,6 +2885,116 @@ workspace-manager.kagent.address (agent-platform.componentDerivedValues). One
 line, no comment inside the define.
 */}}
 {{- define "agent-platform.workspaceManager.kagentFloor" -}}0.4.0{{- end -}}
+
+{{/*
+The agent-manager release that carries the tenant reconciler (its chart's
+tenants block, flag --multi-tenant; giantswarm/agent-manager#160). One line,
+no comment inside the define.
+*/}}
+{{- define "agent-platform.agentManager.tenantsFloor" -}}2.1.0{{- end -}}
+
+{{/*
+agent-manager's tenants block (its tenant reconciler) while
+tenants.organizations.enabled is on, as JSON; {} while it is off, so the
+agent-manager release carries no tenants key and its values are those of a
+chart without the reconciler (an agent-manager 1.x chart's closed schema
+refuses the key). One switch: the connectivity release admits the
+Organizations' workers on the same key (templates/substrate/ in that chart).
+On, from what this chart already has for the kagent namespace:
+  enabled                    true;
+  modelConfig.name           default-model-config, the ModelConfig the kagent
+                             chart renders from kagent.providers;
+  modelConfig.apiKeySecretName
+                             kagent.providers.<providers.default>.apiKeySecretRef,
+                             its key Secret;
+  networkPolicy              the workers' own policy the connectivity release
+                             renders in the kagent namespace with Agent
+                             Substrate and networkPolicy.enabled on: flavor
+                             cilium, names [substrate-workers]; flavor
+                             kubernetes, names [substrate-workers-ingress];
+                             none with networkPolicy.enabled off;
+  workerPoolReplicas         1, the warm workers of each tenant that holds an
+                             agent; a default: agent-manager.tenants.workerPoolReplicas
+                             stands.
+agent-manager.tenants.interval is the operator's (the chart's default without
+it). Every other key is single-source: an own value in agent-manager.tenants
+that differs fails the render, and so does agent-manager.tenants.enabled set
+against the switch.
+The render fails, naming what is missing, when the switch is on and:
+  * components.agent-manager.versionRange's floor is below
+    agent-platform.agentManager.tenantsFloor (an older chart has no tenants
+    block);
+  * a kind the reconciler watches is not served: agent-manager refuses to
+    start with --multi-tenant otherwise. The api.kagent.dev Agents, Harnesses
+    and ModelConfigs come with components.kagent-crds, the ate.dev WorkerPools
+    with components.substrate-crds; both follow components.kagent, which must
+    be on (agent-platform.validateKagentCrds and validateSubstrate refuse
+    either off with kagent on). Flux's
+    HelmReleases and OCIRepositories are what this chart installs through;
+    the network policy kind is the flavor networkPolicy.flavor resolved for
+    the cluster (`auto` reads it from the cluster);
+  * agent-manager.oauth.enabled or agent-manager.oauth.downstream.enabled is
+    off (a request in a tenant runs as the caller);
+  * kagent.fluxServiceAccountName is empty (agent-manager's
+    flux.helmReleaseServiceAccount, which the agents' HelmReleases in a tenant
+    run as);
+  * the default ModelConfig has no key Secret (kagent.providers empty, or its
+    default provider without apiKeySecretRef).
+Called from agent-platform.componentDerivedValues, i.e. only while
+components.agent-manager is on.
+Usage: include "agent-platform.agentManager.tenants" $root | fromJson
+*/}}
+{{- define "agent-platform.agentManager.tenants" -}}
+{{- $am := index .Values "agent-manager" | default dict -}}
+{{- $own := dig "tenants" dict $am | default dict -}}
+{{- if not (dig "organizations" "enabled" false (.Values.tenants | default dict)) -}}
+{{- if dig "enabled" false $own -}}
+{{- fail "agent-manager.tenants.enabled is true but tenants.organizations.enabled is not: the tenant reconciler is turned on with tenants.organizations.enabled, which also admits the Organizations' workers in the connectivity release; set it and leave agent-manager.tenants.enabled unset" -}}
+{{- end -}}
+{}
+{{- else -}}
+{{- if and (hasKey $own "enabled") (not $own.enabled) -}}
+{{- fail "agent-manager.tenants.enabled is false but tenants.organizations.enabled is true: the tenant reconciler follows tenants.organizations.enabled; leave agent-manager.tenants.enabled unset" -}}
+{{- end -}}
+{{- $range := dig "agent-manager" "versionRange" "" .Values.components -}}
+{{- $floor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range) "" -}}
+{{- $want := include "agent-platform.agentManager.tenantsFloor" . -}}
+{{- if or (not $floor) (lt ((semver $floor).Compare (semver $want)) 0) -}}
+{{- fail (printf "tenants.organizations.enabled needs agent-manager %s or later, the release with the tenant reconciler (giantswarm/agent-manager#160), and components.agent-manager.versionRange %q has the floor %q: move the range to >=%s" $want $range $floor $want) -}}
+{{- end -}}
+{{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
+{{- fail "tenants.organizations.enabled with agent-manager on needs components.kagent: the tenant reconciler watches api.kagent.dev Agents, Harnesses and ModelConfigs (kagent-crds) and ate.dev WorkerPools (substrate-crds), which follow components.kagent, and agent-manager refuses to start with --multi-tenant when one is not served" -}}
+{{- end -}}
+{{- if not (and (dig "oauth" "enabled" false $am) (dig "oauth" "downstream" "enabled" false $am)) -}}
+{{- fail "tenants.organizations.enabled needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled: a request in a tenant runs as the caller, whose RoleBindings there grant the writes" -}}
+{{- end -}}
+{{- if not (include "agent-platform.kagent.fluxServiceAccountName" .) -}}
+{{- fail "tenants.organizations.enabled needs kagent.fluxServiceAccountName: it is agent-manager's flux.helmReleaseServiceAccount, the ServiceAccount the agents' HelmReleases in a tenant run as" -}}
+{{- end -}}
+{{- $providers := dig "providers" dict (.Values.kagent | default dict) | default dict -}}
+{{- $provider := toString (dig "default" "" $providers) -}}
+{{- $secret := dig $provider "apiKeySecretRef" "" $providers -}}
+{{- if not $secret -}}
+{{- fail (printf "tenants.organizations.enabled needs kagent.providers.%s.apiKeySecretRef (kagent.providers.default %q): the Secret with the key of the default ModelConfig, which agent-manager copies into a tenant with its first agent; set it in this chart's values, which do not read the kagent chart's own provider defaults" $provider $provider) -}}
+{{- end -}}
+{{- $tenants := dict "enabled" true "modelConfig" (dict "name" "default-model-config" "apiKeySecretName" $secret) -}}
+{{- if and .Values.networkPolicy.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
+{{- $flavor := include "agent-platform.shape.networkPolicyFlavor" . -}}
+{{- $_ := set $tenants "networkPolicy" (dict "flavor" $flavor "names" (list (ternary "substrate-workers" "substrate-workers-ingress" (eq $flavor "cilium")))) -}}
+{{- end -}}
+{{- range $key, $value := dict "modelConfig.name" $tenants.modelConfig.name "modelConfig.apiKeySecretName" $tenants.modelConfig.apiKeySecretName "networkPolicy.flavor" (dig "networkPolicy" "flavor" "" $tenants) "networkPolicy.names" (dig "networkPolicy" "names" list $tenants) -}}
+{{- $path := splitList "." $key -}}
+{{- $mine := dig (first $path) (last $path) nil $own -}}
+{{- if and (not (kindIs "invalid" $mine)) (ne (toJson $mine) (toJson $value)) -}}
+{{- fail (printf "agent-manager.tenants.%s (%s) differs from what tenants.organizations.enabled derives (%s) from the kagent namespace's values: leave agent-manager.tenants.%s unset" $key (toJson $mine) (toJson $value) $key) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (hasKey $own "workerPoolReplicas") -}}
+{{- $_ := set $tenants "workerPoolReplicas" 1 -}}
+{{- end -}}
+{{- toJson $tenants -}}
+{{- end -}}
+{{- end -}}
 
 {{/*
 A Go duration (time.ParseDuration: 720h, 1h30m, 0, 1.5h) in seconds, empty
