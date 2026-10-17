@@ -15469,7 +15469,7 @@ spec:
     - expression: "has(object.metadata.deletionTimestamp) || size(variables.foreign) == 0"
       reason: Forbidden
       messageExpression: >-
-        'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named tenant-credential-*, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ')
+        'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named tenant-credential-*, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ') + '. Fix: rename each to a tenant-credential-* Secret of this namespace or remove it (UPGRADE.md: the migrate run removes the installation skills credential from the platform agents)'
 ---
 # Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1

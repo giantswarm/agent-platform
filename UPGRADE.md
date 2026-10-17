@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the migrate run covers the Organization namespaces)
+
+giantswarm/agent-platform#1089: with `tenants.organizations.enabled`, the connectivity release's `agent-manager migrate` run also covers every namespace labelled `giantswarm.io/organization`. An agent there that names the installation's skills credential (`tenant-credential-agent-manager-skills-token` or `agent-manager-skills-token`) from before the credential step keeps answering, but its next update stalls: `agent-platform-tenant-credential-refs` refuses Flux's apply and the HelmRelease is Stalled. The run moves such agents once agent-manager's migrate carries the tenant pass (giantswarm/agent-manager#191); the chart gives it the rights for that now. The run's pod template changes, so the upgrade starts it once more.
+
+### Operator action
+
+- **None.** The upgrade renders the ClusterRole, ClusterRoleBinding and ValidatingAdmissionPolicy `agent-platform-connectivity-agent-manager-migrate-tenants` and starts the run under its new hash.
+- **A Stalled agent HelmRelease in an Organization namespace** names the refused Secret and the fix in its message. Once the run with the tenant pass has moved it, reconcile it: `flux -n <org-namespace> reconcile helmrelease <agent>`.
+
 ## 4.135.x → \<next\> (the Substrate workers follow the control plane's release)
 
 giantswarm/agent-platform#822: the Substrate version has **one source, the release Flux resolves from `components.substrate.versionRange`**. The chart now sets `ateController.gvisorWorker.followRelease: true` on the substrate release, so ate-controller runs every gVisor pool on its own release's `ateom-gvisor`. A Substrate patch within the range (`1.12.0` → `1.12.1`) rolls the control plane, the atelet and the kagent worker pool together, with no chart release. Before, the pool followed the range's floor and waited for a chart release that moved it. The Substrate chart has defaulted the flag to `true` since `1.4.0`, so an installation on the chart's range renders the same pods as before. Only the substrate release's values gain the key.
