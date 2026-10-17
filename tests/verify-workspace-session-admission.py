@@ -227,6 +227,9 @@ def main(meta: str) -> int:
     for line in ("          github: https://github.com/apps/ci-agents\n", "          gitlab: https://gitlab.example.com\n"):
         if line not in own:
             fail(f"an own muster.muster.credentialProvider.releasable entry does not stand beside the pinned instance's ({line.strip()!r}):\n{own}")
+    derived = block(block(block(documents(helm(meta, [*base, "--set", "components.substrate.enabled=true", "--set", f"{NAME}.muster.mcpServer.auth.authorizationServer.issuer="])).get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6), "releasable", 8)
+    if "          github: https://github.com/apps/123\n" not in derived:
+        fail(f"without an own issuer the muster release's credentialProvider.releasable does not name github under the derived https://github.com/apps/<app.id>:\n{derived}")
     substrate = block(block(docs.get(("HelmRelease", "substrate"), ""), "credentialProvider", 4), "additionalProviders", 6)
     if "uriAuthority: muster.giantswarm.io" not in substrate or "host: muster.agent-platform.svc:50051" not in substrate:
         fail(f"the substrate release's credentialProvider.additionalProviders lacks muster's FetchSecret:\n{substrate}")
@@ -234,7 +237,7 @@ def main(meta: str) -> int:
     if "credentialProvider:" in block(off.get(("HelmRelease", "muster"), ""), "muster", 4):
         fail("the muster release carries a credentialProvider with workspaces off")
     ok("with the switch on the kagent release names muster.giantswarm.io as its credentialAuthority (an own value stands), "
-       "the muster release serves FetchSecret to the egress gateway's identity with Substrate on and releases the pinned provider instance github's grants (an own entry stands beside it), "
+       "the muster release serves FetchSecret to the egress gateway's identity with Substrate on and releases the pinned provider instance github's grants under its own or derived issuer (an own entry stands beside it), "
        "and Substrate routes the authority to muster; "
        "with workspaces off muster gets no credentialProvider")
 

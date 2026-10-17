@@ -5241,7 +5241,8 @@ workspaces:
   # muster.muster.credentialProvider.releasable, derived as the instance the
   # workspace-manager's registration is pinned to (its name in
   # workspace-manager.providers byte for byte) under the App's issuer
-  # (workspace-manager.muster.mcpServer.auth.authorizationServer.issuer); an
+  # (workspace-manager.muster.mcpServer.auth.authorizationServer.issuer, own
+  # or derived as <url>/apps/<app.id>); an
   # own map stands beside it, and an instance missing there gets the
   # gateway's 403 on its hosts.
   enabled: false

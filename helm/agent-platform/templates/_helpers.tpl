@@ -499,8 +499,7 @@ Substrate issues, and answers the gateway's pod identity alone
 (spiffe://cluster.local/ns/<substrate targetNamespace>/sa/atenet-egress).
 releasable, the provider instances whose grants muster releases, is the
 instance muster's registration of the workspace-manager is pinned to
-(agent-platform.workspaceManager.musterPin) under its App's issuer
-(workspace-manager.muster.mcpServer.auth.authorizationServer.issuer), the same
+under its App's issuer, own or derived (agent-platform.workspaceManager.musterPin), the same
 instance name the Session's credential URIs and agent-manager's binding carry.
 muster.credentialProvider's own keys stand. */ -}}
 {{- if and (.root.Values.workspaces | default dict).enabled (include "agent-platform.componentEnabled" (dict "root" .root "name" "substrate")) -}}
@@ -508,10 +507,8 @@ muster.credentialProvider's own keys stand. */ -}}
 {{- $own := dig "muster" "credentialProvider" dict (.root.Values.muster | default dict) | default dict -}}
 {{- $provider := dict "enabled" true "gatewayIdentity" (printf "spiffe://cluster.local/ns/%s/sa/atenet-egress" $substrateNs) -}}
 {{- $pin := include "agent-platform.workspaceManager.musterPin" .root | fromJson -}}
-{{- $server := dig "muster" "mcpServer" "auth" "authorizationServer" dict (index .root.Values "workspace-manager" | default dict) -}}
-{{- $issuer := ternary (toString ($server.issuer | default "")) "" (kindIs "map" $server) -}}
-{{- if and $pin.provider $issuer -}}
-{{- $_ := set $provider "releasable" (dict $pin.provider $issuer) -}}
+{{- if and $pin.provider $pin.issuer -}}
+{{- $_ := set $provider "releasable" (dict $pin.provider $pin.issuer) -}}
 {{- end -}}
 {{- $provider = mergeOverwrite $provider $own -}}
 {{- $muster := get $derived "muster" | default dict -}}
