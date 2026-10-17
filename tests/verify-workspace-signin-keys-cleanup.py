@@ -107,7 +107,7 @@ def live(connectivity: str) -> None:
             fail(f"a {SECRET} another release holds renders the cleanup")
         ok(f"live ({LIVE_CONTEXT}): a {SECRET} another release holds is left alone")
     finally:
-        subprocess.run([*kubectl, "delete", "namespace", ns, "--ignore-not-found", "--wait=false"], check=True, capture_output=True)
+        subprocess.run([*kubectl, "delete", "namespace", ns, "--ignore-not-found", "--timeout=120s"], check=True, capture_output=True)
 
 
 def main(connectivity: str) -> int:
