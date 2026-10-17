@@ -346,6 +346,9 @@ def main(meta: str, connectivity: str) -> int:
             provider = block(block(on or "", "muster", 4), "credentialProvider", 6)
             if provider:
                 on = on.replace(provider, "", 1)
+                # Its pods then mount Substrate's certificates, so the first
+                # install does not wait for them (giantswarm/agent-platform#1107).
+                on = on.replace("    disableWait: true\n", "", 1)
         if on != doc:
             fail(f"switching workspaces on changed {key} (muster.* included)")
     if any(kind == "MCPServer" for kind, _ in on_docs):
