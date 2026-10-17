@@ -1311,6 +1311,15 @@ spec:
           - matchPattern: '*.blob.core.windows.net'
         workloadClusters: {}
     muster:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: muster
+              topologyKey: kubernetes.io/hostname
+            weight: 100
       crds:
         install: false
       enabled: true
@@ -1374,11 +1383,9 @@ spec:
         flavor: kubernetes
       podAnnotations:
         application.giantswarm.io/team: bumblebee
-        karpenter.sh/do-not-disrupt: "true"
       podDisruptionBudget:
         enabled: true
-        maxUnavailable: 1
-        minAvailable: ""
+        minAvailable: 1
       rbac:
         mcpServerEditor:
           subjects:
@@ -1396,6 +1403,7 @@ spec:
           - apiGroup: rbac.authorization.k8s.io
             kind: Group
             name: giantswarm-github:giantswarm:giantswarm-admins
+      replicaCount: 2
     networkPolicy:
       additionalEgressCIDRs: []
       additionalEgressFQDNs: []
@@ -2000,6 +2008,15 @@ spec:
   driftDetection:
     mode: enabled
   values:
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: muster
+            topologyKey: kubernetes.io/hostname
+          weight: 100
     crds:
       install: false
     enabled: true
@@ -2085,11 +2102,9 @@ spec:
       flavor: kubernetes
     podAnnotations:
       application.giantswarm.io/team: bumblebee
-      karpenter.sh/do-not-disrupt: "true"
     podDisruptionBudget:
       enabled: true
-      maxUnavailable: 1
-      minAvailable: ""
+      minAvailable: 1
     rbac:
       mcpServerEditor:
         subjects:
@@ -2107,6 +2122,7 @@ spec:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
           name: giantswarm-github:giantswarm:giantswarm-admins
+    replicaCount: 2
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: helm.toolkit.fluxcd.io/v2
