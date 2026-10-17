@@ -248,7 +248,7 @@ def main(meta: str, connectivity: str) -> int:
         fail("the meta chart does not forward the derived base URL https://workspace-manager.<global.domain>")
     text = notes(meta, META)
     for line in (f"Workspaces, base URL {BASE} (routed: /.well-known/jwks.json):\n",
-                 "  Provider sign-in: muster, pinned to provider instance github's App (OAuth client in Secret workspace-github)"):
+                 "  Provider sign-in: muster, pinned to provider instance github's App (issuer https://github.com/apps/ci-agents, OAuth client in Secret workspace-github)"):
         if line not in text:
             fail(f"NOTES lacks {line.strip()!r}:\n{text}")
     for gone in (f"{BASE}/signin", f"{BASE}/callback/"):
