@@ -15,12 +15,15 @@ kinds, so the Job can emit their rewrite as a diff. Never write.
 With tenants.organizations on, the run also covers the Organization namespaces
 (AGENT_MANAGER_MULTI_TENANT, migrate-cronjob.yaml). RBAC cannot select
 namespaces by label, so the ClusterRole <name>-tenants grants the tenant
-identity list on namespaces (to find the labelled ones) and get, list, update,
-patch on HelmReleases — never create or delete, nothing else — and the
-ValidatingAdmissionPolicy of the same name refuses that identity's
-HelmRelease writes in every namespace that is neither labelled
-giantswarm.io/organization nor the kagent namespace (where it is namespace
-admin anyway): the writes land in the Organization namespaces, and no more.
+identity get, list on namespaces (to find the labelled ones) and get, list,
+update, patch on HelmReleases — never create or delete. The tenant identity is
+also the one helm-controller impersonates for every agent release in the kagent
+namespace, so the ValidatingAdmissionPolicy of the same name holds every
+HelmRelease write of that identity outside the kagent namespace to what the
+run does: an update, in a namespace labelled giantswarm.io/organization, from
+a pod of the run (the pod-name claim of the pod's ServiceAccount token, which
+an impersonated request does not carry), that changes spec.values and nothing
+else of the spec (the chart, the identity it runs as, its sources stay).
 */ -}}
 {{- if (include "agent-platform.kagent.migration" .) }}
 {{- $sa := include "agent-platform.kagent.fluxServiceAccountName" . }}
@@ -105,8 +108,6 @@ spec:
   matchConstraints:
     namespaceSelector:
       matchExpressions:
-        - key: giantswarm.io/organization
-          operator: DoesNotExist
         - key: kubernetes.io/metadata.name
           operator: NotIn
           values: [{{ $kagentNs | quote }}]
@@ -118,10 +119,26 @@ spec:
   matchConditions:
     - name: tenant-identity
       expression: {{ printf "request.userInfo.username == 'system:serviceaccount:%s:%s'" $kagentNs $sa | quote }}
+  variables:
+    - name: pods
+      expression: "'authentication.kubernetes.io/pod-name' in request.userInfo.extra ? request.userInfo.extra['authentication.kubernetes.io/pod-name'] : []"
   validations:
-    - expression: "false"
+    - expression: "has(namespaceObject.metadata.labels) && 'giantswarm.io/organization' in namespaceObject.metadata.labels"
       reason: Forbidden
       messageExpression: {{ printf "'%s writes HelmReleases only in the Organization namespaces (giantswarm.io/organization) and %s; refused in ' + request.namespace" $sa $kagentNs | quote }}
+    - expression: "request.operation == 'UPDATE'"
+      reason: Forbidden
+      messageExpression: {{ printf "'%s only updates HelmReleases in an Organization namespace; refused: ' + request.operation" $sa | quote }}
+    - expression: {{ printf "size(variables.pods) == 1 && variables.pods[0].startsWith('%s-')" $name | quote }}
+      reason: Forbidden
+      messageExpression: {{ printf "'%s writes HelmReleases in an Organization namespace only from a pod of the agent-manager migrate run (%s-*)'" $sa $name | quote }}
+    - expression: >-
+        request.operation != 'UPDATE' || (
+{{- range $i, $f := list "chart" "chartRef" "serviceAccountName" "kubeConfig" "targetNamespace" "storageNamespace" "releaseName" "valuesFrom" "postRenderers" "dependsOn" "suspend" "install" "upgrade" "driftDetection" }}
+        {{ if $i }}&& {{ end }}has(object.spec.{{ $f }}) == has(oldObject.spec.{{ $f }}) && (!has(object.spec.{{ $f }}) || object.spec.{{ $f }} == oldObject.spec.{{ $f }})
+{{- end }})
+      reason: Forbidden
+      messageExpression: {{ printf "'%s changes only spec.values of a HelmRelease in an Organization namespace; refused for ' + request.name" $sa | quote }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
