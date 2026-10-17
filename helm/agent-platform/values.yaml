@@ -1048,29 +1048,26 @@ components:  # @schema additionalProperties: true
     chart: workspace-manager
     # The workspace surface of the Agent Platform (giantswarm/workspace-manager):
     # an Organization's repositories mirrored on one shared volume, a directory
-    # per Session, and the provider sign-ins, MCP only through muster (tools
-    # appear as x_workspace-manager_<tool>). No `enabled` here: the component
+    # per Session, MCP only through muster (tools appear as
+    # x_workspace-manager_<tool>). No `enabled` here: the component
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.5.0, the first release with the provider kind gitlab
-    # (agent-platform.workspaceManager.gitlabFloor; a gitlab instance below it
-    # fails the render). 0.2.0 is the first release that serves the grant key
-    # set (/.well-known/jwks.json, the JWKS URL the grant issuer advertises and
-    # the manager's route publishes; 0.1.x answers 404 there), and 0.4.0 the
-    # first that takes the kagent block, so at this floor the chart forwards
-    # kagent's controller address and the manager cleans up session
-    # directories (agent-platform.workspaceManager.kagentFloor). Its schema
-    # declares every key this chart forwards: the browser's provider sign-in
-    # (signin.keys), the workspace StorageClass (storage.storageClassName) and
-    # kagent.address/namespace, which earlier releases' closed schemas refuse.
-    # A stable never pins a prerelease; the ceiling stays the next major, so
-    # later minor releases roll on their own.
-    versionRange: ">=0.5.0 <1.0.0"
+    # The floor is 0.10.0-rc.5, the first release whose person's provider
+    # token is muster's grant of the provider instance's App
+    # (muster.mcpServer.auth.provider, which this chart derives; an earlier
+    # release keeps its own sign-in store, which this chart no longer feeds:
+    # agent-platform.workspaceManager.musterGrantFloor fails the render below
+    # it with provider instances and OAuth). The earlier floors it covers:
+    # 0.5.0 the provider kind gitlab (agent-platform.workspaceManager.gitlabFloor),
+    # 0.2.0 the grant key set (/.well-known/jwks.json), 0.4.0 the kagent block
+    # (agent-platform.workspaceManager.kagentFloor). The ceiling stays the next
+    # major, so later minor releases roll on their own.
+    versionRange: ">=0.10.0-rc.5 <1.0.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
-    # providers and oauth.enabled its pod starts against the sign-in keys
+    # providers and oauth.enabled its pod starts against the grant signing key
     # Secret the connectivity release renders (a plain object, no hook) and
     # exits while that Secret is missing, so the connectivity release comes
     # first; connectivity orders nothing after this release, so no cycle.
@@ -1082,7 +1079,7 @@ components:  # @schema additionalProperties: true
     gatedValues: [workspace-manager, workspaceManager, workspaces]
     gatedRoster: true
     # An empty key takes the chart's own default instead of overriding it.
-    omitEmptyKeys: [providers, oauth.baseURL, grant.signingKey, sync.cycle, sessions.cleanupAfter, storage.sizing.factor, storage.sizing.headroom, storage.sizing.maxSize]
+    omitEmptyKeys: [providers, oauth.baseURL, grant.signingKey, muster.mcpServer.auth.provider, muster.mcpServer.auth.authorizationServer, sync.cycle, sessions.cleanupAfter, storage.sizing.factor, storage.sizing.headroom, storage.sizing.maxSize]
   # --- The standalone chart's extras -------------------------------------------
   # The components the agent-platform-standalone umbrella carried as Helm
   # dependencies on top of the fleet's roster: Backstage, mcp-kubernetes, the
@@ -5226,7 +5223,7 @@ tenants:
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories
 # mirrored on one shared read-write-many volume in the kagent namespace, a
-# directory per Session, and the provider sign-ins. On, it turns on the
+# directory per Session. On, it turns on the
 # workspace-manager component (components.workspace-manager follows it; an
 # explicit value that disagrees fails the render) and gates every later
 # workspace piece. Off, the default, the render is exactly that of a chart
@@ -5546,15 +5543,16 @@ workspaces:
 
 # Values forwarded verbatim to the workspace-manager component release
 # (giantswarm/workspace-manager), MCP only: tools appear as
-# x_workspace-manager_<tool> through the chart's own MCPServer CR, unpinned and
-# labelled for the agent-platform tool group, like every manager's; no second
-# MCPServer for any provider (a provider sign-in is the workspace-manager's
-# own). The pinned Service name is what the wiring below (network policies)
+# x_workspace-manager_<tool> through the chart's own MCPServer CR, labelled for
+# the agent-platform tool group like every manager's and, with provider
+# instances, pinned to one instance's App (muster.mcpServer.auth below): the
+# person's provider token is muster's grant, never the manager's; no second
+# MCPServer for any provider. The pinned Service name is what the wiring below (network policies)
 # targets.
 #
 # Identity as for cluster-manager above: an OAuth 2.1 resource server
 # validating the session's id_token muster forwards (the MCPServer CR's auth
-# block); the issuer, client, secret and CA fall back to global.identity and
+# block; pinned, beside the App token in X-Muster-Id-Token); the issuer, client, secret and CA fall back to global.identity and
 # the OAuth base URL to global.domain inside the chart. The manager writes the
 # workspace objects with its own ServiceAccount, so muster requests no extra
 # audience at login. The chart's own network policy stays off: the
@@ -5580,17 +5578,13 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
       headers: auto
   oauth:
     enabled: true
-    # The manager's public base URL: the browser's sign-in at <baseURL>/signin
-    # and each provider instance's <baseURL>/connect/<name> and
-    # <baseURL>/callback/<name>, the URL the instance's OAuth client is
-    # registered with. Empty, the default, derives
+    # The manager's public base URL, the issuer of the workspace grants it
+    # signs. Empty, the default, derives
     # https://<fullnameOverride>.<global.domain>; the meta chart forwards the
-    # resolved URL and NOTES prints it. The connectivity release routes those
-    # three paths and the grants' key set, <baseURL>/.well-known/jwks.json,
-    # and only those, on the URL's host
-    # (workspaceManager.route); a provider instance with an OAuth client and
-    # no such host fails the render. A URL with a port (a lab's gateway port)
-    # is taken as it is: the route matches the host.
+    # resolved URL and NOTES prints it. The connectivity release routes the
+    # grants' key set, <baseURL>/.well-known/jwks.json, and only it, on the
+    # URL's host (workspaceManager.route). A URL with a port (a lab's gateway
+    # port) is taken as it is: the route matches the host.
     baseURL: ""
     dex:
       allowPrivateURLs: true
@@ -5608,26 +5602,32 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
         # it changes.
         requiredAudiences:
           - dex-k8s-authenticator
-  # The keys that seal each person's provider sign-ins and the sign-in flow's
-  # state: a Secret in the platform's namespace whose data entries are key ids
-  # (a lower-case DNS label of at most 32 characters), each 32 random bytes.
-  # With providers and oauth.enabled the connectivity release creates it
-  # (workspaceManager.signinKeys.create) and generates the key named
-  # `current` when the Secret lacks it, keeping every key it already holds:
-  # a key rotates by naming a new id here; the old one still opens what it
-  # sealed until it is removed from the Secret by hand. No value ever passes
-  # through these values.
-  signin:
-    keys:
-      secretName: workspace-manager-signin-keys
-      current: key-1
+        # The muster pin (agent-platform.workspaceManager.musterPin): with
+        # providers and oauth.enabled the registration is pinned to one
+        # provider instance's App, so a person grants that App once in muster
+        # and muster attaches the person's App token to every call; muster
+        # holds the person's token, the manager none. Derived unless set:
+        # - provider: the instance, by default the only one of kind github
+        #   (several, or none of kind github: name it here);
+        # - authorizationServer.clientCredentialsSecretRef.name: the Secret
+        #   with the App's OAuth client under `client-id` and `client-secret`,
+        #   which muster reads, by default the Secret of the instance's
+        #   values.oauth.clientSecret (key client-secret; that Secret then
+        #   carries client-id too).
+        # authorizationServer.issuer has no default: the App's own identity the
+        # person's grant is filed under, https://github.com/apps/<app slug>
+        # for a GitHub App. The other authorizationServer keys default to
+        # GitHub's endpoints (the workspace-manager chart's values); a gitlab
+        # instance sets its own. The render fails naming the key that is
+        # missing.
   # The installation's provider instances, several at once: each a unique
-  # `name` (a DNS label: the name workspaces and sign-ins refer to), a `kind`
+  # `name` (a DNS label: the name workspaces refer to), a `kind`
   # and the kind's `values`, whose credentials (the sync credential, the OAuth
   # client's secret) are Secret references. Kind `github` (github.com or a
   # GitHub Enterprise Server) takes `url` (default https://github.com),
-  # `apiURL` (derived from url), `app.id`, `app.privateKey`, `oauth.clientID`
-  # and `oauth.clientSecret`, e.g.
+  # `apiURL` (derived from url), `app.id` and `app.privateKey`;
+  # `oauth.clientID` and `oauth.clientSecret`, the App's OAuth client, are
+  # ignored by the manager and give muster's pin its client Secret (above), e.g.
   #   providers:
   #     - name: github
   #       kind: github
@@ -5639,23 +5639,17 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   #           clientID: Iv1.abc
   #           clientSecret: {name: workspace-github, key: client-secret}
   # Kind `gitlab` (gitlab.com or a self-managed GitLab, workspace-manager
-  # 0.5.0 and newer) takes `url` (the git host and the OAuth application's,
-  # https://gitlab.com for gitlab.com; named, since the connectivity chart
-  # opens the egress to it), `apiURL` (default <url>/api/v4), `token`
-  # (a group access token with read_api and read_repository, the sync's) and
-  # `oauth.clientID`, `oauth.clientSecret` (an OAuth application with the
-  # scopes `api read_user read_repository write_repository` and the redirect
-  # URI <oauth.baseURL>/callback/<name>); a source's owner is a top-level
-  # group, its sub-groups' projects included, or a user. Beside the github
-  # instance above, e.g.
+  # 0.5.0 and newer) takes `url` (the git host, https://gitlab.com for
+  # gitlab.com; named, since the connectivity chart opens the egress to it),
+  # `apiURL` (default <url>/api/v4) and `token` (a group access token with
+  # read_api and read_repository, the sync's); a source's owner is a
+  # top-level group, its sub-groups' projects included, or a user. Beside the
+  # github instance above, e.g.
   #     - name: gitlab
   #       kind: gitlab
   #       values:
   #         url: https://gitlab.example.com
   #         token: {name: workspace-gitlab, key: token}
-  #         oauth:
-  #           clientID: 0123abcd
-  #           clientSecret: {name: workspace-gitlab, key: client-secret}
   # The connectivity chart opens the manager's egress to each instance's hosts
   # (url and apiURL; github.com and api.github.com for a github instance
   # without url; an instance of another kind without url fails the render).
@@ -5730,34 +5724,23 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
 # The wiring the connectivity chart renders for the workspace-manager
 # component (it reads this block, not the chart's). Inert while
 # workspaces.enabled is false. The tools reach muster in-cluster; only the
-# browser's provider sign-in is public (route below).
+# grants' key set is public (route below).
 workspaceManager:  # @schema skipProperties: true; additionalProperties: true
-  # The public route of the browser's provider sign-in, on the host of
+  # The public route of the grants' key set, on the host of
   # workspace-manager.oauth.baseURL (https://workspace-manager.<global.domain>
-  # unless set): /signin (Exact; the person's Dex sign-in, whose redirect URI
-  # <baseURL>/signin the manager's Dex client lists), /connect/<instance> and
-  # /callback/<instance> (PathPrefix), and /.well-known/jwks.json (Exact; the
-  # key set of the grants the manager issues as <baseURL>, public by design),
-  # straight to the manager's Service, with the TLS and route conventions of
-  # the platform's other public routes. Every other path of the host — MCP, the
-  # token exchange, the manager's own OAuth server and its metadata — is not
-  # routed: those stay cluster-internal.
+  # unless set): /.well-known/jwks.json (Exact; the key set of the grants the
+  # manager issues as <baseURL>, public by design), straight to the manager's
+  # Service, with the TLS and route conventions of the platform's other public
+  # routes. Every other path of the host — MCP, the manager's own OAuth server
+  # and its metadata — is not routed: those stay cluster-internal.
   route:
-    # Off leaves the four paths to a route the installation provides on the
-    # same host; a provider instance with an OAuth client then needs
-    # workspace-manager.oauth.baseURL set (the render fails otherwise).
+    # Off leaves the path to a route the installation provides on the same
+    # host.
     enabled: true
     # The route's parents. Empty: muster's (ingress.parentRefs), else the
     # chart-owned edge (gatewayApi.gateway.create), else
     # global.gatewayApi.parentRefs.
     parentRefs: []
-  # The sign-in keys Secret workspace-manager.signin.keys names, created in
-  # the platform's namespace with providers and oauth.enabled: the key named
-  # `current` is generated (32 random bytes) when the Secret lacks it and every
-  # key it holds is kept, also across an uninstall. false leaves the Secret to
-  # the installation.
-  signinKeys:
-    create: true
   # The connectivity release's own grant signing key Secret, secretName with
   # the entry `key`, created in the platform's namespace with providers and
   # oauth.enabled: the entry is generated (an EC P-256 private key, PEM) when
@@ -5777,8 +5760,8 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
     secretName: workspace-manager-grant-keys
     key: key-1
   # Network policy inputs; the policies render under networkPolicy (enabled +
-  # flavor). Ingress: muster (MCPServer on), kagent's controller (the token and
-  # JWKS endpoints a Session's credential is exchanged at, kagent on), the
+  # flavor). Ingress: muster (MCPServer on), kagent's controller (the JWKS
+  # endpoint a Session's workspace grant is verified with, kagent on), the
   # public Gateway the route attaches to (route.enabled; the edge's Envoy
   # pods, or the agentgateway data plane when it is the edge) and the
   # kubelet's probes. Egress: DNS, the Kubernetes API (the workspace objects,
