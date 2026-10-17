@@ -119,7 +119,15 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
-GOLDEN_REF ?= origin/main
+# GOLDEN_REF defaults to the merge-base of HEAD and GOLDEN_BASE: a branch is held
+# to the render it forked from, so a later GOLDEN_BASE commit that changes an
+# unrelated render never reads as this branch's drift. A GOLDEN_BASE that does not
+# resolve is kept as is, so the goldens report it. An explicit GOLDEN_REF (empty
+# included) wins.
+GOLDEN_BASE ?= origin/main
+ifeq ($(origin GOLDEN_REF),undefined)
+GOLDEN_REF := $(or $(shell git merge-base $(GOLDEN_BASE) HEAD 2>/dev/null),$(GOLDEN_BASE))
+endif
 # The postgres golden of verify-wiring (both flavours against GOLDEN_REF): model-manager
 # is on by default with no backend (giantswarm/agent-platform#329), an intended difference
 # held equal on both sides — a chart that predates the default accepts the key. Empty this
