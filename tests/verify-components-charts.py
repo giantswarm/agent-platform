@@ -96,7 +96,9 @@ Network: pulls from gsoci.azurecr.io, and from ghcr.io for the CloudNativePG
 chart (three attempts each); the tag
 list comes from the registry's anonymous `/v2/<repo>/tags/list`, and a throttled
 answer (429, 503) of the distribution API is retried with bounded backoff,
-honouring Retry-After (registry_open; tests/verify-registry-retry.py). Every Helm call
+honouring Retry-After, and so is a transient network error (a timeout, the TLS
+handshake's included, or a reset connection) (registry_open;
+tests/verify-registry-retry.py). Every Helm call
 is bounded (TIMEOUT). PyYAML is in the CI image (the job installs python3-yaml).
 
 The components are independent, and the work is registry round trips and Helm
@@ -398,7 +400,9 @@ TOKENS: dict[str, str] = {}
 # all, after the wait its Retry-After names, else REGISTRY_BACKOFF seconds
 # doubling per retry; no wait is longer than REGISTRY_MAX_WAIT. The last
 # throttled answer is the error, so a registry that stays throttled still ends
-# in a FAIL line, about two minutes later.
+# in a FAIL line, about two minutes later. A transient network error (a timeout,
+# the TLS handshake's included, or a reset or refused connection) is retried the
+# same way with the backoff; the last one is the error.
 REGISTRY_THROTTLED = frozenset({429, 503})
 REGISTRY_ATTEMPTS = 6
 REGISTRY_BACKOFF = 2.0
@@ -419,20 +423,39 @@ def retry_wait(e: urllib.error.HTTPError, retry: int) -> float:
     return min(max(wait, 0.0), REGISTRY_MAX_WAIT)
 
 
+def transient(e: OSError) -> bool:
+    """Whether a network error is worth a retry: a timeout (the TLS handshake's
+    included) or a reset, aborted or refused connection, raised as is or as the
+    reason of a URLError. An HTTP answer is not (see REGISTRY_THROTTLED)."""
+    if isinstance(e, urllib.error.HTTPError):
+        return False
+    if isinstance(e, urllib.error.URLError) and isinstance(e.reason, OSError):
+        e = e.reason
+    return isinstance(e, (TimeoutError, ConnectionError))
+
+
 def registry_open(target: str | urllib.request.Request):
     """urlopen against a registry, retrying a throttled answer (see
-    REGISTRY_THROTTLED); any other error, and the last throttled one, raise."""
+    REGISTRY_THROTTLED) and a transient network error; any other error, and
+    the last throttled or transient one, raise."""
+    url = target.full_url if isinstance(target, urllib.request.Request) else target
     for retry in range(REGISTRY_ATTEMPTS):
+        last = retry == REGISTRY_ATTEMPTS - 1
         try:
             return urllib.request.urlopen(target, timeout=60)
         except urllib.error.HTTPError as e:
-            if e.code not in REGISTRY_THROTTLED or retry == REGISTRY_ATTEMPTS - 1:
+            if e.code not in REGISTRY_THROTTLED or last:
                 raise
             wait = retry_wait(e, retry)
             e.close()
-            url = target.full_url if isinstance(target, urllib.request.Request) else target
-            print(f"NOTE: {url.split('?', 1)[0]}: HTTP {e.code}, retry {retry + 1}/{REGISTRY_ATTEMPTS - 1} in {wait:.0f}s")
-            time.sleep(wait)
+            reason = f"HTTP {e.code}"
+        except OSError as e:
+            if not transient(e) or last:
+                raise
+            wait = min(REGISTRY_BACKOFF * 2 ** retry, REGISTRY_MAX_WAIT)
+            reason = str(e.reason if isinstance(e, urllib.error.URLError) else e) or type(e).__name__
+        print(f"NOTE: {url.split('?', 1)[0]}: {reason}, retry {retry + 1}/{REGISTRY_ATTEMPTS - 1} in {wait:.0f}s")
+        time.sleep(wait)
     raise AssertionError("unreachable")
 
 

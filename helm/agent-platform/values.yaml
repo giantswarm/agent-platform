@@ -401,9 +401,12 @@ components:  # @schema additionalProperties: true
     # token, a forwarded ID token) ends at the bearer's exp, instead of its
     # pooled connections forwarding the expired token to every backend until
     # three rejections evict each of them (giantswarm/muster#1323).
+    # Floor 5.43.6: the chart's schema accepts an affinity (giantswarm/muster#1541);
+    # an earlier muster refuses the pod anti-affinity the muster values below
+    # spread the two replicas with.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.31.4 <6.0.0"
+    versionRange: ">=5.43.6 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -1108,12 +1111,15 @@ components:  # @schema additionalProperties: true
     # kagent 0.10 and never meets this chart. The complete v2 portal is 2.0.0
     # (the gRPC backend, giantswarm/backstage#2344, shipped as a major): the
     # range spans both majors so the component resolves the complete portal,
-    # not the 1.2.0 without the backend. Bounded below 3.0.0: the next major
-    # is the next cut-over.
+    # not the 1.2.0 without the backend. The range admits the 3.x line, the
+    # Agent Platform shell: 3.0.0 changes the portal's UI, not its chart
+    # values, and the connectivity chart's app-config turns the shell on
+    # (app.portals.agentPlatform), which a 2.x portal ignores. Bounded below
+    # 4.0.0: the next major is the next cut-over.
     # The floor is 2.68.0: the image preloads the OpenTelemetry SDK and the
     # chart takes observability.otel, the OTLP trace export
     # global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
-    versionRange: ">=2.68.0 <3.0.0"
+    versionRange: ">=2.68.0 <4.0.0"
     valuesFrom: backstage
     # The backstage chart validates its values with additionalProperties: false,
     # and these keys are not its own: the connectivity chart reads them for the
