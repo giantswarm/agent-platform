@@ -403,7 +403,7 @@ components:  # @schema additionalProperties: true
     # three rejections evict each of them (giantswarm/muster#1323).
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.44.0-rc.4 <6.0.0"
+    versionRange: ">=5.44.0-rc.5 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -5238,11 +5238,12 @@ workspaces:
   # .additionalProviders) and muster answers the person's current token for a
   # Session agent-manager bound to that person (muster.credentialProvider, on
   # with the switch). muster releases a grant only for a provider instance in
-  # muster.muster.credentialProvider.releasable, keyed by the instance's name
-  # in workspace-manager.providers byte for byte, valued the issuer of the
-  # grant (the instance's MCPServer, grantScope: subject), for example
-  # {github: https://workspace-manager.<global.domain>}; an instance missing
-  # there gets the gateway's 403 on its hosts.
+  # muster.muster.credentialProvider.releasable, derived as the instance the
+  # workspace-manager's registration is pinned to (its name in
+  # workspace-manager.providers byte for byte) under the App's issuer
+  # (workspace-manager.muster.mcpServer.auth.authorizationServer.issuer); an
+  # own map stands beside it, and an instance missing there gets the
+  # gateway's 403 on its hosts.
   enabled: false
   # The workspace storage: the read-write-many StorageClass the workspace
   # volumes are claimed from, and whether the connectivity release renders it.

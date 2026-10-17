@@ -220,6 +220,13 @@ def main(meta: str) -> int:
     for line in ("        enabled: true\n", "        gatewayIdentity: spiffe://cluster.local/ns/ate-system/sa/atenet-egress\n"):
         if line not in muster:
             fail(f"with workspaces and Substrate on the muster release's credentialProvider lacks {line.strip()!r}:\n{muster}")
+    releasable = block(muster, "releasable", 8)
+    if "          github: https://github.com/apps/ci-agents\n" not in releasable:
+        fail(f"the muster release's credentialProvider.releasable does not name the pinned provider instance github under its App's issuer:\n{muster}")
+    own = block(block(block(documents(helm(meta, [*base, "--set", "components.substrate.enabled=true", "--set", "muster.muster.credentialProvider.releasable.gitlab=https://gitlab.example.com"])).get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6), "releasable", 8)
+    for line in ("          github: https://github.com/apps/ci-agents\n", "          gitlab: https://gitlab.example.com\n"):
+        if line not in own:
+            fail(f"an own muster.muster.credentialProvider.releasable entry does not stand beside the pinned instance's ({line.strip()!r}):\n{own}")
     substrate = block(block(docs.get(("HelmRelease", "substrate"), ""), "credentialProvider", 4), "additionalProviders", 6)
     if "uriAuthority: muster.giantswarm.io" not in substrate or "host: muster.agent-platform.svc:50051" not in substrate:
         fail(f"the substrate release's credentialProvider.additionalProviders lacks muster's FetchSecret:\n{substrate}")
@@ -227,7 +234,8 @@ def main(meta: str) -> int:
     if "credentialProvider:" in block(off.get(("HelmRelease", "muster"), ""), "muster", 4):
         fail("the muster release carries a credentialProvider with workspaces off")
     ok("with the switch on the kagent release names muster.giantswarm.io as its credentialAuthority (an own value stands), "
-       "the muster release serves FetchSecret to the egress gateway's identity with Substrate on, and Substrate routes the authority to muster; "
+       "the muster release serves FetchSecret to the egress gateway's identity with Substrate on and releases the pinned provider instance github's grants (an own entry stands beside it), "
+       "and Substrate routes the authority to muster; "
        "with workspaces off muster gets no credentialProvider")
 
     # --- nothing without a grant key, or without kagent ------------------------------------------

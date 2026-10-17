@@ -495,12 +495,22 @@ instance>/<git|api>) while workspaces and Substrate are on: muster serves
 FetchSecret on Substrate's pod certificates, which only a cluster running
 Substrate issues, and answers the gateway's pod identity alone
 (spiffe://cluster.local/ns/<substrate targetNamespace>/sa/atenet-egress).
-muster.credentialProvider's own keys stand; releasable names the provider
-instances whose grants muster releases (agent-platform.validateWorkspaceCredentials). */ -}}
+releasable, the provider instances whose grants muster releases, is the
+instance muster's registration of the workspace-manager is pinned to
+(agent-platform.workspaceManager.musterPin) under its App's issuer
+(workspace-manager.muster.mcpServer.auth.authorizationServer.issuer), the same
+instance name the Session's credential URIs and agent-manager's binding carry.
+muster.credentialProvider's own keys stand. */ -}}
 {{- if and (.root.Values.workspaces | default dict).enabled (include "agent-platform.componentEnabled" (dict "root" .root "name" "substrate")) -}}
 {{- $substrateNs := dig "substrate" "targetNamespace" "ate-system" (.root.Values.components | default dict) -}}
 {{- $own := dig "muster" "credentialProvider" dict (.root.Values.muster | default dict) | default dict -}}
 {{- $provider := dict "enabled" true "gatewayIdentity" (printf "spiffe://cluster.local/ns/%s/sa/atenet-egress" $substrateNs) -}}
+{{- $pin := include "agent-platform.workspaceManager.musterPin" .root | fromJson -}}
+{{- $server := dig "muster" "mcpServer" "auth" "authorizationServer" dict (index .root.Values "workspace-manager" | default dict) -}}
+{{- $issuer := ternary (toString ($server.issuer | default "")) "" (kindIs "map" $server) -}}
+{{- if and $pin.provider $issuer -}}
+{{- $_ := set $provider "releasable" (dict $pin.provider $issuer) -}}
+{{- end -}}
 {{- $provider = mergeOverwrite $provider $own -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $muster "credentialProvider" $provider -}}
