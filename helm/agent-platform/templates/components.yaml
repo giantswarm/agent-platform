@@ -174,11 +174,11 @@ knowledge:
       manifests are applied, without waiting for the workload to become ready.
       Upgrades keep waiting. For a component whose workload cannot start until a
       dependant of the component has installed, so that the pair can bootstrap
-      instead of deadlocking. Derived for muster while it serves FetchSecret
-      (muster.credentialProvider.enabled): its pods mount Substrate's pod
-      certificates and the ClusterTrustBundles the connectivity release's hook
-      publishes, while connectivity dependsOn muster and substrate dependsOn
-      connectivity (giantswarm/agent-platform#1107).
+      instead of deadlocking. muster's install AND upgrade skip the wait while
+      agent-platform.muster.awaitsSubstrate: it serves FetchSecret on Substrate's
+      pod certificates and the substrate release, behind it, is not Ready yet —
+      a fresh install and an in-place switch of workspaces and Substrate alike
+      (giantswarm/agent-platform#1107). Once Substrate is Ready both wait again.
   disableWaitForJobs — render `disableWaitForJobs: true` on the child
       HelmRelease's install and upgrade: helm-controller then does not wait for
       the release's plain Jobs to complete (hooks are unaffected). It does not
@@ -341,8 +341,8 @@ always-on consumer (e.g. connectivity) does not block on a HelmRelease that was
 never rendered. With app-owned CRDs a consumer dependsOn the opt-in component
 that ships the CRD it needs; when that component is off it renders no CR for
 that CRD either, so the dependency is moot. */ -}}
-{{- $installDisableWait := $c.installDisableWait }}
-{{- if and (eq $key "muster") (dig "muster" "credentialProvider" "enabled" false $vals) }}{{ $installDisableWait = true }}{{ end }}
+{{- $awaitsSubstrate := and (eq $key "muster") (include "agent-platform.muster.awaitsSubstrate" (dict "root" $root "values" $vals)) }}
+{{- $installDisableWait := or $c.installDisableWait $awaitsSubstrate }}
 {{- $deps := list }}
 {{- range ($c.dependsOn | default list) }}
 {{- if include "agent-platform.componentEnabled" (dict "root" $root "name" .) }}
@@ -446,6 +446,9 @@ spec:
   upgrade:
     {{- with $c.crds }}
     crds: {{ . }}
+    {{- end }}
+    {{- if $awaitsSubstrate }}
+    disableWait: true
     {{- end }}
     {{- if $c.disableWaitForJobs }}
     disableWaitForJobs: true
