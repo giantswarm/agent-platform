@@ -503,6 +503,14 @@ gateway:
       agent_instance_id:
         enabled: true
         expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"] : ""'
+      # The request's id: the x-request-id request header, which the Dev
+      # Portal's backend sets on every call it makes through the data plane
+      # and shows in an error banner, so the banner's id finds this line. The
+      # data plane generates none; a request without the header logs no id.
+      # Any caller can set it: correlation, never identity.
+      request_id:
+        enabled: true
+        expression: 'request.headers["x-request-id"]'
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -2904,7 +2912,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.3.1
+      tag: 2.4.0
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
@@ -3116,7 +3124,7 @@ tenants:
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories
 # mirrored on one shared read-write-many volume in the kagent namespace, a
-# directory per Session, and the provider sign-ins. On, it turns on the
+# directory per Session. On, it turns on the
 # workspace-manager component (components.workspace-manager follows it; an
 # explicit value that disagrees fails the render) and gates every later
 # workspace piece. Off, the default, the render is exactly that of a chart
@@ -3280,19 +3288,14 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
         # it changes.
         requiredAudiences:
           - dex-k8s-authenticator
-  # The sign-in keys Secret (workspaceManager.signinKeys creates it): its name
-  # and the id of the key that seals.
-  signin:
-    keys:
-      secretName: workspace-manager-signin-keys
-      current: key-1
   # The installation's provider instances, several at once: each a unique
-  # `name` (a DNS label: the name workspaces and sign-ins refer to), a `kind`
+  # `name` (a DNS label: the name workspaces refer to), a `kind`
   # and the kind's `values`, whose credentials (the sync credential, the OAuth
   # client's secret) are Secret references. Kind `github` (github.com or a
   # GitHub Enterprise Server) takes `url` (default https://github.com),
-  # `apiURL` (derived from url), `app.id`, `app.privateKey`, `oauth.clientID`
-  # and `oauth.clientSecret`, e.g.
+  # `apiURL` (derived from url), `app.id` and `app.privateKey`;
+  # `oauth.clientID` and `oauth.clientSecret`, the App's OAuth client, give
+  # muster's pin its client Secret (the meta chart derives the pin), e.g.
   #   providers:
   #     - name: github
   #       kind: github
@@ -3311,22 +3314,16 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
 # The wiring the connectivity chart renders for the workspace-manager
 # component (it reads this block, not the chart's). Inert while
 # workspaces.enabled is false. The tools reach muster in-cluster; only the
-# browser's provider sign-in is public (route below).
+# grants' key set is public (route below).
 workspaceManager:  # @schema skipProperties: true; additionalProperties: true
-  # The public route of the browser's provider sign-in on the host of
-  # workspace-manager.oauth.baseURL: /signin (Exact), /connect/<instance> and
-  # /callback/<instance> (PathPrefix) to the manager's Service, nothing else
-  # (templates/workspace-manager/route.yaml). parentRefs empty: muster's
+  # The public route of the grants' key set on the host of
+  # workspace-manager.oauth.baseURL: /.well-known/jwks.json (Exact) to the
+  # manager's Service, nothing else (templates/workspace-manager/route.yaml). parentRefs empty: muster's
   # (ingress.parentRefs), else the chart-owned edge, else
   # global.gatewayApi.parentRefs.
   route:
     enabled: true
     parentRefs: []
-  # Create the sign-in keys Secret workspace-manager.signin.keys names, with
-  # providers and oauth.enabled: the current key generated when missing, every
-  # key kept (templates/workspace-manager/signin-keys.yaml).
-  signinKeys:
-    create: true
   # Create the chart's own grant signing key Secret, secretName with the entry
   # key, with providers and oauth.enabled: the entry generated when missing
   # (an EC P-256 private key, PEM), every entry kept
@@ -3339,8 +3336,8 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
     secretName: workspace-manager-grant-keys
     key: key-1
   # Network policy inputs; the policies render under networkPolicy (enabled +
-  # flavor). Ingress: muster (MCPServer on), kagent's controller (the token and
-  # JWKS endpoints a Session's credential is exchanged at, kagent on), the
+  # flavor). Ingress: muster (MCPServer on), kagent's controller (the JWKS
+  # endpoint a Session's workspace grant is verified with, kagent on), the
   # public Gateway the route attaches to (route.enabled) and the kubelet's
   # probes. Egress: DNS, the Kubernetes API (the workspace objects,
   # volumes and Jobs it writes in the kagent namespace), kagent's controller

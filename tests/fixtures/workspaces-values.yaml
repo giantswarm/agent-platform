@@ -26,8 +26,15 @@ workspace-manager:
           clientSecret: {name: workspace-gitlab, key: client-secret}
   grant:
     signingKey: {name: workspace-manager-keys, key: grant}
-  # The public base URL of the browser's provider sign-in: an instance with an
-  # OAuth client needs one (tests/verify-workspace-manager-route.py); set here
-  # rather than global.domain, which would move every other release.
+  # The public base URL, the grants' issuer whose key set the connectivity
+  # release routes (tests/verify-workspace-manager-route.py); set here rather
+  # than global.domain, which would move every other release.
   oauth:
     baseURL: https://workspaces.ci.example.com
+  # muster's pin: the github instance and its OAuth client Secret are derived,
+  # the App's issuer has no default.
+  muster:
+    mcpServer:
+      auth:
+        authorizationServer:
+          issuer: https://github.com/apps/ci-agents

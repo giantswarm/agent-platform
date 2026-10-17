@@ -54,8 +54,11 @@ Agent's or AgentTemplate's skill or plugin git source names only a
 tenant-credential-* Secret as credentialRef (the credential goes to the
 source's host), and a RemoteMCPServer's headersFrom names only such a Secret
 (the header goes to the server's URL). This holds for every requester, in the
-same namespaces: the platform names the installation's skills credential
-there, and agent-manager mints it under the prefix. An object already being
+same namespaces. The installation's skills credential (agent-manager's
+skills.gitAuthSecretName, or the Secret it mints, and their earlier names) is
+the installation's, never a tenant's: it is refused there under each of its
+names, prefixed or not; the platform's own agents name it in the kagent
+namespace. An object already being
 deleted is admitted, so its controllers can release their finalizers; any
 other change of an object that still names another Secret is refused until
 the reference is renamed. It reads the three kinds untyped (apiVersions "*").
@@ -73,6 +76,17 @@ tenants.organizations.enabled; it writes the platform's copies. */}}
 {{- $reconciler := "" }}
 {{- if and (include "agent-platform.agentManager.enabled" .) (include "agent-platform.tenants.organizations" .) }}
 {{- $reconciler = include "agent-platform.agentManager.serviceAccountUser" . }}
+{{- end }}
+{{- /* The installation's skills credential, current and earlier names: never
+a tenant's credential, whatever its name. */}}
+{{- $installationCredentials := list }}
+{{- if include "agent-platform.agentManager.enabled" . }}
+{{- $skillsAuth := include "agent-platform.agentManager.skillsGitAuth" . | fromJson }}
+{{- range prepend $skillsAuth.previous $skillsAuth.current }}
+{{- if . }}
+{{- $installationCredentials = append $installationCredentials (squote .) }}
+{{- end }}
+{{- end }}
 {{- end }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -250,12 +264,12 @@ spec:
         dyn(variables.spec.headersFrom).filter(h, has(h.valueFrom) && has(h.valueFrom.type) && h.valueFrom.type == 'Secret')
         .map(h, has(h.valueFrom.name) ? string(h.valueFrom.name) : '') : dyn([]))
     - name: foreign
-      expression: {{ printf "variables.refs.filter(n, !n.startsWith('%s'))" $prefix | quote }}
+      expression: {{ printf "variables.refs.filter(n, !n.startsWith('%s')%s)" $prefix (ternary (printf " || n in [%s]" (join ", " $installationCredentials)) "" (gt (len $installationCredentials) 0)) | quote }}
   validations:
     - expression: "has(object.metadata.deletionTimestamp) || size(variables.foreign) == 0"
       reason: Forbidden
       messageExpression: >-
-        {{ printf "'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named %s*, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ')" $prefix }}
+        {{ printf "'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named %s*%s, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ')" $prefix (ternary " other than the skills credential of the installation" "" (gt (len $installationCredentials) 0)) }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

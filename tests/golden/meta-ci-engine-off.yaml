@@ -195,7 +195,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.3.1
+          tag: 2.4.0
       networkPolicy:
         egress:
           cidrs: []
@@ -445,6 +445,9 @@ spec:
             enabled: true
             expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"]
               : ""'
+          request_id:
+            enabled: true
+            expression: request.headers["x-request-id"]
       gatewayClassName: agentgateway
       http:
         maxBufferSize: 8Mi
@@ -2492,6 +2495,8 @@ spec:
       busyWorker:
         annotations:
           karpenter.sh/do-not-disrupt: "true"
+      gvisorWorker:
+        followRelease: true
     atelet:
       affinity: {}
       extraEnv: []
