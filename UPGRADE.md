@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (kagent 1.15.0: the workspace write path)
+
+giantswarm/agent-platform#1096: `components.kagent{,-crds}.versionRange` is `>=1.15.0 <1.16.0`, kagent's releases of the 1.15 line. kagent 1.15.0 compiles a workspace Session's provider hosts into credential URIs of `kagent.controller.session.credentialAuthority`, which the chart already derives, so a workspace Session's git and provider API calls reach muster and act as the person. kagent-crds adds the `EgressPolicy` CRD (`egresspolicies.api.kagent.dev`), which the tenant admission already matches. The kagent-crds release applies it before the kagent release upgrades (`dependsOn`). Substrate stays on its 1.12 range. The ADK keeps credential headers out of the persisted session state, so a session stored by 1.13 resumes unchanged: no migration, no snapshot reset, no manual step. A suspended agent resumes with its conversation and its volumes. The 1.14 line's chart (`runtime: byo` Harness entries) comes with it.
+
+### Operator action
+
+- **None** for an installation that follows the chart's ranges.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.15.0`, `kagent-crds` first or with it.
+- **`kagent.controller.session.brokers` in your values**: drop it. The 1.15 chart no longer reads it; `credentialAuthority` replaces it.
+
 ## \<current\> → \<next\> (the migrate run covers the Organization namespaces)
 
 giantswarm/agent-platform#1089: with `tenants.organizations.enabled`, the connectivity release's `agent-manager migrate` run also covers every namespace labelled `giantswarm.io/organization`. An agent there that names the installation's skills credential (`tenant-credential-agent-manager-skills-token` or `agent-manager-skills-token`) from before the credential step keeps answering, but its next update stalls: `agent-platform-tenant-credential-refs` refuses Flux's apply and the HelmRelease is Stalled. The run moves such agents once agent-manager's migrate carries the tenant pass (giantswarm/agent-manager#191); the chart gives it the rights for that now. The run's pod template changes, so the upgrade starts it once more.
