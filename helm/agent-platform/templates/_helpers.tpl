@@ -1971,6 +1971,31 @@ a database.
 {{- end -}}
 {{- end -}}
 
+{{/*
+"true" while muster's pods mount Substrate certificates the cluster may not issue
+yet: muster serves FetchSecret (its values' credentialProvider.enabled) and the
+substrate release is not Ready on the cluster the HelmReleases live on. The
+signers' ClusterTrustBundles come from the connectivity release's hook and the
+certificates from the substrate release, both behind muster (connectivity
+dependsOn muster, substrate dependsOn connectivity), so a fresh install and an
+in-place switch of workspaces and Substrate on would wait on muster for ever
+(giantswarm/agent-platform#1107). Without a cluster to read (an offline render,
+a target cluster) it counts as not Ready.
+Usage: include "agent-platform.muster.awaitsSubstrate" (dict "root" $root "values" $vals)
+*/}}
+{{- define "agent-platform.muster.awaitsSubstrate" -}}
+{{- if dig "muster" "credentialProvider" "enabled" false .values -}}
+{{- $ready := false -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" .root "name" "substrate")) (not (include "agent-platform.targetSecretName" .root)) -}}
+{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" (.root.Values.gitops.namespace | default .root.Release.Namespace) (include "agent-platform.childName" (dict "root" .root "name" (index .root.Values.components "substrate" "chart"))) -}}
+{{- range (dig "status" "conditions" list ($release | default dict)) -}}
+{{- if and (eq .type "Ready") (eq .status "True") -}}{{- $ready = true -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if not $ready -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "agent-platform.validateKagentLineCrossing" -}}
 {{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
 {{- $range := index .Values.components "kagent" "versionRange" | default "" -}}

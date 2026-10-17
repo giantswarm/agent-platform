@@ -93,7 +93,7 @@ import tempfile
 HELM = os.environ.get("HELM", "helm")
 NAME = "workspace-manager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
-RANGE_RE = r'semver: "(>=[^"]+ <1\.0\.0)"'
+RANGE_RE = r'semver: "(>=[^"]+ <0\.\d+\.0(?:-0)?)"'
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
 ORGS = "tests/fixtures/workspaces-organizations-values.yaml"
 BOM = "helm/agent-platform/examples/customer-bom.yaml"
@@ -278,7 +278,7 @@ def main(meta: str, connectivity: str) -> int:
     must_have(oci, (f"url: {REPOSITORY}/{NAME}",), "the OCIRepository")
     rng = re.search(RANGE_RE, oci)
     if not rng:
-        fail(f"the OCIRepository's range is not a floor below 1.0.0:\n{oci}")
+        fail(f"the OCIRepository's range is not a floor below a minor ceiling:\n{oci}")
     hr = on_docs[("HelmRelease", NAME)]
     must_have(hr, (
         f"releaseName: {NAME}",
@@ -349,6 +349,10 @@ def main(meta: str, connectivity: str) -> int:
             provider = block(block(on or "", "muster", 4), "credentialProvider", 6)
             if provider:
                 on = on.replace(provider, "", 1)
+                # Its pods then mount Substrate's certificates, so until Substrate is
+                # Ready neither its install nor its upgrade waits for them
+                # (giantswarm/agent-platform#1107).
+                on = on.replace("    disableWait: true\n", "", 2)
         if on != doc:
             fail(f"switching workspaces on changed {key} (muster.* included)")
     if any(kind == "MCPServer" for kind, _ in on_docs):

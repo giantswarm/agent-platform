@@ -291,8 +291,12 @@ gitops:
 # Component source coordinates + version policy. Each entry is self-describing;
 # templates/components.yaml is a generic loop with no per-component knowledge.
 #   versionRange — semver constraint rendered into OCIRepository.spec.ref.semver.
-#       WIDE here = the GS dogfooding track (continuous auto-update, zero PRs).
-#       Pin exactly for a customer BOM.
+#       WIDE here = the GS dogfooding track (continuous auto-update, zero PRs)
+#       within the line the forwarded values were proven against: a 0.x range
+#       ends at the next minor (0.N.x, <0.N.0), a range from 1.0.0 at the next
+#       major at most, and the release that renders values for the next line
+#       raises the ceiling (tests/verify-range-ceilings.py). Pin exactly for a
+#       customer BOM.
 #   valuesFrom   — top-level values block forwarded to this release's values.
 #   forwardAllValues — forward the whole values tree (connectivity reads many
 #       blocks). injectGlobal — inject .Values.global (default true; false for
@@ -505,7 +509,7 @@ components:  # @schema additionalProperties: true
     # installations' egress, breaking the chart fetch (sardine, cedar, alligator,
     # finch, …). The same chart/version is mirrored to gsoci.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.x"
+    versionRange: "0.4.x"
     valuesFrom: valkey
     enabled: true
     # valkey.podDisruptionBudget is the connectivity chart's (the wrapper and
@@ -516,7 +520,7 @@ components:  # @schema additionalProperties: true
   agent-platform-mcps:  # @schema additionalProperties: true
     chart: agent-platform-mcps
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.x"
+    versionRange: "0.12.x"
     valuesFrom: agent-platform-mcps
     enabled: false
     injectGlobal: false              # strict values.schema.json
@@ -566,8 +570,12 @@ components:  # @schema additionalProperties: true
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
     # ignores them and exports nothing. From 1.13.0 a kagent.harnesses entry
     # takes runtime: codex on the chart's codex-harness image
-    # (giantswarm/kagent-upstream#606).
-    versionRange: ">=1.13.0 <1.14.0"
+    # (giantswarm/kagent-upstream#606). From 1.15.0 the controller compiles a
+    # workspace Session's provider hosts into credential URIs of
+    # kagent.controller.session.credentialAuthority (derived with the Session
+    # admission) and kagent-crds carries the EgressPolicy CRD the tenant
+    # admission matches: the workspace write path.
+    versionRange: ">=1.15.0 <1.16.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -681,7 +689,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.13.0 <1.14.0"
+    versionRange: ">=1.15.0 <1.16.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -818,7 +826,7 @@ components:  # @schema additionalProperties: true
     # provider served the name itself): the plugin is deployed first and routed
     # with the floor bump.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: ">=0.1.0 <1.0.0"
+    versionRange: ">=0.1.0 <0.2.0"
     valuesFrom: google-access-token-credential-provider
     injectGlobal: false
     targetNamespace: ate-system
@@ -873,7 +881,7 @@ components:  # @schema additionalProperties: true
   agent-sandbox:  # @schema additionalProperties: true
     chart: agent-sandbox
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.x"
+    versionRange: "0.2.x"
     enabled: false
     injectGlobal: false              # strict values.schema.json
     # App-owned CRDs: the GS agent-sandbox chart ships its CRDs in its own crds/
@@ -1002,11 +1010,10 @@ components:  # @schema additionalProperties: true
     # chart to gsoci and the giantswarm catalog, and the guest image artifact
     # the pod fetches (0.20.0 and 0.20.1 have no guest image: their
     # guest-image job failed; 0.19.x were on ghcr.io, with the guest image as
-    # a node path). The ceiling stays the next major, so minor releases roll
-    # on their own.
+    # a node path).
     # The floor is 0.24.0: the chart takes observability.otel, the OTLP trace
     # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
-    versionRange: ">=0.24.0 <1.0.0"
+    versionRange: ">=0.24.0 <0.25.0"
     valuesFrom: vm-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
@@ -1032,13 +1039,12 @@ components:  # @schema additionalProperties: true
     # this chart forwards AND tolerates a cluster without the Cluster API group
     # (list_clusters answers an empty list with a note, a dry run on a cluster
     # that does not exist is refused naming it, get_info reports clusterApi and
-    # the real version); the ceiling stays the next major, so minor releases
-    # roll on their own.
+    # the real version).
     # The floor is 0.22.0: the chart takes observability.otel, the OTLP trace
     # export global.observability.traces.otlp derives, and serviceMonitor
     # with observability.metrics, the metrics port its ServiceMonitor scrapes
     # (giantswarm/cluster-manager#138, giantswarm/giantswarm#36711).
-    versionRange: ">=0.22.0 <1.0.0"
+    versionRange: ">=0.22.0 <0.35.0"
     valuesFrom: cluster-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
@@ -1068,9 +1074,10 @@ components:  # @schema additionalProperties: true
     # it with provider instances and OAuth). The earlier floors it covers:
     # 0.5.0 the provider kind gitlab (agent-platform.workspaceManager.gitlabFloor),
     # 0.2.0 the grant key set (/.well-known/jwks.json), 0.4.0 the kagent block
-    # (agent-platform.workspaceManager.kagentFloor). The ceiling stays the next
-    # major, so later minor releases roll on their own.
-    versionRange: ">=0.10.0 <1.0.0"
+    # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
+    # minor: a workspace-manager minor rolls in with the chart release that
+    # renders its values.
+    versionRange: ">=0.10.0 <0.11.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
@@ -1361,7 +1368,7 @@ components:  # @schema additionalProperties: true
     # Self-hosted DiceBear avatar API + the public avatar HTTPRoute. Lives in its
     # own repo/chart (giantswarm/dicebear); pulled here by range like every component.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: "0.x"
+    versionRange: "0.3.x"
     valuesFrom: dicebear
     # Strict values.schema.json (additionalProperties:false); the chart consumes
     # registry.domain, not global — so do not inject global.
@@ -4975,7 +4982,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.4.0
+      tag: 2.5.0
     dryRun: false
     gitopsNamespaces: []
 
