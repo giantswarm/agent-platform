@@ -11896,6 +11896,7 @@ spec:
             - --namespace=agent-platform
             - --selector=app=backstage
             - --overwrite
+            - --field-manager=agent-platform-config-reload
             - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=17dfed0c93c61330ee2942c868b67df5a07b24457ad3b08924e09bfbf86ccb14
           env:
             # kubectl keeps its discovery/http cache under $HOME; the root
