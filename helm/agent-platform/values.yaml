@@ -725,7 +725,7 @@ components:  # @schema additionalProperties: true
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.12.0 <1.13.0"
+    versionRange: ">=1.13.0 <1.14.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
     # release Flux resolved (ateController.gvisorWorker.followRelease, on by
@@ -752,7 +752,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.12.0 <1.13.0"
+    versionRange: ">=1.13.0 <1.14.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -805,9 +805,8 @@ components:  # @schema additionalProperties: true
     # from substrate.credentialProvider.namespacePolicies
     # (agent-platform.componentDerivedValues). The Substrate chart routes the
     # class to it through substrate.credentialProvider.additionalProviders
-    # below, which a Substrate release before 1.12.0 refuses (its bundled
-    # provider served the name itself): the plugin is deployed first and routed
-    # with the floor bump.
+    # below; a Substrate release before 1.13.0 refuses that entry, its bundled
+    # provider serving the name itself.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: ">=0.1.0 <1.0.0"
     valuesFrom: google-access-token-credential-provider
@@ -6096,6 +6095,14 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
         allowedNamespaces: [kagent]
       - atespace: ate-golden
         allowedNamespaces: [kagent]
+    # The egress gateway resolves an ate-secret:// URI by its authority: k8s.io
+    # on the bundled provider, every entry here on the provider it names. The
+    # host is the plugin's Service as its serving certificate names it
+    # (components.google-access-token-credential-provider, targetNamespace
+    # ate-system); the gateway dials it with its pod identity.
+    additionalProviders:
+      - uriAuthority: google-access-token.k8s.io
+        host: google-access-token-credential-provider.ate-system.svc:50051
   postgres:
     # Where the control plane keeps its state. `auto` (the default) follows
     # the platform: with the platform's CNPG Cluster on (postgres.enabled) the

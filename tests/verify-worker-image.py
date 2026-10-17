@@ -79,7 +79,8 @@ FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # is the line's own and additive), so kagent 1.11, published against 1.9.0,
 # speaks its ate-api contract. 1.11 stays on v0.5.0-alpha2 too (the actor JWT minting and the busy-worker marking are additive; `MintActorJWTRequest.audiences` keeps its field number), so kagent 1.11 speaks its contract as well.
 # 1.12 stays on v0.5.0-alpha2 too (the credential provider's namespace selectors change no proto, CRD, schema or snapshot layout), so kagent 1.12, published against 1.11.1, speaks its contract.
-SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}, (1, 8): {(1, 7)}, (1, 10): {(1, 9)}, (1, 11): {(1, 9), (1, 10)}, (1, 12): {(1, 9), (1, 10), (1, 11)}}
+# 1.13 stays on v0.5.0-alpha2 as well: its bundled credential provider serves k8s.io alone (giantswarm/substrate#455), a change on the egress gateway's side the kagent controller never sees.
+SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}, (1, 8): {(1, 7)}, (1, 10): {(1, 9)}, (1, 11): {(1, 9), (1, 10)}, (1, 12): {(1, 9), (1, 10), (1, 11)}, (1, 13): {(1, 9), (1, 10), (1, 11), (1, 12)}}
 
 
 def tuple_of(version: str) -> str:

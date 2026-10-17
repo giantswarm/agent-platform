@@ -56,6 +56,18 @@ With `tenants.organizations.enabled` the meta chart now uses them: the substrate
 
 - **An installation that sets `kagent.harnesses[].limits`**: drop the key after the upgrade; it has no effect from 1.12.0.
 - **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.12.0`, `kagent-crds` first or with it.
+## 4.141.x → \<next\> (Substrate 1.13.0: the Google access-token class is routed to the plugin)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.13 (`>=1.13.0 <1.14.0`, giantswarm/giantswarm#38547). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.13.0 (`ateom-gvisor:1.13.0`); the kagent CRDs and the kagent release are unchanged. 1.13.0's bundled credential provider serves `k8s.io` alone, and `substrate.credentialProvider.additionalProviders` sends `google-access-token.k8s.io` to `components.google-access-token-credential-provider`, deployed by the previous release. No persisted format changes (Substrate's `docs/upgrade.md`, "The 1.12 to 1.13 step").
+
+- **A Vertex AI turn in the roll window fails closed**: between the Substrate pods rolling to 1.13.0 and the egress gateway reloading its configuration with the new provider list, a credential fetch for `google-access-token.k8s.io` is refused and the turn fails with 403, as on any change of the gateway's providers. Sessions that started before keep their actors; the next turn after the reload succeeds.
+
+### Operator action
+
+- **None.** The plugin must be running before this step: an installation that skipped the previous release installs both in one go, and Flux orders the plugin release after Substrate's through `dependsOn`, so the window above spans both.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.13.0`; `kagent`, `kagent-crds` and `google-access-token-credential-provider` stay where they are.
+- **An installation that overrides `substrate.credentialProvider.additionalProviders`**: keep the `google-access-token.k8s.io` entry, or Vertex AI ModelConfigs stop resolving.
+
 ## 4.133.x → \<next\> (the Google access-token credential provider runs beside Substrate)
 
 `components.google-access-token-credential-provider` deploys the Substrate credential provider plugin for the class `google-access-token.k8s.io` (giantswarm/substrate-credential-providers 0.1.0) in `ate-system`, following `components.kagent` (giantswarm/giantswarm#38547). Nothing is routed to it yet: the Substrate line's bundled provider still serves the class on 1.11, and the routing entry lands with the move to Substrate 1.12, which drops the bundled name.
