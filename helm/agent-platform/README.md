@@ -170,8 +170,8 @@ What follows from it:
   release and the derived image.
 - **`substrate.ateController.gvisorWorker.followRelease` stays unset.** The chart
   sets it; `false` fails the render, because the workers would then run the floor
-  beside a later patch's atelet. A range whose floor is below `1.4.0`, the first
-  release that carries the flag, fails the render too.
+  beside a later patch's atelet. The flag exists from Substrate `1.4.0` on;
+  `make verify-worker-image` fails when the chart the range resolves to lacks it.
 - **The Substrate range confines one runtime contract**: an exact version (the
   BOM's `1.0.0`) or `>=X.Y.Z <X.(Y+1).0`, the ceiling of the pinned minor and no
   `-0` anywhere. Flux's Masterminds semver skips every prerelease while no bound
