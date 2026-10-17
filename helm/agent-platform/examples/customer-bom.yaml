@@ -10,8 +10,10 @@
 #
 # Snapshot of the internal dogfooding track for the 4.0 line (kagent API v2).
 # The muster pin is the floor of components.muster.versionRange: 5.44.0-rc.5
-# serves a workspace Session's provider credentials (credentialProvider); 5.31.4 ends a
-# session on a forwarded bearer at the bearer's exp (giantswarm/muster#1323);
+# serves a workspace Session's provider credentials (credentialProvider), 5.43.6
+# accepts the affinity that spreads muster's two replicas (giantswarm/muster#1541),
+# and from 5.31.4 on a session on a forwarded bearer ends at the bearer's exp
+# (giantswarm/muster#1323);
 # the toolset presets in values.yaml select by the tool-group label, which a
 # muster before 5.12.0 does not know (it refuses to start), and which
 # agent-platform-mcps, agent-manager and model-manager stamp on their MCPServer
