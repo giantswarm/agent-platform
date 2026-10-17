@@ -121,7 +121,7 @@ spec:
       expression: {{ printf "request.userInfo.username == 'system:serviceaccount:%s:%s'" $kagentNs $sa | quote }}
   variables:
     - name: pods
-      expression: "'authentication.kubernetes.io/pod-name' in request.userInfo.extra ? request.userInfo.extra['authentication.kubernetes.io/pod-name'] : []"
+      expression: "has(request.userInfo.extra) && 'authentication.kubernetes.io/pod-name' in request.userInfo.extra ? request.userInfo.extra['authentication.kubernetes.io/pod-name'] : []"
   validations:
     - expression: "has(namespaceObject.metadata.labels) && 'giantswarm.io/organization' in namespaceObject.metadata.labels"
       reason: Forbidden
