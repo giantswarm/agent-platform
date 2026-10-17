@@ -728,9 +728,11 @@ components:  # @schema additionalProperties: true
     versionRange: ">=1.12.0 <1.13.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
-    # release Flux resolved (ateController.gvisorWorker.followRelease, on by
-    # default; giantswarm/substrate#114), so a candidate's atelet and worker
-    # are one build whatever the derived workerImage says.
+    # release Flux resolved (ateController.gvisorWorker.followRelease, which
+    # the chart sets on the substrate release and refuses false;
+    # giantswarm/substrate#114, giantswarm/agent-platform#822),
+    # so a candidate's or a patch's atelet and worker are one build whatever
+    # the derived workerImage says.
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -2888,7 +2890,14 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # stays EMPTY here: the derived value lands over it. An installation that
   # sets it names an ateom-gvisor image TAGGED WITH THAT FLOOR (a mirror by a
   # path other than substrate.image.registry, which the derived image already
-  # follows); any other tag fails the render. sandboxClass gvisor is
+  # follows); any other tag fails the render. The pods run the release the
+  # control plane runs: ate-controller starts every gVisor pool on its own
+  # release's ateom-gvisor (substrate.ateController.gvisorWorker.followRelease,
+  # which the chart sets), so a Substrate patch Flux resolves within the range
+  # rolls the pool with the atelet and no chart release; the pool's
+  # status.workerImage names the image its pods run, and its condition
+  # WorkerImageOverridden is True while that is a later patch than this floor
+  # (giantswarm/agent-platform#822). sandboxClass gvisor is
   # what kagent's generated ActorTemplates select. The Harness's workerPoolRef
   # follows `name`; replicas and template (resources, node placement, the
   # CPU feature-set pin) are the capacity knobs; podDisruptionBudget (the
