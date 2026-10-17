@@ -5600,10 +5600,15 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
         #   with the App's OAuth client under `client-id` and `client-secret`,
         #   which muster reads, by default the Secret of the instance's
         #   values.oauth.clientSecret (key client-secret; that Secret then
-        #   carries client-id too).
-        # authorizationServer.issuer has no default: the App's own identity the
-        # person's grant is filed under, https://github.com/apps/<app slug>
-        # for a GitHub App. The other authorizationServer keys default to
+        #   carries client-id too);
+        # - authorizationServer.issuer: the identity the person's grant of the
+        #   App is filed under, by default <url>/apps/<app.id> of a github
+        #   instance (https://github.com/apps/<app.id> without url), unique
+        #   per App; muster discovers nothing under it, since the endpoints
+        #   are pinned and GitHub's own `iss` is checked as expectedIssuer.
+        #   An own value (https://github.com/apps/<app slug>, say) stands;
+        #   changing it later asks every person to grant the App once more.
+        # The other authorizationServer keys default to
         # GitHub's endpoints (the workspace-manager chart's values); a gitlab
         # instance sets its own. The render fails naming the key that is
         # missing.
