@@ -269,6 +269,11 @@ ALL_ON_INPUTS = [
     # installation names it, and the meta chart refuses the workspaces switch
     # without it (giantswarm/agent-platform#900).
     "--set", "workspaces.storage.storageClassName=workspaces-rwx",
+    # The provider instance muster releases grants of while workspaces and
+    # Substrate are on: an installation pins one (provider instances with
+    # oauth.enabled) or names it, and the meta chart refuses the switch
+    # without (giantswarm/agent-platform#1103).
+    "--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents",
 ]
 
 # Components without a toggle of their own: each follows its switch, and a

@@ -32,6 +32,10 @@ below pins one property:
   unless the block opts in);
 - without the derivation an own block reaches the release as written, and one set in
   part fails the render naming the keys (the kagent chart needs all three);
+- muster's credentialProvider with workspaces and Substrate on: without a provider pin
+  (no providers, oauth off) it releases nothing and the render fails naming
+  muster.muster.credentialProvider.releasable (giantswarm/agent-platform#1103); an own
+  releasable alone turns it on;
 - with Substrate on muster serves FetchSecret and mounts Substrate's pod certificates, which
   only releases after muster publish and issue: until the substrate release is Ready
   (offline: never) its install and upgrade do not wait for its pods (disableWait);
@@ -255,10 +259,24 @@ def main(meta: str) -> int:
        "the muster release serves FetchSecret to the egress gateway's identity with Substrate on and releases the pinned provider instance github's grants under its own or derived issuer (an own entry stands beside it), "
        "and Substrate routes the authority to muster; until Substrate is Ready its install and upgrade do not wait for the pods that mount Substrate's certificates; "
        "with workspaces off muster gets no credentialProvider")
+    sub = ["--set", "components.substrate.enabled=true"]
+    unpinned = (([*NO_OWN, "--set", f"{NAME}.providers=null", "--set", "workspaceManager.route.enabled=false"], "without providers"),
+                ([*NO_OWN, "--set", f"{NAME}.oauth.enabled=false"], "with oauth off"))
+    for flags, what in unpinned:
+        must_fail(meta, [*base, *sub, *flags], "muster releases no provider instance's grant",
+                  f"workspaces and Substrate on {what} (no provider pin, no own releasable)")
+        helm(meta, [*ON, *IDENTITY, *flags, "--set", "components.kagent.enabled=false"])
+    own = block(block(block(documents(helm(meta, [*base, *sub, *unpinned[0][0], "--set", "muster.muster.credentialProvider.releasable.gitlab=https://gitlab.example.com"])).get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6), "releasable", 8)
+    if own != "        releasable:\n          gitlab: https://gitlab.example.com\n":
+        fail(f"without a provider pin an own muster.muster.credentialProvider.releasable does not reach the muster release alone:\n{own}")
+    ok("without a provider pin (no providers, oauth off) workspaces and Substrate fail the render naming muster's releasable, "
+       "pass with Substrate off, and an own releasable alone turns muster's credentialProvider on")
 
     # --- nothing without a grant key, or without kagent ------------------------------------------
-    for flags, what in (([*NO_OWN, "--set", f"{NAME}.providers=null", "--set", "workspaceManager.route.enabled=false"], "without providers"),
-                        ([*NO_OWN, "--set", f"{NAME}.oauth.enabled=false"], "with oauth off"),
+    # Substrate follows kagent: without a provider pin muster's releasable is the installation's own.
+    releasable = ["--set", "muster.muster.credentialProvider.releasable.gitlab=https://gitlab.example.com"]
+    for flags, what in (([*NO_OWN, "--set", f"{NAME}.providers=null", "--set", "workspaceManager.route.enabled=false", *releasable], "without providers"),
+                        ([*NO_OWN, "--set", f"{NAME}.oauth.enabled=false", *releasable], "with oauth off"),
                         ([*NO_OWN, "--set", "workspaceManager.grantKey.create=false"], "with grantKey.create false")):
         if admission(kagent_release([*base, *flags], meta)) is not None:
             fail(f"the kagent release carries a Session admission {what}: the manager signs no grant then")
