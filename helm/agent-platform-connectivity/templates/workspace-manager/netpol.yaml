@@ -11,7 +11,7 @@
 {{- $controllerPort := "8083" }}
 {{- $oauthOn := include "agent-platform.workspaceManager.oauthEnabled" . }}
 {{- $peers := $wm.networkPolicy.ingress.additionalPeers }}
-{{- /* The public sign-in route's Gateway (route.yaml): the agentgateway data
+{{- /* The public key-set route's Gateway (route.yaml): the agentgateway data
        plane when the chart owns the edge and the route names no parent, else
        the Envoy edge pods of the route's parents' namespaces. */ -}}
 {{- $routed := include "agent-platform.workspaceManager.routeHost" . }}
@@ -29,8 +29,8 @@
 ---
 # Ingress to workspace-manager on the Service port: muster (the MCP endpoint)
 # in the release namespace and kagent's controller in the kagent namespace
-# (the token and JWKS endpoints a Session's workspace credential is exchanged
-# at), the public Gateway of the browser's provider sign-in (route on) — plus
+# (the JWKS endpoint a Session's workspace grant is verified with), the public
+# Gateway of the grants' key set (route on) — plus
 # the kubelet's probes (host entity), which a policy that selects the pod
 # would otherwise deny.
 apiVersion: cilium.io/v2
@@ -73,9 +73,8 @@ spec:
             - port: {{ $port | quote }}
               protocol: TCP
     {{- if $routed }}
-    # The public Gateway of the browser's provider sign-in (route.yaml), which
-    # proxies straight to the Service; the route admits only /signin,
-    # /connect/<instance> and /callback/<instance>.
+    # The public Gateway of the grants' key set (route.yaml), which proxies
+    # straight to the Service; the route admits only /.well-known/jwks.json.
     - fromEndpoints:
         {{- if $edgeIsDataPlane }}
         - matchLabels:
@@ -224,8 +223,8 @@ spec:
 {{- end }}
 {{- if $kagentOn }}
 ---
-# Egress from kagent's controller to the workspace-manager's token and JWKS
-# endpoints (additive to the controller's own egress policy).
+# Egress from kagent's controller to the workspace-manager's JWKS
+# endpoint (additive to the controller's own egress policy).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -277,8 +276,8 @@ spec:
 {{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
 ---
 # Ingress to workspace-manager on the Service port: muster (the MCP endpoint),
-# kagent's controller (the token and JWKS endpoints) and the public Gateway of
-# the browser's sign-in (route on).
+# kagent's controller (the JWKS endpoint) and the public Gateway of the grants'
+# key set (route on).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -322,7 +321,7 @@ spec:
         - port: {{ $port | int }}
           protocol: TCP
     {{- if $routed }}
-    # The public Gateway of the browser's provider sign-in (route.yaml).
+    # The public Gateway of the grants' key set (route.yaml).
     - from:
         {{- if $edgeIsDataPlane }}
         - podSelector:
@@ -471,8 +470,8 @@ spec:
 {{- end }}
 {{- if $kagentOn }}
 ---
-# Egress from kagent's controller to the workspace-manager's token and JWKS
-# endpoints (additive to the controller's own egress policy).
+# Egress from kagent's controller to the workspace-manager's JWKS
+# endpoint (additive to the controller's own egress policy).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

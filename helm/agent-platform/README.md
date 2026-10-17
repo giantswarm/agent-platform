@@ -539,7 +539,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.workspace-manager.chart | string | `"workspace-manager"` |  |
 | components.workspace-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.workspace-manager.versionRange | string | `">=0.5.0 <1.0.0"` |  |
+| components.workspace-manager.versionRange | string | `">=0.10.0-rc.5 <1.0.0"` |  |
 | components.workspace-manager.valuesFrom | string | `"workspace-manager"` |  |
 | components.workspace-manager.dependsOn[0] | string | `"muster"` |  |
 | components.workspace-manager.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
@@ -550,11 +550,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.workspace-manager.omitEmptyKeys[0] | string | `"providers"` |  |
 | components.workspace-manager.omitEmptyKeys[1] | string | `"oauth.baseURL"` |  |
 | components.workspace-manager.omitEmptyKeys[2] | string | `"grant.signingKey"` |  |
-| components.workspace-manager.omitEmptyKeys[3] | string | `"sync.cycle"` |  |
-| components.workspace-manager.omitEmptyKeys[4] | string | `"sessions.cleanupAfter"` |  |
-| components.workspace-manager.omitEmptyKeys[5] | string | `"storage.sizing.factor"` |  |
-| components.workspace-manager.omitEmptyKeys[6] | string | `"storage.sizing.headroom"` |  |
-| components.workspace-manager.omitEmptyKeys[7] | string | `"storage.sizing.maxSize"` |  |
+| components.workspace-manager.omitEmptyKeys[3] | string | `"muster.mcpServer.auth.provider"` |  |
+| components.workspace-manager.omitEmptyKeys[4] | string | `"muster.mcpServer.auth.authorizationServer"` |  |
+| components.workspace-manager.omitEmptyKeys[5] | string | `"sync.cycle"` |  |
+| components.workspace-manager.omitEmptyKeys[6] | string | `"sessions.cleanupAfter"` |  |
+| components.workspace-manager.omitEmptyKeys[7] | string | `"storage.sizing.factor"` |  |
+| components.workspace-manager.omitEmptyKeys[8] | string | `"storage.sizing.headroom"` |  |
+| components.workspace-manager.omitEmptyKeys[9] | string | `"storage.sizing.maxSize"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.backstage.versionRange | string | `">=2.68.0 <4.0.0"` |  |
@@ -1481,8 +1483,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
-| workspace-manager.signin.keys.secretName | string | `"workspace-manager-signin-keys"` |  |
-| workspace-manager.signin.keys.current | string | `"key-1"` |  |
 | workspace-manager.providers | list | `[]` |  |
 | workspace-manager.grant.signingKey | object | `{}` |  |
 | workspace-manager.sync.cycle | string | `""` |  |
@@ -1495,7 +1495,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspace-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | workspaceManager.route.enabled | bool | `true` |  |
 | workspaceManager.route.parentRefs | list | `[]` |  |
-| workspaceManager.signinKeys.create | bool | `true` |  |
 | workspaceManager.grantKey.create | bool | `true` |  |
 | workspaceManager.grantKey.secretName | string | `"workspace-manager-grant-keys"` |  |
 | workspaceManager.grantKey.key | string | `"key-1"` |  |
