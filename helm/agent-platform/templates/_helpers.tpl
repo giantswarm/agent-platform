@@ -359,7 +359,9 @@ instance and the Secret with the App's OAuth client, the block's own or
 derived (agent-platform.workspaceManager.musterPin). */ -}}
 {{- with (include "agent-platform.workspaceManager.musterPin" .root | fromJson) -}}
 {{- if and .provider .secretName -}}
-{{- $_ := set $derived "muster" (dict "mcpServer" (dict "auth" (dict "provider" .provider "authorizationServer" (dict "clientCredentialsSecretRef" (dict "name" .secretName))))) -}}
+{{- $server := dict "clientCredentialsSecretRef" (dict "name" .secretName) -}}
+{{- if .issuer -}}{{- $_ := set $server "issuer" .issuer -}}{{- end -}}
+{{- $_ := set $derived "muster" (dict "mcpServer" (dict "auth" (dict "provider" .provider "authorizationServer" $server))) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -688,12 +690,17 @@ muster's pin of the workspace-manager's registration, with provider instances
 and oauth.enabled (nothing otherwise): the provider instance whose App the
 person grants once in muster (muster.mcpServer.auth.provider) and the Secret
 with that App's OAuth client under client-id and client-secret, which muster
-reads (muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name).
-The block's own value stands; else the provider is the only instance of kind
-github, and the Secret that of the instance's values.oauth.clientSecret when its
-key is client-secret, muster's default key. Either is empty when neither
-applies; agent-platform.validateWorkspaceAuth then fails naming the key. Emits
-JSON {provider, secretName}, or {}.
+reads (muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name),
+and the issuer muster files each person's grant of that App under
+(muster.mcpServer.auth.authorizationServer.issuer). The block's own value
+stands; else the provider is the only instance of kind github, the Secret that
+of the instance's values.oauth.clientSecret when its key is client-secret,
+muster's default key, and the issuer <values.url, default https://github.com>/apps/<values.app.id>
+of a github instance: an identity only, unique per App on its host, since the
+workspace-manager chart pins the endpoints and checks GitHub's own `iss`
+(expectedIssuer), so muster discovers nothing under it. Any is empty when
+neither applies; agent-platform.validateWorkspaceAuth then fails naming the
+key. Emits JSON {provider, secretName, issuer}, or {}.
 Usage: include "agent-platform.workspaceManager.musterPin" . | fromJson
 */}}
 {{- define "agent-platform.workspaceManager.musterPin" -}}
@@ -719,7 +726,17 @@ Usage: include "agent-platform.workspaceManager.musterPin" . | fromJson
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- $out = dict "provider" $provider "secretName" $secret -}}
+{{- $issuer := toString (dig "authorizationServer" "issuer" "" $auth) -}}
+{{- if and $provider (not $issuer) -}}
+{{- range $wm.providers -}}
+{{- $v := .values | default dict -}}
+{{- $id := toString (dig "app" "id" "" $v) -}}
+{{- if and (eq (toString .name) $provider) (eq (toString .kind) "github") $id -}}
+{{- $issuer = printf "%s/apps/%s" (trimSuffix "/" (toString ($v.url | default "https://github.com"))) $id -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out = dict "provider" $provider "secretName" $secret "issuer" $issuer -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}
@@ -732,7 +749,7 @@ are on, here where a failure is seen instead of inside the component release:
   agent-platform.workspaceManager.musterGrantFloor; muster's pin
   (agent-platform.workspaceManager.musterPin) names a provider instance of
   workspace-manager.providers and a Secret with the App's OAuth client, and
-  muster.mcpServer.auth.authorizationServer.issuer is set — without the pin no
+  muster.mcpServer.auth.authorizationServer.issuer is set or derived — without the pin no
   person has a provider token and every workspace is refused;
 - workspace-manager.grant.signingKey, when set, only with providers and
   oauth.enabled (the manager refuses to start with a key without them), and
@@ -761,8 +778,8 @@ Emits nothing; fails naming the key and the fix.
 {{- if not $pin.secretName -}}
 {{- fail (printf "workspace-manager.muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name is empty and provider instance %s has no values.oauth.clientSecret with key client-secret to take it from: name the Secret with the App's OAuth client under client-id and client-secret, which muster reads" $pin.provider) -}}
 {{- end -}}
-{{- if not (dig "muster" "mcpServer" "auth" "authorizationServer" "issuer" "" $wm) -}}
-{{- fail (printf "workspace-manager.muster.mcpServer.auth.authorizationServer.issuer is empty: muster files each person's grant of provider instance %s's App under that issuer, the App's own identity (https://github.com/apps/<app slug> for a GitHub App); set it" $pin.provider) -}}
+{{- if not $pin.issuer -}}
+{{- fail (printf "workspace-manager.muster.mcpServer.auth.authorizationServer.issuer is empty and provider instance %s is no github instance with values.app.id to take it from: muster files each person's grant of the instance's App under that issuer, the App's own identity; set it" $pin.provider) -}}
 {{- end -}}
 {{- end -}}
 {{- $grant := dig "grant" "signingKey" dict $wm | default dict -}}

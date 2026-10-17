@@ -85,7 +85,7 @@ Next steps (docs/install.md "After the install"):
 Workspaces, base URL {{ $wmBase }} (routed: /.well-known/jwks.json):
 {{- with (include "agent-platform.workspaceManager.musterPin" . | fromJson) }}
 {{- if .provider }}
-  Provider sign-in: muster, pinned to provider instance {{ .provider }}'s App (OAuth client in Secret {{ .secretName }}); a person grants it once in muster.
+  Provider sign-in: muster, pinned to provider instance {{ .provider }}'s App (issuer {{ .issuer }}, OAuth client in Secret {{ .secretName }}); a person grants it once in muster.
   The App's callback URL is muster's <muster base URL>/oauth/proxy/callback.
 {{- end }}
 {{- end }}

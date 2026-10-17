@@ -28,10 +28,12 @@ muster. Each case below pins one property of its wiring:
   derived from kagent's, storage.storageClassName from workspaces.storage
   (verify-workspace-storage covers the class); the keys left empty are not
   forwarded;
-- muster's pin (agent-platform.workspaceManager.musterPin): an own provider and
-  client Secret stand; no github instance or two of them without an own
-  provider, a provider naming no instance, an instance without a client-secret
-  key and no own Secret, an empty issuer and a range floor below
+- muster's pin (agent-platform.workspaceManager.musterPin): an own provider,
+  client Secret and issuer stand; without an own issuer a github instance's
+  <url>/apps/<app.id> (github.com without url); no github instance or two of
+  them without an own provider, a provider naming no instance, an instance
+  without a client-secret key and no own Secret, no issuer to take (no App id,
+  a gitlab instance) and a range floor below
   agent-platform.workspaceManager.musterGrantFloor (0.10.0) fail naming the key;
   the component chart at the BOM's pin renders the pinned MCPServer
   (authorizationServer with the App's issuer and client Secret, grantScope
@@ -431,7 +433,15 @@ def main(meta: str, connectivity: str) -> int:
               f"{auth}.authorizationServer.clientCredentialsSecretRef.name is empty and provider instance github has no values.oauth.clientSecret", "an instance without an OAuth client")
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[0].values.oauth.clientSecret.key=secret"],
               f"{auth}.authorizationServer.clientCredentialsSecretRef.name is empty", "an OAuth client Secret under another key than client-secret")
-    must_fail(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer="], f"{auth}.authorizationServer.issuer is empty", "no issuer")
+    derived = documents(helm(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer="]))[("HelmRelease", NAME)]
+    must_have(derived, ("            issuer: https://github.com/apps/123\n",), "the HelmRelease without an own issuer")
+    ghes = documents(helm(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer=", "--set", f"{NAME}.providers[0].values.url=https://ghe.example.com/"]))[("HelmRelease", NAME)]
+    must_have(ghes, ("            issuer: https://ghe.example.com/apps/123\n",), "the HelmRelease of a GitHub Enterprise instance without an own issuer")
+    must_fail(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer=", "--set", f"{NAME}.providers[0].values.app.id="],
+              f"{auth}.authorizationServer.issuer is empty and provider instance github is no github instance with values.app.id", "no issuer and no App id")
+    must_fail(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer=", "--set", f"{auth}.provider=gitlab",
+                     "--set", f"{auth}.authorizationServer.clientCredentialsSecretRef.name=gitlab-app"],
+              f"{auth}.authorizationServer.issuer is empty and provider instance gitlab", "no issuer for a gitlab instance")
     for below in (">=0.9.0 <1.0.0", "0.9.0"):
         must_fail(meta, [*ON, *NO_GITLAB, "--set", f"{auth}.provider=github", "--set", f"components.{NAME}.versionRange={below}"],
                   f"admits releases before {GRANT_FLOOR}", f"the range {below} below the muster grant floor")
@@ -450,8 +460,8 @@ def main(meta: str, connectivity: str) -> int:
     for gone in ("signin-keys", "token-exchange"):
         if gone in r.stdout:
             fail(f"the {NAME} chart {pin} still renders {gone}")
-    ok(f"muster's pin: the github instance and its OAuth client Secret derived, an own provider and Secret stand; two or no github instances, an unknown "
-       f"provider, no client-secret key, no issuer and a floor below {GRANT_FLOOR} fail naming the key; the component chart {pin} renders the pinned MCPServer "
+    ok(f"muster's pin: the github instance, its OAuth client Secret and its issuer <url>/apps/<app.id> derived, an own provider, Secret and issuer stand; two or no github instances, an unknown "
+       f"provider, no client-secret key, no issuer to take (no App id, a gitlab instance) and a floor below {GRANT_FLOOR} fail naming the key; the component chart {pin} renders the pinned MCPServer "
        "(the App's issuer and client Secret, grantScope subject, forwardIdentity) and --muster-provider github")
 
     # --- the gitlab kind's floor ----------------------------------------------------------

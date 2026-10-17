@@ -32,7 +32,8 @@ workspace-manager:
   oauth:
     baseURL: https://workspaces.ci.example.com
   # muster's pin: the github instance and its OAuth client Secret are derived,
-  # the App's issuer has no default.
+  # the App's issuer is the fixture's own (derived without it,
+  # tests/verify-workspace-manager.py).
   muster:
     mcpServer:
       auth:
