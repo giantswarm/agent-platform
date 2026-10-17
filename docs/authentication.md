@@ -8,9 +8,8 @@ networking/NetworkPolicy model are described elsewhere (`README.md` →
 The request topology is selected by `ingress.mode` (see `README.md` →
 *Ingress topology*):
 
-- **`agentgateway-muster`** (default) / **`agentgateway-direct`** — client → agentgateway
-  `/mcp` → muster (or, in `agentgateway-direct`, the servers). Here a second
-  Gateway API hop (agentgateway) sits in front of muster.
+- **`agentgateway-muster`** (default) — client → agentgateway `/mcp` → muster.
+  Here a second Gateway API hop (agentgateway) sits in front of muster.
 - **`muster-direct`** (deprecated) — client → muster directly. There is **one** hop:
   the public Gateway → muster. No agentgateway data plane exists.
 
@@ -265,9 +264,7 @@ there is no agentgateway and muster is the sole validator). By default
 agentgateway runs `auth.passthrough`: it forwards the token to muster
 without inspecting it, and muster is the only validator. Optionally, agentgateway
 can validate the JWT **at the edge** (`oauthMode: validate`) as a first layer —
-muster still validates downstream as a second layer. Edge JWT validation is the
-relevant model for `agentgateway-direct`, where agentgateway must gate traffic
-on its own. Token exchange (§3) is
+muster still validates downstream as a second layer. Token exchange (§3) is
 unaffected: agentgateway only ever sees the inbound token; muster's internal
 RFC 8693 exchanges happen behind it.
 
@@ -300,9 +297,8 @@ flowchart TD
 
 ### When `gateway.jwksEgress` is required
 
-`gateway.jwksEgress` is an `agentgateway-*` data-plane knob (most relevant to
-`agentgateway-direct`, where agentgateway validates JWTs at the edge against an
-external key set).
+`gateway.jwksEgress` is an `agentgateway-muster` data-plane knob, for a route
+where agentgateway validates JWTs at the edge against an in-cluster key set.
 
 The data-plane NetworkPolicy
 (`networkpolicy-dataplane-{cilium,kubernetes}.yaml`) allows the proxy egress to

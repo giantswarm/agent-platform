@@ -2145,16 +2145,6 @@ Name of the AgentgatewayParameters CR — defaults to release name.
 {{- end -}}
 
 {{/*
-Truthy (emits "true") when the request topology routes through agentgateway,
-i.e. ingress.mode is agentgateway-muster or agentgateway-direct. Otherwise
-emits nothing (empty string = falsy). Gated templates use:
-  {{- if (include "agent-platform.ingress.agentgateway" .) }}
-*/}}
-{{- define "agent-platform.ingress.agentgateway" -}}
-{{- if or (eq .Values.ingress.mode "agentgateway-muster") (eq .Values.ingress.mode "agentgateway-direct") -}}true{{- end -}}
-{{- end -}}
-
-{{/*
 Fully-qualified name of the muster service. Single source of truth: the umbrella
 pins muster.fullnameOverride (see values.yaml), which the muster sub-chart uses
 verbatim for its Service name. Reading that same key here — rather than
@@ -2268,48 +2258,6 @@ shared ingress.httpRoute.annotations). Emits nothing when both are empty.
 {{- $h := .ctx.Values.ingress.httpRoute -}}
 {{- $merged := merge (deepCopy (dig .route "annotations" dict $h)) ($h.annotations | default dict) -}}
 {{- with $merged }}{{- toYaml . }}{{- end -}}
-{{- end -}}
-
-{{/*
-Validate the ingress.mode selector and the dependent toggles it implies.
-Fails the render with an actionable message when the configuration is
-inconsistent. Rendered exactly once via templates/validate.yaml.
-*/}}
-{{- define "agent-platform.validateIngress" -}}
-{{- $mode := .Values.ingress.mode -}}
-{{- if not (or (eq $mode "muster-direct") (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
-{{- fail (printf "ingress.mode=%v is invalid; must be one of: muster-direct, agentgateway-muster, agentgateway-direct" $mode) -}}
-{{- end -}}
-{{- if eq $mode "agentgateway-direct" -}}
-{{- fail "ingress.mode=agentgateway-direct requires a DCR-capable IdP (RFC 7591/8707), e.g. Zitadel; not yet supported" -}}
-{{- end -}}
-{{- $isAgentgateway := or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct") -}}
-{{- if not .Values.ingress.parentRefs -}}
-{{- fail "ingress.parentRefs is required in all modes — the umbrella-owned muster `/` route (and the agentgateway `/mcp` route in agentgateway-* modes) attaches to it; an empty parentRefs renders a route bound to no Gateway, leaving muster unreachable while install reports success" -}}
-{{- end -}}
-{{- /* viaMuster only matters when the mcps sub-chart is installed; with no MCP
-servers there is nothing to route, so the consistency check is scoped to the
-agent-platform-mcps component. */ -}}
-{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps") -}}
-{{- $mcpsVals := index .Values "agent-platform-mcps" | default dict -}}
-{{- $viaMuster := dig "agentgateway" "viaMuster" false $mcpsVals -}}
-{{- if eq $mode "agentgateway-muster" -}}
-{{- if not (or (eq $viaMuster true) (eq (toString $viaMuster) "true")) -}}
-{{- fail "ingress.mode=agentgateway-muster requires agent-platform-mcps.agentgateway.viaMuster=true" -}}
-{{- end -}}
-{{- else if eq $mode "agentgateway-direct" -}}
-{{- if not (or (eq $viaMuster false) (eq (toString $viaMuster) "false")) -}}
-{{- fail "ingress.mode=agentgateway-direct requires agent-platform-mcps.agentgateway.viaMuster=false" -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
-{{- $agentgatewayEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway") -}}
-{{- if and $isAgentgateway (not $agentgatewayEnabled) -}}
-{{- fail "components.agentgateway.enabled must be true in agentgateway-* modes; the controller dependency condition must match ingress.mode" -}}
-{{- end -}}
-{{- if and (eq $mode "muster-direct") $agentgatewayEnabled -}}
-{{- fail "components.agentgateway.enabled must be false in muster-direct mode (it defaults to true, with ingress.mode agentgateway-muster); the controller dependency condition must match ingress.mode" -}}
-{{- end -}}
 {{- end -}}
 
 {{/*
@@ -2952,7 +2900,7 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- end -}}
 {{- if and $login.existingSecret (not $oauth.existingSecret) (not $dex.clientSecret) (not $identity.existingSecret) }}{{ $_ := set $oauth "existingSecret" $login.existingSecret }}{{ end -}}
 {{- end -}}
-{{- if and $wiring (not $oauth.baseURL) (or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
+{{- if and $wiring (not $oauth.baseURL) (eq $mode "agentgateway-muster") -}}
 {{- $route := dig $wiring "route" dict $v -}}
 {{- if eq $wiring "modelManager" }}{{ $route = dict "pathPrefix" "/model-manager" }}{{ end -}}
 {{- $host := $route.hostname -}}

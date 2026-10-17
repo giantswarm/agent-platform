@@ -218,7 +218,7 @@ Name of the AgentgatewayParameters CR — defaults to release name.
 
 {{/*
 Truthy (emits "true") when the request topology routes through agentgateway,
-i.e. ingress.mode is agentgateway-muster or agentgateway-direct and muster is
+i.e. ingress.mode is agentgateway-muster and muster is
 on. A release without muster (a serving or runtime slice) has no ingress
 topology: it renders no data plane whatever the mode, which defaults to
 agentgateway-muster (#252). Otherwise emits nothing (empty string = falsy).
@@ -226,7 +226,7 @@ Gated templates use:
   {{- if (include "agent-platform.ingress.agentgateway" .) }}
 */}}
 {{- define "agent-platform.ingress.agentgateway" -}}
-{{- if and (or (eq .Values.ingress.mode "agentgateway-muster") (eq .Values.ingress.mode "agentgateway-direct")) (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}true{{- end -}}
+{{- if and (eq .Values.ingress.mode "agentgateway-muster") (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -319,13 +319,10 @@ inconsistent. Rendered exactly once via templates/validate.yaml.
 */}}
 {{- define "agent-platform.validateIngress" -}}
 {{- $mode := .Values.ingress.mode -}}
-{{- if not (or (eq $mode "muster-direct") (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
-{{- fail (printf "ingress.mode=%v is invalid; must be one of: muster-direct, agentgateway-muster, agentgateway-direct" $mode) -}}
+{{- if not (or (eq $mode "muster-direct") (eq $mode "agentgateway-muster")) -}}
+{{- fail (printf "ingress.mode=%v is invalid; must be one of: agentgateway-muster, muster-direct" $mode) -}}
 {{- end -}}
-{{- if eq $mode "agentgateway-direct" -}}
-{{- fail "ingress.mode=agentgateway-direct requires a DCR-capable IdP (RFC 7591/8707), e.g. Zitadel; not yet supported" -}}
-{{- end -}}
-{{- $isAgentgateway := or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct") -}}
+{{- $isAgentgateway := eq $mode "agentgateway-muster" -}}
 {{- $musterEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") -}}
 {{- /* The muster `/` route needs a Gateway in every mode; the helper fails the
 render when neither ingress.parentRefs, the chart-owned edge nor
@@ -346,10 +343,6 @@ agent-platform-mcps component. */ -}}
 {{- if eq $mode "agentgateway-muster" -}}
 {{- if not (or (eq $viaMuster true) (eq (toString $viaMuster) "true")) -}}
 {{- fail "ingress.mode=agentgateway-muster requires agent-platform-mcps.agentgateway.viaMuster=true" -}}
-{{- end -}}
-{{- else if eq $mode "agentgateway-direct" -}}
-{{- if not (or (eq $viaMuster false) (eq (toString $viaMuster) "false")) -}}
-{{- fail "ingress.mode=agentgateway-direct requires agent-platform-mcps.agentgateway.viaMuster=false" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

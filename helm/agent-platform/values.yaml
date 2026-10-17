@@ -1501,12 +1501,8 @@ dicebear:  # @schema skipProperties: true; additionalProperties: true
 #                        false and agent-platform-mcps.agentgateway.viaMuster: false.
 #                        Deprecated: agentgateway-muster becomes the only topology
 #                        (giantswarm/agent-platform#252).
-#   agentgateway-direct  client -> agentgateway /mcp -> servers. As above plus
-#                        optional gateway.jwksEgress; viaMuster: false.
-#                        NOT YET SUPPORTED — install blocked (needs DCR-capable
-#                        IdP, RFC 7591/8707).
 ingress:
-  mode: agentgateway-muster    # agentgateway-muster | muster-direct | agentgateway-direct
+  mode: agentgateway-muster    # agentgateway-muster | muster-direct
   parentRefs: []               # ALL modes: public Gateway, shared by both rendered routes
   hostnames: []                # ALL modes: muster public hostname(s)
   httpRoute:                   # shared base, applied to both rendered HTTPRoutes
@@ -2679,11 +2675,8 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     # viaMuster — when true, routes all MCP traffic through muster instead of
     # having agentgateway connect to each server directly. muster keeps all
-    # per-server connection logic, OAuth, and RFC 8693 token exchange. The
-    # direct topology (false) needs a DCR-capable IdP, which is not yet
-    # available; when Zitadel or similar ships RFC 7591 + RFC 8707, muster's
-    # aggregator role can be retired.
-    viaMuster: true            # must match ingress.mode (guard-enforced): agentgateway-muster=>true, agentgateway-direct=>false
+    # per-server connection logic, OAuth, and RFC 8693 token exchange.
+    viaMuster: true            # must match ingress.mode (guard-enforced): agentgateway-muster=>true, muster-direct=>false
     # musterUrl — in-cluster address of the muster Service. Stable because
     # muster.fullnameOverride pins the Service name to `muster` regardless
     # of the umbrella release name. Override only if the namespace differs.
