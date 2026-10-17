@@ -167,7 +167,9 @@ overwrite would hide a values file that still spells the old key.
     and image.repository, ateom-gvisor, the floor of components.substrate.versionRange) — never the
     worker the kagent build was published against, so the worker and the
     atelet are one Substrate release whatever kagent build the range admits
-    (giantswarm/agent-platform#466). An installation's own workerImage stands
+    (giantswarm/agent-platform#466); the workers run the release the control
+    plane runs, which the substrate release's followRelease sets
+    (giantswarm/agent-platform#822). An installation's own workerImage stands
     only while its tag is that release (a mirror by another path). And
     substrateWorkerPool.template.podAffinity, the worker pods' preferred
     affinity to the atelet on their node, from the Substrate release that
@@ -218,7 +220,10 @@ overwrite would hide a values file that still spells the old key.
     giantswarm.io/organization (an entry added when none names ate-golden; a
     different selector there fails the render), and an ownNamespaceSelector
     entry on the same label, each derived entry once; a Substrate floor below
-    1.12.0 fails the render. Its
+    1.12.0 fails the render. Always ateController.gvisorWorker.followRelease:
+    true, so ate-controller runs every gVisor pool on its own release's
+    ateom-gvisor and the workers follow the release Flux resolves, patches
+    included (giantswarm/agent-platform#822; an own false fails the render). Its
     atelet.imageCache.pinnedImages is NOT derived here: the kagent release's
     ConfigMap kagent-images feeds it through the HelmRelease's valuesFrom
     (components.substrate.valuesFromRefs), so no copy of a digest lives here.
@@ -533,6 +538,17 @@ repeating the admin groups. */ -}}
 {{- end -}}
 {{- end -}}
 {{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref "readWriteRole" $role "ownerRole" $role) -}}
+{{- end -}}
+{{- if eq .name "substrate" -}}
+{{- /* The workers run the release the control plane runs
+(giantswarm/agent-platform#822): ate-controller starts every gVisor pool on
+its own release's ateom-gvisor, so a Substrate patch Flux resolves within the
+range rolls the pool with the atelet, no chart release. Set here rather than
+left to the Substrate chart's default; an own false fails the render. */ -}}
+{{- if eq (toString (dig "ateController" "gvisorWorker" "followRelease" true (.root.Values.substrate | default dict))) "false" -}}
+{{- fail "substrate.ateController.gvisorWorker.followRelease is false: the workers would run the WorkerPool's spec.workerImage (the floor of components.substrate.versionRange) while the atelet runs the release Flux resolves, so a Substrate patch would run a newer atelet beside an older worker — leave it unset; the chart sets it (giantswarm/agent-platform#822)" -}}
+{{- end -}}
+{{- $_ := set $derived "ateController" (dict "gvisorWorker" (dict "followRelease" true)) -}}
 {{- end -}}
 {{- if and (eq .name "substrate") (dig "organizations" "enabled" false (.root.Values.tenants | default dict)) -}}
 {{- /* The Organizations' agents (giantswarm/agent-platform#1041): each
@@ -1268,10 +1284,13 @@ a minor. So the range is an exact version (a BOM pin, `1.0.0`) or a floor with
 the ceiling of its own minor, `>=X.Y.Z <X.(Y+1).0` — and no `-0` anywhere: Flux's
 Masterminds semver skips every prerelease while no bound of a range carries one
 and evaluates them all once one does, so `<1.1.0-0` would admit the line's dev
-builds. A later patch of the pinned minor may reach the control plane ahead of
-the worker, a `1.1.0` never. `0.x`, `~1.0.0`, `^1.0.0`, `<1.1.0`, a `-0` bound, a
+builds. A later patch of the pinned minor reaches the control plane and, through
+ate-controller's followRelease, the workers with it (giantswarm/agent-platform#822);
+a `1.1.0` never reaches either. `0.x`, `~1.0.0`, `^1.0.0`, `<1.1.0`, a `-0` bound, a
 `<=` ceiling, a patch ceiling and the former `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` are
-refused. Called by
+refused, and so is a floor below
+agent-platform.substrate.followReleaseFloor, whose ate-controller runs every
+pool's spec.workerImage. Called by
 agent-platform.validateSubstrate while components.substrate is on.
 */}}
 {{- define "agent-platform.substrate.validateRange" -}}
@@ -1292,7 +1311,25 @@ agent-platform.validateSubstrate while components.substrate is on.
 {{- if not $ok -}}
 {{- fail (printf "components.substrate.versionRange %q does not confine one Substrate release and its patches: the kagent WorkerPool's worker image (ateom-gvisor) follows the range's floor, the atelet follows the release Flux resolves, and only a minor of the line changes the runtime contract the two share — so the range is one exact version (1.0.0) or a floor with the ceiling of its own minor and no -0 bound (>=1.0.0 <1.1.0 — a -0 anywhere makes Flux evaluate the line's dev builds against the range); a worker and an atelet of different contracts boot no golden actor (giantswarm/agent-platform#466)" $range) -}}
 {{- end -}}
+{{- $pin := regexReplaceAll "-.*$" (include "agent-platform.substrate.pinnedVersion" .) "" -}}
+{{- $followFloor := include "agent-platform.substrate.followReleaseFloor" . -}}
+{{- if lt ((semver $pin).Compare (semver $followFloor)) 0 -}}
+{{- fail (printf "components.substrate.versionRange %q pins Substrate %s, below %s: its ate-controller runs every WorkerPool on its spec.workerImage, the range's floor, so a patch Flux resolves would run a newer atelet beside an older worker; the workers follow the control plane's release from %s on (ateController.gvisorWorker.followRelease, giantswarm/agent-platform#822)" $range $pin $followFloor $followFloor) -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+The first release of the Substrate line whose ate-controller runs every gVisor
+WorkerPool on the ateom-gvisor of its own release
+(ateController.gvisorWorker.followRelease, giantswarm/substrate#114). The chart
+sets the flag on the substrate release (agent-platform.componentDerivedValues),
+so the workers run the release the control plane runs and a Substrate patch
+within the range rolls the pool with no chart release
+(giantswarm/agent-platform#822); agent-platform.substrate.validateRange refuses
+a floor below it. One line, no comment inside the define:
+tests/verify-worker-image.py reads the value from this file.
+*/}}
+{{- define "agent-platform.substrate.followReleaseFloor" -}}1.4.0{{- end -}}
 
 {{/*
 The first release of the Substrate line (giantswarm/substrate, the chart
