@@ -56,7 +56,7 @@ muster. Each case below pins one property of its wiring:
 - inline credentials, a duplicate or non-DNS provider name, a provider without a
   kind fail the render naming the path; a gitlab instance below the floor
   agent-platform.workspaceManager.gitlabFloor (0.5.0, a release candidate of it
-  too) fails naming it, the default floor is 0.10.0-rc.5, and the component
+  too) fails naming it, the default floor is 0.10.0, and the component
   chart at the BOM's pin takes the instance; a workspaces.namespace that differs from
   kagent's fails naming the key, kagent.namespaceOverride moves it;
 - the kagent address: with kagent on, the workspace-manager range's floor at
@@ -119,7 +119,7 @@ NO_GITLAB = ["--set", "workspace-manager.providers[1].kind=github"]
 GITLAB_FLOOR = "0.5.0"
 # The first workspace-manager release whose person's token is muster's grant.
 GRANT_FLOOR = "0.10.0"
-DEFAULT_FLOOR = "0.10.0-rc.5"
+DEFAULT_FLOOR = "0.10.0"
 CREDENTIALS = ("privateKey", "clientSecret", "token", "signingKey")
 
 

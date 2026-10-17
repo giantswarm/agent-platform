@@ -405,7 +405,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.flux.enabled | bool | `true` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `">=5.44.0-rc.5 <6.0.0-0"` |  |
+| components.muster.versionRange | string | `">=5.44.0 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.muster.driftDetection.mode | string | `"enabled"` |  |
@@ -539,7 +539,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.workspace-manager.chart | string | `"workspace-manager"` |  |
 | components.workspace-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.workspace-manager.versionRange | string | `">=0.10.0-rc.5 <0.11.0-0"` |  |
+| components.workspace-manager.versionRange | string | `">=0.10.0 <0.11.0"` |  |
 | components.workspace-manager.valuesFrom | string | `"workspace-manager"` |  |
 | components.workspace-manager.dependsOn[0] | string | `"muster"` |  |
 | components.workspace-manager.dependsOn[1] | string | `"agent-platform-connectivity"` |  |

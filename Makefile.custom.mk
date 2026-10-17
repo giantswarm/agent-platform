@@ -2922,11 +2922,11 @@ verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every
 # The floor of components.muster.versionRange, the muster chart version the
 # platform toolset presets are rendered through: the presets need the `label:`
 # rule (muster#1168, from 5.12.0; a muster before it refuses to start on them),
-# the floor is 5.44.0-rc.5 (the workspace credential provider; from 5.43.6 its
+# the floor is 5.44.0 (the workspace credential provider; from 5.43.6 its
 # chart accepts the affinity of muster's two replicas, giantswarm/muster#1541). The customer BOM pins it. The chart is pulled anonymously from gsoci to render its ConfigMap
 # with the values the meta chart forwards, so the check reads the real schema
 # and template of that version, not a copy.
-PRESETS_MUSTER_VERSION := 5.44.0-rc.5
+PRESETS_MUSTER_VERSION := 5.44.0
 # The muster chart's own render guards want the OAuth inputs an installation
 # supplies; these are placeholders for the render, not part of the assertion.
 PRESETS_MUSTER_SETS := --set muster.oauth.server.baseUrl=https://muster.ci.example.com --set muster.oauth.server.dex.issuerUrl=https://dex.ci.example.com --set muster.oauth.server.dex.clientId=platform --set muster.oauth.server.existingSecret=muster-oauth
@@ -2938,7 +2938,7 @@ verify-presets: ## Assert the infrastructure / agent-platform toolset presets re
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >$(VERIFY_TMP)/vp-flux.out 2>&1 || { cat $(VERIFY_TMP)/vp-flux.out; exit 1; }
 	@python3 tests/verify-toolset-presets.py release-values $(VERIFY_TMP)/vp-flux.out >$(VERIFY_TMP)/vp-muster-values.yaml
 	@echo "--> components.muster.versionRange floors at the muster that has the label rule"
-	@grep -qE 'semver: ">=$(PRESETS_MUSTER_VERSION) <6\.0\.0(-0)?"' $(VERIFY_TMP)/vp-flux.out || { echo "FAIL: the muster range does not floor at $(PRESETS_MUSTER_VERSION)"; exit 1; }
+	@grep -q 'semver: ">=$(PRESETS_MUSTER_VERSION) <6.0.0"' $(VERIFY_TMP)/vp-flux.out || { echo "FAIL: the muster range does not floor at $(PRESETS_MUSTER_VERSION)"; exit 1; }
 	@echo "ok: forwarded and floored"
 	@echo "--> muster $(PRESETS_MUSTER_VERSION) accepts the forwarded values and renders the presets into its ConfigMap"
 	@rm -rf $(VERIFY_TMP)/vp-muster-chart && mkdir -p $(VERIFY_TMP)/vp-muster-chart
