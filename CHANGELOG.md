@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The data plane's access log carries the request id: `request_id`** (giantswarm/agent-platform#867). The `<release>-access-log` policy adds the `x-request-id` request header as `request_id` to every access log line, beside `agent_instance_id`. The Dev Portal's backend sets that header on every call it makes through the data plane and names it in an error banner, so the banner's id finds the gateway line of the failing call. The data plane generates no id: a request without the header logs none. The connectivity README's "Access log attributes" lists the chart's field set. `make verify-access-log` asserts both default fields. **Every installation with the agentgateway data plane gets one more field on its access log**; no pod rolls.
+
 ### Changed
 
 - **The Substrate workers run the release the control plane runs** (giantswarm/agent-platform#822). The chart sets `ateController.gvisorWorker.followRelease: true` on the substrate release, so a Substrate patch within `components.substrate.versionRange` rolls the kagent worker pool with the atelet, with no chart release. The range is the one source of the Substrate version; the WorkerPool's `spec.workerImage` stays the floor's. An own `followRelease: false` fails the render. `make verify-worker-image` renders the substrate chart the range resolves to and fails when its ate-controller would run the workers on another release than its atelet.
