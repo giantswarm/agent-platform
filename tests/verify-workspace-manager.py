@@ -339,6 +339,13 @@ def main(meta: str, connectivity: str) -> int:
             if prefix not in (on or ""):
                 fail(f"switching workspaces on did not derive the gateway's workspaces.toolsPrefix onto {key}")
             on = on.replace(prefix, "", 1)
+        if key == ("HelmRelease", "muster"):
+            # And muster's credential provider, which answers the egress gateway
+            # for a workspace Session's provider hosts while Substrate is on
+            # (tests/verify-workspace-session-admission.py pins its values).
+            provider = block(block(on or "", "muster", 4), "credentialProvider", 6)
+            if provider:
+                on = on.replace(provider, "", 1)
         if on != doc:
             fail(f"switching workspaces on changed {key} (muster.* included)")
     if any(kind == "MCPServer" for kind, _ in on_docs):

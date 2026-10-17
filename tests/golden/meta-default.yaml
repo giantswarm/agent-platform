@@ -1602,6 +1602,9 @@ spec:
             ephemeral-storage: 16Mi
       createNamespace: false
       credentialProvider:
+        additionalProviders:
+        - host: muster.agent-platform.svc:50051
+          uriAuthority: muster.giantswarm.io
         namespacePolicies:
         - allowedNamespaces:
           - kagent
@@ -2395,7 +2398,8 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=5.43.6 <6.0.0"
+    semver: ">=5.44.0-rc.5 <6.0.0"
+    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

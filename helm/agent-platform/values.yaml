@@ -404,9 +404,13 @@ components:  # @schema additionalProperties: true
     # Floor 5.43.6: the chart's schema accepts an affinity (giantswarm/muster#1541);
     # an earlier muster refuses the pod anti-affinity the muster values below
     # spread the two replicas with.
+    # Floor 5.44.0-rc.5: muster serves FetchSecret to the egress gateway for
+    # a workspace Session's provider hosts (credentialProvider) and answers
+    # agent-manager's session bindings, with the issuer pin of the
+    # workspace-manager's registration; 5.44.0 once it is promoted.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.43.6 <6.0.0"
+    versionRange: ">=5.44.0-rc.5 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -5252,6 +5256,21 @@ tenants:
 # without workspaces: no release, and nothing of the three blocks below
 # reaches the connectivity release.
 workspaces:
+  # On, with Substrate on, a workspace Session's git and provider API calls
+  # act as the person: kagent compiles each provider host of the Session into
+  # its actor's egress rules as ate-secret://muster.giantswarm.io/<provider
+  # instance>/<git|api> (kagent.controller.session.credentialAuthority), the
+  # egress gateway fetches it from muster (substrate.credentialProvider
+  # .additionalProviders) and muster answers the person's current token for a
+  # Session agent-manager bound to that person (muster.credentialProvider, on
+  # with the switch). muster releases a grant only for a provider instance in
+  # muster.muster.credentialProvider.releasable, derived as the instance the
+  # workspace-manager's registration is pinned to (its name in
+  # workspace-manager.providers byte for byte) under the App's issuer
+  # (workspace-manager.muster.mcpServer.auth.authorizationServer.issuer, own
+  # or derived as <url>/apps/<app.id>); an
+  # own map stands beside it, and an instance missing there gets the
+  # gateway's 403 on its hosts.
   enabled: false
   # The workspace storage: the read-write-many StorageClass the workspace
   # volumes are claimed from, and whether the connectivity release renders it.
@@ -6123,6 +6142,17 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
         allowedNamespaces: [kagent]
       - atespace: ate-golden
         allowedNamespaces: [kagent]
+    # The further credential providers the egress gateway resolves
+    # ate-secret:// URIs through, by URI authority. muster.giantswarm.io is
+    # muster's FetchSecret (its Service in the platform's namespace, port
+    # 50051), which answers a workspace Session's provider hosts with the
+    # person's token: the meta chart turns it on with workspaces.enabled and
+    # Substrate (muster.credentialProvider). The gateway dials it with its pod
+    # identity. An installation that overrides the list keeps this entry, or
+    # a workspace Session's git and API calls get the gateway's 403.
+    additionalProviders:
+      - uriAuthority: muster.giantswarm.io
+        host: muster.agent-platform.svc:50051
   postgres:
     # Where the control plane keeps its state. `auto` (the default) follows
     # the platform: with the platform's CNPG Cluster on (postgres.enabled) the

@@ -405,7 +405,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.flux.enabled | bool | `true` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `">=5.43.6 <6.0.0"` |  |
+| components.muster.versionRange | string | `">=5.44.0-rc.5 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.muster.driftDetection.mode | string | `"enabled"` |  |
@@ -1583,6 +1583,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.credentialProvider.namespacePolicies[0].allowedNamespaces[0] | string | `"kagent"` |  |
 | substrate.credentialProvider.namespacePolicies[1].atespace | string | `"ate-golden"` |  |
 | substrate.credentialProvider.namespacePolicies[1].allowedNamespaces[0] | string | `"kagent"` |  |
+| substrate.credentialProvider.additionalProviders[0].uriAuthority | string | `"muster.giantswarm.io"` |  |
+| substrate.credentialProvider.additionalProviders[0].host | string | `"muster.agent-platform.svc:50051"` |  |
 | substrate.postgres.enabled | string | `"auto"` |  |
 | substrate.postgres.readWriteConnectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |
