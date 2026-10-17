@@ -354,6 +354,14 @@ the connectivity release creates with providers and oauth.enabled
 {{- $_ := set $derived "grant" (dict "signingKey" (dict "name" .name "key" .key)) -}}
 {{- end -}}
 {{- end -}}
+{{- /* muster's pin of the registration to one provider instance's App: the
+instance and the Secret with the App's OAuth client, the block's own or
+derived (agent-platform.workspaceManager.musterPin). */ -}}
+{{- with (include "agent-platform.workspaceManager.musterPin" .root | fromJson) -}}
+{{- if and .provider .secretName -}}
+{{- $_ := set $derived "muster" (dict "mcpServer" (dict "auth" (dict "provider" .provider "authorizationServer" (dict "clientCredentialsSecretRef" (dict "name" .secretName))))) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "klaus-gateway" -}}
 {{- $kg := .root.Values.klausGateway | default dict -}}
@@ -642,54 +650,85 @@ name one Secret. Emits JSON: {name, key}, or {}.
 {{- end -}}
 
 {{/*
-The guards of the browser's provider sign-in, while workspaces are on, as the
-connectivity chart runs them (templates/workspace-manager/_helpers.tpl,
-validateCallback, validateSigninKeys and validateGrantKey) but here, where a
-failure is seen instead of inside the connectivity release:
-- a provider instance with an OAuth client (values.oauth.clientID) needs a
-  callback a browser reaches: a base URL (workspace-manager.oauth.baseURL or
-  global.domain), routed by the chart (workspaceManager.route.enabled) or set
-  explicitly for a route of the installation's own, https (http only on a
-  loopback host) on a host that is not a cluster name;
-- with providers and oauth.enabled, workspace-manager.signin.keys names the
-  Secret and a key id (a lower-case DNS label of at most 32 characters);
+muster's pin of the workspace-manager's registration, with provider instances
+and oauth.enabled (nothing otherwise): the provider instance whose App the
+person grants once in muster (muster.mcpServer.auth.provider) and the Secret
+with that App's OAuth client under client-id and client-secret, which muster
+reads (muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name).
+The block's own value stands; else the provider is the only instance of kind
+github, and the Secret that of the instance's values.oauth.clientSecret when its
+key is client-secret, muster's default key. Either is empty when neither
+applies; agent-platform.validateWorkspaceAuth then fails naming the key. Emits
+JSON {provider, secretName}, or {}.
+Usage: include "agent-platform.workspaceManager.musterPin" . | fromJson
+*/}}
+{{- define "agent-platform.workspaceManager.musterPin" -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $out := dict -}}
+{{- if and $wm.providers (dig "oauth" "enabled" false $wm) -}}
+{{- $auth := dig "muster" "mcpServer" "auth" dict $wm | default dict -}}
+{{- $provider := toString ($auth.provider | default "") -}}
+{{- if not $provider -}}
+{{- $github := list -}}
+{{- range $wm.providers -}}{{- if eq (toString .kind) "github" -}}{{- $github = append $github (toString .name) -}}{{- end -}}{{- end -}}
+{{- if eq (len $github) 1 -}}{{- $provider = first $github -}}{{- end -}}
+{{- end -}}
+{{- $secret := toString (dig "authorizationServer" "clientCredentialsSecretRef" "name" "" $auth) -}}
+{{- if and $provider (not $secret) -}}
+{{- range $wm.providers -}}
+{{- if eq (toString .name) $provider -}}
+{{- $oauth := (.values | default dict).oauth | default dict -}}
+{{- $client := ternary $oauth.clientSecret dict (kindIs "map" $oauth) | default dict -}}
+{{- if and (kindIs "map" $client) (eq (toString ($client.key | default "")) "client-secret") -}}
+{{- $secret = toString ($client.name | default "") -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out = dict "provider" $provider "secretName" $secret -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The guards of the workspace-manager's provider authorization, while workspaces
+are on, here where a failure is seen instead of inside the component release:
+- with provider instances and oauth.enabled: the floor of
+  components.workspace-manager.versionRange at
+  agent-platform.workspaceManager.musterGrantFloor; muster's pin
+  (agent-platform.workspaceManager.musterPin) names a provider instance of
+  workspace-manager.providers and a Secret with the App's OAuth client, and
+  muster.mcpServer.auth.authorizationServer.issuer is set — without the pin no
+  person has a provider token and every workspace is refused;
 - workspace-manager.grant.signingKey, when set, only with providers and
   oauth.enabled (the manager refuses to start with a key without them), and
   the reference the manager gets names a Secret and a data key.
-Emits nothing; fails naming the instance or key and the fix.
+Emits nothing; fails naming the key and the fix.
 */}}
-{{- define "agent-platform.validateWorkspaceSignIn" -}}
+{{- define "agent-platform.validateWorkspaceAuth" -}}
 {{- if (.Values.workspaces | default dict).enabled -}}
 {{- $wm := index .Values "workspace-manager" | default dict -}}
-{{- $fullname := $wm.fullnameOverride | default "workspace-manager" -}}
-{{- $own := dig "oauth" "baseURL" "" $wm -}}
-{{- $base := include "agent-platform.workspaceManager.baseURL" . -}}
-{{- $route := dig "route" "enabled" true (.Values.workspaceManager | default dict) -}}
-{{- range $i, $p := ($wm.providers | default list) -}}
-{{- $oauth := (($p.values | default dict).oauth | default dict) -}}
-{{- if and (kindIs "map" $oauth) ($oauth.clientID | default "") -}}
-{{- $at := printf "workspace-manager.providers[%d] (%s) sets an OAuth client (values.oauth.clientID)" $i (toString $p.name) -}}
-{{- if not $base -}}
-{{- fail (printf "%s but its callback has no host: workspace-manager.oauth.baseURL is empty and global.domain is not set. Set global.domain (the callback is then https://%s.<global.domain>/callback/%s) or workspace-manager.oauth.baseURL, and register that URL with the provider's OAuth client" $at $fullname (toString $p.name)) -}}
-{{- end -}}
-{{- if and (not $route) (not $own) -}}
-{{- fail (printf "%s but workspaceManager.route.enabled is false and workspace-manager.oauth.baseURL is empty: nothing routes %s/callback/%s. Turn the route on, or set workspace-manager.oauth.baseURL to the URL the installation's own route serves" $at $base (toString $p.name)) -}}
-{{- end -}}
-{{- $u := urlParse $base -}}
-{{- $host := regexReplaceAll ":[0-9]+$" ($u.host | default "") "" -}}
-{{- $loopback := or (eq $host "localhost") (hasSuffix ".localhost" $host) (eq $host "127.0.0.1") (eq $host "::1") -}}
-{{- if or (regexMatch "(^|\\.)(svc|cluster\\.local)$" $host) (not $host) (not (or (eq $u.scheme "https") (and (eq $u.scheme "http") $loopback))) -}}
-{{- fail (printf "%s but the base URL %q is not reachable from the person's browser: the provider redirects the browser to <baseURL>/callback/%s, so the base URL is https on a public host (http only on a loopback host), never a cluster-internal name. Set workspace-manager.oauth.baseURL to the public URL, or leave it empty to derive https://%s.<global.domain>" $at $base (toString $p.name) $fullname) -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
 {{- if and $wm.providers (dig "oauth" "enabled" false $wm) -}}
-{{- $keys := dig "signin" "keys" dict $wm -}}
-{{- if not ($keys.secretName | default "") -}}
-{{- fail "workspace-manager.signin.keys.secretName is empty: with providers and oauth.enabled the workspace-manager seals each person's provider sign-ins with the keys of that Secret; name it (workspaceManager.signinKeys.create renders it)" -}}
+{{- $range := dig "workspace-manager" "versionRange" "" .Values.components -}}
+{{- $wmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- $floor := include "agent-platform.workspaceManager.musterGrantFloor" . -}}
+{{- if lt ((semver $wmFloor).Compare (semver $floor)) 0 -}}
+{{- fail (printf "components.workspace-manager.versionRange (%s) admits releases before %s, whose manager keeps each person's provider sign-in in a store of its own that this chart no longer feeds: the person's provider token is muster's grant of the provider instance's App from %s on — raise the floor to %s" $range $floor $floor $floor) -}}
 {{- end -}}
-{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,30}[a-z0-9])?$" (toString ($keys.current | default ""))) -}}
-{{- fail (printf "workspace-manager.signin.keys.current %q is not a key id: a lower-case DNS label of at most 32 characters, the data key of the sealing key in Secret %s" (toString ($keys.current | default "")) $keys.secretName) -}}
+{{- $pin := include "agent-platform.workspaceManager.musterPin" . | fromJson -}}
+{{- $names := list -}}
+{{- range $wm.providers -}}{{- $names = append $names (toString .name) -}}{{- end -}}
+{{- if not $pin.provider -}}
+{{- fail (printf "workspace-manager.muster.mcpServer.auth.provider is empty and the provider instances (%s) have not exactly one of kind github to pin by default: name the instance whose App the person grants in muster" (join ", " $names)) -}}
+{{- end -}}
+{{- if not (has $pin.provider $names) -}}
+{{- fail (printf "workspace-manager.muster.mcpServer.auth.provider %q names no provider instance of workspace-manager.providers (%s)" $pin.provider (join ", " $names)) -}}
+{{- end -}}
+{{- if not $pin.secretName -}}
+{{- fail (printf "workspace-manager.muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name is empty and provider instance %s has no values.oauth.clientSecret with key client-secret to take it from: name the Secret with the App's OAuth client under client-id and client-secret, which muster reads" $pin.provider) -}}
+{{- end -}}
+{{- if not (dig "muster" "mcpServer" "auth" "authorizationServer" "issuer" "" $wm) -}}
+{{- fail (printf "workspace-manager.muster.mcpServer.auth.authorizationServer.issuer is empty: muster files each person's grant of provider instance %s's App under that issuer, the App's own identity (https://github.com/apps/<app slug> for a GitHub App); set it" $pin.provider) -}}
 {{- end -}}
 {{- end -}}
 {{- $grant := dig "grant" "signingKey" dict $wm | default dict -}}
@@ -1552,8 +1591,7 @@ render, either way round. With the switch on, every credential of the
 workspace-manager block is a Secret reference ({name, key}), never a value:
 the provider instances' (any key of a provider's values named privateKey,
 clientSecret, secret, token, password or apiKey, at any depth) and the grant
-signing key. A signInStore block fails the render: the chart takes its sign-in
-keys as signin.keys {secretName, current} and its closed schema refuses the key.
+signing key.
 */}}
 {{- define "agent-platform.validateWorkspaces" -}}
 {{- $on := (.Values.workspaces | default dict).enabled | default false -}}
@@ -1590,9 +1628,6 @@ keys as signin.keys {secretName, current} and its closed schema refuses the key.
 {{- end -}}
 {{- end -}}
 {{- include "agent-platform.workspaces.secretRefs" (dict "node" ($p.values | default dict) "at" (printf "workspace-manager.providers[%d].values" $i)) -}}
-{{- end -}}
-{{- if $wm.signInStore -}}
-{{- fail "workspace-manager.signInStore is not a key of the workspace-manager chart, whose schema refuses it: the sign-in keys are workspace-manager.signin.keys {secretName, current}, a Secret the connectivity release creates (workspaceManager.signinKeys.create); remove signInStore" -}}
 {{- end -}}
 {{- with dig "grant" "signingKey" dict $wm -}}
 {{- include "agent-platform.workspaces.secretRef" (dict "ref" . "at" "workspace-manager.grant.signingKey") -}}
@@ -3055,6 +3090,18 @@ of it included), or the render fails (agent-platform.validateWorkspaces). One
 line, no comment inside the define.
 */}}
 {{- define "agent-platform.workspaceManager.gitlabFloor" -}}0.5.0{{- end -}}
+
+{{/*
+The first release of the workspace-manager line whose person's provider token
+is muster's grant of a provider instance's App (muster.mcpServer.auth.provider)
+and which keeps no sign-in store of its own; an earlier manager with provider
+instances and OAuth needs the sign-in keys this chart no longer creates. With
+provider instances and oauth.enabled the floor of
+components.workspace-manager.versionRange is at it or later (a release
+candidate of it included), or the render fails
+(agent-platform.validateWorkspaceAuth). One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.workspaceManager.musterGrantFloor" -}}0.10.0{{- end -}}
 
 {{/*
 The first release of the klaus-gateway line (giantswarm/klaus-gateway) whose

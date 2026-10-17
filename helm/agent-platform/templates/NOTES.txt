@@ -82,13 +82,11 @@ Next steps (docs/install.md "After the install"):
 {{- $wmBase := include "agent-platform.workspaceManager.baseURL" . }}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager")) $wmBase }}
 
-Workspace provider sign-in, base URL {{ $wmBase }} (routed: /signin, /connect/<instance>, /callback/<instance>):
-  Redirect URI to register on the workspace-manager's Dex client {{ dig "oauth" "dex" "clientID" "" $wm | default .Values.global.identity.clientId | default "<global.identity.clientId>" }} (the browser signs in there before a connect):
-    {{ $wmBase }}/signin
-{{- with $wm.providers }}
-  Callback URL to register with each provider instance's OAuth client (a GitHub App's callback URL):
-{{- range . }}
-    {{ .name }}: {{ $wmBase }}/callback/{{ .name }}
+Workspaces, base URL {{ $wmBase }} (routed: /.well-known/jwks.json):
+{{- with (include "agent-platform.workspaceManager.musterPin" . | fromJson) }}
+{{- if .provider }}
+  Provider sign-in: muster, pinned to provider instance {{ .provider }}'s App (OAuth client in Secret {{ .secretName }}); a person grants it once in muster.
+  The App's callback URL is muster's <muster base URL>/oauth/proxy/callback.
 {{- end }}
 {{- end }}
 {{- with (include "agent-platform.workspaceManager.grantSigningKey" . | fromJson) }}
