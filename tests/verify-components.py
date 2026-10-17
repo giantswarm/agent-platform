@@ -95,7 +95,7 @@ SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
 SUBSTRATE_RANGE = ">=1.12.0 <1.13.0"
 # muster: the first release that serves FetchSecret to the egress gateway with the
 # issuer pin, a release candidate until its stable is promoted.
-MUSTER_RANGE = ">=5.44.0-rc.5 <6.0.0"
+MUSTER_RANGE = ">=5.44.0-rc.5 <6.0.0-0"
 SUBSTRATE_PIN = "1.12.0"  # the range's floor, the BOM pin and the worker image's tag: the release whose credential provider grants namespaces selected by label (ownNamespaceSelector, allowedNamespaceSelector; giantswarm/substrate#456), on 1.11's upstream pin; before it 1.11.4, the release whose atunnel ends a CONNECT tunnel once the actor closes its connection (giantswarm/substrate#451); before it 1.11.3, the release that marks a crashed actor's resume refusal not resumable, whose ateom-gvisor reports a running actor's sandbox exit and whose atelet terminates an actor whose restore failed, and the floor at or above the Substrate kagent 1.12.0 is built against (1.11.1); before it 1.11.0, the release whose egress gateway mints and injects actor JWTs (an actor_jwt entry of replace_headers, giantswarm/substrate#421) on agentgateway 2.4.0, and whose ate-controller can mark the worker pods that host actors (giantswarm/substrate#425)
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
@@ -107,7 +107,7 @@ LINE = {
     "agent-manager": (GSOCI, ">=2.3.0 <3.0.0", ["muster", "kagent"]),
     # The Google access-token credential provider plugin beside Substrate
     # (giantswarm/substrate-credential-providers): 0.1.0 is its first release.
-    "google-access-token-credential-provider": (GSOCI, ">=0.1.0 <1.0.0", ["substrate"]),
+    "google-access-token-credential-provider": (GSOCI, ">=0.1.0 <0.2.0", ["substrate"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).
@@ -116,11 +116,11 @@ LINE = {
     # giantswarm/giantswarm#36711); 0.20.2 was the first vm-manager release
     # from the generated CircleCI pipeline with its guest image artifact
     # (gsoci, the catalog). muster alone: the MCPServer CR.
-    "vm-manager": (GSOCI, ">=0.24.0 <1.0.0", ["muster"]),
+    "vm-manager": (GSOCI, ">=0.24.0 <0.25.0", ["muster"]),
     # 0.4.2 is the first cluster-manager release with the muster registration and
     # the identity contract the meta chart forwards that also tolerates a cluster
     # without the Cluster API group. muster alone: the MCPServer CR.
-    "cluster-manager": (GSOCI, ">=0.22.0 <1.0.0", ["muster"]),
+    "cluster-manager": (GSOCI, ">=0.22.0 <0.35.0", ["muster"]),
     # Swarmgeist on the line: the line speaks A2A v1 over gRPC to the controller
     # GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10 REST client and
     # belongs to the 3.x meta chart. The floor is 2.0.0, the Slack-only line

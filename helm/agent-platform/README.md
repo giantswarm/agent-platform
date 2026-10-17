@@ -405,7 +405,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.flux.enabled | bool | `true` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `">=5.44.0-rc.5 <6.0.0"` |  |
+| components.muster.versionRange | string | `">=5.44.0-rc.5 <6.0.0-0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.muster.driftDetection.mode | string | `"enabled"` |  |
@@ -421,13 +421,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agentgateway.dependsOn[0] | string | `"gateway-api-crds"` |  |
 | components.valkey.chart | string | `"valkey"` |  |
 | components.valkey.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.valkey.versionRange | string | `"0.x"` |  |
+| components.valkey.versionRange | string | `"0.4.x"` |  |
 | components.valkey.valuesFrom | string | `"valkey"` |  |
 | components.valkey.enabled | bool | `true` |  |
 | components.valkey.omitKeys[0] | string | `"podDisruptionBudget"` |  |
 | components.agent-platform-mcps.chart | string | `"agent-platform-mcps"` |  |
 | components.agent-platform-mcps.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-mcps.versionRange | string | `"0.x"` |  |
+| components.agent-platform-mcps.versionRange | string | `"0.12.x"` |  |
 | components.agent-platform-mcps.valuesFrom | string | `"agent-platform-mcps"` |  |
 | components.agent-platform-mcps.enabled | bool | `false` |  |
 | components.agent-platform-mcps.injectGlobal | bool | `false` |  |
@@ -486,7 +486,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.upgradeRemediation.retries | int | `3` |  |
 | components.google-access-token-credential-provider.chart | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.google-access-token-credential-provider.versionRange | string | `">=0.1.0 <1.0.0"` |  |
+| components.google-access-token-credential-provider.versionRange | string | `">=0.1.0 <0.2.0"` |  |
 | components.google-access-token-credential-provider.valuesFrom | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.injectGlobal | bool | `false` |  |
 | components.google-access-token-credential-provider.targetNamespace | string | `"ate-system"` |  |
@@ -500,7 +500,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.klaus-gateway.enabled | bool | `false` |  |
 | components.agent-sandbox.chart | string | `"agent-sandbox"` |  |
 | components.agent-sandbox.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-sandbox.versionRange | string | `"0.x"` |  |
+| components.agent-sandbox.versionRange | string | `"0.2.x"` |  |
 | components.agent-sandbox.enabled | bool | `false` |  |
 | components.agent-sandbox.injectGlobal | bool | `false` |  |
 | components.agent-sandbox.crds | string | `"CreateReplace"` |  |
@@ -523,7 +523,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.vm-manager.versionRange | string | `">=0.24.0 <1.0.0"` |  |
+| components.vm-manager.versionRange | string | `">=0.24.0 <0.25.0"` |  |
 | components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |
@@ -531,7 +531,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
 | components.cluster-manager.chart | string | `"cluster-manager"` |  |
 | components.cluster-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.cluster-manager.versionRange | string | `">=0.22.0 <1.0.0"` |  |
+| components.cluster-manager.versionRange | string | `">=0.22.0 <0.35.0"` |  |
 | components.cluster-manager.valuesFrom | string | `"cluster-manager"` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.cluster-manager.dependsOn[0] | string | `"muster"` |  |
@@ -539,7 +539,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.workspace-manager.chart | string | `"workspace-manager"` |  |
 | components.workspace-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.workspace-manager.versionRange | string | `">=0.10.0-rc.5 <1.0.0"` |  |
+| components.workspace-manager.versionRange | string | `">=0.10.0-rc.5 <0.11.0-0"` |  |
 | components.workspace-manager.valuesFrom | string | `"workspace-manager"` |  |
 | components.workspace-manager.dependsOn[0] | string | `"muster"` |  |
 | components.workspace-manager.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
@@ -625,7 +625,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.gateway-api-crds.targetNamespace | string | `"kube-system"` |  |
 | components.dicebear.chart | string | `"dicebear"` |  |
 | components.dicebear.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.dicebear.versionRange | string | `"0.x"` |  |
+| components.dicebear.versionRange | string | `"0.3.x"` |  |
 | components.dicebear.valuesFrom | string | `"dicebear"` |  |
 | components.dicebear.injectGlobal | bool | `false` |  |
 | components.dicebear.enabled | bool | `true` |  |
