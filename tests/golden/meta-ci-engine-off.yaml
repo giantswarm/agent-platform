@@ -2476,6 +2476,8 @@ spec:
       busyWorker:
         annotations:
           karpenter.sh/do-not-disrupt: "true"
+      gvisorWorker:
+        followRelease: true
     atelet:
       affinity: {}
       extraEnv: []
