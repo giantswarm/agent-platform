@@ -206,3 +206,30 @@ WorkerPools in the Organizations' namespaces
 {{- end -}}
 {{- printf "system:serviceaccount:%s:%s" .Release.Namespace $name -}}
 {{- end -}}
+
+{{/*
+The installation's skills credential as agent-manager's chart names it, a
+JSON object {current, previous}: with agent-manager.skills.mintGitAuthSecret
+the minted <fullname>-skills-token, the installation's own name, and its
+earlier name tenant-credential-<fullname>-skills-token, otherwise
+agent-manager.skills.gitAuthSecretName; agent-manager.skills.previousGitAuthSecretNames
+are earlier names in either case. The migrate run moves every release naming
+an earlier name to the current one; the credential-refs admission refuses
+every one of them in an Organization's namespace.
+*/}}
+{{- define "agent-platform.agentManager.skillsGitAuth" -}}
+{{- $am := include "agent-platform.agentManager.chartValues" . | fromJson -}}
+{{- $current := dig "skills" "gitAuthSecretName" "" $am -}}
+{{- $previous := list -}}
+{{- if dig "skills" "mintGitAuthSecret" false $am -}}
+{{- $fullname := include "agent-platform.agentManager.fullname" . -}}
+{{- $current = printf "%s-skills-token" $fullname -}}
+{{- $previous = append $previous (printf "tenant-credential-%s-skills-token" $fullname) -}}
+{{- end -}}
+{{- range (dig "skills" "previousGitAuthSecretNames" list $am) -}}
+{{- if and (ne . $current) (not (has . $previous)) -}}
+{{- $previous = append $previous . -}}
+{{- end -}}
+{{- end -}}
+{{- dict "current" $current "previous" $previous | toJson -}}
+{{- end -}}

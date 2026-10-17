@@ -107,32 +107,6 @@ spec:
 agent-manager's image for the Job (agentManager.migration.image; the tag is the
 meta chart's BOM pin for the agent-manager component).
 */}}
-{{/*
-The installation's skills credential as agent-manager's chart names it, a
-JSON object {current, previous}: with agent-manager.skills.mintGitAuthSecret
-the minted tenant-credential-<fullname>-skills-token and its earlier name
-<fullname>-skills-token, otherwise agent-manager.skills.gitAuthSecretName;
-agent-manager.skills.previousGitAuthSecretNames are earlier names in either
-case. The migrate run moves every release naming an earlier name to the
-current one.
-*/}}
-{{- define "agent-platform.kagent.migration.skillsGitAuth" -}}
-{{- $am := include "agent-platform.agentManager.chartValues" . | fromJson -}}
-{{- $current := dig "skills" "gitAuthSecretName" "" $am -}}
-{{- $previous := list -}}
-{{- if dig "skills" "mintGitAuthSecret" false $am -}}
-{{- $fullname := include "agent-platform.agentManager.fullname" . -}}
-{{- $current = printf "tenant-credential-%s-skills-token" $fullname -}}
-{{- $previous = append $previous (printf "%s-skills-token" $fullname) -}}
-{{- end -}}
-{{- range (dig "skills" "previousGitAuthSecretNames" list $am) -}}
-{{- if and (ne . $current) (not (has . $previous)) -}}
-{{- $previous = append $previous . -}}
-{{- end -}}
-{{- end -}}
-{{- dict "current" $current "previous" $previous | toJson -}}
-{{- end -}}
-
 {{- define "agent-platform.kagent.migration.image" -}}
 {{- $i := .Values.agentManager.migration.image -}}
 {{- printf "%s/%s:%s" $i.registry $i.repository $i.tag -}}
