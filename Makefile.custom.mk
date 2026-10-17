@@ -1606,7 +1606,7 @@ verify-components-charts: ## Render every component chart with the values the me
 	@echo "component charts accept the forwarded values."
 
 .PHONY: verify-registry-retry
-verify-registry-retry: ## Assert that tests/verify-components-charts.py's registry calls survive a throttled registry: a 429 or 503 is retried after its Retry-After (seconds or an HTTP date, capped), else with exponential backoff, the token request included; one that stays throttled fails with its 429 after the bounded attempts; any other error raises at once. Offline: a local HTTP server plays the registry.
+verify-registry-retry: ## Assert that tests/verify-components-charts.py's registry calls survive a throttled registry: a 429 or 503 is retried after its Retry-After (seconds or an HTTP date, capped), else with exponential backoff, the token request included; a transient network error (a timeout, the TLS handshake's included, or a reset connection) is retried with the backoff; one that stays throttled or unreachable fails with its last error after the bounded attempts; any other error raises at once. Offline: a local HTTP server plays the registry.
 	@echo "====> $@"
 	@python3 tests/verify-registry-retry.py
 	@echo "registry calls retry throttled answers with bounded backoff."
