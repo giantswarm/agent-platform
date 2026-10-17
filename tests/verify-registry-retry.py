@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Assert that tests/verify-components-charts.py's registry_get survives a
-throttled registry and still fails on one that stays throttled.
+throttled registry and a transient network error, and still fails on one that
+stays throttled or unreachable.
 
 gsoci.azurecr.io answers 429 Too Many Requests when it throttles anonymous
 pulls; a registry_get that raised on the first one turned test-ingress-modes red
@@ -15,7 +16,15 @@ time.sleep with a recorder, so the waits are asserted without being slept:
 - 429s and 503s without Retry-After: exponential backoff from REGISTRY_BACKOFF;
 - the token endpoint throttled during the anonymous challenge: retried too;
 - 429 on every call: an HTTPError 429 after exactly REGISTRY_ATTEMPTS calls;
-- 404 and 500: raised at once, never retried.
+- 404 and 500: raised at once, never retried;
+- a TLS handshake timeout (URLError), a bare socket timeout and a reset
+  connection, then 200: retried with the backoff;
+- a handshake timeout on every call: that URLError after exactly
+  REGISTRY_ATTEMPTS calls;
+- a network error that is not transient (a DNS failure): raised at once.
+
+The network errors are injected by a urlopen wrapper that raises them before
+the call reaches the local server.
 
 Offline (127.0.0.1 only). The script under test imports PyYAML, which the CI job
 installs.
@@ -26,10 +35,12 @@ import http.server
 import importlib.util
 import json
 import os
+import socket
 import sys
 import threading
 import time
 import urllib.error
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -79,16 +90,33 @@ cc.print = lambda *a, **k: None  # the NOTE lines are not under test
 
 failures: list[str] = []
 
+# Network errors to raise, in order, before a urlopen reaches the server.
+network_errors: list[OSError] = []
+real_urlopen = urllib.request.urlopen
 
-def case(name: str, script, path: str, want_waits=None, want_calls=None, want_error=None):
+
+def flaky_urlopen(target, *args, **kwargs):
+    if network_errors:
+        Registry.calls.append("network-error")
+        raise network_errors.pop(0)
+    return real_urlopen(target, *args, **kwargs)
+
+
+cc.urllib.request.urlopen = flaky_urlopen
+
+
+def case(name: str, script, path: str, want_waits=None, want_calls=None, want_error=None, errors=()):
     Registry.script, Registry.calls = script, []
     waits.clear()
     cc.TOKENS.clear()
+    network_errors[:] = list(errors)
     try:
         body, _ = cc.registry_get(REPO, f"{BASE}{path}")
         got = ("ok", body)
     except urllib.error.HTTPError as e:
         got = ("error", e.code)
+    except urllib.error.URLError as e:
+        got = ("error", str(e.reason))
     want = ("error", want_error) if want_error else ("ok", {"tags": ["ok"], "token": "t"})
     problems = []
     if got != want:
@@ -138,6 +166,29 @@ case("429 on every call: fails with 429 after exactly REGISTRY_ATTEMPTS calls",
 case("404: raised at once, not retried", {}, TAGS, want_waits=[], want_calls=1, want_error=404)
 
 case("500: raised at once, not retried", {TAGS: [(500, {})]}, TAGS, want_waits=[], want_calls=1, want_error=500)
+
+HANDSHAKE = "_ssl.c:1064: The handshake operation timed out"
+
+case("TLS handshake timeout, then 200: retried with backoff",
+     {TAGS: [(200, {})]},
+     TAGS, want_waits=[round(b)], want_calls=2,
+     errors=[urllib.error.URLError(TimeoutError(HANDSHAKE))])
+
+case("socket timeout and reset connection, then 200: retried with backoff",
+     {TAGS: [(200, {})]},
+     TAGS, want_waits=[round(b), round(2 * b)], want_calls=3,
+     errors=[socket.timeout("timed out"), urllib.error.URLError(ConnectionResetError(104, "Connection reset by peer"))])
+
+case("handshake timeout on every call: fails with it after exactly REGISTRY_ATTEMPTS calls",
+     {TAGS: [(200, {})]},
+     TAGS, want_waits=[round(min(b * 2 ** r, cc.REGISTRY_MAX_WAIT)) for r in range(cc.REGISTRY_ATTEMPTS - 1)],
+     want_calls=cc.REGISTRY_ATTEMPTS, want_error=HANDSHAKE,
+     errors=[urllib.error.URLError(TimeoutError(HANDSHAKE)) for _ in range(cc.REGISTRY_ATTEMPTS)])
+
+case("DNS failure: raised at once, not retried",
+     {TAGS: [(200, {})]},
+     TAGS, want_waits=[], want_calls=1, want_error="[Errno -2] Name or service not known",
+     errors=[urllib.error.URLError(socket.gaierror(-2, "Name or service not known"))])
 
 server.shutdown()
 if failures:
