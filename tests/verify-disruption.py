@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Assert the voluntary-disruption knobs the meta chart forwards to the component
 charts (giantswarm/agent-platform#431): karpenter.sh/do-not-disrupt on the pods
-of muster, kagent-controller and klaus-gateway through each chart's
-podAnnotations, and each chart's PodDisruptionBudget knob on and drainable,
-maxUnavailable: 1 — muster's and the klaus-gateway chart's (1.1.0+)
-podDisruptionBudget with minAvailable emptied (both charts default to
-minAvailable: 1, and a null set at this layer is consumed by Helm before it
-reaches the chart), kagent's controller.pdb on the chart's own default. muster-valkey
+of kagent-controller and klaus-gateway through each chart's podAnnotations, and
+each chart's PodDisruptionBudget knob on and drainable, maxUnavailable: 1 — the
+klaus-gateway chart's (1.1.0+) podDisruptionBudget with minAvailable emptied (the
+chart defaults to minAvailable: 1, and a null set at this layer is consumed by
+Helm before it reaches the chart), kagent's controller.pdb on the chart's own
+default. muster is HA instead (giantswarm/agent-platform#1080): replicaCount 2,
+a preferred pod anti-affinity on kubernetes.io/hostname selecting the muster
+pods, a budget of minAvailable: 1 alone, and no do-not-disrupt. muster-valkey
 (giantswarm/agent-platform#439): karpenter.sh/do-not-disrupt through the valkey
 subchart's podAnnotations (valkey.valkey.podAnnotations); its budget is the
 connectivity chart's (valkey.podDisruptionBudget travels to the connectivity
@@ -150,6 +152,21 @@ def check_busy_worker(manifest: str, off: bool) -> None:
         expect(ANNOTATION in ann, "substrate: no karpenter.sh/do-not-disrupt on ateController.busyWorker.annotations (a busy worker's node would be consolidated under its actors)")
 
 
+def check_muster_ha(muster: list[str], off: bool) -> None:
+    """muster runs two replicas, preferably on two nodes, behind a budget that keeps one serving."""
+    expect("replicaCount: 2" in muster, "muster: replicaCount is not 2 (one replica leaves no endpoint while its pod is evicted)")
+    term = stripped(muster, "affinity", "podAntiAffinity", "preferredDuringSchedulingIgnoredDuringExecution")
+    expect(term, "muster: no preferred pod anti-affinity (the two replicas could share one node)")
+    expect("topologyKey: kubernetes.io/hostname" in term, f"muster: the anti-affinity does not spread over kubernetes.io/hostname ({term})")
+    expect("app.kubernetes.io/name: muster" in term, f"muster: the anti-affinity does not select the muster pods by name ({term})")
+    expect(not block(muster, "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution"), "muster: a required anti-affinity leaves the second replica Pending on a cluster with one schedulable node")
+    pdb = stripped(muster, "podDisruptionBudget")
+    expect(pdb, "muster: no podDisruptionBudget forwarded")
+    expect(f"enabled: {str(not off).lower()}" in pdb, f"muster: podDisruptionBudget.enabled is not {not off}")
+    expect("minAvailable: 1" in pdb, f"muster: podDisruptionBudget.minAvailable is not 1 (an eviction must leave one replica serving) ({pdb})")
+    expect(not any(l.startswith("maxUnavailable") for l in pdb), f"muster: podDisruptionBudget forwards maxUnavailable next to minAvailable ({pdb})")
+
+
 def main(argv: list[str]) -> int:
     off = "--off" in argv
     placement = "--placement" in argv
@@ -167,14 +184,13 @@ def main(argv: list[str]) -> int:
     kagent = values(helm_release(manifest, "kagent"))
     klaus = values(helm_release(manifest, "klaus-gateway"))
 
-    for name, vals in (("muster", muster), ("klaus-gateway", klaus)):
-        pdb = [l.strip() for l in block(vals, "podDisruptionBudget")]
-        expect(pdb, f"{name}: no podDisruptionBudget forwarded")
-        expect(f"enabled: {str(not off).lower()}" in pdb, f"{name}: podDisruptionBudget.enabled is not {not off}")
-        expect("maxUnavailable: 1" in pdb, f"{name}: podDisruptionBudget.maxUnavailable is not 1 (a single replica must stay drainable)")
-        expect('minAvailable: ""' in pdb, f"{name}: podDisruptionBudget.minAvailable must travel as the empty string (a null never reaches the chart and its minAvailable: 1 default would come back next to maxUnavailable)")
     klaus_pdb = [l.strip() for l in block(klaus, "podDisruptionBudget")]
+    expect(klaus_pdb, "klaus-gateway: no podDisruptionBudget forwarded")
+    expect(f"enabled: {str(not off).lower()}" in klaus_pdb, f"klaus-gateway: podDisruptionBudget.enabled is not {not off}")
+    expect("maxUnavailable: 1" in klaus_pdb, "klaus-gateway: podDisruptionBudget.maxUnavailable is not 1 (a single replica must stay drainable)")
+    expect('minAvailable: ""' in klaus_pdb, "klaus-gateway: podDisruptionBudget.minAvailable must travel as the empty string (a null never reaches the chart and its minAvailable: 1 default would come back next to maxUnavailable)")
     expect("unhealthyPodEvictionPolicy: AlwaysAllow" in klaus_pdb, "klaus-gateway: the budget does not keep unhealthy pods evictable")
+    check_muster_ha(muster, off)
 
     controller = [l.strip() for l in block(kagent, "controller", "pdb")]
     expect(controller, "kagent: no controller.pdb forwarded")
@@ -186,10 +202,7 @@ def main(argv: list[str]) -> int:
     kagent_ann = [l.strip() for l in block(kagent, "controller", "podAnnotations")]
     klaus_ann = [l.strip() for l in block(klaus, "podAnnotations")]
     expect("application.giantswarm.io/team: bumblebee" in muster_ann, "muster: the team annotation was lost")
-    if off:
-        expect(ANNOTATION not in muster_ann, "muster: do-not-disrupt still travels with the key set to null")
-    else:
-        expect(ANNOTATION in muster_ann, "muster: no karpenter.sh/do-not-disrupt annotation")
+    expect(ANNOTATION not in muster_ann, "muster: karpenter.sh/do-not-disrupt travels next to two replicas and their budget; it would pin both pods' nodes against consolidation, drift and expiry and the budget would never be reached")
     expect(ANNOTATION in kagent_ann, "kagent: no karpenter.sh/do-not-disrupt on controller.podAnnotations")
     expect(ANNOTATION in klaus_ann, "klaus-gateway: no karpenter.sh/do-not-disrupt on podAnnotations")
 
@@ -204,7 +217,7 @@ def main(argv: list[str]) -> int:
     # Karpenter's consolidation, drift and expiry and the budget would never be reached.
     expect(ANNOTATION not in [l.strip() for l in block(connectivity, "gateway", "parameters", "podAnnotations")], "connectivity: the meta chart still forwards karpenter.sh/do-not-disrupt onto the HA data plane")
 
-    print("ok: muster, kagent-controller, klaus-gateway and muster-valkey carry do-not-disrupt, busy Substrate workers are marked (the HA data plane is not) and their budgets travel where their charts read them" + (" (switched off)" if off else "") + "; scheduling.singletons empty forwards no placement")
+    print("ok: muster runs two replicas spread over nodes behind minAvailable: 1 without do-not-disrupt; kagent-controller, klaus-gateway and muster-valkey carry do-not-disrupt, busy Substrate workers are marked (the HA data plane is not) and their budgets travel where their charts read them" + (" (switched off)" if off else "") + "; scheduling.singletons empty forwards no placement")
     return 0
 
 
