@@ -400,6 +400,13 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 	@if grep -qE '^      value: /mcp' $(VERIFY_TMP)/vg-edge.out; then echo "FAIL: layer-1 /mcp route rendered with the edge as data plane"; exit 1; fi
 	@grep -B4 -A4 '"world", "cluster"' $(VERIFY_TMP)/vg-edge.out | grep -q '"443"' || { echo "FAIL: edge network policy does not admit world traffic on 443"; exit 1; }
 	@echo "ok: edge mode"
+	@echo "--> edge mode without the avatar renderer's route answers 404 on the avatars host (not the MCP catch-all's 406)"
+	@sed -n '/avatars-notfound.yaml/,/^---/p' $(VERIFY_TMP)/vg-edge.out | grep -q '"avatars.ci.example.com"' || { echo "FAIL: the avatars host has no 404 route on the edge with the renderer's route off"; exit 1; }
+	@sed -n '/avatars-notfound.yaml/,/^---/p' $(VERIFY_TMP)/vg-edge.out | grep -q 'status: 404' || { echo "FAIL: the avatars 404 route has no directResponse 404"; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set components.dicebear.enabled=false --set dicebear.route.enabled=true 2>/dev/null | grep -q 'avatars-notfound' || { echo "FAIL: the avatars 404 route is missing with components.dicebear.enabled=false"; exit 1; }
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set dicebear.route.enabled=true 2>/dev/null | grep -q 'avatars-notfound'; then echo "FAIL: the avatars 404 route rendered beside the renderer's own route"; exit 1; fi
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(GLOBAL_VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true 2>/dev/null | grep -q 'avatars-notfound'; then echo "FAIL: the avatars 404 route rendered without the edge as data plane"; exit 1; fi
+	@echo "ok: avatars host 404"
 	@echo "--> edge guards: the certificate Secret and the agentgateway mode are required"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set gatewayApi.gateway.tls.secretName= >$(VERIFY_TMP)/vg-tls.out 2>&1; then \
 		echo "FAIL: gateway.create without tls.secretName accepted"; exit 1; \
@@ -1290,17 +1297,18 @@ DAL_POLICY := agent-platform-connectivity-access-log
 ACCESS_LOG_ATTRS := python3 -c 'import sys,yaml; [print(a["name"]+"="+a["expression"]) for a in next(d for d in yaml.safe_load_all(open(sys.argv[1])) if d)["spec"]["frontend"]["accessLog"]["attributes"]["add"]]'
 
 .PHONY: verify-access-log
-verify-access-log: ## Assert the data plane's access log fields (giantswarm/giantswarm#38023): with a data plane the connectivity chart renders the Gateway-scoped -access-log AgentgatewayPolicy whose frontend.accessLog.attributes add agent_instance_id, x-kagent-agent-instance-id read behind the Substrate egress predicate (the field is empty, and dropped, for any other caller); an installation's own field joins it; every entry off or muster-direct renders none; an entry without an expression fails the render naming it; the meta chart forwards the same default to the connectivity release.
+verify-access-log: ## Assert the data plane's access log fields (giantswarm/giantswarm#38023): with a data plane the connectivity chart renders the Gateway-scoped -access-log AgentgatewayPolicy whose frontend.accessLog.attributes add agent_instance_id, x-kagent-agent-instance-id read behind the Substrate egress predicate (the field is empty, and dropped, for any other caller), and request_id, the x-request-id request header (giantswarm/agent-platform#867); an installation's own field joins it; every entry off or muster-direct renders none; an entry without an expression fails the render naming it; the meta chart forwards the same default to the connectivity release.
 	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) >$(VERIFY_TMP)/val-on.out 2>&1 || { cat $(VERIFY_TMP)/val-on.out; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/val-on.out AgentgatewayPolicy $(DAL_POLICY) >$(VERIFY_TMP)/val-pol.out || { echo "FAIL: no AgentgatewayPolicy $(DAL_POLICY) with the data plane on"; exit 1; }
 	@grep -q '^      kind: Gateway$$' $(VERIFY_TMP)/val-pol.out && grep -q '^      name: agentgateway$$' $(VERIFY_TMP)/val-pol.out || { echo "FAIL: the -access-log policy does not target the data-plane Gateway"; cat $(VERIFY_TMP)/val-pol.out; exit 1; }
-	@[ "$$($(ACCESS_LOG_ATTRS) $(VERIFY_TMP)/val-pol.out)" = 'agent_instance_id=(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""' ] || { echo "FAIL: agent_instance_id does not read x-kagent-agent-instance-id behind the Substrate egress predicate"; cat $(VERIFY_TMP)/val-pol.out; exit 1; }
+	@$(ACCESS_LOG_ATTRS) $(VERIFY_TMP)/val-pol.out >$(VERIFY_TMP)/val-attrs.out
+	@printf '%s\n' 'agent_instance_id=(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""' 'request_id=request.headers["x-request-id"]' | diff -u - $(VERIFY_TMP)/val-attrs.out || { echo "FAIL: the default fields are not agent_instance_id (x-kagent-agent-instance-id behind the Substrate egress predicate) and request_id (the x-request-id header), in name order"; exit 1; }
 	@echo "ok: defaults"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.accessLog.attributes.model.expression=llm.requestModel >$(VERIFY_TMP)/val-add.out 2>&1 || { cat $(VERIFY_TMP)/val-add.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/val-add.out AgentgatewayPolicy $(DAL_POLICY) >$(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: agent_instance_id$$' $(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: model$$' $(VERIFY_TMP)/val-add-pol.out || { echo "FAIL: an installation's own field does not join agent_instance_id"; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/val-add.out AgentgatewayPolicy $(DAL_POLICY) >$(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: agent_instance_id$$' $(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: request_id$$' $(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: model$$' $(VERIFY_TMP)/val-add-pol.out || { echo "FAIL: an installation's own field does not join agent_instance_id"; exit 1; }
 	@echo "ok: an installation's own field"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.accessLog.attributes.agent_instance_id.enabled=false >$(VERIFY_TMP)/val-off.out 2>&1 || { cat $(VERIFY_TMP)/val-off.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.accessLog.attributes.agent_instance_id.enabled=false --set gateway.accessLog.attributes.request_id.enabled=false >$(VERIFY_TMP)/val-off.out 2>&1 || { cat $(VERIFY_TMP)/val-off.out; exit 1; }
 	@if grep -q 'name: $(DAL_POLICY)$$' $(VERIFY_TMP)/val-off.out; then echo "FAIL: the -access-log policy renders with every entry off"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) >$(VERIFY_TMP)/val-direct.out 2>&1 || { cat $(VERIFY_TMP)/val-direct.out; exit 1; }
 	@if grep -q 'name: $(DAL_POLICY)$$' $(VERIFY_TMP)/val-direct.out; then echo "FAIL: the -access-log policy renders in muster-direct, with no data plane to target"; exit 1; fi
@@ -1308,7 +1316,8 @@ verify-access-log: ## Assert the data plane's access log fields (giantswarm/gian
 	elif ! grep -q "gateway.accessLog.attributes.broken has no expression" $(VERIFY_TMP)/val-bad.out; then echo "FAIL: an entry without an expression failed for the wrong reason"; cat $(VERIFY_TMP)/val-bad.out; exit 1; fi
 	@echo "ok: guards"
 	@$(HELM) template t $(CHART_DIR) $(VM) >$(VERIFY_TMP)/val-meta.out 2>&1 || { cat $(VERIFY_TMP)/val-meta.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/val-meta.out HelmRelease agent-platform-connectivity | grep -A2 '^      accessLog:$$' | grep -q '^          agent_instance_id:$$' || { echo "FAIL: the meta chart does not forward gateway.accessLog.attributes.agent_instance_id to the connectivity release"; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/val-meta.out HelmRelease agent-platform-connectivity >$(VERIFY_TMP)/val-meta-conn.out
+	@for f in agent_instance_id request_id; do grep -A12 '^      accessLog:$$' $(VERIFY_TMP)/val-meta-conn.out | grep -q "^          $$f:$$" || { echo "FAIL: the meta chart does not forward gateway.accessLog.attributes.$$f to the connectivity release"; exit 1; }; done
 	@echo "ok: $@"
 
 # Anthropic prompt caching (giantswarm/giantswarm#37788; the kagent line's carried patch kagent-dev/kagent#2788).
@@ -1441,7 +1450,7 @@ verify-serving-slice: ## Assert the serving slice (giantswarm/agent-platform#326
 	@echo "serving slice verified."
 
 .PHONY: verify-runtime-slice
-verify-runtime-slice: ## Assert the runtime slice (giantswarm/agent-platform#317): examples/runtime-slice.yaml renders exactly kagent-crds, substrate-crds, substrate, kagent, agentgateway and connectivity (no muster, dicebear, valkey, Backstage, agent-manager, model-manager, MCP server; the engine off); the kagent release carries the profile's snapshot location and the profile without one fails naming it; the target knob stamps every kubeConfig and renders no hook Job; the connectivity chart with the forwarded values renders nothing of muster, no HTTPRoute, the Substrate hops' policies and the agentgateway controller's policy. The live half (an agent placed there by agent-manager becomes Ready, giantswarm/agent-manager#22): README "The runtime slice on workload clusters". HELM selects the binary.
+verify-runtime-slice: ## Assert the runtime slice (giantswarm/agent-platform#317): examples/runtime-slice.yaml renders exactly kagent-crds, substrate-crds, substrate, google-access-token-credential-provider, kagent, agentgateway and connectivity (no muster, dicebear, valkey, Backstage, agent-manager, model-manager, MCP server; the engine off); the kagent release carries the profile's snapshot location and the profile without one fails naming it; the target knob stamps every kubeConfig and renders no hook Job; the connectivity chart with the forwarded values renders nothing of muster, no HTTPRoute, the Substrate hops' policies and the agentgateway controller's policy. The live half (an agent placed there by agent-manager becomes Ready, giantswarm/agent-manager#22): README "The runtime slice on workload clusters". HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@HELM="$(HELM)" python3 tests/verify-runtime-slice.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "runtime slice verified."
@@ -1597,6 +1606,12 @@ verify-components-charts: ## Render every component chart with the values the me
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-components-charts.py $(CHART_DIR)
 	@echo "component charts accept the forwarded values."
+
+.PHONY: verify-registry-retry
+verify-registry-retry: ## Assert that tests/verify-components-charts.py's registry calls survive a throttled registry: a 429 or 503 is retried after its Retry-After (seconds or an HTTP date, capped), else with exponential backoff, the token request included; a transient network error (a timeout, the TLS handshake's included, or a reset connection) is retried with the backoff; one that stays throttled or unreachable fails with its last error after the bounded attempts; any other error raises at once. Offline: a local HTTP server plays the registry.
+	@echo "====> $@"
+	@python3 tests/verify-registry-retry.py
+	@echo "registry calls retry throttled answers with bounded backoff."
 
 .PHONY: sync-unreleased
 sync-unreleased: ## Write Chart.yaml's agent-platform.giantswarm.io/unreleased from the registries: every component whose range admits no published chart (UNRELEASED), with the version it waits for; drop it when nothing waits. The rest of verify-components-charts runs with it. Network: gsoci.azurecr.io.
@@ -2286,7 +2301,7 @@ verify-workerpool: ## Assert the Substrate WorkerPool reaches the cluster as wri
 	@echo "ok: $@"
 
 .PHONY: verify-worker-image
-verify-worker-image: ## Assert the Substrate worker image follows the chart's own Substrate pin (giantswarm/agent-platform#466): the kagent release carries substrateWorkerPool.workerImage = <substrate.image.registry>/ateom-gvisor:<floor of components.substrate.versionRange> — derived over the forwarded block, never the kagent build's stamp — so the worker and the atelet are one Substrate release whatever kagent build the kagent range admits (the 4.15.2 shape — the Substrate range a minor behind — forwards that minor's worker); a mirror's substrate.image.registry moves it; an own workerImage stands while its tag is the pinned release and fails the render otherwise; an exact pin derives that version; a Substrate range that does not confine one runtime contract (no floor, a ceiling past the next minor or at the next patch, the former -gs.N shape, ~, ^, <=) fails the render naming the range; the kagent chart the range resolves to renders the one WorkerPool with the derived image and was published against the pinned release's X.Y.Z (its Chart.yaml substrate dependency, or the tag of the worker image the line stamps). Network: gsoci.azurecr.io; needs PyYAML.
+verify-worker-image: ## Assert the Substrate worker image follows the chart's own Substrate pin (giantswarm/agent-platform#466): the kagent release carries substrateWorkerPool.workerImage = <substrate.image.registry>/ateom-gvisor:<floor of components.substrate.versionRange> — derived over the forwarded block, never the kagent build's stamp — so the worker and the atelet are one Substrate release whatever kagent build the kagent range admits (the 4.15.2 shape — the Substrate range a minor behind — forwards that minor's worker); a mirror's substrate.image.registry moves it; an own workerImage stands while its tag is the pinned release and fails the render otherwise; an exact pin derives that version; a Substrate range that does not confine one runtime contract (no floor, a ceiling past the next minor or at the next patch, the former -gs.N shape, ~, ^, <=) fails the render naming the range; the kagent chart the range resolves to renders the one WorkerPool with the derived image and was published against the pinned release's X.Y.Z (its Chart.yaml substrate dependency, or the tag of the worker image the line stamps); the workers run the release the control plane runs (#822): the substrate release carries ateController.gvisorWorker.followRelease true, an own false fails the render, and the substrate chart the range resolves to renders ate-controller's --gvisor-worker-image as the ateom-gvisor of its atelet's registry and tag, failing when the two differ. Network: gsoci.azurecr.io; needs PyYAML.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-worker-image.py $(CHART_DIR)
@@ -2999,7 +3014,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) >$(VERIFY_TMP)/vw-bs.out 2>&1 || { cat $(VERIFY_TMP)/vw-bs.out; exit 1; }
 	@awk '/^kind: ConfigMap$$/,/^---/' $(VERIFY_TMP)/vw-bs.out | awk '/name: agent-platform-backstage-app-config$$/,/^---/' >$(VERIFY_TMP)/vw-bs-cm.out
 	@[ -s $(VERIFY_TMP)/vw-bs-cm.out ] || { echo "FAIL: no ConfigMap agent-platform-backstage-app-config (the backstage: block's extraAppConfig mounts exactly this name)"; exit 1; }
-	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'https://avatars.ci.example.com' 'repositories:' 'rootRedirect: /agent-platform'; do \
+	@for pattern in 'baseUrl: https://backstage.ci.example.com' 'metadataUrl: https://dex.ci.example.com/.well-known/openid-configuration' 'clientId: agent-platform' 'url: https://muster.ci.example.com/mcp' 'baseDomain: ci.example.com' '^        agent-platform:$$' 'name: agent-platform$$' 'fluxServiceAccountName: kagent-flux' 'apiBaseUrl: https://agentgateway.ci.example.com$$' 'https://avatars.ci.example.com' 'repositories:'; do \
 		grep -q -- "$$pattern" $(VERIFY_TMP)/vw-bs-cm.out || { echo "FAIL: the Backstage app-config lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q 'client: pg' $(VERIFY_TMP)/vw-bs-cm.out; then echo "FAIL: the pg database block rendered with the chart's sqlite default"; exit 1; fi

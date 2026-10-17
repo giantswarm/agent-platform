@@ -407,7 +407,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.3.0
+          tag: 2.4.0
       networkPolicy:
         egress:
           cidrs: []
@@ -607,6 +607,8 @@ spec:
         enabled: true
       gateway-api-crds:
         enabled: false
+      google-access-token-credential-provider:
+        enabled: false
       gpu-operator:
         enabled: false
       kagent:
@@ -655,6 +657,9 @@ spec:
             enabled: true
             expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"]
               : ""'
+          request_id:
+            enabled: true
+            expression: request.headers["x-request-id"]
       gatewayClassName: agentgateway
       http:
         maxBufferSize: 8Mi
@@ -766,6 +771,8 @@ spec:
             protocol: grpc
             tenant: giantswarm
       registry: gsoci.azurecr.io
+    google-access-token-credential-provider:
+      namespacePolicies: []
     hooks:
       kubectlImage:
         registry: gsoci.azurecr.io

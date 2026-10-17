@@ -503,6 +503,14 @@ gateway:
       agent_instance_id:
         enabled: true
         expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"] : ""'
+      # The request's id: the x-request-id request header, which the Dev
+      # Portal's backend sets on every call it makes through the data plane
+      # and shows in an error banner, so the banner's id finds this line. The
+      # data plane generates none; a request without the header logs no id.
+      # Any caller can set it: correlation, never identity.
+      request_id:
+        enabled: true
+        expression: 'request.headers["x-request-id"]'
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -2904,7 +2912,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.3.0
+      tag: 2.4.0
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
@@ -3194,7 +3202,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/envoy
-          tag: v1.39.3
+          tag: v1.40.0
         port: 10000
         clientIdentity: spiffe://cluster.local/ns/ate-system/sa/ate-api-server
         resources:  # @schema additionalProperties: true
@@ -3229,7 +3237,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/livenessprobe
-          tag: v2.19.0
+          tag: v2.20.0
         nodePort: 29662
         resources:  # @schema additionalProperties: true
           requests:
@@ -3560,6 +3568,10 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     extraEnv: []
 # The substrate-crds component's values (none); forwarded, read by nothing here.
 substrate-crds: {}  # @schema skipProperties: true; additionalProperties: true
+# The Google access-token credential provider's values (components.google-access
+# -token-credential-provider): forwarded to its own release, nothing here reads
+# them.
+google-access-token-credential-provider: {}  # @schema skipProperties: true; additionalProperties: true
 kserve-llmisvc-crd: {}  # @schema skipProperties: true; additionalProperties: true
 # The llm-d controller chart's values; this chart reads
 # kserve.createSharedResources and kserve.controller.deploymentMode for its

@@ -82,6 +82,9 @@ def main(meta: str) -> int:
                     continue
                 url, rng = cc.source(rendered[("OCIRepository", chart)])
                 tags = cc.registry_tags(url)
+                if not tags and name in cc.UNRELEASED:
+                    print(f"NOTE: {what}: {url} publishes nothing yet (waits for {cc.UNRELEASED[name]}); rendered once a build exists")
+                    continue
                 version = cc.fluxsemver.resolve(tags, rng)
                 if not version and name not in cc.UNRELEASED:
                     cc.fail(f"{what}: nothing published at {url} satisfies {rng!r}")

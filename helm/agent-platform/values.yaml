@@ -728,9 +728,11 @@ components:  # @schema additionalProperties: true
     versionRange: ">=1.12.0 <1.13.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
-    # release Flux resolved (ateController.gvisorWorker.followRelease, on by
-    # default; giantswarm/substrate#114), so a candidate's atelet and worker
-    # are one build whatever the derived workerImage says.
+    # release Flux resolved (ateController.gvisorWorker.followRelease, which
+    # the chart sets on the substrate release and refuses false;
+    # giantswarm/substrate#114, giantswarm/agent-platform#822),
+    # so a candidate's or a patch's atelet and worker are one build whatever
+    # the derived workerImage says.
     valuesFrom: substrate-crds
     # The chart takes no values; nothing reads `global`.
     injectGlobal: false
@@ -791,6 +793,29 @@ components:  # @schema additionalProperties: true
     # good one (strategy rollback, remediateLastFailure: Flux's defaults).
     upgradeRemediation:  # @schema additionalProperties: true
       retries: 3
+  google-access-token-credential-provider:  # @schema additionalProperties: true
+    chart: google-access-token-credential-provider
+    # The Google access-token credential provider: an Agent Substrate
+    # credential provider plugin (giantswarm/substrate-credential-providers,
+    # upstream's internal/plugins shape) serving the class
+    # google-access-token.k8s.io, a Google access token minted from the service
+    # account key a Secret holds, which a Vertex AI ModelConfig's actor needs
+    # (giantswarm/giantswarm#38547). Follows components.kagent like the
+    # Substrate entries and lands beside Substrate in ate-system: the egress
+    # gateway dials it there over mTLS, its serving certificate and its callers'
+    # trust bundle come from Substrate's signers, and its grants are derived
+    # from substrate.credentialProvider.namespacePolicies
+    # (agent-platform.componentDerivedValues). The Substrate chart routes the
+    # class to it through substrate.credentialProvider.additionalProviders
+    # below, which a Substrate release before 1.12.0 refuses (its bundled
+    # provider served the name itself): the plugin is deployed first and routed
+    # with the floor bump.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    versionRange: ">=0.1.0 <1.0.0"
+    valuesFrom: google-access-token-credential-provider
+    injectGlobal: false
+    targetNamespace: ate-system
+    dependsOn: [substrate]
   klaus-gateway:  # @schema additionalProperties: true
     chart: klaus-gateway
     repository: oci://gsoci.azurecr.io/charts/giantswarm
@@ -1085,12 +1110,15 @@ components:  # @schema additionalProperties: true
     # kagent 0.10 and never meets this chart. The complete v2 portal is 2.0.0
     # (the gRPC backend, giantswarm/backstage#2344, shipped as a major): the
     # range spans both majors so the component resolves the complete portal,
-    # not the 1.2.0 without the backend. Bounded below 3.0.0: the next major
-    # is the next cut-over.
+    # not the 1.2.0 without the backend. The range admits the 3.x line, the
+    # Agent Platform shell: 3.0.0 changes the portal's UI, not its chart
+    # values, and the connectivity chart's app-config turns the shell on
+    # (app.portals.agentPlatform), which a 2.x portal ignores. Bounded below
+    # 4.0.0: the next major is the next cut-over.
     # The floor is 2.68.0: the image preloads the OpenTelemetry SDK and the
     # chart takes observability.otel, the OTLP trace export
     # global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
-    versionRange: ">=2.68.0 <3.0.0"
+    versionRange: ">=2.68.0 <4.0.0"
     valuesFrom: backstage
     # The backstage chart validates its values with additionalProperties: false,
     # and these keys are not its own: the connectivity chart reads them for the
@@ -1801,6 +1829,14 @@ gateway:
       agent_instance_id:
         enabled: true
         expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"] : ""'
+      # The request's id: the x-request-id request header, which the Dev
+      # Portal's backend sets on every call it makes through the data plane
+      # and shows in an error banner, so the banner's id finds this line. The
+      # data plane generates none; a request without the header logs no id.
+      # Any caller can set it: correlation, never identity.
+      request_id:
+        enabled: true
+        expression: 'request.headers["x-request-id"]'
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -2862,7 +2898,14 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # stays EMPTY here: the derived value lands over it. An installation that
   # sets it names an ateom-gvisor image TAGGED WITH THAT FLOOR (a mirror by a
   # path other than substrate.image.registry, which the derived image already
-  # follows); any other tag fails the render. sandboxClass gvisor is
+  # follows); any other tag fails the render. The pods run the release the
+  # control plane runs: ate-controller starts every gVisor pool on its own
+  # release's ateom-gvisor (substrate.ateController.gvisorWorker.followRelease,
+  # which the chart sets), so a Substrate patch Flux resolves within the range
+  # rolls the pool with the atelet and no chart release; the pool's
+  # status.workerImage names the image its pods run, and its condition
+  # WorkerImageOverridden is True while that is a later patch than this floor
+  # (giantswarm/agent-platform#822). sandboxClass gvisor is
   # what kagent's generated ActorTemplates select. The Harness's workerPoolRef
   # follows `name`; replicas and template (resources, node placement, the
   # CPU feature-set pin) are the capacity knobs; podDisruptionBudget (the
@@ -4909,7 +4952,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.3.0
+      tag: 2.4.0
     dryRun: false
     gitopsNamespaces: []
 
@@ -5384,7 +5427,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/envoy
-          tag: v1.39.3
+          tag: v1.40.0
         # The listener's port in the pod; the Service (service.port) fronts it.
         port: 10000
         clientIdentity: spiffe://cluster.local/ns/ate-system/sa/ate-api-server
@@ -5436,7 +5479,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/livenessprobe
-          tag: v2.19.0
+          tag: v2.20.0
         # The node plugin is on the node's network: its probe listens on
         # localhost at this port (the controller's, in its pod, on 9808).
         nodePort: 29662
@@ -6265,6 +6308,13 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
       pinnedImages: []
 # The substrate-crds chart takes no values.
 substrate-crds: {}  # @schema skipProperties: true; additionalProperties: true
+
+# The Google access-token credential provider (components.google-access-token
+# -credential-provider), forwarded verbatim. namespacePolicies is derived from
+# substrate.credentialProvider.namespacePolicies (the two providers grant the
+# same atespaces the same namespaces); a copy set here must equal it.
+google-access-token-credential-provider:  # @schema skipProperties: true; additionalProperties: true
+  namespacePolicies: []
 
 # === Hook Jobs of the connectivity release ===
 # The images of the connectivity chart's hook Jobs (read there): kubectl with

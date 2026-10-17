@@ -40,7 +40,6 @@ data:
     app:
       title: Agent Platform
       baseUrl: https://{{ $hostname }}
-      rootRedirect: /agent-platform
       {{- /* The Agent Platform shell: from backstage 3.0.0 the platform's pages
       are routed in the shell alone, which is off by default, so without this a
       3.x portal shows no Agent Platform. The classic portal keeps its default.
@@ -49,7 +48,6 @@ data:
         agentPlatform: true
       extensions:
         - page:agent-platform
-        - nav-item:agent-platform
         {{- range ($backstage.enabledExtensions | default list) }}
         - {{ . }}
         {{- end }}

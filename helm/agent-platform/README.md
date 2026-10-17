@@ -134,20 +134,32 @@ admission, silently**, and the render refuses it instead
 (`agent-platform.validateWorkerPool`). See UPGRADE.md, "the Generic chart's
 per-agent placement values are gone, capacity is the WorkerPool".
 
-### The worker image follows the chart's Substrate pin (giantswarm/agent-platform#466)
+### One source of the Substrate version: `components.substrate.versionRange` (giantswarm/agent-platform#466, giantswarm/agent-platform#822)
 
-The pool's `workerImage` — the gVisor worker every actor runs in — is **derived by
-this chart** from `components.substrate.versionRange`'s floor:
-`<substrate.image.registry>/ateom-gvisor:<floor>` (`gsoci.azurecr.io/giantswarm/
-substrate/ateom-gvisor:1.0.0` today), merged over the kagent block the chart forwards.
-The kagent chart stamps a worker of its own at publish (the Substrate its build was
-published against), and that stamp never reaches the cluster: the atelet the
-substrate release installs and the worker the WorkerPool runs are one Substrate
-release **whatever kagent build the kagent range admits**. Chart 4.15.2 showed
-why — its open kagent range admitted a build that stamped the next Substrate's
-worker under the chart's older atelet; that Substrate had renamed the pause bundle,
-every golden boot failed on `bundles/_pause/config.json`, every AgentTemplate
-stayed `Ready=False … compiling`, and nothing on any hop named the skew.
+The Substrate version an installation runs is **the release Flux resolves from
+`components.substrate.versionRange`** (`components.substrate-crds.versionRange`
+carries the same range), and nothing else names it. The control plane runs it,
+and so do the workers: ate-controller starts every gVisor pool on its own
+release's `ateom-gvisor` (`ateController.gvisorWorker.followRelease`, which this
+chart sets on the substrate release; giantswarm/substrate#114). A Substrate
+patch within the range (`1.12.0` → `1.12.1`) rolls the control plane, the atelet
+and the worker pool together, **with no chart release**.
+
+The WorkerPool's `spec.workerImage` is **derived by this chart** from the range's
+floor: `<substrate.image.registry>/ateom-gvisor:<floor>`
+(`gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.12.0` today), merged over
+the kagent block the chart forwards. It is the image the pool runs right after a
+re-pin. The pool's `status.workerImage` names the image its pods run; after a patch
+it is the patch, and the condition `WorkerImageOverridden` is `True` (reason
+`GVisorWorkerImageFlag`) until the floor moves. The kagent chart stamps a worker of
+its own at publish (the Substrate its build was published against), and that stamp
+never reaches the cluster: the atelet the substrate release installs and the worker
+the WorkerPool runs are one Substrate release **whatever kagent build the kagent
+range admits**. Chart 4.15.2 showed why. Its open kagent range admitted a build
+that stamped the next Substrate's worker under the chart's older atelet. That
+Substrate had renamed the pause bundle, so every golden boot failed on
+`bundles/_pause/config.json`, every AgentTemplate stayed `Ready=False … compiling`,
+and nothing on any hop named the skew.
 
 What follows from it:
 
@@ -156,32 +168,61 @@ What follows from it:
   by a path other than `substrate.image.registry`, which the derived image already
   follows); another tag, or a digest alone, fails the render naming the key, the
   release and the derived image.
+- **`substrate.ateController.gvisorWorker.followRelease` stays unset.** The chart
+  sets it; `false` fails the render, because the workers would then run the floor
+  beside a later patch's atelet. The flag exists from Substrate `1.4.0` on;
+  `make verify-worker-image` fails when the chart the range resolves to lacks it.
 - **The Substrate range confines one runtime contract**: an exact version (the
   BOM's `1.0.0`) or `>=X.Y.Z <X.(Y+1).0`, the ceiling of the pinned minor and no
-  `-0` anywhere — Flux's Masterminds semver skips every prerelease while no bound
-  of a range carries one and evaluates them all once one does, so `<1.1.0-0`
+  `-0` anywhere. Flux's Masterminds semver skips every prerelease while no bound
+  of a range carries one, and evaluates them all once one does, so `<1.1.0-0`
   would admit the line's dev builds. A patch of the line is carried patches or a
   rebuild on the same upstream pin and never changes the worker and atelet bundle
-  layout; a re-pin onto another upstream release is at least a minor. The
-  WorkerPool's `workerImage` follows the floor, and ate-controller runs the
-  workers on the release Flux resolves, so a minor never changes under a pool
-  without its range moving. `0.x`, `~`, `^`, a `-0` bound, a `<=` ceiling, a patch
-  ceiling, a floor alone or the former `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` fail the
-  render (`agent-platform.substrate.validateRange`).
-- **Substrate follows `gitops.prereleases`** like every component. From `1.4.0`
-  on, ate-controller runs every gVisor pool on the ateom-gvisor of its own
-  release (`ateController.gvisorWorker.followRelease`, on by default;
-  giantswarm/substrate#114), so a candidate's atelet and worker are one build.
-  Before it, a `1.3.1` candidate's atelet beside the floor's `1.3.0` worker
-  failed every gVisor actor at its pause container, which is why the chart
-  kept Substrate on stable releases from giantswarm/agent-platform#796 until giantswarm/agent-platform#795.
+  layout; a re-pin onto another upstream release is at least a minor. So a patch
+  rolls the pool on its own, and a minor never changes under a pool without its
+  range moving. `0.x`, `~`, `^`, a `-0` bound, a `<=` ceiling, a patch ceiling, a
+  floor alone or the former `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` fail the render
+  (`agent-platform.substrate.validateRange`).
+- **Substrate follows `gitops.prereleases`** like every component: a candidate's
+  atelet and worker are one build, as a patch's are. Before `1.4.0`, a `1.3.1`
+  candidate's atelet beside the floor's `1.3.0` worker failed every gVisor actor
+  at its pause container, which is why the chart kept Substrate on stable
+  releases from giantswarm/agent-platform#796 until giantswarm/agent-platform#795.
+- **A worker roll keeps the conversations.** The pool's Deployment rolls 10 % of
+  its workers at a time (at least one, no surge); a worker that is stopped passes
+  SIGTERM to its actors and waits up to an hour for them. A session's
+  conversation lives in kagent's database and its snapshot in the object store,
+  not on the worker, and a patch changes no persisted format, so the session
+  resumes on another worker. A turn still running when its worker's grace ends
+  is lost.
 - **A Substrate re-pin is one values change**, `components.substrate.versionRange`
-  and `components.substrate-crds.versionRange` together; it **rolls the pool once**
-  (the WorkerPool's `workerImage` changes; one worker at a time under the budget, a
-  turn in flight on a replaced worker is lost). The kagent range moves on its own,
-  when the kagent line's pin moves — `make verify-worker-image` fails the day the
+  and `components.substrate-crds.versionRange` together; it **rolls the pool once**.
+  The kagent range moves on its own,
+  when the kagent line's pin moves. `make verify-worker-image` fails the day the
   kagent build the range admits was published against another Substrate release
-  than the chart pins (its `Chart.yaml` names it), so the two are moved together.
+  than the chart pins (its `Chart.yaml` names it), so the two are moved together,
+  and it fails when the substrate chart the range resolves to would run its
+  workers on another release than its atelet.
+
+### The Google access-token credential provider runs beside Substrate (giantswarm/giantswarm#38547)
+
+A Vertex AI `ModelConfig` (`GeminiVertexAI`, `AnthropicVertexAI`) with a
+service account key binds `ate-secret://google-access-token.k8s.io/...` on
+the Vertex AI hostname, and the egress gateway injects an access token minted
+from the key. The minting is a Substrate credential provider plugin of its own,
+`components.google-access-token-credential-provider`
+([giantswarm/substrate-credential-providers](https://github.com/giantswarm/substrate-credential-providers)),
+in upstream's plugin shape: a Deployment in `ate-system` behind mutual TLS,
+serving the class the Substrate chart routes to it through
+`substrate.credentialProvider.additionalProviders`. It follows
+`components.kagent` like the Substrate entries and takes its grants from
+`substrate.credentialProvider.namespacePolicies` (one list for both providers;
+`agent-platform.componentDerivedValues`). Its CiliumNetworkPolicy opens
+`oauth2.googleapis.com:443` for the exchange, which the bundled provider of
+Substrate 1.11 and earlier had no rule for (giantswarm/agent-platform#1042).
+The Substrate line served the class from its bundled provider until 1.11: the
+plugin is deployed first, and the routing entry lands with the floor move to
+1.12, where the bundled name is gone.
 
 ### The one pool is the failure domain (giantswarm/agent-platform#472)
 
@@ -443,6 +484,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.substrate.timeout | string | `"15m"` |  |
 | components.substrate.upgradeRemediation.retries | int | `3` |  |
+| components.google-access-token-credential-provider.chart | string | `"google-access-token-credential-provider"` |  |
+| components.google-access-token-credential-provider.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.google-access-token-credential-provider.versionRange | string | `">=0.1.0 <1.0.0"` |  |
+| components.google-access-token-credential-provider.valuesFrom | string | `"google-access-token-credential-provider"` |  |
+| components.google-access-token-credential-provider.injectGlobal | bool | `false` |  |
+| components.google-access-token-credential-provider.targetNamespace | string | `"ate-system"` |  |
+| components.google-access-token-credential-provider.dependsOn[0] | string | `"substrate"` |  |
 | components.klaus-gateway.chart | string | `"klaus-gateway"` |  |
 | components.klaus-gateway.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.klaus-gateway.versionRange | string | `">=4.3.0 <5.0.0"` |  |
@@ -509,7 +557,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.workspace-manager.omitEmptyKeys[7] | string | `"storage.sizing.maxSize"` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.backstage.versionRange | string | `">=2.68.0 <3.0.0"` |  |
+| components.backstage.versionRange | string | `">=2.68.0 <4.0.0"` |  |
 | components.backstage.valuesFrom | string | `"backstage"` |  |
 | components.backstage.omitKeys[0] | string | `"hostname"` |  |
 | components.backstage.omitKeys[1] | string | `"parentRefs"` |  |
@@ -668,6 +716,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.metricLabels.api_key.expression | string | `"apiKey.name"` |  |
 | gateway.accessLog.attributes.agent_instance_id.enabled | bool | `true` |  |
 | gateway.accessLog.attributes.agent_instance_id.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent-instance-id\"] : \"\""` |  |
+| gateway.accessLog.attributes.request_id.enabled | bool | `true` |  |
+| gateway.accessLog.attributes.request_id.expression | string | `"request.headers[\"x-request-id\"]"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -1315,7 +1365,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.3.0"` |  |
+| agentManager.migration.image.tag | string | `"2.4.0"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
@@ -1386,7 +1436,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaces.substrate.csiCompanion.controller.resources.limits.ephemeral-storage | string | `"256Mi"` |  |
 | workspaces.substrate.csiCompanion.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | workspaces.substrate.csiCompanion.proxy.image.repository | string | `"giantswarm/envoy"` |  |
-| workspaces.substrate.csiCompanion.proxy.image.tag | string | `"v1.39.3"` |  |
+| workspaces.substrate.csiCompanion.proxy.image.tag | string | `"v1.40.0"` |  |
 | workspaces.substrate.csiCompanion.proxy.port | int | `10000` |  |
 | workspaces.substrate.csiCompanion.proxy.clientIdentity | string | `"spiffe://cluster.local/ns/ate-system/sa/ate-api-server"` |  |
 | workspaces.substrate.csiCompanion.proxy.resources.requests.cpu | string | `"10m"` |  |
@@ -1410,7 +1460,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaces.substrate.csiCompanion.node.resources.limits.ephemeral-storage | string | `"256Mi"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.image.registry | string | `"gsoci.azurecr.io"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.image.repository | string | `"giantswarm/livenessprobe"` |  |
-| workspaces.substrate.csiCompanion.livenessProbe.image.tag | string | `"v2.19.0"` |  |
+| workspaces.substrate.csiCompanion.livenessProbe.image.tag | string | `"v2.20.0"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.nodePort | int | `29662` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.resources.requests.cpu | string | `"5m"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.resources.requests.memory | string | `"16Mi"` |  |
@@ -1560,6 +1610,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.atelet.extraEnv | list | `[]` |  |
 | substrate.atelet.imageCache.pinnedImages | list | `[]` |  |
 | substrate-crds | object | `{}` |  |
+| google-access-token-credential-provider.namespacePolicies | list | `[]` |  |
 | hooks.kubectlImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.kubectlImage.repository | string | `"giantswarm/alpine-k8s"` |  |
 | hooks.kubectlImage.tag | string | `"1.37.1"` |  |
