@@ -11,7 +11,8 @@ the Secret left it behind. Each case below pins one property:
   an install or an upgrade without the Secret carries nothing for it;
 - on a cluster (LIVE_CONTEXT=<kube context>, else skipped): with the Secret
   there and this release's (meta.helm.sh/release-name and -namespace), ONE
-  post-install,post-upgrade hook Job deletes exactly it as the hook identity,
+  post-install,post-upgrade hook Job, <release>-signin-keys-cleanup (a
+  label value of at most 63 characters), deletes exactly it as the hook identity,
   whose ClusterRole gains delete on exactly that Secret and is created for the
   post events; a Secret of the name another release holds renders neither.
 
@@ -27,7 +28,10 @@ HELM = os.environ.get("HELM", "helm")
 LIVE_CONTEXT = os.environ.get("LIVE_CONTEXT", "")
 SECRET = "workspace-manager-signin-keys"
 RELEASE = "t"
-JOB = f"{RELEASE}-workspace-manager-signin-keys-cleanup"
+SUFFIX = "signin-keys-cleanup"
+JOB = f"{RELEASE}-{SUFFIX}"
+# The release name installations run: the Job name is judged at its real length.
+INSTALLED = f"agent-platform-connectivity-{SUFFIX}"
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
 CONN = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.workspace-manager.enabled=true", "-f", FIXTURE,
         "--set", "global.domain=ci.example.com", "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
@@ -111,6 +115,8 @@ def live(connectivity: str) -> None:
 
 
 def main(connectivity: str) -> int:
+    if len(INSTALLED) > 63:
+        fail(f"the cleanup Job name {INSTALLED} is longer than 63 characters: the Job controller's job-name pod label refuses it")
     docs = documents(helm(connectivity, CONN))
     if ("Deployment", "workspace-manager") in docs:
         fail("the connectivity chart renders the manager itself")

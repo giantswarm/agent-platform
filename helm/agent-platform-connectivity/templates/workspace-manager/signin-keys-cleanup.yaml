@@ -8,7 +8,7 @@ as the hook identity (templates/_hooks.tpl), which carries delete on exactly
 this Secret while the hook renders (templates/substrate/hooks-rbac.yaml).
 */ -}}
 {{- with include "agent-platform.workspaceManager.signinKeysOrphan" . }}
-{{ include "agent-platform.hooks.job" (dict "root" $ "name" "workspace-manager-signin-keys-cleanup" "hook" "post-install,post-upgrade"
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" "signin-keys-cleanup" "hook" "post-install,post-upgrade"
       "about" (printf "delete the unused workspace-manager sign-in keys Secret %s/%s an earlier release kept" $.Release.Namespace .)
       "script" (printf "kubectl -n %s delete secret %s --ignore-not-found\n" ($.Release.Namespace | quote) (. | quote))) }}
 {{- end }}
