@@ -269,7 +269,7 @@ spec:
     - expression: "has(object.metadata.deletionTimestamp) || size(variables.foreign) == 0"
       reason: Forbidden
       messageExpression: >-
-        {{ printf "'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named %s*%s, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ') + '. Fix: rename each to a %s* Secret of this namespace or remove it; an agent of agent-manager drops the installation skills credential on its next update_agent, or with the agent-manager migrate run (UPGRADE.md)'" $prefix (ternary " other than the skills credential of the installation" "" (gt (len $installationCredentials) 0)) $prefix }}
+        {{ printf "'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named %s*%s, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ') + '. Fix: rename each to a %s* Secret of this namespace or remove it (UPGRADE.md: the migrate run removes the installation skills credential from the platform agents)'" $prefix (ternary " other than the skills credential of the installation" "" (gt (len $installationCredentials) 0)) $prefix }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
