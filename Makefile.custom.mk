@@ -119,7 +119,15 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
-GOLDEN_REF ?= origin/main
+# GOLDEN_REF defaults to the merge-base of HEAD and GOLDEN_BASE: a branch is held
+# to the render it forked from, so a later GOLDEN_BASE commit that changes an
+# unrelated render never reads as this branch's drift. A GOLDEN_BASE that does not
+# resolve is kept as is, so the goldens report it. An explicit GOLDEN_REF (empty
+# included) wins.
+GOLDEN_BASE ?= origin/main
+ifeq ($(origin GOLDEN_REF),undefined)
+GOLDEN_REF := $(or $(shell git merge-base $(GOLDEN_BASE) HEAD 2>/dev/null),$(GOLDEN_BASE))
+endif
 # The postgres golden of verify-wiring (both flavours against GOLDEN_REF): model-manager
 # is on by default with no backend (giantswarm/agent-platform#329), an intended difference
 # held equal on both sides — a chart that predates the default accepts the key. Empty this
@@ -3832,6 +3840,12 @@ verify-workspace-manager-route: ## Assert the workspace-manager's public route (
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-workspace-manager-route.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "workspace-manager sign-in route verified."
+
+.PHONY: verify-workspace-signin-keys-cleanup
+verify-workspace-signin-keys-cleanup: ## Assert the cleanup of the workspace-manager sign-in keys Secret (giantswarm/agent-platform#1095): the connectivity chart renders no workspace-manager-signin-keys Secret with providers and oauth.enabled, and offline no cleanup Job and no delete rule. LIVE_CONTEXT=<kube context> adds the lookup cases — with the Secret there and this release's (meta.helm.sh/release-name and -namespace) ONE post-install,post-upgrade hook Job deletes exactly it as the hook identity, whose ClusterRole gains delete on exactly that Secret; one another release holds renders neither — creating and deleting the namespace ap-verify-signin-keys-cleanup there (a lab cluster, never an installation); empty, they are skipped. HELM selects the binary.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@LIVE_CONTEXT=$(LIVE_CONTEXT) python3 tests/verify-workspace-signin-keys-cleanup.py $(CONNECTIVITY_DIR)
+	@echo "workspace-manager sign-in keys cleanup verified."
 
 .PHONY: verify-workspace-grant-key
 verify-workspace-grant-key: ## Assert the workspace grant signing key (giantswarm/agent-platform#935): with providers and oauth.enabled the connectivity chart creates the Secret workspace-manager.grant.signingKey names — the installation's own reference, else workspaceManager.grantKey.secretName/.key — holding ONE entry, a generated EC P-256 private key (PEM, SEC1, prime256v1, a 32-byte scalar), kept on uninstall, generated anew per offline render (no constant), the entry following the key id and the name following secretName; none without providers, with oauth off, with grantKey.create false or with the component off; the meta chart forwards the installation's own reference unchanged and, with none, the created Secret's — nothing without providers, with oauth off or with create false — and the connectivity release gets the grantKey block it creates the Secret from; NOTES prints the key and the key set's URL; the guards in both charts (an own reference without providers or with oauth off — the manager refuses to start with it —, a half reference, a bad Secret name or data key, on the own and the derived reference). The keep across upgrades needs a cluster (lookup): README "Workspaces". HELM selects the binary.
