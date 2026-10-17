@@ -5270,7 +5270,10 @@ workspaces:
   # (workspace-manager.muster.mcpServer.auth.authorizationServer.issuer, own
   # or derived as <url>/apps/<app.id>); an
   # own map stands beside it, and an instance missing there gets the
-  # gateway's 403 on its hosts.
+  # gateway's 403 on its hosts. muster refuses a credential provider that
+  # releases nothing, so with Substrate on and no instance to release (no
+  # workspace-manager.providers with oauth.enabled, no own map) the render
+  # fails naming both.
   enabled: false
   # The workspace storage: the read-write-many StorageClass the workspace
   # volumes are claimed from, and whether the connectivity release renders it.
