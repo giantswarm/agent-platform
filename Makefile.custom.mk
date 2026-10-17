@@ -20,6 +20,11 @@ HELM_PINNED = $(CURDIR)/$(HELM_PINNED_DIR)/$(HELM_PLATFORM)/helm
 HELM_VERSION = $(shell $(HELM) version --short 2>/dev/null)
 GOLDEN_HELM = $(if $(filter file,$(origin HELM)),$(if $(filter $(HELM_PINNED_VERSION)+%,$(HELM_VERSION)),$(HELM),$(HELM_PINNED)),$(HELM))
 CONNECTIVITY_DIR ?= helm/agent-platform-connectivity
+# The component floors and ranges, read from the one place they are declared:
+# components.<name>.versionRange in the meta chart's values.yaml. A recipe asks
+# here instead of naming a version, so a floor move is one edit plus
+# `make golden-update` (tests/floors.py).
+FLOORS = python3 tests/floors.py --chart $(CHART_DIR)
 # Where the verify recipes write their scratch renders: TMPDIR when the
 # environment sets one (a sandbox can allow writes there only), /tmp otherwise.
 # A write that fails would leave cat and grep reading an earlier run's file.
@@ -529,7 +534,8 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "ok: flux render"
 	@echo "--> agentgateway 2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
 	@./tests/verify-agentgateway-wiring.py $(VERIFY_TMP)/ap-flux.out
-	@grep -q 'semver: ">=2.8.0 <3.0.0"' $(VERIFY_TMP)/ap-flux.out || { echo "FAIL: agentgateway range is not >=2.8.0 <3.0.0 (the flattened chart line, floored at the packaging release whose CRDs are upstream v1.6.0, the agentgateway line's base)"; exit 1; }
+	@$(FLOORS) floor agentgateway --min 2.8.0 >/dev/null || { echo "FAIL: components.agentgateway.versionRange must floor at or above 2.8.0 (the flattened chart line: the packaging release whose CRDs are upstream v1.6.0, the agentgateway line's base)"; exit 1; }
+	@grep -qF "semver: \"$$($(FLOORS) range agentgateway)\"" $(VERIFY_TMP)/ap-flux.out || { echo "FAIL: the agentgateway OCIRepository does not carry components.agentgateway.versionRange"; exit 1; }
 	@echo "ok: agentgateway 2.x wiring"
 	@echo "--> the kagent line's wiring: kagent + kagent-crds on the line's release range, one build (tag + Harness digest), flat forwarded values with no umbrella-only or retired key"
 	@./tests/verify-kagent-wiring.py $(VERIFY_TMP)/ap-flux.out
@@ -584,7 +590,8 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	else echo "ok: engine guard"; fi
 	@echo "--> customer BOM pins every range to an exact version"
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml -f $(CHART_DIR)/examples/customer-bom.yaml $(ENGINE_OFF) >$(VERIFY_TMP)/ap-bom.out 2>&1 || { cat $(VERIFY_TMP)/ap-bom.out; exit 1; }
-	@grep -q 'semver: "$(PRESETS_MUSTER_VERSION)"' $(VERIFY_TMP)/ap-bom.out || { echo "FAIL: BOM did not pin muster to $(PRESETS_MUSTER_VERSION)"; exit 1; }
+	@$(FLOORS) bom
+	@grep -qF "semver: \"$$($(FLOORS) floor muster)\"" $(VERIFY_TMP)/ap-bom.out || { echo "FAIL: the BOM's muster pin did not reach its OCIRepository"; exit 1; }
 	@if grep -qE 'semver: "[0-9]+\.x"' $(VERIFY_TMP)/ap-bom.out; then echo "FAIL: BOM still contains an unpinned x-range"; exit 1; fi
 	@echo "ok: customer BOM pinned"
 	@echo "--> gitops.namespace routes the Flux CRs to an exempt ns, targetNamespace routes workloads"
@@ -1440,8 +1447,9 @@ pinned-helm: ## Resolve the helm golden-update and verify-target render tests/go
 	@echo "HELM=$(GOLDEN_HELM)"
 
 .PHONY: golden-update
-golden-update: pinned-helm ## Re-render the shapes of tests/golden/ and write them back. Run it when a change moves the rendered output on purpose, and commit the diff: it is what a reviewer reads to see which objects moved. Renders with the helm CI pins (pinned-helm resolves or fetches it).
-	@echo "====> $@ (tests/golden/)"
+golden-update: pinned-helm ## Re-render the shapes of tests/golden/ and write them back, after pinning the customer BOM at the floors of components.*.versionRange (tests/floors.py: values.yaml is the one place a floor is declared). Run it when a change moves the rendered output or a floor on purpose, and commit the diff: it is what a reviewer reads to see which objects moved. Renders with the helm CI pins (pinned-helm resolves or fetches it).
+	@echo "====> $@ ($(CHART_DIR)/examples/customer-bom.yaml, tests/golden/)"
+	@$(FLOORS) bom --write
 	@HELM="$(GOLDEN_HELM)" python3 tests/verify-target.py --update $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "$@: review the tests/golden/ diff before committing — it is the rendered blast radius of this change"
 
@@ -2922,14 +2930,16 @@ verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every
 	@python3 tests/verify-kyverno.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
-# The floor of components.muster.versionRange, the muster chart version the
-# platform toolset presets are rendered through: the presets need the `label:`
-# rule (muster#1168, from 5.12.0; a muster before it refuses to start on them),
-# the floor is 5.44.0 (the workspace credential provider; from 5.43.6 its
-# chart accepts the affinity of muster's two replicas, giantswarm/muster#1541). The customer BOM pins it. The chart is pulled anonymously from gsoci to render its ConfigMap
-# with the values the meta chart forwards, so the check reads the real schema
-# and template of that version, not a copy.
-PRESETS_MUSTER_VERSION := 5.44.0
+# The floor of components.muster.versionRange (tests/floors.py reads it from
+# values.yaml), the muster chart version the platform toolset presets are
+# rendered through: the presets need the `label:` rule (muster#1168, from
+# 5.12.0; a muster before it refuses to start on them), which
+# PRESETS_MUSTER_MIN holds the floor to. The customer BOM pins it. The chart
+# is pulled anonymously from gsoci to render its ConfigMap with the values the
+# meta chart forwards, so the check reads the real schema and template of that
+# version, not a copy. Recursive (=), so it is read only when a recipe uses it.
+PRESETS_MUSTER_MIN := 5.12.0
+PRESETS_MUSTER_VERSION = $(shell $(FLOORS) floor muster)
 # The muster chart's own render guards want the OAuth inputs an installation
 # supplies; these are placeholders for the render, not part of the assertion.
 PRESETS_MUSTER_SETS := --set muster.oauth.server.baseUrl=https://muster.ci.example.com --set muster.oauth.server.dex.issuerUrl=https://dex.ci.example.com --set muster.oauth.server.dex.clientId=platform --set muster.oauth.server.existingSecret=muster-oauth
@@ -2940,8 +2950,9 @@ verify-presets: ## Assert the infrastructure / agent-platform toolset presets re
 	@echo "--> the muster HelmRelease values carry both presets, selecting by the tool-group label"
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >$(VERIFY_TMP)/vp-flux.out 2>&1 || { cat $(VERIFY_TMP)/vp-flux.out; exit 1; }
 	@python3 tests/verify-toolset-presets.py release-values $(VERIFY_TMP)/vp-flux.out >$(VERIFY_TMP)/vp-muster-values.yaml
-	@echo "--> components.muster.versionRange floors at the muster that has the label rule"
-	@grep -q 'semver: ">=$(PRESETS_MUSTER_VERSION) <6.0.0"' $(VERIFY_TMP)/vp-flux.out || { echo "FAIL: the muster range does not floor at $(PRESETS_MUSTER_VERSION)"; exit 1; }
+	@echo "--> components.muster.versionRange floors at a muster that has the label rule ($(PRESETS_MUSTER_MIN))"
+	@$(FLOORS) floor muster --min $(PRESETS_MUSTER_MIN)
+	@grep -qF "semver: \"$$($(FLOORS) range muster)\"" $(VERIFY_TMP)/vp-flux.out || { echo "FAIL: the muster OCIRepository does not carry components.muster.versionRange"; exit 1; }
 	@echo "ok: forwarded and floored"
 	@echo "--> muster $(PRESETS_MUSTER_VERSION) accepts the forwarded values and renders the presets into its ConfigMap"
 	@rm -rf $(VERIFY_TMP)/vp-muster-chart && mkdir -p $(VERIFY_TMP)/vp-muster-chart
