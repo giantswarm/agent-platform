@@ -32,6 +32,10 @@ below pins one property:
   unless the block opts in);
 - without the derivation an own block reaches the release as written, and one set in
   part fails the render naming the keys (the kagent chart needs all three);
+- with Substrate on muster serves FetchSecret and mounts Substrate's pod certificates, which
+  only releases after muster publish and issue: its first install does not wait for its
+  pods (install.disableWait), its upgrades do; nothing with workspaces off
+  (giantswarm/agent-platform#1107);
 - the guards: a kagent range whose floor is below 1.6.0
   (agent-platform.kagent.sessionAdmissionFloor; an exact pin and a release candidate
   of 1.6.0 judged alike), no issuer (neither global.domain nor oauth.baseURL), a
@@ -236,9 +240,19 @@ def main(meta: str) -> int:
     off = documents(helm(meta, [*KAGENT, *IDENTITY, "--set", "components.substrate.enabled=true"]))
     if "credentialProvider:" in block(off.get(("HelmRelease", "muster"), ""), "muster", 4):
         fail("the muster release carries a credentialProvider with workspaces off")
+    # muster's pods mount Substrate's pod certificates and trust bundles, which the
+    # connectivity release's hook publishes and the substrate release issues, both after
+    # muster: its first install must not wait for its pods (giantswarm/agent-platform#1107).
+    release = docs.get(("HelmRelease", "muster"), "")
+    if "    disableWait: true\n" not in block(release, "install", 2):
+        fail(f"with a credentialProvider the muster release's first install waits for pods that mount Substrate's certificates, issued only after muster (giantswarm/agent-platform#1107):\n{block(release, 'install', 2)}")
+    if "disableWait" in block(release, "upgrade", 2):
+        fail(f"the muster release's upgrade does not wait for its pods:\n{block(release, 'upgrade', 2)}")
+    if "disableWait" in block(off.get(("HelmRelease", "muster"), ""), "install", 2):
+        fail("the muster release's first install does not wait with workspaces off")
     ok("with the switch on the kagent release names muster.giantswarm.io as its credentialAuthority (an own value stands), "
        "the muster release serves FetchSecret to the egress gateway's identity with Substrate on and releases the pinned provider instance github's grants under its own or derived issuer (an own entry stands beside it), "
-       "and Substrate routes the authority to muster; "
+       "and Substrate routes the authority to muster; its first install does not wait for the pods that mount Substrate's certificates, its upgrades do; "
        "with workspaces off muster gets no credentialProvider")
 
     # --- nothing without a grant key, or without kagent ------------------------------------------
