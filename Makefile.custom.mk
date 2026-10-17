@@ -2917,10 +2917,10 @@ verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every
 # The floor of components.muster.versionRange, the muster chart version the
 # platform toolset presets are rendered through: the presets need the `label:`
 # rule (muster#1168, from 5.12.0; a muster before it refuses to start on them),
-# the floor is 5.31.4 (giantswarm/muster#1323). The customer BOM pins it. The chart is pulled anonymously from gsoci to render its ConfigMap
+# the floor is 5.44.0-rc.5 (the workspace credential provider). The customer BOM pins it. The chart is pulled anonymously from gsoci to render its ConfigMap
 # with the values the meta chart forwards, so the check reads the real schema
 # and template of that version, not a copy.
-PRESETS_MUSTER_VERSION := 5.31.4
+PRESETS_MUSTER_VERSION := 5.44.0-rc.5
 # The muster chart's own render guards want the OAuth inputs an installation
 # supplies; these are placeholders for the render, not part of the assertion.
 PRESETS_MUSTER_SETS := --set muster.oauth.server.baseUrl=https://muster.ci.example.com --set muster.oauth.server.dex.issuerUrl=https://dex.ci.example.com --set muster.oauth.server.dex.clientId=platform --set muster.oauth.server.existingSecret=muster-oauth

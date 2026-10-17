@@ -93,6 +93,9 @@ KAGENT_RANGE = ">=1.13.0 <1.14.0"
 # tests/verify-worker-image.py holds the derivation and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
 SUBSTRATE_RANGE = ">=1.12.0 <1.13.0"
+# muster: the first release that serves FetchSecret to the egress gateway with the
+# issuer pin, a release candidate until its stable is promoted.
+MUSTER_RANGE = ">=5.44.0-rc.5 <6.0.0"
 SUBSTRATE_PIN = "1.12.0"  # the range's floor, the BOM pin and the worker image's tag: the release whose credential provider grants namespaces selected by label (ownNamespaceSelector, allowedNamespaceSelector; giantswarm/substrate#456), on 1.11's upstream pin; before it 1.11.4, the release whose atunnel ends a CONNECT tunnel once the actor closes its connection (giantswarm/substrate#451); before it 1.11.3, the release that marks a crashed actor's resume refusal not resumable, whose ateom-gvisor reports a running actor's sandbox exit and whose atelet terminates an actor whose restore failed, and the floor at or above the Substrate kagent 1.12.0 is built against (1.11.1); before it 1.11.0, the release whose egress gateway mints and injects actor JWTs (an actor_jwt entry of replace_headers, giantswarm/substrate#421) on agentgateway 2.4.0, and whose ate-controller can mark the worker pods that host actors (giantswarm/substrate#425)
 WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
 SUBSTRATE_NAMESPACE = "ate-system"
@@ -256,7 +259,8 @@ def check_semver_filters(meta: str, ci: list[str]) -> None:
     # A release candidate's floor renders the release tag filter (Flux evaluates
     # every pre-release tag against it, the line's branch builds included).
     want = {**DEV_CHANNEL, **({n: RELEASE_TAG_FILTER for n in ("substrate", "substrate-crds")} if "-" in SUBSTRATE_RANGE else {}),
-            **({n: RELEASE_TAG_FILTER for n in ("kagent", "kagent-crds")} if "-" in KAGENT_RANGE else {})}
+            **({n: RELEASE_TAG_FILTER for n in ("kagent", "kagent-crds")} if "-" in KAGENT_RANGE else {}),
+            **({"muster": RELEASE_TAG_FILTER} if "-" in MUSTER_RANGE else {})}
     if got != want:
         fail(f"OCIRepository semverFilters differ from the dev-channel and release-candidate defaults: rendered {got}, expected {want}")
     probe = render(meta, [*every, "--set-json", f"components.muster.semverFilter={json.dumps(PROBE_FILTER)}"])

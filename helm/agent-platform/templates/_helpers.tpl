@@ -501,7 +501,9 @@ releasable, the provider instances whose grants muster releases, is the
 instance muster's registration of the workspace-manager is pinned to
 under its App's issuer, own or derived (agent-platform.workspaceManager.musterPin), the same
 instance name the Session's credential URIs and agent-manager's binding carry.
-muster.credentialProvider's own keys stand. */ -}}
+muster.credentialProvider's own keys stand. Without a releasable instance
+(no provider pin and no own entry) nothing is derived: muster refuses a
+credential provider that releases nothing. */ -}}
 {{- if and (.root.Values.workspaces | default dict).enabled (include "agent-platform.componentEnabled" (dict "root" .root "name" "substrate")) -}}
 {{- $substrateNs := dig "substrate" "targetNamespace" "ate-system" (.root.Values.components | default dict) -}}
 {{- $own := dig "muster" "credentialProvider" dict (.root.Values.muster | default dict) | default dict -}}
@@ -511,9 +513,11 @@ muster.credentialProvider's own keys stand. */ -}}
 {{- $_ := set $provider "releasable" (dict $pin.provider $pin.issuer) -}}
 {{- end -}}
 {{- $provider = mergeOverwrite $provider $own -}}
+{{- if $provider.releasable -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $muster "credentialProvider" $provider -}}
 {{- $_ := set $derived "muster" $muster -}}
+{{- end -}}
 {{- end -}}
 {{- /* The customer's platform team writes the servers and workflows of
 muster's namespace beside the Giant Swarm admin groups

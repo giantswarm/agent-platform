@@ -401,6 +401,10 @@ components:  # @schema additionalProperties: true
     # token, a forwarded ID token) ends at the bearer's exp, instead of its
     # pooled connections forwarding the expired token to every backend until
     # three rejections evict each of them (giantswarm/muster#1323).
+    # Floor 5.44.0-rc.5: muster serves FetchSecret to the egress gateway for
+    # a workspace Session's provider hosts (credentialProvider) and answers
+    # agent-manager's session bindings, with the issuer pin of the
+    # workspace-manager's registration; 5.44.0 once it is promoted.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
     versionRange: ">=5.44.0-rc.5 <6.0.0"
