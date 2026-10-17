@@ -566,8 +566,12 @@ components:  # @schema additionalProperties: true
     # carries (otel.exporter.otlp, otel.traces, otel.logs); an older chart
     # ignores them and exports nothing. From 1.13.0 a kagent.harnesses entry
     # takes runtime: codex on the chart's codex-harness image
-    # (giantswarm/kagent-upstream#606).
-    versionRange: ">=1.13.0 <1.14.0"
+    # (giantswarm/kagent-upstream#606). From 1.15.0 the controller compiles a
+    # workspace Session's provider hosts into credential URIs of
+    # kagent.controller.session.credentialAuthority (derived with the Session
+    # admission) and kagent-crds carries the EgressPolicy CRD the tenant
+    # admission matches: the workspace write path.
+    versionRange: ">=1.15.0 <1.16.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -681,7 +685,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.13.0 <1.14.0"
+    versionRange: ">=1.15.0 <1.16.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
