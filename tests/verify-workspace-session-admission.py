@@ -208,6 +208,28 @@ def main(meta: str) -> int:
     ok(f"with the switch on and a grant signing key (own or created) the kagent release carries {JWT}: "
        f"jwksURL {JWKS}, issuer {ISSUER}, audience kagent, allowHTTP true; NOTES prints it; no null in the release's values")
 
+    # --- the person's credential on the providers' hosts ------------------------------------------
+    session = block(block(hr, "controller", 4), "session", 6)
+    if "        credentialAuthority: muster.giantswarm.io\n" not in session:
+        fail(f"the kagent release's controller.session names no credentialAuthority muster.giantswarm.io:\n{session}")
+    own = block(block(kagent_release([*base, "--set", "kagent.controller.session.credentialAuthority=creds.example.com"], meta), "controller", 4), "session", 6)
+    if "        credentialAuthority: creds.example.com\n" not in own:
+        fail(f"an own kagent.controller.session.credentialAuthority does not stand:\n{own}")
+    docs = documents(helm(meta, [*base, "--set", "components.substrate.enabled=true"]))
+    muster = block(block(docs.get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6)
+    for line in ("        enabled: true\n", "        gatewayIdentity: spiffe://cluster.local/ns/ate-system/sa/atenet-egress\n"):
+        if line not in muster:
+            fail(f"with workspaces and Substrate on the muster release's credentialProvider lacks {line.strip()!r}:\n{muster}")
+    substrate = block(block(docs.get(("HelmRelease", "substrate"), ""), "credentialProvider", 4), "additionalProviders", 6)
+    if "uriAuthority: muster.giantswarm.io" not in substrate or "host: muster.agent-platform.svc:50051" not in substrate:
+        fail(f"the substrate release's credentialProvider.additionalProviders lacks muster's FetchSecret:\n{substrate}")
+    off = documents(helm(meta, [*KAGENT, *IDENTITY, "--set", "components.substrate.enabled=true"]))
+    if "credentialProvider:" in block(off.get(("HelmRelease", "muster"), ""), "muster", 4):
+        fail("the muster release carries a credentialProvider with workspaces off")
+    ok("with the switch on the kagent release names muster.giantswarm.io as its credentialAuthority (an own value stands), "
+       "the muster release serves FetchSecret to the egress gateway's identity with Substrate on, and Substrate routes the authority to muster; "
+       "with workspaces off muster gets no credentialProvider")
+
     # --- nothing without a grant key, or without kagent ------------------------------------------
     for flags, what in (([*NO_OWN, "--set", f"{NAME}.providers=null", "--set", "workspaceManager.route.enabled=false"], "without providers"),
                         ([*NO_OWN, "--set", f"{NAME}.oauth.enabled=false"], "with oauth off"),

@@ -461,7 +461,12 @@ block, an issuer, the email claim, an own block set in part. */ -}}
 {{- include "agent-platform.validateSessionAdmission" .root -}}
 {{- with (include "agent-platform.kagent.sessionAdmission" .root | fromJson) -}}
 {{- $controller := get $derived "controller" | default dict -}}
-{{- $_ := set $controller "session" (dict "admission" (dict "jwt" .)) -}}
+{{- $session := dict "admission" (dict "jwt" .) -}}
+{{- /* The credential provider a Session's provider hosts resolve through:
+muster's authority, which muster answers with the person's token
+(muster.credentialProvider); an own value stands. */ -}}
+{{- $_ := set $session "credentialAuthority" (dig "controller" "session" "credentialAuthority" (dig "muster" "credentialProvider" "authority" "muster.giantswarm.io" ($.root.Values.muster | default dict)) ($.root.Values.kagent | default dict)) -}}
+{{- $_ := set $controller "session" $session -}}
 {{- $_ := set $derived "controller" $controller -}}
 {{- end -}}
 {{- end -}}
@@ -472,7 +477,26 @@ installation names its own. Without it a lab Dex fails muster's OIDC discovery
 and muster never turns Ready (giantswarm/agent-platform#309). */ -}}
 {{- $ca := dig "identity" "ca" dict (.root.Values.global | default dict) -}}
 {{- if and $ca.secretName (not (dig "muster" "extraCaFile" "secret" "name" "" (.root.Values.muster | default dict))) -}}
-{{- $_ := set $derived "muster" (dict "extraCaFile" (dict "secret" (dict "name" $ca.secretName "key" ($ca.key | default "ca.crt")))) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $muster "extraCaFile" (dict "secret" (dict "name" $ca.secretName "key" ($ca.key | default "ca.crt"))) -}}
+{{- $_ := set $derived "muster" $muster -}}
+{{- end -}}
+{{- /* muster answers the egress gateway's credential fetches for a workspace
+Session's provider hosts (ate-secret://muster.giantswarm.io/<provider
+instance>/<git|api>) while workspaces and Substrate are on: muster serves
+FetchSecret on Substrate's pod certificates, which only a cluster running
+Substrate issues, and answers the gateway's pod identity alone
+(spiffe://cluster.local/ns/<substrate targetNamespace>/sa/atenet-egress).
+muster.credentialProvider's own keys stand; releasable names the provider
+instances whose grants muster releases (agent-platform.validateWorkspaceCredentials). */ -}}
+{{- if and (.root.Values.workspaces | default dict).enabled (include "agent-platform.componentEnabled" (dict "root" .root "name" "substrate")) -}}
+{{- $substrateNs := dig "substrate" "targetNamespace" "ate-system" (.root.Values.components | default dict) -}}
+{{- $own := dig "muster" "credentialProvider" dict (.root.Values.muster | default dict) | default dict -}}
+{{- $provider := dict "enabled" true "gatewayIdentity" (printf "spiffe://cluster.local/ns/%s/sa/atenet-egress" $substrateNs) -}}
+{{- $provider = mergeOverwrite $provider $own -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $muster "credentialProvider" $provider -}}
+{{- $_ := set $derived "muster" $muster -}}
 {{- end -}}
 {{- /* The customer's platform team writes the servers and workflows of
 muster's namespace beside the Giant Swarm admin groups
