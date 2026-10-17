@@ -107,7 +107,7 @@ LINE = {
     "agent-manager": (GSOCI, ">=2.3.0 <3.0.0", ["muster", "kagent"]),
     # The Google access-token credential provider plugin beside Substrate
     # (giantswarm/substrate-credential-providers): 0.1.0 is its first release.
-    "google-access-token-credential-provider": (GSOCI, ">=0.1.0 <1.0.0", ["substrate"]),
+    "google-access-token-credential-provider": (GSOCI, ">=0.1.0 <0.2.0", ["substrate"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).
@@ -116,11 +116,11 @@ LINE = {
     # giantswarm/giantswarm#36711); 0.20.2 was the first vm-manager release
     # from the generated CircleCI pipeline with its guest image artifact
     # (gsoci, the catalog). muster alone: the MCPServer CR.
-    "vm-manager": (GSOCI, ">=0.24.0 <1.0.0", ["muster"]),
+    "vm-manager": (GSOCI, ">=0.24.0 <0.25.0", ["muster"]),
     # 0.4.2 is the first cluster-manager release with the muster registration and
     # the identity contract the meta chart forwards that also tolerates a cluster
     # without the Cluster API group. muster alone: the MCPServer CR.
-    "cluster-manager": (GSOCI, ">=0.22.0 <1.0.0", ["muster"]),
+    "cluster-manager": (GSOCI, ">=0.22.0 <0.35.0", ["muster"]),
     # Swarmgeist on the line: the line speaks A2A v1 over gRPC to the controller
     # GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10 REST client and
     # belongs to the 3.x meta chart. The floor is 2.0.0, the Slack-only line
