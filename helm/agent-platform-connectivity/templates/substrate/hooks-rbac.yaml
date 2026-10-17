@@ -9,7 +9,9 @@ on persistentvolumeclaims (and get on storageclasses) while this chart applies
 model serving's cache claim (templates/model-serving/cache-pvc.yaml), and delete on the pre-pull
 DaemonSet by name while it renders (templates/model-serving/prepull.yaml: the
 DaemonSet is a post-install/post-upgrade hook object, and the pre-delete hook
-Job removes it). Cluster-scoped because the
+Job removes it), and delete on the workspace-manager sign-in keys Secret by
+name while its cleanup renders (templates/workspace-manager/signin-keys-cleanup.yaml).
+Cluster-scoped because the
 bootstrap writes into two namespaces the substrate release has not created yet
 (a Role there cannot precede its namespace), publishes cluster-scoped objects,
 and the databases hook writes into every namespace of
@@ -73,6 +75,14 @@ rules:
   - apiGroups: ["apps"]
     resources: ["daemonsets"]
     resourceNames: [{{ include "agent-platform.modelServing.prepull.name" . | quote }}]
+    verbs: ["delete"]
+  {{- end }}
+  {{- with include "agent-platform.workspaceManager.signinKeysOrphan" . }}
+  # The sign-in keys cleanup (templates/workspace-manager/signin-keys-cleanup.yaml)
+  # deletes the Secret an earlier release kept: delete on exactly that Secret.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ . | quote }}]
     verbs: ["delete"]
   {{- end }}
   {{- if include "agent-platform.llmRouting.modelConfigs" . }}
