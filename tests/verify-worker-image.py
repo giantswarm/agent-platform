@@ -42,10 +42,8 @@ range to one release (`agent-platform.substrate.validateRange`). Here:
     against another minor, fails: the meta chart's CI names the day the kagent
     line moves to another Substrate release before the chart's own pin does;
   - the workers run the release the control plane runs (#822): the substrate
-    release carries ateController.gvisorWorker.followRelease: true, an own false
-    fails the render, and so does a floor below the first release that carries
-    the flag (agent-platform.substrate.followReleaseFloor, read from
-    _helpers.tpl); the substrate chart the range resolves to renders, with the
+    release carries ateController.gvisorWorker.followRelease: true and an own
+    false fails the render; the substrate chart the range resolves to renders, with the
     forwarded values, ate-controller's --gvisor-worker-image as the ateom-gvisor
     of the atelet's own registry, repository and tag — the resolved release, so
     a Substrate patch within the range rolls the pool with no chart release —
@@ -72,8 +70,6 @@ KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "kagent.databas
 REGISTRY = "gsoci.azurecr.io"
 REPOSITORY = "giantswarm/substrate"
 WORKER = "ateom-gvisor"
-HELPERS = os.path.join("templates", "_helpers.tpl")
-FOLLOW_FLOOR_RE = re.compile(r'define "agent-platform\.substrate\.followReleaseFloor" -\}\}([^{]+)\{\{')
 FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # Substrate minors released on the upstream pin of an earlier minor: a minor of
 # the line is a re-pin except these. 1.2 and 1.3 are the line on
@@ -221,10 +217,6 @@ def main(meta: str) -> int:
     print("ok: a Substrate range with no floor, a ceiling past the next minor or at the next patch, a -0 ceiling (which admits the line's dev builds), the former -gs.N shape, a ~ or ^ range, a <= ceiling or a floor alone fails the render naming the range")
 
     # --- the workers follow the control plane's release (#822) ---
-    follow_floor = FOLLOW_FLOOR_RE.search(open(os.path.join(meta, HELPERS), encoding="utf-8").read())
-    if not follow_floor:
-        cc.fail(f"agent-platform.substrate.followReleaseFloor is not a one-line define in {HELPERS}")
-    follow_floor = follow_floor.group(1).strip()
     sub_values, sub_forwarded, sub_source = substrate_release(meta, [])
     if follow_release(sub_values) is not True:
         cc.fail(f"the substrate release carries ateController.gvisorWorker.followRelease {follow_release(sub_values)!r}; expected true — the workers run the release the control plane runs, a Substrate patch rolls the pool with the atelet")
@@ -233,11 +225,6 @@ def main(meta: str) -> int:
                  "substrate.ateController.gvisorWorker.followRelease is false",
                  "followRelease false")
     print("ok: an own followRelease false fails the render naming the key")
-    below = f">={previous_minor(follow_floor)} <{tuple_of(follow_floor)}"
-    render_fails(meta, ["--set", f"components.substrate.versionRange={below}"],
-                 f"pins Substrate {previous_minor(follow_floor)}, below {follow_floor}",
-                 f"a Substrate floor below {follow_floor} ({below})")
-    print(f"ok: a Substrate floor below {follow_floor} ({below}), whose ate-controller runs the pool's spec.workerImage, fails the render naming the floor")
 
     with tempfile.TemporaryDirectory() as tmp:
         url, sub_rng = sub_source.split(" ", 1)

@@ -25,7 +25,6 @@ The WorkerPool's `spec.workerImage` stays the floor's (`ateom-gvisor:1.12.0`). I
 
 - **None** for an installation that follows the chart's range: the rendered pods are unchanged.
 - **`substrate.ateController.gvisorWorker.followRelease: false` in your values**: drop it. It now fails the render, because the workers would run the floor beside a later patch's atelet.
-- **An own `components.substrate.versionRange` with a floor below `1.4.0`**: the render fails, because that ate-controller has no flag. Move the floor to the chart's range.
 - **Recognising it worked**: `kubectl -n kagent get workerpool kagent-default -o jsonpath='{.status.workerImage}'` and `kubectl -n ate-system get ds atelet -o jsonpath='{.spec.template.spec.containers[0].image}'` name the same Substrate version.
 
 ## 4.135.x → \<next\> (Substrate 1.12.0: the Organizations' credentials by label)

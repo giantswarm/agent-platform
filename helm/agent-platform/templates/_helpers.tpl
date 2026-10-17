@@ -1288,9 +1288,7 @@ builds. A later patch of the pinned minor reaches the control plane and, through
 ate-controller's followRelease, the workers with it (giantswarm/agent-platform#822);
 a `1.1.0` never reaches either. `0.x`, `~1.0.0`, `^1.0.0`, `<1.1.0`, a `-0` bound, a
 `<=` ceiling, a patch ceiling and the former `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` are
-refused, and so is a floor below
-agent-platform.substrate.followReleaseFloor, whose ate-controller runs every
-pool's spec.workerImage. Called by
+refused. Called by
 agent-platform.validateSubstrate while components.substrate is on.
 */}}
 {{- define "agent-platform.substrate.validateRange" -}}
@@ -1311,25 +1309,7 @@ agent-platform.validateSubstrate while components.substrate is on.
 {{- if not $ok -}}
 {{- fail (printf "components.substrate.versionRange %q does not confine one Substrate release and its patches: the kagent WorkerPool's worker image (ateom-gvisor) follows the range's floor, the atelet follows the release Flux resolves, and only a minor of the line changes the runtime contract the two share — so the range is one exact version (1.0.0) or a floor with the ceiling of its own minor and no -0 bound (>=1.0.0 <1.1.0 — a -0 anywhere makes Flux evaluate the line's dev builds against the range); a worker and an atelet of different contracts boot no golden actor (giantswarm/agent-platform#466)" $range) -}}
 {{- end -}}
-{{- $pin := regexReplaceAll "-.*$" (include "agent-platform.substrate.pinnedVersion" .) "" -}}
-{{- $followFloor := include "agent-platform.substrate.followReleaseFloor" . -}}
-{{- if lt ((semver $pin).Compare (semver $followFloor)) 0 -}}
-{{- fail (printf "components.substrate.versionRange %q pins Substrate %s, below %s: its ate-controller runs every WorkerPool on its spec.workerImage, the range's floor, so a patch Flux resolves would run a newer atelet beside an older worker; the workers follow the control plane's release from %s on (ateController.gvisorWorker.followRelease, giantswarm/agent-platform#822)" $range $pin $followFloor $followFloor) -}}
 {{- end -}}
-{{- end -}}
-
-{{/*
-The first release of the Substrate line whose ate-controller runs every gVisor
-WorkerPool on the ateom-gvisor of its own release
-(ateController.gvisorWorker.followRelease, giantswarm/substrate#114). The chart
-sets the flag on the substrate release (agent-platform.componentDerivedValues),
-so the workers run the release the control plane runs and a Substrate patch
-within the range rolls the pool with no chart release
-(giantswarm/agent-platform#822); agent-platform.substrate.validateRange refuses
-a floor below it. One line, no comment inside the define:
-tests/verify-worker-image.py reads the value from this file.
-*/}}
-{{- define "agent-platform.substrate.followReleaseFloor" -}}1.4.0{{- end -}}
 
 {{/*
 The first release of the Substrate line (giantswarm/substrate, the chart
