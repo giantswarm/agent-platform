@@ -10969,6 +10969,8 @@ spec:
         add:
           - name: agent_instance_id
             expression: '(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""'
+          - name: request_id
+            expression: 'request.headers["x-request-id"]'
 ---
 # Source: agent-platform-connectivity/templates/agentgateway/healthz.yaml
 apiVersion: agentgateway.dev/v1alpha1

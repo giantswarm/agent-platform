@@ -716,6 +716,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gateway.metricLabels.api_key.expression | string | `"apiKey.name"` |  |
 | gateway.accessLog.attributes.agent_instance_id.enabled | bool | `true` |  |
 | gateway.accessLog.attributes.agent_instance_id.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent-instance-id\"] : \"\""` |  |
+| gateway.accessLog.attributes.request_id.enabled | bool | `true` |  |
+| gateway.accessLog.attributes.request_id.expression | string | `"request.headers[\"x-request-id\"]"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |

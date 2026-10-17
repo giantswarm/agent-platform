@@ -1297,17 +1297,18 @@ DAL_POLICY := agent-platform-connectivity-access-log
 ACCESS_LOG_ATTRS := python3 -c 'import sys,yaml; [print(a["name"]+"="+a["expression"]) for a in next(d for d in yaml.safe_load_all(open(sys.argv[1])) if d)["spec"]["frontend"]["accessLog"]["attributes"]["add"]]'
 
 .PHONY: verify-access-log
-verify-access-log: ## Assert the data plane's access log fields (giantswarm/giantswarm#38023): with a data plane the connectivity chart renders the Gateway-scoped -access-log AgentgatewayPolicy whose frontend.accessLog.attributes add agent_instance_id, x-kagent-agent-instance-id read behind the Substrate egress predicate (the field is empty, and dropped, for any other caller); an installation's own field joins it; every entry off or muster-direct renders none; an entry without an expression fails the render naming it; the meta chart forwards the same default to the connectivity release.
+verify-access-log: ## Assert the data plane's access log fields (giantswarm/giantswarm#38023): with a data plane the connectivity chart renders the Gateway-scoped -access-log AgentgatewayPolicy whose frontend.accessLog.attributes add agent_instance_id, x-kagent-agent-instance-id read behind the Substrate egress predicate (the field is empty, and dropped, for any other caller), and request_id, the x-request-id request header (giantswarm/agent-platform#867); an installation's own field joins it; every entry off or muster-direct renders none; an entry without an expression fails the render naming it; the meta chart forwards the same default to the connectivity release.
 	@echo "====> $@ ($(CHART_DIR) + $(CONNECTIVITY_DIR))"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) >$(VERIFY_TMP)/val-on.out 2>&1 || { cat $(VERIFY_TMP)/val-on.out; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/val-on.out AgentgatewayPolicy $(DAL_POLICY) >$(VERIFY_TMP)/val-pol.out || { echo "FAIL: no AgentgatewayPolicy $(DAL_POLICY) with the data plane on"; exit 1; }
 	@grep -q '^      kind: Gateway$$' $(VERIFY_TMP)/val-pol.out && grep -q '^      name: agentgateway$$' $(VERIFY_TMP)/val-pol.out || { echo "FAIL: the -access-log policy does not target the data-plane Gateway"; cat $(VERIFY_TMP)/val-pol.out; exit 1; }
-	@[ "$$($(ACCESS_LOG_ATTRS) $(VERIFY_TMP)/val-pol.out)" = 'agent_instance_id=(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""' ] || { echo "FAIL: agent_instance_id does not read x-kagent-agent-instance-id behind the Substrate egress predicate"; cat $(VERIFY_TMP)/val-pol.out; exit 1; }
+	@$(ACCESS_LOG_ATTRS) $(VERIFY_TMP)/val-pol.out >$(VERIFY_TMP)/val-attrs.out
+	@printf '%s\n' 'agent_instance_id=(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""' 'request_id=request.headers["x-request-id"]' | diff -u - $(VERIFY_TMP)/val-attrs.out || { echo "FAIL: the default fields are not agent_instance_id (x-kagent-agent-instance-id behind the Substrate egress predicate) and request_id (the x-request-id header), in name order"; exit 1; }
 	@echo "ok: defaults"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.accessLog.attributes.model.expression=llm.requestModel >$(VERIFY_TMP)/val-add.out 2>&1 || { cat $(VERIFY_TMP)/val-add.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/val-add.out AgentgatewayPolicy $(DAL_POLICY) >$(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: agent_instance_id$$' $(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: model$$' $(VERIFY_TMP)/val-add-pol.out || { echo "FAIL: an installation's own field does not join agent_instance_id"; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/val-add.out AgentgatewayPolicy $(DAL_POLICY) >$(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: agent_instance_id$$' $(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: request_id$$' $(VERIFY_TMP)/val-add-pol.out && grep -q '^          - name: model$$' $(VERIFY_TMP)/val-add-pol.out || { echo "FAIL: an installation's own field does not join agent_instance_id"; exit 1; }
 	@echo "ok: an installation's own field"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.accessLog.attributes.agent_instance_id.enabled=false >$(VERIFY_TMP)/val-off.out 2>&1 || { cat $(VERIFY_TMP)/val-off.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(DPT_VM) --set gateway.accessLog.attributes.agent_instance_id.enabled=false --set gateway.accessLog.attributes.request_id.enabled=false >$(VERIFY_TMP)/val-off.out 2>&1 || { cat $(VERIFY_TMP)/val-off.out; exit 1; }
 	@if grep -q 'name: $(DAL_POLICY)$$' $(VERIFY_TMP)/val-off.out; then echo "FAIL: the -access-log policy renders with every entry off"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) >$(VERIFY_TMP)/val-direct.out 2>&1 || { cat $(VERIFY_TMP)/val-direct.out; exit 1; }
 	@if grep -q 'name: $(DAL_POLICY)$$' $(VERIFY_TMP)/val-direct.out; then echo "FAIL: the -access-log policy renders in muster-direct, with no data plane to target"; exit 1; fi
@@ -1315,7 +1316,8 @@ verify-access-log: ## Assert the data plane's access log fields (giantswarm/gian
 	elif ! grep -q "gateway.accessLog.attributes.broken has no expression" $(VERIFY_TMP)/val-bad.out; then echo "FAIL: an entry without an expression failed for the wrong reason"; cat $(VERIFY_TMP)/val-bad.out; exit 1; fi
 	@echo "ok: guards"
 	@$(HELM) template t $(CHART_DIR) $(VM) >$(VERIFY_TMP)/val-meta.out 2>&1 || { cat $(VERIFY_TMP)/val-meta.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/val-meta.out HelmRelease agent-platform-connectivity | grep -A2 '^      accessLog:$$' | grep -q '^          agent_instance_id:$$' || { echo "FAIL: the meta chart does not forward gateway.accessLog.attributes.agent_instance_id to the connectivity release"; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/val-meta.out HelmRelease agent-platform-connectivity >$(VERIFY_TMP)/val-meta-conn.out
+	@for f in agent_instance_id request_id; do grep -A12 '^      accessLog:$$' $(VERIFY_TMP)/val-meta-conn.out | grep -q "^          $$f:$$" || { echo "FAIL: the meta chart does not forward gateway.accessLog.attributes.$$f to the connectivity release"; exit 1; }; done
 	@echo "ok: $@"
 
 # Anthropic prompt caching (giantswarm/giantswarm#37788; the kagent line's carried patch kagent-dev/kagent#2788).
