@@ -1890,12 +1890,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
-| workspace-manager.signin.keys.secretName | string | `"workspace-manager-signin-keys"` |  |
-| workspace-manager.signin.keys.current | string | `"key-1"` |  |
 | workspace-manager.providers | list | `[]` |  |
 | workspaceManager.route.enabled | bool | `true` |  |
 | workspaceManager.route.parentRefs | list | `[]` |  |
-| workspaceManager.signinKeys.create | bool | `true` |  |
 | workspaceManager.grantKey.create | bool | `true` |  |
 | workspaceManager.grantKey.secretName | string | `"workspace-manager-grant-keys"` |  |
 | workspaceManager.grantKey.key | string | `"key-1"` |  |
