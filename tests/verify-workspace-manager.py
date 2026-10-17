@@ -56,7 +56,7 @@ muster. Each case below pins one property of its wiring:
 - inline credentials, a duplicate or non-DNS provider name, a provider without a
   kind fail the render naming the path; a gitlab instance below the floor
   agent-platform.workspaceManager.gitlabFloor (0.5.0, a release candidate of it
-  too) fails naming it, the default floor is 0.10.0, and the component
+  too) fails naming it, the default floor is at or above the grant floor, and the component
   chart at the BOM's pin takes the instance; a workspaces.namespace that differs from
   kagent's fails naming the key, kagent.namespaceOverride moves it;
 - the kagent address: with kagent on, the workspace-manager range's floor at
@@ -90,6 +90,9 @@ import subprocess
 import sys
 import tempfile
 
+import floors
+import fluxsemver
+
 HELM = os.environ.get("HELM", "helm")
 NAME = "workspace-manager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
@@ -119,7 +122,6 @@ NO_GITLAB = ["--set", "workspace-manager.providers[1].kind=github"]
 GITLAB_FLOOR = "0.5.0"
 # The first workspace-manager release whose person's token is muster's grant.
 GRANT_FLOOR = "0.10.0"
-DEFAULT_FLOOR = "0.10.0"
 CREDENTIALS = ("privateKey", "clientSecret", "token", "signingKey")
 
 
@@ -465,8 +467,11 @@ def main(meta: str, connectivity: str) -> int:
        "(the App's issuer and client Secret, grantScope subject, forwardIdentity) and --muster-provider github")
 
     # --- the gitlab kind's floor ----------------------------------------------------------
-    if not (rng := re.search(RANGE_RE, on_docs[("OCIRepository", NAME)])) or not rng.group(1).startswith(f">={DEFAULT_FLOOR} "):
-        fail(f"the default workspace-manager range is not floored at {DEFAULT_FLOOR}, the first release whose person's token is muster's grant")
+    default = floors.range_of(NAME, meta)
+    if not (rng := re.search(RANGE_RE, on_docs[("OCIRepository", NAME)])) or rng.group(1) != default:
+        fail(f"the workspace-manager OCIRepository does not carry components.{NAME}.versionRange {default!r}")
+    if fluxsemver.Version(floors.floor(NAME, meta)) < fluxsemver.Version(GRANT_FLOOR):
+        fail(f"the default workspace-manager range {default!r} floors below {GRANT_FLOOR}, the first release whose person's token is muster's grant")
     for below in (">=0.4.0 <1.0.0", "0.4.1"):
         must_fail(meta, [*ON, "--set", f"components.{NAME}.versionRange={below}"],
                   f"{NAME}.providers[1] (gitlab) is of kind gitlab, which workspace-manager has from {GITLAB_FLOOR} on", f"a gitlab instance on the range {below}")

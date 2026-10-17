@@ -48,11 +48,12 @@ import re
 import subprocess
 import sys
 
+import floors
+
 HELM = os.environ.get("HELM", "helm")
 NAME = "cluster-manager"
 WIRING = "clusterManager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
-RANGE = ">=0.22.0 <1.0.0"
 CI = ["--set", "components.flux.enabled=false"]
 ON = ["--set", f"components.{NAME}.enabled=true"]
 IDENTITY = [
@@ -111,6 +112,7 @@ def must_have(doc: str, lines: tuple, what: str) -> None:
 
 
 def main(meta: str, connectivity: str) -> int:
+    rng = floors.range_of(NAME, meta)  # values.yaml's, the one place it is declared
     # --- off by default -------------------------------------------------------
     off = helm(meta, [])
     off_docs = documents(off)
@@ -136,7 +138,7 @@ def main(meta: str, connectivity: str) -> int:
         if (kind, NAME) not in on_docs:
             fail(f"components.{NAME}.enabled=true rendered no {kind} named {NAME}")
     oci = on_docs[("OCIRepository", NAME)]
-    must_have(oci, (f"url: {REPOSITORY}/{NAME}", f'semver: "{RANGE}"'), "the OCIRepository")
+    must_have(oci, (f"url: {REPOSITORY}/{NAME}", f'semver: "{rng}"'), "the OCIRepository")
     if "semverFilter" in oci or "insecure" in oci:
         fail("the OCIRepository carries a dev-channel knob by default")
     hr = on_docs[("HelmRelease", NAME)]
@@ -170,7 +172,7 @@ def main(meta: str, connectivity: str) -> int:
             continue
         if on_docs[key] != doc:
             fail(f"switching the component on changed {key}")
-    ok(f"on: one OCIRepository ({RANGE}) + one HelmRelease dependsOn muster, the block forwarded (Service name, OAuth as the caller, the muster registration, global), the namespace derived, the two blocks reach connectivity; nothing else moved")
+    ok(f"on: one OCIRepository ({rng}) + one HelmRelease dependsOn muster, the block forwarded (Service name, OAuth as the caller, the muster registration, global), the namespace derived, the two blocks reach connectivity; nothing else moved")
 
     # --- the derived namespace ------------------------------------------------------
     moved = documents(helm(meta, [*ON, "--set", "gitops.targetNamespace=agent-platform"]))[("HelmRelease", NAME)]

@@ -55,18 +55,22 @@ import tempfile
 
 import yaml
 
+import floors
+import fluxsemver
+
 GSOCI = "oci://gsoci.azurecr.io/charts/giantswarm"
 
-# component -> (repository, versionRange, dependsOn, a line only the standalone's
-# defaults put into the forwarded values, or None when the block is empty)
+# component -> (repository, dependsOn, a line only the standalone's defaults put
+# into the forwarded values, or None when the block is empty). Every range is
+# values.yaml's (tests/floors.py), the one place a range or floor is declared.
 NEW = {
-    "backstage": (GSOCI, ">=2.68.0 <4.0.0", ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
-    "mcp-kubernetes": (GSOCI, ">=1.3.0 <2.0.0", [], "fullnameOverride: mcp-kubernetes"),
-    "cloudnative-pg": ("oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts", "0.29.x", [], "repository: gsoci.azurecr.io/giantswarm/cloudnative-pg"),
-    "kserve-llmisvc-crd": (GSOCI, "0.7.x", [], None),
+    "backstage": (GSOCI, ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
+    "mcp-kubernetes": (GSOCI, [], "fullnameOverride: mcp-kubernetes"),
+    "cloudnative-pg": ("oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts", [], "repository: gsoci.azurecr.io/giantswarm/cloudnative-pg"),
+    "kserve-llmisvc-crd": (GSOCI, [], None),
     # The one KServe controller: it renders the control plane's shared objects
     # itself, since the classic controller (kserve-resources) is gone.
-    "kserve-llmisvc-resources": (GSOCI, "0.7.x", ["kserve-llmisvc-crd"], "createSharedResources: true"),
+    "kserve-llmisvc-resources": (GSOCI, ["kserve-llmisvc-crd"], "createSharedResources: true"),
 }
 
 # The wiring chart has no range of its own: released off the same tag as the
@@ -77,50 +81,44 @@ NEW = {
 CONNECTIVITY = "agent-platform-connectivity"
 
 # The components whose ranges the kagent API v2 line changed (component ->
-# repository, versionRange, dependsOn with every component on): the kagent line's
-# two charts on the line's release range (one build, kagent after its CRDs), the
-# managers on the lines that speak v1alpha3 (agent-manager 1.x; model-manager
-# 0.x from 0.20.0, dual-version), klaus-gateway 2.x (A2A v1 over gRPC). kagent-crds
-# follows components.kagent and takes no `global` (a chart of two subchart switches).
+# repository, dependsOn with every component on): the kagent line's two charts
+# on one range (one build, kagent after its CRDs), the managers on the lines
+# that speak v1alpha3, klaus-gateway on the line that speaks A2A v1 over gRPC.
+# kagent-crds follows components.kagent and takes no `global` (a chart of two
+# subchart switches).
 KAGENT_LINE = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
-KAGENT_RANGE = ">=1.13.0 <1.14.0"
 # Agent Substrate, kagent API v2's runtime, from the Giant Swarm Substrate line
-# (giantswarm/substrate): two roster entries in the kagent-crds shape, one pin,
-# both landing in ate-system, both following components.kagent. The pin is the
-# line's release range, the kagent entry's shape; its floor is the BOM pin AND
-# the worker image's tag — the meta chart derives the kagent WorkerPool's
-# ateom-gvisor image from it, never from the kagent chart's stamp (#466;
-# tests/verify-worker-image.py holds the derivation and its guards).
+# (giantswarm/substrate): two roster entries in the kagent-crds shape, one
+# range, both landing in ate-system, both following components.kagent. The
+# range's floor is the BOM pin AND the worker image's tag — the meta chart
+# derives the kagent WorkerPool's ateom-gvisor image from it, never from the
+# kagent chart's stamp (#466; tests/verify-worker-image.py holds the derivation
+# and its guards).
 SUBSTRATE_LINE = "oci://gsoci.azurecr.io/giantswarm/substrate/helm"
-SUBSTRATE_RANGE = ">=1.12.0 <1.13.0"
-# muster: the first release that serves FetchSecret to the egress gateway with the
-# issuer pin.
-MUSTER_RANGE = ">=5.44.0 <6.0.0"
-SUBSTRATE_PIN = "1.12.0"  # the range's floor, the BOM pin and the worker image's tag: the release whose credential provider grants namespaces selected by label (ownNamespaceSelector, allowedNamespaceSelector; giantswarm/substrate#456), on 1.11's upstream pin; before it 1.11.4, the release whose atunnel ends a CONNECT tunnel once the actor closes its connection (giantswarm/substrate#451); before it 1.11.3, the release that marks a crashed actor's resume refusal not resumable, whose ateom-gvisor reports a running actor's sandbox exit and whose atelet terminates an actor whose restore failed, and the floor at or above the Substrate kagent 1.12.0 is built against (1.11.1); before it 1.11.0, the release whose egress gateway mints and injects actor JWTs (an actor_jwt entry of replace_headers, giantswarm/substrate#421) on agentgateway 2.4.0, and whose ate-controller can mark the worker pods that host actors (giantswarm/substrate#425)
-WORKER_IMAGE = f"gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:{SUBSTRATE_PIN}"  # the line's release, published there
+WORKER_IMAGE_REPOSITORY = "gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor"  # the line's releases, published there
 SUBSTRATE_NAMESPACE = "ate-system"
 LINE = {
-    "kagent": (KAGENT_LINE, KAGENT_RANGE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),
-    "kagent-crds": (KAGENT_LINE, KAGENT_RANGE, []),
-    "substrate": (SUBSTRATE_LINE, SUBSTRATE_RANGE, ["substrate-crds", "agent-platform-connectivity"]),
-    "substrate-crds": (SUBSTRATE_LINE, SUBSTRATE_RANGE, []),
-    "agent-manager": (GSOCI, ">=2.3.0 <3.0.0", ["muster", "kagent"]),
+    "kagent": (KAGENT_LINE, ["kagent-crds", "substrate-crds", "substrate", "agent-platform-connectivity"]),
+    "kagent-crds": (KAGENT_LINE, []),
+    "substrate": (SUBSTRATE_LINE, ["substrate-crds", "agent-platform-connectivity"]),
+    "substrate-crds": (SUBSTRATE_LINE, []),
+    "agent-manager": (GSOCI, ["muster", "kagent"]),
     # The Google access-token credential provider plugin beside Substrate
     # (giantswarm/substrate-credential-providers): 0.1.0 is its first release.
-    "google-access-token-credential-provider": (GSOCI, ">=0.1.0 <1.0.0", ["substrate"]),
+    "google-access-token-credential-provider": (GSOCI, ["substrate"]),
     # The ceiling admits model-manager 1.0.0, the release that composes
     # LLMInferenceServices only: nothing the meta chart forwards names the
     # values it drops (kserve.servingKind, kserve.runtime).
-    "model-manager": (GSOCI, ">=1.14.0 <2.0.0", ["muster", "kagent", "kserve-llmisvc-resources"]),
+    "model-manager": (GSOCI, ["muster", "kagent", "kserve-llmisvc-resources"]),
     # 0.22.0 carries serviceMonitor.enabled / .labels (giantswarm/vm-manager#73,
     # giantswarm/giantswarm#36711); 0.20.2 was the first vm-manager release
     # from the generated CircleCI pipeline with its guest image artifact
     # (gsoci, the catalog). muster alone: the MCPServer CR.
-    "vm-manager": (GSOCI, ">=0.24.0 <1.0.0", ["muster"]),
+    "vm-manager": (GSOCI, ["muster"]),
     # 0.4.2 is the first cluster-manager release with the muster registration and
     # the identity contract the meta chart forwards that also tolerates a cluster
     # without the Cluster API group. muster alone: the MCPServer CR.
-    "cluster-manager": (GSOCI, ">=0.22.0 <1.0.0", ["muster"]),
+    "cluster-manager": (GSOCI, ["muster"]),
     # Swarmgeist on the line: the line speaks A2A v1 over gRPC to the controller
     # GRPCRoute (giantswarm/klaus-gateway#234); 0.x is the 0.10 REST client and
     # belongs to the 3.x meta chart. The floor is 2.0.0, the Slack-only line
@@ -130,7 +128,7 @@ LINE = {
     # class in the thread, the turn record and the turn metric
     # (giantswarm/klaus-gateway#329). 4.3.0 starts every Slack Session through
     # agent-manager's start_session (giantswarm/klaus-gateway#446).
-    "klaus-gateway": (GSOCI, ">=4.3.0 <5.0.0", []),
+    "klaus-gateway": (GSOCI, []),
 }
 
 # The kagent.dev API version the 4.x line serves, pinned into both managers'
@@ -184,6 +182,8 @@ DEV_CHANNEL: dict[str, str] = {}
 PROBE_FILTER = ".*-dev\\.x\\..*"
 # agent-platform.releaseTagFilter: stable releases and release candidates.
 RELEASE_TAG_FILTER = "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
+# A range bound that carries a pre-release (templates/components.yaml's test).
+PRERELEASE_BOUND = re.compile(r"(^|[ ,])[<>=~^]+v?[0-9]+(\.[0-9]+){0,2}-")
 
 ON = [f"--set=components.{n}.enabled=true" for n in (*NEW, "klaus-gateway", "cluster-manager")]
 PARENT_REF = ["--set", "ingress.parentRefs[0].name=x"]
@@ -257,10 +257,11 @@ def check_semver_filters(meta: str, ci: list[str]) -> None:
     every = [*ci, *ON, *[f"--set=components.{n}.enabled=true" for n in SWITCHES]]
     got = semver_filters(render(meta, every))
     # A release candidate's floor renders the release tag filter (Flux evaluates
-    # every pre-release tag against it, the line's branch builds included).
-    want = {**DEV_CHANNEL, **({n: RELEASE_TAG_FILTER for n in ("substrate", "substrate-crds")} if "-" in SUBSTRATE_RANGE else {}),
-            **({n: RELEASE_TAG_FILTER for n in ("kagent", "kagent-crds")} if "-" in KAGENT_RANGE else {}),
-            **({"muster": RELEASE_TAG_FILTER} if "-" in MUSTER_RANGE else {})}
+    # every pre-release tag against it, the line's branch builds included):
+    # every rendered component whose values.yaml range has one.
+    rendered = {n for (k, n) in docs(render(meta, every)) if k == "OCIRepository"}
+    rc = {n: RELEASE_TAG_FILTER for n, r in floors.ranges(meta).items() if n in rendered and PRERELEASE_BOUND.search(r)}
+    want = {**DEV_CHANNEL, **rc}
     if got != want:
         fail(f"OCIRepository semverFilters differ from the dev-channel and release-candidate defaults: rendered {got}, expected {want}")
     probe = render(meta, [*every, "--set-json", f"components.muster.semverFilter={json.dumps(PROBE_FILTER)}"])
@@ -288,8 +289,11 @@ def check_gateway_api_crds(meta: str, ci: list[str]) -> None:
     src, hr = on.get(("OCIRepository", name)), on.get(("HelmRelease", name))
     if not src or not hr:
         fail(f"components.{name} on rendered no OCIRepository and HelmRelease")
-    if f"url: {GSOCI}/{name}\n" not in src or 'semver: ">=1.9.1 <2.0.0"' not in src:
-        fail(f"the {name} OCIRepository is not the fleet's chart at >=1.9.1 <2.0.0 (1.9.1 is Gateway API v1.6.1)")
+    rng = floors.range_of(name, meta)
+    if f"url: {GSOCI}/{name}\n" not in src or f'semver: "{rng}"' not in src:
+        fail(f"the {name} OCIRepository is not the fleet's chart at components.{name}.versionRange {rng!r}")
+    if fluxsemver.Version(floors.floor(name, meta)) < fluxsemver.Version("1.9.1"):
+        fail(f"components.{name}.versionRange {rng!r} floors below 1.9.1, the chart of Gateway API v1.6.1")
     if "\n  targetNamespace: kube-system\n" not in hr:
         fail(f"the {name} release does not install into kube-system, where the app runs its installer Job")
     if "global" in (yaml.safe_load(hr_values(hr)) or {}):
@@ -480,7 +484,8 @@ def main(meta: str, connectivity: str) -> int:
     on = docs(on_manifest)
     conn_on_values = hr_values(on[("HelmRelease", "agent-platform-connectivity")])
     ron = roster(conn_on_values)
-    for name, (repo, rng, deps, marker) in NEW.items():
+    for name, (repo, deps, marker) in NEW.items():
+        rng = floors.range_of(name, meta)
         oci = on.get(("OCIRepository", name))
         hr = on.get(("HelmRelease", name))
         if not oci or not hr:
@@ -521,7 +526,8 @@ def main(meta: str, connectivity: str) -> int:
         forbidden = [d for d in NOT_CONSUMED.get(consumer, []) if d in have]
         if forbidden:
             fail(f"{consumer} dependsOn {forbidden}, which depend on it (their pods start against what its hooks mint) — a cycle helm-controller resolves into a deadlock")
-    for name, (repo, rng, deps) in LINE.items():
+    for name, (repo, deps) in LINE.items():
+        rng = floors.range_of(name, meta)
         oci, hr = on.get(("OCIRepository", name)), on.get(("HelmRelease", name))
         if not oci or not hr:
             fail(f"components.{name} did not render one OCIRepository + one HelmRelease with the CI values")
@@ -529,6 +535,9 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"{name} OCIRepository url is not {repo}/{name}")
         if f'semver: "{rng}"' not in oci:
             fail(f"{name} OCIRepository does not carry versionRange {rng!r} (the kagent API v2 line's range)")
+    for pair in (("kagent", "kagent-crds"), ("substrate", "substrate-crds")):
+        if len({floors.range_of(n, meta) for n in pair}) != 1:
+            fail(f"components.{pair[0]} and components.{pair[1]} carry different ranges {[floors.range_of(n, meta) for n in pair]}; the two charts are one build of the line")
         if sorted(depends_on(hr)) != sorted(deps):
             fail(f"{name} dependsOn {depends_on(hr)}, expected {deps}")
     for name in MANAGERS:
@@ -605,15 +614,15 @@ def main(meta: str, connectivity: str) -> int:
     substrate_pins = {re.search(rf"^\s*{n}:\s*\{{\s*versionRange:\s*\"([^\"]+)\"", bom_file, re.M).group(1) for n in ("substrate", "substrate-crds")}
     if len(substrate_pins) != 1:
         fail(f"the BOM pins substrate and substrate-crds to different builds {sorted(substrate_pins)}; the two charts are one build of the Substrate line")
+    substrate_pin = floors.floor("substrate", meta)
+    worker_image = f"{WORKER_IMAGE_REPOSITORY}:{substrate_pin}"
     if re.search(r"^\s*workerImage:\s*(?!\"\"$|''$)\S+$", open(f"{meta}/values.yaml").read(), re.M):
         fail("kagent.substrateWorkerPool.workerImage is set in values.yaml; the chart derives the worker from components.substrate.versionRange's floor, the key stays empty here (#466)")
-    if not re.search(rf"^  workerImage: {re.escape(WORKER_IMAGE)}$", hr_values(on[("HelmRelease", "kagent")]), re.M):
-        fail(f"the kagent release does not carry substrateWorkerPool.workerImage {WORKER_IMAGE!r}, the worker of the Substrate release the chart pins (the floor of components.substrate.versionRange) — the worker and the atelet are one Substrate release (#466)")
-    if not SUBSTRATE_RANGE.startswith(f">={SUBSTRATE_PIN} "):
-        fail(f"SUBSTRATE_PIN {SUBSTRATE_PIN!r} is not the floor of SUBSTRATE_RANGE {SUBSTRATE_RANGE!r}")
-    if substrate_pins != {SUBSTRATE_PIN}:
-        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {SUBSTRATE_PIN!r}, the BOM {sorted(substrate_pins)} — the two Substrate charts and the derived worker image are one release of the line")
-    print(f"ok: the customer BOM pins the extras, the kagent line and the managers exactly, and not the wiring chart; the kagent release's worker image is {WORKER_IMAGE}, the chart's own Substrate pin")
+    if not re.search(rf"^  workerImage: {re.escape(worker_image)}$", hr_values(on[("HelmRelease", "kagent")]), re.M):
+        fail(f"the kagent release does not carry substrateWorkerPool.workerImage {worker_image!r}, the worker of the Substrate release the chart pins (the floor of components.substrate.versionRange) — the worker and the atelet are one Substrate release (#466)")
+    if substrate_pins != {substrate_pin}:
+        fail(f"the Substrate pin is not one version: the floor of components.substrate.versionRange {substrate_pin!r}, the BOM {sorted(substrate_pins)} — the two Substrate charts and the derived worker image are one release of the line")
+    print(f"ok: the customer BOM pins the extras, the kagent line and the managers exactly, and not the wiring chart; the kagent release's worker image is {worker_image}, the chart's own Substrate pin")
 
     # --- the forwarded tree validates against the connectivity chart --------------
     # The meta chart's defaults plus the one input every render needs; the CI
