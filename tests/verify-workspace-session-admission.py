@@ -37,7 +37,8 @@ below pins one property:
   of 1.6.0 judged alike), no issuer (neither global.domain nor oauth.baseURL), a
   userIdClaim other than email — each only with the admission derived;
 - the kagent chart at the range's floor renders the three KAGENT_SESSION_ADMISSION_JWT_*
-  entries of the controller ConfigMap from the forwarded block, and the first chart that
+  entries and KAGENT_SESSION_CREDENTIAL_AUTHORITY (the workspace write path, from
+  kagent 1.15.0) of the controller ConfigMap from the forwarded block, and the first chart that
   takes the opt-in renders KAGENT_SESSION_ADMISSION_JWT_ALLOW_HTTP "true" from it
   (network: gsoci).
 
@@ -315,7 +316,11 @@ def main(meta: str) -> int:
     for key, env in ENV.items():
         if f'{env}: "{WANT[key]}"' not in cm[0]:
             fail(f"the kagent chart {floor} does not render {env} from the forwarded {JWT}.{key}:\n{cm[0]}")
-    ok(f"the kagent chart {floor} renders the three KAGENT_SESSION_ADMISSION_JWT_* entries of the controller ConfigMap from the forwarded block")
+    if 'KAGENT_SESSION_CREDENTIAL_AUTHORITY: "muster.giantswarm.io"' not in cm[0]:
+        fail(f"the kagent chart {floor} does not render KAGENT_SESSION_CREDENTIAL_AUTHORITY from the forwarded "
+             f"kagent.controller.session.credentialAuthority: the range admits no release of the workspace write path:\n{cm[0]}")
+    ok(f"the kagent chart {floor} renders the three KAGENT_SESSION_ADMISSION_JWT_* entries and KAGENT_SESSION_CREDENTIAL_AUTHORITY "
+       f"of the controller ConfigMap from the forwarded block")
     render = kagent_chart_render(hr, ALLOW_HTTP_CHART)
     cm = [d for d in render.split("\n---\n") if re.search(r"^kind: ConfigMap$", d, re.M) and "KAGENT_CONTROLLER_NAME:" in d]
     if not cm or 'KAGENT_SESSION_ADMISSION_JWT_ALLOW_HTTP: "true"' not in cm[0]:
