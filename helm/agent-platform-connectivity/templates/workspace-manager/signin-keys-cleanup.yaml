@@ -1,0 +1,14 @@
+{{- /*
+Deletes the sign-in keys Secret earlier releases created
+(agent-platform.workspaceManager.signinKeysOrphan): the workspace-manager keeps
+no sign-in store, and the Secret carried helm.sh/resource-policy: keep, so the
+upgrade that stopped rendering it left it behind. Renders only while the live
+Secret is there and this release's, so once it is gone the hook is too. Runs
+as the hook identity (templates/_hooks.tpl), which carries delete on exactly
+this Secret while the hook renders (templates/substrate/hooks-rbac.yaml).
+*/ -}}
+{{- with include "agent-platform.workspaceManager.signinKeysOrphan" . }}
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" "workspace-manager-signin-keys-cleanup" "hook" "post-install,post-upgrade"
+      "about" (printf "delete the unused workspace-manager sign-in keys Secret %s/%s an earlier release kept" $.Release.Namespace .)
+      "script" (printf "kubectl -n %s delete secret %s --ignore-not-found\n" ($.Release.Namespace | quote) (. | quote))) }}
+{{- end }}

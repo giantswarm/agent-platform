@@ -3828,6 +3828,12 @@ verify-workspace-manager-route: ## Assert the workspace-manager's public route (
 	@python3 tests/verify-workspace-manager-route.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "workspace-manager sign-in route verified."
 
+.PHONY: verify-workspace-signin-keys-cleanup
+verify-workspace-signin-keys-cleanup: ## Assert the cleanup of the workspace-manager sign-in keys Secret (giantswarm/agent-platform#1095): the connectivity chart renders no workspace-manager-signin-keys Secret with providers and oauth.enabled, and offline no cleanup Job and no delete rule. LIVE_CONTEXT=<kube context> adds the lookup cases — with the Secret there and this release's (meta.helm.sh/release-name and -namespace) ONE post-install,post-upgrade hook Job deletes exactly it as the hook identity, whose ClusterRole gains delete on exactly that Secret; one another release holds renders neither — creating and deleting the namespace ap-verify-signin-keys-cleanup there (a lab cluster, never an installation); empty, they are skipped. HELM selects the binary.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@LIVE_CONTEXT=$(LIVE_CONTEXT) python3 tests/verify-workspace-signin-keys-cleanup.py $(CONNECTIVITY_DIR)
+	@echo "workspace-manager sign-in keys cleanup verified."
+
 .PHONY: verify-workspace-grant-key
 verify-workspace-grant-key: ## Assert the workspace grant signing key (giantswarm/agent-platform#935): with providers and oauth.enabled the connectivity chart creates the Secret workspace-manager.grant.signingKey names — the installation's own reference, else workspaceManager.grantKey.secretName/.key — holding ONE entry, a generated EC P-256 private key (PEM, SEC1, prime256v1, a 32-byte scalar), kept on uninstall, generated anew per offline render (no constant), the entry following the key id and the name following secretName; none without providers, with oauth off, with grantKey.create false or with the component off; the meta chart forwards the installation's own reference unchanged and, with none, the created Secret's — nothing without providers, with oauth off or with create false — and the connectivity release gets the grantKey block it creates the Secret from; NOTES prints the key and the key set's URL; the guards in both charts (an own reference without providers or with oauth off — the manager refuses to start with it —, a half reference, a bad Secret name or data key, on the own and the derived reference). The keep across upgrades needs a cluster (lookup): README "Workspaces". HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"

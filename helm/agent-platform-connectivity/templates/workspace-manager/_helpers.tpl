@@ -207,6 +207,26 @@ Secret is the installation's own key, which this chart never creates.
 {{- end -}}
 
 {{/*
+The sign-in keys Secret earlier releases created, when it is still there: its
+name if the live Secret workspace-manager-signin-keys in the release namespace
+carries this release's Helm ownership (meta.helm.sh/release-name and
+-namespace), else empty. The workspace-manager keeps no sign-in store, and the
+Secret was kept by helm.sh/resource-policy: keep when the chart stopped
+rendering it, so the cleanup hook (signin-keys-cleanup.yaml) deletes it. A
+Secret of that name another owner holds is left alone. Empty offline: the
+lookup needs the cluster.
+*/}}
+{{- define "agent-platform.workspaceManager.signinKeysOrphan" -}}
+{{- $name := "workspace-manager-signin-keys" -}}
+{{- with (lookup "v1" "Secret" .Release.Namespace $name) -}}
+{{- $ann := .metadata.annotations | default dict -}}
+{{- if and (eq (get $ann "meta.helm.sh/release-name") $.Release.Name) (eq (get $ann "meta.helm.sh/release-namespace") $.Release.Namespace) -}}
+{{- $name -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The grant signing key guard: workspace-manager.grant.signingKey, when set, is
 a Secret reference with both name and key, and only with provider instances
 and oauth.enabled, without which the manager refuses to start with a key; the
