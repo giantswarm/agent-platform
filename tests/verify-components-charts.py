@@ -42,7 +42,7 @@ component is on — the resource servers' OAuth clients, a public Gateway for th
 routes, the ingress mode that admits agentgateway. Without them the charts
 refuse to render at all, and the point here is a full render, not merely an
 accepted schema. The two lists are apart because
-tests/verify-kagent-tools-namespace.py imports QUICKSTART for renders with a much
+tests/verify-kagent-controller-vpa.py imports QUICKSTART for renders with a much
 smaller component set, where the all-on ingress mode would trip the connectivity
 chart's guard.
 
@@ -96,7 +96,9 @@ Network: pulls from gsoci.azurecr.io, and from ghcr.io for the CloudNativePG
 chart (three attempts each); the tag
 list comes from the registry's anonymous `/v2/<repo>/tags/list`, and a throttled
 answer (429, 503) of the distribution API is retried with bounded backoff,
-honouring Retry-After (registry_open; tests/verify-registry-retry.py). Every Helm call
+honouring Retry-After, and so is a transient network error (a timeout, the TLS
+handshake's included, or a reset connection) (registry_open;
+tests/verify-registry-retry.py). Every Helm call
 is bounded (TIMEOUT). PyYAML is in the CI image (the job installs python3-yaml).
 
 The components are independent, and the work is registry round trips and Helm
@@ -242,7 +244,7 @@ QUICKSTART = [
     "--set", "postgres.enabled=true",
 ]
 # The inputs that only matter once EVERY component is turned on, kept out of
-# QUICKSTART because tests/verify-kagent-tools-namespace.py imports that list
+# QUICKSTART because tests/verify-kagent-controller-vpa.py imports that list
 # for renders with a much smaller component set: ingress.mode and its
 # companion are tied to which components are enabled, and a mode that disagrees
 # with them fails the connectivity chart's guard.
@@ -267,6 +269,11 @@ ALL_ON_INPUTS = [
     # installation names it, and the meta chart refuses the workspaces switch
     # without it (giantswarm/agent-platform#900).
     "--set", "workspaces.storage.storageClassName=workspaces-rwx",
+    # The provider instance muster releases grants of while workspaces and
+    # Substrate are on: an installation pins one (provider instances with
+    # oauth.enabled) or names it, and the meta chart refuses the switch
+    # without (giantswarm/agent-platform#1103).
+    "--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents",
 ]
 
 # Components without a toggle of their own: each follows its switch, and a
@@ -398,7 +405,9 @@ TOKENS: dict[str, str] = {}
 # all, after the wait its Retry-After names, else REGISTRY_BACKOFF seconds
 # doubling per retry; no wait is longer than REGISTRY_MAX_WAIT. The last
 # throttled answer is the error, so a registry that stays throttled still ends
-# in a FAIL line, about two minutes later.
+# in a FAIL line, about two minutes later. A transient network error (a timeout,
+# the TLS handshake's included, or a reset or refused connection) is retried the
+# same way with the backoff; the last one is the error.
 REGISTRY_THROTTLED = frozenset({429, 503})
 REGISTRY_ATTEMPTS = 6
 REGISTRY_BACKOFF = 2.0
@@ -419,20 +428,39 @@ def retry_wait(e: urllib.error.HTTPError, retry: int) -> float:
     return min(max(wait, 0.0), REGISTRY_MAX_WAIT)
 
 
+def transient(e: OSError) -> bool:
+    """Whether a network error is worth a retry: a timeout (the TLS handshake's
+    included) or a reset, aborted or refused connection, raised as is or as the
+    reason of a URLError. An HTTP answer is not (see REGISTRY_THROTTLED)."""
+    if isinstance(e, urllib.error.HTTPError):
+        return False
+    if isinstance(e, urllib.error.URLError) and isinstance(e.reason, OSError):
+        e = e.reason
+    return isinstance(e, (TimeoutError, ConnectionError))
+
+
 def registry_open(target: str | urllib.request.Request):
     """urlopen against a registry, retrying a throttled answer (see
-    REGISTRY_THROTTLED); any other error, and the last throttled one, raise."""
+    REGISTRY_THROTTLED) and a transient network error; any other error, and
+    the last throttled or transient one, raise."""
+    url = target.full_url if isinstance(target, urllib.request.Request) else target
     for retry in range(REGISTRY_ATTEMPTS):
+        last = retry == REGISTRY_ATTEMPTS - 1
         try:
             return urllib.request.urlopen(target, timeout=60)
         except urllib.error.HTTPError as e:
-            if e.code not in REGISTRY_THROTTLED or retry == REGISTRY_ATTEMPTS - 1:
+            if e.code not in REGISTRY_THROTTLED or last:
                 raise
             wait = retry_wait(e, retry)
             e.close()
-            url = target.full_url if isinstance(target, urllib.request.Request) else target
-            print(f"NOTE: {url.split('?', 1)[0]}: HTTP {e.code}, retry {retry + 1}/{REGISTRY_ATTEMPTS - 1} in {wait:.0f}s")
-            time.sleep(wait)
+            reason = f"HTTP {e.code}"
+        except OSError as e:
+            if not transient(e) or last:
+                raise
+            wait = min(REGISTRY_BACKOFF * 2 ** retry, REGISTRY_MAX_WAIT)
+            reason = str(e.reason if isinstance(e, urllib.error.URLError) else e) or type(e).__name__
+        print(f"NOTE: {url.split('?', 1)[0]}: {reason}, retry {retry + 1}/{REGISTRY_ATTEMPTS - 1} in {wait:.0f}s")
+        time.sleep(wait)
     raise AssertionError("unreachable")
 
 
@@ -598,7 +626,8 @@ def check_harnesses(manifest: str, values: str, what: str) -> None:
     claude or codex entry reaches its Harness as forwarded (snapshot location,
     env) and takes the chart's claude-harness or codex-harness image at its
     digest; a claude one carries no turn limits, which the line withdrew from
-    the Harness API in 1.12.0."""
+    the Harness API in 1.12.0. A byo entry (omp) runs its own image and
+    command and carries its displayName as the portal's annotation."""
     entries = (yaml.safe_load(values) or {}).get("harnesses") or []
     rendered = [d for d in yaml.safe_load_all(manifest) if isinstance(d, dict) and d.get("kind") == "Harness"]
     if len(rendered) != 1 + len(entries):
@@ -614,7 +643,20 @@ def check_harnesses(manifest: str, values: str, what: str) -> None:
         if spec is None:
             fail(f"{what} renders no Harness for the kagent.harnesses entry {entry['name']!r}")
         runtime = entry.get("runtime", "claude")
-        if runtime not in ("claude", "codex"):
+        if runtime not in ("claude", "codex", "byo"):
+            continue
+        harness = by_name[entry["name"]]
+        if runtime == "byo":
+            got = {
+                "runtime": [r for r in ("kagent", "claude", "codex", "byo") if r in spec],
+                "image": spec.get("workload", {}).get("image"),
+                "command": spec.get("workload", {}).get("command"),
+                "displayName": harness.get("metadata", {}).get("annotations", {}).get("ui.giantswarm.io/display-name"),
+                "snapshotLocation": spec.get("substrate", {}).get("snapshotPolicy", {}).get("location"),
+            }
+            want = {"runtime": ["byo"], "image": entry.get("image"), "command": entry.get("command"), "displayName": entry.get("displayName"), "snapshotLocation": entry.get("snapshotLocation")}
+            if got != want:
+                fail(f"{what} renders the byo Harness {entry['name']!r} off its entry:\n  got      {got}\n  expected {want}")
             continue
         got = {
             "runtime": [r for r in ("kagent", "claude", "codex", "byo") if r in spec],

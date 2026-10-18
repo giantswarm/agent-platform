@@ -1,8 +1,7 @@
 # Exercises the klaus-gateway connectivity routes, including the Slack OBO/CIMD
 # public route. klausGateway.agentgatewayRoute renders agentgateway.dev objects
-# on the agentgateway Gateway, so it needs an agentgateway-* mode with the
-# agentgateway component on (the ingress guard refuses it in muster-direct);
-# parentRefs is required in every mode.
+# on the agentgateway Gateway, so it needs the agentgateway component on;
+# parentRefs is required.
 components:
   agentgateway:
     enabled: true

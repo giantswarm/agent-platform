@@ -190,9 +190,10 @@ def main() -> None:
         fail(f"muster with a semverFilter: {filtered.get('muster')!r}, want the range and the filter as written")
 
     # prereleases: false on any component keeps its range; true follows the switch.
-    kept = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=false"])).get("muster")
-    if kept != (off["muster"], ""):
-        fail(f"muster with prereleases: false: {kept!r}, want {off['muster']!r} without a filter")
+    # The probe names a stable range: an rc floor is filtered (above).
+    kept = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=false", "--set", "components.muster.versionRange=>=5.0.0 <6.0.0"])).get("muster")
+    if kept != (">=5.0.0 <6.0.0", ""):
+        fail(f"muster with prereleases: false: {kept!r}, want '>=5.0.0 <6.0.0' without a filter")
     widened = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=true"])).get("muster")
     if widened != (on["muster"], refs(helm(chart, ON))["muster"][1]):
         fail(f"muster with prereleases: true: {widened!r}, want the switch's range {on['muster']!r}")

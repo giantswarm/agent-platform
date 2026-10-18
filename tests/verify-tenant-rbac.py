@@ -252,6 +252,18 @@ def check_egress_admission(docs: list) -> None:
     if "userInfo.username ==" in cel:
         fail(f"{name} exempts a requester: {cel}")
     ok(f"{name} refuses, in the Organizations' namespaces but kagent and for every requester, a git credentialRef or a headersFrom Secret not named tenant-credential-*")
+    if " in [" in cel:
+        fail(f"{name} names an installation skills credential without agent-manager: {cel}")
+
+
+def check_installation_credential(docs: list) -> None:
+    name = "agent-platform-tenant-credential-refs"
+    vap = find(docs, "ValidatingAdmissionPolicy", name)
+    cel = " ".join(v["expression"] for v in vap["spec"].get("variables", []))
+    want = "n in ['agent-manager-skills-token', 'tenant-credential-agent-manager-skills-token']"
+    if want not in cel:
+        fail(f"{name} does not refuse the installation's skills credential under its names ({want}): {cel}")
+    ok(f"{name} refuses the installation's skills credential, agent-manager-skills-token and its earlier tenant-credential- name, for every requester")
 
 
 def check_platform_secrets(docs: list) -> None:
@@ -351,6 +363,8 @@ def main() -> None:
     ok("the platform tenant: every signed-in person is a platform user, the admin groups are editors")
 
     orgs = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "components.agent-manager.enabled=true", *ORGS])
+    check_installation_credential(render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "components.agent-manager.enabled=true",
+                                                "--set", "agent-manager.skills.mintGitAuthSecret=true"]))
     check_platform_secrets(orgs)
     model = find(orgs, "ValidatingAdmissionPolicy", "agent-platform-tenant-model-credentials")
     if f"'{RECONCILER}'" not in " ".join(v["expression"] for v in model["spec"]["validations"]):

@@ -10788,7 +10788,7 @@ spec:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/agentgateway-upstream/agentgateway
-    tag: 2.4.0
+    tag: 2.4.1
   service:
     spec:
       type: ClusterIP
@@ -10865,6 +10865,8 @@ spec:
         add:
           - name: agent_instance_id
             expression: '(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""'
+          - name: request_id
+            expression: 'request.headers["x-request-id"]'
 ---
 # Source: agent-platform-connectivity/templates/agentgateway/healthz.yaml
 apiVersion: agentgateway.dev/v1alpha1

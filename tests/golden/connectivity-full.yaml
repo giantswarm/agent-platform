@@ -13364,7 +13364,7 @@ spec:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/agentgateway-upstream/agentgateway
-    tag: 2.4.0
+    tag: 2.4.1
   service:
     spec:
       type: ClusterIP
@@ -13441,6 +13441,8 @@ spec:
         add:
           - name: agent_instance_id
             expression: '(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""'
+          - name: request_id
+            expression: 'request.headers["x-request-id"]'
 ---
 # Source: agent-platform-connectivity/templates/agentgateway/healthz.yaml
 apiVersion: agentgateway.dev/v1alpha1
@@ -14708,6 +14710,96 @@ spec:
               protocol: TCP
 ---
 # Source: agent-platform-connectivity/templates/substrate/netpol.yaml
+# ate-idp-server: serves the actor-JWT issuer's discovery document and key set
+# (8443, behind the Service idp on 443) from the mounted signing pool; muster,
+# which verifies the actor JWTs the egress gateway injects
+# (muster.credentialProvider.actorBearer), reads it, and the kubelet probes it.
+# It dials nothing.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-ate-idp-server
+  namespace: ate-system
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ate-idp-server
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: default
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: coredns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: k8s-dns-node-cache
+      toPorts:
+        - ports:
+            - port: "1053"
+              protocol: UDP
+            - port: "1053"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+---
+# Source: agent-platform-connectivity/templates/substrate/netpol.yaml
+# muster ──▶ ate-idp-server :8443: the actor-JWT issuer's key set, whatever
+# networkPolicy.musterInClusterMcpPorts opens.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: muster-to-substrate-idp
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: ate-idp-server
+            io.kubernetes.pod.namespace: ate-system
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+---
+# Source: agent-platform-connectivity/templates/substrate/netpol.yaml
 # podcertificate-controller: signs the Substrate pods' PodCertificateRequests
 # from the two CA pools; it needs the apiserver and nothing else.
 apiVersion: cilium.io/v2
@@ -15467,7 +15559,7 @@ spec:
     - expression: "has(object.metadata.deletionTimestamp) || size(variables.foreign) == 0"
       reason: Forbidden
       messageExpression: >-
-        'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named tenant-credential-*, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ')
+        'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named tenant-credential-*, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ') + '. Fix: rename each to a tenant-credential-* Secret of this namespace or remove it (UPGRADE.md: the migrate run removes the installation skills credential from the platform agents)'
 ---
 # Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1

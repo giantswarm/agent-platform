@@ -1,8 +1,9 @@
 {{- /*
 The network policy of the hook identity (templates/_hooks.tpl, hooks-rbac.yaml).
 Every hook Job of this release — the Substrate bootstrap, the derived Postgres
-Secrets, the model-serving cache claim, the pre-pull cleanup — runs `kubectl`
-from the release namespace under the pod labels app.kubernetes.io/instance:
+Secrets, the model-serving cache claim, the pre-pull cleanup, the sign-in keys
+cleanup — runs `kubectl` from the release namespace under the pod labels
+app.kubernetes.io/instance:
 <release> + app.kubernetes.io/component: hooks, and nothing else: in-cluster
 kubectl dials KUBERNETES_SERVICE_HOST by IP, no DNS. On a cluster whose network
 policy is default-deny for every endpoint (Cilium policyEnforcementMode: always,

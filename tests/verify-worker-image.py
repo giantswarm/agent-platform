@@ -40,9 +40,16 @@ range to one release (`agent-platform.substrate.validateRange`). Here:
     stamp by a patch — a data-plane fix ships without a kagent rebuild — while
     a kagent build stamped against a newer Substrate than the chart pins, or
     against another minor, fails: the meta chart's CI names the day the kagent
-    line moves to another Substrate release before the chart's own pin does.
+    line moves to another Substrate release before the chart's own pin does;
+  - the workers run the release the control plane runs (#822): the substrate
+    release carries ateController.gvisorWorker.followRelease: true and an own
+    false fails the render; the substrate chart the range resolves to renders, with the
+    forwarded values, ate-controller's --gvisor-worker-image as the ateom-gvisor
+    of the atelet's own registry, repository and tag — the resolved release, so
+    a Substrate patch within the range rolls the pool with no chart release —
+    and a render whose worker and atelet differ fails here.
 
-Network: gsoci.azurecr.io (the kagent chart). Usage: verify-worker-image.py <meta chart dir>
+Network: gsoci.azurecr.io (the kagent and substrate charts). Usage: verify-worker-image.py <meta chart dir>
 """
 import importlib.util
 import os
@@ -63,10 +70,6 @@ KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "kagent.databas
 REGISTRY = "gsoci.azurecr.io"
 REPOSITORY = "giantswarm/substrate"
 WORKER = "ateom-gvisor"
-# The 4.15.2 shape of the skew: the Substrate range a minor behind the kagent
-# line's stamp (a synthetic older minor in the stable shape; the render alone is
-# asserted). The atelet of that range and this worker are one release.
-OLDER_RANGE = ">=0.9.0 <0.10.0"
 FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # Substrate minors released on the upstream pin of an earlier minor: a minor of
 # the line is a re-pin except these. 1.2 and 1.3 are the line on
@@ -79,7 +82,9 @@ FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # is the line's own and additive), so kagent 1.11, published against 1.9.0,
 # speaks its ate-api contract. 1.11 stays on v0.5.0-alpha2 too (the actor JWT minting and the busy-worker marking are additive; `MintActorJWTRequest.audiences` keeps its field number), so kagent 1.11 speaks its contract as well.
 # 1.12 stays on v0.5.0-alpha2 too (the credential provider's namespace selectors change no proto, CRD, schema or snapshot layout), so kagent 1.12, published against 1.11.1, speaks its contract.
-SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}, (1, 8): {(1, 7)}, (1, 10): {(1, 9)}, (1, 11): {(1, 9), (1, 10)}, (1, 12): {(1, 9), (1, 10), (1, 11)}}
+# 1.13 stays on v0.5.0-alpha2 too (ate-idp-server serves the issuer ate-api-server already signs with; no proto, CRD, schema or snapshot layout changes), so kagent 1.15, published against 1.11.1, speaks its contract.
+# 1.14 stays on v0.5.0-alpha2 as well: its bundled credential provider serves k8s.io alone (giantswarm/substrate#455), a change on the egress gateway's side the kagent controller never sees.
+SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}, (1, 8): {(1, 7)}, (1, 10): {(1, 9)}, (1, 11): {(1, 9), (1, 10)}, (1, 12): {(1, 9), (1, 10), (1, 11)}, (1, 13): {(1, 9), (1, 10), (1, 11), (1, 12)}, (1, 14): {(1, 9), (1, 10), (1, 11), (1, 12), (1, 13)}}
 
 
 def tuple_of(version: str) -> str:
@@ -126,6 +131,30 @@ def worker_image(values: dict) -> str:
     return ((values.get("substrateWorkerPool") or {}).get("workerImage")) or ""
 
 
+def previous_minor(version: str) -> str:
+    """X.(Y-1).0 — the 4.15.2 shape of the skew, the Substrate range a minor
+    behind the kagent line's stamp (the render alone is asserted)."""
+    x, y, _ = tuple_of(version).split(".")
+    return f"{x}.{int(y) - 1}.0"
+
+
+def substrate_release(meta: str, flags: list[str]) -> tuple[dict, str, str]:
+    rendered = render(meta, flags)
+    if ("HelmRelease", "substrate") not in rendered:
+        cc.fail("the meta chart renders no substrate HelmRelease with components.kagent on")
+    forwarded = cc.hr_values(rendered[("HelmRelease", "substrate")])
+    url, rng = cc.source(cc.oci(rendered, "substrate"))
+    return yaml.safe_load(forwarded), forwarded, f"{url} {rng}"
+
+
+def follow_release(values: dict):
+    return ((values.get("ateController") or {}).get("gvisorWorker") or {}).get("followRelease")
+
+
+def container_args(doc: dict) -> list[str]:
+    return [a for c in doc["spec"]["template"]["spec"]["containers"] for a in c.get("args") or []]
+
+
 def render_fails(meta: str, flags: list[str], needle: str, what: str) -> None:
     r = cc.run(["helm", "template", cc.RELEASE, meta, *cc.QUICKSTART, *KAGENT_ON, *flags])
     if r.returncode == 0:
@@ -170,11 +199,12 @@ def main(meta: str) -> int:
                      f"an own workerImage with {what}")
     print(f"ok: an own workerImage with another tag or a digest alone fails the render naming the key, the pinned release {floor} and the derived image")
 
-    values, _, _ = kagent_release(meta, ["--set", f"components.substrate.versionRange={OLDER_RANGE}"])
-    old_floor = floor_of(OLDER_RANGE)
+    older_range = f">={previous_minor(floor)} <{tuple_of(floor)}"
+    values, _, _ = kagent_release(meta, ["--set", f"components.substrate.versionRange={older_range}"])
+    old_floor = floor_of(older_range)
     if worker_image(values) != f"{REGISTRY}/{REPOSITORY}/{WORKER}:{old_floor}":
-        cc.fail(f"with the Substrate range at {OLDER_RANGE!r} the kagent release carries workerImage {worker_image(values)!r}; expected the {old_floor} worker — the worker follows the chart's Substrate, not the kagent build the range admits (the 4.15.2 skew, #466)")
-    print(f"ok: the 4.15.2 shape (Substrate {OLDER_RANGE!r}, the kagent range untouched) forwards the {old_floor} worker — the worker follows the chart's Substrate pin")
+        cc.fail(f"with the Substrate range at {older_range!r} the kagent release carries workerImage {worker_image(values)!r}; expected the {old_floor} worker — the worker follows the chart's Substrate, not the kagent build the range admits (the 4.15.2 skew, #466)")
+    print(f"ok: the 4.15.2 shape (Substrate {older_range!r}, the kagent range untouched) forwards the {old_floor} worker — the worker follows the chart's Substrate pin")
 
     values, _, _ = kagent_release(meta, ["--set", f"components.substrate.versionRange={floor}"])
     if worker_image(values) != derived:
@@ -187,6 +217,43 @@ def main(meta: str) -> int:
                      f"components.substrate.versionRange {bad!r} does not confine one Substrate release".replace("'", '"'),
                      f"a Substrate range that does not confine one release ({bad})")
     print("ok: a Substrate range with no floor, a ceiling past the next minor or at the next patch, a -0 ceiling (which admits the line's dev builds), the former -gs.N shape, a ~ or ^ range, a <= ceiling or a floor alone fails the render naming the range")
+
+    # --- the workers follow the control plane's release (#822) ---
+    sub_values, sub_forwarded, sub_source = substrate_release(meta, [])
+    if follow_release(sub_values) is not True:
+        cc.fail(f"the substrate release carries ateController.gvisorWorker.followRelease {follow_release(sub_values)!r}; expected true — the workers run the release the control plane runs, a Substrate patch rolls the pool with the atelet")
+    print("ok: the substrate release carries ateController.gvisorWorker.followRelease: true")
+    render_fails(meta, ["--set", "substrate.ateController.gvisorWorker.followRelease=false"],
+                 "substrate.ateController.gvisorWorker.followRelease is false",
+                 "followRelease false")
+    print("ok: an own followRelease false fails the render naming the key")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        url, sub_rng = sub_source.split(" ", 1)
+        version = fluxsemver.resolve(cc.resolve_tags(cc.registry_tags(url), sub_rng), sub_rng)
+        if not version:
+            cc.fail(f"no published substrate chart satisfies {sub_rng!r} at {url}")
+        resolved = cc.pull(url, version, tmp)
+        forwarded_file = os.path.join(tmp, "forwarded.yaml")
+        with open(forwarded_file, "w", encoding="utf-8") as f:
+            f.write(sub_forwarded)
+        r = cc.run(["helm", "template", "substrate", f"{tmp}/substrate", "-n", "ate-system", "-f", forwarded_file, *cc.API_VERSIONS])
+        if r.returncode != 0:
+            cc.fail(f"the substrate chart {resolved} rejects the values the meta chart forwards\n{r.stderr}")
+        objs = {(d.get("kind"), d["metadata"]["name"]): d for d in yaml.safe_load_all(r.stdout) if isinstance(d, dict) and d.get("metadata")}
+        if ("DaemonSet", "atelet") not in objs or ("Deployment", "ate-controller") not in objs:
+            cc.fail(f"the substrate chart {resolved} renders no atelet DaemonSet or ate-controller Deployment")
+        atelet = next(c["image"] for c in objs[("DaemonSet", "atelet")]["spec"]["template"]["spec"]["containers"] if c["name"] == "atelet")
+        flags = [a.split("=", 1)[1] for a in container_args(objs[("Deployment", "ate-controller")]) if a.startswith("--gvisor-worker-image=")]
+        if not flags:
+            cc.fail(f"the substrate chart {resolved} renders ate-controller without --gvisor-worker-image: the workers would run the WorkerPool's spec.workerImage (the range's floor) while the atelet runs {atelet}")
+        worker, (atelet_path, atelet_tag) = flags[0], atelet.rsplit(":", 1)
+        expected = f"{atelet_path.rsplit('/', 1)[0]}/{WORKER}:{atelet_tag}"
+        if worker != expected:
+            cc.fail(f"the substrate chart {resolved} runs the workers on {worker} beside the atelet {atelet}: the worker and the control plane differ (expected {expected})")
+        if tuple_of(atelet_tag) != tuple_of(resolved):
+            cc.fail(f"the substrate chart {resolved} runs the atelet {atelet}, not its own release")
+        print(f"ok: the substrate chart {resolved} (the range {sub_rng!r}) runs the workers on {worker}, the atelet's release ({atelet}) — a patch Flux resolves rolls the pool with the control plane, the WorkerPool's spec.workerImage {derived} is the floor's")
 
     # --- the kagent chart the range resolves to, with the forwarded values ---
     with tempfile.TemporaryDirectory() as tmp:

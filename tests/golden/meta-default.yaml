@@ -407,7 +407,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.3.1
+          tag: 2.5.0
       networkPolicy:
         egress:
           cidrs: []
@@ -460,7 +460,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.4.0
+          tag: 2.4.1
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -491,7 +491,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.4.0
+          tag: 2.4.1
       resources:
         limits:
           cpu: 500m
@@ -657,6 +657,9 @@ spec:
             enabled: true
             expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"]
               : ""'
+          request_id:
+            enabled: true
+            expression: request.headers["x-request-id"]
       gatewayClassName: agentgateway
       http:
         maxBufferSize: 8Mi
@@ -946,12 +949,6 @@ spec:
                 ephemeral-storage: 256Mi
                 memory: 1Gi
       harnesses: []
-      kagent-tools:
-        enabled: false
-        namespaceOverride: kagent
-      kmcp:
-        enabled: false
-        namespaceOverride: kagent
       modelConfigs: []
       namespaceOverride: kagent
       oauth2-proxy:
@@ -1308,6 +1305,15 @@ spec:
           - matchPattern: '*.blob.core.windows.net'
         workloadClusters: {}
     muster:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: muster
+              topologyKey: kubernetes.io/hostname
+            weight: 100
       crds:
         install: false
       enabled: true
@@ -1371,11 +1377,9 @@ spec:
         flavor: kubernetes
       podAnnotations:
         application.giantswarm.io/team: bumblebee
-        karpenter.sh/do-not-disrupt: "true"
       podDisruptionBudget:
         enabled: true
-        maxUnavailable: 1
-        minAvailable: ""
+        minAvailable: 1
       rbac:
         mcpServerEditor:
           subjects:
@@ -1393,6 +1397,7 @@ spec:
           - apiGroup: rbac.authorization.k8s.io
             kind: Group
             name: giantswarm-github:giantswarm:giantswarm-admins
+      replicaCount: 2
     networkPolicy:
       additionalEgressCIDRs: []
       additionalEgressFQDNs: []
@@ -1591,6 +1596,11 @@ spec:
             ephemeral-storage: 16Mi
       createNamespace: false
       credentialProvider:
+        additionalProviders:
+        - host: muster.agent-platform.svc:50051
+          uriAuthority: muster.giantswarm.io
+        - host: google-access-token-credential-provider.ate-system.svc:50051
+          uriAuthority: google-access-token.k8s.io
         namespacePolicies:
         - allowedNamespaces:
           - kagent
@@ -1754,7 +1764,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.4.0
+        tag: 2.4.1
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1807,7 +1817,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.4.0
+        tag: 2.4.1
     resources:
       limits:
         cpu: 500m
@@ -1996,6 +2006,15 @@ spec:
   driftDetection:
     mode: enabled
   values:
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: muster
+            topologyKey: kubernetes.io/hostname
+          weight: 100
     crds:
       install: false
     enabled: true
@@ -2081,11 +2100,9 @@ spec:
       flavor: kubernetes
     podAnnotations:
       application.giantswarm.io/team: bumblebee
-      karpenter.sh/do-not-disrupt: "true"
     podDisruptionBudget:
       enabled: true
-      maxUnavailable: 1
-      minAvailable: ""
+      minAvailable: 1
     rbac:
       mcpServerEditor:
         subjects:
@@ -2103,6 +2120,7 @@ spec:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
           name: giantswarm-github:giantswarm:giantswarm-admins
+    replicaCount: 2
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: helm.toolkit.fluxcd.io/v2
@@ -2332,7 +2350,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: "0.x"
+    semver: "0.3.x"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2378,7 +2396,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=5.31.4 <6.0.0"
+    semver: ">=5.45.0 <6.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2401,7 +2419,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: "0.x"
+    semver: "0.4.x"
 ---
 # Source: agent-platform/templates/self/release.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

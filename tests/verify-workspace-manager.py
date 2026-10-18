@@ -3,8 +3,7 @@
 (giantswarm/agent-platform#884).
 
 Workspaces are an Organization's repositories mirrored on one shared volume in the
-kagent namespace, a directory per Session, and the provider sign-ins; the
-workspace-manager (giantswarm/workspace-manager) serves them as MCP tools through
+kagent namespace and a directory per Session; the workspace-manager (giantswarm/workspace-manager) serves them as MCP tools through
 muster. Each case below pins one property of its wiring:
 
 - off by default: no release, and the render is byte-identical to the render
@@ -16,17 +15,31 @@ muster. Each case below pins one property of its wiring:
   slices' workspaces.storage and workspaces.substrate (the lab's block,
   tests/fixtures/workspaces-lab-values.yaml), which both schemas take; an explicit
   components.workspace-manager.enabled that disagrees fails the render either way
-  round, one that agrees passes;
+  round, one that agrees passes; the switch on with components.kagent off fails
+  naming kagent, whose namespace the workspaces live in (the meta renders below
+  layer tests/fixtures/workspaces-agents-values.yaml);
 - on with two provider instances (a GitHub one and a second kind,
   tests/fixtures/workspaces-values.yaml): ONE OCIRepository and ONE HelmRelease that
-  dependsOn muster and the connectivity release (the sign-in keys Secret first),
+  dependsOn muster and the connectivity release (the grant key Secret first),
   the block forwarded — the pinned Service name, the OAuth resource
-  server, the chart's own unpinned muster registration (forwardToken, no audience,
-  no authorization server), the provider instances, the grant's key — every
+  server, the chart's own muster registration pinned to the github instance's
+  App (auth.provider github, the App's OAuth client Secret from the instance's
+  values.oauth.clientSecret, the fixture's issuer), the provider instances, the
+  grant's key, no signin and no tokenExchange — every
   credential a Secret reference {key, name} and nothing else; workspaces.namespace
   derived from kagent's, storage.storageClassName from workspaces.storage
   (verify-workspace-storage covers the class); the keys left empty are not
-  forwarded; a signInStore block fails naming signin.keys (the chart's key);
+  forwarded;
+- muster's pin (agent-platform.workspaceManager.musterPin): an own provider,
+  client Secret and issuer stand; without an own issuer a github instance's
+  <url>/apps/<app.id> (github.com without url); no github instance or two of
+  them without an own provider, a provider naming no instance, an instance
+  without a client-secret key and no own Secret, no issuer to take (no App id,
+  a gitlab instance) and a range floor below
+  agent-platform.workspaceManager.musterGrantFloor (0.10.0) fail naming the key;
+  the component chart at the BOM's pin renders the pinned MCPServer
+  (authorizationServer with the App's issuer and client Secret, grantScope
+  subject, forwardIdentity) and --muster-provider;
   nothing under muster.* moves (the muster release and the muster block forwarded
   to connectivity are unchanged), nothing else of the render moves but the kagent
   release's jwt Session admission (tests/verify-workspace-session-admission.py),
@@ -34,27 +47,30 @@ muster. Each case below pins one property of its wiring:
 - the Organizations (#886): workspaces.organizations [{name, memberGroups}] reaches
   the release as the chart's organizations map and moves nothing else; the
   component chart, rendered at the BOM's pin with the forwarded block, gives the
-  manager's ServiceAccount one Role and RoleBinding in kagent, cluster-wide only
-  `get` on PersistentVolumes (a workspace volume's CSI driver and handle, which
-  the grant names) and StorageClasses (whether the class provisions a size the
-  controller grows) and no binding of a member or group; a duplicate, groupless,
+  manager's ServiceAccount one Role and RoleBinding in kagent and one in its own
+  namespace (the provider Secrets, the removal of earlier releases' sign-ins),
+  cluster-wide only `get` on PersistentVolumes (a workspace volume's CSI driver
+  and handle, which the grant names), StorageClasses (whether the class
+  provisions a size the controller grows) and its own CRD, and no binding of a
+  member or group; a duplicate, groupless,
   empty-group or non-DNS Organization, an own workspace-manager.organizations and
   workspace-manager.rbac.create false fail the render;
 - inline credentials, a duplicate or non-DNS provider name, a provider without a
   kind fail the render naming the path; a gitlab instance below the floor
   agent-platform.workspaceManager.gitlabFloor (0.5.0, a release candidate of it
-  too) fails naming it, the default floor is 0.5.0, and the component chart at
-  the BOM's pin takes the instance; a workspaces.namespace that differs from
+  too) fails naming it, the default floor is at or above the grant floor, and the component
+  chart at the BOM's pin takes the instance; a workspaces.namespace that differs from
   kagent's fails naming the key, kagent.namespaceOverride moves it;
 - the kagent address: with kagent on, the workspace-manager range's floor at
   agent-platform.workspaceManager.kagentFloor (0.4.0, a release candidate of it
   too) and no value set the release carries kagent.address
   grpc://kagent-controller.kagent.svc:8083 and kagent.namespace kagent
   (kagent.namespaceOverride and kagent.fullnameOverride move both), and the
-  component chart at 0.4.0 takes the block; an own address wins and takes
+  component chart at 0.4.0 takes the block (rendered without OAuth: the muster
+  grant floor applies with provider instances and OAuth only); an own address wins and takes
   nothing derived; an own namespace without an address that differs fails
-  naming the key; without kagent or below the floor (an earlier release's
-  closed schema refuses the block) no kagent block;
+  naming the key; below the floor (an earlier release's closed schema refuses
+  the block) no kagent block;
 - the connectivity chart, cilium: the ingress (muster, kagent's controller, the
   kubelet's probes, the metrics port), the egress (DNS with the proxy clause, the
   kube-apiserver, the Dex issuer by name, each provider instance's hosts on their
@@ -76,15 +92,20 @@ import subprocess
 import sys
 import tempfile
 
+import floors
+import fluxsemver
+
 HELM = os.environ.get("HELM", "helm")
 NAME = "workspace-manager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
-RANGE_RE = r'semver: "(>=[^"]+ <1\.0\.0)"'
+RANGE_RE = r'semver: "(>=[^"]+ <0\.\d+\.0(?:-0)?)"'
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
+# The agents beside them: the meta chart refuses workspaces without kagent.
+AGENTS = "tests/fixtures/workspaces-agents-values.yaml"
 ORGS = "tests/fixtures/workspaces-organizations-values.yaml"
 BOM = "helm/agent-platform/examples/customer-bom.yaml"
 CI = ["--set", "components.flux.enabled=false"]
-ON = ["-f", FIXTURE]
+ON = ["-f", FIXTURE, "-f", AGENTS]
 KAGENT = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "kagent.harness.snapshotLocation=s3://ci/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
 IDENTITY = [
     "--set", "global.domain=ci.example.com",
@@ -94,10 +115,20 @@ IDENTITY = [
 ]
 # The first workspace-manager release whose chart takes kagent.address, with the
 # fixture's second instance as a github one: the gitlab kind needs 0.5.0.
-WM_KAGENT = ["--set", "components.workspace-manager.versionRange=>=0.4.0 <1.0.0"]
+# A manager below the muster grant floor renders only without OAuth (and so
+# without a grant key or the fixture's muster pin, which an earlier chart's
+# schema refuses): the floor guard applies with provider instances and OAuth.
+# Without the pin muster's releasable is the installation's own while Substrate
+# is on (agent-platform.validateWorkspaceAuth).
+PRE_GRANT = ["--set", "workspace-manager.oauth.enabled=false", "--set", "workspace-manager.grant.signingKey=null",
+             "--set", "workspace-manager.muster.mcpServer.auth.authorizationServer=null",
+             "--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]
+WM_KAGENT = ["--set", "components.workspace-manager.versionRange=>=0.4.0 <1.0.0", *PRE_GRANT]
 NO_GITLAB = ["--set", "workspace-manager.providers[1].kind=github"]
 # The first workspace-manager release with the provider kind gitlab.
 GITLAB_FLOOR = "0.5.0"
+# The first workspace-manager release whose person's token is muster's grant.
+GRANT_FLOOR = "0.10.0"
 CREDENTIALS = ("privateKey", "clientSecret", "token", "signingKey")
 
 
@@ -242,7 +273,11 @@ def main(meta: str, connectivity: str) -> int:
     must_fail(meta, ["--set", f"components.{NAME}.enabled=true"], "workspaces are one switch", "the component on with the switch off")
     helm(meta, [*ON, "--set", f"components.{NAME}.enabled=true"])
     must_fail(meta, ["--set", "workspaces.enabled=maybe"], "workspaces", "a non-boolean switch")
-    ok("one switch: workspaces.enabled turns the component on, a disagreeing toggle fails either way, an agreeing one passes; the schema refuses a non-boolean")
+    must_fail(meta, ["-f", FIXTURE], "workspaces.enabled is true but components.kagent.enabled is not: workspaces need the agents",
+              "workspaces on with the agents off (their namespace is kagent's)", ci_values=False)
+    must_fail(meta, [*ON, "--set", "components.kagent.enabled=false"], "workspaces need the agents", "workspaces on with kagent switched off")
+    ok("one switch: workspaces.enabled turns the component on, a disagreeing toggle fails either way, an agreeing one passes; the schema refuses a non-boolean; "
+       "without the agents (components.kagent off) the render fails naming kagent, the namespace the workspaces live in")
 
     # --- on with two provider instances --------------------------------------------
     on_docs = documents(helm(meta, ON))
@@ -253,14 +288,16 @@ def main(meta: str, connectivity: str) -> int:
     must_have(oci, (f"url: {REPOSITORY}/{NAME}",), "the OCIRepository")
     rng = re.search(RANGE_RE, oci)
     if not rng:
-        fail(f"the OCIRepository's range is not a floor below 1.0.0:\n{oci}")
+        fail(f"the OCIRepository's range is not a floor below a minor ceiling:\n{oci}")
     hr = on_docs[("HelmRelease", NAME)]
     must_have(hr, (
         f"releaseName: {NAME}",
         "  dependsOn:\n    - name: muster\n    - name: agent-platform-connectivity\n",
         f"    fullnameOverride: {NAME}\n",
         "    oauth:\n      baseURL: https://workspaces.ci.example.com\n      dex:\n        allowPrivateURLs: true\n      enabled: true\n      sso:\n        allowPrivateIPs: true\n",
-        "    muster:\n      mcpServer:\n        auth:\n          forwardToken: true\n          requiredAudiences:\n          - dex-k8s-authenticator\n        enabled: true\n",
+        "    muster:\n      mcpServer:\n        auth:\n          authorizationServer:\n            clientCredentialsSecretRef:\n              name: workspace-github\n"
+        "            issuer: https://github.com/apps/ci-agents\n          forwardToken: true\n          provider: github\n"
+        "          requiredAudiences:\n          - dex-k8s-authenticator\n        enabled: true\n",
         "    workspaces:\n      namespace: kagent\n",
         "    - kind: github\n      name: github\n",
         "    - kind: gitlab\n      name: gitlab\n",
@@ -272,7 +309,7 @@ def main(meta: str, connectivity: str) -> int:
         "    sessions:\n      cleanupAfter: 336h\n",
         "\n    global:\n",
     ), "the HelmRelease")
-    for absent in ("authorizationServer", "\n    sync:", "sizing:", "signInStore", "\n    networkPolicy:"):
+    for absent in ("\n    signin:", "tokenExchange", "\n    sync:", "sizing:", "signInStore", "\n    networkPolicy:"):
         if absent in hr:
             fail(f"the HelmRelease carries {absent.strip()!r}")
     refs = 0
@@ -285,6 +322,9 @@ def main(meta: str, connectivity: str) -> int:
         refs += 1
     if refs != 5:
         fail(f"expected the 5 credentials of the fixture as Secret references in the HelmRelease, found {refs}")
+    # The baseline of the comparison below: the agents on, workspaces off.
+    off_docs = documents(helm(meta, ["-f", AGENTS]))
+    conn = off_docs[("HelmRelease", "agent-platform-connectivity")]
     conn_on = on_docs[("HelmRelease", "agent-platform-connectivity")]
     if f"      {NAME}:\n        enabled: true\n" not in conn_on:
         fail(f"the roster forwarded to connectivity does not say {NAME}: enabled: true")
@@ -315,17 +355,30 @@ def main(meta: str, connectivity: str) -> int:
             if prefix not in (on or ""):
                 fail(f"switching workspaces on did not derive the gateway's workspaces.toolsPrefix onto {key}")
             on = on.replace(prefix, "", 1)
+        if key == ("HelmRelease", "muster"):
+            # And muster's credential provider, which answers the egress gateway
+            # for a workspace Session's provider hosts while Substrate is on
+            # (tests/verify-workspace-session-admission.py pins its values).
+            provider = block(block(on or "", "muster", 4), "credentialProvider", 6)
+            if provider:
+                on = on.replace(provider, "", 1)
+                # Its pods then mount Substrate's certificates, so until Substrate is
+                # Ready neither its install nor its upgrade waits for them
+                # (giantswarm/agent-platform#1107).
+                on = on.replace("    disableWait: true\n", "", 2)
         if on != doc:
             fail(f"switching workspaces on changed {key} (muster.* included)")
     if any(kind == "MCPServer" for kind, _ in on_docs):
         fail("the meta chart renders an MCPServer: the registration is the component chart's own")
     ok(f"on: one OCIRepository ({rng.group(1)}) + one HelmRelease dependsOn muster and connectivity with the block forwarded "
-       "(Service name, OAuth, the unpinned muster registration, two provider instances, the grant's key, the class, cleanupAfter from kagent's TTL), "
+       "(Service name, OAuth, the muster registration pinned to the github instance's App, two provider instances, the grant's key, the class, cleanupAfter from kagent's TTL), "
        f"{refs} credentials all Secret references, the namespace kagent's, empty keys not forwarded; nothing else moved, muster.* included; no MCPServer")
 
     # --- the storage slices' keys beside the switch ----------------------------------------
     lab = "tests/fixtures/workspaces-lab-values.yaml"
-    lab_docs = documents(helm(meta, ["-f", lab]))
+    # Beside the provider instances: with Substrate on, workspaces need one muster releases
+    # (agent-platform.validateWorkspaceAuth).
+    lab_docs = documents(helm(meta, [*ON, "-f", lab]))
     lab_conn = lab_docs[("HelmRelease", "agent-platform-connectivity")]
     must_have(lab_conn, ("      storageClassName: agentlab-workspaces\n", "        name: nfs.csi.k8s.io\n"),
               "the workspaces block forwarded to connectivity with the storage slices' keys")
@@ -351,13 +404,19 @@ def main(meta: str, connectivity: str) -> int:
     if any(kind in ("Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding") for kind, _ in orgs):
         fail("the meta chart renders RBAC of its own: the manager's Role and RoleBinding are the component chart's")
     rbac = component_rbac(org_hr)
-    if rbac["Role"] != [f"kagent/{NAME}"] or rbac["RoleBinding"] != [f"kagent/{NAME}"]:
-        fail(f"the component chart's manager RBAC in kagent is not one Role and one RoleBinding named {NAME}: {rbac}")
+    # kagent's Role writes the workspace objects; the release namespace's (the
+    # render's, default) reads the provider instances' Secrets and deletes the
+    # sign-ins earlier releases kept there.
+    want = sorted([f"kagent/{NAME}", f"default/{NAME}-manager"])
+    if sorted(rbac["Role"]) != want or sorted(rbac["RoleBinding"]) != want:
+        fail(f"the component chart's manager RBAC is not one Role and one RoleBinding in kagent ({NAME}) and in its own namespace ({NAME}-manager): {rbac}")
     volumes = f"{NAME}-volumes"
     if (rbac["ClusterRole"] != [volumes] or rbac["ClusterRoleBinding"] != [volumes]
             or rbac["clusterRules"] != ['rules:\n  - apiGroups: [""]\n    resources: [persistentvolumes]\n    verbs: [get]\n'
-                                        '  - apiGroups: [storage.k8s.io]\n    resources: [storageclasses]\n    verbs: [get]']):
-        fail(f"the component chart's cluster-wide RBAC is not the one ClusterRole and binding {volumes} that only gets PersistentVolumes and StorageClasses: {rbac}")
+                                        '  - apiGroups: [storage.k8s.io]\n    resources: [storageclasses]\n    verbs: [get]\n'
+                                        '  - apiGroups: [apiextensions.k8s.io]\n    resources: [customresourcedefinitions]\n'
+                                        '    resourceNames: [workspaces.workspace-manager.giantswarm.io]\n    verbs: [get]']):
+        fail(f"the component chart's cluster-wide RBAC is not the one ClusterRole and binding {volumes} that only gets PersistentVolumes, StorageClasses and its own CRD: {rbac}")
     if rbac["subjects"] - {"ServiceAccount"}:
         fail(f"a binding of the component chart names a subject other than a ServiceAccount (a member, a group): {sorted(rbac['subjects'])}")
     must_fail(meta, [*ON, "-f", ORGS, "--set", "workspaces.organizations[1].name=acme"], "is a duplicate", "a duplicate Organization")
@@ -368,7 +427,7 @@ def main(meta: str, connectivity: str) -> int:
     must_fail(meta, [*ON, "--set", f"{NAME}.rbac.create=false"], f"{NAME}.rbac.create is false", "the manager's RBAC off")
     helm(connectivity, ["--set", "ingress.parentRefs[0].name=x", "--set", f"components.{NAME}.enabled=true", "-f", FIXTURE, "-f", ORGS, *IDENTITY], ci_values=False)
     ok(f"two Organizations forwarded as the organizations map, nothing else moved; the component chart {rbac['version']} renders one Role and RoleBinding "
-       "in kagent for the manager's ServiceAccount, cluster-wide only get on PersistentVolumes and StorageClasses, no member binding; a duplicate, groupless, empty-group or non-DNS "
+       "in kagent and one in its own namespace for the manager's ServiceAccount, cluster-wide only get on PersistentVolumes, StorageClasses and its CRD, no member binding; a duplicate, groupless, empty-group or non-DNS "
        "Organization, an own organizations map and rbac.create false fail; connectivity takes the key")
 
     # --- inline credentials and bad instances -----------------------------------------
@@ -378,22 +437,67 @@ def main(meta: str, connectivity: str) -> int:
               f"{NAME}.providers[1].values.token is a credential", "an inline token")
     must_fail(meta, [*ON, "--set", f"{NAME}.grant.signingKey=abc"],
               f"{NAME}.grant.signingKey is a credential", "an inline grant signing key")
-    must_fail(meta, [*ON, "--set", f"{NAME}.signInStore.encryptionKey.name=k", "--set", f"{NAME}.signInStore.encryptionKey.key=k"],
-              f"{NAME}.signInStore is not a key of the workspace-manager chart", "a signInStore block (the chart's key is signin.keys)")
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[1].name=github"], "is a duplicate", "a duplicate provider name")
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[1].name=Git_Lab"], "is not a DNS label", "a non-DNS provider name")
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[1].kind="], "names no kind", "a provider without kind")
     ok("an inline credential, a duplicate or non-DNS name and a missing kind fail naming the path")
 
+    # --- muster's pin --------------------------------------------------------------------
+    auth = f"{NAME}.muster.mcpServer.auth"
+    own = documents(helm(meta, [*ON, "--set", f"{auth}.provider=gitlab", "--set", f"{auth}.authorizationServer.clientCredentialsSecretRef.name=gitlab-app"]))[("HelmRelease", NAME)]
+    must_have(own, ("              name: gitlab-app\n", "          provider: gitlab\n"), "the HelmRelease with an own provider and client Secret")
+    must_fail(meta, [*ON, *NO_GITLAB], f"{auth}.provider is empty and the provider instances (github, gitlab) have not exactly one of kind github",
+              "two github instances and no own provider")
+    must_fail(meta, [*ON, "--set", f"{NAME}.providers[0].kind=gitlab", "--set", f"{NAME}.providers[0].values.url=https://gl.example.com"],
+              f"{auth}.provider is empty", "no github instance and no own provider")
+    must_fail(meta, [*ON, "--set", f"{auth}.provider=bitbucket"], f'{auth}.provider "bitbucket" names no provider instance', "a provider naming no instance")
+    must_fail(meta, [*ON, "--set", f"{NAME}.providers[0].values.oauth=null"],
+              f"{auth}.authorizationServer.clientCredentialsSecretRef.name is empty and provider instance github has no values.oauth.clientSecret", "an instance without an OAuth client")
+    must_fail(meta, [*ON, "--set", f"{NAME}.providers[0].values.oauth.clientSecret.key=secret"],
+              f"{auth}.authorizationServer.clientCredentialsSecretRef.name is empty", "an OAuth client Secret under another key than client-secret")
+    derived = documents(helm(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer="]))[("HelmRelease", NAME)]
+    must_have(derived, ("            issuer: https://github.com/apps/123\n",), "the HelmRelease without an own issuer")
+    ghes = documents(helm(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer=", "--set", f"{NAME}.providers[0].values.url=https://ghe.example.com/"]))[("HelmRelease", NAME)]
+    must_have(ghes, ("            issuer: https://ghe.example.com/apps/123\n",), "the HelmRelease of a GitHub Enterprise instance without an own issuer")
+    must_fail(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer=", "--set", f"{NAME}.providers[0].values.app.id="],
+              f"{auth}.authorizationServer.issuer is empty and provider instance github is no github instance with values.app.id", "no issuer and no App id")
+    must_fail(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer=", "--set", f"{auth}.provider=gitlab",
+                     "--set", f"{auth}.authorizationServer.clientCredentialsSecretRef.name=gitlab-app"],
+              f"{auth}.authorizationServer.issuer is empty and provider instance gitlab", "no issuer for a gitlab instance")
+    for below in (">=0.9.0 <1.0.0", "0.9.0"):
+        must_fail(meta, [*ON, *NO_GITLAB, "--set", f"{auth}.provider=github", "--set", f"components.{NAME}.versionRange={below}"],
+                  f"admits releases before {GRANT_FLOOR}", f"the range {below} below the muster grant floor")
+    with open(BOM, encoding="utf-8") as f:
+        pin = re.search(rf'^\s*{re.escape(NAME)}:\s*\{{\s*versionRange:\s*"([^"]+)"', f.read(), re.M).group(1)
+    r = component_render(documents(helm(meta, [*ON, *IDENTITY]))[("HelmRelease", NAME)], pin)
+    if r.returncode != 0:
+        fail(f"the {NAME} chart {pin} refuses the forwarded pin:\n{r.stderr}")
+    mcp = next((d for d in r.stdout.split("\n---\n") if re.search(r"^kind: MCPServer", d, re.M)), "")
+    must_have(mcp, (
+        "  auth:\n    type: oauth\n    authorizationServer:\n      issuer: \"https://github.com/apps/ci-agents\"\n",
+        "      clientCredentialsSecretRef:\n        name: \"workspace-github\"\n",
+        "      grantScope: \"subject\"\n    forwardIdentity: true\n",
+    ), f"the {NAME} chart {pin}'s MCPServer")
+    must_have(r.stdout, ("- --muster-provider=github\n", "- --muster-server=workspace-manager\n"), f"the {NAME} chart {pin}'s Deployment")
+    for gone in ("signin-keys", "token-exchange"):
+        if gone in r.stdout:
+            fail(f"the {NAME} chart {pin} still renders {gone}")
+    ok(f"muster's pin: the github instance, its OAuth client Secret and its issuer <url>/apps/<app.id> derived, an own provider, Secret and issuer stand; two or no github instances, an unknown "
+       f"provider, no client-secret key, no issuer to take (no App id, a gitlab instance) and a floor below {GRANT_FLOOR} fail naming the key; the component chart {pin} renders the pinned MCPServer "
+       "(the App's issuer and client Secret, grantScope subject, forwardIdentity) and --muster-provider github")
+
     # --- the gitlab kind's floor ----------------------------------------------------------
-    if not (rng := re.search(RANGE_RE, on_docs[("OCIRepository", NAME)])) or not rng.group(1).startswith(f">={GITLAB_FLOOR} "):
-        fail(f"the default workspace-manager range is not floored at {GITLAB_FLOOR}, the first release with the gitlab kind")
+    default = floors.range_of(NAME, meta)
+    if not (rng := re.search(RANGE_RE, on_docs[("OCIRepository", NAME)])) or rng.group(1) != default:
+        fail(f"the workspace-manager OCIRepository does not carry components.{NAME}.versionRange {default!r}")
+    if fluxsemver.Version(floors.floor(NAME, meta)) < fluxsemver.Version(GRANT_FLOOR):
+        fail(f"the default workspace-manager range {default!r} floors below {GRANT_FLOOR}, the first release whose person's token is muster's grant")
     for below in (">=0.4.0 <1.0.0", "0.4.1"):
         must_fail(meta, [*ON, "--set", f"components.{NAME}.versionRange={below}"],
                   f"{NAME}.providers[1] (gitlab) is of kind gitlab, which workspace-manager has from {GITLAB_FLOOR} on", f"a gitlab instance on the range {below}")
     for at in (f"{GITLAB_FLOOR}-rc.1", f">={GITLAB_FLOOR} <1.0.0"):
-        helm(meta, [*ON, "--set", f"components.{NAME}.versionRange={at}"])
-    helm(meta, [*ON, *NO_GITLAB, "--set", f"components.{NAME}.versionRange=>=0.4.0 <1.0.0"])
+        helm(meta, [*ON, *PRE_GRANT, "--set", f"components.{NAME}.versionRange={at}"])
+    helm(meta, [*ON, *NO_GITLAB, *PRE_GRANT, "--set", f"components.{NAME}.versionRange=>=0.4.0 <1.0.0"])
     with open(BOM, encoding="utf-8") as f:
         pin = re.search(rf'^\s*{re.escape(NAME)}:\s*\{{\s*versionRange:\s*"([^"]+)"', f.read(), re.M).group(1)
     r = component_render(documents(helm(meta, [*ON, *IDENTITY]))[("HelmRelease", NAME)], pin)
@@ -402,7 +506,7 @@ def main(meta: str, connectivity: str) -> int:
     must_have(r.stdout, ("kind: gitlab", "name: gitlab", "url: https://gitlab.example.com:8443", "name: workspace-gitlab"),
               f"the {NAME} chart {pin}'s providers configuration")
     ok(f"a gitlab instance needs the workspace-manager floor at {GITLAB_FLOOR} (a release candidate of it too; below, the render fails naming "
-       f"the floor; a github-only list does not), the default floor; the component chart at the BOM's pin {pin} takes the instance with its Secret references")
+       f"the floor; a github-only list does not); the component chart at the BOM's pin {pin} takes the instance with its Secret references")
 
     # --- the derived namespace ----------------------------------------------------------
     moved = documents(helm(meta, [*ON, "--set", "kagent.namespaceOverride=agents"]))[("HelmRelease", NAME)]
@@ -413,13 +517,11 @@ def main(meta: str, connectivity: str) -> int:
     ok("workspaces.namespace follows the kagent namespace; an own value must agree")
 
     # --- the kagent address -------------------------------------------------------------
-    if "\n    kagent:\n" in documents(helm(meta, [*ON, *NO_GITLAB, *WM_KAGENT, "--set", "components.kagent.enabled=false"]))[("HelmRelease", NAME)]:
-        fail("the HelmRelease carries a kagent block with kagent off")
-    if "\n    kagent:\n" in documents(helm(meta, [*ON, *NO_GITLAB, *KAGENT, "--set", f"components.{NAME}.versionRange=>=0.2.0 <1.0.0"]))[("HelmRelease", NAME)]:
+    if "\n    kagent:\n" in documents(helm(meta, [*ON, *NO_GITLAB, *KAGENT, *PRE_GRANT, "--set", f"components.{NAME}.versionRange=>=0.2.0 <1.0.0"]))[("HelmRelease", NAME)]:
         fail("the HelmRelease carries a kagent block below the workspace-manager floor that takes it (an earlier chart's schema refuses it)")
     want = "    kagent:\n      address: grpc://kagent-controller.kagent.svc:8083\n      namespace: kagent\n"
     for rng in ("0.4.0-rc.1", ">=0.4.0 <1.0.0"):
-        hr = documents(helm(meta, [*ON, *NO_GITLAB, *KAGENT, *IDENTITY, "--set", f"components.{NAME}.versionRange={rng}"]))[("HelmRelease", NAME)]
+        hr = documents(helm(meta, [*ON, *NO_GITLAB, *KAGENT, *IDENTITY, *PRE_GRANT, "--set", f"components.{NAME}.versionRange={rng}"]))[("HelmRelease", NAME)]
         must_have(hr, (want,), f"the HelmRelease with kagent on and the range {rng}")
     if (r := component_render(hr, "0.4.0")).returncode != 0:
         fail(f"the {NAME} chart 0.4.0 refuses the forwarded kagent block:\n{r.stderr}")
@@ -435,8 +537,8 @@ def main(meta: str, connectivity: str) -> int:
     must_fail(meta, [*ON, *NO_GITLAB, *KAGENT, *WM_KAGENT, "--set", f"{NAME}.kagent.namespace=elsewhere"], f"{NAME}.kagent.namespace (elsewhere) differs",
               "an own kagent namespace that disagrees with the derived address")
     ok("kagent.address defaults to kagent's controller Service (grpc://kagent-controller.kagent.svc:8083) with its namespace from "
-       "workspace-manager 0.4.0 on, the default floor, which takes it (0.4.0 renders it), following kagent's namespace and fullname; an own address wins; "
-       "a disagreeing own namespace fails; none without kagent or below the floor")
+       "workspace-manager 0.4.0 on, which takes it (0.4.0 renders it), following kagent's namespace and fullname; an own address wins; "
+       "a disagreeing own namespace fails; none below the floor")
 
     # --- the connectivity chart -------------------------------------------------------------
     conn_on_flags = ["--set", "ingress.parentRefs[0].name=x", "--set", f"components.{NAME}.enabled=true", "-f", FIXTURE, *IDENTITY]

@@ -218,7 +218,7 @@ Name of the AgentgatewayParameters CR — defaults to release name.
 
 {{/*
 Truthy (emits "true") when the request topology routes through agentgateway,
-i.e. ingress.mode is agentgateway-muster or agentgateway-direct and muster is
+i.e. ingress.mode is agentgateway-muster and muster is
 on. A release without muster (a serving or runtime slice) has no ingress
 topology: it renders no data plane whatever the mode, which defaults to
 agentgateway-muster (#252). Otherwise emits nothing (empty string = falsy).
@@ -226,7 +226,7 @@ Gated templates use:
   {{- if (include "agent-platform.ingress.agentgateway" .) }}
 */}}
 {{- define "agent-platform.ingress.agentgateway" -}}
-{{- if and (or (eq .Values.ingress.mode "agentgateway-muster") (eq .Values.ingress.mode "agentgateway-direct")) (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}true{{- end -}}
+{{- if and (eq .Values.ingress.mode "agentgateway-muster") (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -319,13 +319,10 @@ inconsistent. Rendered exactly once via templates/validate.yaml.
 */}}
 {{- define "agent-platform.validateIngress" -}}
 {{- $mode := .Values.ingress.mode -}}
-{{- if not (or (eq $mode "muster-direct") (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
-{{- fail (printf "ingress.mode=%v is invalid; must be one of: muster-direct, agentgateway-muster, agentgateway-direct" $mode) -}}
+{{- if not (or (eq $mode "muster-direct") (eq $mode "agentgateway-muster")) -}}
+{{- fail (printf "ingress.mode=%v is invalid; must be one of: agentgateway-muster, muster-direct" $mode) -}}
 {{- end -}}
-{{- if eq $mode "agentgateway-direct" -}}
-{{- fail "ingress.mode=agentgateway-direct requires a DCR-capable IdP (RFC 7591/8707), e.g. Zitadel; not yet supported" -}}
-{{- end -}}
-{{- $isAgentgateway := or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct") -}}
+{{- $isAgentgateway := eq $mode "agentgateway-muster" -}}
 {{- $musterEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") -}}
 {{- /* The muster `/` route needs a Gateway in every mode; the helper fails the
 render when neither ingress.parentRefs, the chart-owned edge nor
@@ -346,10 +343,6 @@ agent-platform-mcps component. */ -}}
 {{- if eq $mode "agentgateway-muster" -}}
 {{- if not (or (eq $viaMuster true) (eq (toString $viaMuster) "true")) -}}
 {{- fail "ingress.mode=agentgateway-muster requires agent-platform-mcps.agentgateway.viaMuster=true" -}}
-{{- end -}}
-{{- else if eq $mode "agentgateway-direct" -}}
-{{- if not (or (eq $viaMuster false) (eq (toString $viaMuster) "false")) -}}
-{{- fail "ingress.mode=agentgateway-direct requires agent-platform-mcps.agentgateway.viaMuster=false" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -2081,34 +2074,6 @@ Truthy when the platform runs Agent Substrate: the substrate component is on
 */}}
 {{- define "agent-platform.substrate.enabled" -}}
 {{- include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "substrate") -}}
-{{- end -}}
-
-{{/*
-kagent's built-in tool server: the kagent-tools subchart of the kagent chart
-(kagent.kagent-tools). The subchart renders its Deployment and Services into its
-own namespaceOverride, else its release namespace, and the kagent chart composes
-the kagent-tool-server RemoteMCPServer URL from the same two inputs
-(http://<tools fullname>.<that namespace>:<port>/mcp). The egress rules this
-chart opens to the server — the kagent controller's tool discovery
-(templates/kagent/netpol.yaml) and the actors' calls through Substrate's egress
-gateway (templates/substrate/netpol.yaml) — derive the namespace the same way,
-from the same values block and the same release namespace (every platform
-HelmRelease installs into gitops.targetNamespace), so a rule names the namespace
-the server is rendered into whether or not an installation pins the override.
-Never the kagent namespace by assumption: kagent.namespaceOverride moves the
-controller, not the subchart (#421). The port is the tools Service's targetPort.
-*/}}
-{{- define "agent-platform.kagentTools.enabled" -}}
-{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
-{{- if $tools.enabled }}true{{- end -}}
-{{- end -}}
-{{- define "agent-platform.kagentTools.namespace" -}}
-{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
-{{- $tools.namespaceOverride | default .Release.Namespace -}}
-{{- end -}}
-{{- define "agent-platform.kagentTools.port" -}}
-{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
-{{- dig "service" "ports" "tools" "targetPort" "8084" $tools | toString -}}
 {{- end -}}
 
 {{/*

@@ -350,15 +350,30 @@ expression through `tpl`; Helm merges maps, so an installation adds or drops
 one field without restating the rest. A field is the place for what is per
 request: as a metric label it would make one series per value.
 
-The chart's one field is `agent_instance_id`, the session of an agent's model
-call. The kagent runtime names the `Session` a turn runs in (a Dev Portal
-conversation, a Slack thread) in `x-kagent-agent-instance-id` on every
-model call of that turn, and the field reads it behind the same Substrate
-egress predicate as the agent labels (`agent-platform.substrate.egressCall`),
-so a pod that is not the egress logs no session (the empty value drops the
-field), header or not. Summed
-per `agent_instance_id`, the `llm` listener's lines give the cost of one
-conversation. Accounting, never authorization.
+The chart's fields, after the data plane's own (`gateway`, `listener`,
+`route`, `endpoint`, `src.addr`, `http.method`, `http.host`, `http.path`,
+`http.status`, `grpc.status`, `error`, `reason`, `duration`, …):
+
+| Field | Value | Present when |
+|---|---|---|
+| `request_id` | the `x-request-id` request header | the caller sent one |
+| `agent_instance_id` | the `x-kagent-agent-instance-id` request header | an agent's model call through the Substrate egress |
+
+`request_id` is the request's id. The Dev Portal's backend sets
+`x-request-id` on every call it makes through the data plane and names it in
+an error banner (`request id 310e4b1e-…`), so that id finds exactly the line
+of the failing call. The data plane generates no id: a request without the
+header logs none (the field is dropped). Any caller can set it, so it
+correlates, never identifies.
+
+`agent_instance_id` is the session of an agent's model call. The kagent
+runtime names the `Session` a turn runs in (a Dev Portal conversation, a
+Slack thread) in `x-kagent-agent-instance-id` on every model call of that
+turn, and the field reads it behind the same Substrate egress predicate as
+the agent labels (`agent-platform.substrate.egressCall`), so a pod that is
+not the egress logs no session (the empty value drops the field), header or
+not. Summed per `agent_instance_id`, the `llm` listener's lines give the cost
+of one conversation. Accounting, never authorization.
 
 **Guards.** The schema holds every entry to `{expression, enabled}`; the render
 fails, naming the entry, on a missing, empty or multi-line expression. No
@@ -1220,6 +1235,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | gateway.metricLabels.api_key.expression | string | `"apiKey.name"` |  |
 | gateway.accessLog.attributes.agent_instance_id.enabled | bool | `true` |  |
 | gateway.accessLog.attributes.agent_instance_id.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent-instance-id\"] : \"\""` |  |
+| gateway.accessLog.attributes.request_id.enabled | bool | `true` |  |
+| gateway.accessLog.attributes.request_id.expression | string | `"request.headers[\"x-request-id\"]"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -1466,7 +1483,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.oauth2-proxy.metrics.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.oauth2-proxy.metrics.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.grafana-mcp.enabled | bool | `false` |  |
-| kagent.kagent-tools.enabled | bool | `false` |  |
 | kagent.querydoc.enabled | bool | `false` |  |
 | kagent.k8s-agent.enabled | bool | `false` |  |
 | kagent.k8s-agent.namespaceOverride | string | `"kagent"` |  |
@@ -1650,10 +1666,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.4.0"` |  |
+| agentgateway.controller.image.tag | string | `"2.4.1"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.4.0"` |  |
+| agentgateway.proxy.image.tag | string | `"2.4.1"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1766,7 +1782,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.3.1"` |  |
+| agentManager.migration.image.tag | string | `"2.5.0"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
@@ -1874,12 +1890,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
-| workspace-manager.signin.keys.secretName | string | `"workspace-manager-signin-keys"` |  |
-| workspace-manager.signin.keys.current | string | `"key-1"` |  |
 | workspace-manager.providers | list | `[]` |  |
 | workspaceManager.route.enabled | bool | `true` |  |
 | workspaceManager.route.parentRefs | list | `[]` |  |
-| workspaceManager.signinKeys.create | bool | `true` |  |
 | workspaceManager.grantKey.create | bool | `true` |  |
 | workspaceManager.grantKey.secretName | string | `"workspace-manager-grant-keys"` |  |
 | workspaceManager.grantKey.key | string | `"key-1"` |  |

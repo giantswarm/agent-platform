@@ -69,6 +69,9 @@ _spec.loader.exec_module(charts)
 
 FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2", "--api-versions", "monitoring.coreos.com/v1",
               "--api-versions", "gateway.networking.k8s.io/v1", "--api-versions", "gateway.envoyproxy.io/v1alpha1"]
+# muster's credential provider releases an instance while workspaces and Substrate are on
+# (agent-platform.validateWorkspaceAuth): no provider instance to pin here, so the renders name it.
+RELEASABLE = ["--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]
 ON = [
     "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
@@ -349,7 +352,7 @@ def companion(meta: str, connectivity: str, preset: str, fixture: str) -> None:
     if {w["kind"] for w in workloads} != {"Deployment", "DaemonSet"}:
         fail(f"the CSI companion ({preset}) renders {[w['name'] for w in workloads]}, not one Deployment and one DaemonSet")
     meta_docs = render(meta, ["-f", f"{meta}/ci/ci-values.yaml", "--set", "components.flux.enabled=false", "--namespace", COMPANION_NAMESPACE,
-                              "--set", "kyvernoPolicies.enabled=true", *FLEET_APIS, *ON, "-f", fixture])
+                              "--set", "kyvernoPolicies.enabled=true", *FLEET_APIS, *ON, "-f", fixture, *RELEASABLE])
     pes = [d for d in meta_docs if d["kind"] == "PolicyException" and d["metadata"]["name"].startswith(COMPANION)]
     used = hold(workloads, pes)
     if used != {pe["metadata"]["name"] for pe in pes}:

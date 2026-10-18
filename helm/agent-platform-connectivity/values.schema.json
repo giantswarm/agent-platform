@@ -420,6 +420,18 @@
                                             "type": "string"
                                         }
                                     }
+                                },
+                                "request_id": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "enabled": {
+                                            "type": "boolean"
+                                        },
+                                        "expression": {
+                                            "type": "string"
+                                        }
+                                    }
                                 }
                             },
                             "additionalProperties": {

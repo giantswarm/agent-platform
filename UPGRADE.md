@@ -15,6 +15,70 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (Substrate 1.14.0: the Google access-token class is routed to the plugin)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.14 (`>=1.14.0 <1.15.0`, giantswarm/giantswarm#38547). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.14.0 (`ateom-gvisor:1.14.0`); the kagent CRDs and the kagent release are unchanged. 1.14.0's bundled credential provider serves `k8s.io` alone, and `substrate.credentialProvider.additionalProviders` sends `google-access-token.k8s.io` to `components.google-access-token-credential-provider`, deployed since 4.141.0. No persisted format changes (Substrate's `docs/upgrade.md`, "The 1.13 to 1.14 step").
+
+- **A Vertex AI turn in the roll window fails closed**: between the Substrate pods rolling to 1.14.0 and the egress gateway reloading its configuration with the new provider list, a credential fetch for `google-access-token.k8s.io` that still reaches the bundled provider is refused and the turn fails. Sessions that started before keep their actors; the next turn after the reload reaches the plugin.
+
+### Operator action
+
+- **None** for an installation that follows the chart's ranges.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.14.0`; `google-access-token-credential-provider` stays where it is.
+- **An installation that overrides `substrate.credentialProvider.additionalProviders`**: keep the `google-access-token.k8s.io` entry beside the `muster.giantswarm.io` one, or Vertex AI ModelConfigs stop resolving.
+
+## \<current\> → \<next\> (kagent 1.17: muster's actor JWT on a workspace Session)
+
+giantswarm/giantswarm#38607: `components.kagent{,-crds}.versionRange` is `>=1.17.0-rc.1 <1.18.0-0`. kagent 1.16 and 1.17 stay on 1.15's upstream pin and Substrate 1.12.1 contract; they add no database migration, and kagent-crds' only change is an additive ModelConfig field (the ChatGPT subscription login). A session stored by 1.15 resumes unchanged: no migration, no snapshot reset, no manual step; a suspended agent resumes with its conversation and its volumes. The kagent line's charts from 1.16.0 no longer carry the kagent-tools and kmcp subcharts. With muster trusting the actor JWT, the kagent release gets `controller.session.actorJWTProviders.muster` (muster's in-cluster host and audience): a workspace Session's calls to muster carry the Session Actor's JWT, which Substrate's egress gateway mints, and muster serves them as the Session's person.
+
+### Operator action
+
+- **None** for an installation that follows the chart's ranges.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.17.0-rc.1`, `kagent-crds` first or with it.
+- **muster's `oauth.server.baseUrl` unset**: kagent gets no muster provider (its controller refuses one without an audience); set it, or `muster.muster.credentialProvider.actorBearer.audience`.
+
+## \<current\> → \<next\> (Substrate 1.13.0: muster trusts the actor JWT)
+
+giantswarm/muster#1572: `components.substrate{,-crds}.versionRange` is `>=1.13.0 <1.14.0` and `components.muster.versionRange` `>=5.45.0 <6.0.0`. The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.13.0 (`ateom-gvisor:1.13.0`). 1.13 stays on 1.12's upstream pin and changes no persisted format, CRD, schema or snapshot layout: no migration, no snapshot reset, no manual step; a suspended agent resumes with its conversation and its volumes, and the goldens are kept. 1.13.0 adds `ate-idp-server` (two replicas, the Service `idp` on 443), which serves the issuer ate-api-server names in every actor JWT. With `workspaces.enabled` and Substrate on, muster verifies a Session's injected actor JWT against it (`muster.muster.credentialProvider.actorBearer`) and serves the call as the person the Session is bound to, only for a binding that lists the provider `muster`.
+
+### Operator action
+
+- **None** for an installation that follows the chart's ranges.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.13.0` and `muster` to `5.45.0`.
+- **An own `substrate.ateApi.actorJWTIssuer`**: muster takes it as its issuer; an issuer set through `substrate.ateApi.extraArgs` moves to `ateApi.actorJWTIssuer` (Substrate's 1.12 to 1.13 step).
+- **To keep muster from trusting actor JWTs**: `muster.muster.credentialProvider.actorBearer.enabled: false`.
+
+## \<current\> → \<next\> (kagent 1.15.0: the workspace write path)
+
+giantswarm/agent-platform#1096: `components.kagent{,-crds}.versionRange` is `>=1.15.0 <1.16.0`, kagent's releases of the 1.15 line. kagent 1.15.0 compiles a workspace Session's provider hosts into credential URIs of `kagent.controller.session.credentialAuthority`, which the chart already derives, so a workspace Session's git and provider API calls reach muster and act as the person. kagent-crds adds the `EgressPolicy` CRD (`egresspolicies.api.kagent.dev`), which the tenant admission already matches. The kagent-crds release applies it before the kagent release upgrades (`dependsOn`). Substrate stays on its 1.12 range. The ADK keeps credential headers out of the persisted session state, so a session stored by 1.13 resumes unchanged: no migration, no snapshot reset, no manual step. A suspended agent resumes with its conversation and its volumes. The 1.14 line's chart (`runtime: byo` Harness entries) comes with it.
+
+### Operator action
+
+- **None** for an installation that follows the chart's ranges.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.15.0`, `kagent-crds` first or with it.
+- **`kagent.controller.session.brokers` in your values**: drop it. The 1.15 chart no longer reads it; `credentialAuthority` replaces it.
+
+## \<current\> → \<next\> (the migrate run covers the Organization namespaces)
+
+giantswarm/agent-platform#1089: with `tenants.organizations.enabled`, the connectivity release's `agent-manager migrate` run also covers every namespace labelled `giantswarm.io/organization`. An agent there that names the installation's skills credential (`tenant-credential-agent-manager-skills-token` or `agent-manager-skills-token`) from before the credential step keeps answering, but its next update stalls: `agent-platform-tenant-credential-refs` refuses Flux's apply and the HelmRelease is Stalled. The run moves such agents once agent-manager's migrate carries the tenant pass (giantswarm/agent-manager#191); the chart gives it the rights for that now. The run's pod template changes, so the upgrade starts it once more.
+
+### Operator action
+
+- **None.** The upgrade renders the ClusterRole, ClusterRoleBinding and ValidatingAdmissionPolicy `agent-platform-connectivity-agent-manager-migrate-tenants` and starts the run under its new hash.
+- **A Stalled agent HelmRelease in an Organization namespace** names the refused Secret and the fix in its message. Once the run with the tenant pass has moved it, reconcile it: `flux -n <org-namespace> reconcile helmrelease <agent>`.
+
+## 4.135.x → \<next\> (the Substrate workers follow the control plane's release)
+
+giantswarm/agent-platform#822: the Substrate version has **one source, the release Flux resolves from `components.substrate.versionRange`**. The chart now sets `ateController.gvisorWorker.followRelease: true` on the substrate release, so ate-controller runs every gVisor pool on its own release's `ateom-gvisor`. A Substrate patch within the range (`1.12.0` → `1.12.1`) rolls the control plane, the atelet and the kagent worker pool together, with no chart release. Before, the pool followed the range's floor and waited for a chart release that moved it. The Substrate chart has defaulted the flag to `true` since `1.4.0`, so an installation on the chart's range renders the same pods as before. Only the substrate release's values gain the key.
+
+The WorkerPool's `spec.workerImage` stays the floor's (`ateom-gvisor:1.12.0`). Its `status.workerImage` names what the pods run, and the condition `WorkerImageOverridden` is `True` while that is a later patch.
+
+### Operator action
+
+- **None** for an installation that follows the chart's range: the rendered pods are unchanged.
+- **`substrate.ateController.gvisorWorker.followRelease: false` in your values**: drop it. It now fails the render, because the workers would run the floor beside a later patch's atelet.
+- **Recognising it worked**: `kubectl -n kagent get workerpool kagent-default -o jsonpath='{.status.workerImage}'` and `kubectl -n ate-system get ds atelet -o jsonpath='{.spec.template.spec.containers[0].image}'` name the same Substrate version.
+
 ## 4.135.x → \<next\> (Substrate 1.12.0: the Organizations' credentials by label)
 
 `components.substrate{,-crds}.versionRange` selects Substrate 1.12 from 1.12.0 (`>=1.12.0 <1.13.0`, giantswarm/agent-platform#1041). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.12.0 (`ateom-gvisor:1.12.0`); the kagent CRDs and the kagent release are unchanged. 1.12 stays on 1.11's upstream pin and changes no persisted format, CRD, schema or snapshot layout: no migration, no snapshot reset and no manual step. A suspended agent resumes with its conversation and its volumes. 1.12.0 brings:

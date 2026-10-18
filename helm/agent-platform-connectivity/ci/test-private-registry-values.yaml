@@ -3,7 +3,6 @@ global:
 
 # parentRefs is required in all modes (the muster `/` route attaches to it).
 ingress:
-  mode: muster-direct
   parentRefs:
     - name: giantswarm-default
       namespace: envoy-gateway-system
@@ -22,8 +21,3 @@ agentgateway:
   proxy:
     image:
       registry: localhost:5000
-
-components:
-  # muster-direct runs without the agentgateway component (on by default).
-  agentgateway:
-    enabled: false
