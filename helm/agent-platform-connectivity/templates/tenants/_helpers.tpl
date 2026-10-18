@@ -89,12 +89,12 @@ default-model-config
 
 {{/*
 "true" when a tenant's own ModelConfigs are admitted under the platform's
-rules (tenants.organizations.modelConfigs.enabled;
+rules (kagent on and tenants.organizations.enabled;
 giantswarm/agent-platform#759, templates/tenants/modelconfig-admission.yaml),
 else empty.
 */}}
 {{- define "agent-platform.tenants.modelConfigs" -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (dig "organizations" "modelConfigs" "enabled" false (.Values.tenants | default dict)) }}true{{ end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.tenants.organizations" .) }}true{{ end -}}
 {{- end -}}
 
 {{/*

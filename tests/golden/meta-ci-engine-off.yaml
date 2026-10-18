@@ -1426,8 +1426,6 @@ spec:
     tenants:
       organizations:
         enabled: false
-        modelConfigs:
-          enabled: false
       platform:
         editors:
         - apiGroup: rbac.authorization.k8s.io

@@ -4,14 +4,16 @@
 verify-tenant-modelconfigs.py checks what the connectivity chart renders; this
 script checks what the policies' CEL decides. It runs against a cluster that
 already serves kagent's CRDs (api.kagent.dev ModelConfigs and
-RemoteMCPServers; agentlab's kind cluster does) and changes nothing there but
-what it creates and deletes again:
+RemoteMCPServers) and admissionregistration.k8s.io/v1 MutatingAdmissionPolicy
+(agentlab's kind cluster does) and changes nothing there but what it creates
+and deletes again:
 
-- it renders the connectivity chart with tenants.organizations.enabled and
-  tenants.organizations.modelConfigs.enabled (an Anthropic and an OpenAI
-  listener model), takes the policies a tenant's model and credentials meet
-  (agent-platform-tenant-model-routing, -secret-creation, -model-credentials,
-  -credentials, -credential-refs), and applies them under a name of this run,
+- it renders the connectivity chart with tenants.organizations.enabled (an
+  Anthropic and an OpenAI listener model), takes the policies a tenant's
+  model and credentials meet (agent-platform-tenant-model-routing,
+  -secret-creation, -model-credentials, -credentials, -credential-refs, and
+  the modelconfig-llm-routing MutatingAdmissionPolicies with their
+  Organizations' binding), and applies them under a name of this run,
   selecting only a namespace of this run by a label of its own: the
   cluster's own Organization namespaces and policies are not touched, and
   the namespace carries no giantswarm.io/organization label, so the cluster's
@@ -53,6 +55,7 @@ READER = "prove-secret-reader"
 KEY = "kagent-anthropic"
 ANTHROPIC = f"http://agentgateway.{PLATFORM_NS}.svc:8081"
 OPENAI = f"{ANTHROPIC}/v1"
+ROUTING = "agent-platform-connectivity-modelconfig-llm-routing"
 POLICIES = ["agent-platform-tenant-model-routing", "agent-platform-tenant-secret-creation",
             "agent-platform-tenant-model-credentials", "agent-platform-tenant-credentials",
             "agent-platform-tenant-credential-refs"]
@@ -69,6 +72,15 @@ def kubectl(args, stdin=None, as_=None):
 
 def apply(obj, as_=None):
     return kubectl(["create", "--dry-run=server", "-f", "-"], yaml.safe_dump(obj), as_)
+
+
+def filled(obj, block, url, as_=None):
+    """Admitted, with the listener written in as spec.<block>.baseUrl."""
+    rc, out = kubectl(["create", "--dry-run=server", "-o", "json", "-f", "-"], yaml.safe_dump(obj), as_)
+    if rc != 0:
+        return rc, out
+    got = json.loads(out).get("spec", {}).get(block, {}).get("baseUrl")
+    return (0, f"baseUrl {got}") if got == url else (1, f"admitted with baseUrl {got}, want {url}")
 
 
 def case(name, rc_out, allowed, needle=None):
@@ -114,8 +126,7 @@ def render(chart):
                         "--set", "llmRouting.models[1].name=openai", "--set", "llmRouting.models[1].provider=OpenAI",
                         "--set", "llmRouting.models[1].baseURL=https://api.openai.com/v1",
                         "--set", "tenants.organizations.enabled=true",
-                        "--set", f"kagent.providers.anthropic.config.baseUrl={ANTHROPIC}",
-                        "--set", "tenants.organizations.modelConfigs.enabled=true"], capture_output=True, text=True)
+                        "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"], capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit(f"FAIL: helm template:\n{r.stderr}")
     return [d for d in yaml.safe_load_all(r.stdout) if d]
@@ -139,6 +150,20 @@ def main():
         vapb["metadata"] = {"name": f"{name}-{RUN}"}
         vapb["spec"]["policyName"] = f"{name}-{RUN}"
         objs += [vap, vapb]
+    # The routing policies, with only their Organizations' binding.
+    for map_ in [d for d in docs if d.get("kind") == "MutatingAdmissionPolicy" and d["metadata"]["name"].startswith(ROUTING)]:
+        name = map_["metadata"]["name"]
+        binding = find(docs, "MutatingAdmissionPolicyBinding", f"{name}-organizations")
+        if binding is None:
+            sys.exit(f"FAIL: the chart renders no Organizations' binding for {name}")
+        map_["metadata"] = {"name": f"{name}-{RUN}"}
+        map_["spec"]["matchConstraints"]["namespaceSelector"] = {"matchLabels": {LABEL: RUN}}
+        binding["metadata"] = {"name": f"{name}-organizations-{RUN}"}
+        binding["spec"]["policyName"] = f"{name}-{RUN}"
+        binding["spec"]["matchResources"]["namespaceSelector"] = {"matchLabels": {LABEL: RUN}}
+        objs += [map_, binding]
+    if not any(o["kind"] == "MutatingAdmissionPolicy" for o in objs):
+        sys.exit("FAIL: the chart renders no modelconfig-llm-routing policy")
     admin = find(docs, "ClusterRole", "agent-platform:admin")
     try:
         prove(objs, admin["rules"])
@@ -172,24 +197,31 @@ def prove(objs, admin_rules):
                 "subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": user}]})
     for o in objs:
         create(o)
-    # The API server's policy informer: wait for each policy's first refusal.
-    for probe in (mc("probe", url=None), secret("probe-plain"), mc("probe", secret="plain"), secret("tenant-credential-p", type_="example.com/token"),
+    # The API server's policy informer: wait for each policy's first refusal,
+    # and for the routing policies' first write.
+    for probe in (mc("probe", url="https://api.anthropic.com"), secret("probe-plain"), mc("probe", secret="plain"), secret("tenant-credential-p", type_="example.com/token"),
                   rmcp("plain")):
         for _ in range(100):
             if apply(probe, as_=ADMIN)[0] != 0:
                 break
             time.sleep(0.3)
+    for probe, block, url in ((mc("probe", url=None), "anthropic", ANTHROPIC), (mc("probe", "OpenAI", "openAI", None), "openAI", OPENAI)):
+        for _ in range(100):
+            if filled(probe, block, url, as_=ADMIN)[0] == 0:
+                break
+            time.sleep(0.3)
     for o in objs:
-        if o["kind"] == "ValidatingAdmissionPolicy":
-            _, out = kubectl(["get", "validatingadmissionpolicy", o["metadata"]["name"], "-o", "json"])
+        if o["kind"] in ("ValidatingAdmissionPolicy", "MutatingAdmissionPolicy"):
+            _, out = kubectl(["get", o["kind"].lower(), o["metadata"]["name"], "-o", "json"])
             tc = json.loads(out).get("status", {}).get("typeChecking", {})
             case(f"{o['metadata']['name'][:-9]}: the API server's type check finds nothing", (1 if tc else 0, json.dumps(tc)), True)
 
     # A tenant's own ModelConfig (agent-platform-tenant-model-routing).
     case("MC: Anthropic on the listener with a tenant credential", apply(mc("own"), as_=ADMIN), True)
     case("MC: OpenAI on the listener's /v1 with a tenant credential", apply(mc("own-openai", "OpenAI", "openAI", OPENAI), as_=ADMIN), True)
-    case("MC: Anthropic without a baseUrl", apply(mc("nourl", url=None), as_=ADMIN), False,
-         f"set spec.anthropic.baseUrl to {ANTHROPIC} (it is unset)")
+    case("MC: Anthropic without a baseUrl gets the listener", filled(mc("nourl", url=None), "anthropic", ANTHROPIC, as_=ADMIN), True)
+    case("MC: OpenAI without a baseUrl gets the listener's /v1",
+         filled(mc("nourl-openai", "OpenAI", "openAI", None), "openAI", OPENAI, as_=ADMIN), True)
     case("MC: Anthropic straight to the provider", apply(mc("direct", url="https://api.anthropic.com"), as_=ADMIN), False,
          "(it is https://api.anthropic.com)")
     case("MC: OpenAI on the listener without /v1", apply(mc("openai-root", "OpenAI", "openAI", ANTHROPIC), as_=ADMIN), False,
@@ -201,6 +233,8 @@ def prove(objs, admin_rules):
     case("MC: the listener with the platform's key", apply(mc("platform-key", secret=KEY), as_=ADMIN), False,
          "names only a tenant credential")
     case("MC: the reconciler's default-model-config with the platform's key", apply(mc("default-model-config", secret=KEY), as_=REC), True)
+    case("MC: the reconciler's default-model-config without a baseUrl gets the listener",
+         filled(mc("default-model-config", url=None, secret=KEY), "anthropic", ANTHROPIC, as_=REC), True)
     case("MC: the reconciler's copy under another name", apply(mc("other", secret=KEY), as_=REC), False, "names only a tenant credential")
     case("MC: the reconciler's default-model-config straight to the provider",
          apply(mc("default-model-config", url="https://api.anthropic.com", secret=KEY), as_=REC), False, ".baseUrl to")

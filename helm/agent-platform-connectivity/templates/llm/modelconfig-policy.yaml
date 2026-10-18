@@ -14,10 +14,20 @@ is honest; a silent one is not. Confirm with:
 Every write marks the baseUrl it sets (agent-platform.llmRouting.baseUrlMark):
 turning routing off removes these policies and the listener, and the reconcile
 hook (modelconfig-routing-hook.yaml) takes exactly the marked baseUrls off
-again, which Helm cannot: it never owned them. */ -}}
+again, which Helm cannot: it never owned them.
+
+With tenants.organizations.enabled (agent-platform.tenants.modelConfigs) the
+policies also fill in the listener in every namespace labelled
+giantswarm.io/organization (a second binding each; the reconcile hook still
+reads the kagent namespace only): a tenant's ModelConfig, and agent-manager's
+copy of the default one, may omit baseUrl. There an explicit baseUrl that is
+not the listener is refused by agent-platform-tenant-model-routing
+(templates/tenants/modelconfig-admission.yaml), and so is an empty one when
+this policy fails: Ignore here fails closed there. */ -}}
 {{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.llmRouting.modelConfigs" .) }}
 {{- $mark := include "agent-platform.llmRouting.baseUrlMark" . }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $organizations := include "agent-platform.tenants.modelConfigs" . }}
 {{- /* One policy per provider the listener serves
 (agent-platform.llmRouting.providers): the block that carries baseUrl and the
 URL differ by provider (an OpenAI ModelConfig's ends in /v1). The first keeps
@@ -45,16 +55,22 @@ spec:
         apiVersions: ["*"]
         operations: ["CREATE", "UPDATE"]
         resources: ["modelconfigs"]
+    {{- /* With the Organizations' namespaces, the bindings select. */}}
+    {{- if not $organizations }}
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: {{ $ns }}
+    {{- end }}
   matchConditions:
     - name: provider-matches
       expression: >-
         has(object.spec.provider) &&
         object.spec.provider.lowerAscii() == {{ $provider | quote }}
-    {{- /* An explicit baseUrl stays untouched. That is the escape hatch: a model
-    reaches the provider directly by naming the provider URL itself. */}}
+    {{- /* An explicit baseUrl stays untouched. In the kagent namespace that is
+    the escape hatch: a model reaches the provider directly by naming the
+    provider URL itself. In an Organization namespace there is no escape:
+    agent-platform-tenant-model-routing refuses a baseUrl that is not the
+    listener. */}}
     - name: base-url-absent
       expression: >-
         !has(object.spec.{{ $urlKey }}) ||
@@ -81,5 +97,24 @@ spec:
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: {{ $ns }}
+{{- if $organizations }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: {{ $name }}-organizations
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+spec:
+  policyName: {{ $name }}
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [{{ $ns | quote }}]
+{{- end }}
 {{- end }}
 {{- end }}

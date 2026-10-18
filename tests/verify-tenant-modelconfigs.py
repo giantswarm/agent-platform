@@ -4,10 +4,10 @@
 What the policies' CEL decides is proven by prove-tenant-modelconfigs.py on a
 cluster; this script pins what the connectivity chart renders:
 
-- off (the default), neither agent-platform-tenant-model-routing nor
-  agent-platform-tenant-secret-creation renders, and
-  agent-platform-tenant-model-credentials lets agent-manager's ServiceAccount
-  name the platform's key under any ModelConfig name, as before;
+- with tenants.organizations.enabled off, neither
+  agent-platform-tenant-model-routing nor agent-platform-tenant-secret-creation
+  renders, and each modelconfig-llm-routing MutatingAdmissionPolicy selects
+  and binds the kagent namespace only;
 - on, both policies render (Fail, bound with Deny) for every namespace
   labelled giantswarm.io/organization but the kagent namespace: the model
   routing one over modelconfigs.api.kagent.dev of every version, created or
@@ -15,13 +15,15 @@ cluster; this script pins what the connectivity chart renders:
   model's ends in /v1); the Secret one over Secret creation only, for names
   outside the tenant-credential- prefix, with the authorizer's check; and
   agent-manager's exception in agent-platform-tenant-model-credentials holds
-  to the name default-model-config;
-- the render fails, naming the key, below Kubernetes 1.30, with llmRouting
-  off, and with tenants.organizations.enabled when agent-manager's copy of
-  the default ModelConfig would be refused: its provider not one the listener
-  serves, or its baseUrl (kagent.providers.<default>.config.baseUrl) not the
-  listener, unless empty where the modelconfig-llm-routing
-  MutatingAdmissionPolicy fills it in.
+  to the name default-model-config. Each modelconfig-llm-routing policy
+  (Ignore) selects no namespace itself and gets a second binding for those
+  namespaces, beside its kagent one;
+- with tenants.organizations.enabled the render fails, naming the key, with
+  llmRouting off, with a default ModelConfig provider the listener does not
+  serve, and without the modelconfig-llm-routing policy
+  (llmRouting.modelConfigPolicy.enabled off, or MutatingAdmissionPolicy not
+  served), which fills in the listener as the baseUrl of agent-manager's copy
+  of the default ModelConfig.
 
 Needs PyYAML. HELM selects the binary.
 
@@ -46,12 +48,12 @@ BASE = [
     "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
     "--set", "global.identity.clientId=platform",
     "--set", "global.identity.existingSecret=platform-oauth",
-    "--set", "tenants.organizations.enabled=true",
+    "--set", "llmRouting.enabled=true",
 ]
-RAW = ["--set", "llmRouting.enabled=true", "--set", "tenants.organizations.modelConfigs.enabled=true"]
+ORGS = ["--set", "tenants.organizations.enabled=true"]
 LISTENER = "http://agentgateway.agent-platform.svc:8081"
-ON = RAW + ["--set", f"kagent.providers.anthropic.config.baseUrl={LISTENER}"]
 MAP = ["--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
+ON = ORGS + MAP
 OPENAI = ["--set", "llmRouting.models[0].name=anthropic", "--set", "llmRouting.models[0].provider=Anthropic",
           "--set", "llmRouting.models[0].baseURL=https://api.anthropic.com/v1",
           "--set", "llmRouting.models[1].name=openai", "--set", "llmRouting.models[1].provider=OpenAI",
@@ -60,6 +62,7 @@ NEW = ["agent-platform-tenant-model-routing", "agent-platform-tenant-secret-crea
 ORG_NS = [{"key": "giantswarm.io/organization", "operator": "Exists"},
           {"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": ["kagent"]}]
 RECONCILER = "system:serviceaccount:agent-platform:agent-manager"
+ROUTING = "agent-platform-connectivity-modelconfig-llm-routing"
 
 
 def fail(msg: str) -> None:
@@ -97,14 +100,30 @@ def credentials_exception(docs: list) -> str:
     return vap["spec"]["validations"][0]["expression"]
 
 
+def routing_policies(docs: list) -> dict:
+    """Each modelconfig-llm-routing policy -> (its namespaceSelector, its bindings' namespaceSelectors)."""
+    out = {}
+    for d in docs:
+        if d.get("kind") == "MutatingAdmissionPolicy" and d["metadata"]["name"].startswith(ROUTING):
+            out[d["metadata"]["name"]] = (d["spec"]["matchConstraints"].get("namespaceSelector"), [])
+    for d in docs:
+        if d.get("kind") == "MutatingAdmissionPolicyBinding" and d["spec"]["policyName"] in out:
+            out[d["spec"]["policyName"]][1].append(d["spec"].get("matchResources", {}).get("namespaceSelector"))
+    if len(out) != 2:
+        fail(f"want a modelconfig-llm-routing policy per listener provider (2), got {sorted(out)}")
+    return out
+
+
 def check_off(chart: str) -> None:
-    docs = render(chart, ["--set", "llmRouting.enabled=true"])
+    docs = render(chart, MAP + OPENAI)
     present = [n for n in NEW if find(docs, "ValidatingAdmissionPolicy", n) or find(docs, "ValidatingAdmissionPolicyBinding", n)]
     if present:
         fail(f"off, the chart renders {present}")
-    if RECONCILER not in credentials_exception(docs) or "default-model-config" in credentials_exception(docs):
-        fail(f"off, agent-manager's exception changed: {credentials_exception(docs)}")
-    ok("off, no tenant ModelConfig policy renders and agent-manager's key exception is unchanged")
+    kagent = {"matchLabels": {"kubernetes.io/metadata.name": "kagent"}}
+    for name, (selector, bindings) in routing_policies(docs).items():
+        if selector != kagent or bindings != [kagent]:
+            fail(f"off, {name} selects {selector} and binds {bindings}, want the kagent namespace only")
+    ok("off, no tenant ModelConfig policy renders and the modelconfig-llm-routing policies act in the kagent namespace only")
 
 
 def check_on(chart: str) -> None:
@@ -140,36 +159,30 @@ def check_on(chart: str) -> None:
     if RECONCILER not in exception or "request.name == 'default-model-config'" not in exception:
         fail(f"on, agent-manager's key exception is not held to default-model-config: {exception}")
     ok("on, only agent-manager's default-model-config names the platform's key")
+    kagent = {"matchLabels": {"kubernetes.io/metadata.name": "kagent"}}
+    for name, (selector, bindings) in routing_policies(docs).items():
+        policy = find(docs, "MutatingAdmissionPolicy", name)
+        if policy["spec"]["failurePolicy"] != "Ignore":
+            fail(f"{name} failurePolicy is {policy['spec']['failurePolicy']}, want Ignore (the validating policy refuses an empty baseUrl)")
+        if selector is not None or sorted(bindings, key=str) != sorted([kagent, {"matchExpressions": ORG_NS}], key=str):
+            fail(f"on, {name} selects {selector} and binds {bindings}, want the kagent namespace and the Organizations' namespaces")
+    ok("on, each modelconfig-llm-routing policy (Ignore) fills in the listener in the kagent and the Organizations' namespaces")
 
 
 def main() -> None:
     chart = sys.argv[1]
     check_off(chart)
     check_on(chart)
-    refused(chart, ON + ["--kube-version", "1.29.0"], ["tenants.organizations.modelConfigs.enabled", "1.30", "v1.29.0"],
-            "below Kubernetes 1.30 the render fails")
-    for version in ("1.30.0", "1.30.0-eks-1"):
-        if helm(chart, ON + ["--kube-version", version]).returncode != 0:
-            fail(f"Kubernetes {version} refused")
-    ok("Kubernetes 1.30, a provider's build of it included, renders")
-    refused(chart, RAW, ["kagent.providers.anthropic.config.baseUrl", LISTENER],
-            "a default ModelConfig without the listener baseUrl, and no MutatingAdmissionPolicy to fill it in, fails the render")
-    refused(chart, RAW + ["--set", "kagent.providers.anthropic.config.baseUrl=https://api.anthropic.com"] + MAP,
-            ["kagent.providers.anthropic.config.baseUrl", LISTENER], "a default ModelConfig straight to the provider fails the render")
-    refused(chart, RAW + ["--set", "kagent.providers.default=claude", "--set", "kagent.providers.claude.provider=Anthropic",
-                          "--set", "kagent.providers.claude.model=m", "--set", "kagent.providers.claude.apiKeySecretRef=k",
-                          "--set", f"kagent.providers.claude.config.baseUrl={LISTENER}"],
-            ["kagent.providers.claude.config.baseUrl", "spec.anthropic"],
-            "a default baseUrl under a providers key the API server drops fails the render")
-    if helm(chart, RAW + MAP).returncode != 0:
-        fail("an empty default baseUrl that the modelconfig-llm-routing policy fills in is refused")
-    ok("an empty default baseUrl renders where the modelconfig-llm-routing policy fills it in")
-    refused(chart, ["--set", "tenants.organizations.modelConfigs.enabled=true"], ["tenants.organizations.modelConfigs.enabled needs llmRouting.enabled"],
+    refused(chart, ["--set", "llmRouting.enabled=false"] + ON, ["tenants.organizations.enabled needs llmRouting.enabled"],
             "with llmRouting off the render fails")
+    refused(chart, ORGS, ["tenants.organizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy", "admissionregistration.k8s.io/v1"],
+            "without MutatingAdmissionPolicy served the render fails")
+    refused(chart, ON + ["--set", "llmRouting.modelConfigPolicy.enabled=false"],
+            ["tenants.organizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy", "llmRouting.modelConfigPolicy.enabled"],
+            "with llmRouting.modelConfigPolicy.enabled off the render fails")
     refused(chart, ON + ["--set", "kagent.providers.default=bedrock", "--set", "kagent.providers.bedrock.provider=Bedrock",
                          "--set", "kagent.providers.bedrock.model=m", "--set", "kagent.providers.bedrock.apiKeySecretRef=k"],
             ["kagent.providers.bedrock.provider", "Bedrock"], "a default ModelConfig the listener does not serve fails the render")
-
 
 if __name__ == "__main__":
     main()
