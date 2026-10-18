@@ -874,6 +874,22 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 		echo "FAIL: apiFormat outside the CRD's enum rendered; the API server refuses it at admission"; exit 1; \
 	else grep -q 'openai-gpt-codex' $(VERIFY_TMP)/vl-fmt.out || { cat $(VERIFY_TMP)/vl-fmt.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
 	@echo "ok: apiFormat guards"
+	@echo "--> a ChatGPT login (credentialType chatgptOAuth): no apiKeySecretKey, the Responses API, off the listener"
+	@awk '/name: "openai-chatgpt-codex"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out >$(VERIFY_TMP)/vl-chatgpt.out
+	@grep -q '^  apiKeySecret: "kagent-chatgpt-login"$$' $(VERIFY_TMP)/vl-chatgpt.out || { cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig does not name its login Secret"; exit 1; }
+	@if grep -q 'apiKeySecretKey' $(VERIFY_TMP)/vl-chatgpt.out; then cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig carries apiKeySecretKey; the CRD refuses it at admission"; exit 1; fi
+	@grep -A3 '^  openAI:$$' $(VERIFY_TMP)/vl-chatgpt.out | grep -q 'credentialType: chatgptOAuth' || { cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig carries no openAI.credentialType: chatgptOAuth"; exit 1; }
+	@grep -A3 '^  openAI:$$' $(VERIFY_TMP)/vl-chatgpt.out | grep -q 'apiFormat: responses' || { cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig carries no openAI.apiFormat: responses"; exit 1; }
+	@if grep -q 'baseUrl:' $(VERIFY_TMP)/vl-chatgpt.out; then cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig was pointed at the listener, whose OpenAI route serves the OpenAI API, not the ChatGPT Codex backend"; exit 1; fi
+	@echo "ok: ChatGPT login ModelConfig"
+	@echo "--> guard: a ChatGPT login on another provider, with apiKeySecretKey, without apiFormat responses, or a credentialType outside the CRD's enum fails the render naming the entry"
+	@for args in "kagent.modelConfigs[4].provider=Anthropic" "kagent.modelConfigs[4].apiKeySecretKey=OPENAI_API_KEY" "kagent.modelConfigs[4].apiFormat=chatCompletions" "kagent.modelConfigs[4].apiFormat=" "kagent.modelConfigs[4].credentialType=ChatGPTOAuth"; do \
+		if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set "$$args" >$(VERIFY_TMP)/vl-chatgpt-guard.out 2>&1; then \
+			echo "FAIL: $$args rendered a ChatGPT login ModelConfig the CRD or the codex compiler refuses"; exit 1; \
+		fi; \
+		grep -q 'openai-chatgpt-codex' $(VERIFY_TMP)/vl-chatgpt-guard.out || { cat $(VERIFY_TMP)/vl-chatgpt-guard.out; echo "FAIL: $$args: the failure does not name the entry"; exit 1; }; \
+	done
+	@echo "ok: ChatGPT login guards"
 	@echo "--> guard: a provider outside the CRD's enum fails the render, naming the entry and the enum"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].provider=openai' >$(VERIFY_TMP)/vl-enum.out 2>&1; then \
 		echo "FAIL: provider 'openai' rendered; the API server refuses it at admission (the enum is case-sensitive) after the chart said nothing"; exit 1; \

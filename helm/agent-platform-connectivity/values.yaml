@@ -1863,11 +1863,22 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # uses needs responses and no maxTokens: the codex compiler refuses any
   #   # other OpenAI option. Any other provider refuses the key.
   #   apiFormat: responses
+  #   # Optional (OpenAI). What apiKeySecret holds: apiKey (the CRD's default)
+  #   # or chatgptOAuth, a ChatGPT subscription login (docs/chatgpt-login.md).
+  #   # chatgptOAuth renders no apiKeySecretKey, needs apiFormat: responses,
+  #   # and stays off the LLM listener. Any other provider refuses the key.
+  #   credentialType: chatgptOAuth
   # - name: openai-gpt-5-5   # a codex model, through the llm listener's
   #   provider: OpenAI       # OpenAI entry (llmRouting.models)
   #   model: gpt-5.5
   #   apiKeySecret: kagent-openai
   #   apiKeySecretKey: OPENAI_API_KEY
+  #   apiFormat: responses
+  # - name: openai-chatgpt-codex   # a codex model on this installation's own
+  #   provider: OpenAI             # ChatGPT login (docs/chatgpt-login.md)
+  #   model: gpt-5.5
+  #   apiKeySecret: kagent-chatgpt-login
+  #   credentialType: chatgptOAuth
   #   apiFormat: responses
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
