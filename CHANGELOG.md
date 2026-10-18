@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **One source of truth for the component version floors** (giantswarm/agent-platform#1102). `components.<name>.versionRange` in values.yaml is the one place a floor is declared: `tests/floors.py` reads the ranges and floors from it, and the checks that named a floor (`verify-presets`' muster, `verify-meta`'s agentgateway and BOM, `verify-components`' ranges, Substrate pin and release-candidate filters, `verify-cluster-manager`, `verify-workspace-manager`) ask it instead; a feature floor a check holds a range to stays a minimum (`floors.py floor <name> --min`). The customer BOM pins every component with a `>=` floor at that floor: `make golden-update` writes the pins, `make verify-meta` fails on one that differs. A floor move is one edit of values.yaml plus `make golden-update`. The BOM's agent-manager pin moves from 2.1.0 to 2.3.0, the floor of its range.
 
+### Removed
+
+- **`ingress.mode: agentgateway-direct` is gone** (giantswarm/agent-platform#252). The mode never rendered: its guard failed every install for want of a DCR-capable IdP. The connectivity chart now refuses it as an unknown mode (`must be one of: agentgateway-muster, muster-direct`); its `viaMuster: false` guard, the meta chart's unused copies of the ingress guard and the mode's values comments go with it. No installation renders differently. `make verify-modes` asserts the refusal.
+
 ## [4.145.2-rc.1] - 2026-10-18
 
 ### Fixed

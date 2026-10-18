@@ -209,12 +209,12 @@ verify-modes: ## Assert ingress.mode fail-guards fire (connectivity chart owns t
 	elif ! grep -q "no public Gateway for ingress.parentRefs" $(VERIFY_TMP)/vm-parents.out; then \
 		echo "FAIL: empty-parentRefs check failed for the wrong reason"; cat $(VERIFY_TMP)/vm-parents.out; exit 1; \
 	else echo "ok: empty-parentRefs guard"; fi
-	@echo "--> agentgateway-direct must be blocked with the DCR message"
+	@echo "--> an unknown mode (the removed agentgateway-direct) must fail naming the supported modes"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-direct >$(VERIFY_TMP)/vm-direct.out 2>&1; then \
-		echo "FAIL: direct-mode guard did not fire (render succeeded)"; cat $(VERIFY_TMP)/vm-direct.out; exit 1; \
-	elif ! grep -q "requires a DCR-capable IdP" $(VERIFY_TMP)/vm-direct.out; then \
-		echo "FAIL: direct-mode failed for the wrong reason"; cat $(VERIFY_TMP)/vm-direct.out; exit 1; \
-	else echo "ok: direct blocked"; fi
+		echo "FAIL: ingress.mode=agentgateway-direct rendered"; exit 1; \
+	elif ! grep -q "ingress.mode=agentgateway-direct is invalid; must be one of: agentgateway-muster, muster-direct" $(VERIFY_TMP)/vm-direct.out; then \
+		echo "FAIL: agentgateway-direct refused for the wrong reason"; cat $(VERIFY_TMP)/vm-direct.out; exit 1; \
+	else echo "ok: agentgateway-direct refused"; fi
 	@echo "--> agentgateway-muster + viaMuster:false must fail"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --set components.agent-platform-mcps.enabled=true --set agent-platform-mcps.agentgateway.viaMuster=false >$(VERIFY_TMP)/vm-via.out 2>&1; then \
 		echo "FAIL: viaMuster guard did not fire"; exit 1; \
