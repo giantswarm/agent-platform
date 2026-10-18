@@ -44,6 +44,10 @@ DRIVER = "nfs.csi.k8s.io"
 ENDPOINT = "tcp://csi-nfs-controller.agentlab-workspaces.svc.cluster.local:50051"
 API = "ate.dev/v1alpha1/CSIDriverConfig"
 CI = ["--set", "components.flux.enabled=false"]
+# muster's credential provider releases an instance while workspaces and Substrate are on
+# (agent-platform.validateWorkspaceAuth): the fixtures name no provider instance to pin,
+# so the meta chart's renders name the releasable themselves.
+RELEASABLE = ["--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]
 CONN = ["--set", "ingress.parentRefs[0].name=x", "--set", "networkPolicy.enabled=true", "--set", "networkPolicy.flavor=cilium"]
 SUBSTRATE = ["--set", "components.substrate.enabled=true"]
 CSI = "workspaces.substrate.csiDriver"
@@ -61,6 +65,8 @@ def helm(chart: str, flags: list, expect_fail: bool = False, ci_values: bool = T
     cmd = [HELM, "template", "t", chart]
     if ci_values:
         cmd += ["-f", f"{chart}/ci/ci-values.yaml", *CI]
+        if os.path.basename(os.path.normpath(chart)) == "agent-platform":
+            cmd += RELEASABLE
     if live:
         cmd += ["--dry-run=server", "--kube-context", LIVE_CONTEXT]
     cmd += flags

@@ -121,6 +121,10 @@ SUBSTRATE_DIR = "/var/lib/ate"
 PROXY_REPOSITORY = "giantswarm/envoy"
 PROBE_REPOSITORY = "giantswarm/livenessprobe"
 CI = ["--set", "components.flux.enabled=false"]
+# muster's credential provider releases an instance while workspaces and Substrate are on
+# (agent-platform.validateWorkspaceAuth): the fixtures name no provider instance to pin,
+# so the meta chart's renders name the releasable themselves.
+RELEASABLE = ["--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]
 CONN = ["--namespace", NS, "--set", "ingress.parentRefs[0].name=x", "--set", "networkPolicy.enabled=true", "--set", "networkPolicy.flavor=cilium",
         "--set", "components.substrate.enabled=true", "--set", "kyvernoPolicies.enabled=true",
         "--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2"]
@@ -156,6 +160,8 @@ def helm(chart: str, flags: list, expect_fail: bool = False, ci_values: bool = T
     cmd = [HELM, "template", "t", chart]
     if ci_values:
         cmd += ["-f", f"{chart}/ci/ci-values.yaml", *CI]
+        if os.path.basename(os.path.normpath(chart)) == "agent-platform":
+            cmd += RELEASABLE
     cmd += flags
     r = subprocess.run(cmd, capture_output=True, text=True)
     if expect_fail:
