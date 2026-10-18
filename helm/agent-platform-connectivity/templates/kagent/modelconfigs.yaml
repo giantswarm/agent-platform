@@ -17,8 +17,34 @@ not openai), and three providers have one. */}}
 provider (agent-platform.llmRouting.providers), at the URL that provider's
 client expects (agent-platform.llmListenerUrl: an OpenAI entry's ends in /v1).
 An entry for any other provider keeps the direct path even with routing on. */}}
+{{- /* A ChatGPT subscription login (openAI.credentialType chatgptOAuth): the
+Secret apiKeySecret names holds the installation's own login (access_token,
+refresh_token, account_id, labelled kagent.dev/chatgpt-login: "true"), which
+the kagent controller refreshes, and the codex compiler sends its turns to the
+ChatGPT Codex backend. The CRD admits it on OpenAI only and without
+apiKeySecretKey; the codex compiler only with apiFormat responses. It stays off
+the listener, whose OpenAI route serves the OpenAI API, not the ChatGPT
+backend: kagent sends the login to the baseUrl it finds. */}}
+{{- $chatgpt := false }}
+{{- with .credentialType }}
+{{- if not (has (toString .) (list "apiKey" "chatgptOAuth")) }}
+{{- fail (printf "kagent.modelConfigs[].credentialType %q on %q is not one of the CRD's values apiKey, chatgptOAuth" (toString .) $name) }}
+{{- end }}
+{{- if not (include "agent-platform.modelConfigApiFormatKey" $provider) }}
+{{- fail (printf "kagent.modelConfigs[].credentialType is set on %q, whose provider %s has no credentialType in ModelConfigSpec (OpenAI has one)" $name $provider) }}
+{{- end }}
+{{- $chatgpt = eq (toString .) "chatgptOAuth" }}
+{{- end }}
+{{- if $chatgpt }}
+{{- if .apiKeySecretKey }}
+{{- fail (printf "kagent.modelConfigs[].apiKeySecretKey is set on %q, a ChatGPT login (credentialType chatgptOAuth): its Secret holds the fixed keys access_token, refresh_token and account_id, and the CRD refuses apiKeySecretKey beside it" $name) }}
+{{- end }}
+{{- if ne (toString .apiFormat) "responses" }}
+{{- fail (printf "kagent.modelConfigs[].credentialType chatgptOAuth on %q needs apiFormat: responses; a ChatGPT login serves codex only, and the codex compiler refuses any other format" $name) }}
+{{- end }}
+{{- end }}
 {{- $baseUrl := .baseUrl }}
-{{- if and (not $baseUrl) $routed (has (lower $provider) $listenerProviders) }}
+{{- if and (not $baseUrl) (not $chatgpt) $routed (has (lower $provider) $listenerProviders) }}
 {{- $baseUrl = include "agent-platform.llmListenerUrl" (dict "root" $ "provider" $provider) }}
 {{- end }}
 ---
@@ -35,7 +61,9 @@ spec:
   provider: {{ $provider | quote }}
   model: {{ required "kagent.modelConfigs[].model is required" .model | quote }}
   apiKeySecret: {{ required "kagent.modelConfigs[].apiKeySecret is required" .apiKeySecret | quote }}
+  {{- if not $chatgpt }}
   apiKeySecretKey: {{ .apiKeySecretKey | default "ANTHROPIC_API_KEY" | quote }}
+  {{- end }}
   {{- /* Traffic through the LLM listener, so the gateway meters this model's
   usage. The block is this entry's own provider, not the chart's default
   provider: the two differ once a catalog holds more than one provider. An
@@ -91,6 +119,7 @@ spec:
   {{- end }}
   {{- $fields := dict }}
   {{- with .apiFormat }}{{ $_ := set $fields "apiFormat" (toString .) }}{{ end }}
+  {{- with .credentialType }}{{ $_ := set $fields "credentialType" (toString .) }}{{ end }}
   {{- if not (kindIs "invalid" $promptCaching) }}{{ $_ := set $fields "promptCaching" $promptCaching }}{{ end }}
   {{- with $cacheTTL }}{{ $_ := set $fields "cacheTTL" (toString .) }}{{ end }}
   {{- with $maxTokens }}{{ $_ := set $fields "maxTokens" (int .) }}{{ end }}

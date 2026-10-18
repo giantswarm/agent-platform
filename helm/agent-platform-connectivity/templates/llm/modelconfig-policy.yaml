@@ -59,6 +59,16 @@ spec:
       expression: >-
         !has(object.spec.{{ $urlKey }}) ||
         !has(object.spec.{{ $urlKey }}.baseUrl)
+    {{- /* A ChatGPT login stays off the listener, whose OpenAI route serves the
+    OpenAI API: kagent sends the login to the baseUrl it finds, and without one
+    to the ChatGPT Codex backend. */}}
+    {{- if eq $urlKey "openAI" }}
+    - name: not-chatgpt-login
+      expression: >-
+        !has(object.spec.openAI) ||
+        !has(object.spec.openAI.credentialType) ||
+        object.spec.openAI.credentialType != "chatgptOAuth"
+    {{- end }}
   mutations:
     - patchType: ApplyConfiguration
       applyConfiguration:

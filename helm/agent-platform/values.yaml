@@ -3676,6 +3676,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   apiKeySecret: kagent-openai
   #   apiKeySecretKey: OPENAI_API_KEY
   #   apiFormat: responses
+  # - name: openai-chatgpt-codex   # a codex model on this installation's own
+  #   provider: OpenAI             # ChatGPT login, off the llm listener
+  #   model: gpt-5.6-luna          # (docs/chatgpt-login.md)
+  #   apiKeySecret: kagent-chatgpt-login
+  #   credentialType: chatgptOAuth
+  #   apiFormat: responses
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
