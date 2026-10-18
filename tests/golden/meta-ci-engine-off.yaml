@@ -2979,7 +2979,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.17.0-rc.1 <1.18.0-0"
+    semver: ">=1.18.0-rc.1 <1.19.0-0"
     semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
 ---
 # Source: agent-platform/templates/components.yaml
@@ -3003,7 +3003,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.17.0-rc.1 <1.18.0-0"
+    semver: ">=1.18.0-rc.1 <1.19.0-0"
     semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
 ---
 # Source: agent-platform/templates/components.yaml

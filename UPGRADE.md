@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (kagent 1.18: no caller bearer to muster on a workspace Session)
+
+giantswarm/giantswarm#38064: `components.kagent{,-crds}.versionRange` is `>=1.18.0-rc.1 <1.19.0-0`. kagent 1.18.0 is 1.17.0 plus one harness change: the A2A gateway names a turn's actor-JWT hosts (muster's in-cluster host on a workspace Session, `controller.session.actorJWTProviders.muster`) to the runtime, and the claude Harness's MCP forwarder sends muster a placeholder bearer, which Substrate's egress gateway replaces with the Session Actor's JWT, instead of the caller's bearer; a turn whose every MCP server is on such a host holds no caller bearer and is not bounded by its `exp`. A Session without a workspace keeps the caller's bearer, as before. No database migration, no CRD change, no new value: a session stored by 1.17 resumes unchanged, with no snapshot reset and no manual step.
+
+### Operator action
+
+- **None** for an installation that follows the chart's ranges.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.18.0-rc.1`, `kagent-crds` first or with it.
+
 ## \<current\> → \<next\> (Substrate 1.14.0: the Google access-token class is routed to the plugin)
 
 `components.substrate{,-crds}.versionRange` selects Substrate 1.14 (`>=1.14.0 <1.15.0`, giantswarm/giantswarm#38547). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.14.0 (`ateom-gvisor:1.14.0`); the kagent CRDs and the kagent release are unchanged. 1.14.0's bundled credential provider serves `k8s.io` alone, and `substrate.credentialProvider.additionalProviders` sends `google-access-token.k8s.io` to `components.google-access-token-credential-provider`, deployed since 4.141.0. No persisted format changes (Substrate's `docs/upgrade.md`, "The 1.13 to 1.14 step").
