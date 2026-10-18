@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.146.1-rc.1] - 2026-10-18
+
 ### Fixed
 
 - **Workspaces without the agents are refused at render time** (giantswarm/agent-platform#1118). `workspaces.enabled: true` with `components.kagent.enabled` off installed a workspace-manager release whose sync ServiceAccount and Roles go into the kagent namespace, which only exists with the agents, so the install failed on `namespaces "kagent" not found`. The render now fails naming kagent; turn the agents on beside the workspaces, or the workspaces off.
@@ -3286,7 +3288,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `bootstrap.oauth.*` values and the `templates/oauth-bootstrap-secret.yaml` Helm `lookup`-based Secret generator. Use `extraObjects` to ship the Secret in the same release, or pre-create it out of band and reference via `muster.muster.oauth.server.existingSecret`.
 
-[Unreleased]: https://github.com/giantswarm/agentic-platform/compare/v4.146.0...HEAD
+[Unreleased]: https://github.com/giantswarm/agentic-platform/compare/v4.146.1-rc.1...HEAD
+[4.146.1-rc.1]: https://github.com/giantswarm/agentic-platform/compare/v4.146.0...v4.146.1-rc.1
 [4.146.0]: https://github.com/giantswarm/agentic-platform/compare/v4.145.2-rc.1...v4.146.0
 [4.145.2-rc.1]: https://github.com/giantswarm/agentic-platform/compare/v4.145.1-rc.6...v4.145.2-rc.1
 [4.145.1-rc.6]: https://github.com/giantswarm/agentic-platform/compare/v4.145.1-rc.5...v4.145.1-rc.6
