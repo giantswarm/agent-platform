@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assert the network path to Substrate's actor-JWT issuer (giantswarm/giantswarm#38064).
+"""Assert the network path to Substrate's actor-JWT issuer (giantswarm/muster#1572).
 
 ate-idp-server (the Substrate line from 1.13.0) serves the discovery document and
 key set of the issuer every actor JWT names, on 8443 behind the Service idp:443.

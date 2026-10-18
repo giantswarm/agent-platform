@@ -1713,7 +1713,7 @@ verify-mcp-backend-netpol: ## Assert the in-cluster MCP backends' ingress (netwo
 	@python3 tests/verify-mcp-backend-netpol.py --muster-egress $(VERIFY_TMP)/vmbn-muster.out
 
 .PHONY: verify-substrate-idp-netpol
-verify-substrate-idp-netpol: ## Assert the path to Substrate's actor-JWT issuer (giantswarm/giantswarm#38064), in both flavours: with Substrate and muster on ate-idp-server (8443, behind the Service idp) admits muster from the release namespace and the kubelet's probes only, and muster's egress reaches it by muster-to-substrate-idp whatever networkPolicy.musterInClusterMcpPorts opens; with muster off no muster is admitted and no egress policy renders; with Substrate off neither renders. HELM selects the binary.
+verify-substrate-idp-netpol: ## Assert the path to Substrate's actor-JWT issuer (giantswarm/muster#1572), in both flavours: with Substrate and muster on ate-idp-server (8443, behind the Service idp) admits muster from the release namespace and the kubelet's probes only, and muster's egress reaches it by muster-to-substrate-idp whatever networkPolicy.musterInClusterMcpPorts opens; with muster off no muster is admitted and no egress policy renders; with Substrate off neither renders. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 tests/verify-substrate-idp-netpol.py $(CONNECTIVITY_DIR) $(KAGENT_NETPOL)
 	@echo "substrate idp network path verified."
