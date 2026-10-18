@@ -15,6 +15,18 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (Substrate 1.14.0: the Google access-token class is routed to the plugin)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.14 (`>=1.14.0 <1.15.0`, giantswarm/giantswarm#38547). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.14.0 (`ateom-gvisor:1.14.0`); the kagent CRDs and the kagent release are unchanged. 1.14.0's bundled credential provider serves `k8s.io` alone, and `substrate.credentialProvider.additionalProviders` sends `google-access-token.k8s.io` to `components.google-access-token-credential-provider`, deployed since 4.141.0. No persisted format changes (Substrate's `docs/upgrade.md`, "The 1.13 to 1.14 step").
+
+- **A Vertex AI turn in the roll window fails closed**: between the Substrate pods rolling to 1.14.0 and the egress gateway reloading its configuration with the new provider list, a credential fetch for `google-access-token.k8s.io` that still reaches the bundled provider is refused and the turn fails. Sessions that started before keep their actors; the next turn after the reload reaches the plugin.
+
+### Operator action
+
+- **None** for an installation that follows the chart's ranges.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.14.0`; `google-access-token-credential-provider` stays where it is.
+- **An installation that overrides `substrate.credentialProvider.additionalProviders`**: keep the `google-access-token.k8s.io` entry beside the `muster.giantswarm.io` one, or Vertex AI ModelConfigs stop resolving.
+
 ## \<current\> → \<next\> (kagent 1.17: muster's actor JWT on a workspace Session)
 
 giantswarm/giantswarm#38607: `components.kagent{,-crds}.versionRange` is `>=1.17.0-rc.1 <1.18.0-0`. kagent 1.16 and 1.17 stay on 1.15's upstream pin and Substrate 1.12.1 contract; they add no database migration, and kagent-crds' only change is an additive ModelConfig field (the ChatGPT subscription login). A session stored by 1.15 resumes unchanged: no migration, no snapshot reset, no manual step; a suspended agent resumes with its conversation and its volumes. The kagent line's charts from 1.16.0 no longer carry the kagent-tools and kmcp subcharts. With muster trusting the actor JWT, the kagent release gets `controller.session.actorJWTProviders.muster` (muster's in-cluster host and audience): a workspace Session's calls to muster carry the Session Actor's JWT, which Substrate's egress gateway mints, and muster serves them as the Session's person.
