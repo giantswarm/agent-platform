@@ -19,7 +19,7 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 giantswarm/agent-platform#759: with kagent and `tenants.organizations.enabled` on, every ModelConfig in a namespace labelled `giantswarm.io/organization` goes through the `llm` listener ([README: A tenant's own model](./README.md#a-tenants-own-model)). The `modelconfig-llm-routing` MutatingAdmissionPolicies fill in a missing `baseUrl` there, and `agent-platform-tenant-model-routing` refuses any other `baseUrl` and any provider the listener does not serve.
 
-- **The connectivity render fails** with `tenants.organizations.enabled` on and `llmRouting.enabled` off (the default), with a default ModelConfig provider (`kagent.providers.<default>.provider`) the listener does not serve, or without the routing policy (`llmRouting.modelConfigPolicy.enabled` off, or an API server that does not serve `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, Kubernetes 1.36). The connectivity HelmRelease then stops reconciling.
+- **The connectivity render fails** with `tenants.organizations.enabled` on and `llmRouting.enabled` off (the default), with a default ModelConfig provider (`kagent.providers.<default>.provider`) the listener does not serve, or without the routing policy (`llmRouting.modelConfigPolicy.enabled` off, or an API server that does not serve `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, as below Kubernetes 1.36). The connectivity HelmRelease then stops reconciling.
 - **A ModelConfig in an Organization namespace that is not on the listener** (a Bedrock one, a direct provider URL) can no longer be updated; only its deletion stays possible.
 
 ### Operator action
