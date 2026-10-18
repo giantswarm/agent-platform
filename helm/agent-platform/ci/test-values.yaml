@@ -9,4 +9,3 @@ ingress:
       kind: Gateway
   hostnames:
     - muster.ci.example.com
-

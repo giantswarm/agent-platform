@@ -17,4 +17,3 @@ extraObjects:
     data:
       example-key: example-value
       release: "{{ .Release.Name }}"
-

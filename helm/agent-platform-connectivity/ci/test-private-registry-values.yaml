@@ -21,4 +21,3 @@ agentgateway:
   proxy:
     image:
       registry: localhost:5000
-
