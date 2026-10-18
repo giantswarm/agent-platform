@@ -20,7 +20,9 @@ routing policy fails (failurePolicy Ignore), the baseUrl stays empty and is
 refused here: the path fails closed. The tenant's own key passes the listener
 untouched. The copy of the platform's default ModelConfig that agent-manager's
 tenant reconciler writes is held the same way, so the default ModelConfig
-needs a provider the listener serves (the render fails otherwise).
+needs a provider the listener serves (the render fails otherwise) and no
+baseUrl but the listener (kagent.providers.<default>.config.baseUrl; not
+checked here: the copy is refused at admission).
 
 agent-platform-tenant-secret-creation admits the creation of a Secret whose
 name lacks the tenant-credential- prefix only for a requester who may already
@@ -105,12 +107,12 @@ spec:
     - expression: "has(object.metadata.deletionTimestamp) || size(variables.route) == 2"
       reason: Forbidden
       messageExpression: >-
-        {{ printf "'in an Organization namespace a ModelConfig goes through the platform\\'s LLM listener, which meters every model call; it serves the providers %s, and provider ' + (variables.provider == '' ? '<none>' : variables.provider) + ' is not one of them (a Bedrock ModelConfig has no baseUrl and would bypass the listener). Use a served provider with spec.<provider>.baseUrl set to the listener, or ask the platform team to add the provider to llmRouting.models. Refused for ' + request.userInfo.username + ': ' + request.name" (join ", " $providers) }}
+        {{ printf "'in an Organization namespace a ModelConfig goes through the platform\\'s LLM listener, which meters every model call; it serves the providers %s, and provider ' + (variables.provider == '' ? '<none>' : variables.provider) + ' is not one of them (a Bedrock ModelConfig has no baseUrl and would bypass the listener). Use a served provider (its spec.<provider>.baseUrl is the listener, filled in when you leave it out), or ask the platform team to add the provider to llmRouting.models. Refused for ' + request.userInfo.username + ': ' + request.name" (join ", " $providers) }}
     - expression: "has(object.metadata.deletionTimestamp) || size(variables.route) != 2 || variables.baseUrl == variables.route[1]"
       reason: Forbidden
       messageExpression: >-
         'in an Organization namespace a ModelConfig goes through the platform\'s LLM listener, which meters every model call and passes your own key through untouched: set spec.' +
-        variables.route[0] + '.baseUrl to ' + variables.route[1] + ' (it is ' + (variables.baseUrl == '' ? 'unset' : variables.baseUrl) +
+        variables.route[0] + '.baseUrl to ' + variables.route[1] + ', or leave it out and the listener is filled in (it is ' + (variables.baseUrl == '' ? 'unset' : variables.baseUrl) +
         '). Refused for ' + request.userInfo.username + ': ' + request.name
 ---
 apiVersion: admissionregistration.k8s.io/v1

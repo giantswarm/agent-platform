@@ -195,16 +195,24 @@ def prove(objs, admin_rules):
         create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": {"name": name, "namespace": NS},
                 "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": kind, "name": role},
                 "subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": user}]})
+    mutating = [o for o in objs if o["kind"].startswith("MutatingAdmissionPolicy")]
     for o in objs:
-        create(o)
-    # The API server's policy informer: wait for each policy's first refusal,
-    # and for the routing policies' first write.
+        if o not in mutating:
+            create(o)
+    # The API server's policy informer: wait for each policy's first refusal.
     for probe in (mc("probe", url="https://api.anthropic.com"), secret("probe-plain"), mc("probe", secret="plain"), secret("tenant-credential-p", type_="example.com/token"),
                   rmcp("plain")):
         for _ in range(100):
             if apply(probe, as_=ADMIN)[0] != 0:
                 break
             time.sleep(0.3)
+    # Fail closed: a ModelConfig the routing policies leave without a baseUrl
+    # (failurePolicy Ignore) is refused. Then the routing policies, and their
+    # first write.
+    case("MC: Anthropic without a baseUrl and no routing policy", apply(mc("unset", url=None), as_=ADMIN), False,
+         f"set spec.anthropic.baseUrl to {ANTHROPIC}, or leave it out and the listener is filled in (it is unset)")
+    for o in mutating:
+        create(o)
     for probe, block, url in ((mc("probe", url=None), "anthropic", ANTHROPIC), (mc("probe", "OpenAI", "openAI", None), "openAI", OPENAI)):
         for _ in range(100):
             if filled(probe, block, url, as_=ADMIN)[0] == 0:
