@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.145.2-rc.1] - 2026-10-18
+
 ### Fixed
 
 - **A workspace installation without a provider pin fails the render instead of losing muster's session bindings** (giantswarm/agent-platform#1103). With `workspaces.enabled` and Substrate on, muster's credential provider needs a provider instance to release: the one muster's registration of the workspace-manager is pinned to (provider instances with `oauth.enabled`), or an own `muster.muster.credentialProvider.releasable`. Without either the meta chart derived no `muster.credentialProvider` at all (muster refuses one that releases nothing), so muster served no `/session-bindings` and agent-manager's binding of a workspace Session got a 404. The render now fails naming both fixes; one helper (`agent-platform.muster.credentialProvider`) resolves the provider for the derivation and the guard. Substrate follows kagent, so **an installation with `workspaces.enabled` and no workspace provider instance adds one, or turns workspaces off**: the workspace-manager accepts no Workspace without one. `make verify-workspace-session-admission` asserts the guard.
@@ -3270,7 +3272,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `bootstrap.oauth.*` values and the `templates/oauth-bootstrap-secret.yaml` Helm `lookup`-based Secret generator. Use `extraObjects` to ship the Secret in the same release, or pre-create it out of band and reference via `muster.muster.oauth.server.existingSecret`.
 
-[Unreleased]: https://github.com/giantswarm/agentic-platform/compare/v4.145.1-rc.6...HEAD
+[Unreleased]: https://github.com/giantswarm/agentic-platform/compare/v4.145.2-rc.1...HEAD
+[4.145.2-rc.1]: https://github.com/giantswarm/agentic-platform/compare/v4.145.1-rc.6...v4.145.2-rc.1
 [4.145.1-rc.6]: https://github.com/giantswarm/agentic-platform/compare/v4.145.1-rc.5...v4.145.1-rc.6
 [4.145.1-rc.5]: https://github.com/giantswarm/agentic-platform/compare/v4.145.1-rc.4...v4.145.1-rc.5
 [4.145.1-rc.4]: https://github.com/giantswarm/agentic-platform/compare/v4.145.1-rc.2...v4.145.1-rc.4
