@@ -96,7 +96,7 @@ import fluxsemver
 HELM = os.environ.get("HELM", "helm")
 NAME = "workspace-manager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
-RANGE_RE = r'semver: "(>=[^"]+ <1\.0\.0)"'
+RANGE_RE = r'semver: "(>=[^"]+ <0\.\d+\.0(?:-0)?)"'
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
 ORGS = "tests/fixtures/workspaces-organizations-values.yaml"
 BOM = "helm/agent-platform/examples/customer-bom.yaml"
@@ -114,8 +114,11 @@ IDENTITY = [
 # A manager below the muster grant floor renders only without OAuth (and so
 # without a grant key or the fixture's muster pin, which an earlier chart's
 # schema refuses): the floor guard applies with provider instances and OAuth.
+# Without the pin muster's releasable is the installation's own while Substrate
+# is on (agent-platform.validateWorkspaceAuth).
 PRE_GRANT = ["--set", "workspace-manager.oauth.enabled=false", "--set", "workspace-manager.grant.signingKey=null",
-             "--set", "workspace-manager.muster.mcpServer.auth.authorizationServer=null"]
+             "--set", "workspace-manager.muster.mcpServer.auth.authorizationServer=null",
+             "--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]
 WM_KAGENT = ["--set", "components.workspace-manager.versionRange=>=0.4.0 <1.0.0", *PRE_GRANT]
 NO_GITLAB = ["--set", "workspace-manager.providers[1].kind=github"]
 # The first workspace-manager release with the provider kind gitlab.
@@ -277,7 +280,7 @@ def main(meta: str, connectivity: str) -> int:
     must_have(oci, (f"url: {REPOSITORY}/{NAME}",), "the OCIRepository")
     rng = re.search(RANGE_RE, oci)
     if not rng:
-        fail(f"the OCIRepository's range is not a floor below 1.0.0:\n{oci}")
+        fail(f"the OCIRepository's range is not a floor below a minor ceiling:\n{oci}")
     hr = on_docs[("HelmRelease", NAME)]
     must_have(hr, (
         f"releaseName: {NAME}",
@@ -348,6 +351,10 @@ def main(meta: str, connectivity: str) -> int:
             provider = block(block(on or "", "muster", 4), "credentialProvider", 6)
             if provider:
                 on = on.replace(provider, "", 1)
+                # Its pods then mount Substrate's certificates, so until Substrate is
+                # Ready neither its install nor its upgrade waits for them
+                # (giantswarm/agent-platform#1107).
+                on = on.replace("    disableWait: true\n", "", 2)
         if on != doc:
             fail(f"switching workspaces on changed {key} (muster.* included)")
     if any(kind == "MCPServer" for kind, _ in on_docs):
@@ -358,7 +365,9 @@ def main(meta: str, connectivity: str) -> int:
 
     # --- the storage slices' keys beside the switch ----------------------------------------
     lab = "tests/fixtures/workspaces-lab-values.yaml"
-    lab_docs = documents(helm(meta, ["-f", lab]))
+    # Beside the provider instances: with Substrate on, workspaces need one muster releases
+    # (agent-platform.validateWorkspaceAuth).
+    lab_docs = documents(helm(meta, [*ON, "-f", lab]))
     lab_conn = lab_docs[("HelmRelease", "agent-platform-connectivity")]
     must_have(lab_conn, ("      storageClassName: agentlab-workspaces\n", "        name: nfs.csi.k8s.io\n"),
               "the workspaces block forwarded to connectivity with the storage slices' keys")

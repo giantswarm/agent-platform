@@ -407,7 +407,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.4.0
+          tag: 2.5.0
       networkPolicy:
         egress:
           cidrs: []
@@ -2352,7 +2352,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: "0.x"
+    semver: "0.3.x"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2421,7 +2421,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: "0.x"
+    semver: "0.4.x"
 ---
 # Source: agent-platform/templates/self/release.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

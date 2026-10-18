@@ -57,6 +57,10 @@ PRESETS = {
             ["nfsvers=4.1", "hard"]),
 }
 CI = ["--set", "components.flux.enabled=false"]
+# muster's credential provider releases an instance while workspaces and Substrate are on
+# (agent-platform.validateWorkspaceAuth): the fixtures name no provider instance to pin,
+# so the meta chart's renders name the releasable themselves.
+RELEASABLE = ["--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]
 CONN = ["--set", "ingress.parentRefs[0].name=x"]
 ON = ["--set", "workspaces.enabled=true", "--set", f"workspaces.storage.storageClassName={NAME}"]
 
@@ -73,6 +77,8 @@ def helm(chart: str, flags: list, expect_fail: bool = False, ci_values: bool = T
     cmd = [HELM, "template", "t", chart]
     if ci_values:
         cmd += ["-f", f"{chart}/ci/ci-values.yaml", *CI]
+        if os.path.basename(os.path.normpath(chart)) == "agent-platform":
+            cmd += RELEASABLE
     if live:
         cmd += ["--dry-run=server", "--kube-context", LIVE_CONTEXT]
     cmd += flags
