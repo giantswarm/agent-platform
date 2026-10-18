@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Workspaces without the agents are refused at render time** (giantswarm/agent-platform#1118). `workspaces.enabled: true` with `components.kagent.enabled` off installed a workspace-manager release whose sync ServiceAccount and Roles go into the kagent namespace, which only exists with the agents, so the install failed on `namespaces "kagent" not found`. The render now fails naming kagent; turn the agents on beside the workspaces, or the workspaces off.
+
 ### Changed
 
 - **One source of truth for the component version floors** (giantswarm/agent-platform#1102). `components.<name>.versionRange` in values.yaml is the one place a floor is declared: `tests/floors.py` reads the ranges and floors from it, and the checks that named a floor (`verify-presets`' muster, `verify-meta`'s agentgateway and BOM, `verify-components`' ranges, Substrate pin and release-candidate filters, `verify-cluster-manager`, `verify-workspace-manager`) ask it instead; a feature floor a check holds a range to stays a minimum (`floors.py floor <name> --min`). The customer BOM pins every component with a `>=` floor at that floor: `make golden-update` writes the pins, `make verify-meta` fails on one that differs. A floor move is one edit of values.yaml plus `make golden-update`. The BOM's agent-manager pin moves from 2.1.0 to 2.3.0, the floor of its range.

@@ -40,6 +40,8 @@ import tempfile
 HELM = os.environ.get("HELM", "helm")
 NAME = "workspace-manager"
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
+# The agents beside them: the meta chart refuses workspaces without kagent.
+AGENTS = "tests/fixtures/workspaces-agents-values.yaml"
 BASE = "https://workspaces.ci.example.com"
 HOST = "workspaces.ci.example.com"
 IDENTITY = [
@@ -52,7 +54,7 @@ CONN = ["--set", "ingress.parentRefs[0].name=edge", "--set", "ingress.parentRefs
         "--set", f"components.{NAME}.enabled=true", "-f", FIXTURE, *IDENTITY]
 # The chart-owned edge: the agentgateway data plane is the public Gateway.
 EDGE = ["--set", "gatewayApi.gateway.create=true", "--set", "gatewayApi.gateway.tls.secretName=wildcard", "--set", "ingress.parentRefs=null"]
-META = ["--set", "components.flux.enabled=false", "-f", FIXTURE]
+META = ["--set", "components.flux.enabled=false", "-f", FIXTURE, "-f", AGENTS]
 ROUTED = ("/.well-known/jwks.json",)
 INTERNAL = ("/signin", "/connect/github", "/connect/gitlab", "/callback/github", "/callback/gitlab", "/mcp", "/mcp/", "/token", "/.well-known/jwks.json/x", "/.well-known/oauth-authorization-server",
             "/.well-known/oauth-protected-resource", "/oauth/token", "/oauth/callback", "/oauth/authorize",
