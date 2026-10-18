@@ -2,14 +2,17 @@
 #
 #    devctl
 #
-#    https://github.com/giantswarm/devctl/blob/48d8219323be4cd05f2eccad7ccfc71118b3ae82/pkg/gen/input/workflows/internal/file/changelog.yaml.template
+#    https://github.com/giantswarm/devctl/blob/23ab6540f3fba8e280bd45b61a7f37f541928b60/pkg/gen/input/workflows/internal/file/changelog.yaml.template
 #
 # yamllint disable rule:truthy
 # Fails a pull request while CHANGELOG.md lists, under Unreleased, an entry a
 # release already carried: `devctl changelog check` reads every release tag's
 # CHANGELOG.md. The Auto-release workflow opens the cut as a pull request after
 # every release; merging it, or running `devctl changelog cut` and committing
-# CHANGELOG.md, clears the check.
+# CHANGELOG.md, clears the check. An entry the base branch already holds
+# released (a release's cut pull request not merged yet) is listed and passes:
+# the check runs on the pull request's merge with its base, and the cut is
+# the base's to land, not every open pull request's.
 name: Changelog
 
 on:
@@ -34,13 +37,32 @@ jobs:
 
       - name: Check CHANGELOG.md
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}      # gh downloads devctl
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # devctl's version check reads its releases
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           if [ ! -f CHANGELOG.md ]; then
             echo "no CHANGELOG.md: nothing to check"
             exit 0
           fi
-          gh release download --repo giantswarm/devctl --pattern devctl-linux-amd64 --output "${RUNNER_TEMP}/devctl"
+          # CircleCI uploads a devctl release's binaries minutes after its
+          # tag: the latest release can have none yet.
+          for attempt in $(seq 1 20); do
+            gh release download --repo giantswarm/devctl --pattern devctl-linux-amd64 --output "${RUNNER_TEMP}/devctl" && break
+            if [ "$attempt" -eq 20 ]; then
+              echo "::error title=No devctl binary::devctl's latest release has no devctl-linux-amd64 after 10 minutes"
+              exit 1
+            fi
+            echo "devctl's latest release has no devctl-linux-amd64 yet (CircleCI uploads it after the tag): retrying in 30s"
+            sleep 30
+          done
           chmod +x "${RUNNER_TEMP}/devctl"
-          "${RUNNER_TEMP}/devctl" changelog check
+          # The checkout is the pull request merged with its base: its first
+          # parent is the base it was built on. The event's base commit is the
+          # fallback for a checkout that is no merge.
+          base=$BASE_SHA
+          if git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+            base=$(git rev-parse HEAD^1)
+          fi
+          "${RUNNER_TEMP}/devctl" changelog check --base "$base"
