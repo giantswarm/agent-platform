@@ -1599,6 +1599,8 @@ spec:
         additionalProviders:
         - host: muster.agent-platform.svc:50051
           uriAuthority: muster.giantswarm.io
+        - host: google-access-token-credential-provider.ate-system.svc:50051
+          uriAuthority: google-access-token.k8s.io
         namespacePolicies:
         - allowedNamespaces:
           - kagent

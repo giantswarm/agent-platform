@@ -750,7 +750,7 @@ components:  # @schema additionalProperties: true
     # (https://idp.<namespace>.svc) muster verifies a Session's actor JWT
     # against (muster.credentialProvider.actorBearer, with workspaces on).
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.13.0 <1.14.0"
+    versionRange: ">=1.14.0 <1.15.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
     # release Flux resolved (ateController.gvisorWorker.followRelease, which
@@ -779,7 +779,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.13.0 <1.14.0"
+    versionRange: ">=1.14.0 <1.15.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -832,9 +832,8 @@ components:  # @schema additionalProperties: true
     # from substrate.credentialProvider.namespacePolicies
     # (agent-platform.componentDerivedValues). The Substrate chart routes the
     # class to it through substrate.credentialProvider.additionalProviders
-    # below, which a Substrate release before 1.12.0 refuses (its bundled
-    # provider served the name itself): the plugin is deployed first and routed
-    # with the floor bump.
+    # below; a Substrate release before 1.14.0 refuses that entry, its bundled
+    # provider serving the name itself.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: ">=0.1.0 <0.2.0"
     valuesFrom: google-access-token-credential-provider
@@ -6166,11 +6165,18 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     # 50051), which answers a workspace Session's provider hosts with the
     # person's token: the meta chart turns it on with workspaces.enabled and
     # Substrate (muster.credentialProvider). The gateway dials it with its pod
-    # identity. An installation that overrides the list keeps this entry, or
-    # a workspace Session's git and API calls get the gateway's 403.
+    # identity. google-access-token.k8s.io is the credential provider plugin
+    # (components.google-access-token-credential-provider, its Service in
+    # ate-system as its serving certificate names it), which answers a Vertex
+    # AI ModelConfig's actor with a Google access token; the bundled provider
+    # served that name until Substrate 1.13. An installation that overrides
+    # the list keeps both entries, or a workspace Session's git and API calls
+    # get the gateway's 403 and Vertex AI ModelConfigs stop resolving.
     additionalProviders:
       - uriAuthority: muster.giantswarm.io
         host: muster.agent-platform.svc:50051
+      - uriAuthority: google-access-token.k8s.io
+        host: google-access-token-credential-provider.ate-system.svc:50051
   postgres:
     # Where the control plane keeps its state. `auto` (the default) follows
     # the platform: with the platform's CNPG Cluster on (postgres.enabled) the

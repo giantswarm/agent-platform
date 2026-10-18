@@ -406,7 +406,15 @@ def main(meta: str, connectivity: str) -> int:
     render_fails(meta, [*ci, *grants, "--set", "google-access-token-credential-provider.namespacePolicies[0].atespace=team-b",
                         "--set", "google-access-token-credential-provider.namespacePolicies[0].allowedNamespaces[0]=other"],
                  "differs from substrate.credentialProvider.namespacePolicies", "a copy of the grants that disagrees")
-    print("ok: the google-access-token credential provider follows components.kagent, lands in ate-system, takes Substrate's grants and names its release")
+    # The Substrate release routes the plugin's class to the plugin's Service, the
+    # name its serving certificate carries: the component's release name in its
+    # targetNamespace, port 50051.
+    plugin = yaml.safe_load(docs(render(meta, ci))[("HelmRelease", "google-access-token-credential-provider")])
+    plugin_host = f"{plugin['metadata']['name']}.{plugin['spec']['targetNamespace']}.svc:50051"
+    routes = yaml.safe_load(hr_values(docs(render(meta, ci))[("HelmRelease", "substrate")])).get("credentialProvider", {}).get("additionalProviders") or []
+    if {"uriAuthority": "google-access-token.k8s.io", "host": plugin_host} not in routes:
+        fail(f"the substrate release does not route google-access-token.k8s.io to {plugin_host} (got {routes!r})")
+    print("ok: the google-access-token credential provider follows components.kagent, lands in ate-system, takes Substrate's grants and names its release; the Substrate release routes its class to its Service")
     print("ok: kagent-crds, substrate and substrate-crds follow components.kagent — on with it, off without it, the roster says which; the Substrate releases land in ate-system; the guards refuse kagent without its runtime or a snapshot location")
 
     # --- atelet's pinned images come from the kagent release's ConfigMap; an own list travels only when set ---

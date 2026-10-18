@@ -465,13 +465,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.13.0 <1.14.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.14.0 <1.15.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.13.0 <1.14.0"` |  |
+| components.substrate.versionRange | string | `">=1.14.0 <1.15.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -1581,6 +1581,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | substrate.credentialProvider.namespacePolicies[1].allowedNamespaces[0] | string | `"kagent"` |  |
 | substrate.credentialProvider.additionalProviders[0].uriAuthority | string | `"muster.giantswarm.io"` |  |
 | substrate.credentialProvider.additionalProviders[0].host | string | `"muster.agent-platform.svc:50051"` |  |
+| substrate.credentialProvider.additionalProviders[1].uriAuthority | string | `"google-access-token.k8s.io"` |  |
+| substrate.credentialProvider.additionalProviders[1].host | string | `"google-access-token-credential-provider.ate-system.svc:50051"` |  |
 | substrate.postgres.enabled | string | `"auto"` |  |
 | substrate.postgres.readWriteConnectionString | string | `""` |  |
 | substrate.postgres.schema | string | `"public"` |  |
