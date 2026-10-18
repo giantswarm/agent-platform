@@ -8,9 +8,9 @@ A codex agent can run on a ChatGPT subscription instead of an OpenAI API key. Th
 kagent:
   modelConfigs:
     - name: openai-chatgpt-codex
-      displayName: GPT-5.5 (ChatGPT)
+      displayName: GPT-5.6 Luna (ChatGPT)
       provider: OpenAI
-      model: gpt-5.5
+      model: gpt-5.6-luna
       apiKeySecret: kagent-chatgpt-login   # this installation's login
       credentialType: chatgptOAuth
       apiFormat: responses
@@ -22,7 +22,7 @@ The chart renders `spec.openAI.credentialType: chatgptOAuth` and no `apiKeySecre
 - `apiKeySecretKey` beside `chatgptOAuth` (the CRD refuses it at admission);
 - `chatgptOAuth` without `apiFormat: responses` (a ChatGPT login serves codex only, and the codex compiler requires the Responses API).
 
-It needs the kagent line from 1.16.0, which the chart's kagent range already selects. The codex compiler sends the turns to `https://chatgpt.com/backend-api/codex` and opens the agent's egress to it; the Substrate egress gateway adds the access token and the account id on that path only.
+`model` is one the ChatGPT Codex backend serves to a subscription (`gpt-5.6-luna` is proven); the backend answers any other with HTTP 400 and the turn fails with "Codex execution failed". It needs the kagent line from 1.16.0, which the chart's kagent range already selects. The codex compiler sends the turns to `https://chatgpt.com/backend-api/codex` and opens the agent's egress to it; the Substrate egress gateway adds the access token and the account id on that path only.
 
 ## One login per installation
 

@@ -98,9 +98,9 @@ kagent:
       apiKeySecretKey: OPENAI_API_KEY
       apiFormat: responses
     - name: openai-chatgpt-codex
-      displayName: OpenAI GPT-5.5 (ChatGPT login)
+      displayName: OpenAI GPT-5.6 Luna (ChatGPT login)
       provider: OpenAI
-      model: gpt-5.5
+      model: gpt-5.6-luna
       apiKeySecret: kagent-chatgpt-login
       credentialType: chatgptOAuth
       apiFormat: responses

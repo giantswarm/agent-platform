@@ -3678,7 +3678,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   apiFormat: responses
   # - name: openai-chatgpt-codex   # a codex model on this installation's own
   #   provider: OpenAI             # ChatGPT login, off the llm listener
-  #   model: gpt-5.5               # (docs/chatgpt-login.md)
+  #   model: gpt-5.6-luna          # (docs/chatgpt-login.md)
   #   apiKeySecret: kagent-chatgpt-login
   #   credentialType: chatgptOAuth
   #   apiFormat: responses
