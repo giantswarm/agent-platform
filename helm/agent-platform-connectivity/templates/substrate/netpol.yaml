@@ -38,6 +38,9 @@ what (the substrate chart's arguments and Service definitions):
   ate-controller, dns, podcertificate-controller, k8s-credential-provider ──▶
         the apiserver (and ate-controller ──▶ ate-api :443); dns answers the
         actors' lookups; the credential provider reads the agents' Secrets.
+  muster ──▶ ate-idp-server :8443 (the Service idp :443): the key set of the
+        actor-JWT issuer, which muster verifies a Session's injected actor JWT
+        against; ate-idp-server dials nothing.
   the bundled stores, while they run (substrate.postgres resolving to the
         bundled StatefulSet, substrate.rustfs.enabled): Postgres `app: postgres`
         :5432 ◀── ate-api-server; rustfs `app: rustfs` :9000 ◀── ate-api-server,
@@ -83,6 +86,7 @@ agent-platform.kagentTools.* helpers, _helpers.tpl). */}}
 {{- $toolsNs := include "agent-platform.kagentTools.namespace" . }}
 {{- $toolsPort := include "agent-platform.kagentTools.port" . }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
+{{- $musterOn := and .Values.muster.enabled (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
 {{- /* The workers of the Organizations' namespaces (tenants.organizations.enabled,
 agent-platform#1036): agent-manager's tenant reconciler puts a WorkerPool in
 each labelled namespace that holds an agent, with a copy of the workers' own
@@ -713,6 +717,67 @@ spec:
         - kube-apiserver
     {{- end }}
 ---
+# ate-idp-server: serves the actor-JWT issuer's discovery document and key set
+# (8443, behind the Service idp on 443) from the mounted signing pool; muster,
+# which verifies the actor JWTs the egress gateway injects
+# (muster.credentialProvider.actorBearer), reads it, and the kubelet probes it.
+# It dials nothing.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-ate-idp-server
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ate-idp-server
+  ingress:
+    {{- if $musterOn }}
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+    {{- end }}
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+{{- if $musterOn }}
+---
+# muster ──▶ ate-idp-server :8443: the actor-JWT issuer's key set, whatever
+# networkPolicy.musterInClusterMcpPorts opens.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: muster-to-substrate-idp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: ate-idp-server
+            io.kubernetes.pod.namespace: {{ $ns }}
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+{{- end }}
+---
 # podcertificate-controller: signs the Substrate pods' PodCertificateRequests
 # from the two CA pools; it needs the apiserver and nothing else.
 apiVersion: cilium.io/v2
@@ -1025,6 +1090,62 @@ spec:
     - ports:
         - port: 9090
           protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-ate-idp-server-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: ate-idp-server
+  policyTypes: [Ingress]
+  {{- if $musterOn }}
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: muster
+      ports:
+        - port: 8443
+          protocol: TCP
+  {{- else }}
+  ingress: []
+  {{- end }}
+{{- if $musterOn }}
+---
+# muster's egress is default-deny beyond the union of the policies selecting it
+# (-mcp-egress): the actor-JWT issuer's key set is opened here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: muster-to-substrate-idp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchLabels:
+              app: ate-idp-server
+      ports:
+        - port: 8443
+          protocol: TCP
+{{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

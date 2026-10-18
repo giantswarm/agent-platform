@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **muster accepts Substrate's actor JWT as a Session's own bearer** (giantswarm/muster#1572). `components.substrate{,-crds}.versionRange` selects Substrate 1.13 (`>=1.13.0 <1.14.0`), whose `ate-idp-server` serves the actor-JWT issuer's discovery document and key set behind the Service `idp`. With `workspaces.enabled` and Substrate on, the muster release gets `credentialProvider.actorBearer` on, with the issuer `substrate.ateApi.actorJWTIssuer`, else `https://idp.<substrate namespace>.svc`, and muster's own audience: a Session's MCP call carrying its actor JWT is served as the person its binding names when the binding lists the provider `muster`. `components.muster.versionRange` floors at 5.45.0, the first release that knows the key. The connectivity chart admits muster to `ate-idp-server` on 8443 and opens muster's egress to it, in both flavours (`make verify-substrate-idp-netpol`).
+
 ### Fixed
 
 - **Workspaces without the agents are refused at render time** (giantswarm/agent-platform#1118). `workspaces.enabled: true` with `components.kagent.enabled` off installed a workspace-manager release whose sync ServiceAccount and Roles go into the kagent namespace, which only exists with the agents, so the install failed on `namespaces "kagent" not found`. The render now fails naming kagent; turn the agents on beside the workspaces, or the workspaces off.

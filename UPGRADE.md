@@ -15,6 +15,17 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (Substrate 1.13.0: muster trusts the actor JWT)
+
+giantswarm/muster#1572: `components.substrate{,-crds}.versionRange` is `>=1.13.0 <1.14.0` and `components.muster.versionRange` `>=5.45.0 <6.0.0`. The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.13.0 (`ateom-gvisor:1.13.0`). 1.13 stays on 1.12's upstream pin and changes no persisted format, CRD, schema or snapshot layout: no migration, no snapshot reset, no manual step; a suspended agent resumes with its conversation and its volumes, and the goldens are kept. 1.13.0 adds `ate-idp-server` (two replicas, the Service `idp` on 443), which serves the issuer ate-api-server names in every actor JWT. With `workspaces.enabled` and Substrate on, muster verifies a Session's injected actor JWT against it (`muster.muster.credentialProvider.actorBearer`) and serves the call as the person the Session is bound to, only for a binding that lists the provider `muster`.
+
+### Operator action
+
+- **None** for an installation that follows the chart's ranges.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.13.0` and `muster` to `5.45.0`.
+- **An own `substrate.ateApi.actorJWTIssuer`**: muster takes it as its issuer; an issuer set through `substrate.ateApi.extraArgs` moves to `ateApi.actorJWTIssuer` (Substrate's 1.12 to 1.13 step).
+- **To keep muster from trusting actor JWTs**: `muster.muster.credentialProvider.actorBearer.enabled: false`.
+
 ## \<current\> → \<next\> (kagent 1.15.0: the workspace write path)
 
 giantswarm/agent-platform#1096: `components.kagent{,-crds}.versionRange` is `>=1.15.0 <1.16.0`, kagent's releases of the 1.15 line. kagent 1.15.0 compiles a workspace Session's provider hosts into credential URIs of `kagent.controller.session.credentialAuthority`, which the chart already derives, so a workspace Session's git and provider API calls reach muster and act as the person. kagent-crds adds the `EgressPolicy` CRD (`egresspolicies.api.kagent.dev`), which the tenant admission already matches. The kagent-crds release applies it before the kagent release upgrades (`dependsOn`). Substrate stays on its 1.12 range. The ADK keeps credential headers out of the persisted session state, so a session stored by 1.13 resumes unchanged: no migration, no snapshot reset, no manual step. A suspended agent resumes with its conversation and its volumes. The 1.14 line's chart (`runtime: byo` Harness entries) comes with it.

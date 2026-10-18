@@ -142,12 +142,12 @@ carries the same range), and nothing else names it. The control plane runs it,
 and so do the workers: ate-controller starts every gVisor pool on its own
 release's `ateom-gvisor` (`ateController.gvisorWorker.followRelease`, which this
 chart sets on the substrate release; giantswarm/substrate#114). A Substrate
-patch within the range (`1.12.0` → `1.12.1`) rolls the control plane, the atelet
+patch within the range (`1.13.0` → `1.13.1`) rolls the control plane, the atelet
 and the worker pool together, **with no chart release**.
 
 The WorkerPool's `spec.workerImage` is **derived by this chart** from the range's
 floor: `<substrate.image.registry>/ateom-gvisor:<floor>`
-(`gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.12.0` today), merged over
+(`gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.13.0` today), merged over
 the kagent block the chart forwards. It is the image the pool runs right after a
 re-pin. The pool's `status.workerImage` names the image its pods run; after a patch
 it is the patch, and the condition `WorkerImageOverridden` is `True` (reason
@@ -405,7 +405,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.flux.enabled | bool | `true` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `">=5.44.0 <6.0.0"` |  |
+| components.muster.versionRange | string | `">=5.45.0 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.muster.driftDetection.mode | string | `"enabled"` |  |
@@ -465,13 +465,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.12.0 <1.13.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.13.0 <1.14.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.12.0 <1.13.0"` |  |
+| components.substrate.versionRange | string | `">=1.13.0 <1.14.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |

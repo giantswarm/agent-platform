@@ -735,7 +735,14 @@ releasable, the provider instances whose grants muster releases, is the
 instance muster's registration of the workspace-manager is pinned to under its
 App's issuer, own or derived (agent-platform.workspaceManager.musterPin), the
 same instance name the Session's credential URIs and agent-manager's binding
-carry. muster.credentialProvider's own keys stand. muster refuses a credential
+carry. actorBearer: muster serves a Session's own MCP calls as the person the
+Session's actor is bound to, verifying the actor JWT Substrate's egress gateway
+injects against the issuer ate-api-server signs it as and ate-idp-server serves
+(the Substrate line from 1.13.0; substrate.ateApi.actorJWTIssuer, else the idp
+Service of the release `substrate`, https://idp.<substrate namespace>.svc), for
+muster's own audience (its oauth.server.baseUrl, the muster chart's default);
+only a binding that lists the reserved provider `muster` is served.
+muster.credentialProvider's own keys stand. muster refuses a credential
 provider that releases nothing, so an empty releasable fails the render
 (agent-platform.validateWorkspaceAuth). Emits JSON, {} with workspaces or
 Substrate off.
@@ -746,12 +753,18 @@ Usage: include "agent-platform.muster.credentialProvider" . | fromJson
 {{- if and (.Values.workspaces | default dict).enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
 {{- $substrateNs := dig "substrate" "targetNamespace" "ate-system" (.Values.components | default dict) -}}
 {{- $own := dig "muster" "credentialProvider" dict (.Values.muster | default dict) | default dict -}}
-{{- $provider = dict "enabled" true "gatewayIdentity" (printf "spiffe://cluster.local/ns/%s/sa/atenet-egress" $substrateNs) -}}
+{{- $issuer := dig "ateApi" "actorJWTIssuer" "" (.Values.substrate | default dict) | default (printf "https://idp.%s.svc" $substrateNs) -}}
+{{- $provider = dict "enabled" true "gatewayIdentity" (printf "spiffe://cluster.local/ns/%s/sa/atenet-egress" $substrateNs) "actorBearer" (dict "enabled" true "issuer" $issuer) -}}
 {{- $pin := include "agent-platform.workspaceManager.musterPin" . | fromJson -}}
 {{- if and $pin.provider $pin.issuer -}}
 {{- $_ := set $provider "releasable" (dict $pin.provider $pin.issuer) -}}
 {{- end -}}
 {{- $provider = mergeOverwrite $provider $own -}}
+{{- /* mergeOverwrite never lets a false win: an own actorBearer.enabled: false turns it off. */ -}}
+{{- $ownBearer := $own.actorBearer | default dict -}}
+{{- if and (kindIs "map" $ownBearer) (hasKey $ownBearer "enabled") -}}
+{{- $_ := set $provider.actorBearer "enabled" $ownBearer.enabled -}}
+{{- end -}}
 {{- end -}}
 {{- $provider | toJson -}}
 {{- end -}}

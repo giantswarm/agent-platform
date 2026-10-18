@@ -128,12 +128,12 @@ carries the same range), and nothing else names it. The control plane runs it,
 and so do the workers: ate-controller starts every gVisor pool on its own
 release's `ateom-gvisor` (`ateController.gvisorWorker.followRelease`, which this
 chart sets on the substrate release; giantswarm/substrate#114). A Substrate
-patch within the range (`1.12.0` → `1.12.1`) rolls the control plane, the atelet
+patch within the range (`1.13.0` → `1.13.1`) rolls the control plane, the atelet
 and the worker pool together, **with no chart release**.
 
 The WorkerPool's `spec.workerImage` is **derived by this chart** from the range's
 floor: `<substrate.image.registry>/ateom-gvisor:<floor>`
-(`gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.12.0` today), merged over
+(`gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.13.0` today), merged over
 the kagent block the chart forwards. It is the image the pool runs right after a
 re-pin. The pool's `status.workerImage` names the image its pods run; after a patch
 it is the patch, and the condition `WorkerImageOverridden` is `True` (reason

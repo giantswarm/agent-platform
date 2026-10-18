@@ -14710,6 +14710,96 @@ spec:
               protocol: TCP
 ---
 # Source: agent-platform-connectivity/templates/substrate/netpol.yaml
+# ate-idp-server: serves the actor-JWT issuer's discovery document and key set
+# (8443, behind the Service idp on 443) from the mounted signing pool; muster,
+# which verifies the actor JWTs the egress gateway injects
+# (muster.credentialProvider.actorBearer), reads it, and the kubelet probes it.
+# It dials nothing.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-ate-idp-server
+  namespace: ate-system
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ate-idp-server
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: default
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: coredns
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: k8s-dns-node-cache
+      toPorts:
+        - ports:
+            - port: "1053"
+              protocol: UDP
+            - port: "1053"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+---
+# Source: agent-platform-connectivity/templates/substrate/netpol.yaml
+# muster ──▶ ate-idp-server :8443: the actor-JWT issuer's key set, whatever
+# networkPolicy.musterInClusterMcpPorts opens.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: muster-to-substrate-idp
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: ate-idp-server
+            io.kubernetes.pod.namespace: ate-system
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+---
+# Source: agent-platform-connectivity/templates/substrate/netpol.yaml
 # podcertificate-controller: signs the Substrate pods' PodCertificateRequests
 # from the two CA pools; it needs the apiserver and nothing else.
 apiVersion: cilium.io/v2

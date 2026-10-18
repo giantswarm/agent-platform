@@ -412,9 +412,12 @@ components:  # @schema additionalProperties: true
     # a workspace Session's provider hosts (credentialProvider) and answers
     # agent-manager's session bindings, with the issuer pin of the
     # workspace-manager's registration.
+    # Floor 5.45.0: muster accepts Substrate's actor JWT as a bound Session's
+    # own bearer (credentialProvider.actorBearer, which the chart's schema
+    # refuses before it; giantswarm/muster#1572).
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.44.0 <6.0.0"
+    versionRange: ">=5.45.0 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -739,8 +742,11 @@ components:  # @schema additionalProperties: true
     # kagent line's own pin moves
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
+    # The floor is 1.13.0: ate-idp-server serves the actor-JWT issuer
+    # (https://idp.<namespace>.svc) muster verifies a Session's actor JWT
+    # against (muster.credentialProvider.actorBearer, with workspaces on).
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.12.0 <1.13.0"
+    versionRange: ">=1.13.0 <1.14.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
     # release Flux resolved (ateController.gvisorWorker.followRelease, which
@@ -769,7 +775,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.12.0 <1.13.0"
+    versionRange: ">=1.13.0 <1.14.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -5273,9 +5279,15 @@ workspaces:
   # gateway's 403 on its hosts. muster refuses a credential provider that
   # releases nothing, so with Substrate on and no instance to release (no
   # workspace-manager.providers with oauth.enabled, no own map) the render
-  # fails naming both. Workspaces need the agents: their namespace is
-  # kagent's, so the switch on with components.kagent.enabled off fails the
-  # render naming kagent.
+  # fails naming both. With the switch muster also accepts Substrate's actor
+  # JWT as a bound Session's own bearer on its MCP endpoints
+  # (muster.muster.credentialProvider.actorBearer: the issuer
+  # substrate.ateApi.actorJWTIssuer, else https://idp.<substrate namespace>.svc,
+  # whose key set ate-idp-server serves; muster's own audience), serving the
+  # call as the person the binding names only when the binding lists the
+  # provider `muster`; an own actorBearer key stands. Workspaces need the
+  # agents: their namespace is kagent's, so the switch on with
+  # components.kagent.enabled off fails the render naming kagent.
   enabled: false
   # The workspace storage: the read-write-many StorageClass the workspace
   # volumes are claimed from, and whether the connectivity release renders it.
