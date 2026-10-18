@@ -577,8 +577,12 @@ components:  # @schema additionalProperties: true
     # workspace Session's provider hosts into credential URIs of
     # kagent.controller.session.credentialAuthority (derived with the Session
     # admission) and kagent-crds carries the EgressPolicy CRD the tenant
-    # admission matches: the workspace write path.
-    versionRange: ">=1.15.0 <1.16.0"
+    # admission matches: the workspace write path. From 1.17.0 it adds the
+    # installation's actor-JWT providers (kagent.controller.session
+    # .actorJWTProviders, derived for muster while muster trusts the actor
+    # JWT) to every grant-admitted Session, so its calls to muster carry the
+    # Session Actor's JWT. The floor is its first candidate, 1.17.0-rc.1.
+    versionRange: ">=1.17.0-rc.1 <1.18.0-0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -692,7 +696,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.15.0 <1.16.0"
+    versionRange: ">=1.17.0-rc.1 <1.18.0-0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -3304,24 +3308,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   grafana-mcp:
     enabled: false
 
-  # kagent's built-in MCP tool server: kubectl-style k8s ops, Helm releases,
-  # Argo Rollouts tools. Disabled: muster-registered MCP servers cover these
-  # surfaces. On, it lives in the kagent namespace with the rest of kagent: the
-  # subchart renders its Deployment, Services and ServiceAccount into its own
-  # namespaceOverride (the release namespace without it — see the note on
-  # namespaceOverride above), the kagent chart composes the kagent-tool-server
-  # RemoteMCPServer URL from the same key, and the connectivity chart derives
-  # the controller's and the actors' egress to it the same way, so the three
-  # always name one namespace.
-  kagent-tools:
-    enabled: false
-    namespaceOverride: kagent
-
-  # kagent's own MCP server controller (reconciles MCPServer CRDs).
-  # Disabled: muster fills this role in the GS platform.
-  kmcp:
-    enabled: false
-    namespaceOverride: kagent
+  # kagent's built-in tool server (kagent-tools) and MCP server controller
+  # (kmcp) are not part of the kagent line's charts from 1.16.0: muster-registered
+  # MCP servers cover both. Either switched on fails the render
+  # (agent-platform.validateKagentSubcharts).
 
   # --- Tenant identity (read by the connectivity chart, not passed to the kagent chart) ---
   # -- The ServiceAccount the agents' Flux `HelmRelease`s execute as. The

@@ -476,6 +476,9 @@ block, an issuer, the email claim, an own block set in part. */ -}}
 muster's authority, which muster answers with the person's token
 (muster.credentialProvider); an own value stands. */ -}}
 {{- $_ := set $session "credentialAuthority" (dig "controller" "session" "credentialAuthority" (dig "muster" "credentialProvider" "authority" "muster.giantswarm.io" ($.root.Values.muster | default dict)) ($.root.Values.kagent | default dict)) -}}
+{{- with (include "agent-platform.kagent.musterActorJWTProvider" $.root | fromJson) -}}
+{{- $_ := set $session "actorJWTProviders" (dict "muster" .) -}}
+{{- end -}}
 {{- $_ := set $controller "session" $session -}}
 {{- $_ := set $derived "controller" $controller -}}
 {{- end -}}
@@ -767,6 +770,38 @@ Usage: include "agent-platform.muster.credentialProvider" . | fromJson
 {{- end -}}
 {{- end -}}
 {{- $provider | toJson -}}
+{{- end -}}
+
+{{/*
+kagent's reserved actor-JWT provider `muster` (kagent.controller.session
+.actorJWTProviders.muster, the kagent line from 1.17.0): while muster trusts the
+actor JWT (agent-platform.muster.credentialProvider's actorBearer on), kagent
+adds `muster` to every Session admitted with a workspace grant and compiles it
+into an actor_jwt rule on muster's host, so Substrate's egress gateway hands
+muster the Session Actor's JWT and muster serves the Session's person.
+hostname is the host of the in-cluster MCP URL every agent's RemoteMCPServer
+targets (agent-platform.musterMcpUrl); audience is the one muster verifies, its
+own actorBearer.audience, else its oauth.server.baseUrl. An own key of the
+kagent block's muster entry stands. Emits JSON, {} with the actor bearer or
+muster off, or without an audience (kagent's controller refuses an entry
+without one, and muster verifies none then).
+Usage: include "agent-platform.kagent.musterActorJWTProvider" . | fromJson
+*/}}
+{{- define "agent-platform.kagent.musterActorJWTProvider" -}}
+{{- $entry := dict -}}
+{{- $bearer := (include "agent-platform.muster.credentialProvider" . | fromJson).actorBearer | default dict -}}
+{{- $url := include "agent-platform.musterMcpUrl" . -}}
+{{- if and $bearer.enabled $url -}}
+{{- $muster := dig "muster" dict (.Values.muster | default dict) | default dict -}}
+{{- $audience := $bearer.audience | default (dig "oauth" "server" "baseUrl" "" $muster) -}}
+{{- $own := dig "controller" "session" "actorJWTProviders" "muster" dict (.Values.kagent | default dict) | default dict -}}
+{{- $entry = mergeOverwrite (dict "hostname" (urlParse $url).hostname "audience" $audience) $own -}}
+{{- end -}}
+{{- if $entry.audience -}}
+{{- $entry | toJson -}}
+{{- else -}}
+{}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -1666,6 +1701,19 @@ at render time instead.
 {{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true")
            (ne (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds")) "true") -}}
 {{- fail "components.kagent.enabled is true but components.kagent-crds.enabled is not: the kagent line ships its CRDs as the kagent-crds chart, which the kagent release and the connectivity release's kagent CRs depend on; turn both on" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The kagent line's charts from 1.16.0 carry no kagent-tools or kmcp subchart:
+the switch would render nothing, so an installation that turns one on is told
+at render time instead of running without the server it asked for.
+*/}}
+{{- define "agent-platform.validateKagentSubcharts" -}}
+{{- range $sub := list "kagent-tools" "kmcp" -}}
+{{- if dig $sub "enabled" false ($.Values.kagent | default dict) -}}
+{{- fail (printf "kagent.%s.enabled is true, but the kagent line's charts from 1.16.0 carry no %s subchart; muster-registered MCP servers cover it — turn it off" $sub $sub) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

@@ -42,7 +42,7 @@ component is on — the resource servers' OAuth clients, a public Gateway for th
 routes, the ingress mode that admits agentgateway. Without them the charts
 refuse to render at all, and the point here is a full render, not merely an
 accepted schema. The two lists are apart because
-tests/verify-kagent-tools-namespace.py imports QUICKSTART for renders with a much
+tests/verify-kagent-controller-vpa.py imports QUICKSTART for renders with a much
 smaller component set, where the all-on ingress mode would trip the connectivity
 chart's guard.
 
@@ -244,7 +244,7 @@ QUICKSTART = [
     "--set", "postgres.enabled=true",
 ]
 # The inputs that only matter once EVERY component is turned on, kept out of
-# QUICKSTART because tests/verify-kagent-tools-namespace.py imports that list
+# QUICKSTART because tests/verify-kagent-controller-vpa.py imports that list
 # for renders with a much smaller component set: ingress.mode and its
 # companion are tied to which components are enabled, and a mode that disagrees
 # with them fails the connectivity chart's guard.

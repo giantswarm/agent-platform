@@ -1567,21 +1567,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   grafana-mcp:
     enabled: false
 
-  # kagent's built-in MCP tool server: kubectl-style k8s ops, Helm releases,
-  # Argo Rollouts tools. Disabled: muster-registered MCP servers cover these
-  # surfaces. The kagent chart renders the subchart into its namespaceOverride
-  # (the release namespace without it) and composes the kagent-tool-server
-  # RemoteMCPServer URL from the same key; this chart derives the controller's
-  # and the actors' egress to it the same way (agent-platform.kagentTools.*,
-  # read by templates/kagent/netpol.yaml and templates/substrate/netpol.yaml),
-  # so the rules follow wherever the chart renders the server. No default for
-  # namespaceOverride here: the block reaches this chart and the kagent chart
-  # from the meta chart alike, and a default of this chart's own would let the
-  # two disagree the moment an installation unsets it (the meta chart pins it
-  # to the kagent namespace with the rest of kagent).
-  kagent-tools:
-    enabled: false
-
   # Semantic document search MCP server (doc2vec embeddings, vector similarity).
   # Ships empty — no documents loaded by default. Enable and populate with GS
   # or upstream docs if you want AI-assisted documentation search.

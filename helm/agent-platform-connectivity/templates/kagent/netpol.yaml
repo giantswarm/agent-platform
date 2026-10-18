@@ -1,13 +1,6 @@
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.networkPolicy.enabled }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $controllerPort := "8083" }}
-{{- /* kagent's built-in tool server (the kagent-tools subchart of the kagent chart):
-     the namespace and port the kagent chart renders it into — and composes its
-     RemoteMCPServer URL from — derived by the agent-platform.kagentTools.*
-     helpers the way the chart derives them (_helpers.tpl). */}}
-{{- $toolsEnabled := include "agent-platform.kagentTools.enabled" . }}
-{{- $toolsNs := include "agent-platform.kagentTools.namespace" . }}
-{{- $toolsPort := include "agent-platform.kagentTools.port" . }}
 {{- $clusterName := .Values.postgres.clusterName }}
 {{- /* The controller's metrics port, opened only when the kagent chart renders
      its metrics server (kagent.controller.metrics): the port of bindAddress,
@@ -152,19 +145,6 @@ spec:
       toPorts:
         - ports:
             - port: "8080"
-              protocol: TCP
-    {{- end }}
-    {{- if $toolsEnabled }}
-    # Tool discovery (MCP initialize + tools/list) against the built-in tool
-    # server's RemoteMCPServer URL; without it the RemoteMCPServer never becomes
-    # Accepted and the agents that reference it run without tools.
-    - toEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: kagent-tools
-            io.kubernetes.pod.namespace: {{ $toolsNs }}
-      toPorts:
-        - ports:
-            - port: {{ $toolsPort | quote }}
               protocol: TCP
     {{- end }}
 {{- if .Values.postgres.enabled }}

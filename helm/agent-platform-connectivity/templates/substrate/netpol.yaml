@@ -80,11 +80,6 @@ the render.
 {{- $pgMode := include "agent-platform.substrate.postgresMode" . }}
 {{- $rustfs := dig "rustfs" "enabled" false (.Values.substrate | default dict) }}
 {{- $s3proxy := include "agent-platform.substrateStore.s3proxy" . }}
-{{- /* kagent's built-in tool server, where the kagent chart renders it (the
-agent-platform.kagentTools.* helpers, _helpers.tpl). */}}
-{{- $toolsEnabled := include "agent-platform.kagentTools.enabled" . }}
-{{- $toolsNs := include "agent-platform.kagentTools.namespace" . }}
-{{- $toolsPort := include "agent-platform.kagentTools.port" . }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
 {{- $musterOn := and .Values.muster.enabled (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
 {{- /* The workers of the Organizations' namespaces (tenants.organizations.enabled,
@@ -562,18 +557,6 @@ spec:
       toPorts:
         - ports:
             - port: {{ .Values.llmRouting.listener.port | quote }}
-              protocol: TCP
-    {{- end }}
-    {{- if $toolsEnabled }}
-    # The actors' calls to the built-in tool server, where the kagent chart
-    # renders it (the controller's discovery of it is templates/kagent/netpol.yaml).
-    - toEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: kagent-tools
-            io.kubernetes.pod.namespace: {{ $toolsNs }}
-      toPorts:
-        - ports:
-            - port: {{ $toolsPort | quote }}
               protocol: TCP
     {{- end }}
     {{- /* A host model server may sit on a node of the cluster (the host or

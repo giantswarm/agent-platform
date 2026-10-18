@@ -1676,19 +1676,10 @@ define managers_must_pass
 	@echo "ok: $(1)"
 endef
 
-# kagent's built-in tool server (kagent.kagent-tools.enabled) is an MCP endpoint
-# the controller discovers and the agents call directly; both run under the
-# default-deny egress lists above, so the chart has to open the path or the
-# kagent-tool-server RemoteMCPServer never becomes Accepted (SYN dropped, "Policy
-# denied") and the agents that reference it run without tools. Off by default
-# and off in the golden render, so the default render is unchanged. The rules
-# name the namespace the kagent chart renders the server into — the subchart's
-# namespaceOverride, else the release namespace, never the kagent namespace by
-# assumption (#421: the rule said kagent, the server sat in the release
-# namespace, discovery timed out) — and tests/verify-kagent-tools-namespace.py
-# ties them to the rendered Deployment and RemoteMCPServer URL of the kagent
-# chart the range resolves to, through the values the meta chart forwards
-# (network: gsoci.azurecr.io, like verify-components-charts).
+# The kagent controller's VerticalPodAutoscaler names the Deployment and the
+# container the kagent chart renders: tests/verify-kagent-controller-vpa.py ties
+# them to the chart the range resolves to, through the values the meta chart
+# forwards (network: gsoci.azurecr.io, like verify-components-charts).
 KAGENT_NETPOL := $(VM) --set components.kagent.enabled=true $(SUBSTRATE_ON) --set muster.enabled=true --set networkPolicy.flavor=cilium --set kagent.namespaceOverride=kagent
 # An actor whose ModelConfig points at a host model server dials it through the
 # egress gateway, on a port the gateway's allow-list does not otherwise open:
@@ -1936,7 +1927,7 @@ verify-kagent-vpa: ## Assert the kagent controller's VerticalPodAutoscaler: with
 	@echo "ok: meta-layer overrides reach the object, siblings keep their defaults"
 	@echo "$@: all passed"
 
-verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (Substrate's egress gateway) to the built-in tool server renders iff kagent.kagent-tools.enabled, in the namespace and port the kagent chart renders the server into (kagent.kagent-tools.namespaceOverride, else the release namespace — tied to the rendered Deployment and RemoteMCPServer URL of the kagent chart the range resolves to by tests/verify-kagent-tools-namespace.py; network: gsoci.azurecr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list and reaches the world on every TCP port but the instance metadata services and Azure's WireServer, the cluster on 443 and 10443; the credential provider reaches networkPolicy.substrate.credentialProvider.egressFQDNs on 443 by name with the DNS proxy on (oauth2.googleapis.com by default, a list of its own replacing it), the apiserver and DNS only when it is empty, and no other world destination; the controller reaches ate-api and the router, and the router admits it on 8080 from kagent.namespaceOverride only — tests/verify-atenet-router-ingress.py; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); that the egress gateway opens every host model server model-manager fronts, at its agentHost, with the DNS proxy on where one is named by hostname; the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only; and the cluster entity reaches the kagent controller's metrics port (kagent.controller.metrics.bindAddress, only while enabled, never the API port) and atenet-egress's ext-proc 9090, in both flavours; Substrate's bundled Postgres and rustfs reachable from their consumers only while they run, in both flavours, and no policy for them otherwise.
+verify-kagent-netpol: ## Assert no egress to kagent's built-in tool server renders (the kagent line's charts carry no kagent-tools subchart from 1.16.0) and the meta chart refuses kagent.kagent-tools.enabled and kagent.kmcp.enabled naming the key; the controller VPA's targetRef and containerName are the rendered controller Deployment's of the kagent chart the range resolves to (tests/verify-kagent-controller-vpa.py; network: gsoci.azurecr.io); Agent Substrate's hops in both flavours (the worker pods reach only the egress gateway, the dns and the cluster DNS; the egress gateway carries the actors' allow-list and reaches the world on every TCP port but the instance metadata services and Azure's WireServer, the cluster on 443 and 10443; the credential provider reaches networkPolicy.substrate.credentialProvider.egressFQDNs on 443 by name with the DNS proxy on (oauth2.googleapis.com by default, a list of its own replacing it), the apiserver and DNS only when it is empty, and no other world destination; the controller reaches ate-api and the router, and the router admits it on 8080 from kagent.namespaceOverride only — tests/verify-atenet-router-ingress.py; no `app: kagent` selector remains outside the two v1alpha2 templates #299 deletes); that the egress gateway opens every host model server model-manager fronts, at its agentHost, with the DNS proxy on where one is named by hostname; the oauth2-proxy ingress admits kagent.oauth2ProxyIngress.additionalPeers on the proxy port only; and the cluster entity reaches the kagent controller's metrics port (kagent.controller.metrics.bindAddress, only while enabled, never the API port) and atenet-egress's ext-proc 9090, in both flavours; Substrate's bundled Postgres and rustfs reachable from their consumers only while they run, in both flavours, and no policy for them otherwise.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> Agent Substrate on, cilium: the worker pods' egress is the egress gateway, the dns and the cluster DNS — nothing else"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >$(VERIFY_TMP)/vkn-sub.out 2>&1 || { cat $(VERIFY_TMP)/vkn-sub.out; exit 1; }
@@ -2005,29 +1996,16 @@ verify-kagent-netpol: ## Assert the kagent controller's and the actors' egress (
 	@if grep -q 'name: substrate-' $(VERIFY_TMP)/vkn-nosub.out; then echo "FAIL: Substrate policies render while the component is off"; exit 1; else echo "ok: inert while Substrate is off"; fi
 	@echo "--> no app: kagent selector remains (the v1alpha2 agent Deployments' label) outside the two templates #299 deletes"
 	@if grep -rln 'app: kagent$$' $(CONNECTIVITY_DIR)/templates $(CHART_DIR)/templates | grep -vxF -e "$$(printf '%s\n' $(KAGENT_V1ALPHA2_TEMPLATES))"; then echo "FAIL: an app: kagent selector remains in the chart (above); on kagent API v2 no pod carries it"; exit 1; else echo "ok: no app: kagent selector left"; fi
-	@echo "--> kagent-tools off (the default): no tool-server egress"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >$(VERIFY_TMP)/vkn-off.out 2>&1 || { cat $(VERIFY_TMP)/vkn-off.out; exit 1; }
-	@if grep -q 'kagent-tools' $(VERIFY_TMP)/vkn-off.out; then echo "FAIL: tool-server egress renders while kagent-tools is off"; grep -n 'kagent-tools' $(VERIFY_TMP)/vkn-off.out | head; exit 1; else echo "ok: inert while off"; fi
-	@echo "--> kagent-tools on with the meta chart's default kagent.kagent-tools.namespaceOverride=kagent: the controller's and the actors' egress (Substrate's egress gateway) to the kagent-tools pods on 8084 in the kagent namespace"
-	@$(HELM) template t $(CONNECTIVITY_DIR) --namespace agent-platform $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true --set kagent.kagent-tools.namespaceOverride=kagent >$(VERIFY_TMP)/vkn-on.out 2>&1 || { cat $(VERIFY_TMP)/vkn-on.out; exit 1; }
-	@for n in agent-platform-connectivity-kagent-controller-egress substrate-atenet-egress; do \
-		awk "/^  name: $$n$$/,/^---/" $(VERIFY_TMP)/vkn-on.out >$(VERIFY_TMP)/vkn-on-$$n.out; \
-		grep -q 'app.kubernetes.io/name: kagent-tools' $(VERIFY_TMP)/vkn-on-$$n.out || { echo "FAIL: $$n has no egress to the kagent-tools pods"; exit 1; }; \
-		grep -A1 'app.kubernetes.io/name: kagent-tools' $(VERIFY_TMP)/vkn-on-$$n.out | grep -q 'io.kubernetes.pod.namespace: kagent$$' || { echo "FAIL: $$n tool-server egress does not follow kagent.kagent-tools.namespaceOverride (kagent)"; exit 1; }; \
-		grep -A4 'app.kubernetes.io/name: kagent-tools' $(VERIFY_TMP)/vkn-on-$$n.out | grep -q 'port: "8084"' || { echo "FAIL: $$n tool-server egress does not open port 8084"; exit 1; }; \
+	@echo "--> no tool-server egress: the kagent line's charts carry no kagent-tools subchart from 1.16.0"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true >$(VERIFY_TMP)/vkn-off.out 2>&1 || { cat $(VERIFY_TMP)/vkn-off.out; exit 1; }
+	@if grep -q 'kagent-tools' $(VERIFY_TMP)/vkn-off.out; then echo "FAIL: tool-server egress renders"; grep -n 'kagent-tools' $(VERIFY_TMP)/vkn-off.out | head; exit 1; else echo "ok: no tool-server egress"; fi
+	@for sub in kagent-tools kmcp; do \
+		if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.kagent.enabled=true --set kagent.database.postgres.urlFile=/etc/kagent-db/uri --set kagent.$$sub.enabled=true >$(VERIFY_TMP)/vkn-$$sub.out 2>&1; then echo "FAIL: the meta chart renders kagent.$$sub.enabled=true"; exit 1; fi; \
+		grep -q "kagent.$$sub.enabled is true, but the kagent line's charts from 1.16.0 carry no $$sub subchart" $(VERIFY_TMP)/vkn-$$sub.out || { echo "FAIL: the meta chart fails kagent.$$sub.enabled=true for another reason"; cat $(VERIFY_TMP)/vkn-$$sub.out; exit 1; }; \
 	done
-	@echo "ok: both policies open the tool server"
-	@echo "--> kagent-tools on without kagent.kagent-tools.namespaceOverride (this chart carries no default of its own): the rules name the RELEASE namespace, where the subchart renders without the override — not the kagent namespace kagent.namespaceOverride moves the controller to (#421)"
-	@$(HELM) template t $(CONNECTIVITY_DIR) --namespace agent-platform $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true >$(VERIFY_TMP)/vkn-release-ns.out 2>&1 || { cat $(VERIFY_TMP)/vkn-release-ns.out; exit 1; }
-	@[ "$$(grep -A1 'app.kubernetes.io/name: kagent-tools' $(VERIFY_TMP)/vkn-release-ns.out | grep -c 'io.kubernetes.pod.namespace: agent-platform$$')" = "2" ] || { echo "FAIL: without kagent.kagent-tools.namespaceOverride the tool-server egress does not name the release namespace (where the kagent chart renders the server)"; grep -A1 'app.kubernetes.io/name: kagent-tools' $(VERIFY_TMP)/vkn-release-ns.out; exit 1; }
-	@echo "ok: the rules follow the subchart's fallback, the release namespace"
-	@echo "--> the rules' namespace and port are the kagent chart's: its rendered kagent-tools Deployment and RemoteMCPServer URL, with the values the meta chart forwards (network: gsoci.azurecr.io); the controller VPA's targetRef and containerName are its rendered controller Deployment's"
-	@python3 tests/verify-kagent-tools-namespace.py $(CHART_DIR) $(CONNECTIVITY_DIR)
-	@echo "--> an explicit kagent.kagent-tools.namespaceOverride / service.ports.tools.targetPort follows into the rules"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set kagent.kagent-tools.enabled=true --set kagent.kagent-tools.namespaceOverride=tools-ns --set kagent.kagent-tools.service.ports.tools.targetPort=9084 >$(VERIFY_TMP)/vkn-override.out 2>&1 || { cat $(VERIFY_TMP)/vkn-override.out; exit 1; }
-	@[ "$$(grep -A1 'app.kubernetes.io/name: kagent-tools' $(VERIFY_TMP)/vkn-override.out | grep -c 'io.kubernetes.pod.namespace: tools-ns$$')" = "2" ] || { echo "FAIL: the tool-server egress does not follow kagent.kagent-tools.namespaceOverride"; exit 1; }
-	@[ "$$(grep -A4 'app.kubernetes.io/name: kagent-tools' $(VERIFY_TMP)/vkn-override.out | grep -c 'port: "9084"')" = "2" ] || { echo "FAIL: the tool-server egress does not follow the tools targetPort"; exit 1; }
-	@echo "ok: namespace and port overrides"
+	@echo "ok: the meta chart refuses kagent.kagent-tools.enabled and kagent.kmcp.enabled naming the key"
+	@echo "--> the controller VPA's targetRef and containerName are the kagent chart's rendered controller Deployment's (network: gsoci.azurecr.io)"
+	@python3 tests/verify-kagent-controller-vpa.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "--> a host model server among model-manager's backends: the egress gateway opens the address the ModelConfigs carry"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) >$(VERIFY_TMP)/vkn-mm-off.out 2>&1 || { cat $(VERIFY_TMP)/vkn-mm-off.out; exit 1; }
 	@if grep -q 'host model server the actors dial' $(VERIFY_TMP)/vkn-mm-off.out; then echo "FAIL: host model server egress renders while model-manager is off"; exit 1; else echo "ok: inert while model-manager is off"; fi
