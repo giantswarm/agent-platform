@@ -133,7 +133,7 @@ and the worker pool together, **with no chart release**.
 
 The WorkerPool's `spec.workerImage` is **derived by this chart** from the range's
 floor: `<substrate.image.registry>/ateom-gvisor:<floor>`
-(`gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.13.0` today), merged over
+(`gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.15.0` today), merged over
 the kagent block the chart forwards. It is the image the pool runs right after a
 re-pin. The pool's `status.workerImage` names the image its pods run; after a patch
 it is the patch, and the condition `WorkerImageOverridden` is `True` (reason
