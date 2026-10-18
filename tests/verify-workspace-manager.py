@@ -15,7 +15,9 @@ muster. Each case below pins one property of its wiring:
   slices' workspaces.storage and workspaces.substrate (the lab's block,
   tests/fixtures/workspaces-lab-values.yaml), which both schemas take; an explicit
   components.workspace-manager.enabled that disagrees fails the render either way
-  round, one that agrees passes;
+  round, one that agrees passes; the switch on with components.kagent off fails
+  naming kagent, whose namespace the workspaces live in (the meta renders below
+  layer tests/fixtures/workspaces-agents-values.yaml);
 - on with two provider instances (a GitHub one and a second kind,
   tests/fixtures/workspaces-values.yaml): ONE OCIRepository and ONE HelmRelease that
   dependsOn muster and the connectivity release (the grant key Secret first),
@@ -67,8 +69,8 @@ muster. Each case below pins one property of its wiring:
   component chart at 0.4.0 takes the block (rendered without OAuth: the muster
   grant floor applies with provider instances and OAuth only); an own address wins and takes
   nothing derived; an own namespace without an address that differs fails
-  naming the key; without kagent or below the floor (an earlier release's
-  closed schema refuses the block) no kagent block;
+  naming the key; below the floor (an earlier release's closed schema refuses
+  the block) no kagent block;
 - the connectivity chart, cilium: the ingress (muster, kagent's controller, the
   kubelet's probes, the metrics port), the egress (DNS with the proxy clause, the
   kube-apiserver, the Dex issuer by name, each provider instance's hosts on their
@@ -98,10 +100,12 @@ NAME = "workspace-manager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
 RANGE_RE = r'semver: "(>=[^"]+ <0\.\d+\.0(?:-0)?)"'
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
+# The agents beside them: the meta chart refuses workspaces without kagent.
+AGENTS = "tests/fixtures/workspaces-agents-values.yaml"
 ORGS = "tests/fixtures/workspaces-organizations-values.yaml"
 BOM = "helm/agent-platform/examples/customer-bom.yaml"
 CI = ["--set", "components.flux.enabled=false"]
-ON = ["-f", FIXTURE]
+ON = ["-f", FIXTURE, "-f", AGENTS]
 KAGENT = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "kagent.harness.snapshotLocation=s3://ci/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
 IDENTITY = [
     "--set", "global.domain=ci.example.com",
@@ -269,7 +273,11 @@ def main(meta: str, connectivity: str) -> int:
     must_fail(meta, ["--set", f"components.{NAME}.enabled=true"], "workspaces are one switch", "the component on with the switch off")
     helm(meta, [*ON, "--set", f"components.{NAME}.enabled=true"])
     must_fail(meta, ["--set", "workspaces.enabled=maybe"], "workspaces", "a non-boolean switch")
-    ok("one switch: workspaces.enabled turns the component on, a disagreeing toggle fails either way, an agreeing one passes; the schema refuses a non-boolean")
+    must_fail(meta, ["-f", FIXTURE], "workspaces.enabled is true but components.kagent.enabled is not: workspaces need the agents",
+              "workspaces on with the agents off (their namespace is kagent's)", ci_values=False)
+    must_fail(meta, [*ON, "--set", "components.kagent.enabled=false"], "workspaces need the agents", "workspaces on with kagent switched off")
+    ok("one switch: workspaces.enabled turns the component on, a disagreeing toggle fails either way, an agreeing one passes; the schema refuses a non-boolean; "
+       "without the agents (components.kagent off) the render fails naming kagent, the namespace the workspaces live in")
 
     # --- on with two provider instances --------------------------------------------
     on_docs = documents(helm(meta, ON))
@@ -314,6 +322,9 @@ def main(meta: str, connectivity: str) -> int:
         refs += 1
     if refs != 5:
         fail(f"expected the 5 credentials of the fixture as Secret references in the HelmRelease, found {refs}")
+    # The baseline of the comparison below: the agents on, workspaces off.
+    off_docs = documents(helm(meta, ["-f", AGENTS]))
+    conn = off_docs[("HelmRelease", "agent-platform-connectivity")]
     conn_on = on_docs[("HelmRelease", "agent-platform-connectivity")]
     if f"      {NAME}:\n        enabled: true\n" not in conn_on:
         fail(f"the roster forwarded to connectivity does not say {NAME}: enabled: true")
@@ -506,8 +517,6 @@ def main(meta: str, connectivity: str) -> int:
     ok("workspaces.namespace follows the kagent namespace; an own value must agree")
 
     # --- the kagent address -------------------------------------------------------------
-    if "\n    kagent:\n" in documents(helm(meta, [*ON, *NO_GITLAB, *WM_KAGENT, "--set", "components.kagent.enabled=false"]))[("HelmRelease", NAME)]:
-        fail("the HelmRelease carries a kagent block with kagent off")
     if "\n    kagent:\n" in documents(helm(meta, [*ON, *NO_GITLAB, *KAGENT, *PRE_GRANT, "--set", f"components.{NAME}.versionRange=>=0.2.0 <1.0.0"]))[("HelmRelease", NAME)]:
         fail("the HelmRelease carries a kagent block below the workspace-manager floor that takes it (an earlier chart's schema refuses it)")
     want = "    kagent:\n      address: grpc://kagent-controller.kagent.svc:8083\n      namespace: kagent\n"
@@ -529,7 +538,7 @@ def main(meta: str, connectivity: str) -> int:
               "an own kagent namespace that disagrees with the derived address")
     ok("kagent.address defaults to kagent's controller Service (grpc://kagent-controller.kagent.svc:8083) with its namespace from "
        "workspace-manager 0.4.0 on, which takes it (0.4.0 renders it), following kagent's namespace and fullname; an own address wins; "
-       "a disagreeing own namespace fails; none without kagent or below the floor")
+       "a disagreeing own namespace fails; none below the floor")
 
     # --- the connectivity chart -------------------------------------------------------------
     conn_on_flags = ["--set", "ingress.parentRefs[0].name=x", "--set", f"components.{NAME}.enabled=true", "-f", FIXTURE, *IDENTITY]

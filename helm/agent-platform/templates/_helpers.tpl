@@ -1660,7 +1660,11 @@ at render time instead.
 Workspaces are one switch, workspaces.enabled: the workspace-manager component
 follows it, and so does every later workspace piece. An explicit
 components.workspace-manager.enabled that disagrees with the switch fails the
-render, either way round. With the switch on, every credential of the
+render, either way round. The switch on with the kagent component off fails
+the render too: the workspaces' namespace is kagent's (every Session runs and
+mounts its workspace there), so the workspace-manager release would apply its
+sync ServiceAccount and Roles into a namespace that does not exist. With the
+switch on, every credential of the
 workspace-manager block is a Secret reference ({name, key}), never a value:
 the provider instances' (any key of a provider's values named privateKey,
 clientSecret, secret, token, password or apiKey, at any depth) and the grant
@@ -1673,6 +1677,9 @@ signing key.
 {{- fail (printf "components.workspace-manager.enabled is %v but workspaces.enabled is %v: workspaces are one switch — set workspaces.enabled and leave components.workspace-manager.enabled unset" $c.enabled $on) -}}
 {{- end -}}
 {{- if $on -}}
+{{- if ne (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true" -}}
+{{- fail "workspaces.enabled is true but components.kagent.enabled is not: workspaces need the agents — they live in the kagent namespace, where every Session runs and mounts its workspace, and the workspace-manager's sync ServiceAccount, Roles and volumes go there; turn components.kagent.enabled on, or workspaces off" -}}
+{{- end -}}
 {{- include "agent-platform.workspaces.storage.validate" . -}}
 {{- include "agent-platform.workspaces.substrate.validate" . -}}
 {{- $wm := index .Values "workspace-manager" | default dict -}}

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Workspaces without the agents are refused at render time** (giantswarm/agent-platform#1118). `workspaces.enabled: true` with `components.kagent.enabled` off installed a workspace-manager release whose sync ServiceAccount and Roles go into the kagent namespace, which only exists with the agents, so the install failed on `namespaces "kagent" not found`. The render now fails naming kagent; turn the agents on beside the workspaces, or the workspaces off.
+
 ## [4.146.0] - 2026-10-18
 
 ### Changed

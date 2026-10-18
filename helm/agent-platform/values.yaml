@@ -5273,7 +5273,9 @@ workspaces:
   # gateway's 403 on its hosts. muster refuses a credential provider that
   # releases nothing, so with Substrate on and no instance to release (no
   # workspace-manager.providers with oauth.enabled, no own map) the render
-  # fails naming both.
+  # fails naming both. Workspaces need the agents: their namespace is
+  # kagent's, so the switch on with components.kagent.enabled off fails the
+  # render naming kagent.
   enabled: false
   # The workspace storage: the read-write-many StorageClass the workspace
   # volumes are claimed from, and whether the connectivity release renders it.

@@ -23,7 +23,7 @@ below pins one property:
   without it; NOTES prints them; no null anywhere in the release's values;
 - the same with the connectivity release's key (no own reference, providers and
   oauth.enabled); nothing without a grant key: no providers, oauth off,
-  grantKey.create false; nothing with kagent off;
+  grantKey.create false; workspaces with kagent off fail the render;
 - the derivation follows fullnameOverride, service.port, gitops.targetNamespace and
   components.workspace-manager.targetNamespace (the key set), global.domain (the
   issuer) and grant.audience; a value the kagent block sets for one of the three
@@ -65,9 +65,11 @@ HELM = os.environ.get("HELM", "helm")
 NAME = "workspace-manager"
 NAMESPACE = "agent-platform"
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
+# The agents beside them: the meta chart refuses workspaces without kagent.
+AGENTS = "tests/fixtures/workspaces-agents-values.yaml"
 KAGENT_CHART = "oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent"
 CI = ["--set", "components.flux.enabled=false"]
-ON = ["-f", FIXTURE]
+ON = ["-f", FIXTURE, "-f", AGENTS]
 KAGENT = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "kagent.harness.snapshotLocation=s3://ci/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
 IDENTITY = [
     "--set", "global.domain=ci.example.com",
@@ -265,12 +267,11 @@ def main(meta: str) -> int:
     for flags, what in unpinned:
         must_fail(meta, [*base, *sub, *flags], "muster releases no provider instance's grant",
                   f"workspaces and Substrate on {what} (no provider pin, no own releasable)")
-        helm(meta, [*ON, *IDENTITY, *flags, "--set", "components.kagent.enabled=false"])
     own = block(block(block(documents(helm(meta, [*base, *sub, *unpinned[0][0], "--set", "muster.muster.credentialProvider.releasable.gitlab=https://gitlab.example.com"])).get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6), "releasable", 8)
     if own != "        releasable:\n          gitlab: https://gitlab.example.com\n":
         fail(f"without a provider pin an own muster.muster.credentialProvider.releasable does not reach the muster release alone:\n{own}")
     ok("without a provider pin (no providers, oauth off) workspaces and Substrate fail the render naming muster's releasable, "
-       "pass with Substrate off, and an own releasable alone turns muster's credentialProvider on")
+       "and an own releasable alone turns muster's credentialProvider on")
 
     # --- nothing without a grant key, or without kagent ------------------------------------------
     # Substrate follows kagent: without a provider pin muster's releasable is the installation's own.
@@ -280,9 +281,8 @@ def main(meta: str) -> int:
                         ([*NO_OWN, "--set", "workspaceManager.grantKey.create=false"], "with grantKey.create false")):
         if admission(kagent_release([*base, *flags], meta)) is not None:
             fail(f"the kagent release carries a Session admission {what}: the manager signs no grant then")
-    if ("HelmRelease", "kagent") in documents(helm(meta, [*ON, *IDENTITY, "--set", "components.kagent.enabled=false"])):
-        fail("a kagent release renders with kagent off")
-    ok("nothing without a grant key (no providers, oauth off, grantKey.create false) and nothing with kagent off")
+    must_fail(meta, [*ON, *IDENTITY, "--set", "components.kagent.enabled=false"], "workspaces need the agents", "workspaces on with kagent off")
+    ok("nothing without a grant key (no providers, oauth off, grantKey.create false); workspaces with kagent off fail the render")
 
     # --- what the derivation follows -------------------------------------------------------------
     moved = admission(kagent_release([*base, "--set", f"{NAME}.fullnameOverride=wm", "--set", f"{NAME}.service.port=9090",
