@@ -626,7 +626,8 @@ def check_harnesses(manifest: str, values: str, what: str) -> None:
     claude or codex entry reaches its Harness as forwarded (snapshot location,
     env) and takes the chart's claude-harness or codex-harness image at its
     digest; a claude one carries no turn limits, which the line withdrew from
-    the Harness API in 1.12.0."""
+    the Harness API in 1.12.0. A byo entry (omp) runs its own image and
+    command and carries its displayName as the portal's annotation."""
     entries = (yaml.safe_load(values) or {}).get("harnesses") or []
     rendered = [d for d in yaml.safe_load_all(manifest) if isinstance(d, dict) and d.get("kind") == "Harness"]
     if len(rendered) != 1 + len(entries):
@@ -642,7 +643,20 @@ def check_harnesses(manifest: str, values: str, what: str) -> None:
         if spec is None:
             fail(f"{what} renders no Harness for the kagent.harnesses entry {entry['name']!r}")
         runtime = entry.get("runtime", "claude")
-        if runtime not in ("claude", "codex"):
+        if runtime not in ("claude", "codex", "byo"):
+            continue
+        harness = by_name[entry["name"]]
+        if runtime == "byo":
+            got = {
+                "runtime": [r for r in ("kagent", "claude", "codex", "byo") if r in spec],
+                "image": spec.get("workload", {}).get("image"),
+                "command": spec.get("workload", {}).get("command"),
+                "displayName": harness.get("metadata", {}).get("annotations", {}).get("ui.giantswarm.io/display-name"),
+                "snapshotLocation": spec.get("substrate", {}).get("snapshotPolicy", {}).get("location"),
+            }
+            want = {"runtime": ["byo"], "image": entry.get("image"), "command": entry.get("command"), "displayName": entry.get("displayName"), "snapshotLocation": entry.get("snapshotLocation")}
+            if got != want:
+                fail(f"{what} renders the byo Harness {entry['name']!r} off its entry:\n  got      {got}\n  expected {want}")
             continue
         got = {
             "runtime": [r for r in ("kagent", "claude", "codex", "byo") if r in spec],

@@ -1218,12 +1218,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.4.0"` |  |
+| agentgateway.controller.image.tag | string | `"2.4.1"` |  |
 | agentgateway.controller.replicaCount | int | `2` |  |
 | agentgateway.inferenceExtension.enabled | bool | `true` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.4.0"` |  |
+| agentgateway.proxy.image.tag | string | `"2.4.1"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1323,7 +1323,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.observability.otel.headers | string | `"auto"` |  |
 | agent-manager.kagent.namespace | string | `"kagent"` |  |
 | agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
-| agent-manager.harness.egress | object | `{}` | The origins a coding agent reaches, by the name of its Harness ({claude: [https://github.com, …], codex: […]}): the installation's forge and git hosts plus the toolchain's registries; the model host is not listed (kagent adds the ModelConfig's destination). agent-manager writes the list into the Agent's spec.egress and the Substrate egress gate refuses any other origin with a 403; agent-manager refuses an agent on a coding Harness without an entry. Empty (the default) is not forwarded and the agent-manager chart's own list applies: GitHub for claude (and codex from agent-manager 2.2.0) plus the Go and npm registries for claude-go and claude-node. Each kagent.harnesses entry an installation adds gets its entry here; an installation whose forge is not GitHub sets every Harness it serves: Helm merges the map into the chart's, so a Harness left out keeps the GitHub list. Needs agent-manager 1.11.0 or later. |
+| agent-manager.harness.egress | object | `{}` | The origins a coding agent reaches, by the name of its Harness ({claude: [https://github.com, …], codex: […], omp: […]}): the installation's forge and git hosts plus the toolchain's registries; the model host is not listed (kagent adds the ModelConfig's destination). agent-manager writes the list into the Agent's spec.egress and the Substrate egress gate refuses any other origin with a 403; agent-manager refuses an agent on a coding Harness without an entry. Empty (the default) is not forwarded and the agent-manager chart's own list applies: GitHub for claude (and codex from agent-manager 2.2.0) plus the Go and npm registries for claude-go and claude-node. Each kagent.harnesses entry an installation adds gets its entry here; an installation whose forge is not GitHub sets every Harness it serves: Helm merges the map into the chart's, so a Harness left out keeps the GitHub list. Needs agent-manager 1.11.0 or later. |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
 | agent-manager.agentChart.semver | string | `">=2.0.0 <3.0.0"` |  |
 | agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |

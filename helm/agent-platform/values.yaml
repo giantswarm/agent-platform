@@ -3693,16 +3693,21 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
 
   # --- Coding agents: further Harnesses (the kagent chart's harnesses[]) ---
   # A coding agent is an Agent whose spec.harnessRef names a coding Harness:
-  # Claude Code (claude) or the codex CLI (codex) run headless by the kagent
-  # line's claude-harness or codex-harness image in a Substrate actor, calling
-  # muster as the person who sent the turn (giantswarm/giantswarm#37625,
-  # giantswarm/giantswarm#38449). This list is forwarded to the kagent chart as
-  # it is: one entry per further Harness, with the policy shape of harness.*
-  # above plus runtime: claude (the default), codex or kagent. A claude or
-  # codex entry takes the chart's claude-harness or codex-harness image at its
-  # published digest; its snapshotLocation is its own (a snapshot is the
-  # actor's whole memory and filesystem, and each store has its own
-  # retention). An Agent declares its own egress (spec.egress, which
+  # Claude Code (claude), the codex CLI (codex) or oh-my-pi (omp) run headless
+  # by the kagent line's claude-harness, codex-harness or omp-harness image in
+  # a Substrate actor, calling muster as the person who sent the turn
+  # (giantswarm/giantswarm#37625, giantswarm/giantswarm#38449). This list is
+  # forwarded to the kagent chart as it is: one entry per further Harness,
+  # with the policy shape of harness.* above plus runtime: claude (the
+  # default), codex, kagent or byo. A claude or codex entry takes the chart's
+  # claude-harness or codex-harness image at its published digest. omp has no
+  # kagent runtime, so its entry is a BYO one (runtime: byo): the omp-harness
+  # image by digest (the kagent release's runtimeImages.ompHarness.digest),
+  # its command and a displayName (the ui.giantswarm.io/display-name
+  # annotation the Dev Portal titles the Harness by), all three required.
+  # An entry's snapshotLocation is its own (a snapshot is the actor's whole
+  # memory and filesystem, and each store has its own retention). An Agent
+  # declares its own egress (spec.egress, which
   # agent-manager writes from agent-manager.harness.egress.<Harness name>); a
   # Harness carries none. A codex agent's model is a Responses API ModelConfig
   # (kagent.modelConfigs[].apiFormat: responses). kagent refuses a share of a
@@ -3721,6 +3726,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   env:
   #     - name: KAGENT_PROPAGATE_TOKEN
   #       value: "true"
+  # - name: omp
+  #   runtime: byo
+  #   displayName: oh-my-pi
+  #   image: gsoci.azurecr.io/giantswarm/kagent/omp-harness@sha256:<the release's runtimeImages.ompHarness.digest>
+  #   command: [/usr/local/bin/kagent-omp]
+  #   snapshotLocation: s3://<bucket>/omp
 
 # === The platform's own Grafana boards ===
 # Forwarded to the connectivity chart, which renders one ConfigMap per board
@@ -4272,7 +4283,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.4.0"
+      tag: "2.4.1"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -4306,7 +4317,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.4.0"
+      tag: "2.4.1"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -4791,7 +4802,7 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     apiVersion: v1alpha3
   harness:
     # -- The origins a coding agent reaches, by the name of its Harness
-    # ({claude: [https://github.com, …], codex: […]}): the installation's
+    # ({claude: [https://github.com, …], codex: […], omp: […]}): the installation's
     # forge and git hosts plus the toolchain's registries; the model host is
     # not listed (kagent adds the ModelConfig's destination). agent-manager
     # writes the list into the Agent's spec.egress and the Substrate egress
