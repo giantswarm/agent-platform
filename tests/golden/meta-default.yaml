@@ -949,12 +949,6 @@ spec:
                 ephemeral-storage: 256Mi
                 memory: 1Gi
       harnesses: []
-      kagent-tools:
-        enabled: false
-        namespaceOverride: kagent
-      kmcp:
-        enabled: false
-        namespaceOverride: kagent
       modelConfigs: []
       namespaceOverride: kagent
       oauth2-proxy:

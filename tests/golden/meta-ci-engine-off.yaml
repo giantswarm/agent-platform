@@ -738,12 +738,6 @@ spec:
                 ephemeral-storage: 256Mi
                 memory: 1Gi
       harnesses: []
-      kagent-tools:
-        enabled: false
-        namespaceOverride: kagent
-      kmcp:
-        enabled: false
-        namespaceOverride: kagent
       modelConfigs: []
       namespaceOverride: kagent
       oauth2-proxy:
@@ -1936,12 +1930,6 @@ spec:
         value: "true"
       snapshotLocation: s3://ci-agent-snapshots/agents
     harnesses: []
-    kagent-tools:
-      enabled: false
-      namespaceOverride: kagent
-    kmcp:
-      enabled: false
-      namespaceOverride: kagent
     namespaceOverride: kagent
     oauth2-proxy:
       config:

@@ -3308,24 +3308,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   grafana-mcp:
     enabled: false
 
-  # kagent's built-in MCP tool server: kubectl-style k8s ops, Helm releases,
-  # Argo Rollouts tools. Disabled: muster-registered MCP servers cover these
-  # surfaces. On, it lives in the kagent namespace with the rest of kagent: the
-  # subchart renders its Deployment, Services and ServiceAccount into its own
-  # namespaceOverride (the release namespace without it — see the note on
-  # namespaceOverride above), the kagent chart composes the kagent-tool-server
-  # RemoteMCPServer URL from the same key, and the connectivity chart derives
-  # the controller's and the actors' egress to it the same way, so the three
-  # always name one namespace.
-  kagent-tools:
-    enabled: false
-    namespaceOverride: kagent
-
-  # kagent's own MCP server controller (reconciles MCPServer CRDs).
-  # Disabled: muster fills this role in the GS platform.
-  kmcp:
-    enabled: false
-    namespaceOverride: kagent
+  # kagent's built-in tool server (kagent-tools) and MCP server controller
+  # (kmcp) are not part of the kagent line's charts from 1.16.0: muster-registered
+  # MCP servers cover both. Either switched on fails the render
+  # (agent-platform.validateKagentSubcharts).
 
   # --- Tenant identity (read by the connectivity chart, not passed to the kagent chart) ---
   # -- The ServiceAccount the agents' Flux `HelmRelease`s execute as. The

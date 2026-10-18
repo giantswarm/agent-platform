@@ -1705,6 +1705,19 @@ at render time instead.
 {{- end -}}
 
 {{/*
+The kagent line's charts from 1.16.0 carry no kagent-tools or kmcp subchart:
+the switch would render nothing, so an installation that turns one on is told
+at render time instead of running without the server it asked for.
+*/}}
+{{- define "agent-platform.validateKagentSubcharts" -}}
+{{- range $sub := list "kagent-tools" "kmcp" -}}
+{{- if dig $sub "enabled" false ($.Values.kagent | default dict) -}}
+{{- fail (printf "kagent.%s.enabled is true, but the kagent line's charts from 1.16.0 carry no %s subchart; muster-registered MCP servers cover it — turn it off" $sub $sub) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Workspaces are one switch, workspaces.enabled: the workspace-manager component
 follows it, and so does every later workspace piece. An explicit
 components.workspace-manager.enabled that disagrees with the switch fails the

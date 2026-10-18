@@ -1483,7 +1483,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.oauth2-proxy.metrics.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.oauth2-proxy.metrics.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.grafana-mcp.enabled | bool | `false` |  |
-| kagent.kagent-tools.enabled | bool | `false` |  |
 | kagent.querydoc.enabled | bool | `false` |  |
 | kagent.k8s-agent.enabled | bool | `false` |  |
 | kagent.k8s-agent.namespaceOverride | string | `"kagent"` |  |
