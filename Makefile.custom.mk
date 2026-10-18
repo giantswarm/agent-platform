@@ -1712,6 +1712,12 @@ verify-mcp-backend-netpol: ## Assert the in-cluster MCP backends' ingress (netwo
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) -f tests/fixtures/mcp-backends-values.yaml --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vmbn-muster.out 2>&1 || { cat $(VERIFY_TMP)/vmbn-muster.out; exit 1; }
 	@python3 tests/verify-mcp-backend-netpol.py --muster-egress $(VERIFY_TMP)/vmbn-muster.out
 
+.PHONY: verify-substrate-idp-netpol
+verify-substrate-idp-netpol: ## Assert the path to Substrate's actor-JWT issuer (giantswarm/giantswarm#38064), in both flavours: with Substrate and muster on ate-idp-server (8443, behind the Service idp) admits muster from the release namespace and the kubelet's probes only, and muster's egress reaches it by muster-to-substrate-idp whatever networkPolicy.musterInClusterMcpPorts opens; with muster off no muster is admitted and no egress policy renders; with Substrate off neither renders. HELM selects the binary.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 tests/verify-substrate-idp-netpol.py $(CONNECTIVITY_DIR) $(KAGENT_NETPOL)
+	@echo "substrate idp network path verified."
+
 .PHONY: verify-kagent-netpol
 verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, no AOF; an installation's own fragment reaches the release verbatim. Its readers (giantswarm/agent-platform#851): ciliumNetworkPolicy.ingress.clients names exactly muster and klaus-gateway, by the pod labels the connectivity chart's muster-to-* and klausgateway-store-egress policies select.
 	@echo "====> $@ ($(CHART_DIR))"

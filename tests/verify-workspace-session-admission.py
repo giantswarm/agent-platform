@@ -231,6 +231,21 @@ def main(meta: str) -> int:
     for line in ("        enabled: true\n", "        gatewayIdentity: spiffe://cluster.local/ns/ate-system/sa/atenet-egress\n"):
         if line not in muster:
             fail(f"with workspaces and Substrate on the muster release's credentialProvider lacks {line.strip()!r}:\n{muster}")
+    bearer = block(muster, "actorBearer", 8)
+    if bearer != "        actorBearer:\n          enabled: true\n          issuer: https://idp.ate-system.svc\n":
+        fail(f"with workspaces and Substrate on the muster release's credentialProvider.actorBearer is not on with Substrate's issuer https://idp.ate-system.svc:\n{muster}")
+    def bearer_of(flags: list) -> str:
+        return block(block(block(documents(helm(meta, [*base, "--set", "components.substrate.enabled=true", *flags])).get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6), "actorBearer", 8)
+    if "          issuer: https://idp.substrate.example\n" not in bearer_of(["--set", "substrate.ateApi.actorJWTIssuer=https://idp.substrate.example"]):
+        fail("an own substrate.ateApi.actorJWTIssuer does not become muster's actorBearer.issuer")
+    if "          issuer: https://idp.ate.svc\n" not in bearer_of(["--set", "components.substrate.targetNamespace=ate"]):
+        fail("muster's actorBearer.issuer does not follow components.substrate.targetNamespace")
+    if "          enabled: false\n" not in bearer_of(["--set", "muster.muster.credentialProvider.actorBearer.enabled=false"]):
+        fail("an own muster.muster.credentialProvider.actorBearer.enabled=false does not stand")
+    if "          audience: https://muster.example\n" not in bearer_of(["--set", "muster.muster.credentialProvider.actorBearer.audience=https://muster.example"]):
+        fail("an own muster.muster.credentialProvider.actorBearer.audience does not stand")
+    ok("with workspaces and Substrate on muster accepts Substrate's actor JWT (actorBearer, issuer https://idp.<substrate namespace>.svc "
+       "or substrate.ateApi.actorJWTIssuer); an own enabled: false or audience stands")
     releasable = block(muster, "releasable", 8)
     if "          github: https://github.com/apps/ci-agents\n" not in releasable:
         fail(f"the muster release's credentialProvider.releasable does not name the pinned provider instance github under its App's issuer:\n{muster}")
