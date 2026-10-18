@@ -40,12 +40,12 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## \<current\> → \<next\> (kagent 1.17: muster's actor JWT on a workspace Session)
 
-giantswarm/giantswarm#38607: `components.kagent{,-crds}.versionRange` is `>=1.17.0 <1.18.0`. kagent 1.16 and 1.17 stay on 1.15's upstream pin and Substrate 1.12.1 contract; they add no database migration, and kagent-crds' only change is an additive ModelConfig field (the ChatGPT subscription login). A session stored by 1.15 resumes unchanged: no migration, no snapshot reset, no manual step; a suspended agent resumes with its conversation and its volumes. The kagent line's charts from 1.16.0 no longer carry the kagent-tools and kmcp subcharts. With muster trusting the actor JWT, the kagent release gets `controller.session.actorJWTProviders.muster` (muster's in-cluster host and audience): a workspace Session's calls to muster carry the Session Actor's JWT, which Substrate's egress gateway mints, and muster serves them as the Session's person.
+giantswarm/giantswarm#38607: `components.kagent{,-crds}.versionRange` is `>=1.17.0-rc.1 <1.18.0-0`. kagent 1.16 and 1.17 stay on 1.15's upstream pin and Substrate 1.12.1 contract; they add no database migration, and kagent-crds' only change is an additive ModelConfig field (the ChatGPT subscription login). A session stored by 1.15 resumes unchanged: no migration, no snapshot reset, no manual step; a suspended agent resumes with its conversation and its volumes. The kagent line's charts from 1.16.0 no longer carry the kagent-tools and kmcp subcharts. With muster trusting the actor JWT, the kagent release gets `controller.session.actorJWTProviders.muster` (muster's in-cluster host and audience): a workspace Session's calls to muster carry the Session Actor's JWT, which Substrate's egress gateway mints, and muster serves them as the Session's person.
 
 ### Operator action
 
 - **None** for an installation that follows the chart's ranges.
-- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.17.0`, `kagent-crds` first or with it.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.17.0-rc.1`, `kagent-crds` first or with it.
 - **muster's `oauth.server.baseUrl` unset**: kagent gets no muster provider (its controller refuses one without an audience); set it, or `muster.muster.credentialProvider.actorBearer.audience`.
 
 ## \<current\> → \<next\> (Substrate 1.13.0: muster trusts the actor JWT)
