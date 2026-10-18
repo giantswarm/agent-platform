@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A workspace installation without a provider pin fails the render instead of losing muster's session bindings** (giantswarm/agent-platform#1103). With `workspaces.enabled` and Substrate on, muster's credential provider needs a provider instance to release: the one muster's registration of the workspace-manager is pinned to (provider instances with `oauth.enabled`), or an own `muster.muster.credentialProvider.releasable`. Without either the meta chart derived no `muster.credentialProvider` at all (muster refuses one that releases nothing), so muster served no `/session-bindings` and agent-manager's binding of a workspace Session got a 404. The render now fails naming both fixes; one helper (`agent-platform.muster.credentialProvider`) resolves the provider for the derivation and the guard. Substrate follows kagent, so **an installation with `workspaces.enabled` and no workspace provider instance adds one, or turns workspaces off**: the workspace-manager accepts no Workspace without one. `make verify-workspace-session-admission` asserts the guard.
+
 ### Removed
 
 - **`ingress.mode: agentgateway-direct` is gone** (giantswarm/agent-platform#252). The mode never rendered: its guard failed every install for want of a DCR-capable IdP. The connectivity chart now refuses it as an unknown mode (`must be one of: agentgateway-muster, muster-direct`); its `viaMuster: false` guard, the meta chart's unused copies of the ingress guard and the mode's values comments go with it. No installation renders differently. `make verify-modes` asserts the refusal.

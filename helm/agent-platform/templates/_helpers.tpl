@@ -491,33 +491,14 @@ and muster never turns Ready (giantswarm/agent-platform#309). */ -}}
 {{- $_ := set $muster "extraCaFile" (dict "secret" (dict "name" $ca.secretName "key" ($ca.key | default "ca.crt"))) -}}
 {{- $_ := set $derived "muster" $muster -}}
 {{- end -}}
-{{- /* muster answers the egress gateway's credential fetches for a workspace
-Session's provider hosts (ate-secret://muster.giantswarm.io/<provider
-instance>/<git|api>) while workspaces and Substrate are on: muster serves
-FetchSecret on Substrate's pod certificates, which only a cluster running
-Substrate issues, and answers the gateway's pod identity alone
-(spiffe://cluster.local/ns/<substrate targetNamespace>/sa/atenet-egress).
-releasable, the provider instances whose grants muster releases, is the
-instance muster's registration of the workspace-manager is pinned to
-under its App's issuer, own or derived (agent-platform.workspaceManager.musterPin), the same
-instance name the Session's credential URIs and agent-manager's binding carry.
-muster.credentialProvider's own keys stand. Without a releasable instance
-(no provider pin and no own entry) nothing is derived: muster refuses a
-credential provider that releases nothing. */ -}}
-{{- if and (.root.Values.workspaces | default dict).enabled (include "agent-platform.componentEnabled" (dict "root" .root "name" "substrate")) -}}
-{{- $substrateNs := dig "substrate" "targetNamespace" "ate-system" (.root.Values.components | default dict) -}}
-{{- $own := dig "muster" "credentialProvider" dict (.root.Values.muster | default dict) | default dict -}}
-{{- $provider := dict "enabled" true "gatewayIdentity" (printf "spiffe://cluster.local/ns/%s/sa/atenet-egress" $substrateNs) -}}
-{{- $pin := include "agent-platform.workspaceManager.musterPin" .root | fromJson -}}
-{{- if and $pin.provider $pin.issuer -}}
-{{- $_ := set $provider "releasable" (dict $pin.provider $pin.issuer) -}}
-{{- end -}}
-{{- $provider = mergeOverwrite $provider $own -}}
+{{- /* muster's credential provider (agent-platform.muster.credentialProvider);
+without a releasable instance agent-platform.validateWorkspaceAuth has failed
+the render. */ -}}
+{{- $provider := include "agent-platform.muster.credentialProvider" .root | fromJson -}}
 {{- if $provider.releasable -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $muster "credentialProvider" $provider -}}
 {{- $_ := set $derived "muster" $muster -}}
-{{- end -}}
 {{- end -}}
 {{- /* The customer's platform team writes the servers and workflows of
 muster's namespace beside the Giant Swarm admin groups
@@ -743,6 +724,39 @@ Usage: include "agent-platform.workspaceManager.musterPin" . | fromJson
 {{- end -}}
 
 {{/*
+muster's credential provider while workspaces and Substrate are on: muster
+answers the egress gateway's credential fetches for a workspace Session's
+provider hosts (ate-secret://muster.giantswarm.io/<provider instance>/<git|api>)
+and agent-manager's session bindings. muster serves FetchSecret on Substrate's
+pod certificates, which only a cluster running Substrate issues, and answers
+the gateway's pod identity alone
+(spiffe://cluster.local/ns/<substrate targetNamespace>/sa/atenet-egress).
+releasable, the provider instances whose grants muster releases, is the
+instance muster's registration of the workspace-manager is pinned to under its
+App's issuer, own or derived (agent-platform.workspaceManager.musterPin), the
+same instance name the Session's credential URIs and agent-manager's binding
+carry. muster.credentialProvider's own keys stand. muster refuses a credential
+provider that releases nothing, so an empty releasable fails the render
+(agent-platform.validateWorkspaceAuth). Emits JSON, {} with workspaces or
+Substrate off.
+Usage: include "agent-platform.muster.credentialProvider" . | fromJson
+*/}}
+{{- define "agent-platform.muster.credentialProvider" -}}
+{{- $provider := dict -}}
+{{- if and (.Values.workspaces | default dict).enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
+{{- $substrateNs := dig "substrate" "targetNamespace" "ate-system" (.Values.components | default dict) -}}
+{{- $own := dig "muster" "credentialProvider" dict (.Values.muster | default dict) | default dict -}}
+{{- $provider = dict "enabled" true "gatewayIdentity" (printf "spiffe://cluster.local/ns/%s/sa/atenet-egress" $substrateNs) -}}
+{{- $pin := include "agent-platform.workspaceManager.musterPin" . | fromJson -}}
+{{- if and $pin.provider $pin.issuer -}}
+{{- $_ := set $provider "releasable" (dict $pin.provider $pin.issuer) -}}
+{{- end -}}
+{{- $provider = mergeOverwrite $provider $own -}}
+{{- end -}}
+{{- $provider | toJson -}}
+{{- end -}}
+
+{{/*
 The guards of the workspace-manager's provider authorization, while workspaces
 are on, here where a failure is seen instead of inside the component release:
 - with provider instances and oauth.enabled: the floor of
@@ -752,6 +766,9 @@ are on, here where a failure is seen instead of inside the component release:
   workspace-manager.providers and a Secret with the App's OAuth client, and
   muster.mcpServer.auth.authorizationServer.issuer is set or derived — without the pin no
   person has a provider token and every workspace is refused;
+- with Substrate on: muster's credential provider
+  (agent-platform.muster.credentialProvider) releases an instance, pinned or
+  own — muster refuses it with an empty releasable;
 - workspace-manager.grant.signingKey, when set, only with providers and
   oauth.enabled (the manager refuses to start with a key without them), and
   the reference the manager gets names a Secret and a data key.
@@ -782,6 +799,10 @@ Emits nothing; fails naming the key and the fix.
 {{- if not $pin.issuer -}}
 {{- fail (printf "workspace-manager.muster.mcpServer.auth.authorizationServer.issuer is empty and provider instance %s is no github instance with values.app.id to take it from: muster files each person's grant of the instance's App under that issuer, the App's own identity; set it" $pin.provider) -}}
 {{- end -}}
+{{- end -}}
+{{- $provider := include "agent-platform.muster.credentialProvider" . | fromJson -}}
+{{- if and $provider (not $provider.releasable) -}}
+{{- fail "workspaces.enabled with Substrate on, but muster releases no provider instance's grant: without workspace-manager.providers and workspace-manager.oauth.enabled muster's registration of the workspace-manager is pinned to no instance, so muster.muster.credentialProvider.releasable is empty, muster refuses its credential provider, and agent-manager's session bindings (/session-bindings) answer 404 — add the provider instances with oauth.enabled (muster then releases the pinned instance's grants), or name the instances in muster.muster.credentialProvider.releasable (<instance>: <its App's issuer>)" -}}
 {{- end -}}
 {{- $grant := dig "grant" "signingKey" dict $wm | default dict -}}
 {{- if and (kindIs "map" $grant) (or $grant.name $grant.key) (not (and $wm.providers (dig "oauth" "enabled" false $wm))) -}}
