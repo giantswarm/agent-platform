@@ -15,6 +15,38 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (kagent 1.19: the controller authorizes each caller with Kubernetes RBAC)
+
+giantswarm/agent-platform#706: `components.kagent{,-crds}.versionRange` is `>=1.19.0 <1.20.0`, and the kagent release gets `controller.authorization.mode: kubernetes`. kagent 1.19.0 is 1.18.0 plus giantswarm/kagent-upstream#633: in this mode a ServiceAccount token is authenticated with a TokenReview, and a list of every creator's Sessions (`ListSessions` with `all_creators`) needs `list` on `sessions.api.kagent.dev` cluster-wide. No database migration, no CRD change: a session stored by 1.18 resumes unchanged.
+
+What changes for a person and for each caller:
+
+- **Agents are visible by RBAC.** The controller asks the API server, with a SubjectAccessReview for the caller's user (`kagent.controller.auth.userIdClaim`, email) and groups (the `groups` claim, no prefix), whether the caller may see and run an agent. A person sees the agents of the kagent namespace (the platform tenant, bound to `tenants.platform.users`, `system:authenticated` by default) and of each Organization namespace (`giantswarm.io/organization`) where a RoleBinding gives them `agent-platform:user`, `:editor` or `:admin`. A person bound nowhere sees an empty list and cannot start a conversation.
+- **Every creator's Sessions are refused for people.** No tenant role grants it. kagent's own UI shows "Showing only the conversations you started" on the agent page and "Not counted" on its Agents tab; its orphaned-conversations page shows an error. The Dev Portal asks only for the caller's own Sessions.
+- **workspace-manager** calls with its projected ServiceAccount token. With workspaces on, the connectivity release binds its ServiceAccount to the ClusterRole `agent-platform:workspace-manager-sessions` (`list` on `sessions.api.kagent.dev`), and the kagent release's `controller.authorization.serviceAccountTokenAudience` follows `workspace-manager.kagent.tokenAudience` (`kagent` unless set; an own value that differs fails the render).
+- **Only the platform's callers reach the controller's API port.** The kagent release's `controller.networkPolicy` is on: port 8083 admits kagent's UI, the agentgateway data plane (the Dev Portal, Slack through klaus-gateway, agent-manager and every call through the edge), Substrate's egress gateway (`atenet-egress`, the agents' calls) and, with workspaces on, workspace-manager. With `networkPolicy.enabled` the connectivity release already admitted only these; the kagent chart's policy now holds the same with the platform's policies off. Add a caller in `kagent.controller.networkPolicy.from` (NetworkPolicyPeers); `enabled: false` fails the render.
+
+### Operator action
+
+Before the upgrade, check:
+
+- **Group bindings for every person who uses agents.** A person sees the platform tenant's agents through `tenants.platform.users` (`system:authenticated` by default, so nobody loses them). An agent in an Organization namespace is visible only to the groups a RoleBinding there binds to `agent-platform:user`, `:editor` or `:admin`. List them with `kubectl get rolebindings -A -o wide | grep agent-platform:` and add the missing ones in the installation's configuration before the upgrade.
+- **The groups as the API server sees them.** The controller reviews the `groups` claim with no prefix and the email with no prefix, as Giant Swarm installations bind them. An installation whose API server sets `--oidc-groups-prefix` or `--oidc-username-prefix` sets `kagent.controller.authorization.groupsPrefix` or `.usernamePrefix` to the same value (agentlab: `oidc:`); another claim, `kagent.controller.authorization.groupsClaim`.
+- **workspace-manager sends the token.** With workspaces on, `components.workspace-manager.versionRange` must select 0.10.0 or later (the chart's floor): it mounts the projected token of `workspace-manager.kagent.tokenAudience`. An installation that pins the manager below the range keeps `noop` (below) until it moves. workspace-manager must run in the connectivity release's namespace (`components.workspace-manager.targetNamespace` unset); another namespace fails the render.
+- **NetworkPolicy enforcement.** The controller trusts the user a caller names behind the edge, so the API port must be closed to every other pod. The installation's CNI must enforce Kubernetes NetworkPolicies (Cilium on Giant Swarm installations). Without enforcement, keep `noop`.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.19.0`, `kagent-crds` first or with it.
+
+To keep today's behaviour (every signed-in caller sees and runs every agent) on one installation, set:
+
+```yaml
+kagent:
+  controller:
+    authorization:
+      mode: noop
+```
+
+`noop` renders no controller NetworkPolicy and derives nothing; the connectivity release's own policies stay as before. Remove it once the checks above pass.
+
 ## \<current\> → \<next\> (`tenants.organizations.enabled`: a tenant's own model, on the `llm` listener)
 
 giantswarm/agent-platform#759: with kagent and `tenants.organizations.enabled` on, every ModelConfig in a namespace labelled `giantswarm.io/organization` goes through the `llm` listener ([README: A tenant's own model](./README.md#a-tenants-own-model)). The `modelconfig-llm-routing` MutatingAdmissionPolicies fill in a missing `baseUrl` there, and `agent-platform-tenant-model-routing` refuses any other `baseUrl` and any provider the listener does not serve.

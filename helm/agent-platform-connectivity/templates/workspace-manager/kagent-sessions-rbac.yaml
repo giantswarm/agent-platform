@@ -1,0 +1,42 @@
+{{- /*
+workspace-manager lists every creator's Sessions (ListSessions with
+all_creators) for the session directories' cleanup, as its own ServiceAccount
+with a projected token of kagent's audience. In the kubernetes authorization
+mode the kagent controller authenticates that token with a TokenReview and
+reviews the list as `list` on sessions.api.kagent.dev with no namespace
+(giantswarm/agent-platform#706; the kagent line from 1.19.0). No tenant role
+grants it: the list carries the Session names of every tenant. So this
+ClusterRole holds that one rule and is bound to the manager's ServiceAccount
+only. In the noop mode the controller asks nothing and the binding is inert.
+*/ -}}
+{{- if and (include "agent-platform.workspaceManager.enabled" .) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson }}
+{{- $sa := dig "serviceAccount" dict $chart }}
+{{- $saName := dig "name" "" $sa | default (ternary (include "agent-platform.workspaceManager.fullname" .) "default" (ne (toString (dig "create" true $sa)) "false")) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:workspace-manager-sessions
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [api.kagent.dev]
+    resources: [sessions]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-platform:workspace-manager-sessions
+  labels:
+    {{- include "agent-platform.workspaceManager.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-platform:workspace-manager-sessions
+subjects:
+  - kind: ServiceAccount
+    name: {{ $saName }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
