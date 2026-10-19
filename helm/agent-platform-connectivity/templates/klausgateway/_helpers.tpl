@@ -47,8 +47,9 @@ applies (bolt, memory, reviews off).
 Truthy (emits "true") while klaus-gateway runs the egress refusal notices
 (giantswarm/giantswarm#38667) — the meta chart's define of the same name,
 which this chart must agree with: klaus-gateway with Slack and
-klausGateway.refusals.enabled on, kagent and Substrate on, the controller in
-the kubernetes authorization mode. The gateway then reads the Kubernetes API
+klausGateway.refusals.enabled on — which the meta chart resolves from auto,
+the floors of the klaus-gateway and kagent ranges included — kagent and
+Substrate on, the controller in the kubernetes authorization mode. The gateway then reads the Kubernetes API
 (the egress's EndpointSlices, the Agents), the stats port of Substrate's
 atenet-egress and the kagent controller's API port
 (-klausgateway-refusals-egress).

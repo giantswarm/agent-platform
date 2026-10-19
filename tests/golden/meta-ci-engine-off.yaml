@@ -920,6 +920,8 @@ spec:
         maxUnavailable: 1
         minAvailable: ""
         unhealthyPodEvictionPolicy: AlwaysAllow
+      refusals:
+        enabled: false
       routing:
         store: memory
       serviceMonitor:

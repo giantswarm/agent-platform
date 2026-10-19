@@ -896,6 +896,10 @@ components:  # @schema additionalProperties: true
     # observability block is closed and takes the endpoint and headers only.
     omitKeys:
       - observability.enabled
+      # Forwarded only while the refusal notices run, as derived values
+      # (agent-platform.klausGateway.refusalsOn): a klaus-gateway before
+      # 4.11.0 refuses the block.
+      - refusals
     # slack.contextBotIDs travels only when set: the key is new in
     # klaus-gateway 4.2.0, and an older chart's closed slack block refuses it.
     omitEmptyKeys:
@@ -4325,9 +4329,14 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
   # token audience), admits this gateway as the controller's session reader
   # (kagent.controller.authorization.sessionReaderServiceAccount) and to its
   # API port, and the connectivity chart opens the gateway's egress to both.
-  # agentURLTemplate ({namespace}, {name}) is the notice's Open agent link.
+  # agentURLTemplate ({namespace}, {name}) is the notice's Open agent link,
+  # window (24h) the dedup window. auto (the default) runs them while the
+  # floors of components.klaus-gateway.versionRange (4.11.0) and
+  # components.kagent.versionRange (1.20.0, the session reader) carry them;
+  # true runs them likewise and fails the render below the floors; false
+  # never.
   refusals:
-    enabled: true
+    enabled: auto
 
   # Agentgateway route — exposes the Slack channel path (/channels/slack, with
   # slack.enabled) on the agentgateway data-plane Gateway (agentgateway-*

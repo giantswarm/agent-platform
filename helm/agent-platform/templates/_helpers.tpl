@@ -446,7 +446,9 @@ release's closed schema refuses a workspaces block. */ -}}
 {{- /* The egress refusal notices, while they are on
 (agent-platform.klausGateway.refusalsOn): where the Substrate egress and the
 kagent controller are, and the audience of the token the controller's session
-reader admits. An own value that differs fails the render. */ -}}
+reader admits, and the block's own keys (agentURLTemplate, window, …). An own
+value that differs fails the render. components.klaus-gateway.omitKeys drops
+the block otherwise: a klaus-gateway before 4.11.0 refuses it. */ -}}
 {{- if include "agent-platform.klausGateway.refusalsOn" .root -}}
 {{- $want := dict
   "egressService" (printf "%s/atenet-egress" (dig "substrate" "targetNamespace" "ate-system" .root.Values.components))
@@ -458,7 +460,10 @@ reader admits. An own value that differs fails the render. */ -}}
 {{- fail (printf "klausGateway.refusals.%s (%s) differs from what the platform runs (%s): the gateway reads the egress and asks the kagent controller where the chart installs them — leave klausGateway.refusals.%s unset" $k (toString (dig $k "" $own)) $v $k) -}}
 {{- end -}}
 {{- end -}}
-{{- $_ := set $derived "refusals" $want -}}
+{{- $refusals := omit $own "enabled" -}}
+{{- range $k, $v := $want -}}{{- $_ := set $refusals $k $v -}}{{- end -}}
+{{- $_ := set $refusals "enabled" true -}}
+{{- $_ := set $derived "refusals" $refusals -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "valkey" -}}
@@ -2757,6 +2762,14 @@ connectivity release both read the resolved value. */ -}}
 {{- $_ := set (index $v "substrate" "postgres") "enabled" (eq (include "agent-platform.substrate.postgresMode" $root) "bundled") -}}
 {{- end -}}
 {{- include "agent-platform.shape.otlp" (dict "root" $root "values" $v) -}}
+{{- /* klausGateway.refusals.enabled: auto | true | false, resolved to the
+answer agent-platform.klausGateway.refusalsOn gives, so the connectivity
+release opens the gateway's refusal egress exactly while the notices run. */ -}}
+{{- if kindIs "map" (index $v "klausGateway") -}}
+{{- $kgv := index $v "klausGateway" -}}
+{{- if not (kindIs "map" (index $kgv "refusals")) -}}{{- $_ := set $kgv "refusals" dict -}}{{- end -}}
+{{- $_ := set (index $kgv "refusals") "enabled" (eq (include "agent-platform.klausGateway.refusalsOn" $root) "true") -}}
+{{- end -}}
 {{- /* Derived component copies: only a leaf left at auto is written. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "networkPolicy" "flavor") "value" $flavor) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "valkey" "ciliumNetworkPolicy" "enabled") "value" (eq $flavor "cilium")) -}}
@@ -3405,17 +3418,37 @@ klaus-gateway's release namespace and the name of its ServiceAccount and pods
 {{- end -}}
 
 {{/*
+The releases the refusal notices need: klaus-gateway 4.11.0, whose closed
+values schema knows klausGateway.refusals, and kagent 1.20.0, whose
+controller admits a session reader. Truthy (emits "true") while the floors of
+components.klaus-gateway.versionRange and components.kagent.versionRange are
+at or above them; below, the notices stay off and nothing of them renders.
+*/}}
+{{- define "agent-platform.klausGateway.refusalsFloor" -}}4.11.0{{- end -}}
+{{- define "agent-platform.kagent.sessionReaderFloor" -}}1.20.0{{- end -}}
+{{- define "agent-platform.klausGateway.refusalsFloorsMet" -}}
+{{- $kgFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "klaus-gateway" "versionRange" "" .Values.components) | default "0.0.0") "" -}}
+{{- $kaFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "kagent" "versionRange" "" .Values.components) | default "0.0.0") "" -}}
+{{- if and (ge ((semver $kgFloor).Compare (semver (include "agent-platform.klausGateway.refusalsFloor" .))) 0) (ge ((semver $kaFloor).Compare (semver (include "agent-platform.kagent.sessionReaderFloor" .))) 0) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 Truthy (emits "true") while the egress refusal notices run
 (giantswarm/giantswarm#38667): klaus-gateway with Slack on
-(klausGateway.slack.enabled), klausGateway.refusals.enabled (on by default),
+(klausGateway.slack.enabled), klausGateway.refusals.enabled not false (auto by default),
 kagent and Substrate on, and the controller in the kubernetes authorization
-mode, whose session reader admits the gateway. The gateway then reads the
+mode, whose session reader admits the gateway, and the klaus-gateway and kagent
+ranges at or above the releases that carry the notices
+(agent-platform.klausGateway.refusalsFloorsMet). The gateway then reads the
 Substrate egress's refusal counter and tells each agent's creator by direct
 message. The connectivity chart asks the same (its copy of this define).
 */}}
 {{- define "agent-platform.klausGateway.refusalsOn" -}}
 {{- $kg := .Values.klausGateway | default dict -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) (dig "slack" "enabled" false $kg) (dig "refusals" "enabled" false $kg) (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) (eq (toString (dig "controller" "authorization" "mode" "" (.Values.kagent | default dict))) "kubernetes") -}}true{{- end -}}
+{{- if and (eq (toString (dig "refusals" "enabled" "auto" $kg)) "true") (not (include "agent-platform.klausGateway.refusalsFloorsMet" .)) -}}
+{{- fail (printf "klausGateway.refusals.enabled is true, but components.klaus-gateway.versionRange admits a klaus-gateway before %s or components.kagent.versionRange a kagent before %s, which cannot run the refusal notices — raise the floors, or leave klausGateway.refusals.enabled at auto" (include "agent-platform.klausGateway.refusalsFloor" .) (include "agent-platform.kagent.sessionReaderFloor" .)) -}}
+{{- end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) (dig "slack" "enabled" false $kg) (ne (toString (dig "refusals" "enabled" "auto" $kg)) "false") (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) (eq (toString (dig "controller" "authorization" "mode" "" (.Values.kagent | default dict))) "kubernetes") (include "agent-platform.klausGateway.refusalsFloorsMet" .) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
