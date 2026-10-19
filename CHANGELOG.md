@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The egress gateway reaches muster's credential provider** (giantswarm/giantswarm#38627). With Cilium enforcing, `substrate-atenet-egress` opened muster on its MCP port only, so the gateway's `FetchSecret` to `muster.agent-platform.svc:50051` timed out and a workspace Session's `git push` and GitHub API calls ended in `503 credential provider muster.giantswarm.io unavailable`. The policy now opens muster on 50051 while workspaces are on.
+
 - **The egress gateway reaches the Google access-token credential provider plugin** (giantswarm/giantswarm#38547). With Cilium enforcing, `substrate-atenet-egress` opened `k8s-credential-provider:50051` but not `google-access-token-credential-provider:50051`, so every Vertex AI turn after the 4.148.0 routing failed with `credential provider google-access-token.k8s.io unavailable`. The policy now opens the plugin on 50051 while kagent and the plugin component are on.
 
 - **Workspaces without the agents are refused at render time** (giantswarm/agent-platform#1118). `workspaces.enabled: true` with `components.kagent.enabled` off installed a workspace-manager release whose sync ServiceAccount and Roles go into the kagent namespace, which only exists with the agents, so the install failed on `namespaces "kagent" not found`. The render now fails naming kagent; turn the agents on beside the workspaces, or the workspaces off.
