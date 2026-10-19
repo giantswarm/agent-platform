@@ -42,7 +42,7 @@ muster:
 
 ### Requirements
 
-- **muster ≥ 5.12.0.** The `label:` rule arrived there; a 5.11.0 muster refuses to start on a preset that uses it. `components.muster.versionRange` (today `>=5.31.4 <6.0.0`) stays above that floor, and a BOM that pins muster must pin at least 5.12.0.
+- **muster ≥ 5.12.0.** The `label:` rule arrived there; a 5.11.0 muster refuses to start on a preset that uses it. `components.muster.versionRange` stays above that floor, and a BOM that pins muster must pin at least 5.12.0.
 - The labels come with the component versions above. On an installation still running an older agent-platform-mcps, `preset:infrastructure` resolves to nothing until the label arrives — no error, an empty toolset (the failure mode is closed). `filter_tools` reports the selector under `toolset_unmatched`.
 
 ## Adding an installation's own presets

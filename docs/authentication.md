@@ -47,18 +47,20 @@ muster signs no tokens of its own: every downstream server validates against Dex
 
 ## 4. Edge JWT validation and JWKS
 
-agentgateway verifies the JWT itself (`Strict`, against `global.identity.issuerUrl`) on three routes: the kagent controller route ([5](#5-the-kagent-controller-route)), the agent-manager route (`agentManager.route`, off by default) and the models Gateway ([6](#6-the-models-gateway)). Each takes its key set from its own `jwtAuthentication.jwks` (`host`, `port`, `path`, `tls`). The agentgateway controller fetches it and pushes the keys to the data plane. A failed fetch refuses every caller with `401 token uses the unknown key`.
+agentgateway verifies the JWT itself (`Strict`, against `global.identity.issuerUrl`) on three routes: the kagent controller route ([5](#5-the-kagent-controller-route)), the agent-manager route (`agentManager.route` with its `jwtAuthentication.enabled`, both off by default) and the models Gateway ([6](#6-the-models-gateway)). Each takes its key set from its own `jwtAuthentication.jwks` (`host`, `port`, `path`, `tls`). The agentgateway controller fetches it and pushes the keys to the data plane. A failed fetch refuses every caller with `401 token uses the unknown key`.
 
 An in-cluster issuer (for example Dex on `:5556` in another namespace) needs `gateway.jwksEgress.enabled: true` with that `namespace` and `port`; the render fails when a route names an in-cluster JWKS host the egress rule does not open. An external issuer on 443 needs no rule.
 
 ## 5. The kagent controller route
 
-`kagent.controllerRoute.enabled` (off by default; rendered with `components.kagent` on) exposes the kagent controller's API: the kagent API v2 gRPC services and A2A v1, native gRPC or gRPC-Web. The controller authorizes nothing on its own, so it is reachable only through two authentication boundaries:
+`kagent.controllerRoute.enabled` (off by default; rendered with `components.kagent` on) exposes the kagent controller's API: the kagent API v2 gRPC services and A2A v1, native gRPC or gRPC-Web. The controller does not verify the token it is given, so it is reachable only through two authentication boundaries:
 
 - **agentgateway** (`GRPCRoute kagent-controller`, `kagent-controller-public`), with `AgentgatewayPolicy kagent-controller-jwt`. JWT validation is on by default (`kagent.controllerRoute.jwtAuthentication`). A token is required and must carry the identity claim, `kagent.controller.auth.userIdClaim` (`email`). The policy **sets** `x-user-id` from the verified claim, which replaces any value the client sent, and passes the bearer through.
 - **the kagent UI** (`kagent.uiRoute` behind `kagent.oauth2-proxy`). Its route removes `x-user-id`, and the bearer comes from the oauth2-proxy session.
 
-The controller (`kagent.controller.auth.mode: trusted-proxy`) takes the caller from the bearer's `email` claim. It never verifies a signature, so its network policy admits only the agentgateway data plane and the UI pods on `:8083`.
+The controller (`kagent.controller.auth.mode: trusted-proxy`) takes the caller from the bearer's `email` claim. It never verifies a signature, so its API port (`:8083`) admits only the kagent UI, the agentgateway data plane, Substrate's egress gateway and, with workspaces on, workspace-manager.
+
+With `kagent.controller.authorization.mode: kubernetes` (the default from kagent 1.19), the controller then asks the API server, with a SubjectAccessReview for that user and the token's `groups`, whether the caller may see and run an agent. A person needs `agent-platform:user`, `agent-platform:editor` or `agent-platform:admin` in the agent's namespace; in the kagent namespace, `tenants.platform.users` grants `agent-platform:user`. `mode: noop` lets every signed-in caller see and run every agent. See [UPGRADE.md](../UPGRADE.md).
 
 | Request | At the gateway |
 |---|---|

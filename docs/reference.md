@@ -126,7 +126,7 @@ Keep `gitops.self.enabled: false` in your values file afterwards. Otherwise the 
 
 ### Clusters that run Flux
 
-On a cluster that already runs Flux (every Giant Swarm management cluster), set `components.flux.enabled: false` and install the chart through that Flux. No engine object, hook or tenant identity is rendered, and self-management is off.
+On a cluster that already runs Flux (every Giant Swarm management cluster), set `components.flux.enabled: false` and install the chart through that Flux. No engine object, engine hook or tenant identity is rendered, and self-management is off.
 
 ```yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -211,7 +211,7 @@ These are the main non-component settings. Component switches are in [Enabling a
 | `global.identity.{issuerUrl,clientId,existingSecret}` | `""` | The platform's one OIDC provider. See [install.md §2](install.md#the-identity-provider). |
 | `global.gatewayApi.parentRefs` | `[]` | The public Gateway that routes attach to by default. |
 | `global.registry` | `gsoci.azurecr.io` | Container image registry. |
-| `ingress.mode` | `agentgateway-muster` | Request topology. `muster-direct` is deprecated. `agentgateway-direct` is not supported. See [Ingress topology](#ingress-topology). |
+| `ingress.mode` | `agentgateway-muster` | Request topology. `muster-direct` is deprecated. `agentgateway-direct` was removed. See [Ingress topology](#ingress-topology). |
 | `ingress.parentRefs` / `ingress.hostnames` | `[]` | Overrides for muster's route. Empty means `global.gatewayApi.parentRefs` (or the chart-owned edge) and `muster.<global.domain>`. |
 | `ingress.backendTrafficPolicy.enabled` | `false` | Route-scoped `BackendTrafficPolicy` (keeps `WWW-Authenticate`, sets `requestTimeout: 0s`). |
 | `gateway.name` / `gateway.gatewayClassName` | `agentgateway` | Name and class of the data-plane `Gateway`. |
@@ -285,9 +285,9 @@ Configuration:
 
 A workspace is an Organization's set of repositories, mirrored on one shared read-write-many volume in the kagent namespace, with a directory per Session. **[workspace-manager](https://github.com/giantswarm/workspace-manager)** serves workspaces as MCP tools through muster (`x_workspace-manager_*`).
 
-- **One switch.** `workspaces.enabled` (default `false`) installs `components.workspace-manager` (`dependsOn: [muster]`) and gates every other workspace piece. The roster entry follows the switch, and an explicit value that disagrees fails the render. With the switch off, the render is identical to a chart without workspaces (`make verify-workspace-manager`).
+- **One switch.** `workspaces.enabled` (default `false`) installs `components.workspace-manager` (`dependsOn: [muster, agent-platform-connectivity]`) and gates every other workspace piece. Workspaces need kagent; the render fails with `components.kagent.enabled` off. The roster entry follows the switch, and an explicit value that disagrees fails the render. With the switch off, the render is identical to a chart without workspaces (`make verify-workspace-manager`).
 - **Organizations.** `workspaces.organizations[]` takes a `name` and `memberGroups`. Write a group as it appears in the token's groups claim: the Dex connector id, a colon, then the group, for example `giantswarm-github:acme:developers`.
-- **Storage.** `workspaces.storage.storageClassName` is required. The class must keep POSIX semantics, file modes and symbolic links, because the volumes hold git repositories: Amazon EFS, Azure Files over NFS 4.1 (not SMB), or an NFS server. Bring your own class, or let the connectivity chart render one with `storageClass.create: true` and a `storageClass.preset` of `efs` (needs `efs.fileSystemId`), `azureFiles` or `nfs` (needs `nfs.server`). On EFS, set the CSI driver's `controller.deleteAccessPointRootDir: true`, or deleted volumes leave their data behind. `make verify-workspace-storage` covers the presets.
+- **Storage.** `workspaces.storage.storageClassName` names the class (default `workspaces-rwx`); an empty value fails the render. The class must keep POSIX semantics, file modes and symbolic links, because the volumes hold git repositories: Amazon EFS, Azure Files over NFS 4.1 (not SMB), or an NFS server. Bring your own class, or let the connectivity chart render one with `storageClass.create: true` and a `storageClass.preset` of `efs` (needs `efs.fileSystemId`), `azureFiles` or `nfs` (needs `nfs.server`). On EFS, set the CSI driver's `controller.deleteAccessPointRootDir: true`, or deleted volumes leave their data behind. `make verify-workspace-storage` covers the presets.
 - **Substrate's driver.** `workspaces.substrate.csiDriver` (`name`, `controllerEndpoint`, optional `tls`) renders the `CSIDriverConfig` Substrate mounts workspaces with. The driver must be the provisioner of the workspace StorageClass. Without it, a Session cannot mount a workspace (`make verify-workspace-substrate`).
 - **Providers.** `workspace-manager.providers[]` lists the provider instances (`name`, `kind`, `values`), for example GitHub and GitLab side by side. Every credential is a Secret reference `{name, key}`. An inline value fails the render.
 - **The person's provider token is muster's grant.** The meta chart pins the manager's `MCPServer` to one provider instance's App. A person grants that App once in muster, and muster forwards the person's token on every call. The App's callback URL is `<muster base URL>/oauth/proxy/callback`. The manager stores no token.
@@ -306,7 +306,7 @@ A workspace is an Organization's set of repositories, mirrored on one shared rea
 - **Image references travel inside the chart.** The controller and UI tag and the Go ADK digest of the platform `Harness` are stamped into the chart at publish time. The meta chart forwards none of them.
   - `kagent.harness.image` is an override, by digest. It is forwarded only when set.
   - `kagent.substrateWorkerPool.workerImage` is **derived from the floor of `components.substrate.versionRange`**, never taken from the kagent chart's stamp. An own value must carry that tag, or the render fails. See the meta chart README, [One source of the Substrate version](../helm/agent-platform/README.md#one-source-of-the-substrate-version-componentssubstrateversionrange-giantswarmagent-platform466-giantswarmagent-platform822).
-- **The `kagent:` block** uses upstream's chart shape, keys at the root. The connectivity keys are dropped before the values reach the kagent release (`components.kagent.omitKeys`): `controllerRoute`, `controller.vpa`, `fluxServiceAccountName`, `harness.snapshotStore`, `modelConfigs`, `oauth2ProxyIngress`, `remoteMcpServers`, `uiRoute`, `substrateWorkerPool.podDisruptionBudget`.
+- **The `kagent:` block** uses upstream's chart shape, keys at the root. The connectivity keys are dropped before the values reach the kagent release (`components.kagent.omitKeys`): `controllerRoute`, `controller.vpa`, `fluxServiceAccountName`, `harness.snapshotStore`, `modelConfigs`, `oauth2ProxyIngress`, `remoteMcpServers`, `uiRoute`, `substrateWorkerPool.podDisruptionBudget`, `substrateWorkerPool.priorityClass`.
 - **Drift detection.** The kagent, muster and kserve-runtime-configs releases set `spec.driftDetection.mode: enabled` (`components.<name>.driftDetection`). helm-controller re-applies anything that drifted on every reconcile. An object can opt out with `helm.toolkit.fluxcd.io/driftDetection: disabled`. If you turn on `muster.autoscaling.enabled`, add an `ignore` rule for the Deployment's `spec.replicas`.
 
 `make verify-meta`, `make verify-components-charts` and `make verify-kagent-crds` hold the pin and the forwarded blocks.
@@ -316,7 +316,7 @@ A workspace is an Organization's set of repositories, mirrored on one shared rea
 - The Secret lives in the template's namespace. Its key holds `base64("<username>:<token>")`; on GitHub that is `x-access-token:<token>`.
 - The source URL must be `https://`.
 - Use one credential per host. The label `ui.giantswarm.io/agent-skills-git-auth: "true"` makes the portal offer the Secret.
-- A namespace other than `kagent` also needs an entry in `substrate.credentialProvider.namespacePolicies`.
+- Any other namespace than `kagent` also needs an entry in `substrate.credentialProvider.namespacePolicies`. With `tenants.organizations.enabled`, the chart adds the Organizations' namespaces itself.
 - To rotate, replace the Secret's contents and keep its name.
 - agent-manager can keep a Secret named `agent-manager-skills-token` filled with its GitHub App's token (`agent-manager.skills.mintGitAuthSecret`). It belongs to the installation, so a tenant's Organization namespace refuses it.
 - A missing or wrong credential fails only the templates that name it: `Ready=False`, `ActorTemplateRetrying`, then `ActorTemplateFailed`.
@@ -449,7 +449,7 @@ make live-serving-slice NAMESPACE=<the slice's>   # on a cluster: the models-jwt
 
 A CPU workload cluster runs agents managed from the installation: the **runtime slice**, values profile [`examples/runtime-slice.yaml`](../helm/agent-platform/examples/runtime-slice.yaml).
 
-- **What it renders.** `kagent-crds`, `substrate-crds`, `substrate`, `kagent`, `cloudnative-pg` (the operator for kagent's and Substrate's databases; kagent bundles no Postgres), `agentgateway` and the connectivity release. No muster, dicebear, Valkey, model-manager or Flux engine. The agents' tools come from the installation's muster.
+- **What it renders.** `kagent-crds`, `substrate-crds`, `substrate`, `google-access-token-credential-provider`, `kagent`, `cloudnative-pg` (the operator for kagent's and Substrate's databases; kagent bundles no Postgres), `agentgateway` and the connectivity release. No muster, dicebear, Valkey, model-manager or Flux engine. The agents' tools come from the installation's muster.
 - **How it is delivered.** One `<cluster>-agent-platform` release per target cluster, a `HelmRelease` in the cluster's organization namespace on the installation, with `gitops.target.kubeConfig.secretRef` naming `<cluster>-kubeconfig`. The installation's Flux installs everything, and no hook of this chart renders. See [One release per target cluster](../helm/agent-platform/README.md#one-release-per-target-cluster).
 - **Placement.** The slice never runs beside the platform's own release: `components.kagent-crds.ownedCrds` refuses a second owner of kagent's CRDs. A GPU cluster that also serves models turns the serving toggles on in the same release.
 
@@ -625,9 +625,9 @@ The kagent controller serves Prometheus metrics on `:8080` (`kagent.controller.m
 
 `global.registry` (default `gsoci.azurecr.io`) and `global.imagePullSecrets` are injected into every component release that takes `global`. These components are not injected (`injectGlobal: false`), and you set their own image keys:
 
-- agent-platform-mcps, kagent-crds, substrate-crds, substrate, agent-sandbox, gpu-operator, gateway-api-crds and dicebear.
+- agent-platform-mcps, kagent-crds, substrate-crds, substrate, google-access-token-credential-provider, agent-sandbox, gpu-operator, gateway-api-crds and dicebear.
 - Substrate: `substrate.image.registry`, plus `components.substrate.repository` for its chart.
-- agent-sandbox: `agent-sandbox.agent-sandbox.image.repository`. The controller sits under a nested key.
+- agent-sandbox: no image key is forwarded (its release carries no values); mirror its chart with `components.agent-sandbox.repository`.
 
 These charts read their own `image.registry` keys:
 

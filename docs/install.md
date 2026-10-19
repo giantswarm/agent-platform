@@ -22,7 +22,7 @@ The released chart carries the examples: `helm pull oci://gsoci.azurecr.io/chart
 ### Every shape
 
 - **Kubernetes ≥ 1.36** and **Helm 4** (Helm 4's `--wait` waits for the component `HelmRelease`s to be Ready; Helm 3 returns before they are).
-- **The Gateway API CRDs**, the one cluster prerequisite the chart does not bring:
+- **The Gateway API CRDs**, which a default install does not bring (`components.gateway-api-crds.enabled: true` installs them):
 
   ```bash
   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.0/standard-install.yaml
@@ -80,8 +80,7 @@ No Gateway to prepare: the agentgateway data plane becomes the edge. It needs th
 - **The `PodCertificateRequest`, `ClusterTrustBundle` and `ClusterTrustBundleProjection` feature gates** on kube-apiserver, kube-controller-manager and every kubelet. Agent Substrate, which runs every agent, takes its identities from them; a live install refuses a cluster that does not serve `certificates.k8s.io/v1beta1` `PodCertificateRequest`.
 - **On Cilium with kube-proxy replacement: `socketLB.hostNamespaceOnly: true`** (`bpf-lb-sock-hostns-only`), or the agents cannot resolve names over UDP from their sandboxes ([Reference: Agent Substrate](reference.md#agent-substrate)).
 - **An object store bucket** for the agents' snapshots, `kagent.harness.snapshotLocation` (`s3://<bucket>/<prefix>`), writable from the nodes (IRSA, Workload Identity, or credentials in `substrate.atelet.extraEnv`).
-- **A database**, one of three:
-  - the bundled single-instance Postgres of kagent and of Substrate (the defaults; a lab or a trial);
+- **A database**, one of two. The kagent chart deploys no Postgres, so the render fails without one; Substrate alone falls back to its bundled single-instance Postgres.
   - the platform's CloudNativePG Cluster: `components.cloudnative-pg.enabled: true` and `postgres.enabled: true` ([Reference: Backstage, mcp-kubernetes, CloudNativePG and KServe](reference.md#backstage-mcp-kubernetes-cloudnativepg-and-kserve));
   - an external Postgres with the `pgvector` extension available (managed-cloud): the connection URL in Secret `kagent-postgres` (key `uri`) in the `kagent` namespace and the connection string in Secret `substrate-postgres` (key `connectionString`) in `ate-system`, both created before the install. Set `substrate.postgres.readWriteRole` and `ownerRole` to a role that connection's user may assume (`examples/managed-cloud.yaml`).
 - The portal (Backstage) keeps its database in SQLite, or in a CloudNativePG Cluster with `backstage.database.engine: postgresql` and the `cloudnative-pg` component; it takes no external database.
@@ -99,7 +98,7 @@ One OIDC provider signs in every person, **Dex only today** (Keycloak and Entra 
 | `global.identity.clientId` (e.g. `agent-platform`) | `https://muster.<domain>/oauth/callback` | always (muster's OAuth server) |
 | the same client | `https://backstage.<domain>/api/auth/oidc-agent-platform/handler/frame` | `components.backstage` |
 | a client of its own for the kagent UI's oauth2-proxy | `https://kagent.<domain>/oauth2/callback` | `kagent.uiRoute` with `kagent.oauth2-proxy` |
-| `dex-k8s-authenticator` (the audience your kube-apiserver trusts), `trustedPeers: [<global.identity.clientId>]`, no redirect URI | — | model-manager, agent-manager and mcp-kubernetes: muster forwards the person's token to them with this audience, and they act on the cluster as that person |
+| `dex-k8s-authenticator` (the audience your kube-apiserver trusts), `trustedPeers: [<global.identity.clientId>]`, no redirect URI | — | model-manager, agent-manager, cluster-manager, workspace-manager and mcp-kubernetes: muster forwards the person's token to them with this audience, and they act on the cluster as that person |
 
 In Dex's config:
 

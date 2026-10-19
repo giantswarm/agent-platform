@@ -26,7 +26,7 @@ It is the agent platform that runs on every [Giant Swarm](https://www.giantswarm
 
 ## Three pillars
 
-Every component can be switched on or off on its own. A default install runs Tool Access (muster, agentgateway and Valkey) plus model-manager. You add agents, model serving and the portal when you need them.
+Most components can be switched on or off on their own. A default install runs Tool Access (muster, agentgateway and Valkey) plus model-manager. You add agents, model serving and the portal when you need them.
 
 ### Agent Runtime
 
@@ -73,7 +73,7 @@ Serve open-weight models on your own GPUs, or use hosted providers such as Anthr
 | [Flux](https://github.com/fluxcd/flux2) | Delivers every component and keeps it current. The chart brings its own [Flux Operator](https://github.com/controlplaneio-fluxcd/flux-operator) where a cluster has none. |
 | [CloudNativePG](https://github.com/cloudnative-pg/cloudnative-pg) | Postgres for agent sessions and the Substrate control plane, with backups. |
 | [vm-manager](https://github.com/giantswarm/vm-manager) | KVM virtual machines with a vTPM and attestation, created over MCP. |
-| Any OIDC provider | One identity for people, MCP clients and agents, for example [Dex](https://github.com/dexidp/dex). |
+| [Dex](https://github.com/dexidp/dex) | One identity for people, MCP clients and agents. Other OIDC providers are not supported yet. |
 
 ## Why Agent Platform
 
