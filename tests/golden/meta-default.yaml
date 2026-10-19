@@ -808,6 +808,13 @@ spec:
         auth:
           mode: trusted-proxy
           userIdClaim: email
+        authorization:
+          groupsClaim: groups
+          groupsPrefix: ""
+          includeNamespaces: []
+          mode: kubernetes
+          namespaceSelector: giantswarm.io/organization
+          usernamePrefix: ""
         env: []
         image:
           repository: giantswarm/kagent/controller

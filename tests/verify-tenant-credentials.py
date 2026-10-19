@@ -17,11 +17,14 @@ Organizations' workers (giantswarm/agent-platform#1036):
   ate-golden entry selecting other namespaces fails the render naming the key;
 - a Substrate floor below 1.12.0 fails the render with the switch on: the
   older provider refuses the selectors at start;
+- the Google access-token plugin's release carries the same namespacePolicies
+  as the substrate release, off and on, own policies included;
 - the Substrate chart at the range's floor (while the floor is unpublished,
   the chart verify-components-charts renders against: UNRELEASED,
   RENDER_AGAINST) takes the
   forwarded values: its policy file carries both entries and it grants the
-  provider list/watch on namespaces.
+  provider list/watch on namespaces; so does the plugin's chart at its range's
+  floor.
 
 Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io.
 
@@ -84,14 +87,26 @@ def own_policies(tmp: str, name: str, policies: list) -> list[str]:
     return ["-f", path]
 
 
-def substrate(meta: str, flags: list[str]) -> dict:
+PLUGIN = "google-access-token-credential-provider"
+
+
+def releases(meta: str, flags: list[str]) -> dict:
     r = helm("template", "t", meta, *BASE, *flags)
     if r.returncode != 0:
         fail(f"meta render {' '.join(flags)} failed\n{r.stderr}")
-    for d in yaml.safe_load_all(r.stdout):
-        if d and d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "substrate":
-            return d["spec"]["values"]
-    fail(f"no substrate HelmRelease in the render {' '.join(flags)}")
+    out = {d["metadata"]["name"]: d["spec"]["values"] for d in yaml.safe_load_all(r.stdout)
+           if d and d.get("kind") == "HelmRelease" and d["metadata"]["name"] in ("substrate", PLUGIN)}
+    for name in ("substrate", PLUGIN):
+        if name not in out:
+            fail(f"no {name} HelmRelease in the render {' '.join(flags)}")
+    return out
+
+
+def substrate(meta: str, flags: list[str]) -> dict:
+    got = releases(meta, flags)
+    expect(f"the {PLUGIN} release's namespacePolicies against the substrate release's, {' '.join(flags) or 'defaults'}",
+           got[PLUGIN].get("namespacePolicies"), policies(got["substrate"]))
+    return got["substrate"]
 
 
 def policies(values: dict) -> list:
@@ -169,6 +184,29 @@ def main() -> None:
         if not reader or {"apiGroups": [""], "resources": ["namespaces"], "verbs": ["list", "watch"]} not in reader[0].get("rules", []):
             fail(f"the Substrate chart {version} grants the credential provider no list/watch on namespaces: {reader}")
         print(f"ok: the Substrate chart {version} writes both entries and grants list/watch on namespaces")
+
+        plugin = releases(meta, ON)[PLUGIN]
+        url, rng = cc.source(rendered[("OCIRepository", PLUGIN)])
+        tags = cc.registry_tags(url)
+        version = cc.floor(rng)
+        if version not in tags:
+            version = cc.fallback(PLUGIN, url, rng, tags, "")
+        print(f"--> the {PLUGIN} chart {version} takes the forwarded policies")
+        cc.pull(url, version, tmp)
+        values = os.path.join(tmp, "plugin.yaml")
+        with open(values, "w", encoding="utf-8") as f:
+            yaml.safe_dump(plugin, f)
+        r = helm("template", PLUGIN, os.path.join(tmp, PLUGIN), "-n", "ate-system", "-f", values)
+        if r.returncode != 0:
+            fail(f"the {PLUGIN} chart {version} rejects the forwarded values\n{r.stderr}")
+        docs = [d for d in yaml.safe_load_all(r.stdout) if d]
+        files = [yaml.safe_load(v) for d in docs if d.get("kind") == "ConfigMap" for v in (d.get("data") or {}).values()]
+        if [f["policies"] for f in files if isinstance(f, dict) and list(f) == ["policies"]] != [TENANTS]:
+            fail(f"the {PLUGIN} chart {version} writes no policy file with the forwarded policies: {files}")
+        reader = [d for d in docs if d.get("kind") == "ClusterRole" and d["metadata"]["name"].endswith("-namespace-reader")]
+        if not reader or {"apiGroups": [""], "resources": ["namespaces"], "verbs": ["list", "watch"]} not in reader[0].get("rules", []):
+            fail(f"the {PLUGIN} chart {version} grants the plugin no list/watch on namespaces: {reader}")
+        print(f"ok: the {PLUGIN} chart {version} writes both entries and grants list/watch on namespaces")
 
 
 if __name__ == "__main__":

@@ -119,10 +119,13 @@ IDENTITY = [
 # without a grant key or the fixture's muster pin, which an earlier chart's
 # schema refuses): the floor guard applies with provider instances and OAuth.
 # Without the pin muster's releasable is the installation's own while Substrate
-# is on (agent-platform.validateWorkspaceAuth).
+# is on (agent-platform.validateWorkspaceAuth). Such a manager sends kagent no
+# ServiceAccount token, so the kagent controller keeps the noop authorization
+# (agent-platform.workspaceManager.tokenFloor).
 PRE_GRANT = ["--set", "workspace-manager.oauth.enabled=false", "--set", "workspace-manager.grant.signingKey=null",
              "--set", "workspace-manager.muster.mcpServer.auth.authorizationServer=null",
-             "--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]
+             "--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents",
+             "--set", "kagent.controller.authorization.mode=noop"]
 WM_KAGENT = ["--set", "components.workspace-manager.versionRange=>=0.4.0 <1.0.0", *PRE_GRANT]
 NO_GITLAB = ["--set", "workspace-manager.providers[1].kind=github"]
 # The first workspace-manager release with the provider kind gitlab.
@@ -348,6 +351,15 @@ def main(meta: str, connectivity: str) -> int:
             if not re.search(r"^        admission:\n          jwt:\n", session, re.M):
                 fail(f"switching workspaces on did not derive kagent's Session admission onto {key}:\n{session}")
             on = on.replace(session, "", 1)
+            # And, in the kubernetes authorization mode, the manager's token audience
+            # and its pods admitted to the controller's API port
+            # (tests/verify-kagent-authorization.py pins both).
+            audience = "        serviceAccountTokenAudience: kagent\n"
+            peer = re.compile(r"^        - namespaceSelector:\n            matchLabels:\n              kubernetes\.io/metadata\.name: \S+\n"
+                              r"          podSelector:\n            matchLabels:\n              app\.kubernetes\.io/name: workspace-manager\n", re.M)
+            if audience not in on or not peer.search(on):
+                fail(f"switching workspaces on did not derive the manager's token audience and its NetworkPolicy peer onto {key}")
+            on = peer.sub("", on.replace(audience, "", 1), count=1)
         if key == ("HelmRelease", "klaus-gateway"):
             # And the gateway's workspace tools prefix, derived from the
             # klaus-gateway floor 4.3.0 on (tests/verify-klausgateway-workspaces.py).
