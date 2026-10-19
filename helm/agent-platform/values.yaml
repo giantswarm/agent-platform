@@ -5257,7 +5257,31 @@ tenants:
     # credential provider also reads each such namespace's Secrets for the
     # atespace of the same name, and for ate-golden, where every template's
     # golden actor boots (substrate.credentialProvider.namespacePolicies).
-    # Off, the default, nothing changes.
+    # On, a tenant also brings its own model key (giantswarm/agent-platform#759;
+    # README, "A tenant's own model"), and every model call of an
+    # Organization's namespace still goes through the `llm` listener, so the
+    # gateway meters it under the tenant. The connectivity release's
+    # modelconfig-llm-routing policies fill in the listener as the
+    # `spec.<provider>.baseUrl` of a ModelConfig there that has none, and two
+    # more ValidatingAdmissionPolicies hold every such namespace but kagent,
+    # for every requester: `agent-platform-tenant-model-routing` admits a
+    # ModelConfig only when the listener serves its provider
+    # (llmRouting.models) and its baseUrl is the listener (a Bedrock
+    # ModelConfig, any provider the listener does not serve, and a baseUrl
+    # that is not the listener are refused);
+    # `agent-platform-tenant-secret-creation` admits the creation of a Secret
+    # without the `tenant-credential-` prefix only for a requester who may
+    # already read that Secret (Helm, GitOps and the cluster's controllers
+    # keep writing as today). Only agent-manager's copy of
+    # `default-model-config` names the platform's key there. The render
+    # fails without llmRouting.enabled, with a default ModelConfig provider
+    # (kagent.providers.<default>.provider) the listener does not serve, and
+    # without the modelconfig-llm-routing policy
+    # (llmRouting.modelConfigPolicy.enabled, on an API server that serves
+    # admissionregistration.k8s.io/v1 MutatingAdmissionPolicy). Point every
+    # ModelConfig already in an Organization namespace at the listener, or
+    # delete it, before you turn this on: later updates of one that is not
+    # are refused. Off, the default, nothing changes.
     enabled: false
 
 # === Workspaces (workspaces, workspace-manager) ===

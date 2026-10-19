@@ -666,6 +666,46 @@ The connectivity chart renders that tenant identity whenever kagent is on (`temp
 
 The platform's own component `HelmRelease`s are the second tenant. On a Giant Swarm management cluster they live in the exempt `flux-giantswarm` namespace (`gitops.namespace`) and need no identity of their own; a cluster whose Flux the chart brings itself gives them one, `agent-platform-flux`, with the bundled engine.
 
+### A tenant's own model
+
+Every tenant's agents use the platform's default ModelConfig: agent-manager's tenant reconciler copies `default-model-config` and its key Secret into each Organization namespace (labelled `giantswarm.io/organization`) that holds an agent. A tenant that pays for its own model usage adds its own ModelConfig and key Secret in its namespace. Its agents select it by name; another tenant's agents cannot, because an agent's template names a ModelConfig of its own namespace only.
+
+It comes with `tenants.organizations.enabled` (and kagent). It needs `llmRouting.enabled`, a default ModelConfig provider (`kagent.providers.<default>.provider`) the listener serves, and the `modelconfig-llm-routing` MutatingAdmissionPolicy (`llmRouting.modelConfigPolicy.enabled`, on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy); the render fails otherwise. The default ModelConfig's `kagent.providers.<default>.config.baseUrl` stays empty or the listener URL: agent-manager copies it into each Organization namespace, where another `baseUrl` is refused (the render does not check it). These rules then hold in every Organization namespace (not in the `kagent` namespace), for every requester:
+
+- A ModelConfig names a provider the listener serves (an `llmRouting.models` entry of provider Anthropic, OpenAI or Mistral). It may omit `spec.<provider>.baseUrl`: the `modelconfig-llm-routing` policy fills in the listener URL, as it does in the `kagent` namespace. A `baseUrl` that is not the listener URL is refused, and so is any other provider, Bedrock included. So every model call of the tenant is metered on the listener under the tenant's namespace, and the tenant's own key passes the listener untouched.
+- The ModelConfig's `apiKeySecret` names a Secret prefixed `tenant-credential-`, as an Agent's or AgentTemplate's `credentialRef` and a RemoteMCPServer's `headersFrom` do (these three rules hold with kagent alone, `tenants.organizations.enabled` or not). Only agent-manager's own `default-model-config` names the platform's key copy.
+- A `tenant-credential-` Secret is of type `Opaque`. A Secret without the prefix is created only by a requester who may already read that Secret in the namespace: Helm, GitOps and the cluster's controllers keep writing as before.
+
+**Before you turn on `tenants.organizations.enabled`**, point every ModelConfig already in an Organization namespace at the listener, or delete it: the policy refuses each later update of a ModelConfig that is not on the listener (a Bedrock or direct-URL one, say); only its deletion stays possible.
+
+The two objects. The ModelConfig has no `baseUrl`: the API server writes in the listener URL of the installation (`http://<gateway.name>.<release namespace>.svc:<llmRouting.listener.port>`; an OpenAI ModelConfig's ends in `/v1`). A ModelConfig may also set that URL itself; the refusal message of a wrong `baseUrl` names it.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tenant-credential-anthropic
+  namespace: org-acme
+type: Opaque
+stringData:
+  ANTHROPIC_API_KEY: <the tenant's key>
+---
+apiVersion: api.kagent.dev/v1alpha3
+kind: ModelConfig
+metadata:
+  name: acme-sonnet
+  namespace: org-acme
+spec:
+  provider: Anthropic
+  model: claude-sonnet-4-6
+  apiKeySecret: tenant-credential-anthropic
+  apiKeySecretKey: ANTHROPIC_API_KEY
+```
+
+**Still open: how the key reaches the namespace.** The plan's team discussion (T3 in giantswarm/bumblebee-plans `agent-permissions`) has not decided how a tenant's key Secret gets into its namespace: through the installation's secret management with the ModelConfig in a pull request, or through the Dev Portal writing it as the tenant's admin. This chart changes no role for it. `make prove-tenant-modelconfigs` proves the rules above on a cluster.
+
+**Turning routing off** needs `tenants.organizations.enabled` off first. The routing hook then takes the listener `baseUrl` off the kagent namespace's ModelConfigs only: delete or repoint the Organization namespaces' ModelConfigs whose `baseUrl` carries the annotation `agent-platform.giantswarm.io/llm-routing-base-url` (UPGRADE.md).
+
 ### Gateway API CR ownership
 
 Of the resources the umbrella manages, **only `AgentgatewayParameters` is vendor-specific** to agentgateway. Everything else is standard Gateway API / standard Cilium.
