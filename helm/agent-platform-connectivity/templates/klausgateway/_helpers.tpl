@@ -56,7 +56,8 @@ atenet-egress and the kagent controller's API port
 */}}
 {{- define "agent-platform.klausGateway.refusalsOn" -}}
 {{- $kg := .Values.klausGateway | default dict -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) (dig "slack" "enabled" false $kg) (dig "refusals" "enabled" false $kg) (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) (eq (toString (dig "controller" "authorization" "mode" "" (.Values.kagent | default dict))) "kubernetes") -}}true{{- end -}}
+{{- $mode := dig "controller" "authorization" "mode" "" (.Values.kagent | default dict) -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) (dig "slack" "enabled" false $kg) (dig "refusals" "enabled" false $kg) (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) (eq (toString $mode) "kubernetes") -}}true{{- end -}}
 {{- end -}}
 
 {{/*
