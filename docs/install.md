@@ -75,7 +75,7 @@ No Gateway to prepare: the agentgateway data plane becomes the edge. It needs th
 
 ### Agents (managed-cloud)
 
-- **Kubernetes ≥ 1.35 with the `PodCertificateRequest`, `ClusterTrustBundle` and `ClusterTrustBundleProjection` feature gates** on kube-apiserver, kube-controller-manager and every kubelet. Agent Substrate, which runs every agent, takes its identities from them; a live install refuses a cluster that does not serve `certificates.k8s.io/v1beta1` `PodCertificateRequest`.
+- **The `PodCertificateRequest`, `ClusterTrustBundle` and `ClusterTrustBundleProjection` feature gates** on kube-apiserver, kube-controller-manager and every kubelet. Agent Substrate, which runs every agent, takes its identities from them; a live install refuses a cluster that does not serve `certificates.k8s.io/v1beta1` `PodCertificateRequest`.
 - **On Cilium with kube-proxy replacement: `socketLB.hostNamespaceOnly: true`** (`bpf-lb-sock-hostns-only`), or the agents cannot resolve names over UDP from their sandboxes ([README: Agent Substrate](../README.md#agent-substrate)).
 - **An object store bucket** for the agents' snapshots, `kagent.harness.snapshotLocation` (`s3://<bucket>/<prefix>`), writable from the nodes (IRSA, Workload Identity, or credentials in `substrate.atelet.extraEnv`).
 - **A database**, one of three:

@@ -17,7 +17,7 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## \<current\> → \<next\> (Kubernetes 1.36 or later)
 
-The charts expect Kubernetes 1.36 or later and no longer check the version: the 1.30 render guard of self-management and the render-time check that the API server serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy are gone. With `llmRouting.enabled` on, the connectivity release now always carries the `modelconfig-llm-routing` policies (unless `llmRouting.modelConfigPolicy.enabled` is off).
+The charts expect Kubernetes 1.36 or later and no longer check the version: the 1.30 render guard of self-management and the render-time check that the API server serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy are gone. With kagent and `llmRouting.modelConfigPolicy.enabled` on (the default), every render now carries the `<release>-llm-routing-modelconfigs` post-install/post-upgrade hook Job and the `api.kagent.dev` `modelconfigs` rule on the `<release>-hooks` ClusterRole, routing on or off, and with `llmRouting.enabled` on the `modelconfig-llm-routing` policies; an offline `helm template` shows them too.
 
 ### Operator action
 
