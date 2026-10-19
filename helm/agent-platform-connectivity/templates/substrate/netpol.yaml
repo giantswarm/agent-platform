@@ -17,7 +17,10 @@ what (the substrate chart's arguments and Service definitions):
         and the golden boot's git fetch gets 403), and the plugin
         google-access-token-credential-provider :50051 for a Vertex AI
         ModelConfig's access token (without it the turn fails with
-        "credential provider google-access-token.k8s.io unavailable") — nothing
+        "credential provider google-access-token.k8s.io unavailable"), and with
+        workspaces muster :50051 for a workspace Session's git and GitHub API
+        credentials (without it "credential provider muster.giantswarm.io
+        unavailable") — nothing
         leaves a worker pod for those destinations directly; the sandbox's
         outbound traffic is tunnelled to atenet-egress, so the actors' egress
         allow-list lives on atenet-egress and the worker pods reach only the
@@ -540,6 +543,15 @@ spec:
         - ports:
             - port: {{ include "agent-platform.musterServicePort" . | quote }}
               protocol: TCP
+            {{- if include "agent-platform.workspaces.enabled" . }}
+            # muster's credential provider (FetchSecret), which the egress
+            # gateway asks for a workspace Session's ate-secret://muster.giantswarm.io
+            # credentials (substrate.credentialProvider.additionalProviders);
+            # without it every git and GitHub API call of the Session ends in
+            # "credential provider muster.giantswarm.io unavailable".
+            - port: "50051"
+              protocol: TCP
+            {{- end }}
     {{- end }}
     {{- if $kagentOn }}
     - toEndpoints:
