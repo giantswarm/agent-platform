@@ -1,0 +1,63 @@
+# Exercises klaus-gateway's egress refusal notices
+# (templates/klausgateway/netpol.yaml): with Slack, klausGateway.refusals,
+# kagent, Substrate and the controller's kubernetes authorization mode on, the
+# -klausgateway-refusals-egress policy opens the gateway to atenet-egress's
+# stats port and the kagent controller's API port, and the store-egress
+# policy carries the kube-apiserver rule. The flavor is explicit: `ct lint`
+# renders without cilium.io/v2 served.
+components:
+  agentgateway:
+    enabled: true
+  kagent:
+    enabled: true
+  substrate:
+    enabled: true
+  substrate-crds:
+    enabled: true
+  klaus-gateway:
+    enabled: true
+
+kagent:
+  namespaceOverride: kagent
+  harness:
+    snapshotLocation: s3://ci-agent-snapshots/agents
+  database:
+    postgres:
+      urlFile: /etc/cnpg/uri
+      bundled:
+        enabled: false
+  controller:
+    authorization:
+      mode: kubernetes
+
+ingress:
+  mode: agentgateway-muster
+  parentRefs:
+    - name: giantswarm-default
+      namespace: envoy-gateway-system
+      group: gateway.networking.k8s.io
+      kind: Gateway
+  hostnames:
+    - muster.ci.example.com
+
+networkPolicy:
+  enabled: true
+  flavor: cilium
+
+muster:
+  muster:
+    oauth:
+      server:
+        enabled: false
+        storage:
+          type: memory
+
+klausGateway:
+  a2a:
+    enabled: true
+  slack:
+    enabled: true
+    mode: events
+    secretName: slack-credentials
+  refusals:
+    enabled: true

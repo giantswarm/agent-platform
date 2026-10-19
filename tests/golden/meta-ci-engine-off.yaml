@@ -920,6 +920,8 @@ spec:
         maxUnavailable: 1
         minAvailable: ""
         unhealthyPodEvictionPolicy: AlwaysAllow
+      refusals:
+        enabled: false
       routing:
         store: memory
       serviceMonitor:
@@ -3054,7 +3056,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=4.3.0 <5.0.0"
+    semver: ">=4.11.0 <5.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

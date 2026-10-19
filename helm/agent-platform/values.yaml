@@ -889,18 +889,24 @@ components:  # @schema additionalProperties: true
     # turn_complete and klaus_gateway_turn_total carry failure_class
     # (giantswarm/klaus-gateway#329). An alert on a burst of one class reads
     # every installation only once none runs an older gateway.
-    # The floor is 4.3.0: every Slack Session starts through agent-manager's
-    # start_session as the person, create-only and without a message
-    # (giantswarm/klaus-gateway#446), which agent-manager's 1.13.0 floor
-    # serves; and the chart takes workspaces.toolsPrefix, which this chart
-    # derives from that floor on (agent-platform.klausGateway.workspacesFloor).
-    versionRange: ">=4.3.0 <5.0.0"
+    # The floor is 4.11.0: the chart takes klausGateway.refusals, the egress
+    # refusal notices (agent-platform.klausGateway.refusalsFloor), which run
+    # once components.kagent reaches the session reader. Every release from it
+    # starts each Slack Session through agent-manager's start_session as the
+    # person, create-only and without a message (giantswarm/klaus-gateway#446),
+    # which agent-manager's 1.13.0 floor serves, and takes
+    # workspaces.toolsPrefix (agent-platform.klausGateway.workspacesFloor).
+    versionRange: ">=4.11.0 <5.0.0"
     valuesFrom: klausGateway
     # klausGateway.observability.enabled is this chart's knob (auto | true |
     # false, resolved by agent-platform.shape.apply); the klaus-gateway chart's
     # observability block is closed and takes the endpoint and headers only.
     omitKeys:
       - observability.enabled
+      # Forwarded only while the refusal notices run, as derived values
+      # (agent-platform.klausGateway.refusalsOn): a klaus-gateway before
+      # 4.11.0 refuses the block.
+      - refusals
     # slack.contextBotIDs travels only when set: the key is new in
     # klaus-gateway 4.2.0, and an older chart's closed slack block refuses it.
     omitEmptyKeys:
@@ -4316,6 +4322,28 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     # iconUrl. "{agent}" is replaced with the agentRef. Empty disables the fallback.
     # Example: https://avatars.{codename}.{base}/v1/{agent}.png
     fallbackIconUrlTemplate: ""
+
+  # Egress refusal notices (giantswarm/giantswarm#38667): when the Substrate
+  # egress refuses a destination an agent's egress does not declare, the
+  # agent's creator (the Agent's agent-platform.giantswarm.io/created-by,
+  # which agent-manager records) gets a direct message from the app, one per
+  # agent and destination within `window` (24h), later refusals counted into
+  # it. Runs while Slack is on, kagent and Substrate are on and the
+  # controller is in the kubernetes authorization mode
+  # (agent-platform.klausGateway.refusalsOn). The chart derives
+  # egressService (Substrate's atenet-egress), kagentTarget (the controller's
+  # in-cluster gRPC API) and kagentAudience (the controller's ServiceAccount
+  # token audience), admits this gateway as the controller's session reader
+  # (kagent.controller.authorization.sessionReaderServiceAccount) and to its
+  # API port, and the connectivity chart opens the gateway's egress to both.
+  # agentURLTemplate ({namespace}, {name}) is the notice's Open agent link,
+  # window (24h) the dedup window. auto (the default) runs them while the
+  # floors of components.klaus-gateway.versionRange (4.11.0) and
+  # components.kagent.versionRange (1.20.0, the session reader) carry them;
+  # true runs them likewise and fails the render below the floors; false
+  # never.
+  refusals:
+    enabled: auto
 
   # Agentgateway route — exposes the Slack channel path (/channels/slack, with
   # slack.enabled) on the agentgateway data-plane Gateway (agentgateway-*
