@@ -15,13 +15,13 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
-## \<current\> → \<next\> (Kubernetes 1.36 or later)
+## \<current\> → \<next\> (Kubernetes 1.35 or later; the routing policies follow the served API)
 
-The charts expect Kubernetes 1.36 or later and no longer check the version: the 1.30 render guard of self-management and the render-time check that the API server serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy are gone. With kagent and `llmRouting.modelConfigPolicy.enabled` on (the default), every render now carries the `<release>-llm-routing-modelconfigs` post-install/post-upgrade hook Job and the `api.kagent.dev` `modelconfigs` rule on the `<release>-hooks` ClusterRole, routing on or off, and with `llmRouting.enabled` on the `modelconfig-llm-routing` policies; an offline `helm template` shows them too.
+The charts target Kubernetes 1.35 or later. The 1.30 render guard of self-management is gone. `agent-platform-connectivity` renders the `modelconfig-llm-routing` MutatingAdmissionPolicies and the `<release>-llm-routing-modelconfigs` post-install/post-upgrade hook Job (with the `api.kagent.dev` `modelconfigs` rule on the `<release>-hooks` ClusterRole) only where the API server serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, Kubernetes 1.36 and later; an offline `helm template` shows them with `--api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy`. 4.151.0 rendered them everywhere, and on Kubernetes 1.35 its connectivity upgrade failed at apply time.
 
 ### Operator action
 
-- **None** on Kubernetes 1.36 or later. Upgrade an older cluster to 1.36 first: below it, the install fails at apply time.
+- **None.** A connectivity HelmRelease that failed on 4.151.0 upgrades on its own once this release is selected.
 
 ## \<current\> → \<next\> (kagent 1.19: the controller authorizes each caller with Kubernetes RBAC)
 
