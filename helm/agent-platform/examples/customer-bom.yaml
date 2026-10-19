@@ -45,7 +45,7 @@ components:
   kagent-crds:                   { versionRange: "1.18.0" }
   substrate:                     { versionRange: "1.14.0" }
   substrate-crds:                { versionRange: "1.14.0" }
-  google-access-token-credential-provider: { versionRange: "0.1.0" }
+  google-access-token-credential-provider: { versionRange: "0.2.0" }
   klaus-gateway:                 { versionRange: "4.3.0" }
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
