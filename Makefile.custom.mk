@@ -54,6 +54,12 @@ FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-ver
 # written against; a target that wants the data plane sets the agentgateway
 # keys after it (a later --set wins), and verify-modes asserts the default.
 MUSTER_DIRECT := --set ingress.mode=muster-direct --set components.agentgateway.enabled=false --set agent-platform-mcps.agentgateway.viaMuster=false
+# The ModelConfig reconcile of llmRouting (a hook Job, the hooks identity
+# t-hooks with a cluster-wide ModelConfig rule) renders whenever kagent is on and
+# llmRouting.modelConfigPolicy.enabled is; verify-llm-routing-modelconfigs owns
+# it. A render that asserts another owner's objects (no Job, no
+# cluster-scoped RBAC) turns it off.
+NO_ROUTING_HOOK := --set llmRouting.modelConfigPolicy.enabled=false
 VM := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents --set kagent.database.postgres.urlFile=/etc/kagent-db/uri $(MUSTER_DIRECT) $(FLEET_APIS)
 # Agent Substrate on, as the meta chart forwards it (the two Substrate entries
 # follow components.kagent there; the connectivity chart reads the roster).
@@ -121,7 +127,14 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # kagent.substrateWorkerPool.priorityClass.enabled=false (the kagent block is
 # additionalProperties: true), and verify-workerpool asserts the class on, off
 # and its guards.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false
+# The twelfth (the Kubernetes 1.36 floor): the ModelConfig reconcile of
+# llmRouting (templates/llm/modelconfig-routing-hook.yaml, its Job and the
+# hooks identity's ClusterRole) renders with kagent on whatever the render
+# sees served; it rendered offline only with --api-versions
+# admissionregistration.k8s.io/v1/MutatingAdmissionPolicy before. Both sides
+# render with NO_ROUTING_HOOK, and verify-llm-routing-modelconfigs asserts the
+# hook on and off.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false $(NO_ROUTING_HOOK)
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 # GOLDEN_REF defaults to the merge-base of HEAD and GOLDEN_BASE: a branch is held
@@ -897,26 +910,22 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 		cat $(VERIFY_TMP)/vl-enum.out; echo "FAIL: the enum guard does not name the entry and the CRD's enum"; exit 1; \
 	else echo "ok: enum guard"; fi
 	@echo "--> the MutatingAdmissionPolicy writes the provider's own block name"
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set-json 'llmRouting.models=[{"name":"openai","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"gpt-*"}]' >$(VERIFY_TMP)/vl-openai.out 2>&1 || { cat $(VERIFY_TMP)/vl-openai.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set-json 'llmRouting.models=[{"name":"openai","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"gpt-*"}]' >$(VERIFY_TMP)/vl-openai.out 2>&1 || { cat $(VERIFY_TMP)/vl-openai.out; exit 1; }
 	@grep -q 'object.spec.openAI.baseUrl' $(VERIFY_TMP)/vl-openai.out || { echo "FAIL: the policy reads the lower-cased provider name, not the ModelConfigSpec block; every CEL evaluation would error"; exit 1; }
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set-json 'llmRouting.models=[{"name":"gemini","provider":"Gemini","baseURL":"https://generativelanguage.googleapis.com/v1beta","match":"gemini-*"}]' 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
+	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set-json 'llmRouting.models=[{"name":"gemini","provider":"Gemini","baseURL":"https://generativelanguage.googleapis.com/v1beta","match":"gemini-*"}]' 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
 		echo "FAIL: the policy renders for a provider whose block carries no baseUrl; the mutation would be pruned"; exit 1; \
 	else echo "ok: provider block name"; fi
-	@echo "--> the MutatingAdmissionPolicy renders only where the API server serves the GA group"
-	@if grep -q 'kind: MutatingAdmissionPolicy' $(VERIFY_TMP)/vl-ci.out; then \
-		echo "FAIL: the policy rendered without the GA API version; on 1.34/1.35 it would exist and mutate nothing"; exit 1; \
-	fi
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy >$(VERIFY_TMP)/vl-map.out 2>&1 || { cat $(VERIFY_TMP)/vl-map.out; exit 1; }
-	@grep -q 'kind: MutatingAdmissionPolicy$$' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: no MutatingAdmissionPolicy on a 1.36 API server; a ModelConfig created outside the chart would be unmetered"; exit 1; }
-	@grep -q 'kind: MutatingAdmissionPolicyBinding' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy has no binding; it matches nothing"; exit 1; }
-	@grep -q 'failurePolicy: Ignore' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy fails closed; a CEL error would block every ModelConfig write"; exit 1; }
-	@grep -q 'kubernetes.io/metadata.name: kagent' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy is not scoped to the kagent namespace"; exit 1; }
-	@grep -q 'base-url-absent' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy has no baseUrl guard; it would overwrite a model pointed at another upstream"; exit 1; }
-	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy writes the wrong listener URL"; exit 1; }
-	@awk '/^kind: MutatingAdmissionPolicy$$/{f=1} f&&/^  name: .*-modelconfig-llm-routing-openai$$/{g=1} g&&/^---/{exit} g' $(VERIFY_TMP)/vl-map.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081/v1"' || { echo "FAIL: no policy for the listener's OpenAI entry writing the listener URL with /v1; a codex ModelConfig created by agent-manager or Backstage would bypass the listener"; exit 1; }
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set llmRouting.modelConfigPolicy.enabled=false 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
+	@echo "--> the MutatingAdmissionPolicy renders with routing on, gated on its own toggle"
+	@grep -q 'kind: MutatingAdmissionPolicy$$' $(VERIFY_TMP)/vl-ci.out || { echo "FAIL: no MutatingAdmissionPolicy with routing on; a ModelConfig created outside the chart would be unmetered"; exit 1; }
+	@grep -q 'kind: MutatingAdmissionPolicyBinding' $(VERIFY_TMP)/vl-ci.out || { echo "FAIL: the policy has no binding; it matches nothing"; exit 1; }
+	@grep -q 'failurePolicy: Ignore' $(VERIFY_TMP)/vl-ci.out || { echo "FAIL: the policy fails closed; a CEL error would block every ModelConfig write"; exit 1; }
+	@grep -q 'kubernetes.io/metadata.name: kagent' $(VERIFY_TMP)/vl-ci.out || { echo "FAIL: the policy is not scoped to the kagent namespace"; exit 1; }
+	@grep -q 'base-url-absent' $(VERIFY_TMP)/vl-ci.out || { echo "FAIL: the policy has no baseUrl guard; it would overwrite a model pointed at another upstream"; exit 1; }
+	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' $(VERIFY_TMP)/vl-ci.out || { echo "FAIL: the policy writes the wrong listener URL"; exit 1; }
+	@awk '/^kind: MutatingAdmissionPolicy$$/{f=1} f&&/^  name: .*-modelconfig-llm-routing-openai$$/{g=1} g&&/^---/{exit} g' $(VERIFY_TMP)/vl-ci.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081/v1"' || { echo "FAIL: no policy for the listener's OpenAI entry writing the listener URL with /v1; a codex ModelConfig created by agent-manager or Backstage would bypass the listener"; exit 1; }
+	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set llmRouting.modelConfigPolicy.enabled=false 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
 		echo "FAIL: llmRouting.modelConfigPolicy.enabled=false still rendered the policy"; exit 1; \
-	else echo "ok: admission policy gated on the GA group and its own toggle"; fi
+	else echo "ok: admission policy gated on its own toggle"; fi
 	@echo "--> the meta chart forwards the cutover value to the kagent release"
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.providers.anthropic.config.baseUrl=http://agentgateway.default.svc:8081 >$(VERIFY_TMP)/vl-meta.out 2>&1 || { cat $(VERIFY_TMP)/vl-meta.out; exit 1; }
 	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: kagent$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-meta.out >$(VERIFY_TMP)/vl-meta-kagent.out
@@ -2633,7 +2642,7 @@ MCPS_ONE := --set components.agent-platform-mcps.enabled=true --set agent-platfo
 verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAccount, RoleBinding, agent-manager, the portal helper) and the fixes that retired the standalone's template patches.
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
 	@echo "--> kagent on: ServiceAccount + RoleBinding kagent-flux in the kagent namespace, bound to cluster-admin"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) >$(VERIFY_TMP)/vid-on.out 2>&1 || { cat $(VERIFY_TMP)/vid-on.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) $(NO_ROUTING_HOOK) >$(VERIFY_TMP)/vid-on.out 2>&1 || { cat $(VERIFY_TMP)/vid-on.out; exit 1; }
 	@awk '/^kind: ServiceAccount$$/,/^---/' $(VERIFY_TMP)/vid-on.out >$(VERIFY_TMP)/vid-sa.out; grep -q '^  name: kagent-flux$$' $(VERIFY_TMP)/vid-sa.out || { echo "FAIL: no ServiceAccount kagent-flux"; exit 1; }
 	@grep -q '^  namespace: kagent$$' $(VERIFY_TMP)/vid-sa.out || { echo "FAIL: the ServiceAccount is not in the kagent namespace"; exit 1; }
 	@grep -q 'application.giantswarm.io/team: "bumblebee"' $(VERIFY_TMP)/vid-sa.out || { echo "FAIL: the ServiceAccount lost the team label the fleet's hand-written copy carries"; exit 1; }
@@ -2696,7 +2705,7 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.muster.enabled=false 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' >$(VERIFY_TMP)/vid-meta-am-nomuster.out; if grep -q 'url: http://' $(VERIFY_TMP)/vid-meta-am-nomuster.out; then echo "FAIL: agent-manager's muster.url is derived while the muster component is off"; exit 1; fi
 	@echo "ok: muster MCP URL — one helper, one consumer (agent-manager muster.url; the portal sends none)"
 	@echo "--> empty value: no identity, agent-manager omits the ServiceAccount"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName= >$(VERIFY_TMP)/vid-empty.out 2>&1 || { cat $(VERIFY_TMP)/vid-empty.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) $(NO_ROUTING_HOOK) --set kagent.fluxServiceAccountName= >$(VERIFY_TMP)/vid-empty.out 2>&1 || { cat $(VERIFY_TMP)/vid-empty.out; exit 1; }
 	@$(GOLDEN_DROP) $(VERIFY_TMP)/vid-empty.out "$(TENANT_RBAC_ALL)"
 	@if grep -qE '^kind: (ServiceAccount|RoleBinding)$$' $(VERIFY_TMP)/vid-empty.out; then echo "FAIL: an empty kagent.fluxServiceAccountName still renders the identity"; exit 1; fi
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.fluxServiceAccountName= >$(VERIFY_TMP)/vid-meta-empty.out 2>&1 || { cat $(VERIFY_TMP)/vid-meta-empty.out; exit 1; }
@@ -3034,7 +3043,7 @@ CTRL_POLICY := awk '/^  name: agent-platform-connectivity-controller$$/{f=1} f&&
 verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object; on = the Backstage app-config (one-value identity), route and config-reload hook, the mcp-kubernetes MCPServer (OAuth, forwarded token, kube audience), the model serving objects on the kserve components and the guard without them, the KServe controller policies; the meta chart forwards the blocks, omits the wiring keys and renders no release for the switch.
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
 	@echo "--> toggles off: none of the ported objects renders"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_OFF) >$(VERIFY_TMP)/vw-off.out 2>&1 || { cat $(VERIFY_TMP)/vw-off.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_OFF) $(NO_ROUTING_HOOK) >$(VERIFY_TMP)/vw-off.out 2>&1 || { cat $(VERIFY_TMP)/vw-off.out; exit 1; }
 	@for pattern in 'agent-platform-backstage-app-config' 'kind: MCPServer' 'serving.kserve.io' 'agent-platform-model-serving' 'name: hf-cache' 'kserve-controller' 'backstage-config-reload' 'kind: Job'; do \
 		if grep -q -- "$$pattern" $(VERIFY_TMP)/vw-off.out; then echo "FAIL: toggles off but the render contains $$pattern"; exit 1; fi; \
 	done
@@ -3482,9 +3491,9 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 # first object of a kind, wrong as soon as two Jobs render).
 PICK := python3 tests/pick-doc.py
 MIGRATION_ON := $(MANAGERS_MIN) --set components.agent-manager.enabled=true
-# tenants.organizations.enabled needs the llm listener and its routing policy
+# tenants.organizations.enabled needs the llm listener
 # (giantswarm/agent-platform#759).
-MIGRATION_TENANTS := --set tenants.organizations.enabled=true --set llmRouting.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true --api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy
+MIGRATION_TENANTS := --set tenants.organizations.enabled=true --set llmRouting.enabled=true --set ingress.mode=agentgateway-muster --set components.agentgateway.enabled=true
 # The migrate Job's image pin: agentManager.migration.image.tag — the meta chart's BOM pin for agent-manager,
 # mirrored as the connectivity chart's default. Read from the values (Renovate bumps both files), never a literal.
 MIGRATION_PIN = python3 -c "import yaml; print(yaml.safe_load(open('$(CHART_DIR)/values.yaml'))['agentManager']['migration']['image']['tag'])"
@@ -3793,7 +3802,7 @@ verify-identity: verify-identity-migration
 verify-identity-migration: ## Assert the migration holds no cluster-scoped right without tenants: the 1.x -> 2.x run deletes no CRD, so no ClusterRole or ClusterRoleBinding renders with the migration on, off, or with agent-manager off; with tenants.organizations on (#1089) the run covers the Organization namespaces through exactly list on namespaces and get, list, update, patch on helmreleases, held by a ValidatingAdmissionPolicy to updates of spec.values in those namespaces from the run's pods, and the credential-refs refusal names the fix; the per-GitOps-namespace Roles follow a renamed identity.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> migration on: no ClusterRole, no ClusterRoleBinding"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vim-on.out 2>&1 || { cat $(VERIFY_TMP)/vim-on.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) $(NO_ROUTING_HOOK) >$(VERIFY_TMP)/vim-on.out 2>&1 || { cat $(VERIFY_TMP)/vim-on.out; exit 1; }
 	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-on.out "$(TENANT_RBAC)"
 	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: a cluster-scoped RBAC object renders with the migration on"; grep -n -A3 -E '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; exit 1; fi
 	@if grep -q 'customresourcedefinitions' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: the migration is granted rights on customresourcedefinitions"; exit 1; fi
@@ -3833,10 +3842,10 @@ verify-identity-migration: ## Assert the migration holds no cluster-scoped right
 	@if grep -q 'kagent-flux' $(VERIFY_TMP)/vim-x.out; then echo "FAIL: the old name survives with a renamed identity"; grep -n kagent-flux $(VERIFY_TMP)/vim-x.out; exit 1; fi
 	@echo "ok: renamed identity"
 	@echo "--> off: no ClusterRoleBinding with the migration off, with agent-manager off (verify-identity's own kagent-only case), with kagent off"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.enabled=false >$(VERIFY_TMP)/vim-off.out 2>&1 || { cat $(VERIFY_TMP)/vim-off.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) $(NO_ROUTING_HOOK) --set agentManager.migration.enabled=false >$(VERIFY_TMP)/vim-off.out 2>&1 || { cat $(VERIFY_TMP)/vim-off.out; exit 1; }
 	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-off.out "$(TENANT_RBAC)"
 	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-off.out; then echo "FAIL: a cluster-scoped object renders with the migration off"; exit 1; fi
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) >$(VERIFY_TMP)/vim-noam.out 2>&1 || { cat $(VERIFY_TMP)/vim-noam.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_MIN) $(NO_ROUTING_HOOK) >$(VERIFY_TMP)/vim-noam.out 2>&1 || { cat $(VERIFY_TMP)/vim-noam.out; exit 1; }
 	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-noam.out "$(TENANT_RBAC)"
 	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-noam.out; then echo "FAIL: a cluster-scoped object renders with agent-manager off"; exit 1; fi
 	@echo "ok: none while off"
@@ -3885,7 +3894,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true >$(VERIFY_TMP)/vmig-off.out 2>&1 || { cat $(VERIFY_TMP)/vmig-off.out; exit 1; }
 	@if grep -q 'agent-manager-migrate' $(VERIFY_TMP)/vmig-off.out; then echo "FAIL: the migration renders with agent-manager off"; exit 1; else echo "ok: inert without agent-manager"; fi
 	@echo "--> on: a suspended CronJob (no hook) in the kagent namespace, its run named with an 8-hex hash of its pod template (a changed image or identity renders a new name; identical renders the same), as the tenant identity, agent-manager's image, migrate, its inputs as environment, the optional token"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vmig-on.out 2>&1 || { cat $(VERIFY_TMP)/vmig-on.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) $(NO_ROUTING_HOOK) >$(VERIFY_TMP)/vmig-on.out 2>&1 || { cat $(VERIFY_TMP)/vmig-on.out; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vmig-on.out CronJob $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-job.out || { echo "FAIL: no CronJob $(MIGRATION_JOB) in the kagent namespace"; exit 1; }
 	@grep -qE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-on.out || { echo "FAIL: the start hook does not create the run $(MIGRATION_JOB)-<8-hex spec hash> from the CronJob"; exit 1; }
 	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-job.out; then echo "FAIL: the CronJob is a Helm hook; a migrate failure would fail the connectivity upgrade that renders the Harness"; exit 1; fi
@@ -3916,7 +3925,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@if grep -q 'AGENT_MANAGER_MANAGED_NAMESPACES' $(VERIFY_TMP)/vmig-job.out; then echo "FAIL: AGENT_MANAGER_MANAGED_NAMESPACES renders without additional namespaces"; exit 1; fi
 	@echo "ok: the Job"
 	@echo "--> #378, both flavors: no Job of the release (Helm's readiness check reads a Failed Job Failed with or without disableWaitForJobs and stalls the upgrade), a suspended CronJob, its run started by a post-install/post-upgrade hook — after the release's manifests, the run's regular network policy among them, are applied — as the tenant identity in the kagent namespace under the migration's component label, so under the run's own policy"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vmig-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vmig-k8s.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) $(NO_ROUTING_HOOK) --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vmig-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vmig-k8s.out; exit 1; }
 	@for f in cilium:CiliumNetworkPolicy:on kubernetes:NetworkPolicy:k8s; do \
 		flavor=$${f%%:*}; rest=$${f#*:}; kind=$${rest%%:*}; out=$(VERIFY_TMP)/vmig-$${rest#*:}.out; \
 		if $(PICK) $$out Job '$(MIGRATION_JOB)-*' >/dev/null; then echo "FAIL ($$flavor): the migrate run is a Job of the release; a Failed run stalls the connectivity upgrade, and it starts before a CRD-backed policy is applied (#378)"; exit 1; fi; \
@@ -3973,7 +3982,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@echo "ok: skills credential"
 	@echo "--> RBAC: nothing cluster-scoped (verify-identity-migration) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
 	@if $(PICK) $(VERIFY_TMP)/vmig-on.out Role $(MIGRATION_JOB) >/dev/null 2>&1; then echo "FAIL: a GitOps-namespace Role renders with an empty gitopsNamespaces"; exit 1; fi
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' --set 'agentManager.migration.gitopsNamespaces[1]=flux-team' >$(VERIFY_TMP)/vmig-gitops.out 2>&1 || { cat $(VERIFY_TMP)/vmig-gitops.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) $(NO_ROUTING_HOOK) --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' --set 'agentManager.migration.gitopsNamespaces[1]=flux-team' >$(VERIFY_TMP)/vmig-gitops.out 2>&1 || { cat $(VERIFY_TMP)/vmig-gitops.out; exit 1; }
 	@for ns in flux-giantswarm flux-team; do \
 		$(PICK) $(VERIFY_TMP)/vmig-gitops.out Role $(MIGRATION_JOB) $$ns >$(VERIFY_TMP)/vmig-role-$$ns.out || { echo "FAIL: no Role in $$ns"; exit 1; }; \
 		grep -q 'resources: \["helmreleases"\]' $(VERIFY_TMP)/vmig-role-$$ns.out || { echo "FAIL: the Role in $$ns does not read helmreleases"; exit 1; }; \
@@ -4094,7 +4103,7 @@ verify-hooks-memory: ## Assert the connectivity hook Jobs' memory (#513): every 
 	@echo "ok: $@"
 
 .PHONY: verify-hooks-ephemeral-storage
-verify-hooks-ephemeral-storage: ## Assert every hook Job and CronJob of both charts bounds its emptyDirs (#780, #866, Kyverno's require-emptydir-requests-and-limits): each container mounting an emptyDir requests and limits ephemeral-storage, each emptyDir carries a sizeLimit — the connectivity chart's four hook Jobs, the Backstage config-reload, the migrate start and the migrate CronJob, the meta chart's hooks with the engine on (self-management's included) and the serving teardown with it off. Needs PyYAML.
+verify-hooks-ephemeral-storage: ## Assert every hook Job and CronJob of both charts bounds its emptyDirs (#780, #866, Kyverno's require-emptydir-requests-and-limits): each container mounting an emptyDir requests and limits ephemeral-storage, each emptyDir carries a sizeLimit — the connectivity chart's four hook Jobs, the Backstage config-reload, the migrate start and the migrate CronJob, the ModelConfig reconcile of llmRouting, the meta chart's hooks with the engine on (self-management's included) and the serving teardown with it off. Needs PyYAML.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >$(VERIFY_TMP)/vhe-conn.out 2>&1 || { cat $(VERIFY_TMP)/vhe-conn.out; exit 1; }
@@ -4105,7 +4114,7 @@ verify-hooks-ephemeral-storage: ## Assert every hook Job and CronJob of both cha
 	@python3 tests/verify-hooks-ephemeral-storage.py \
 		$(VERIFY_TMP)/vhe-conn.out=t-substrate-bootstrap,t-postgres-databases,t-model-serving-cache,t-model-serving-prepull-cleanup \
 		$(VERIFY_TMP)/vhe-backstage.out=agent-platform-connectivity-backstage-config-reload \
-		$(VERIFY_TMP)/vhe-migrate.out=t-agent-manager-migrate-start,agent-platform-connectivity-agent-manager-migrate \
+		$(VERIFY_TMP)/vhe-migrate.out=t-agent-manager-migrate-start,agent-platform-connectivity-agent-manager-migrate,t-llm-routing-modelconfigs \
 		$(VERIFY_TMP)/vhe-meta.out=t-flux-operator-crds,t-kagent-namespace,t-self-stop-resumer,t-self-suspend,t-self-values,t-teardown-engine,t-teardown-operator,t-teardown-releases \
 		$(VERIFY_TMP)/vhe-serving.out=t-serving-teardown
 	@echo "ok: $@"
@@ -4524,7 +4533,7 @@ verify-tenant-reconciler: ## Assert agent-manager's tenant reconciler follows te
 	@echo "ok: $@"
 
 .PHONY: verify-tenant-modelconfigs
-verify-tenant-modelconfigs: ## Assert the render of a tenant's own ModelConfig (giantswarm/agent-platform#759): with tenants.organizations.enabled off, neither agent-platform-tenant-model-routing nor agent-platform-tenant-secret-creation renders and the modelconfig-llm-routing policies bind the kagent namespace only; on, both (Fail, Deny) select every Organization namespace but kagent, the routing policy carries each listener provider's block and URL, the Secret policy asks the authorizer on creations outside the tenant-credential- prefix, only agent-manager's default-model-config names the platform's key, and each modelconfig-llm-routing policy (Ignore) gets a second binding for the Organizations' namespaces; the render fails with llmRouting off, with a default ModelConfig provider the listener does not serve, and without the modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled off, or MutatingAdmissionPolicy not served). What the CEL decides is proven by make prove-tenant-modelconfigs. Needs PyYAML. HELM selects the binary.
+verify-tenant-modelconfigs: ## Assert the render of a tenant's own ModelConfig (giantswarm/agent-platform#759): with tenants.organizations.enabled off, neither agent-platform-tenant-model-routing nor agent-platform-tenant-secret-creation renders and the modelconfig-llm-routing policies bind the kagent namespace only; on, both (Fail, Deny) select every Organization namespace but kagent, the routing policy carries each listener provider's block and URL, the Secret policy asks the authorizer on creations outside the tenant-credential- prefix, only agent-manager's default-model-config names the platform's key, and each modelconfig-llm-routing policy (Ignore) gets a second binding for the Organizations' namespaces; the render fails with llmRouting off, with a default ModelConfig provider the listener does not serve, and without the modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled off). What the CEL decides is proven by make prove-tenant-modelconfigs. Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-tenant-modelconfigs.py $(CONNECTIVITY_DIR)

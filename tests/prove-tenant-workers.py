@@ -139,7 +139,6 @@ def prove(chart, crd):
                         "--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true",
                         "--set", "tenants.organizations.enabled=true",
                         "--set", "llmRouting.enabled=true",
-                        "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy",
                         "--set", f"kagent.substrateWorkerPool.name={POOL}",
                         "--show-only", "templates/substrate/tenant-workers-admission.yaml"], capture_output=True, text=True, check=True)
     policies = [d for d in yaml.safe_load_all(r.stdout) if d]

@@ -38,8 +38,7 @@ kagent namespace, the platform tenant whose workers the platform writes:
     WorkerPool write there is refused.
 
 Admission runs every validating policy and webhook on a request: Kyverno and
-these policies each refuse on their own. Kubernetes 1.30 or later
-(admissionregistration.k8s.io/v1).
+these policies each refuse on their own.
 */ -}}
 {{- if and (include "agent-platform.substrate.enabled" .) (include "agent-platform.tenants.organizations" .) }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}

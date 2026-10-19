@@ -61,9 +61,9 @@ BASE = [
     "--api-versions", "kyverno.io/v1",
     "--api-versions", "cilium.io/v2",
 ]
-# tenants.organizations.enabled needs the llm listener and its routing policy
+# tenants.organizations.enabled needs the llm listener
 # (giantswarm/agent-platform#759).
-ON = ["--set", "tenants.organizations.enabled=true", "--set", "llmRouting.enabled=true", "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
+ON = ["--set", "tenants.organizations.enabled=true", "--set", "llmRouting.enabled=true"]
 # (kind, name, direction, port): the rules of each flavor that admit the
 # kagent namespace's workers.
 HOPS = {

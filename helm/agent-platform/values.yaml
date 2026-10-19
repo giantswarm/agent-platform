@@ -224,9 +224,7 @@ gitops:
     # namespace agent-platform.giantswarm.io/helm-cli=allow first, then
     # `helm upgrade --set gitops.self.enabled=false --force-conflicts`, and
     # keep the value in the values file. `true` with the engine off fails the
-    # render. Needs Kubernetes >= 1.30 (admissionregistration.k8s.io/v1
-    # ValidatingAdmissionPolicy); an older cluster fails the render and installs
-    # with false.
+    # render.
     enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
     # OCI repository the chart is pulled from (the OCIRepository url is
     # <repository>/agent-platform). A mirror, or a lab's own registry, goes here.
@@ -2025,9 +2023,8 @@ llmRouting:
         matchLabels: {}  # @schema additionalProperties: {"type": "string"}
   # A MutatingAdmissionPolicy that sends a ModelConfig the connectivity chart
   # does NOT render through the LLM listener — one created by Backstage,
-  # agent-manager or kubectl. Rendered only on Kubernetes 1.36 and later, where
-  # the API server serves admissionregistration.k8s.io/v1. Consumed by the
-  # connectivity chart; see its values.yaml for the rendered behavior.
+  # agent-manager or kubectl. Consumed by the connectivity chart; see its
+  # values.yaml for the rendered behavior.
   modelConfigPolicy:
     enabled: true
   # USD per one million tokens, by provider and model, OVER the gateway's
@@ -5305,7 +5302,7 @@ tenants:
     # differ), and only Substrate's controllers write a Deployment,
     # ReplicaSet or Pod labelled ate.dev/worker-pool; no one adds an
     # ephemeral container to a worker, execs into one or attaches to one
-    # (Kubernetes 1.30 or later; docs/substrate-security.md). On, Substrate's
+    # (docs/substrate-security.md). On, Substrate's
     # credential provider also reads each such namespace's Secrets for the
     # atespace of the same name, and for ate-golden, where every template's
     # golden actor boots (substrate.credentialProvider.namespacePolicies).
@@ -5329,8 +5326,7 @@ tenants:
     # fails without llmRouting.enabled, with a default ModelConfig provider
     # (kagent.providers.<default>.provider) the listener does not serve, and
     # without the modelconfig-llm-routing policy
-    # (llmRouting.modelConfigPolicy.enabled, on an API server that serves
-    # admissionregistration.k8s.io/v1 MutatingAdmissionPolicy). Point every
+    # (llmRouting.modelConfigPolicy.enabled). Point every
     # ModelConfig already in an Organization namespace at the listener, or
     # delete it, before you turn this on: later updates of one that is not
     # are refused. Off, the default, nothing changes.

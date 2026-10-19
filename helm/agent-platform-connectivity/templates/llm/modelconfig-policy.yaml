@@ -4,13 +4,6 @@ objects created elsewhere: Backstage, agent-manager, or kubectl. Without it such
 a model calls the provider directly and its usage never reaches the gateway's
 metrics.
 
-Rendered only where the API server serves the GA group. On a beta API server
-(1.34, 1.35) the object is accepted and the admission plugin stays off behind
-its feature gate, so the policy would exist and mutate nothing. An absent object
-is honest; a silent one is not. Confirm with:
-
-  kubernetes_feature_enabled{name="MutatingAdmissionPolicy", job="apiserver"}
-
 Every write marks the baseUrl it sets (agent-platform.llmRouting.baseUrlMark):
 turning routing off removes these policies and the listener, and the reconcile
 hook (modelconfig-routing-hook.yaml) takes exactly the marked baseUrls off
