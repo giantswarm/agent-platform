@@ -436,7 +436,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.18.0 <1.19.0"` |  |
+| components.kagent.versionRange | string | `">=1.19.0 <1.20.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -460,7 +460,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.18.0 <1.19.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.19.0 <1.20.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
@@ -885,6 +885,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.substrate.atenetRouterURL | string | `"http://atenet-router.ate-system.svc:80"` |  |
 | kagent.controller.auth.mode | string | `"trusted-proxy"` |  |
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
+| kagent.controller.authorization.mode | string | `"kubernetes"` |  |
+| kagent.controller.authorization.usernamePrefix | string | `""` |  |
+| kagent.controller.authorization.groupsClaim | string | `"groups"` |  |
+| kagent.controller.authorization.groupsPrefix | string | `""` |  |
+| kagent.controller.authorization.namespaceSelector | string | `"giantswarm.io/organization"` |  |
+| kagent.controller.authorization.includeNamespaces | list | `[]` |  |
 | kagent.controller.sessionIdleTTL | string | `"336h"` |  |
 | kagent.controller.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | kagent.controller.pdb.enabled | bool | `true` |  |

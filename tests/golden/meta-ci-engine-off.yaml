@@ -596,6 +596,13 @@ spec:
         auth:
           mode: trusted-proxy
           userIdClaim: email
+        authorization:
+          groupsClaim: groups
+          groupsPrefix: ""
+          includeNamespaces: []
+          mode: kubernetes
+          namespaceSelector: giantswarm.io/organization
+          usernamePrefix: ""
         env: []
         image:
           repository: giantswarm/kagent/controller
@@ -1860,6 +1867,14 @@ spec:
       auth:
         mode: trusted-proxy
         userIdClaim: email
+      authorization:
+        groupsClaim: groups
+        groupsPrefix: ""
+        includeNamespaces:
+        - kagent
+        mode: kubernetes
+        namespaceSelector: giantswarm.io/organization
+        usernamePrefix: ""
       env: []
       image:
         repository: giantswarm/kagent/controller
@@ -1874,6 +1889,21 @@ spec:
           interval: 60s
           labels:
             observability.giantswarm.io/tenant: giantswarm
+      networkPolicy:
+        enabled: true
+        from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+          podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: agentgateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ate-system
+          podSelector:
+            matchLabels:
+              app: atenet-egress
       pdb:
         enabled: true
         unhealthyPodEvictionPolicy: AlwaysAllow
@@ -2978,7 +3008,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.18.0 <1.19.0"
+    semver: ">=1.19.0 <1.20.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3001,7 +3031,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.18.0 <1.19.0"
+    semver: ">=1.19.0 <1.20.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

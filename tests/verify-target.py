@@ -119,7 +119,9 @@ def releases(manifest: str) -> set[str]:
 def targeted(doc: str) -> str:
     """A default-render Flux document as the target knob places it (#688): its own,
     its chartRef's and its dependsOn names prefixed with the release name, its
-    workloads and their Helm storage in agent-platform."""
+    workloads and their Helm storage in agent-platform, so the namespace a
+    release's values name for the platform's pods (the kagent controller's
+    NetworkPolicy peers, controller.networkPolicy.from) is agent-platform too."""
     out, section = [], ""
     for line in doc.split("\n"):
         if re.match(r"^  \S", line):
@@ -128,6 +130,8 @@ def targeted(doc: str) -> str:
             line = line.replace("name: ", "name: t-", 1)
         elif section in ("chartRef:", "dependsOn:") and re.match(r"^    (- )?name: ", line):
             line = line.replace("name: ", "name: t-", 1)
+        elif re.match(r"^ +kubernetes\.io/metadata\.name: default$", line):
+            line = line.replace(": default", ": agent-platform")
         elif line == "  targetNamespace: default":
             out.append("  targetNamespace: agent-platform")
             line = "  storageNamespace: agent-platform"

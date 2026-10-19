@@ -306,6 +306,18 @@ plugin which egress gateway may call it. */ -}}
 {{- $_ := set $derived "tenants" . -}}
 {{- end -}}
 {{- end -}}
+{{- if eq .name "agent-platform-connectivity" -}}
+{{- /* The namespace the workspace-manager release installs into, when it is
+not the connectivity release's own: the connectivity release binds the
+manager's ServiceAccount there (workspace-manager/kagent-sessions-rbac.yaml). */ -}}
+{{- if and (dig "enabled" false (.root.Values.workspaces | default dict)) (include "agent-platform.componentEnabled" (dict "root" .root "name" "workspace-manager")) -}}
+{{- $wmNs := dig "workspace-manager" "targetNamespace" "" .root.Values.components | default (include "agent-platform.targetNamespace" .root) -}}
+{{- $connNs := dig "agent-platform-connectivity" "targetNamespace" "" .root.Values.components | default (include "agent-platform.targetNamespace" .root) -}}
+{{- if ne $wmNs $connNs -}}
+{{- $_ := set $derived "workspaceManager" (dict "namespace" $wmNs) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if eq .name "cluster-manager" -}}
 {{- /* model-manager's namespace: where the model-manager component lands — the
 platform's own namespace (gitops.targetNamespace, else the release namespace).
@@ -522,6 +534,11 @@ muster's authority, which muster answers with the person's token
 {{- $_ := set $controller "session" $session -}}
 {{- $_ := set $derived "controller" $controller -}}
 {{- end -}}
+{{- /* The authorizer's derived keys and the controller's NetworkPolicy, in
+the kubernetes authorization mode (agent-platform.kagent.authorization). */ -}}
+{{- with (include "agent-platform.kagent.authorization" .root | fromJson) -}}
+{{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "muster" -}}
 {{- /* The identity provider's private CA (global.identity.ca) is what muster's
@@ -644,6 +661,75 @@ shared inferenceservice-config ConfigMap its own release renders. */ -}}
 {{- end -}}
 {{- end -}}
 {{- $derived | toJson -}}
+{{- end -}}
+
+{{/*
+The kagent controller's authorizer keys and NetworkPolicy the kagent release
+receives in the kubernetes authorization mode
+(kagent.controller.authorization.mode; giantswarm/agent-platform#706), as a
+partial controller block:
+- authorization.includeNamespaces: the kagent namespace, the platform tenant,
+  while the block's own list is empty;
+- authorization.serviceAccountTokenAudience, with workspaces on: the audience
+  of the projected token workspace-manager calls the controller with
+  (workspace-manager.kagent.tokenAudience, else kagent, that chart's default);
+  an own value that differs fails the render, since the controller's
+  TokenReview would refuse every call of the manager;
+- networkPolicy: enabled, `from` the controller API's callers beside kagent's
+  UI (the kagent chart admits it itself): the agentgateway data plane
+  (gateway.name, in the connectivity release's namespace), Substrate's egress
+  gateway (atenet-egress, in Substrate's namespace) with Substrate on, and
+  workspace-manager (its pods, in its release's namespace) with workspaces on;
+  then the block's own peers, each once. An own `enabled: false` fails the
+  render: whoever reaches the API port picks whose RBAC applies. So does a
+  workspace-manager range whose floor is below
+  agent-platform.workspaceManager.tokenFloor (no ServiceAccount token).
+Emits {} in the noop mode, and with kagent off.
+Usage: include "agent-platform.kagent.authorization" . | fromJson
+*/}}
+{{- define "agent-platform.kagent.authorization" -}}
+{{- $out := dict -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- $authz := dig "controller" "authorization" dict $kagent -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (eq (toString (dig "mode" "" $authz)) "kubernetes") -}}
+{{- $a := dict -}}
+{{- if not (dig "includeNamespaces" list $authz) -}}
+{{- $_ := set $a "includeNamespaces" (list (include "agent-platform.kagent.namespace" .)) -}}
+{{- end -}}
+{{- $wmOn := and (dig "enabled" false (.Values.workspaces | default dict)) (include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager")) -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- if $wmOn -}}
+{{- $audience := dig "kagent" "tokenAudience" "" $wm | default "kagent" -}}
+{{- $own := toString (dig "serviceAccountTokenAudience" "" $authz) -}}
+{{- if and $own (ne $own $audience) -}}
+{{- fail (printf "kagent.controller.authorization.serviceAccountTokenAudience (%s) differs from the audience of workspace-manager's token (%s, workspace-manager.kagent.tokenAudience): the controller's TokenReview would refuse every call of the manager — leave kagent.controller.authorization.serviceAccountTokenAudience unset, it follows workspace-manager.kagent.tokenAudience" $own $audience) -}}
+{{- end -}}
+{{- $_ := set $a "serviceAccountTokenAudience" $audience -}}
+{{- $wmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "workspace-manager" "versionRange" "" .Values.components) | default "0.0.0") "" -}}
+{{- if lt ((semver $wmFloor).Compare (semver (include "agent-platform.workspaceManager.tokenFloor" .))) 0 -}}
+{{- fail (printf "components.workspace-manager.versionRange (floor %s) admits a workspace-manager before %s, which calls the kagent controller without a ServiceAccount token, so the kubernetes authorization mode refuses its Session listing and no session directory is cleaned up — raise the floor, or set kagent.controller.authorization.mode: noop" $wmFloor (include "agent-platform.workspaceManager.tokenFloor" .)) -}}
+{{- end -}}
+{{- end -}}
+{{- if $a -}}{{- $_ := set $out "authorization" $a -}}{{- end -}}
+{{- $np := dig "controller" "networkPolicy" dict $kagent -}}
+{{- if eq (toString (dig "enabled" "" $np)) "false" -}}
+{{- fail "kagent.controller.networkPolicy.enabled is false with kagent.controller.authorization.mode kubernetes: the controller trusts the user a caller names, so every pod that reaches its API port could pick whose RBAC applies — leave it unset (the chart turns it on and admits the platform's callers), add a caller to kagent.controller.networkPolicy.from, or set kagent.controller.authorization.mode: noop" -}}
+{{- end -}}
+{{- $connNs := dig "agent-platform-connectivity" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $peers := list (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $connNs)) "podSelector" (dict "matchLabels" (dict "gateway.networking.k8s.io/gateway-name" .Values.gateway.name))) -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "substrate") -}}
+{{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" (dig "substrate" "targetNamespace" "ate-system" .Values.components))) "podSelector" (dict "matchLabels" (dict "app" "atenet-egress"))) -}}
+{{- end -}}
+{{- if $wmOn -}}
+{{- $wmNs := dig "workspace-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $wmNs)) "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" ($wm.nameOverride | default "workspace-manager")))) -}}
+{{- end -}}
+{{- range (dig "from" list $np) -}}
+{{- if not (has . $peers) -}}{{- $peers = append $peers . -}}{{- end -}}
+{{- end -}}
+{{- $_ := set $out "networkPolicy" (dict "enabled" true "from" $peers) -}}
+{{- end -}}
+{{- $out | toJson -}}
 {{- end -}}
 
 {{/*
@@ -3081,6 +3167,13 @@ workspace-manager.kagent.address (agent-platform.componentDerivedValues). One
 line, no comment inside the define.
 */}}
 {{- define "agent-platform.workspaceManager.kagentFloor" -}}0.4.0{{- end -}}
+
+{{/*
+The first release of the workspace-manager line that calls the kagent
+controller with a projected ServiceAccount token of kagent.tokenAudience, which
+the controller's kubernetes authorization mode needs (agent-platform.kagent.authorization).
+*/}}
+{{- define "agent-platform.workspaceManager.tokenFloor" -}}0.10.0{{- end -}}
 
 {{/*
 The agent-manager release that carries the tenant reconciler (its chart's

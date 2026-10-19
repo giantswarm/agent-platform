@@ -585,8 +585,13 @@ components:  # @schema additionalProperties: true
     # actor-JWT hosts to the runtime, and the claude Harness sends muster a
     # placeholder the egress gateway replaces, holding no caller bearer for a
     # turn whose every MCP server is on such a host, and the claude, codex and
-    # omp Harnesses commit as the person of the turn.
-    versionRange: ">=1.18.0 <1.19.0"
+    # omp Harnesses commit as the person of the turn. From 1.19.0 the
+    # controller's kubernetes authorization mode authenticates a
+    # ServiceAccount token with a TokenReview and reviews every creator's
+    # Session list as cluster-wide `list` on sessions.api.kagent.dev
+    # (giantswarm/kagent-upstream#633), so workspace-manager passes the
+    # authorizer this chart turns on (kagent.controller.authorization).
+    versionRange: ">=1.19.0 <1.20.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -700,7 +705,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.18.0 <1.19.0"
+    versionRange: ">=1.19.0 <1.20.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -2777,6 +2782,46 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # stable human identity and matches muster's trusted-issuer subjectClaim,
       # so UI (oauth2-proxy) and A2A sessions key identically.
       userIdClaim: email
+    # Who sees and runs an agent is Kubernetes RBAC (giantswarm/agent-platform#706,
+    # the tenants block below). In the kubernetes mode the controller asks the
+    # API server with a SubjectAccessReview for the caller's user (the
+    # userIdClaim above) and groups, mapped as the API server's OIDC
+    # authenticator maps the same token, and creates subjectaccessreviews and
+    # tokenreviews for it (the kagent chart's ClusterRole). noop, the kagent
+    # chart's default, lets every signed-in caller see and run every agent; an
+    # installation keeps it with `mode: noop` (UPGRADE.md). In the kubernetes
+    # mode this chart derives onto the kagent release:
+    #   - includeNamespaces, while it is empty: the kagent namespace, the
+    #     platform tenant, which carries no organization label;
+    #   - serviceAccountTokenAudience, with workspaces on: the audience of the
+    #     projected token workspace-manager calls the controller with
+    #     (workspace-manager.kagent.tokenAudience, kagent unless set); an own
+    #     value that differs fails the render;
+    #   - controller.networkPolicy: on, admitting to the controller's API port
+    #     only kagent's UI, the agentgateway data plane (gateway.name in the
+    #     connectivity release's namespace: the portal, Slack, agent-manager
+    #     and every caller through the edge), Substrate's egress gateway
+    #     (atenet-egress: the agents' calls) and, with workspaces on,
+    #     workspace-manager. Whoever reaches that port picks whose RBAC applies
+    #     (the caller's token is decoded, not verified, behind the edge). Own
+    #     `from` peers are admitted beside them; `enabled: false` fails the
+    #     render.
+    authorization:
+      mode: kubernetes
+      # What the API server puts before the username claim
+      # (--oidc-username-prefix). Empty: Giant Swarm installations.
+      usernamePrefix: ""
+      # The claim the installation's Dex tokens carry the groups in
+      # (--oidc-groups-claim).
+      groupsClaim: groups
+      # What the API server puts before every group (--oidc-groups-prefix).
+      # Empty: Giant Swarm installations bind groups with no prefix; a lab
+      # whose API server sets one (agentlab: oidc:) sets it here.
+      groupsPrefix: ""
+      # The tenants a person's agent list ranges over: every Organization
+      # namespace, and includeNamespaces beside them.
+      namespaceSelector: giantswarm.io/organization
+      includeNamespaces: []
     # kagent's jwt Session admission (controller.session.admission.jwt:
     # jwksURL, issuer, audience; the kagent chart from 1.6.0) is not set here:
     # with workspaces.enabled and a grant signing key (the reference the chart
@@ -5183,9 +5228,14 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # model key among them), for every requester.
 # An Organization's RoleBindings are the installation's (they name the
 # customer's groups); the chart binds the platform tenant only, below. The
-# kagent controller answers from these roles once its authorizer is on (the
-# kagent setting of giantswarm/giantswarm#37761, not yet released): until then
-# the bindings change nothing a person sees.
+# kagent controller answers from these roles: its authorizer is on
+# (kagent.controller.authorization.mode: kubernetes, the kagent line from
+# 1.19.0). An installation that keeps `noop` there sees every agent, and the
+# bindings change nothing a person sees. With workspaces on, the connectivity
+# release also binds workspace-manager's ServiceAccount to `list` on
+# sessions.api.kagent.dev cluster-wide (the ClusterRole
+# agent-platform:workspace-manager-sessions): the manager lists every creator's
+# Sessions for the session directories' cleanup, which no tenant role grants.
 tenants:
   platform:
     # -- Every signed-in person: bound to agent-platform:user in the kagent
