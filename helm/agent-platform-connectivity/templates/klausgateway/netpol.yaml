@@ -322,3 +322,88 @@ spec:
 {{- end }}
 {{- end }}
 {{- end }}
+{{- if and (include "agent-platform.klausGateway.refusalsOn" .) .Values.networkPolicy.enabled }}
+{{- $substrateNs := include "agent-platform.substrate.namespace" . }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- /* The stats port of atenet-egress (Substrate's PodMonitor scrapes it too)
+     and the kagent controller's API port, as their own policies name them. */}}
+{{- $statsPort := "15020" }}
+{{- $controllerPort := "8083" }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+# Egress of the refusal notices (giantswarm/giantswarm#38667): klaus-gateway
+# reads the refusal counter from the stats port of every atenet-egress pod and
+# asks the kagent controller, with its ServiceAccount token, which Agent a
+# refusing Session runs (the controller admits it as its session reader; the
+# controller's own ingress policy, which the kagent release renders, admits
+# this pod). The API server (EndpointSlices, Agents) is the store-egress
+# policy's kube-apiserver rule.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-klausgateway-refusals-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEndpoints:
+        - matchLabels:
+            app: atenet-egress
+            io.kubernetes.pod.namespace: {{ $substrateNs }}
+      toPorts:
+        - ports:
+            - port: {{ $statsPort | quote }}
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: controller
+            app.kubernetes.io/name: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: {{ $controllerPort | quote }}
+              protocol: TCP
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-klausgateway-refusals-egress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $substrateNs }}
+          podSelector:
+            matchLabels:
+              app: atenet-egress
+      ports:
+        - port: {{ $statsPort | int }}
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $kagentNs }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: controller
+              app.kubernetes.io/name: kagent
+      ports:
+        - port: {{ $controllerPort | int }}
+          protocol: TCP
+    {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+{{- end }}
+{{- end }}
