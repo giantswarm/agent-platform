@@ -71,14 +71,15 @@ Next steps (docs/install.md "After the install"):
 {{- if .Values.muster.muster.oauth.server.enabled }}
     client {{ .Values.muster.muster.oauth.server.dex.clientId | default .Values.global.identity.clientId | default "<global.identity.clientId>" }}: {{ $musterBase }}/oauth/callback
 {{- end }}
-{{- if and .Values.tenants.organizations.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
-    each OAuth app of an MCP server in an Organization's namespace: {{ $musterBase }}/oauth/ns/<namespace>/callback
-{{- end }}
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "backstage") }}
     client {{ .Values.global.identity.clientId | default "<global.identity.clientId>" }}: https://{{ .Values.backstage.hostname | default (printf "backstage.%s" $domain) }}/api/auth/oidc-agent-platform/handler/frame
 {{- end }}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.kagent.uiRoute.enabled (index .Values.kagent "oauth2-proxy" "enabled") }}
     kagent UI's client:     https://{{ .Values.kagent.uiRoute.hostname | default (printf "kagent.%s" $domain) }}/oauth2/callback
+{{- end }}
+{{- if and .Values.tenants.organizations.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
+
+  An Organization's MCP server: its OAuth app (at that server's own authorization server, not the identity provider) registers {{ $musterBase }}/oauth/ns/<namespace>/callback
 {{- end }}
 {{- end }}
 {{- $wm := index .Values "workspace-manager" | default dict }}
