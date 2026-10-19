@@ -889,12 +889,14 @@ components:  # @schema additionalProperties: true
     # turn_complete and klaus_gateway_turn_total carry failure_class
     # (giantswarm/klaus-gateway#329). An alert on a burst of one class reads
     # every installation only once none runs an older gateway.
-    # The floor is 4.3.0: every Slack Session starts through agent-manager's
-    # start_session as the person, create-only and without a message
-    # (giantswarm/klaus-gateway#446), which agent-manager's 1.13.0 floor
-    # serves; and the chart takes workspaces.toolsPrefix, which this chart
-    # derives from that floor on (agent-platform.klausGateway.workspacesFloor).
-    versionRange: ">=4.3.0 <5.0.0"
+    # The floor is 4.11.0: the chart takes klausGateway.refusals, the egress
+    # refusal notices (agent-platform.klausGateway.refusalsFloor), which run
+    # once components.kagent reaches the session reader. Every release from it
+    # starts each Slack Session through agent-manager's start_session as the
+    # person, create-only and without a message (giantswarm/klaus-gateway#446),
+    # which agent-manager's 1.13.0 floor serves, and takes
+    # workspaces.toolsPrefix (agent-platform.klausGateway.workspacesFloor).
+    versionRange: ">=4.11.0 <5.0.0"
     valuesFrom: klausGateway
     # klausGateway.observability.enabled is this chart's knob (auto | true |
     # false, resolved by agent-platform.shape.apply); the klaus-gateway chart's
