@@ -14,7 +14,13 @@ what (the substrate chart's arguments and Service definitions):
         credential provider k8s-credential-provider :50051 for the Secret
         values a policy's credential injection names (the Substrate line from
         1.1.0; without this hop every injection ends in UpstreamCallTimeout
-        and the golden boot's git fetch gets 403) — nothing
+        and the golden boot's git fetch gets 403), and the plugin
+        google-access-token-credential-provider :50051 for a Vertex AI
+        ModelConfig's access token (without it the turn fails with
+        "credential provider google-access-token.k8s.io unavailable"), and with
+        workspaces muster :50051 for a workspace Session's git and GitHub API
+        credentials (without it "credential provider muster.giantswarm.io
+        unavailable") — nothing
         leaves a worker pod for those destinations directly; the sandbox's
         outbound traffic is tunnelled to atenet-egress, so the actors' egress
         allow-list lives on atenet-egress and the worker pods reach only the
@@ -516,6 +522,18 @@ spec:
         - ports:
             - port: "50051"
               protocol: TCP
+    {{- if and $kagentOn (include "agent-platform.componentEnabled" (dict "root" . "name" "google-access-token-credential-provider")) }}
+    # The Google access-token credential provider plugin, which the Substrate
+    # chart routes the class google-access-token.k8s.io to (a Vertex AI
+    # ModelConfig's token), asked per request like the bundled provider.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: google-access-token-credential-provider
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+    {{- end }}
     {{- if and $kagentOn .Values.muster.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
     - toEndpoints:
         - matchLabels:
@@ -525,6 +543,15 @@ spec:
         - ports:
             - port: {{ include "agent-platform.musterServicePort" . | quote }}
               protocol: TCP
+            {{- if include "agent-platform.workspaces.enabled" . }}
+            # muster's credential provider (FetchSecret), which the egress
+            # gateway asks for a workspace Session's ate-secret://muster.giantswarm.io
+            # credentials (substrate.credentialProvider.additionalProviders);
+            # without it every git and GitHub API call of the Session ends in
+            # "credential provider muster.giantswarm.io unavailable".
+            - port: "50051"
+              protocol: TCP
+            {{- end }}
     {{- end }}
     {{- if $kagentOn }}
     - toEndpoints:

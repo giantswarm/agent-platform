@@ -61,7 +61,9 @@ BASE = [
     "--api-versions", "kyverno.io/v1",
     "--api-versions", "cilium.io/v2",
 ]
-ON = ["--set", "tenants.organizations.enabled=true"]
+# tenants.organizations.enabled needs the llm listener
+# (giantswarm/agent-platform#759).
+ON = ["--set", "tenants.organizations.enabled=true", "--set", "llmRouting.enabled=true"]
 # (kind, name, direction, port): the rules of each flavor that admit the
 # kagent namespace's workers.
 HOPS = {
@@ -235,6 +237,11 @@ def check_admission(docs, pool="kagent-default"):
 # verify-tenant-rbac asserts it).
 EGRESS_POLICIES = ("agent-platform-tenant-egress-credentials", "agent-platform-tenant-model-credentials",
                    "agent-platform-tenant-credentials", "agent-platform-tenant-credential-refs")
+# A tenant's own ModelConfig (giantswarm/agent-platform#759) selects the label
+# with kagent and tenants.organizations on; verify-tenant-modelconfigs asserts it.
+MODEL_POLICIES = {("ValidatingAdmissionPolicy", "agent-platform-tenant-model-routing"),
+                  ("ValidatingAdmissionPolicy", "agent-platform-tenant-secret-creation"),
+                  ("MutatingAdmissionPolicyBinding", "agent-platform-connectivity-modelconfig-llm-routing-organizations")}
 
 
 def main():
@@ -250,7 +257,7 @@ def main():
         selecting = {(d["kind"], d["metadata"]["name"]) for d in on if ORG in yaml.safe_dump(d)}
         want = {(kind, name) for kind, name, _, _ in HOPS[flavor]} | {("PolicyException", "substrate-workers")} | {
             ("ValidatingAdmissionPolicy", WORKERS_POLICY), ("ValidatingAdmissionPolicy", COPY_POLICY)} | {
-            ("ValidatingAdmissionPolicy", n) for n in EGRESS_POLICIES}
+            ("ValidatingAdmissionPolicy", n) for n in EGRESS_POLICIES} | MODEL_POLICIES
         if selecting != want:
             fail(f"tenants.organizations on ({flavor}): {sorted(selecting)} select {ORG}, not exactly {sorted(want)}")
         check_hops(flavor, on)

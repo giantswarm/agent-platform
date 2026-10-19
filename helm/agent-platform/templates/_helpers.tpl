@@ -119,6 +119,45 @@ Usage: include "agent-platform.kagent.fluxServiceAccountName" .
 {{- end -}}
 
 {{/*
+The credential providers' namespacePolicies, as JSON {"policies": [...]}: the
+installation's own substrate.credentialProvider.namespacePolicies and, with
+tenants.organizations.enabled, the Organizations' agents
+(giantswarm/agent-platform#1041): each namespace labelled
+giantswarm.io/organization is read by the atespace of its own name only (an
+ownNamespaceSelector entry), and ate-golden, where every template's golden
+actor boots, reads them all (allowedNamespaceSelector on its entry, so that
+entry's secretSelector narrows it there too). Each derived entry once; an
+ate-golden entry that selects other namespaces fails. Substrate's bundled
+provider and the Google access-token plugin get the same list.
+Usage: (include "agent-platform.credentialProvider.namespacePolicies" $root | fromJson).policies
+*/}}
+{{- define "agent-platform.credentialProvider.namespacePolicies" -}}
+{{- $own := dig "credentialProvider" "namespacePolicies" list (.Values.substrate | default dict) -}}
+{{- if not (dig "organizations" "enabled" false (.Values.tenants | default dict)) -}}
+{{- toJson (dict "policies" $own) -}}
+{{- else -}}
+{{- $sel := dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists")) -}}
+{{- $policies := list -}}
+{{- $golden := false -}}
+{{- $ownSel := false -}}
+{{- range $i, $p := $own -}}
+{{- if eq (toJson ($p.ownNamespaceSelector | default dict)) (toJson $sel) -}}{{- $ownSel = true -}}{{- end -}}
+{{- if eq ($p.atespace | default "") "ate-golden" -}}
+{{- if and $p.allowedNamespaceSelector (ne (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
+{{- fail (printf "substrate.credentialProvider.namespacePolicies[%d] (ate-golden) has an allowedNamespaceSelector (%s) other than the Organizations' namespaces (%s), which tenants.organizations.enabled sets on it: leave it unset" $i (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
+{{- end -}}
+{{- $p = merge (dict "allowedNamespaceSelector" $sel) $p -}}
+{{- $golden = true -}}
+{{- end -}}
+{{- $policies = append $policies $p -}}
+{{- end -}}
+{{- if not $golden -}}{{- $policies = append $policies (dict "atespace" "ate-golden" "allowedNamespaceSelector" $sel) -}}{{- end -}}
+{{- if not $ownSel -}}{{- $policies = append $policies (dict "ownNamespaceSelector" $sel) -}}{{- end -}}
+{{- toJson (dict "policies" $policies) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Values this chart derives for a component from a block another component owns,
 merged OVER the component's forwarded values (templates/components.yaml) so one
 value drives every consumer. Emits a JSON object; {} for a component with
@@ -233,14 +272,15 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- $derived := dict -}}
 {{- if eq .name "google-access-token-credential-provider" -}}
 {{- /* The plugin resolves keys under the same atespace-to-namespace grants as
-Substrate's bundled provider: one list, Substrate's. The Substrate release's
-name and namespace tell the plugin which egress gateway may call it. */ -}}
+Substrate's bundled provider: one list, Substrate's, with the entries the
+Organizations derive. The Substrate release's name and namespace tell the
+plugin which egress gateway may call it. */ -}}
 {{- $grants := dig "credentialProvider" "namespacePolicies" list (.root.Values.substrate | default dict) -}}
 {{- $own := dig "namespacePolicies" list (index .root.Values "google-access-token-credential-provider" | default dict) -}}
 {{- if and $own (ne (toJson $own) (toJson $grants)) -}}
 {{- fail (printf "google-access-token-credential-provider.namespacePolicies (%s) differs from substrate.credentialProvider.namespacePolicies (%s): an atespace resolves Google service account keys under the grants it resolves every other Secret under — set substrate.credentialProvider.namespacePolicies and leave google-access-token-credential-provider.namespacePolicies unset" (toJson $own) (toJson $grants)) -}}
 {{- end -}}
-{{- $_ := set $derived "namespacePolicies" $grants -}}
+{{- $_ := set $derived "namespacePolicies" (include "agent-platform.credentialProvider.namespacePolicies" .root | fromJson).policies -}}
 {{- $_ := set $derived "substrate" (dict "releaseName" "substrate" "namespace" (dig "substrate" "targetNamespace" "ate-system" .root.Values.components)) -}}
 {{- end -}}
 {{- if eq .name "agent-manager" -}}
@@ -264,6 +304,18 @@ name and namespace tell the plugin which egress gateway may call it. */ -}}
 {{- $_ := set $derived "kagent" (dict "controllerTarget" $target) -}}
 {{- with (include "agent-platform.agentManager.tenants" .root | fromJson) -}}
 {{- $_ := set $derived "tenants" . -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .name "agent-platform-connectivity" -}}
+{{- /* The namespace the workspace-manager release installs into, when it is
+not the connectivity release's own: the connectivity release binds the
+manager's ServiceAccount there (workspace-manager/kagent-sessions-rbac.yaml). */ -}}
+{{- if and (dig "enabled" false (.root.Values.workspaces | default dict)) (include "agent-platform.componentEnabled" (dict "root" .root "name" "workspace-manager")) -}}
+{{- $wmNs := dig "workspace-manager" "targetNamespace" "" .root.Values.components | default (include "agent-platform.targetNamespace" .root) -}}
+{{- $connNs := dig "agent-platform-connectivity" "targetNamespace" "" .root.Values.components | default (include "agent-platform.targetNamespace" .root) -}}
+{{- if ne $wmNs $connNs -}}
+{{- $_ := set $derived "workspaceManager" (dict "namespace" $wmNs) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "cluster-manager" -}}
@@ -482,6 +534,11 @@ muster's authority, which muster answers with the person's token
 {{- $_ := set $controller "session" $session -}}
 {{- $_ := set $derived "controller" $controller -}}
 {{- end -}}
+{{- /* The authorizer's derived keys and the controller's NetworkPolicy, in
+the kubernetes authorization mode (agent-platform.kagent.authorization). */ -}}
+{{- with (include "agent-platform.kagent.authorization" .root | fromJson) -}}
+{{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "muster" -}}
 {{- /* The identity provider's private CA (global.identity.ca) is what muster's
@@ -580,36 +637,13 @@ left to the Substrate chart's default; an own false fails the render. */ -}}
 {{- $_ := set $derived "ateController" (dict "gvisorWorker" (dict "followRelease" true)) -}}
 {{- end -}}
 {{- if and (eq .name "substrate") (dig "organizations" "enabled" false (.root.Values.tenants | default dict)) -}}
-{{- /* The Organizations' agents (giantswarm/agent-platform#1041): each
-namespace labelled giantswarm.io/organization is read by the atespace of its
-own name only (an ownNamespaceSelector entry), and ate-golden, where every
-template's golden actor boots, reads them all (allowedNamespaceSelector on
-its entry, so that entry's secretSelector narrows it there too). The
-installation's own policies stay, each derived entry once; an ate-golden entry
-that selects other namespaces fails, and so does a Substrate floor below 1.12.0,
-whose provider refuses the selectors. */ -}}
+{{- /* A Substrate floor below 1.12.0 fails: its provider refuses the
+selectors agent-platform.credentialProvider.namespacePolicies derives. */ -}}
 {{- $pin := include "agent-platform.substrate.pinnedVersion" .root -}}
 {{- if semverCompare "<1.12.0-0" $pin -}}
 {{- fail (printf "tenants.organizations.enabled needs Substrate 1.12.0 or later, whose credential provider reads namespace policies by label: components.substrate.versionRange selects %s, whose provider refuses the policy file at start" $pin) -}}
 {{- end -}}
-{{- $sel := dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists")) -}}
-{{- $policies := list -}}
-{{- $golden := false -}}
-{{- $own := false -}}
-{{- range $i, $p := dig "credentialProvider" "namespacePolicies" list ($.root.Values.substrate | default dict) -}}
-{{- if eq (toJson ($p.ownNamespaceSelector | default dict)) (toJson $sel) -}}{{- $own = true -}}{{- end -}}
-{{- if eq ($p.atespace | default "") "ate-golden" -}}
-{{- if and $p.allowedNamespaceSelector (ne (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
-{{- fail (printf "substrate.credentialProvider.namespacePolicies[%d] (ate-golden) has an allowedNamespaceSelector (%s) other than the Organizations' namespaces (%s), which tenants.organizations.enabled sets on it: leave it unset" $i (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
-{{- end -}}
-{{- $p = merge (dict "allowedNamespaceSelector" $sel) $p -}}
-{{- $golden = true -}}
-{{- end -}}
-{{- $policies = append $policies $p -}}
-{{- end -}}
-{{- if not $golden -}}{{- $policies = append $policies (dict "atespace" "ate-golden" "allowedNamespaceSelector" $sel) -}}{{- end -}}
-{{- if not $own -}}{{- $policies = append $policies (dict "ownNamespaceSelector" $sel) -}}{{- end -}}
-{{- $_ := set $derived "credentialProvider" (dict "namespacePolicies" $policies) -}}
+{{- $_ := set $derived "credentialProvider" (dict "namespacePolicies" (include "agent-platform.credentialProvider.namespacePolicies" .root | fromJson).policies) -}}
 {{- end -}}
 {{- if and (eq .name "kserve-llmisvc-resources") (include "agent-platform.componentEnabled" (dict "root" .root "name" "modelServing")) -}}
 {{- /* The models Gateway (modelServing.modelsGateway, rendered by the
@@ -627,6 +661,75 @@ shared inferenceservice-config ConfigMap its own release renders. */ -}}
 {{- end -}}
 {{- end -}}
 {{- $derived | toJson -}}
+{{- end -}}
+
+{{/*
+The kagent controller's authorizer keys and NetworkPolicy the kagent release
+receives in the kubernetes authorization mode
+(kagent.controller.authorization.mode; giantswarm/agent-platform#706), as a
+partial controller block:
+- authorization.includeNamespaces: the kagent namespace, the platform tenant,
+  while the block's own list is empty;
+- authorization.serviceAccountTokenAudience, with workspaces on: the audience
+  of the projected token workspace-manager calls the controller with
+  (workspace-manager.kagent.tokenAudience, else kagent, that chart's default);
+  an own value that differs fails the render, since the controller's
+  TokenReview would refuse every call of the manager;
+- networkPolicy: enabled, `from` the controller API's callers beside kagent's
+  UI (the kagent chart admits it itself): the agentgateway data plane
+  (gateway.name, in the connectivity release's namespace), Substrate's egress
+  gateway (atenet-egress, in Substrate's namespace) with Substrate on, and
+  workspace-manager (its pods, in its release's namespace) with workspaces on;
+  then the block's own peers, each once. An own `enabled: false` fails the
+  render: whoever reaches the API port picks whose RBAC applies. So does a
+  workspace-manager range whose floor is below
+  agent-platform.workspaceManager.tokenFloor (no ServiceAccount token).
+Emits {} in the noop mode, and with kagent off.
+Usage: include "agent-platform.kagent.authorization" . | fromJson
+*/}}
+{{- define "agent-platform.kagent.authorization" -}}
+{{- $out := dict -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- $authz := dig "controller" "authorization" dict $kagent -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (eq (toString (dig "mode" "" $authz)) "kubernetes") -}}
+{{- $a := dict -}}
+{{- if not (dig "includeNamespaces" list $authz) -}}
+{{- $_ := set $a "includeNamespaces" (list (include "agent-platform.kagent.namespace" .)) -}}
+{{- end -}}
+{{- $wmOn := and (dig "enabled" false (.Values.workspaces | default dict)) (include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager")) -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- if $wmOn -}}
+{{- $audience := dig "kagent" "tokenAudience" "" $wm | default "kagent" -}}
+{{- $own := toString (dig "serviceAccountTokenAudience" "" $authz) -}}
+{{- if and $own (ne $own $audience) -}}
+{{- fail (printf "kagent.controller.authorization.serviceAccountTokenAudience (%s) differs from the audience of workspace-manager's token (%s, workspace-manager.kagent.tokenAudience): the controller's TokenReview would refuse every call of the manager — leave kagent.controller.authorization.serviceAccountTokenAudience unset, it follows workspace-manager.kagent.tokenAudience" $own $audience) -}}
+{{- end -}}
+{{- $_ := set $a "serviceAccountTokenAudience" $audience -}}
+{{- $wmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "workspace-manager" "versionRange" "" .Values.components) | default "0.0.0") "" -}}
+{{- if lt ((semver $wmFloor).Compare (semver (include "agent-platform.workspaceManager.tokenFloor" .))) 0 -}}
+{{- fail (printf "components.workspace-manager.versionRange (floor %s) admits a workspace-manager before %s, which calls the kagent controller without a ServiceAccount token, so the kubernetes authorization mode refuses its Session listing and no session directory is cleaned up — raise the floor, or set kagent.controller.authorization.mode: noop" $wmFloor (include "agent-platform.workspaceManager.tokenFloor" .)) -}}
+{{- end -}}
+{{- end -}}
+{{- if $a -}}{{- $_ := set $out "authorization" $a -}}{{- end -}}
+{{- $np := dig "controller" "networkPolicy" dict $kagent -}}
+{{- if eq (toString (dig "enabled" "" $np)) "false" -}}
+{{- fail "kagent.controller.networkPolicy.enabled is false with kagent.controller.authorization.mode kubernetes: the controller trusts the user a caller names, so every pod that reaches its API port could pick whose RBAC applies — leave it unset (the chart turns it on and admits the platform's callers), add a caller to kagent.controller.networkPolicy.from, or set kagent.controller.authorization.mode: noop" -}}
+{{- end -}}
+{{- $connNs := dig "agent-platform-connectivity" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $peers := list (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $connNs)) "podSelector" (dict "matchLabels" (dict "gateway.networking.k8s.io/gateway-name" .Values.gateway.name))) -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "substrate") -}}
+{{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" (dig "substrate" "targetNamespace" "ate-system" .Values.components))) "podSelector" (dict "matchLabels" (dict "app" "atenet-egress"))) -}}
+{{- end -}}
+{{- if $wmOn -}}
+{{- $wmNs := dig "workspace-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $wmNs)) "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" ($wm.nameOverride | default "workspace-manager")))) -}}
+{{- end -}}
+{{- range (dig "from" list $np) -}}
+{{- if not (has . $peers) -}}{{- $peers = append $peers . -}}{{- end -}}
+{{- end -}}
+{{- $_ := set $out "networkPolicy" (dict "enabled" true "from" $peers) -}}
+{{- end -}}
+{{- $out | toJson -}}
 {{- end -}}
 
 {{/*
@@ -3066,6 +3169,13 @@ line, no comment inside the define.
 {{- define "agent-platform.workspaceManager.kagentFloor" -}}0.4.0{{- end -}}
 
 {{/*
+The first release of the workspace-manager line that calls the kagent
+controller with a projected ServiceAccount token of kagent.tokenAudience, which
+the controller's kubernetes authorization mode needs (agent-platform.kagent.authorization).
+*/}}
+{{- define "agent-platform.workspaceManager.tokenFloor" -}}0.10.0{{- end -}}
+
+{{/*
 The agent-manager release that carries the tenant reconciler (its chart's
 tenants block, flag --multi-tenant; giantswarm/agent-manager#160). One line,
 no comment inside the define.
@@ -3794,28 +3904,18 @@ the same tag as this chart (components.<name>.releasedWithChart).
 {{- end -}}
 
 {{/*
-Render guards of self-management, evaluated only when it is on:
-
-1. Kubernetes >= 1.30: the admission policy is admissionregistration.k8s.io/v1
-   ValidatingAdmissionPolicy (GA in 1.30). An older apiserver would fail the
-   install at apply time with `no matches for kind`; the render says why and
-   names the way out (gitops.self.enabled=false keeps the Helm CLI as the
-   day-2 tool). `helm template --kube-version` exercises it offline.
-2. The hand-back annotation together with self-management on: the policy would
-   admit the Helm CLI while the bundled helm-controller holds the release — two
-   writers on one release, which is what the whole shape forbids (a CLI
-   revision pending while the controller reconciles is unlocked and upgraded
-   with whatever the values Secret holds). The hand-back upgrade carries
-   gitops.self.enabled=false; a stale annotation is removed. `lookup` is live
-   under the Helm CLI, --dry-run=server and helm-controller (where the guard
-   surfaces on the self HelmRelease for the duration of a hand-back), empty
-   under `helm template`.
+Render guard of self-management, evaluated only when it is on: the hand-back
+annotation together with self-management on. The policy would admit the Helm
+CLI while the bundled helm-controller holds the release — two writers on one
+release, which is what the whole shape forbids (a CLI revision pending while
+the controller reconciles is unlocked and upgraded with whatever the values
+Secret holds). The hand-back upgrade carries gitops.self.enabled=false; a stale
+annotation is removed. `lookup` is live under the Helm CLI, --dry-run=server
+and helm-controller (where the guard surfaces on the self HelmRelease for the
+duration of a hand-back), empty under `helm template`.
 */}}
 {{- define "agent-platform.validateSelf" -}}
 {{- if eq (include "agent-platform.selfEnabled" .) "true" -}}
-{{- if semverCompare "<1.30.0-0" .Capabilities.KubeVersion.Version -}}
-{{- fail (printf "self-management (gitops.self.enabled) needs Kubernetes >= 1.30 for its ValidatingAdmissionPolicy (admissionregistration.k8s.io/v1); this cluster reports %s. Set gitops.self.enabled=false to install without it — the Helm CLI then stays the day-2 tool" .Capabilities.KubeVersion.Version) -}}
-{{- end -}}
 {{- $ns := lookup "v1" "Namespace" "" .Release.Namespace -}}
 {{- $ann := include "agent-platform.self.handBackAnnotation" . -}}
 {{- if and $ns (eq (dig "metadata" "annotations" $ann "" $ns) "allow") -}}

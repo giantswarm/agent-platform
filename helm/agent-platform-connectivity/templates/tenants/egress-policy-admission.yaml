@@ -24,7 +24,9 @@ the ModelConfig's base URL, so a ModelConfig names only a Secret with the
 prefix, for every requester but agent-manager's tenant reconciler
 (agent-platform.agentManager.serviceAccountUser; with agent-manager on and
 tenants.organizations.enabled), which writes the copy of the platform's
-default ModelConfig with the platform's key and base URL. A
+default ModelConfig with the platform's key and base URL, only under that
+ModelConfig's name (agent-platform.tenants.modelConfigName), whose base URL
+agent-platform-tenant-model-routing holds to the listener. A
 ModelConfig without apiKeySecret is admitted. It reads the object untyped
 (apiVersions "*") like the EgressPolicy policy.
 
@@ -65,8 +67,7 @@ the reference is renamed. It reads the three kinds untyped (apiVersions "*").
 
 The EgressPolicy policy reads the object untyped (apiVersions "*"): it admits
 every version of egresspolicies.api.kagent.dev, and matches nothing on a
-cluster that does not serve them. Kubernetes 1.30 or later
-(admissionregistration.k8s.io/v1).
+cluster that does not serve them.
 */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
@@ -166,7 +167,8 @@ spec:
   validations:
     - expression: >-
         variables.secret == '' || variables.secret.startsWith({{ squote $prefix }}){{ with $reconciler }} ||
-        request.userInfo.username == {{ squote . }}{{ end }}
+        (request.userInfo.username == {{ squote . }} &&
+        request.name == {{ include "agent-platform.tenants.modelConfigName" $ | squote }}){{ end }}
       reason: Forbidden
       messageExpression: >-
         {{ printf "'a ModelConfig in an Organization namespace names only a tenant credential, a Secret named %s*, as its apiKeySecret%s. Refused for ' + request.userInfo.username + ': apiKeySecret ' + variables.secret" $prefix (ternary "; only agent-manager writes the copy of the platform model" "" (ne $reconciler "")) }}

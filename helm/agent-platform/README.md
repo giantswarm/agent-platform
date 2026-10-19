@@ -218,8 +218,9 @@ serving the class the Substrate chart routes to it through
 `components.kagent` like the Substrate entries and takes its grants from
 `substrate.credentialProvider.namespacePolicies` (one list for both providers;
 `agent-platform.componentDerivedValues`). Its CiliumNetworkPolicy opens
-`oauth2.googleapis.com:443` for the exchange, which the bundled provider of
-Substrate 1.11 and earlier had no rule for (giantswarm/agent-platform#1042).
+`oauth2.googleapis.com:443` for the exchange; the bundled provider reads
+Secrets only and reaches the apiserver and DNS
+(`networkPolicy.substrate.credentialProvider.egressFQDNs`, `[]` by default).
 The Substrate line served the class from its bundled provider until 1.11: the
 plugin is deployed first, and the routing entry lands with the floor move to
 1.12, where the bundled name is gone.
@@ -435,7 +436,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.18.0 <1.19.0"` |  |
+| components.kagent.versionRange | string | `">=1.19.0 <1.20.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -459,7 +460,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.18.0 <1.19.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.19.0 <1.20.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
@@ -486,7 +487,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.upgradeRemediation.retries | int | `3` |  |
 | components.google-access-token-credential-provider.chart | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.google-access-token-credential-provider.versionRange | string | `">=0.1.0 <0.2.0"` |  |
+| components.google-access-token-credential-provider.versionRange | string | `">=0.2.0 <0.3.0"` |  |
 | components.google-access-token-credential-provider.valuesFrom | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.injectGlobal | bool | `false` |  |
 | components.google-access-token-credential-provider.targetNamespace | string | `"ate-system"` |  |
@@ -748,7 +749,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | networkPolicy.flavor | string | `"auto"` | `auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor. |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
-| networkPolicy.substrate.credentialProvider.egressFQDNs[0].matchName | string | `"oauth2.googleapis.com"` |  |
+| networkPolicy.substrate.credentialProvider.egressFQDNs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
 | networkPolicy.musterInClusterMcpPorts[1] | int | `8443` |  |
 | networkPolicy.mcpBackends | object | `{}` |  |
@@ -884,6 +885,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controller.substrate.atenetRouterURL | string | `"http://atenet-router.ate-system.svc:80"` |  |
 | kagent.controller.auth.mode | string | `"trusted-proxy"` |  |
 | kagent.controller.auth.userIdClaim | string | `"email"` |  |
+| kagent.controller.authorization.mode | string | `"kubernetes"` |  |
+| kagent.controller.authorization.usernamePrefix | string | `""` |  |
+| kagent.controller.authorization.groupsClaim | string | `"groups"` |  |
+| kagent.controller.authorization.groupsPrefix | string | `""` |  |
+| kagent.controller.authorization.namespaceSelector | string | `"giantswarm.io/organization"` |  |
+| kagent.controller.authorization.includeNamespaces | list | `[]` |  |
 | kagent.controller.sessionIdleTTL | string | `"336h"` |  |
 | kagent.controller.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | kagent.controller.pdb.enabled | bool | `true` |  |
@@ -1365,7 +1372,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.6.4"` |  |
+| agentManager.migration.image.tag | string | `"2.6.7"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
@@ -1400,7 +1407,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: bound to agent-platform:user in the kagent namespace, and to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, gives this to every user. It also gives it to every ServiceAccount, so every pod in the cluster can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. To give it to people only, replace the default with an OIDC group that every user belongs to, written as the API server sees it (with the installation's OIDC groups prefix). |
 | tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects. |
 | tenants.platformTeam | list | `[]` | The customer's platform team, per installation: RBAC subjects bound to agent-platform:editor in the kagent namespace beside `platform.editors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation). |
-| tenants.organizations.enabled | bool | `false` | Admit the agent workers of the Organizations' namespaces and turn on agent-manager's tenant reconciler. With components.agent-manager on, the agent-manager release gets `tenants.enabled` (agent-manager 2.1.0 or later), which puts a WorkerPool in each namespace labelled `giantswarm.io/organization` that holds an agent, with copies of the kagent namespace's default ModelConfig (`default-model-config`, its key Secret kagent.providers.<default>.apiKeySecretRef, which must be set in these values: the kagent chart's own provider defaults are not read) and of the workers' own policy (the CiliumNetworkPolicy `substrate-workers` in the cilium flavor, which needs cilium.io/v2 served or agent-manager does not start; the NetworkPolicy `substrate-workers-ingress` in the kubernetes flavor; none with networkPolicy.enabled off). Each tenant that holds an agent keeps 1 warm worker unless agent-manager.tenants.workerPoolReplicas sets another count. The render fails, naming the key, below agent-manager 2.1.0, with kagent off, with agent-manager's OAuth or downstream OAuth off, without kagent.fluxServiceAccountName or without that key Secret. agent-manager.tenants.workerPoolReplicas and .interval are yours; any other agent-manager.tenants key is derived and must be unset or equal. On, with Agent Substrate on, the connectivity release lets the worker pods of every such namespace reach the atenet router's tunnel, the egress gateway and the actors' dns, as the kagent namespace's workers do (both flavors), and the workers' Kyverno PolicyException covers them there when Substrate's controllers write them (ate-controller, the Deployment and ReplicaSet controllers); a labelled pod a person writes there is judged like any other. It needs Kyverno 1.15.2 or later: an older Kyverno matches the exception's namespaceSelector against no labels, so the exception never applies and the workers are refused. The namespaces are selected by the label, never listed; a namespace without the label gets nothing. Two ValidatingAdmissionPolicies hold the workers there for every requester, cluster-admin included: only agent-manager's ServiceAccount writes a WorkerPool, as a copy of the platform WorkerPool (kagent.substrateWorkerPool.name; only replicas may differ), and only Substrate's controllers write a Deployment, ReplicaSet or Pod labelled ate.dev/worker-pool; no one adds an ephemeral container to a worker, execs into one or attaches to one (Kubernetes 1.30 or later; docs/substrate-security.md). On, Substrate's credential provider also reads each such namespace's Secrets for the atespace of the same name, and for ate-golden, where every template's golden actor boots (substrate.credentialProvider.namespacePolicies). Off, the default, nothing changes. |
+| tenants.organizations.enabled | bool | `false` | Admit the agent workers of the Organizations' namespaces and turn on agent-manager's tenant reconciler. With components.agent-manager on, the agent-manager release gets `tenants.enabled` (agent-manager 2.1.0 or later), which puts a WorkerPool in each namespace labelled `giantswarm.io/organization` that holds an agent, with copies of the kagent namespace's default ModelConfig (`default-model-config`, its key Secret kagent.providers.<default>.apiKeySecretRef, which must be set in these values: the kagent chart's own provider defaults are not read) and of the workers' own policy (the CiliumNetworkPolicy `substrate-workers` in the cilium flavor, which needs cilium.io/v2 served or agent-manager does not start; the NetworkPolicy `substrate-workers-ingress` in the kubernetes flavor; none with networkPolicy.enabled off). Each tenant that holds an agent keeps 1 warm worker unless agent-manager.tenants.workerPoolReplicas sets another count. The render fails, naming the key, below agent-manager 2.1.0, with kagent off, with agent-manager's OAuth or downstream OAuth off, without kagent.fluxServiceAccountName or without that key Secret. agent-manager.tenants.workerPoolReplicas and .interval are yours; any other agent-manager.tenants key is derived and must be unset or equal. On, with Agent Substrate on, the connectivity release lets the worker pods of every such namespace reach the atenet router's tunnel, the egress gateway and the actors' dns, as the kagent namespace's workers do (both flavors), and the workers' Kyverno PolicyException covers them there when Substrate's controllers write them (ate-controller, the Deployment and ReplicaSet controllers); a labelled pod a person writes there is judged like any other. It needs Kyverno 1.15.2 or later: an older Kyverno matches the exception's namespaceSelector against no labels, so the exception never applies and the workers are refused. The namespaces are selected by the label, never listed; a namespace without the label gets nothing. Two ValidatingAdmissionPolicies hold the workers there for every requester, cluster-admin included: only agent-manager's ServiceAccount writes a WorkerPool, as a copy of the platform WorkerPool (kagent.substrateWorkerPool.name; only replicas may differ), and only Substrate's controllers write a Deployment, ReplicaSet or Pod labelled ate.dev/worker-pool; no one adds an ephemeral container to a worker, execs into one or attaches to one (docs/substrate-security.md). On, Substrate's credential provider also reads each such namespace's Secrets for the atespace of the same name, and for ate-golden, where every template's golden actor boots (substrate.credentialProvider.namespacePolicies). On, a tenant also brings its own model key (giantswarm/agent-platform#759; README, "A tenant's own model"), and every model call of an Organization's namespace still goes through the `llm` listener, so the gateway meters it under the tenant. The connectivity release's modelconfig-llm-routing policies fill in the listener as the `spec.<provider>.baseUrl` of a ModelConfig there that has none, and two more ValidatingAdmissionPolicies hold every such namespace but kagent, for every requester: `agent-platform-tenant-model-routing` admits a ModelConfig only when the listener serves its provider (llmRouting.models) and its baseUrl is the listener (a Bedrock ModelConfig, any provider the listener does not serve, and a baseUrl that is not the listener are refused); `agent-platform-tenant-secret-creation` admits the creation of a Secret without the `tenant-credential-` prefix only for a requester who may already read that Secret (Helm, GitOps and the cluster's controllers keep writing as today). Only agent-manager's copy of `default-model-config` names the platform's key there. The render fails without llmRouting.enabled, with a default ModelConfig provider (kagent.providers.<default>.provider) the listener does not serve, and without the modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled). Point every ModelConfig already in an Organization namespace at the listener, or delete it, before you turn this on: later updates of one that is not are refused. Off, the default, nothing changes. |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |

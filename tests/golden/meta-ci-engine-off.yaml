@@ -195,7 +195,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.6.4
+          tag: 2.6.7
       networkPolicy:
         egress:
           cidrs: []
@@ -596,6 +596,13 @@ spec:
         auth:
           mode: trusted-proxy
           userIdClaim: email
+        authorization:
+          groupsClaim: groups
+          groupsPrefix: ""
+          includeNamespaces: []
+          mode: kubernetes
+          namespaceSelector: giantswarm.io/organization
+          usernamePrefix: ""
         env: []
         image:
           repository: giantswarm/kagent/controller
@@ -1209,8 +1216,7 @@ spec:
       - 8443
       substrate:
         credentialProvider:
-          egressFQDNs:
-          - matchName: oauth2.googleapis.com
+          egressFQDNs: []
     postgres:
       affinity: {}
       applicationDatabase:
@@ -1861,6 +1867,14 @@ spec:
       auth:
         mode: trusted-proxy
         userIdClaim: email
+      authorization:
+        groupsClaim: groups
+        groupsPrefix: ""
+        includeNamespaces:
+        - kagent
+        mode: kubernetes
+        namespaceSelector: giantswarm.io/organization
+        usernamePrefix: ""
       env: []
       image:
         repository: giantswarm/kagent/controller
@@ -1875,6 +1889,21 @@ spec:
           interval: 60s
           labels:
             observability.giantswarm.io/tenant: giantswarm
+      networkPolicy:
+        enabled: true
+        from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+          podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: agentgateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ate-system
+          podSelector:
+            matchLabels:
+              app: atenet-egress
       pdb:
         enabled: true
         unhealthyPodEvictionPolicy: AlwaysAllow
@@ -2956,7 +2985,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=0.1.0 <0.2.0"
+    semver: ">=0.2.0 <0.3.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2979,7 +3008,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.18.0 <1.19.0"
+    semver: ">=1.19.0 <1.20.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3002,7 +3031,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.18.0 <1.19.0"
+    semver: ">=1.19.0 <1.20.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

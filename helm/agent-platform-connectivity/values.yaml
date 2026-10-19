@@ -681,12 +681,11 @@ llmRouting:
   # agent-platform.giantswarm.io/llm-routing-base-url), and the hook
   # <release>-llm-routing-modelconfigs takes a marked baseUrl back off once
   # routing is off or its provider is no longer served (giantswarm/agent-platform#1057).
-  #
-  # Rendered only where the API server serves
-  # admissionregistration.k8s.io/v1/MutatingAdmissionPolicy, which is Kubernetes
-  # 1.36 and later. On 1.34 and 1.35 the API is beta and its feature gate is off
-  # by default, so the object would exist and mutate nothing; the chart renders
-  # nothing there instead. Leaving this true on an older cluster is safe.
+  # It acts in the kagent namespace and, with tenants.organizations.enabled, in
+  # every namespace labelled giantswarm.io/organization too (a second binding),
+  # where agent-platform-tenant-model-routing refuses a baseUrl that is not the
+  # listener; tenants.organizations.enabled fails the render without this
+  # policy. The hook reads the kagent namespace only.
   modelConfigPolicy:
     enabled: true
   # USD per one million tokens, by provider and model, OVER the gateway's
@@ -737,18 +736,16 @@ networkPolicy:
   # Substrate's credential provider (k8s-credential-provider, ate-system),
   # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) it reaches
   # on 443/TCP besides the apiserver and DNS, through the DNS proxy rule the
-  # policy renders with them. The default is the token endpoint it exchanges a
-  # Vertex AI service account key at (google-access-token.k8s.io, for
-  # AnthropicVertexAI and GeminiVertexAI ModelConfigs); kagent refuses a key
-  # whose token_uri names another host. A list replaces the default as a
-  # whole: keep oauth2.googleapis.com when adding a name. [] leaves the
-  # provider the apiserver and DNS only, and every Vertex AI call fails with
-  # "could not exchange the service account key for an access token". Ignored
-  # by the kubernetes flavor, which renders no egress policy for Substrate.
+  # policy renders with them. The default [] leaves it the apiserver and DNS
+  # only: it reads Secrets and dials no outside service. The Vertex AI token
+  # exchange is the Google access-token plugin's
+  # (components.google-access-token-credential-provider), whose own policy
+  # opens oauth2.googleapis.com. Name a host here only for a provider in that
+  # pod that dials one. Ignored by the kubernetes flavor, which renders no
+  # egress policy for Substrate.
   substrate:
     credentialProvider:
-      egressFQDNs:  # @schema item: object; itemProperties: {"matchName": {"type": "string", "minLength": 1}, "matchPattern": {"type": "string", "minLength": 1}}
-        - matchName: oauth2.googleapis.com
+      egressFQDNs: []  # @schema item: object; itemProperties: {"matchName": {"type": "string", "minLength": 1}, "matchPattern": {"type": "string", "minLength": 1}}
   # Extra in-cluster egress ports for muster -> MCP backends reached via a
   # ClusterIP whose pod listens on a non-80/443 port (e.g. the in-cluster
   # pro / runbooks MCP servers on 8080, or tunnelport RemoteApp tunnels whose
@@ -2901,7 +2898,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.6.4
+      tag: 2.6.7
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
@@ -3106,8 +3103,21 @@ tenants:
     # namespace (only replicas may differ), and only Substrate's controllers
     # write a Deployment, ReplicaSet or Pod labelled `ate.dev/worker-pool`; no
     # one adds an ephemeral container to a worker, execs into one or
-    # attaches to one (Kubernetes 1.30 or later). A namespace without the
-    # label gets nothing. Off, the render is that of a chart without the key.
+    # attaches to one. With kagent on, a tenant
+    # also brings its own ModelConfig and model key, metered on the `llm`
+    # listener (giantswarm/agent-platform#759): the modelconfig-llm-routing
+    # policies fill in the listener as the baseUrl of a ModelConfig there
+    # that has none, and two more ValidatingAdmissionPolicies hold every
+    # such namespace but kagent: a ModelConfig names a provider the listener
+    # serves and the listener as its baseUrl (any other provider, Bedrock
+    # included, and any other baseUrl are refused), and only a requester who
+    # may read a namespace's Secrets creates one there without the
+    # tenant-credential- prefix; only agent-manager's copy of the default ModelConfig names the
+    # platform's key. It needs llmRouting.enabled, a default ModelConfig
+    # provider the listener serves, and the modelconfig-llm-routing policy
+    # (llmRouting.modelConfigPolicy.enabled); the render fails otherwise. A namespace
+    # without the label gets nothing. Off, the render is that of a chart
+    # without the key.
     enabled: false
 
 # === Workspaces (workspaces, workspace-manager) ===

@@ -407,7 +407,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.6.4
+          tag: 2.6.7
       networkPolicy:
         egress:
           cidrs: []
@@ -808,6 +808,13 @@ spec:
         auth:
           mode: trusted-proxy
           userIdClaim: email
+        authorization:
+          groupsClaim: groups
+          groupsPrefix: ""
+          includeNamespaces: []
+          mode: kubernetes
+          namespaceSelector: giantswarm.io/organization
+          usernamePrefix: ""
         env: []
         image:
           repository: giantswarm/kagent/controller
@@ -1420,8 +1427,7 @@ spec:
       - 8443
       substrate:
         credentialProvider:
-          egressFQDNs:
-          - matchName: oauth2.googleapis.com
+          egressFQDNs: []
     postgres:
       affinity: {}
       applicationDatabase:

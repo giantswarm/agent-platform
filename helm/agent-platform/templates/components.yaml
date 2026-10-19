@@ -103,7 +103,9 @@ knowledge:
       flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName, the
       tenant identity the connectivity chart renders, and its muster.url from
       the muster Service (agent-platform.musterMcpUrl, the URL every agent's
-      own RemoteMCPServer targets). Never written back into
+      own RemoteMCPServer targets). A forwardAllValues release gets them too:
+      the connectivity release's workspaceManager.namespace, the namespace of
+      the workspace-manager release when it is not its own. Never written back into
       .Values, so the whole-tree forward stays what the operator wrote.
   injectGlobal  — inject `.Values.global` into the forwarded values (default
       true). Set false for components whose strict values.schema.json
@@ -322,6 +324,8 @@ connectivity chart's migrate Job read the same range and filter. */ -}}
 {{- /* ...and so does its roster entry, with gatedRoster (see gatedValues above). */ -}}
 {{- if and $gc.gatedRoster (not (index $roster $gated).enabled) }}{{- $_ := set $vals "components" (omit $vals.components $gated) }}{{- end }}
 {{- end }}
+{{- /* Derived values reach a whole-tree release too (see derived values above). */ -}}
+{{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the

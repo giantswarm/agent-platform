@@ -15,6 +15,68 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (Kubernetes 1.36 or later)
+
+The charts expect Kubernetes 1.36 or later and no longer check the version: the 1.30 render guard of self-management and the render-time check that the API server serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy are gone. With kagent and `llmRouting.modelConfigPolicy.enabled` on (the default), every render now carries the `<release>-llm-routing-modelconfigs` post-install/post-upgrade hook Job and the `api.kagent.dev` `modelconfigs` rule on the `<release>-hooks` ClusterRole, routing on or off, and with `llmRouting.enabled` on the `modelconfig-llm-routing` policies; an offline `helm template` shows them too.
+
+### Operator action
+
+- **None** on Kubernetes 1.36 or later. Upgrade an older cluster to 1.36 first: below it, the install fails at apply time.
+
+## \<current\> → \<next\> (kagent 1.19: the controller authorizes each caller with Kubernetes RBAC)
+
+giantswarm/agent-platform#706: `components.kagent{,-crds}.versionRange` is `>=1.19.0 <1.20.0`, and the kagent release gets `controller.authorization.mode: kubernetes`. kagent 1.19.0 is 1.18.0 plus giantswarm/kagent-upstream#633: in this mode a ServiceAccount token is authenticated with a TokenReview, and a list of every creator's Sessions (`ListSessions` with `all_creators`) needs `list` on `sessions.api.kagent.dev` cluster-wide. No database migration, no CRD change: a session stored by 1.18 resumes unchanged.
+
+What changes for a person and for each caller:
+
+- **Agents are visible by RBAC.** The controller asks the API server, with a SubjectAccessReview for the caller's user (`kagent.controller.auth.userIdClaim`, email) and groups (the `groups` claim, no prefix), whether the caller may see and run an agent. A person sees the agents of the kagent namespace (the platform tenant, bound to `tenants.platform.users`, `system:authenticated` by default) and of each Organization namespace (`giantswarm.io/organization`) where a RoleBinding gives them `agent-platform:user`, `:editor` or `:admin`. A person bound nowhere sees an empty list and cannot start a conversation.
+- **Every creator's Sessions are refused for people.** No tenant role grants it. kagent's own UI shows "Showing only the conversations you started" on the agent page and "Not counted" on its Agents tab; its orphaned-conversations page shows an error. The Dev Portal asks only for the caller's own Sessions.
+- **workspace-manager** calls with its projected ServiceAccount token. With workspaces on, the connectivity release binds its ServiceAccount to the ClusterRole `agent-platform:workspace-manager-sessions` (`list` on `sessions.api.kagent.dev`), and the kagent release's `controller.authorization.serviceAccountTokenAudience` follows `workspace-manager.kagent.tokenAudience` (`kagent` unless set; an own value that differs fails the render).
+- **Only the platform's callers reach the controller's API port.** The kagent release's `controller.networkPolicy` is on: port 8083 admits kagent's UI, the agentgateway data plane (the Dev Portal, Slack through klaus-gateway, agent-manager and every call through the edge), Substrate's egress gateway (`atenet-egress`, the agents' calls) and, with workspaces on, workspace-manager. With `networkPolicy.enabled` the connectivity release already admitted only these; the kagent chart's policy now holds the same with the platform's policies off. Add a caller in `kagent.controller.networkPolicy.from` (NetworkPolicyPeers); `enabled: false` fails the render.
+
+### Operator action
+
+Before the upgrade, check:
+
+- **Group bindings for every person who uses agents.** A person sees the platform tenant's agents through `tenants.platform.users` (`system:authenticated` by default, so nobody loses them). An agent in an Organization namespace is visible only to the groups a RoleBinding there binds to `agent-platform:user`, `:editor` or `:admin`. List them with `kubectl get rolebindings -A -o wide | grep agent-platform:` and add the missing ones in the installation's configuration before the upgrade.
+- **The groups as the API server sees them.** The controller reviews the `groups` claim with no prefix and the email with no prefix, as Giant Swarm installations bind them. An installation whose API server sets `--oidc-groups-prefix` or `--oidc-username-prefix` sets `kagent.controller.authorization.groupsPrefix` or `.usernamePrefix` to the same value (agentlab: `oidc:`); another claim, `kagent.controller.authorization.groupsClaim`.
+- **workspace-manager sends the token.** With workspaces on, `components.workspace-manager.versionRange` must select 0.10.0 or later (the chart's floor): from 0.10.0 the manager mounts the projected token of `workspace-manager.kagent.tokenAudience`. A floor below 0.10.0 fails the render in the kubernetes mode; such an installation keeps `noop` (below) until it moves. A BOM pin must also be 0.10.0 or later.
+- **NetworkPolicy enforcement.** The controller trusts the user a caller names behind the edge, so the API port must be closed to every other pod. The installation's CNI must enforce Kubernetes NetworkPolicies (Cilium on Giant Swarm installations). Without enforcement, keep `noop`.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.19.0`, `kagent-crds` first or with it.
+
+To keep today's behaviour (every signed-in caller sees and runs every agent) on one installation, set:
+
+```yaml
+kagent:
+  controller:
+    authorization:
+      mode: noop
+```
+
+`noop` renders no controller NetworkPolicy and derives nothing; the connectivity release's own policies stay as before. Remove it once the checks above pass.
+
+## \<current\> → \<next\> (Google access-token plugin 0.2.0: grants selected by label)
+
+giantswarm/giantswarm#38622: `components.google-access-token-credential-provider.versionRange` is `>=0.2.0 <0.3.0`. The plugin rolls in place; with `tenants.organizations.enabled` it gets the derived selector grants the substrate release gets and a ClusterRole with `list` and `watch` on namespaces. Without the switch its grants are unchanged.
+
+### Operator action
+
+- **None** for an installation that follows the chart's ranges.
+- **An installation that pins the BOM**: move `google-access-token-credential-provider` to `0.2.0`.
+
+## \<current\> → \<next\> (`tenants.organizations.enabled`: a tenant's own model, on the `llm` listener)
+
+giantswarm/agent-platform#759: with kagent and `tenants.organizations.enabled` on, every ModelConfig in a namespace labelled `giantswarm.io/organization` goes through the `llm` listener ([README: A tenant's own model](./README.md#a-tenants-own-model)). The `modelconfig-llm-routing` MutatingAdmissionPolicies fill in a missing `baseUrl` there, and `agent-platform-tenant-model-routing` refuses any other `baseUrl` and any provider the listener does not serve.
+
+- **The connectivity render fails** with `tenants.organizations.enabled` on and `llmRouting.enabled` off (the default), with a default ModelConfig provider (`kagent.providers.<default>.provider`) the listener does not serve, or without the routing policy (`llmRouting.modelConfigPolicy.enabled` off). The connectivity HelmRelease then stops reconciling.
+- **A ModelConfig in an Organization namespace that is not on the listener** (a Bedrock one, a direct provider URL) can no longer be updated; only its deletion stays possible.
+
+### Operator action
+
+- **None** with `tenants.organizations.enabled` off.
+- **`tenants.organizations.enabled` on**: before the upgrade, set `llmRouting.enabled: true`, keep `llmRouting.modelConfigPolicy.enabled: true`, give the default ModelConfig a provider of `llmRouting.models` and leave `kagent.providers.<default>.config.baseUrl` empty or the listener URL (agent-manager copies it into each Organization namespace, where another `baseUrl` is refused). Then point every ModelConfig already in an Organization namespace at the listener (remove its `baseUrl`, or set the listener URL), or delete it.
+- **Turning routing off later**: turn `tenants.organizations.enabled` off first (the render needs it), then delete or repoint the Organization namespaces' ModelConfigs whose `baseUrl` carries the annotation `agent-platform.giantswarm.io/llm-routing-base-url`: the routing hook takes it off in the kagent namespace only.
+
 ## \<current\> → \<next\> (kagent 1.18: no caller bearer to muster on a workspace Session)
 
 giantswarm/giantswarm#38064: `components.kagent{,-crds}.versionRange` is `>=1.18.0 <1.19.0`. kagent 1.18.0 is 1.17.0 plus two harness changes. The claude, codex and omp Harnesses commit as the person of the turn. And the A2A gateway names a turn's actor-JWT hosts (muster's in-cluster host on a workspace Session, `controller.session.actorJWTProviders.muster`) to the runtime, and the claude Harness's MCP forwarder sends muster a placeholder bearer, which Substrate's egress gateway replaces with the Session Actor's JWT, instead of the caller's bearer; a turn whose every MCP server is on such a host holds no caller bearer and is not bounded by its `exp`. A Session without a workspace keeps the caller's bearer, as before. No database migration, no CRD change, no new value: a session stored by 1.17 resumes unchanged, with no snapshot reset and no manual step.

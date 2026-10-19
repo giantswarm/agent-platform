@@ -92,7 +92,7 @@ go install github.com/giantswarm/agentlab@latest
 agentlab up
 ```
 
-**On a cluster:** you need Kubernetes ≥ 1.35, Helm 4, the Gateway API CRDs and an OIDC provider. Start from the [example values](helm/agent-platform/examples/) for your cluster shape:
+**On a cluster:** you need Kubernetes ≥ 1.36, Helm 4, the Gateway API CRDs and an OIDC provider. Start from the [example values](helm/agent-platform/examples/) for your cluster shape:
 
 ```bash
 kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.0/standard-install.yaml

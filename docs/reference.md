@@ -66,7 +66,7 @@ Notes on the table:
 
 The per-shape details are in [install.md](install.md#2-prerequisites).
 
-- **Kubernetes ≥ 1.35.** kagent also needs the `ClusterTrustBundle`, `ClusterTrustBundleProjection` and `PodCertificateRequest` feature gates. See [Agent Substrate](#agent-substrate). Self-management needs Kubernetes 1.30 or later.
+- **Kubernetes ≥ 1.36.** The charts do not check the version; an older cluster fails at apply time. kagent also needs the `ClusterTrustBundle`, `ClusterTrustBundleProjection` and `PodCertificateRequest` feature gates. See [Agent Substrate](#agent-substrate).
 - **Gateway API v1 CRDs.** Install them, or set `components.gateway-api-crds.enabled: true`.
 - **Flux is optional.** The chart brings its own engine. On a cluster that already runs Flux, set `components.flux.enabled: false`.
 - **Kyverno and Cilium are optional.** `kyvernoPolicies.enabled` and `networkPolicy.flavor` default to `auto` and follow what the cluster serves. See [Cluster shape](#cluster-shape-auto).
@@ -351,7 +351,7 @@ What it changes on a cluster, the Pod Security exceptions and the compensating c
 
 **Prerequisites** (also in [install.md](install.md#agents-managed-cloud)):
 
-- **Kubernetes 1.35** with the feature gates `ClusterTrustBundle`, `ClusterTrustBundleProjection` and `PodCertificateRequest` on kube-apiserver, kube-controller-manager and every kubelet. A live render refuses a cluster that does not serve `certificates.k8s.io/v1beta1` `PodCertificateRequest`.
+- **Kubernetes 1.36** with the feature gates `ClusterTrustBundle`, `ClusterTrustBundleProjection` and `PodCertificateRequest` on kube-apiserver, kube-controller-manager and every kubelet. A live render refuses a cluster that does not serve `certificates.k8s.io/v1beta1` `PodCertificateRequest`.
 - **Cilium with kube-proxy replacement needs `socketLB.hostNamespaceOnly: true`** (`bpf-lb-sock-hostns-only: "true"`; the Giant Swarm default). Without it, actors cannot resolve DNS from their nested network namespace, and git-sourced skills fail with `Could not resolve host`.
 - **A proxied installation** mirrors:
   - `oci://gsoci.azurecr.io/giantswarm/substrate/helm` (`components.substrate.repository`);
@@ -516,6 +516,41 @@ Agents are Flux `HelmRelease`s in the kagent namespace. Under a Flux multi-tenan
 
 The platform's own component `HelmRelease`s need no tenant identity in an exempt namespace (`gitops.namespace: flux-giantswarm` on Giant Swarm management clusters). With the bundled Flux engine they run as `agent-platform-flux`.
 
+### A tenant's own model
+
+Each Organization namespace (labelled `giantswarm.io/organization`) that holds an agent gets a copy of the platform's `default-model-config` and its key Secret from agent-manager. A tenant that pays for its own model usage adds its own ModelConfig and key Secret in its namespace, and its agents select it by name. Another tenant's agents cannot, because a template names only ModelConfigs of its own namespace.
+
+This comes with `tenants.organizations.enabled` (and kagent). It needs `llmRouting.enabled`, a default provider the LLM listener serves, and `llmRouting.modelConfigPolicy.enabled`; the render fails otherwise. In every Organization namespace:
+
+- A ModelConfig's provider must be one the listener serves (Anthropic, OpenAI or Mistral in `llmRouting.models`). Its `baseUrl` is filled in with the listener URL, and any other `baseUrl` or provider (Bedrock included) is refused. Every model call of the tenant is metered on the listener, and the tenant's key passes through untouched.
+- `apiKeySecret` must name a Secret prefixed `tenant-credential-`, of type `Opaque`.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tenant-credential-anthropic
+  namespace: org-acme
+type: Opaque
+stringData:
+  ANTHROPIC_API_KEY: <the tenant's key>
+---
+apiVersion: api.kagent.dev/v1alpha3
+kind: ModelConfig
+metadata:
+  name: acme-sonnet
+  namespace: org-acme
+spec:
+  provider: Anthropic
+  model: claude-sonnet-4-6
+  apiKeySecret: tenant-credential-anthropic
+  apiKeySecretKey: ANTHROPIC_API_KEY
+```
+
+- **Before turning it on,** point every ModelConfig already in an Organization namespace at the listener, or delete it. Later updates of one that is not on the listener are refused.
+- **Turning routing off** needs `tenants.organizations.enabled` off first. Then repoint or delete the Organization namespaces' ModelConfigs annotated `agent-platform.giantswarm.io/llm-routing-base-url` ([UPGRADE.md](../UPGRADE.md)).
+- How a tenant's key Secret reaches its namespace is not decided yet. `make prove-tenant-modelconfigs` checks the rules on a cluster.
+
 ### OAuth secrets
 
 The platform Secret `global.identity.existingSecret` carries muster's OAuth keys: `dex-client-secret`, `registration-token`, `oauth-encryption-key` and `valkey-password`. See [install.md](install.md) for its keys and the Dex client. Pre-create the Secret, or ship it in the same release through the top-level `extraObjects: []` list. Inline credentials end up in the `HelmRelease` values. `gitops.forbidInlineSecrets: true` refuses them.
@@ -626,7 +661,7 @@ Charts that ship a `crds/` directory get `crds: CreateReplace` on their `HelmRel
 
 ## Compatibility
 
-The platform needs Kubernetes 1.35 or later. Agent Substrate also needs the PodCertificateRequest API, and the render checks for it. The `kubernetes` NetworkPolicy flavor works on any CNI, but it has no entity selectors and no FQDN egress.
+The platform needs Kubernetes 1.36 or later. Agent Substrate also needs the PodCertificateRequest API, and the render checks for it. The `kubernetes` NetworkPolicy flavor works on any CNI, but it has no entity selectors and no FQDN egress.
 
 ### Cluster shape (`auto`)
 
