@@ -584,9 +584,9 @@ components:  # @schema additionalProperties: true
     # Session Actor's JWT. From 1.18.0 the A2A gateway names a turn's
     # actor-JWT hosts to the runtime, and the claude Harness sends muster a
     # placeholder the egress gateway replaces, holding no caller bearer for a
-    # turn whose every MCP server is on such a host. The floor is its first
-    # candidate, 1.18.0-rc.1.
-    versionRange: ">=1.18.0-rc.1 <1.19.0-0"
+    # turn whose every MCP server is on such a host, and the claude, codex and
+    # omp Harnesses commit as the person of the turn.
+    versionRange: ">=1.18.0 <1.19.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -700,7 +700,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.18.0-rc.1 <1.19.0-0"
+    versionRange: ">=1.18.0 <1.19.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false

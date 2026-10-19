@@ -17,12 +17,12 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## \<current\> → \<next\> (kagent 1.18: no caller bearer to muster on a workspace Session)
 
-giantswarm/giantswarm#38064: `components.kagent{,-crds}.versionRange` is `>=1.18.0-rc.1 <1.19.0-0`. kagent 1.18.0 is 1.17.0 plus one harness change: the A2A gateway names a turn's actor-JWT hosts (muster's in-cluster host on a workspace Session, `controller.session.actorJWTProviders.muster`) to the runtime, and the claude Harness's MCP forwarder sends muster a placeholder bearer, which Substrate's egress gateway replaces with the Session Actor's JWT, instead of the caller's bearer; a turn whose every MCP server is on such a host holds no caller bearer and is not bounded by its `exp`. A Session without a workspace keeps the caller's bearer, as before. No database migration, no CRD change, no new value: a session stored by 1.17 resumes unchanged, with no snapshot reset and no manual step.
+giantswarm/giantswarm#38064: `components.kagent{,-crds}.versionRange` is `>=1.18.0 <1.19.0`. kagent 1.18.0 is 1.17.0 plus two harness changes. The claude, codex and omp Harnesses commit as the person of the turn. And the A2A gateway names a turn's actor-JWT hosts (muster's in-cluster host on a workspace Session, `controller.session.actorJWTProviders.muster`) to the runtime, and the claude Harness's MCP forwarder sends muster a placeholder bearer, which Substrate's egress gateway replaces with the Session Actor's JWT, instead of the caller's bearer; a turn whose every MCP server is on such a host holds no caller bearer and is not bounded by its `exp`. A Session without a workspace keeps the caller's bearer, as before. No database migration, no CRD change, no new value: a session stored by 1.17 resumes unchanged, with no snapshot reset and no manual step.
 
 ### Operator action
 
 - **None** for an installation that follows the chart's ranges.
-- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.18.0-rc.1`, `kagent-crds` first or with it.
+- **An installation that pins the BOM**: move `kagent` and `kagent-crds` to `1.18.0`, `kagent-crds` first or with it.
 
 ## \<current\> → \<next\> (Substrate 1.14.0: the Google access-token class is routed to the plugin)
 
