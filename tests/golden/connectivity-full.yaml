@@ -14525,6 +14525,16 @@ spec:
         - ports:
             - port: "50051"
               protocol: TCP
+    # The Google access-token credential provider plugin, which the Substrate
+    # chart routes the class google-access-token.k8s.io to (a Vertex AI
+    # ModelConfig's token), asked per request like the bundled provider.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: google-access-token-credential-provider
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: muster
