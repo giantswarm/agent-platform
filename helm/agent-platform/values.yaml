@@ -5338,7 +5338,21 @@ tenants:
     # (llmRouting.modelConfigPolicy.enabled). Point every
     # ModelConfig already in an Organization namespace at the listener, or
     # delete it, before you turn this on: later updates of one that is not
-    # are refused. Off, the default, nothing changes.
+    # are refused. On, with components.muster on, the muster release gets
+    # `muster.mcpServersInAllNamespaces: true` (giantswarm/muster#1601): muster
+    # serves the MCPServers of the namespaces named `org-…` next to its own,
+    # and lists them with the person's Dex token, so a person sees a server
+    # only where Kubernetes RBAC lets them list `mcpservers` (muster's
+    # namespace through tenants.platform.users). An own
+    # muster.muster.mcpServersInAllNamespaces against this switch fails the
+    # render. The render fails, naming the key, below muster 5.47.0, with
+    # muster's OAuth server off or not on the dex provider, and with
+    # tenants.platform.users empty. Before you turn this on: Dex lets muster's
+    # client ask for the audience of muster.muster.writesAsCaller.kubernetesAudience
+    # (muster's default dex-k8s-authenticator, which Giant Swarm API servers
+    # trust), and each OAuth app of an Organization's MCP server registers
+    # `<muster.muster.oauth.server.baseUrl>/oauth/ns/<namespace>/callback`
+    # (UPGRADE.md). Off, the default, nothing changes.
     enabled: false
 
 # === Workspaces (workspaces, workspace-manager) ===

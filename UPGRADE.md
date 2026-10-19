@@ -15,6 +15,20 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (`tenants.organizations.enabled` also turns on muster's MCP servers per tenant)
+
+giantswarm/muster#1601: with `tenants.organizations.enabled` and muster on, the muster release gets `muster.mcpServersInAllNamespaces: true`. muster then serves the `MCPServer`s of the namespaces named `org-…` and lists them with the person's Dex token ([Reference: A tenant's own MCP servers](docs/reference.md#a-tenants-own-mcp-servers)). With the switch off (the default, and the value on every installation today) nothing changes.
+
+### Operator action
+
+- **An installation that sets `muster.muster.mcpServersInAllNamespaces`**: remove it. A value against `tenants.organizations.enabled` fails the render.
+- **Before you turn `tenants.organizations.enabled` on**, do these steps. The chart cannot do them:
+  - `muster.muster.writesAsCaller.kubernetesAudience` is an audience that your API server trusts. The muster default, `dex-k8s-authenticator`, is correct on Giant Swarm installations.
+  - Dex lets muster's client ask for that audience: the client of that audience lists `muster.muster.oauth.server.dex.clientId` in its `trustedPeers`.
+  - Each OAuth app of an MCP server in an Organization's namespace registers `<muster.muster.oauth.server.baseUrl>/oauth/ns/<namespace>/callback`.
+  - `tenants.platform.users` holds every person who must see the MCP servers of muster's namespace (default `system:authenticated`). An empty list fails the render.
+- **Do not turn the switch on yet for the MCP servers.** Two muster gaps are still open: a person's sign-in to a tenant server stays after its namespace is deleted, and muster cannot read the client Secret of a tenant server's sign-in in an Organization's namespace (giantswarm/agentlab#907).
+
 ## \<current\> → \<next\> (workspace-manager 0.11, muster 5.47: a disconnect revokes the grant at the provider)
 
 giantswarm/muster#1597: `components.workspace-manager.versionRange` is `>=0.11.0 <0.12.0` and `components.muster.versionRange` `>=5.47.0 <6.0.0`. Both roll in place; no CRD, store or session format changes, and nobody signs in again. A person's `core_auth_logout` now revokes their grant of the pinned provider App at the provider's RFC 7009 endpoint, so the next connect asks for consent again.
