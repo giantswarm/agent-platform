@@ -553,18 +553,17 @@ spec:
 
 ### A tenant's own MCP servers
 
-With `tenants.organizations.enabled` (and muster on), the muster release gets `muster.mcpServersInAllNamespaces: true` ([giantswarm/muster#1601](https://github.com/giantswarm/muster/pull/1601)). muster then serves the `MCPServer`s of the namespaces named `org-…` next to the servers of its own namespace:
+With `tenants.organizations.enabled` (and muster on), the muster release gets `muster.mcpServersInAllNamespaces: true` ([giantswarm/muster#1601](https://github.com/giantswarm/muster/pull/1601)) and `muster.writesAsCaller.kubernetesAudience` from `mcp-kubernetes.kubernetesAudience`, the audience the API server trusts (default `dex-k8s-authenticator`, the audience of Giant Swarm API servers). muster then serves the `MCPServer`s of the namespaces named `org-…` next to the servers of its own namespace:
 
-- muster lists the servers of each namespace with the person's own Dex token. A person sees a server only where Kubernetes RBAC lets them `list` `mcpservers.muster.giantswarm.io`: muster's namespace through `agent-platform:mcpserver-viewer` (bound to `tenants.platform.users`), an Organization's namespace through `agent-platform:user`, `:editor` or `:admin` there. A server that a person may not see does not exist for that person.
+- muster lists the servers of each namespace with the person's own Dex token for that audience. A person sees a server only where Kubernetes RBAC lets them `list` `mcpservers.muster.giantswarm.io`: muster's namespace through `agent-platform:mcpserver-viewer` (bound to `tenants.platform.users`), an Organization's namespace through `agent-platform:user`, `:editor` or `:admin` there. A server that a person may not see does not exist for that person.
 - A tenant server signs in through `<muster>/oauth/ns/<namespace>/callback`, and its token stays in its namespace.
 
-Do not set `muster.muster.mcpServersInAllNamespaces` yourself: a value against the switch fails the render. The render also fails when the muster range admits a muster below 5.47.0, when muster's OAuth server is off or not on the `dex` provider, and when `tenants.platform.users` is empty.
+Do not set `muster.muster.mcpServersInAllNamespaces` yourself: a value against the switch fails the render. A `muster.muster.writesAsCaller.kubernetesAudience` that differs from `mcp-kubernetes.kubernetesAudience` also fails it: set the audience in `mcp-kubernetes.kubernetesAudience`. The render also fails when the muster range admits a muster below 5.47.0, when muster's OAuth server is off or not on the `dex` provider, and when `tenants.platform.users` is empty.
 
 The chart cannot do these steps. Do them before you turn the switch on:
 
-- **The audience.** muster checks that the person's token carries `muster.muster.writesAsCaller.kubernetesAudience` before it calls the API server. The default, `dex-k8s-authenticator`, is the audience that Giant Swarm API servers trust. If your API server trusts a different client ID, set that value (agentlab: `kubernetes`).
-- **Dex.** Dex must let muster's client (`muster.muster.oauth.server.dex.clientId`) ask for that audience: the audience client lists muster's client in its `trustedPeers`.
-- **The callbacks.** Each OAuth app of an MCP server in an Organization's namespace registers `<muster.muster.oauth.server.baseUrl>/oauth/ns/<namespace>/callback`.
+- **Dex.** Dex must let muster's client (`muster.muster.oauth.server.dex.clientId`) ask for the audience of `mcp-kubernetes.kubernetesAudience`: the Dex client of that audience lists muster's client in its `trustedPeers`.
+- **The callbacks.** Each OAuth app of an MCP server in an Organization's namespace registers `<muster's public URL>/oauth/ns/<namespace>/callback`. The chart's NOTES print this URL.
 
 ### OAuth secrets
 

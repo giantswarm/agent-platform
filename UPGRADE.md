@@ -17,17 +17,18 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## \<current\> → \<next\> (`tenants.organizations.enabled` also turns on muster's MCP servers per tenant)
 
-giantswarm/muster#1601: with `tenants.organizations.enabled` and muster on, the muster release gets `muster.mcpServersInAllNamespaces: true`. muster then serves the `MCPServer`s of the namespaces named `org-…` and lists them with the person's Dex token ([Reference: A tenant's own MCP servers](docs/reference.md#a-tenants-own-mcp-servers)). With the switch off (the default, and the value on every installation today) nothing changes.
+giantswarm/muster#1601: with `tenants.organizations.enabled` and muster on, the muster release gets `muster.mcpServersInAllNamespaces: true` and `muster.writesAsCaller.kubernetesAudience` from `mcp-kubernetes.kubernetesAudience`. muster then serves the `MCPServer`s of the namespaces named `org-…` and lists them with the person's Dex token for that audience ([Reference: A tenant's own MCP servers](docs/reference.md#a-tenants-own-mcp-servers)). With the switch off (the default) nothing changes. Where the switch is already on (agentlab), muster gets the setting with this upgrade.
 
 ### Operator action
 
 - **An installation that sets `muster.muster.mcpServersInAllNamespaces`**: remove it. A value against `tenants.organizations.enabled` fails the render.
+- **An installation with the switch on that sets `muster.muster.writesAsCaller.kubernetesAudience`**: set the same value in `mcp-kubernetes.kubernetesAudience` and remove muster's. A value that differs fails the render.
 - **Before you turn `tenants.organizations.enabled` on**, do these steps. The chart cannot do them:
-  - `muster.muster.writesAsCaller.kubernetesAudience` is an audience that your API server trusts. The muster default, `dex-k8s-authenticator`, is correct on Giant Swarm installations.
-  - Dex lets muster's client ask for that audience: the client of that audience lists `muster.muster.oauth.server.dex.clientId` in its `trustedPeers`.
-  - Each OAuth app of an MCP server in an Organization's namespace registers `<muster.muster.oauth.server.baseUrl>/oauth/ns/<namespace>/callback`.
+  - `mcp-kubernetes.kubernetesAudience` is an audience that your API server trusts. The default, `dex-k8s-authenticator`, is correct on Giant Swarm installations.
+  - Dex lets muster's client ask for that audience: the Dex client of that audience lists `muster.muster.oauth.server.dex.clientId` in its `trustedPeers`.
+  - Each OAuth app of an MCP server in an Organization's namespace registers `<muster's public URL>/oauth/ns/<namespace>/callback`. The chart's NOTES print this URL.
   - `tenants.platform.users` holds every person who must see the MCP servers of muster's namespace (default `system:authenticated`). An empty list fails the render.
-- **Do not turn the switch on yet for the MCP servers.** Two muster gaps are still open: a person's sign-in to a tenant server stays after its namespace is deleted, and muster cannot read the client Secret of a tenant server's sign-in in an Organization's namespace (giantswarm/agentlab#907).
+- **Two muster gaps are still open** (giantswarm/agentlab#907). Know them before you turn the switch on: a person's sign-in to a tenant server stays after its namespace is deleted, so a new Organization that gets a deleted namespace's name also gets its people's sign-ins; and muster cannot read the client Secret of a tenant server's sign-in in an Organization's namespace, so such a server cannot sign in until a Role and RoleBinding there give muster's ServiceAccount `get` on that Secret.
 
 ## \<current\> → \<next\> (workspace-manager 0.11, muster 5.47: a disconnect revokes the grant at the provider)
 

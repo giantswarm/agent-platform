@@ -5347,12 +5347,14 @@ tenants:
     # muster.muster.mcpServersInAllNamespaces against this switch fails the
     # render. The render fails, naming the key, below muster 5.47.0, with
     # muster's OAuth server off or not on the dex provider, and with
-    # tenants.platform.users empty. Before you turn this on: Dex lets muster's
-    # client ask for the audience of muster.muster.writesAsCaller.kubernetesAudience
-    # (muster's default dex-k8s-authenticator, which Giant Swarm API servers
-    # trust), and each OAuth app of an Organization's MCP server registers
-    # `<muster.muster.oauth.server.baseUrl>/oauth/ns/<namespace>/callback`
-    # (UPGRADE.md). Off, the default, nothing changes.
+    # tenants.platform.users empty. muster's
+    # muster.writesAsCaller.kubernetesAudience follows
+    # mcp-kubernetes.kubernetesAudience, the audience the API server trusts;
+    # an own value that differs fails the render. Before you turn this on:
+    # Dex lets muster's client ask for that audience, and each OAuth app of an
+    # Organization's MCP server registers
+    # `<muster's public URL>/oauth/ns/<namespace>/callback` (UPGRADE.md). Off,
+    # the default, nothing changes.
     enabled: false
 
 # === Workspaces (workspaces, workspace-manager) ===

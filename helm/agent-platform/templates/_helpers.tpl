@@ -171,7 +171,9 @@ overwrite would hide a values file that still spells the old key.
     block's own subjects with tenants.platformTeam appended (each subject
     once), while that list is not empty. And muster.mcpServersInAllNamespaces:
     true while tenants.organizations.enabled is on (agent-platform.muster.allNamespaces;
-    single source, an own value against the switch fails either way).
+    single source, an own value against the switch fails either way), with
+    muster.writesAsCaller.kubernetesAudience from mcp-kubernetes.kubernetesAudience
+    while that is not empty (an own value that differs fails).
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
                  tenants, the tenant reconciler, while
                  tenants.organizations.enabled is on
@@ -578,10 +580,20 @@ repeating the admin groups. */ -}}
 {{- $_ := set $derived "rbac" $rbac -}}
 {{- end -}}
 {{- /* muster serves the Organizations' MCPServers with the one tenants
-switch (agent-platform.muster.allNamespaces). */ -}}
+switch (agent-platform.muster.allNamespaces), and lists them with the person's
+token for the audience the API server trusts: mcp-kubernetes.kubernetesAudience,
+the one value of it in this chart (empty derives nothing; an own
+writesAsCaller.kubernetesAudience that differs fails). */ -}}
 {{- if include "agent-platform.muster.allNamespaces" .root -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $muster "mcpServersInAllNamespaces" true -}}
+{{- with dig "kubernetesAudience" "" (index .root.Values "mcp-kubernetes" | default dict) -}}
+{{- $ownAudience := dig "muster" "writesAsCaller" "kubernetesAudience" "" ($.root.Values.muster | default dict) -}}
+{{- if and $ownAudience (ne $ownAudience .) -}}
+{{- fail (printf "muster.muster.writesAsCaller.kubernetesAudience (%s) differs from mcp-kubernetes.kubernetesAudience (%s), the audience the API server trusts, which tenants.organizations.enabled gives muster: set mcp-kubernetes.kubernetesAudience and leave muster.muster.writesAsCaller.kubernetesAudience unset" $ownAudience .) -}}
+{{- end -}}
+{{- $_ := set $muster "writesAsCaller" (dict "kubernetesAudience" .) -}}
+{{- end -}}
 {{- $_ := set $derived "muster" $muster -}}
 {{- end -}}
 {{- end -}}

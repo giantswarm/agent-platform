@@ -6,12 +6,16 @@ from the one tenants switch (agent-platform.muster.allNamespaces):
 - off (the default): the muster release carries no mcpServersInAllNamespaces,
   and its values are those of the render with the switch on minus that key —
   the switch changes nothing else in muster's values;
-- on: muster.mcpServersInAllNamespaces: true; an own true is a no-op;
+- on: muster.mcpServersInAllNamespaces: true (an own true is a no-op), and
+  muster.writesAsCaller.kubernetesAudience from mcp-kubernetes.kubernetesAudience,
+  the audience the API server trusts (empty, none; an own equal value is a no-op);
 - the muster chart of the floor (MUSTER_FLOOR, pulled from the registry)
-  accepts the forwarded values and writes the setting into muster's config;
+  accepts the forwarded values and writes the setting and the audience into
+  muster's config;
 - the render fails, naming the key, for: an own value against the switch
-  (either way), a muster range below MUSTER_FLOOR, muster's OAuth server off
-  or not on dex, and no tenants.platform.users.
+  (either way), an own audience that differs, a muster range below
+  MUSTER_FLOOR, muster's OAuth server off or not on dex, and no
+  tenants.platform.users.
 
 Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io.
 
@@ -65,16 +69,31 @@ def expect(what: str, got, want) -> None:
 def main() -> None:
     meta = sys.argv[1]
 
-    print("--> off: no mcpServersInAllNamespaces; the switch adds that key and changes nothing else")
+    derived = ("mcpServersInAllNamespaces", "writesAsCaller")
+    print("--> off: neither derived key; the switch adds them and changes nothing else")
     off = muster(meta, [])
     on = muster(meta, ON)
-    if "mcpServersInAllNamespaces" in off["muster"]:
-        fail(f"off: the muster release carries mcpServersInAllNamespaces: {off['muster']['mcpServersInAllNamespaces']!r}")
+    for key in derived:
+        if key in off["muster"]:
+            fail(f"off: the muster release carries {key}: {off['muster'][key]!r}")
     expect("on: muster.mcpServersInAllNamespaces", on["muster"].get("mcpServersInAllNamespaces"), True)
-    rest = {**on, "muster": {k: v for k, v in on["muster"].items() if k != "mcpServersInAllNamespaces"}}
-    expect("on: muster's values beside mcpServersInAllNamespaces", rest, off)
+    expect("on: muster.writesAsCaller", on["muster"].get("writesAsCaller"),
+           {"kubernetesAudience": "dex-k8s-authenticator"})
+    rest = {**on, "muster": {k: v for k, v in on["muster"].items() if k not in derived}}
+    expect("on: muster's values beside the derived keys", rest, off)
     expect("on: an own true", muster(meta, [*ON, "--set", "muster.muster.mcpServersInAllNamespaces=true"]), on)
     print("ok: off and on")
+
+    print("--> on: the audience follows mcp-kubernetes.kubernetesAudience")
+    aud = ["--set", "mcp-kubernetes.kubernetesAudience=kubernetes"]
+    expect("on, mcp-kubernetes.kubernetesAudience=kubernetes: muster.writesAsCaller",
+           muster(meta, [*ON, *aud])["muster"].get("writesAsCaller"), {"kubernetesAudience": "kubernetes"})
+    expect("on, an own equal audience: muster.writesAsCaller", muster(
+        meta, [*ON, *aud, "--set", "muster.muster.writesAsCaller.kubernetesAudience=kubernetes"]
+    )["muster"].get("writesAsCaller"), {"kubernetesAudience": "kubernetes"})
+    expect("on, mcp-kubernetes.kubernetesAudience empty: muster.writesAsCaller",
+           muster(meta, [*ON, "--set", "mcp-kubernetes.kubernetesAudience="])["muster"].get("writesAsCaller"), None)
+    print("ok: audience")
 
     print(f"--> the muster chart {MUSTER_FLOOR} takes the forwarded values and serves every namespace")
     with tempfile.TemporaryDirectory() as tmp:
@@ -98,6 +117,8 @@ def main() -> None:
         config = yaml.safe_load(configs[0]["data"]["config.yaml"])
         expect(f"muster {MUSTER_FLOOR} config.yaml: mcpServersInAllNamespaces",
                config.get("mcpServersInAllNamespaces"), True)
+        expect(f"muster {MUSTER_FLOOR} config.yaml: writesAsCaller",
+               config.get("writesAsCaller"), {"kubernetesAudience": "dex-k8s-authenticator"})
     print("ok: chart")
 
     print("--> refusals name what is missing")
@@ -106,6 +127,8 @@ def main() -> None:
          "muster.muster.mcpServersInAllNamespaces is true but tenants.organizations.enabled is not"),
         ("an own false with the switch", [*ON, "--set", "muster.muster.mcpServersInAllNamespaces=false"],
          "muster.muster.mcpServersInAllNamespaces is false but tenants.organizations.enabled is true"),
+        ("an own audience that differs", [*ON, "--set", "muster.muster.writesAsCaller.kubernetesAudience=kubernetes"],
+         "muster.muster.writesAsCaller.kubernetesAudience (kubernetes) differs from mcp-kubernetes.kubernetesAudience"),
         ("a muster range below the floor", [*ON, "--set", "components.muster.versionRange=>=5.46.0 <6.0.0"],
          f"needs muster {MUSTER_FLOOR} or later"),
         ("muster's OAuth server off", [*ON, "--set", "muster.muster.oauth.server.enabled=false"],
