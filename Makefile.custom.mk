@@ -4537,6 +4537,13 @@ verify-tenant-reconciler: ## Assert agent-manager's tenant reconciler follows te
 	@HELM="$(HELM)" python3 tests/verify-tenant-reconciler.py $(CHART_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-tenant-muster
+verify-tenant-muster: ## Assert muster serves the Organizations' MCP servers with tenants.organizations.enabled (giantswarm/muster#1601): off, the muster release carries no mcpServersInAllNamespaces and the switch changes nothing else in its values; on, muster.mcpServersInAllNamespaces: true (an own true is a no-op) and muster.writesAsCaller.kubernetesAudience from mcp-kubernetes.kubernetesAudience (none while that is empty); the muster chart of the floor takes the forwarded values and writes both into muster's config; the render refuses, naming the key, an own value against the switch (either way), an own audience that differs, a muster range below 5.48.0, muster's OAuth server off or not on dex, and no tenants.platform.users. Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-tenant-muster.py $(CHART_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-tenant-modelconfigs
 verify-tenant-modelconfigs: ## Assert the render of a tenant's own ModelConfig (giantswarm/agent-platform#759): with tenants.organizations.enabled off, neither agent-platform-tenant-model-routing nor agent-platform-tenant-secret-creation renders and the modelconfig-llm-routing policies bind the kagent namespace only; on, both (Fail, Deny) select every Organization namespace but kagent, the routing policy carries each listener provider's block and URL, the Secret policy asks the authorizer on creations outside the tenant-credential- prefix, only agent-manager's default-model-config names the platform's key, and each modelconfig-llm-routing policy (Ignore) gets a second binding for the Organizations' namespaces; the render fails with llmRouting off, with a default ModelConfig provider the listener does not serve, and without the modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled off, or MutatingAdmissionPolicy not served). What the CEL decides is proven by make prove-tenant-modelconfigs. Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"

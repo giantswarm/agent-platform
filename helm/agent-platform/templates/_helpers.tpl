@@ -169,7 +169,11 @@ overwrite would hide a values file that still spells the old key.
     private CA its OAuth server verifies the provider against. And
     rbac.mcpServerEditor.subjects and rbac.workflowEditor.subjects: the
     block's own subjects with tenants.platformTeam appended (each subject
-    once), while that list is not empty.
+    once), while that list is not empty. And muster.mcpServersInAllNamespaces:
+    true while tenants.organizations.enabled is on (agent-platform.muster.allNamespaces;
+    single source, an own value against the switch fails either way), with
+    muster.writesAsCaller.kubernetesAudience from mcp-kubernetes.kubernetesAudience
+    while that is not empty (an own value that differs fails).
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
                  tenants, the tenant reconciler, while
                  tenants.organizations.enabled is on
@@ -596,6 +600,23 @@ repeating the admin groups. */ -}}
 {{- $_ := set $rbac $role (dict "subjects" $subjects) -}}
 {{- end -}}
 {{- $_ := set $derived "rbac" $rbac -}}
+{{- end -}}
+{{- /* muster serves the Organizations' MCPServers with the one tenants
+switch (agent-platform.muster.allNamespaces), and lists them with the person's
+token for the audience the API server trusts: mcp-kubernetes.kubernetesAudience,
+the one value of it in this chart (empty derives nothing; an own
+writesAsCaller.kubernetesAudience that differs fails). */ -}}
+{{- if include "agent-platform.muster.allNamespaces" .root -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $muster "mcpServersInAllNamespaces" true -}}
+{{- with dig "kubernetesAudience" "" (index .root.Values "mcp-kubernetes" | default dict) -}}
+{{- $ownAudience := dig "muster" "writesAsCaller" "kubernetesAudience" "" ($.root.Values.muster | default dict) -}}
+{{- if and $ownAudience (ne $ownAudience .) -}}
+{{- fail (printf "muster.muster.writesAsCaller.kubernetesAudience (%s) differs from mcp-kubernetes.kubernetesAudience (%s), the audience the API server trusts, which tenants.organizations.enabled gives muster: set mcp-kubernetes.kubernetesAudience and leave muster.muster.writesAsCaller.kubernetesAudience unset" $ownAudience .) -}}
+{{- end -}}
+{{- $_ := set $muster "writesAsCaller" (dict "kubernetesAudience" .) -}}
+{{- end -}}
+{{- $_ := set $derived "muster" $muster -}}
 {{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
@@ -3325,6 +3346,67 @@ Usage: include "agent-platform.agentManager.tenants" $root | fromJson
 {{- $_ := set $tenants "workerPoolReplicas" 1 -}}
 {{- end -}}
 {{- toJson $tenants -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The first muster release that serves tenant MCP servers safely: its chart takes
+muster.mcpServersInAllNamespaces (5.47.0, giantswarm/muster#1601; an earlier
+chart's schema refuses the key), and a tenant server's sign-ins go with the
+MCPServer objects that made them, not with the namespace's name (5.48.0,
+giantswarm/muster#1603). One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.muster.tenantsFloor" -}}5.48.0{{- end -}}
+
+{{/*
+"true" while tenants.organizations.enabled is on, empty while it is off: the
+muster release then gets muster.mcpServersInAllNamespaces: true, so muster
+serves the MCPServers of the Organizations' namespaces (org-…) next to its
+own, each to a person whom Kubernetes RBAC lets list mcpservers there
+(giantswarm/muster#1601). One switch for every component of the tenants, as
+for agent-manager's reconciler (agent-platform.agentManager.tenants).
+Single source: an own muster.muster.mcpServersInAllNamespaces against the
+switch fails the render, either way. An own false beside the switch would
+leave the Organizations' agents without their own MCP servers, and nothing
+would say so; an own true without it would serve the tenants' servers on an
+installation with no tenants. An own value equal to the switch is a no-op.
+The render fails, naming what is missing, when the switch is on and:
+  * the floor of components.muster.versionRange (a release candidate counts
+    as its release) is below agent-platform.muster.tenantsFloor;
+  * muster's OAuth server is off or not on the dex provider: muster refuses
+    to start with the setting otherwise (it lists the servers with the
+    person's Dex token, which the API server accepts);
+  * tenants.platform.users is empty: the connectivity release then binds
+    nobody to list muster's own MCPServers (agent-platform:mcpserver-viewer),
+    and muster shows nobody the servers for everyone.
+Called from agent-platform.componentDerivedValues, i.e. only while
+components.muster is on.
+Usage: include "agent-platform.muster.allNamespaces" $root
+*/}}
+{{- define "agent-platform.muster.allNamespaces" -}}
+{{- $m := dig "muster" dict (.Values.muster | default dict) | default dict -}}
+{{- $own := toString (dig "mcpServersInAllNamespaces" "" $m) -}}
+{{- if not (dig "organizations" "enabled" false (.Values.tenants | default dict)) -}}
+{{- if eq $own "true" -}}
+{{- fail "muster.muster.mcpServersInAllNamespaces is true but tenants.organizations.enabled is not: muster serves the Organizations' MCP servers with tenants.organizations.enabled, which turns on every other part of the tenants too; set it and leave muster.muster.mcpServersInAllNamespaces unset" -}}
+{{- end -}}
+{{- else -}}
+{{- if eq $own "false" -}}
+{{- fail "muster.muster.mcpServersInAllNamespaces is false but tenants.organizations.enabled is true: muster serves the Organizations' MCP servers with tenants.organizations.enabled, and without them the Organizations' agents have none of their own; leave muster.muster.mcpServersInAllNamespaces unset" -}}
+{{- end -}}
+{{- $range := dig "muster" "versionRange" "" .Values.components -}}
+{{- $floor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range) "" -}}
+{{- $want := include "agent-platform.muster.tenantsFloor" . -}}
+{{- if or (not $floor) (lt ((semver $floor).Compare (semver $want)) 0) -}}
+{{- fail (printf "tenants.organizations.enabled needs muster %s or later, whose chart takes muster.mcpServersInAllNamespaces (giantswarm/muster#1601; an earlier chart refuses the key), and components.muster.versionRange %q has the floor %q: move the range to >=%s" $want $range $floor $want) -}}
+{{- end -}}
+{{- if not (and (dig "oauth" "server" "enabled" false $m) (eq (toString (dig "oauth" "server" "provider" "dex" $m)) "dex")) -}}
+{{- fail "tenants.organizations.enabled needs muster.muster.oauth.server.enabled with the provider dex: muster lists the Organizations' MCP servers with the person's Dex token and refuses to start with mcpServersInAllNamespaces otherwise" -}}
+{{- end -}}
+{{- if not (dig "platform" "users" list .Values.tenants) -}}
+{{- fail "tenants.organizations.enabled needs tenants.platform.users: muster lists the MCP servers of its own namespace as the person, and with no subject there the connectivity release binds nobody to list them (agent-platform:mcpserver-viewer)" -}}
+{{- end -}}
+true
 {{- end -}}
 {{- end -}}
 

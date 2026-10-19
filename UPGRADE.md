@@ -15,6 +15,22 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (`tenants.organizations.enabled` also turns on muster's MCP servers per tenant)
+
+giantswarm/muster#1601: with `tenants.organizations.enabled` and muster on, the muster release gets `muster.mcpServersInAllNamespaces: true` and `muster.writesAsCaller.kubernetesAudience` from `mcp-kubernetes.kubernetesAudience`. muster then serves the `MCPServer`s of the namespaces named `org-…` and lists them with the person's Dex token for that audience ([Reference: A tenant's own MCP servers](docs/reference.md#a-tenants-own-mcp-servers)). With the switch off (the default) nothing changes. Where the switch is already on (agentlab), muster gets the setting with this upgrade.
+
+### Operator action
+
+- **An installation that sets `muster.muster.mcpServersInAllNamespaces`**: remove it. A value against `tenants.organizations.enabled` fails the render.
+- **An installation with the switch on that sets `muster.muster.writesAsCaller.kubernetesAudience`**: set the same value in `mcp-kubernetes.kubernetesAudience` and remove muster's. A value that differs fails the render.
+- **Before you turn `tenants.organizations.enabled` on**, do these steps. The chart cannot do them:
+  - `mcp-kubernetes.kubernetesAudience` is an audience that your API server trusts. The default, `dex-k8s-authenticator`, is correct on Giant Swarm installations.
+  - Dex lets muster's client ask for that audience: the Dex client of that audience lists `muster.muster.oauth.server.dex.clientId` in its `trustedPeers`.
+  - Each OAuth app of an MCP server in an Organization's namespace registers `<muster's public URL>/oauth/ns/<namespace>/callback`. The chart's NOTES print this URL.
+  - `tenants.platform.users` holds every person who must see the MCP servers of muster's namespace (default `system:authenticated`). An empty list fails the render.
+  - For each MCP server in an Organization's namespace that names a client Secret (`clientCredentialsSecretRef`), a Role in that namespace gives muster's ServiceAccount `get` on that Secret alone (`resourceNames`), with its RoleBinding. muster gets no other read of an Organization's Secrets; without the Role, a sign-in to that server answers that it is not ready and names the Secret and the Role.
+- **`components.muster.versionRange` is `>=5.48.0 <6.0.0`** (was `>=5.47.0 <6.0.0`), and the switch needs 5.48.0 or later: muster 5.48.0 (giantswarm/muster#1603) files a tenant server's sign-ins under the MCPServer objects that made them, so an Organization's namespace that is created again under a deleted one's name starts with no sign-ins. muster rolls in place; no store or session format changes, and nobody signs in again in muster's namespace. Where the switch was already on (agentlab), the first registration of each tenant server after the upgrade forgets that namespace's earlier sign-ins once. An installation that pins the BOM moves `muster` to `5.48.0`.
+
 ## \<current\> → \<next\> (Substrate 1.16.0: `tcp` egress rules, agentgateway 2.5.0)
 
 `components.substrate{,-crds}.versionRange` selects Substrate 1.16 (`>=1.16.0 <1.17.0`, was `>=1.14.0 <1.15.0`). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.16.0 (`ateom-gvisor:1.16.0`); the kagent CRDs and the kagent release are unchanged. 1.15 and 1.16 stay on upstream v0.5.0-alpha2: 1.15 adds `ate_actor_stats_dns_queries_total`, 1.16 the `tcp` egress rule and agentgateway 2.5.0 on the egress gateway. No CRD, Postgres schema or snapshot layout changes (Substrate's `docs/upgrade.md`, "The 1.14 to 1.15 step" and "The 1.15 to 1.16 step"): no migration, no snapshot reset, no manual step; conversations, goldens and durable volumes survive the roll.
