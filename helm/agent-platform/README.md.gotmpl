@@ -204,8 +204,9 @@ serving the class the Substrate chart routes to it through
 `components.kagent` like the Substrate entries and takes its grants from
 `substrate.credentialProvider.namespacePolicies` (one list for both providers;
 `agent-platform.componentDerivedValues`). Its CiliumNetworkPolicy opens
-`oauth2.googleapis.com:443` for the exchange, which the bundled provider of
-Substrate 1.11 and earlier had no rule for (giantswarm/agent-platform#1042).
+`oauth2.googleapis.com:443` for the exchange; the bundled provider reads
+Secrets only and reaches the apiserver and DNS
+(`networkPolicy.substrate.credentialProvider.egressFQDNs`, `[]` by default).
 The Substrate line served the class from its bundled provider until 1.11: the
 plugin is deployed first, and the routing entry lands with the floor move to
 1.12, where the bundled name is gone.

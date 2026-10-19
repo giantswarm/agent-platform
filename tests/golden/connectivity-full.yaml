@@ -14707,17 +14707,8 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-          rules:
-            dns:
-              - matchPattern: "*"
     - toEntities:
         - kube-apiserver
-    - toFQDNs:
-        - matchName: oauth2.googleapis.com
-      toPorts:
-        - ports:
-            - port: "443"
-              protocol: TCP
 ---
 # Source: agent-platform-connectivity/templates/substrate/netpol.yaml
 # ate-idp-server: serves the actor-JWT issuer's discovery document and key set
