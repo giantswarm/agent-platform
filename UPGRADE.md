@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (workspace-manager 0.11, muster 5.47: a disconnect revokes the grant at the provider)
+
+giantswarm/muster#1597: `components.workspace-manager.versionRange` is `>=0.11.0 <0.12.0` and `components.muster.versionRange` `>=5.47.0 <6.0.0`. Both roll in place; no CRD, store or session format changes, and nobody signs in again. A person's `core_auth_logout` now revokes their grant of the pinned provider App at the provider's RFC 7009 endpoint, so the next connect asks for consent again.
+
+### Operator action
+
+- **A GitLab pin** (`workspace-manager.muster.mcpServer.auth.provider` naming a gitlab instance, its endpoints set by hand): add `authorizationServer.revocationEndpoint: https://<gitlab>/oauth/revoke`. Without it a disconnect logs `subject_grant_revocation_unsupported` and the token stays valid at GitLab until it expires. A GitHub pin needs nothing: GitHub has no RFC 7009 endpoint.
+- **An installation that pins the BOM**: move `muster` to `5.47.0` and `workspace-manager` to `0.11.0`.
+
 ## \<current\> → \<next\> (Kubernetes 1.35 or later; the routing policies follow the served API)
 
 The charts target Kubernetes 1.35 or later. The 1.30 render guard of self-management is gone. `agent-platform-connectivity` renders the `modelconfig-llm-routing` MutatingAdmissionPolicies and the `<release>-llm-routing-modelconfigs` post-install/post-upgrade hook Job (with the `api.kagent.dev` `modelconfigs` rule on the `<release>-hooks` ClusterRole) only where the API server serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, Kubernetes 1.36 and later; an offline `helm template` shows them with `--api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy`. 4.151.0 rendered them everywhere, and on Kubernetes 1.35 its connectivity upgrade failed at apply time.

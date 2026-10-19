@@ -413,9 +413,14 @@ components:  # @schema additionalProperties: true
     # Floor 5.45.0: muster accepts Substrate's actor JWT as a bound Session's
     # own bearer (credentialProvider.actorBearer, which the chart's schema
     # refuses before it; giantswarm/muster#1572).
+    # Floor 5.47.0: a person's disconnect (core_auth_logout) revokes a
+    # subject-scoped grant at the provider's RFC 7009 endpoint, the one the
+    # workspace-manager's MCPServer pins (giantswarm/muster#1597), and a
+    # client subscribes to a backend's resources per user
+    # (subscriptions/listen, giantswarm/muster#1348).
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.45.0 <6.0.0"
+    versionRange: ">=5.47.0 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -1084,18 +1089,22 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.10.0, the first release whose person's provider
-    # token is muster's grant of the provider instance's App
+    # The floor is 0.11.0, the first release whose MCPServer pins the
+    # provider's revocation endpoint
+    # (muster.mcpServer.auth.authorizationServer.revocationEndpoint), so a
+    # person's disconnect in muster revokes their grant at the provider
+    # (giantswarm/muster#1597). The earlier floors it covers: 0.10.0 the
+    # person's provider token as muster's grant of the provider instance's App
     # (muster.mcpServer.auth.provider, which this chart derives; an earlier
     # release keeps its own sign-in store, which this chart no longer feeds:
     # agent-platform.workspaceManager.musterGrantFloor fails the render below
-    # it with provider instances and OAuth). The earlier floors it covers:
+    # it with provider instances and OAuth),
     # 0.5.0 the provider kind gitlab (agent-platform.workspaceManager.gitlabFloor),
     # 0.2.0 the grant key set (/.well-known/jwks.json), 0.4.0 the kagent block
     # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
     # minor: a workspace-manager minor rolls in with the chart release that
     # renders its values.
-    versionRange: ">=0.10.0 <0.11.0"
+    versionRange: ">=0.11.0 <0.12.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
@@ -5748,8 +5757,11 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
         #   changing it later asks every person to grant the App once more.
         # The other authorizationServer keys default to
         # GitHub's endpoints (the workspace-manager chart's values); a gitlab
-        # instance sets its own. The render fails naming the key that is
-        # missing.
+        # instance sets its own, revocationEndpoint
+        # (https://<gitlab>/oauth/revoke) among them, so a person's
+        # disconnect revokes the grant at GitLab; GitHub has no RFC 7009
+        # endpoint and leaves it empty. The render fails naming the key that
+        # is missing.
   # The installation's provider instances, several at once: each a unique
   # `name` (a DNS label: the name workspaces refer to), a `kind`
   # and the kind's `values`, whose credentials (the sync credential, the OAuth
