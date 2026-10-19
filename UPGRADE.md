@@ -15,6 +15,18 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (Substrate 1.16.0: `tcp` egress rules, agentgateway 2.5.0)
+
+`components.substrate{,-crds}.versionRange` selects Substrate 1.16 (`>=1.16.0 <1.17.0`, was `>=1.14.0 <1.15.0`). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.16.0 (`ateom-gvisor:1.16.0`); the kagent CRDs and the kagent release are unchanged. 1.15 and 1.16 stay on upstream v0.5.0-alpha2: 1.15 adds `ate_actor_stats_dns_queries_total`, 1.16 the `tcp` egress rule and agentgateway 2.5.0 on the egress gateway. No CRD, Postgres schema or snapshot layout changes (Substrate's `docs/upgrade.md`, "The 1.14 to 1.15 step" and "The 1.15 to 1.16 step"): no migration, no snapshot reset, no manual step; conversations, goldens and durable volumes survive the roll.
+
+- **During the roll** a 1.14 worker reports no DNS count, and a request path with a percent-encoded `/` gets only the host-wide credential until the egress gateway runs 1.16.
+- **`kubectl ate`**: the egress contract is `v0.4.0-alpha1+path-prefix+tcp`; a 1.14 or 1.15 `kubectl ate` and a 1.16 ate-api refuse each other's egress-policy writes. Use the `kubectl ate` of 1.16.
+
+### Operator action
+
+- **None** for an installation that follows the chart's ranges.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.16.0`.
+
 ## \<current\> → \<next\> (workspace-manager 0.11, muster 5.47: a disconnect revokes the grant at the provider)
 
 giantswarm/muster#1597: `components.workspace-manager.versionRange` is `>=0.11.0 <0.12.0` and `components.muster.versionRange` `>=5.47.0 <6.0.0`. Both roll in place; no CRD, store or session format changes, and nobody signs in again. A person's `core_auth_logout` now revokes their grant of the pinned provider App at the provider's RFC 7009 endpoint, so the next connect asks for consent again.
