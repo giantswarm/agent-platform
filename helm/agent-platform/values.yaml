@@ -837,9 +837,11 @@ components:  # @schema additionalProperties: true
     # (agent-platform.componentDerivedValues). The Substrate chart routes the
     # class to it through substrate.credentialProvider.additionalProviders
     # below; a Substrate release before 1.14.0 refuses that entry, its bundled
-    # provider serving the name itself.
+    # provider serving the name itself. The floor is 0.2.0, the first plugin
+    # that reads the selector grants tenants.organizations.enabled derives; an
+    # older plugin refuses its policy file at start.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: ">=0.1.0 <0.2.0"
+    versionRange: ">=0.2.0 <0.3.0"
     valuesFrom: google-access-token-credential-provider
     injectGlobal: false
     targetNamespace: ate-system
@@ -6407,8 +6409,10 @@ substrate-crds: {}  # @schema skipProperties: true; additionalProperties: true
 
 # The Google access-token credential provider (components.google-access-token
 # -credential-provider), forwarded verbatim. namespacePolicies is derived from
-# substrate.credentialProvider.namespacePolicies (the two providers grant the
-# same atespaces the same namespaces); a copy set here must equal it.
+# substrate.credentialProvider.namespacePolicies with the entries
+# tenants.organizations.enabled adds (the two providers grant the same
+# atespaces the same namespaces); a copy set here must equal the installation's
+# own substrate.credentialProvider.namespacePolicies.
 google-access-token-credential-provider:  # @schema skipProperties: true; additionalProperties: true
   namespacePolicies: []
 

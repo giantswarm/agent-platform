@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (Google access-token plugin 0.2.0: grants selected by label)
+
+giantswarm/giantswarm#38622: `components.google-access-token-credential-provider.versionRange` is `>=0.2.0 <0.3.0`. The plugin rolls in place; with `tenants.organizations.enabled` it gets the derived selector grants the substrate release gets and a ClusterRole with `list` and `watch` on namespaces. Without the switch its grants are unchanged.
+
+### Operator action
+
+- **None** for an installation that follows the chart's ranges.
+- **An installation that pins the BOM**: move `google-access-token-credential-provider` to `0.2.0`.
+
 ## \<current\> → \<next\> (`tenants.organizations.enabled`: a tenant's own model, on the `llm` listener)
 
 giantswarm/agent-platform#759: with kagent and `tenants.organizations.enabled` on, every ModelConfig in a namespace labelled `giantswarm.io/organization` goes through the `llm` listener ([README: A tenant's own model](./README.md#a-tenants-own-model)). The `modelconfig-llm-routing` MutatingAdmissionPolicies fill in a missing `baseUrl` there, and `agent-platform-tenant-model-routing` refuses any other `baseUrl` and any provider the listener does not serve.
