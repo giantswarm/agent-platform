@@ -74,9 +74,9 @@ TEAM = [
 ]
 ADMINS = ["giantswarm-ad:giantswarm-admins", "giantswarm-github:giantswarm:giantswarm-admins"]
 ROLES = ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
-# tenants.organizations.enabled needs the llm listener
+# tenants.organizations.enabled needs the llm listener and its routing policy
 # (giantswarm/agent-platform#759).
-ORGS = ["--set", "tenants.organizations.enabled=true", "--set", "llmRouting.enabled=true"]
+ORGS = ["--set", "tenants.organizations.enabled=true", "--set", "llmRouting.enabled=true", "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
 RECONCILER = "system:serviceaccount:agent-platform:agent-manager"
 WRITES = {"create", "update", "patch", "delete"}
 

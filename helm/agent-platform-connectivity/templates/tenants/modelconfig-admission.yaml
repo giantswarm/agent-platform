@@ -47,7 +47,7 @@ ModelConfig without a baseUrl, agent-manager's copy included, is refused.
 {{- fail "tenants.organizations.enabled needs an llmRouting.models entry whose provider a ModelConfig can point at the listener (Anthropic, Mistral or OpenAI): no other ModelConfig is admitted in an Organization namespace" }}
 {{- end }}
 {{- if not (include "agent-platform.llmRouting.modelConfigs" .) }}
-{{- fail "tenants.organizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy, which fills in the listener as the baseUrl of a ModelConfig in an Organization namespace (agent-manager's copy of the default ModelConfig included): set llmRouting.modelConfigPolicy.enabled" }}
+{{- fail "tenants.organizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy, which fills in the listener as the baseUrl of a ModelConfig in an Organization namespace (agent-manager's copy of the default ModelConfig included): set llmRouting.modelConfigPolicy.enabled, on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy" }}
 {{- end }}
 {{- $kp := dig "providers" dict (.Values.kagent | default dict) | default dict }}
 {{- $default := dig (toString (dig "default" "" $kp)) "provider" "" $kp }}

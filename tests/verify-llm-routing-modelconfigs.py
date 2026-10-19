@@ -9,9 +9,9 @@ toggle the release says. This test asserts:
   - the policies mark what they write: the annotation
     agent-platform.giantswarm.io/llm-routing-base-url with the URL they set;
   - the hook renders, post-install and post-upgrade, with routing on and off,
-    wherever the policies would (kagent, llmRouting.modelConfigPolicy), and
-    nowhere else; the hook identity then carries get, list and patch on
-    modelconfigs, nothing more;
+    wherever the policies would (kagent, llmRouting.modelConfigPolicy, the GA
+    MutatingAdmissionPolicy API), and nowhere else; the hook identity then
+    carries get, list and patch on modelconfigs, nothing more;
   - the script, run against a stub kubectl over a fixture namespace:
       off removes a marked baseUrl and an unmarked listener URL on an object
       Helm does not manage, each with its mark, and touches nothing else (an
@@ -38,6 +38,7 @@ import yaml
 
 MARK = "agent-platform.giantswarm.io/llm-routing-base-url"
 ORIGIN = "http://agentgateway.default.svc:8081"
+MAP = ["-a", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
 HOOK = "t-llm-routing-modelconfigs"
 
 # A kubectl that answers the hook's three calls from files in $STUB.
@@ -168,7 +169,7 @@ def main():
 
     print("--> the policies mark the baseUrl they write")
     # The CI values serve Anthropic and OpenAI.
-    on = render(chart)
+    on = render(chart, *MAP)
     for name, url in (("agent-platform-connectivity-modelconfig-llm-routing", ORIGIN),
                       ("agent-platform-connectivity-modelconfig-llm-routing-openai", ORIGIN + "/v1")):
         pol = find(on, "MutatingAdmissionPolicy", name)
@@ -182,19 +183,21 @@ def main():
             fail(f"{name}: a ChatGPT login condition {chatgpt}, want one on the OpenAI policy only")
 
     print("--> the hook renders on and off wherever the policies would, with its RBAC")
-    off = render(chart, "--set", "llmRouting.enabled=false")
+    off = render(chart, *MAP, "--set", "llmRouting.enabled=false")
     for docs, label in ((on, "on"), (off, "off")):
         hook_script(docs)
         role = find(docs, "ClusterRole", "t-hooks")
         rules = [r for r in (role or {}).get("rules", []) if "api.kagent.dev" in r["apiGroups"]]
         if rules != [{"apiGroups": ["api.kagent.dev"], "resources": ["modelconfigs"], "verbs": ["get", "list", "patch"]}]:
             fail(f"routing {label}: the hook identity's ModelConfig rule is {rules}")
-    docs = render(chart, "--set", "llmRouting.modelConfigPolicy.enabled=false")
-    if find(docs, "Job", HOOK):
-        fail("the hook renders with llmRouting.modelConfigPolicy off")
-    role = find(docs, "ClusterRole", "t-hooks")
-    if role and any("api.kagent.dev" in r["apiGroups"] for r in role["rules"]):
-        fail("the hook identity keeps the ModelConfig rule with llmRouting.modelConfigPolicy off")
+    for args, why in ((["--set", "llmRouting.enabled=false"], "without the GA MutatingAdmissionPolicy API"),
+                      ([*MAP, "--set", "llmRouting.modelConfigPolicy.enabled=false"], "with llmRouting.modelConfigPolicy off")):
+        docs = render(chart, *args)
+        if find(docs, "Job", HOOK):
+            fail(f"the hook renders {why}")
+        role = find(docs, "ClusterRole", "t-hooks")
+        if role and any("api.kagent.dev" in r["apiGroups"] for r in role["rules"]):
+            fail(f"the hook identity keeps the ModelConfig rule {why}")
 
     print("--> off: the chart's baseUrls come off, the operator's stay")
     patched, log = run_hook(hook_script(off), FIXTURE)
@@ -224,7 +227,7 @@ def main():
         fail(f"on: a second run patches {sorted(again)}")
 
     print("--> on: a provider the listener no longer serves leaves it")
-    anthropic_only = render(chart, "--set-json", 'llmRouting.models=[{"name":"anthropic","provider":"Anthropic","baseURL":"https://api.anthropic.com/v1","match":"claude-*"}]')
+    anthropic_only = render(chart, *MAP, "--set-json", 'llmRouting.models=[{"name":"anthropic","provider":"Anthropic","baseURL":"https://api.anthropic.com/v1","match":"claude-*"}]')
     patched, _ = run_hook(hook_script(anthropic_only), FIXTURE)
     if patched.get("legacy-openai", {}).get("spec", {}).get("openAI", {}).get("baseUrl", "x") is not None:
         fail(f"on, OpenAI not served: legacy-openai keeps the listener URL: {patched.get('legacy-openai')}")

@@ -21,8 +21,9 @@ cluster; this script pins what the connectivity chart renders:
 - with tenants.organizations.enabled the render fails, naming the key, with
   llmRouting off, with a default ModelConfig provider the listener does not
   serve, and without the modelconfig-llm-routing policy
-  (llmRouting.modelConfigPolicy.enabled off), which fills in the listener as
-  the baseUrl of agent-manager's copy of the default ModelConfig.
+  (llmRouting.modelConfigPolicy.enabled off, or MutatingAdmissionPolicy not
+  served), which fills in the listener as the baseUrl of agent-manager's copy
+  of the default ModelConfig.
 
 Needs PyYAML. HELM selects the binary.
 
@@ -51,6 +52,8 @@ BASE = [
 ]
 ORGS = ["--set", "tenants.organizations.enabled=true"]
 LISTENER = "http://agentgateway.agent-platform.svc:8081"
+MAP = ["--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
+ON = ORGS + MAP
 OPENAI = ["--set", "llmRouting.models[0].name=anthropic", "--set", "llmRouting.models[0].provider=Anthropic",
           "--set", "llmRouting.models[0].baseURL=https://api.anthropic.com/v1",
           "--set", "llmRouting.models[1].name=openai", "--set", "llmRouting.models[1].provider=OpenAI",
@@ -112,7 +115,7 @@ def routing_policies(docs: list) -> dict:
 
 
 def check_off(chart: str) -> None:
-    docs = render(chart, OPENAI)
+    docs = render(chart, MAP + OPENAI)
     present = [n for n in NEW if find(docs, "ValidatingAdmissionPolicy", n) or find(docs, "ValidatingAdmissionPolicyBinding", n)]
     if present:
         fail(f"off, the chart renders {present}")
@@ -124,7 +127,7 @@ def check_off(chart: str) -> None:
 
 
 def check_on(chart: str) -> None:
-    docs = render(chart, ORGS + OPENAI)
+    docs = render(chart, ON + OPENAI)
     for name in NEW:
         vap = find(docs, "ValidatingAdmissionPolicy", name)
         vapb = find(docs, "ValidatingAdmissionPolicyBinding", name)
@@ -170,12 +173,14 @@ def main() -> None:
     chart = sys.argv[1]
     check_off(chart)
     check_on(chart)
-    refused(chart, ["--set", "llmRouting.enabled=false"] + ORGS, ["tenants.organizations.enabled needs llmRouting.enabled"],
+    refused(chart, ["--set", "llmRouting.enabled=false"] + ON, ["tenants.organizations.enabled needs llmRouting.enabled"],
             "with llmRouting off the render fails")
-    refused(chart, ORGS + ["--set", "llmRouting.modelConfigPolicy.enabled=false"],
+    refused(chart, ORGS, ["tenants.organizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy", "admissionregistration.k8s.io/v1"],
+            "without MutatingAdmissionPolicy served the render fails")
+    refused(chart, ON + ["--set", "llmRouting.modelConfigPolicy.enabled=false"],
             ["tenants.organizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy", "llmRouting.modelConfigPolicy.enabled"],
             "with llmRouting.modelConfigPolicy.enabled off the render fails")
-    refused(chart, ORGS + ["--set", "kagent.providers.default=bedrock", "--set", "kagent.providers.bedrock.provider=Bedrock",
+    refused(chart, ON + ["--set", "kagent.providers.default=bedrock", "--set", "kagent.providers.bedrock.provider=Bedrock",
                          "--set", "kagent.providers.bedrock.model=m", "--set", "kagent.providers.bedrock.apiKeySecretRef=k"],
             ["kagent.providers.bedrock.provider", "Bedrock"], "a default ModelConfig the listener does not serve fails the render")
 
