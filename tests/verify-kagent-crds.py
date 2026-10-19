@@ -233,8 +233,11 @@ def check_rules(kind: str, spec: dict, path: str, errors: list[str]) -> None:
                 errors.append(f"{path}.{key}: the {owner} block on a {provider} ModelConfig (the CRD refuses it)")
         if "apiKeySecretKey" in spec and "apiKeySecret" not in spec:
             errors.append(f"{path}.apiKeySecretKey: set without apiKeySecret")
-        if "apiKeySecret" in spec and "apiKeySecretKey" not in spec and provider not in ("Bedrock", "SAPAICore"):
+        chatgpt = (spec.get("openAI") or {}).get("credentialType") == "chatgptOAuth"
+        if "apiKeySecret" in spec and "apiKeySecretKey" not in spec and provider not in ("Bedrock", "SAPAICore") and not chatgpt:
             errors.append(f"{path}.apiKeySecret: set without apiKeySecretKey")
+        if chatgpt and ("apiKeySecret" not in spec or "apiKeySecretKey" in spec):
+            errors.append(f"{path}: a ChatGPT login (openAI.credentialType chatgptOAuth) requires apiKeySecret and no apiKeySecretKey")
         if spec.get("apiKeyPassthrough") and spec.get("apiKeySecret"):
             errors.append(f"{path}: apiKeyPassthrough and apiKeySecret are mutually exclusive")
 

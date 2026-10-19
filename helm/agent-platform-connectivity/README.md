@@ -220,6 +220,15 @@ On the installation, after the cutover:
   refuses any other OpenAI option (`maxTokens` included), `defaultHeaders`,
   `tls` and `apiKeyPassthrough`; the chart renders none of them for such an
   entry, and refuses `apiFormat` on any other provider.
+- **codex on a ChatGPT subscription**: an `OpenAI` entry with `credentialType:
+  chatgptOAuth` and `apiFormat: responses` names the installation's own
+  ChatGPT login Secret in `apiKeySecret` and renders no `apiKeySecretKey`. It
+  stays off the listener: the chart writes no listener `baseUrl`, the policy
+  skips it and the hook takes one it wrote off again, because the listener's
+  OpenAI route serves the OpenAI API, not the ChatGPT Codex backend, and a
+  subscription has no per-token price. Its turns are not in the GenAI usage
+  metrics. How each installation's login is created and placed:
+  [docs/chatgpt-login.md](../../docs/chatgpt-login.md).
   The `baseUrl` lands under the CRD's block for the entry's provider —
   `anthropic`, `mistral`, `openAI`, `sapAICore`, the four `ModelConfigSpec` gives one —
   never the lower-cased provider name, which the API server would prune; the
@@ -1666,10 +1675,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.4.1"` |  |
+| agentgateway.controller.image.tag | string | `"2.4.2"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.4.1"` |  |
+| agentgateway.proxy.image.tag | string | `"2.4.2"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1782,7 +1791,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.5.0"` |  |
+| agentManager.migration.image.tag | string | `"2.6.4"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |

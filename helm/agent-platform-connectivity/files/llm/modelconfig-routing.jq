@@ -15,8 +15,9 @@
 # baseUrl belongs to the operator (a Helm-managed one is a release value) and
 # is never touched.
 #
-# Off, or a provider the listener no longer serves: a chart baseUrl is removed
-# with its mark, so the ModelConfig calls its provider directly again. On: a
+# Off, a provider the listener no longer serves, or a ChatGPT login
+# (openAI.credentialType chatgptOAuth, which the listener never serves): a
+# chart baseUrl is removed with its mark, so the ModelConfig calls its provider directly again. On: a
 # chart baseUrl becomes the current listener URL, marked. A ModelConfig without
 # a baseUrl stays as it is: the policy routes it at its next write, and the
 # cutover of the default ModelConfig stays the second step of the README.
@@ -35,7 +36,8 @@ def listenerUrl: $origin + (if ascii_downcase == "openai" then "/v1" else "" end
 | ((.metadata.annotations // {})[$mark] // null) as $marked
 | (((.metadata.labels // {})["app.kubernetes.io/managed-by"] // "") == "Helm") as $helm
 | ($current != null and ($current == $marked or ($marked == null and ($helm | not) and ($current == $origin or $current == $origin + "/v1")))) as $chart
-| (if $mode == "on" and any($served[]; . == ($provider | ascii_downcase)) then ($provider | listenerUrl) else null end) as $want
+| ((.spec.openAI.credentialType // "") == "chatgptOAuth") as $chatgpt
+| (if $mode == "on" and ($chatgpt | not) and any($served[]; . == ($provider | ascii_downcase)) then ($provider | listenerUrl) else null end) as $want
 | select($chart and ($want != $current or $marked == null))
 | $want
 | {name: $mc.metadata.name, patch: {metadata: {resourceVersion: $mc.metadata.resourceVersion, annotations: {($mark): .}}, spec: {($key): {baseUrl: .}}}}

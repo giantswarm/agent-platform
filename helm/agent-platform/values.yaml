@@ -581,8 +581,12 @@ components:  # @schema additionalProperties: true
     # installation's actor-JWT providers (kagent.controller.session
     # .actorJWTProviders, derived for muster while muster trusts the actor
     # JWT) to every grant-admitted Session, so its calls to muster carry the
-    # Session Actor's JWT. The floor is its first candidate, 1.17.0-rc.1.
-    versionRange: ">=1.17.0-rc.1 <1.18.0-0"
+    # Session Actor's JWT. From 1.18.0 the A2A gateway names a turn's
+    # actor-JWT hosts to the runtime, and the claude Harness sends muster a
+    # placeholder the egress gateway replaces, holding no caller bearer for a
+    # turn whose every MCP server is on such a host, and the claude, codex and
+    # omp Harnesses commit as the person of the turn.
+    versionRange: ">=1.18.0 <1.19.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -696,7 +700,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.17.0-rc.1 <1.18.0-0"
+    versionRange: ">=1.18.0 <1.19.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -3676,6 +3680,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   apiKeySecret: kagent-openai
   #   apiKeySecretKey: OPENAI_API_KEY
   #   apiFormat: responses
+  # - name: openai-chatgpt-codex   # a codex model on this installation's own
+  #   provider: OpenAI             # ChatGPT login, off the llm listener
+  #   model: gpt-5.6-luna          # (docs/chatgpt-login.md)
+  #   apiKeySecret: kagent-chatgpt-login
+  #   credentialType: chatgptOAuth
+  #   apiFormat: responses
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
@@ -4282,7 +4292,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.4.1"
+      tag: "2.4.2"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -4316,7 +4326,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.4.1"
+      tag: "2.4.2"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -4981,7 +4991,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.5.0
+      tag: 2.6.4
     dryRun: false
     gitopsNamespaces: []
 
