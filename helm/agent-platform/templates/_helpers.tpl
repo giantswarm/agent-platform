@@ -119,6 +119,45 @@ Usage: include "agent-platform.kagent.fluxServiceAccountName" .
 {{- end -}}
 
 {{/*
+The credential providers' namespacePolicies, as JSON {"policies": [...]}: the
+installation's own substrate.credentialProvider.namespacePolicies and, with
+tenants.organizations.enabled, the Organizations' agents
+(giantswarm/agent-platform#1041): each namespace labelled
+giantswarm.io/organization is read by the atespace of its own name only (an
+ownNamespaceSelector entry), and ate-golden, where every template's golden
+actor boots, reads them all (allowedNamespaceSelector on its entry, so that
+entry's secretSelector narrows it there too). Each derived entry once; an
+ate-golden entry that selects other namespaces fails. Substrate's bundled
+provider and the Google access-token plugin get the same list.
+Usage: (include "agent-platform.credentialProvider.namespacePolicies" $root | fromJson).policies
+*/}}
+{{- define "agent-platform.credentialProvider.namespacePolicies" -}}
+{{- $own := dig "credentialProvider" "namespacePolicies" list (.Values.substrate | default dict) -}}
+{{- if not (dig "organizations" "enabled" false (.Values.tenants | default dict)) -}}
+{{- toJson (dict "policies" $own) -}}
+{{- else -}}
+{{- $sel := dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists")) -}}
+{{- $policies := list -}}
+{{- $golden := false -}}
+{{- $ownSel := false -}}
+{{- range $i, $p := $own -}}
+{{- if eq (toJson ($p.ownNamespaceSelector | default dict)) (toJson $sel) -}}{{- $ownSel = true -}}{{- end -}}
+{{- if eq ($p.atespace | default "") "ate-golden" -}}
+{{- if and $p.allowedNamespaceSelector (ne (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
+{{- fail (printf "substrate.credentialProvider.namespacePolicies[%d] (ate-golden) has an allowedNamespaceSelector (%s) other than the Organizations' namespaces (%s), which tenants.organizations.enabled sets on it: leave it unset" $i (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
+{{- end -}}
+{{- $p = merge (dict "allowedNamespaceSelector" $sel) $p -}}
+{{- $golden = true -}}
+{{- end -}}
+{{- $policies = append $policies $p -}}
+{{- end -}}
+{{- if not $golden -}}{{- $policies = append $policies (dict "atespace" "ate-golden" "allowedNamespaceSelector" $sel) -}}{{- end -}}
+{{- if not $ownSel -}}{{- $policies = append $policies (dict "ownNamespaceSelector" $sel) -}}{{- end -}}
+{{- toJson (dict "policies" $policies) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Values this chart derives for a component from a block another component owns,
 merged OVER the component's forwarded values (templates/components.yaml) so one
 value drives every consumer. Emits a JSON object; {} for a component with
@@ -233,14 +272,15 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- $derived := dict -}}
 {{- if eq .name "google-access-token-credential-provider" -}}
 {{- /* The plugin resolves keys under the same atespace-to-namespace grants as
-Substrate's bundled provider: one list, Substrate's. The Substrate release's
-name and namespace tell the plugin which egress gateway may call it. */ -}}
+Substrate's bundled provider: one list, Substrate's, with the entries the
+Organizations derive. The Substrate release's name and namespace tell the
+plugin which egress gateway may call it. */ -}}
 {{- $grants := dig "credentialProvider" "namespacePolicies" list (.root.Values.substrate | default dict) -}}
 {{- $own := dig "namespacePolicies" list (index .root.Values "google-access-token-credential-provider" | default dict) -}}
 {{- if and $own (ne (toJson $own) (toJson $grants)) -}}
 {{- fail (printf "google-access-token-credential-provider.namespacePolicies (%s) differs from substrate.credentialProvider.namespacePolicies (%s): an atespace resolves Google service account keys under the grants it resolves every other Secret under — set substrate.credentialProvider.namespacePolicies and leave google-access-token-credential-provider.namespacePolicies unset" (toJson $own) (toJson $grants)) -}}
 {{- end -}}
-{{- $_ := set $derived "namespacePolicies" $grants -}}
+{{- $_ := set $derived "namespacePolicies" (include "agent-platform.credentialProvider.namespacePolicies" .root | fromJson).policies -}}
 {{- $_ := set $derived "substrate" (dict "releaseName" "substrate" "namespace" (dig "substrate" "targetNamespace" "ate-system" .root.Values.components)) -}}
 {{- end -}}
 {{- if eq .name "agent-manager" -}}
@@ -597,36 +637,13 @@ left to the Substrate chart's default; an own false fails the render. */ -}}
 {{- $_ := set $derived "ateController" (dict "gvisorWorker" (dict "followRelease" true)) -}}
 {{- end -}}
 {{- if and (eq .name "substrate") (dig "organizations" "enabled" false (.root.Values.tenants | default dict)) -}}
-{{- /* The Organizations' agents (giantswarm/agent-platform#1041): each
-namespace labelled giantswarm.io/organization is read by the atespace of its
-own name only (an ownNamespaceSelector entry), and ate-golden, where every
-template's golden actor boots, reads them all (allowedNamespaceSelector on
-its entry, so that entry's secretSelector narrows it there too). The
-installation's own policies stay, each derived entry once; an ate-golden entry
-that selects other namespaces fails, and so does a Substrate floor below 1.12.0,
-whose provider refuses the selectors. */ -}}
+{{- /* A Substrate floor below 1.12.0 fails: its provider refuses the
+selectors agent-platform.credentialProvider.namespacePolicies derives. */ -}}
 {{- $pin := include "agent-platform.substrate.pinnedVersion" .root -}}
 {{- if semverCompare "<1.12.0-0" $pin -}}
 {{- fail (printf "tenants.organizations.enabled needs Substrate 1.12.0 or later, whose credential provider reads namespace policies by label: components.substrate.versionRange selects %s, whose provider refuses the policy file at start" $pin) -}}
 {{- end -}}
-{{- $sel := dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists")) -}}
-{{- $policies := list -}}
-{{- $golden := false -}}
-{{- $own := false -}}
-{{- range $i, $p := dig "credentialProvider" "namespacePolicies" list ($.root.Values.substrate | default dict) -}}
-{{- if eq (toJson ($p.ownNamespaceSelector | default dict)) (toJson $sel) -}}{{- $own = true -}}{{- end -}}
-{{- if eq ($p.atespace | default "") "ate-golden" -}}
-{{- if and $p.allowedNamespaceSelector (ne (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
-{{- fail (printf "substrate.credentialProvider.namespacePolicies[%d] (ate-golden) has an allowedNamespaceSelector (%s) other than the Organizations' namespaces (%s), which tenants.organizations.enabled sets on it: leave it unset" $i (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
-{{- end -}}
-{{- $p = merge (dict "allowedNamespaceSelector" $sel) $p -}}
-{{- $golden = true -}}
-{{- end -}}
-{{- $policies = append $policies $p -}}
-{{- end -}}
-{{- if not $golden -}}{{- $policies = append $policies (dict "atespace" "ate-golden" "allowedNamespaceSelector" $sel) -}}{{- end -}}
-{{- if not $own -}}{{- $policies = append $policies (dict "ownNamespaceSelector" $sel) -}}{{- end -}}
-{{- $_ := set $derived "credentialProvider" (dict "namespacePolicies" $policies) -}}
+{{- $_ := set $derived "credentialProvider" (dict "namespacePolicies" (include "agent-platform.credentialProvider.namespacePolicies" .root | fromJson).policies) -}}
 {{- end -}}
 {{- if and (eq .name "kserve-llmisvc-resources") (include "agent-platform.componentEnabled" (dict "root" .root "name" "modelServing")) -}}
 {{- /* The models Gateway (modelServing.modelsGateway, rendered by the
