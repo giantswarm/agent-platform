@@ -19,13 +19,14 @@ Each case pins one property:
 - with workspaces on: workspace-manager's pods are admitted too,
   serviceAccountTokenAudience is the audience of the manager's token
   (workspace-manager.kagent.tokenAudience, kagent unless set), an own
-  audience that differs fails the render and an equal one passes, and a
-  workspace-manager release outside the connectivity release's namespace
-  fails the render;
+  audience that differs fails the render and an equal one passes, a
+  workspace-manager range whose floor sends no token (below 0.10.0) fails the
+  render, and the peer follows the manager's release namespace;
 - the connectivity release (with the values the meta chart forwards) binds
   workspace-manager's ServiceAccount, and only it, to a ClusterRole with
   `list` on sessions.api.kagent.dev and nothing else, following
-  workspace-manager.serviceAccount.name; nothing without workspaces;
+  workspace-manager.serviceAccount.name and the manager's release namespace
+  (components.workspace-manager.targetNamespace); nothing without workspaces;
 - the kagent chart at the range's floor, rendered with the values the release
   forwards, renders the KAGENT_AUTHORIZATION_* entries of the controller
   ConfigMap, the NetworkPolicy kagent-controller that admits on the API port
@@ -44,7 +45,7 @@ import tempfile
 import yaml
 
 HELM = os.environ.get("HELM", "helm")
-CHART = "helm/agent-platform"
+CHART, CONNECTIVITY = sys.argv[1], sys.argv[2]
 NAMESPACE = "agent-platform"
 KAGENT_CHART = "oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent"
 BASE = [
@@ -127,7 +128,7 @@ def connectivity(flags: list) -> list:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
         yaml.safe_dump(release_values(flags, "agent-platform-connectivity"), f)
         f.flush()
-        return [d for d in yaml.safe_load_all(helm("helm/agent-platform-connectivity", ["-n", NAMESPACE, "-f", f.name])) if d]
+        return [d for d in yaml.safe_load_all(helm(CONNECTIVITY, ["-n", NAMESPACE, "-f", f.name])) if d]
 
 
 def kagent_floor() -> str:
@@ -189,11 +190,18 @@ def main() -> None:
            "kagent", "an own audience equal to the manager's passes")
     must_fail([*WORKSPACES, "--set", f"{AUTHZ}.serviceAccountTokenAudience=other"],
               "kagent.controller.authorization.serviceAccountTokenAudience (other) differs", "an own audience other than the manager's")
-    must_fail([*WORKSPACES, "--set", "components.workspace-manager.targetNamespace=elsewhere"],
-              "components.workspace-manager.targetNamespace (elsewhere) is not the connectivity release's namespace",
-              "workspace-manager outside the connectivity release's namespace")
+    # Below the muster grant floor the manager renders only without OAuth (verify-workspace-manager's PRE_GRANT).
+    pre_grant = ["--set", "workspace-manager.oauth.enabled=false", "--set", "workspace-manager.grant.signingKey=null",
+                 "--set", "workspace-manager.muster.mcpServer.auth.authorizationServer=null",
+                 "--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]
+    must_fail([*WORKSPACES, *pre_grant, "--set", "components.workspace-manager.versionRange=>=0.9.0 <0.11.0"],
+              "admits a workspace-manager before 0.10.0", "a workspace-manager floor that sends no token")
+    split = ["--set", "components.workspace-manager.targetNamespace=elsewhere"]
+    expect(controller([*WORKSPACES, *split])["networkPolicy"]["from"][2]["namespaceSelector"],
+           {"matchLabels": {"kubernetes.io/metadata.name": "elsewhere"}}, "the workspace-manager peer follows its release's namespace")
 
-    for flags, sa in (([], "workspace-manager"), (["--set", "workspace-manager.serviceAccount.name=wm-sa"], "wm-sa")):
+    for flags, sa, ns in (([], "workspace-manager", NAMESPACE), (["--set", "workspace-manager.serviceAccount.name=wm-sa"], "wm-sa", NAMESPACE),
+                          (split, "workspace-manager", "elsewhere")):
         docs = connectivity([*WORKSPACES, *flags])
         role, binding = find(docs, "ClusterRole", ROLE), find(docs, "ClusterRoleBinding", ROLE)
         if role is None or binding is None:
@@ -201,8 +209,8 @@ def main() -> None:
         expect(role["rules"], [{"apiGroups": ["api.kagent.dev"], "resources": ["sessions"], "verbs": ["list"]}],
                f"{ROLE} grants list on sessions.api.kagent.dev and nothing else")
         expect((binding["roleRef"]["name"], binding["subjects"]),
-               (ROLE, [{"kind": "ServiceAccount", "name": sa, "namespace": NAMESPACE}]),
-               f"{ROLE} is bound to workspace-manager's ServiceAccount {sa} only")
+               (ROLE, [{"kind": "ServiceAccount", "name": sa, "namespace": ns}]),
+               f"{ROLE} is bound to workspace-manager's ServiceAccount {ns}/{sa} only")
     expect(find(connectivity([]), "ClusterRole", ROLE), None, f"without workspaces no {ROLE}")
 
     floor = kagent_floor()

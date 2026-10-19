@@ -7,7 +7,9 @@ reviews the list as `list` on sessions.api.kagent.dev with no namespace
 (giantswarm/agent-platform#706; the kagent line from 1.19.0). No tenant role
 grants it: the list carries the Session names of every tenant. So this
 ClusterRole holds that one rule and is bound to the manager's ServiceAccount
-only. In the noop mode the controller asks nothing and the binding is inert.
+only, in the manager's namespace: workspaceManager.namespace, which the meta
+chart sets when the manager's release is not in this release's namespace. In
+the noop mode the controller asks nothing and the binding is inert.
 */ -}}
 {{- if and (include "agent-platform.workspaceManager.enabled" .) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
 {{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson }}
@@ -38,5 +40,5 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ $saName }}
-    namespace: {{ .Release.Namespace }}
+    namespace: {{ dig "namespace" "" (.Values.workspaceManager | default dict) | default .Release.Namespace }}
 {{- end }}
