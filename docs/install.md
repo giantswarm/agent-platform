@@ -28,7 +28,7 @@ The released chart carries the examples: `helm pull oci://gsoci.azurecr.io/chart
   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.0/standard-install.yaml
   ```
 
-- **A default StorageClass** (`kubectl get storageclass` marks one `(default)`): the bundled Valkey, kagent's and Substrate's bundled Postgres and the CloudNativePG Cluster claim volumes without naming a class.
+- **A default StorageClass** (`kubectl get storageclass` marks one `(default)`): the bundled Valkey, Substrate's bundled Postgres and the CloudNativePG Cluster claim volumes without naming a class.
 - **No Flux of its own**, or install through it: the chart brings the Flux engine where the cluster has none. A cluster that runs Flux sets `components.flux.enabled: false` and installs the chart through that Flux ([Reference: Clusters that run Flux](reference.md#clusters-that-run-flux)).
 
 ### A public Gateway (own-gateway, managed-cloud)

@@ -1,0 +1,41 @@
+# Workspaces on with two provider instances, a GitHub one and a second kind:
+# every credential a Secret reference (tests/verify-workspace-manager.py); the
+# installation's read-write-many class named, not rendered.
+workspaces:
+  enabled: true
+  storage:
+    storageClassName: workspaces-rwx
+workspace-manager:
+  providers:
+    - name: github
+      kind: github
+      values:
+        app:
+          id: "123"
+          privateKey: {name: workspace-github, key: private-key}
+        oauth:
+          clientID: Iv1.abc
+          clientSecret: {name: workspace-github, key: client-secret}
+    - name: gitlab
+      kind: gitlab
+      values:
+        url: https://gitlab.example.com:8443
+        token: {name: workspace-gitlab, key: token}
+        oauth:
+          clientID: abc
+          clientSecret: {name: workspace-gitlab, key: client-secret}
+  grant:
+    signingKey: {name: workspace-manager-keys, key: grant}
+  # The public base URL, the grants' issuer whose key set the connectivity
+  # release routes (tests/verify-workspace-manager-route.py); set here rather
+  # than global.domain, which would move every other release.
+  oauth:
+    baseURL: https://workspaces.ci.example.com
+  # muster's pin: the github instance and its OAuth client Secret are derived,
+  # the App's issuer is the fixture's own (derived without it,
+  # tests/verify-workspace-manager.py).
+  muster:
+    mcpServer:
+      auth:
+        authorizationServer:
+          issuer: https://github.com/apps/ci-agents

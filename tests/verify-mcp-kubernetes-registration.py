@@ -10,6 +10,8 @@ The connectivity chart registers the bundled mcp-kubernetes with muster
     muster.giantswarm.io/management-cluster label, spec.family {name: kubernetes,
     instanceArg: management_cluster}, url and auth unchanged;
   - enabled: false: no MCPServer;
+  - displayName (default Kubernetes, the kubernetes family's in agent-platform-mcps)
+    is the ui.giantswarm.io/display-name annotation of either shape; empty renders none;
   - a managementCluster that is not a DNS label fails the render naming the key;
   - with the component or muster off nothing renders, whatever the block says;
   - the meta chart forwards the block to the connectivity release and drops it from
@@ -25,6 +27,11 @@ import yaml
 CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.mcp-kubernetes.enabled=true", "--set", "components.muster.enabled=true"]
 CLUSTER_LABEL = "muster.giantswarm.io/management-cluster"
 TIER_LABEL = "agent-platform.giantswarm.io/tool-group"
+DISPLAY_NAME = "ui.giantswarm.io/display-name"
+
+
+def display_name(cr: dict) -> str | None:
+    return (cr["metadata"].get("annotations") or {}).get(DISPLAY_NAME)
 
 
 def fail(msg: str) -> None:
@@ -57,6 +64,8 @@ def main() -> None:
         fail(f"default: want the family-less singleton mcp-kubernetes, got {single['metadata']} {single['spec']}")
     if single["metadata"]["labels"].get(TIER_LABEL) != "infrastructure":
         fail("default: the singleton lost its infrastructure tool-group label")
+    if display_name(single) != "Kubernetes":
+        fail(f"default: the singleton's {DISPLAY_NAME} is {display_name(single)!r}, want 'Kubernetes'")
 
     member = mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.managementCluster=agentlab"]))
     if len(member) != 1:
@@ -71,6 +80,15 @@ def main() -> None:
     rest = {k: v for k, v in m["spec"].items() if k != "family"}
     if rest != single["spec"]:
         fail(f"member: spec differs from the singleton's beyond family:\n{rest}\n{single['spec']}")
+    if display_name(m) != "Kubernetes":
+        fail(f"member: {DISPLAY_NAME} is {display_name(m)!r}, want the kubernetes family's 'Kubernetes'")
+
+    named = mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.displayName=Kubernetes (agentlab)"]))
+    if len(named) != 1 or display_name(named[0]) != "Kubernetes (agentlab)":
+        fail(f"displayName set: want {DISPLAY_NAME} 'Kubernetes (agentlab)', got {[display_name(d) for d in named]}")
+    unnamed = mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.displayName="]))
+    if len(unnamed) != 1 or "annotations" in unnamed[0]["metadata"]:
+        fail(f"displayName empty: want no annotations, got {[d['metadata'].get('annotations') for d in unnamed]}")
 
     if mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.enabled=false"])):
         fail("enabled=false: an mcp-kubernetes MCPServer rendered")
@@ -90,7 +108,7 @@ def main() -> None:
     if forwarded != {"managementCluster": "agentlab"}:
         fail(f"meta: the connectivity release carries mcp-kubernetes.mcpServer {forwarded}")
 
-    print("ok: singleton by default, family member with managementCluster, none with enabled=false; the guard; the meta chart forwards and omits the block")
+    print("ok: singleton by default, family member with managementCluster, none with enabled=false; the display name on both shapes, none when empty; the guard; the meta chart forwards and omits the block")
 
 
 if __name__ == "__main__":

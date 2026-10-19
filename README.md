@@ -38,6 +38,7 @@ Declarative agents that each run in their own sandbox, are suspended to object s
 | [Agent Substrate](https://github.com/kagent-dev/substrate) | The actor runtime under kagent. Each agent is a [gVisor](https://github.com/google/gvisor) sandbox in a worker pod, with its state snapshotted to object storage. |
 | [agent-manager](https://github.com/giantswarm/agent-manager) | Creates, updates and deletes agents as GitOps releases of the [agent chart](https://github.com/giantswarm/agent), over MCP and REST, as the calling person. |
 | [klaus-gateway](https://github.com/giantswarm/klaus-gateway) | Slack front door. A Slack thread becomes an agent session, and the agent acts as the Slack user. |
+| [workspace-manager](https://github.com/giantswarm/workspace-manager) | Workspaces: an Organization's repositories mirrored on a shared volume, with a working copy per agent session, served as MCP tools. |
 | [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) | The Kubernetes `Sandbox` API for isolated, stateful single-pod workloads. |
 
 ### Tool Access
@@ -110,6 +111,7 @@ Then point any MCP client at `https://muster.<your-domain>/mcp`. Agents also nee
 | [Authentication](docs/authentication.md) | The request path, OAuth discovery, token forwarding and exchange, edge JWT validation |
 | [Toolset presets](docs/toolset-presets.md) | Choosing which tools an agent gets |
 | [Serving presets](docs/serving-presets.md) | Adding and benchmarking a model recipe |
+| [ChatGPT login](docs/chatgpt-login.md) | Running codex on a ChatGPT subscription |
 | [Agent Substrate security](docs/substrate-security.md) | What the agent runtime changes on the cluster, and what protects it |
 | [Upgrading](UPGRADE.md) | Version-to-version upgrade notes |
 

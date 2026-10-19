@@ -78,3 +78,25 @@ Next steps (docs/install.md "After the install"):
     kagent UI's client:     https://{{ .Values.kagent.uiRoute.hostname | default (printf "kagent.%s" $domain) }}/oauth2/callback
 {{- end }}
 {{- end }}
+{{- $wm := index .Values "workspace-manager" | default dict }}
+{{- $wmBase := include "agent-platform.workspaceManager.baseURL" . }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager")) $wmBase }}
+
+Workspaces, base URL {{ $wmBase }} (routed: /.well-known/jwks.json):
+{{- with (include "agent-platform.workspaceManager.musterPin" . | fromJson) }}
+{{- if .provider }}
+  Provider sign-in: muster, pinned to provider instance {{ .provider }}'s App (issuer {{ .issuer }}, OAuth client in Secret {{ .secretName }}); a person grants it once in muster.
+  The App's callback URL is muster's <muster base URL>/oauth/proxy/callback.
+{{- end }}
+{{- end }}
+{{- with (include "agent-platform.workspaceManager.grantSigningKey" . | fromJson) }}
+{{- if .name }}
+  Workspace grants: signed with the key {{ .name }}/{{ .key }} (a Secret in the platform's namespace), published at {{ $wmBase }}/.well-known/jwks.json
+{{- end }}
+{{- end }}
+{{- with (include "agent-platform.kagent.sessionAdmission" . | fromJson) }}
+{{- if .jwksURL }}
+  kagent's Session admission: a Session naming a workspace volume is admitted with a grant the key set {{ .jwksURL }} verifies (issuer {{ .issuer }}, audience {{ .audience }}), naming the caller by email
+{{- end }}
+{{- end }}
+{{- end }}

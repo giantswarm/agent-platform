@@ -1,0 +1,267 @@
+{{/* vim: set filetype=mustache: */}}
+{{/*
+Helpers of the workspace-manager component's wiring (templates/workspace-manager/).
+
+Two values blocks feed these templates: workspaceManager (the umbrella wiring —
+network policy inputs) and workspace-manager (the component chart's own
+values: OAuth, the muster registration, the provider instances, Service name
+and port; hyphenated, so reached through index), read the way the
+cluster-manager templates read theirs.
+*/}}
+
+{{/*
+Truthy when the workspace-manager component is on
+(components.workspace-manager.enabled). The meta chart forwards the entry only
+while workspaces are on, so a missing entry is off here, unlike the roster's
+other entries.
+*/}}
+{{- define "agent-platform.workspaceManager.enabled" -}}
+{{- if dig "workspace-manager" "enabled" false (.Values.components | default dict) }}true{{ end -}}
+{{- end -}}
+
+{{/*
+The component chart's values block, workspace-manager (a dict; empty when unset).
+*/}}
+{{- define "agent-platform.workspaceManager.chartValues" -}}
+{{- index .Values "workspace-manager" | default dict | toJson -}}
+{{- end -}}
+
+{{/*
+The workspace-manager Service name: workspace-manager.fullnameOverride, which
+the component chart uses verbatim for its Service and the network policies
+target.
+*/}}
+{{- define "agent-platform.workspaceManager.fullname" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- required "workspace-manager.fullnameOverride must be set — the umbrella's network policies target this exact Service name" (dig "fullnameOverride" "" $chart) -}}
+{{- end -}}
+
+{{/*
+The port the workspace-manager Service listens on (workspace-manager.service.port, default 8080).
+*/}}
+{{- define "agent-platform.workspaceManager.servicePort" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- dig "service" "port" 8080 $chart -}}
+{{- end -}}
+
+{{/*
+Truthy when the component validates the caller's identity itself
+(workspace-manager.oauth.enabled).
+*/}}
+{{- define "agent-platform.workspaceManager.oauthEnabled" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- if dig "oauth" "enabled" false $chart }}true{{ end -}}
+{{- end -}}
+
+{{/*
+The identity provider the component validates tokens with: dex (the default) or google.
+*/}}
+{{- define "agent-platform.workspaceManager.oauthProvider" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- dig "oauth" "provider" "dex" $chart -}}
+{{- end -}}
+
+{{/*
+The issuer URL the component validates tokens against: the dex provider's
+workspace-manager.oauth.dex.issuerURL, else global.identity.issuerUrl.
+*/}}
+{{- define "agent-platform.workspaceManager.issuerUrl" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- if eq (include "agent-platform.workspaceManager.oauthProvider" .) "dex" -}}
+{{- dig "oauth" "dex" "issuerURL" "" $chart | default .Values.global.identity.issuerUrl -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The namespace the workspaces and every Session live in: kagent's.
+*/}}
+{{- define "agent-platform.workspaceManager.kagentNamespace" -}}
+{{- .Values.kagent.namespaceOverride | default .Release.Namespace -}}
+{{- end -}}
+
+{{/*
+Labels of every object the umbrella renders for the component.
+*/}}
+{{- define "agent-platform.workspaceManager.labels" -}}
+{{ include "labels.common" . }}
+app.kubernetes.io/component: workspace-manager
+{{- end -}}
+
+{{/*
+The selector labels of the workspace-manager pods, as the component chart
+stamps them (app.kubernetes.io/name from its chart name or nameOverride).
+Rendered as YAML mapping entries; the caller provides the indentation.
+*/}}
+{{- define "agent-platform.workspaceManager.podSelector" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+app.kubernetes.io/name: {{ dig "nameOverride" "" $chart | default "workspace-manager" }}
+{{- end -}}
+
+{{/*
+The hosts each provider instance (workspace-manager.providers) is reached at:
+the host of its values.url and values.apiURL, on the URL's port (443 unless it
+names one); a github instance without url is github.com, whose API is
+api.github.com. An instance of another kind without either URL fails the
+render: its hosts are unknown here. Emits a JSON list of {host, port}, each
+pair once, in instance order.
+*/}}
+{{- define "agent-platform.workspaceManager.providerHosts" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- $out := list -}}
+{{- range $i, $p := (dig "providers" list $chart) -}}
+{{- $v := $p.values | default dict -}}
+{{- $urls := list -}}
+{{- range $k := list "url" "apiURL" -}}{{- with (index $v $k) }}{{ $urls = append $urls (toString .) }}{{ end -}}{{- end -}}
+{{- if and (not $urls) (eq (toString $p.kind) "github") -}}
+{{- $urls = list "https://github.com" "https://api.github.com" -}}
+{{- end -}}
+{{- if not $urls -}}
+{{- fail (printf "workspace-manager.providers[%d] (%s, kind %s) names neither values.url nor values.apiURL: the workspace-manager's egress opens each provider instance's hosts, so name the instance's url" $i (toString $p.name) (toString $p.kind)) -}}
+{{- end -}}
+{{- range $urls -}}
+{{- $u := urlParse . -}}
+{{- $hostport := splitList ":" $u.host -}}
+{{- $host := first $hostport -}}
+{{- if or (not (has $u.scheme (list "https" "http"))) (not $host) -}}
+{{- fail (printf "workspace-manager.providers[%d] (%s): %q is not an http(s) URL with a host" $i (toString $p.name) .) -}}
+{{- end -}}
+{{- $port := ternary (last $hostport) (ternary "443" "80" (eq $u.scheme "https")) (eq (len $hostport) 2) -}}
+{{- $entry := dict "host" $host "port" $port -}}
+{{- if not (has $entry $out) }}{{ $out = append $out $entry }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The manager's public base URL, without a trailing slash: workspace-manager.oauth.baseURL,
+else https://<fullnameOverride>.<global.domain> — the derivation the component
+chart makes, and the URL the meta chart forwards to it. Empty when neither is
+set.
+*/}}
+{{- define "agent-platform.workspaceManager.baseURL" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- $url := dig "oauth" "baseURL" "" $chart -}}
+{{- if and (not $url) .Values.global.domain -}}
+{{- $url = printf "https://%s.%s" (include "agent-platform.workspaceManager.fullname" .) .Values.global.domain -}}
+{{- end -}}
+{{- $url | trimSuffix "/" -}}
+{{- end -}}
+
+{{/*
+Truthy when the public key-set route renders: the component on and
+workspaceManager.route.enabled.
+*/}}
+{{- define "agent-platform.workspaceManager.routeEnabled" -}}
+{{- if and (include "agent-platform.workspaceManager.enabled" .) (dig "route" "enabled" true .Values.workspaceManager) }}true{{ end -}}
+{{- end -}}
+
+{{/*
+The route's pinned parents, a JSON list: workspaceManager.route.parentRefs,
+else muster's (ingress.parentRefs), the public Gateway the platform's login
+already runs through; empty leaves the choice to agent-platform.parentRefs
+(the chart-owned edge, else global.gatewayApi.parentRefs).
+*/}}
+{{- define "agent-platform.workspaceManager.routeParentRefs" -}}
+{{- dig "route" "parentRefs" list .Values.workspaceManager | default .Values.ingress.parentRefs | default list | toJson -}}
+{{- end -}}
+
+{{/*
+The key the manager signs its workspace grants with, as the component takes it
+(workspace-manager.grant.signingKey: {name, key} of a Secret in the release
+namespace whose entry is a PEM private key): the block's own reference when it
+names one; else, with provider instances, oauth.enabled and
+workspaceManager.grantKey.create, the Secret and entry this chart creates
+(workspaceManager.grantKey.secretName and .key); else empty, and the manager
+serves no grant — it refuses a key without providers and OAuth. The meta
+chart derives the same reference for the component release. Emits JSON:
+{name, key}, or {}.
+*/}}
+{{- define "agent-platform.workspaceManager.grantSigningKey" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- $own := dig "grant" "signingKey" dict $chart | default dict -}}
+{{- $out := dict -}}
+{{- if and (kindIs "map" $own) (or $own.name $own.key) -}}
+{{- $out = dict "name" (toString ($own.name | default "")) "key" (toString ($own.key | default "")) -}}
+{{- else if and (dig "providers" list $chart) (include "agent-platform.workspaceManager.oauthEnabled" .) (dig "grantKey" "create" true .Values.workspaceManager) -}}
+{{- $out = dict "name" (toString (dig "grantKey" "secretName" "" .Values.workspaceManager)) "key" (toString (dig "grantKey" "key" "" .Values.workspaceManager)) -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+Truthy when this chart creates the grant signing key Secret: the component on
+with provider instances, oauth.enabled and workspaceManager.grantKey.create,
+and the reference the manager gets (grantSigningKey) naming the chart's own
+Secret and entry, workspaceManager.grantKey.secretName and .key — the derived
+reference, or an own one that names exactly them. A reference to another
+Secret is the installation's own key, which this chart never creates.
+*/}}
+{{- define "agent-platform.workspaceManager.grantKeyEnabled" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- $ref := include "agent-platform.workspaceManager.grantSigningKey" . | fromJson -}}
+{{- $wm := .Values.workspaceManager | default dict -}}
+{{- $name := toString (dig "grantKey" "secretName" "" $wm) -}}
+{{- $key := toString (dig "grantKey" "key" "" $wm) -}}
+{{- if and (include "agent-platform.workspaceManager.enabled" .) (dig "providers" list $chart) (include "agent-platform.workspaceManager.oauthEnabled" .) (dig "grantKey" "create" true $wm) $ref.name (eq $ref.name $name) (eq $ref.key $key) }}true{{ end -}}
+{{- end -}}
+
+{{/*
+The sign-in keys Secret earlier releases created, when it is still there: its
+name if the live Secret workspace-manager-signin-keys in the release namespace
+carries this release's Helm ownership (meta.helm.sh/release-name and
+-namespace), else empty. The workspace-manager keeps no sign-in store, and the
+Secret was kept by helm.sh/resource-policy: keep when the chart stopped
+rendering it, so the cleanup hook (signin-keys-cleanup.yaml) deletes it. A
+Secret of that name another owner holds is left alone. Empty offline: the
+lookup needs the cluster.
+*/}}
+{{- define "agent-platform.workspaceManager.signinKeysOrphan" -}}
+{{- $name := "workspace-manager-signin-keys" -}}
+{{- with (lookup "v1" "Secret" .Release.Namespace $name) -}}
+{{- $ann := .metadata.annotations | default dict -}}
+{{- if and (eq (get $ann "meta.helm.sh/release-name") $.Release.Name) (eq (get $ann "meta.helm.sh/release-namespace") $.Release.Namespace) -}}
+{{- $name -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The grant signing key guard: workspace-manager.grant.signingKey, when set, is
+a Secret reference with both name and key, and only with provider instances
+and oauth.enabled, without which the manager refuses to start with a key; the
+reference the manager gets (grantSigningKey) names a Secret and a data key.
+Emits nothing; fails naming the key and the fix.
+*/}}
+{{- define "agent-platform.workspaceManager.validateGrantKey" -}}
+{{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson -}}
+{{- $own := dig "grant" "signingKey" dict $chart | default dict -}}
+{{- if not (kindIs "map" $own) -}}
+{{- fail "workspace-manager.grant.signingKey is a credential: it takes a Secret reference {name, key} of a Secret in the platform's namespace whose entry is a PEM private key, never the value; leave it empty and the connectivity release creates the key (workspaceManager.grantKey)" -}}
+{{- end -}}
+{{- if and (or $own.name $own.key) (not (and $own.name $own.key)) -}}
+{{- fail (printf "workspace-manager.grant.signingKey %s is not a Secret reference: it takes {name, key}, both set — or nothing, and the connectivity release creates the key (workspaceManager.grantKey)" ($own | toJson)) -}}
+{{- end -}}
+{{- $ref := include "agent-platform.workspaceManager.grantSigningKey" . | fromJson -}}
+{{- if $ref.name -}}
+{{- if not (and (dig "providers" list $chart) (include "agent-platform.workspaceManager.oauthEnabled" .)) -}}
+{{- fail (printf "workspace-manager.grant.signingKey names %s/%s but the manager refuses a grant signing key without provider instances and oauth.enabled (--grant-signing-key needs providers and --enable-oauth): add workspace-manager.providers, or leave the key empty" $ref.name $ref.key) -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" $ref.name) -}}
+{{- fail (printf "workspace-manager.grant.signingKey.name %q is not a Secret name (a DNS subdomain)" $ref.name) -}}
+{{- end -}}
+{{- if not (regexMatch "^[-._a-zA-Z0-9]+$" $ref.key) -}}
+{{- fail (printf "workspace-manager.grant.signingKey.key %q is not a Secret data key (letters, digits, -, _ and .): the entry of Secret %s holding the PEM private key" $ref.key $ref.name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The host the public route serves: the base URL's, while the route
+renders; empty otherwise (route off, or no base URL).
+*/}}
+{{- define "agent-platform.workspaceManager.routeHost" -}}
+{{- if (include "agent-platform.workspaceManager.routeEnabled" .) -}}
+{{- include "agent-platform.urlHost" (include "agent-platform.workspaceManager.baseURL" .) -}}
+{{- end -}}
+{{- end -}}

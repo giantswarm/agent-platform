@@ -50,6 +50,16 @@ installation's own podAffinity stands verbatim instead of the derived term.
     AlwaysAllow — is gone with enabled: false, and never reaches the kagent
     release (components.kagent.omitKeys).
 
+Workers above the default priority (#999): the connectivity chart OF THE WORKING
+TREE renders the PriorityClass kagent.substrateWorkerPool.priorityClass names
+(above 0, below atelet's 1000000000, preemptionPolicy Never, never the global
+default), and the meta chart derives the pool's template.priorityClassName from
+its name, so atelet making room on a full node evicts the default-priority
+workloads before a worker; an installation's own template.priorityClassName
+stands instead; enabled: false renders no class and names none; the block never
+reaches the kagent release; a value at or below 0 or at or above 1000000000 and a
+system- name fail the render naming the key.
+
 Network: gsoci.azurecr.io (the kagent chart). Usage: verify-workerpool.py <meta chart dir>
 """
 import importlib.util
@@ -67,7 +77,7 @@ _spec = importlib.util.spec_from_file_location("components_charts", os.path.join
 cc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(cc)
 
-KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "ingress.parentRefs[0].name=x"]
+KAGENT_ON = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "ingress.parentRefs[0].name=x"]
 ARCH = {"kubernetes.io/arch": "amd64"}
 # What the fleet template renders for a CAPA installation with both pins set
 # (shared-configs default/apps/agent-platform: agentPlatform.workerPoolCpuManufacturer,
@@ -96,6 +106,8 @@ SPREAD = {
 # the guard names them.
 TEMPLATE_FIELDS = "labels, annotations, nodeSelector, tolerations, priorityClassName, nodeAffinity, resources"
 WORKER_LABEL = "ate.dev/worker-pool"
+# atelet's PriorityClass value (ate-node-critical): the worker class stays below it.
+ATELET_PRIORITY = 1000000000
 FLOOR_RE = r'^\{\{- define "agent-platform\.substrate\.%s" -\}\}(\S*?)\{\{- end -\}\}$'
 # The worker pods' preferred affinity to the atelet on their node (#756), as the
 # meta chart derives it: atelet's pods carry app: atelet in ate-system
@@ -268,16 +280,69 @@ def check_pdb(meta: str, tmp: str) -> None:
         print(f"ok: the connectivity chart renders PodDisruptionBudget {pool} in {ns} selecting {WORKER_LABEL}={pool}, maxUnavailable 1, AlwaysAllow")
 
 
+def connectivity_render(connectivity: str, tmp: str, name: str, forwarded: str, extra: list[str]):
+    values_path = os.path.join(tmp, f"connectivity-{name}.yaml")
+    with open(values_path, "w", encoding="utf-8") as f:
+        f.write(forwarded)
+    return cc.run(["helm", "template", "agent-platform-connectivity", connectivity, "-n", "agent-platform", "-f", values_path, *extra, *cc.API_VERSIONS])
+
+
+def check_priority_class(meta: str, tmp: str) -> None:
+    """#999: the workers' PriorityClass and the derived template.priorityClassName."""
+    connectivity = os.path.join(os.path.dirname(os.path.abspath(meta)), "agent-platform-connectivity")
+    kagent_values, _, _ = kagent_release(meta, [])
+    pool = kagent_values["substrateWorkerPool"]
+    if "priorityClass" in pool:
+        cc.fail("kagent.substrateWorkerPool.priorityClass reaches the kagent release; the class is the connectivity chart's (components.kagent.omitKeys)")
+    forwarded = connectivity_values(meta, [])
+    pc = yaml.safe_load(forwarded)["kagent"]["substrateWorkerPool"]["priorityClass"]
+    if template_of(kagent_values).get("priorityClassName") != pc["name"]:
+        cc.fail(f"the kagent release's pool template names priorityClassName {template_of(kagent_values).get('priorityClassName')!r}; expected the derived {pc['name']!r}")
+    print(f"ok: the kagent release's pool template names the derived priorityClassName {pc['name']}, and the priorityClass block never reaches the kagent release")
+    r = connectivity_render(connectivity, tmp, "pc-on", forwarded, [])
+    if r.returncode != 0:
+        cc.fail(f"the connectivity chart of the working tree rejects the values the meta chart forwards\n{r.stderr}")
+    classes = [d for d in yaml.safe_load_all(r.stdout) if isinstance(d, dict) and d.get("kind") == "PriorityClass" and d["metadata"]["name"] == pc["name"]]
+    if len(classes) != 1:
+        cc.fail(f"expected one PriorityClass {pc['name']} from the connectivity chart, got {len(classes)}")
+    c = classes[0]
+    if not 0 < c.get("value", 0) < ATELET_PRIORITY or c.get("preemptionPolicy") != "Never" or c.get("globalDefault") is not False:
+        cc.fail(f"PriorityClass {pc['name']} is value {c.get('value')!r} / preemptionPolicy {c.get('preemptionPolicy')!r} / globalDefault {c.get('globalDefault')!r}; expected a value above 0 and below {ATELET_PRIORITY}, Never, false")
+    print(f"ok: the connectivity chart renders PriorityClass {pc['name']} at {c['value']} (above 0, below atelet's {ATELET_PRIORITY}), preemptionPolicy Never, not the global default")
+
+    own, _, _ = kagent_release(meta, ["--set", "kagent.substrateWorkerPool.template.priorityClassName=own-workers"])
+    if template_of(own).get("priorityClassName") != "own-workers":
+        cc.fail(f"an installation's own template.priorityClassName does not stand: {template_of(own).get('priorityClassName')!r}")
+    print("ok: an installation's own template.priorityClassName stands instead of the derived one")
+
+    off_flags = ["--set", "kagent.substrateWorkerPool.priorityClass.enabled=false"]
+    off, _, _ = kagent_release(meta, off_flags)
+    if "priorityClassName" in template_of(off):
+        cc.fail(f"priorityClass.enabled=false still names {template_of(off)['priorityClassName']!r} in the pool template")
+    r = connectivity_render(connectivity, tmp, "pc-off", connectivity_values(meta, off_flags), [])
+    if r.returncode != 0 or any(isinstance(d, dict) and d.get("kind") == "PriorityClass" and d["metadata"]["name"] == pc["name"] for d in yaml.safe_load_all(r.stdout)):
+        cc.fail(f"priorityClass.enabled=false still renders PriorityClass {pc['name']} (or the render fails)\n{r.stderr}")
+    print("ok: priorityClass.enabled=false renders no class and names none")
+
+    for flag, needle in (("value=0", "kagent.substrateWorkerPool.priorityClass.value must be a whole number above 0"),
+                         (f"value={ATELET_PRIORITY}", "kagent.substrateWorkerPool.priorityClass.value must be a whole number above 0"),
+                         ("name=system-workers", "the system- prefix is reserved")):
+        r = connectivity_render(connectivity, tmp, "pc-guard", forwarded, ["--set", f"kagent.substrateWorkerPool.priorityClass.{flag}"])
+        if r.returncode == 0 or needle not in r.stderr:
+            cc.fail(f"kagent.substrateWorkerPool.priorityClass.{flag} does not fail the render naming the key (expected {needle!r}):\n{r.stderr}")
+    print("ok: a value at or below 0 or at atelet's priority and a system- name fail the render naming the key")
+
+
 def main(meta: str) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         values, _, _ = kagent_release(meta, [])
         template = template_of(values)
         if node_selector(values) != ARCH:
             cc.fail(f"the default forwards nodeSelector {node_selector(values)!r} to the kagent release; expected the architecture alone {ARCH!r}")
-        derived = {"podAffinity"} if at_least(default_substrate_floor(meta), helper_floor(meta, "workerPoolAffinityFloor")) else set()
+        derived = {"priorityClassName"} | ({"podAffinity"} if at_least(default_substrate_floor(meta), helper_floor(meta, "workerPoolAffinityFloor")) else set())
         if stray := sorted(set(template) - {"nodeSelector", "resources", *derived}):
-            cc.fail(f"the default forwards {stray!r} in kagent.substrateWorkerPool.template; the default template is the architecture pin, the resources and the derived atelet affinity, nothing else (the disruption knobs are an installation's)")
-        if derived and template.get("podAffinity") != ATELET_AFFINITY:
+            cc.fail(f"the default forwards {stray!r} in kagent.substrateWorkerPool.template; the default template is the architecture pin, the resources, the derived atelet affinity and priority class, nothing else (the disruption knobs are an installation's)")
+        if "podAffinity" in derived and template.get("podAffinity") != ATELET_AFFINITY:
             cc.fail(f"the default forwards podAffinity {template.get('podAffinity')!r}; expected the preferred affinity to the atelet {ATELET_AFFINITY!r}")
         print(f"ok: the default forwards the architecture alone ({ARCH}){' and the atelet affinity' if derived else ''} — no annotation, no spread, no capacity type")
 
@@ -336,6 +401,9 @@ def main(meta: str) -> int:
         # --- #472: the worker budget, from the connectivity chart of the working tree ---
         check_pdb(meta, tmp)
 
+        # --- #999: the workers above the default priority ---
+        check_priority_class(meta, tmp)
+
         # The rendered object: the kagent chart the range resolves to, with the
         # values the meta chart forwards for the pin and the knobs.
         url, rng = source.split(" ", 1)
@@ -344,7 +412,7 @@ def main(meta: str) -> int:
             cc.fail(f"no published kagent chart satisfies {rng!r} at {url}")
         chart_dir = os.path.join(tmp, "kagent")
         resolved = cc.pull(url, version, chart_dir)
-        derived_affinity = {"podAffinity": template["podAffinity"]} if "podAffinity" in template else {}
+        derived_affinity = {k: template[k] for k in ("podAffinity", "priorityClassName") if k in template}
         for what, text, expected_template in (("the pin", forwarded, {"nodeSelector": PIN, **derived_affinity}), ("the disruption knobs", knobs_forwarded, {**KNOBS, **derived_affinity})):
             forwarded_file = os.path.join(tmp, f"forwarded-{what.split()[-1]}.yaml")
             with open(forwarded_file, "w", encoding="utf-8") as f:

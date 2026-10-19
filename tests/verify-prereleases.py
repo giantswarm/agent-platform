@@ -4,10 +4,9 @@ on, every component range and the self-management range admit pre-releases
 and filter their tags to releases and release candidates. The exact version of
 a component released with this chart, an exact pin (1.2.3, =1.2.3), an
 exclusion (!=1.2.3), a range filtered by a semverFilter and a component with
-prereleases: false (Substrate: its worker image follows the floor) stay as
-written; a
-range that already carries a pre-release is filtered; a range with no version
-fails the render.
+prereleases: false stay as written; a
+range that already carries a pre-release (a release candidate's floor) is
+filtered, with the switch off too; a range with no version fails the render.
 
 "Admits pre-releases" is checked the way Flux evaluates the range
 (tests/fluxsemver.py): an rc of the range's floor admits, a stable version
@@ -28,9 +27,9 @@ RELEASE = "agent-platform"
 NAMESPACE = "agent-platform"
 ON = ["--set", "gitops.prereleases=true"]
 # Components the chart keeps on stable releases (components.<name>.prereleases:
-# false): the WorkerPool's worker image follows Substrate's floor, and a
-# candidate's atelet next to it fails every gVisor actor.
-STABLE_ONLY = {"substrate", "substrate-crds"}
+# false): none since Substrate 1.4.0 runs its gVisor workers on its own release
+# (giantswarm/substrate#114). The knob itself is checked on muster below.
+STABLE_ONLY: set[str] = set()
 
 
 def fail(msg: str) -> None:
@@ -103,6 +102,20 @@ def floor_rc(constraint: str) -> str | None:
     return f"{parts[0]}.{parts[1]}.{parts[2]}-rc.1"
 
 
+def check_filter(name: str, constraint: str, flt: str) -> None:
+    """A range that admits pre-releases filters its tags to releases and
+    release candidates: without the filter the repository's branch builds
+    match it."""
+    if not flt:
+        fail(f"{name}: {constraint!r} renders no semverFilter; the branch builds of the repository would match it")
+    for tag in TAGS_ADMITTED:
+        if not re.search(flt, tag):
+            fail(f"{name}: semverFilter {flt!r} refuses the release tag {tag}")
+    for tag in TAGS_REFUSED:
+        if re.search(flt, tag):
+            fail(f"{name}: semverFilter {flt!r} admits the branch build {tag}")
+
+
 def main() -> None:
     chart = sys.argv[1]
 
@@ -113,7 +126,7 @@ def main() -> None:
 
     missing = STABLE_ONLY - off.keys()
     if missing:
-        fail(f"no OCIRepository {sorted(missing)} rendered; the test no longer covers prereleases: false")
+        fail(f"no OCIRepository {sorted(missing)} rendered")
     for name in STABLE_ONLY:
         if on[name] != off[name]:
             fail(f"{name}: prereleases: false, yet {off[name]!r} became {on[name]!r}")
@@ -121,9 +134,16 @@ def main() -> None:
     exact = [n for n, c in off.items() if fluxsemver.parse(c) is not None]
     if not exact:
         fail("no component released with this chart renders an exact version; the test no longer covers it")
+    off_refs = refs(helm(chart, []))
     for name, constraint in off.items():
         if "-" in constraint:
-            fail(f"{name}: {constraint!r} carries a pre-release with gitops.prereleases off")
+            # A release candidate's floor: Flux evaluates every pre-release tag
+            # against it, so it renders the release tag filter even off.
+            check_filter(name, constraint, off_refs[name][1])
+            floor = constraint.split()[0].lstrip(">=")
+            if not fluxsemver.satisfies(floor, constraint) or not fluxsemver.satisfies(floor, on[name]):
+                fail(f"{name}: {constraint!r} (on: {on[name]!r}) does not admit its own floor {floor}")
+            continue
         if name in STABLE_ONLY:
             continue
         if name in exact:
@@ -151,17 +171,14 @@ def main() -> None:
             continue
         if name in exact:
             continue
-        if not flt:
-            fail(f"{name}: {constraint!r} renders no semverFilter; the branch builds of the repository would match it")
-        for tag in TAGS_ADMITTED:
-            if not re.search(flt, tag):
-                fail(f"{name}: semverFilter {flt!r} refuses the release tag {tag}")
-        for tag in TAGS_REFUSED:
-            if re.search(flt, tag):
-                fail(f"{name}: semverFilter {flt!r} admits the branch build {tag}")
-    for name, (_, flt) in refs(helm(chart, [])).items():
-        if flt:
+        check_filter(name, constraint, flt)
+    for name, (constraint, flt) in off_refs.items():
+        if flt and "-" not in constraint:
             fail(f"{name}: semverFilter {flt!r} renders with gitops.prereleases off")
+    # A release candidate's floor on a component with prereleases: false is
+    # filtered too.
+    rc_floor = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=false", "--set", "components.muster.versionRange=>=5.0.0-rc.1 <6.0.0"]))
+    check_filter("muster (an rc floor, prereleases: false)", *rc_floor["muster"])
 
     # The self-management range is one of them (ci-values renders the engine).
     if RELEASE not in off:
@@ -173,9 +190,10 @@ def main() -> None:
         fail(f"muster with a semverFilter: {filtered.get('muster')!r}, want the range and the filter as written")
 
     # prereleases: false on any component keeps its range; true follows the switch.
-    kept = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=false"])).get("muster")
-    if kept != (off["muster"], ""):
-        fail(f"muster with prereleases: false: {kept!r}, want {off['muster']!r} without a filter")
+    # The probe names a stable range: an rc floor is filtered (above).
+    kept = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=false", "--set", "components.muster.versionRange=>=5.0.0 <6.0.0"])).get("muster")
+    if kept != (">=5.0.0 <6.0.0", ""):
+        fail(f"muster with prereleases: false: {kept!r}, want '>=5.0.0 <6.0.0' without a filter")
     widened = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=true"])).get("muster")
     if widened != (on["muster"], refs(helm(chart, ON))["muster"][1]):
         fail(f"muster with prereleases: true: {widened!r}, want the switch's range {on['muster']!r}")

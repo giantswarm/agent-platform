@@ -38,12 +38,13 @@ By default there is no filter and no prerelease.
 | bundled Flux engine (feature switch) | `components.flux.enabled` | `true` |
 | MCP server CRs | `components.agent-platform-mcps.enabled` | `false` |
 | kagent | `components.kagent.enabled` | `false` |
-| kagent CRDs, Agent Substrate and its CRDs | `components.kagent-crds.enabled`, `components.substrate.enabled`, `components.substrate-crds.enabled` | follow `components.kagent` |
+| kagent CRDs, Agent Substrate and its CRDs, the Google access-token credential provider | `components.kagent-crds.enabled`, `components.substrate.enabled`, `components.substrate-crds.enabled`, `components.google-access-token-credential-provider.enabled` | follow `components.kagent` |
 | klaus-gateway | `components.klaus-gateway.enabled` | `false` |
 | agent-sandbox | `components.agent-sandbox.enabled` | `false` |
 | agent-manager | `components.agent-manager.enabled` | `false` |
 | vm-manager | `components.vm-manager.enabled` | `false` |
 | cluster-manager | `components.cluster-manager.enabled` | `false` |
+| workspace-manager | `workspaces.enabled` (`components.workspace-manager` follows it) | `false` |
 | Backstage | `components.backstage.enabled` | `false` |
 | mcp-kubernetes | `components.mcp-kubernetes.enabled` | `false` |
 | CloudNativePG operator | `components.cloudnative-pg.enabled` | `false` |
@@ -59,6 +60,7 @@ Notes on the table:
 - `agent-platform-connectivity` has no switch and is always installed.
 - `flux` and `modelServing` have no chart. `flux` controls the `flux-engine` subchart. `modelServing` controls the serving objects that connectivity renders.
 - If kagent is on, you cannot set the kagent CRDs or Substrate to `false`. The render fails.
+- **Timeouts and remediation.** Every component release reconciles on `gitops.interval` and retries a failed install or upgrade `gitops.retries` times, rolling back between attempts. `components.<name>.timeout` sets the release's `spec.timeout` (helm-controller's default is 5m). `components.<name>.upgradeRemediation` overrides `spec.upgrade.remediation` key by key. The `substrate` release sets `timeout: 15m` and three retries, because rolling atelet across 20+ nodes takes longer than 5m and a short timeout rolls a healthy release back.
 
 ## Prerequisites
 
@@ -279,6 +281,21 @@ Configuration:
 
 `make verify-cluster-manager` covers it.
 
+### Workspaces
+
+A workspace is an Organization's set of repositories, mirrored on one shared read-write-many volume in the kagent namespace, with a directory per Session. **[workspace-manager](https://github.com/giantswarm/workspace-manager)** serves workspaces as MCP tools through muster (`x_workspace-manager_*`).
+
+- **One switch.** `workspaces.enabled` (default `false`) installs `components.workspace-manager` (`dependsOn: [muster]`) and gates every other workspace piece. The roster entry follows the switch, and an explicit value that disagrees fails the render. With the switch off, the render is identical to a chart without workspaces (`make verify-workspace-manager`).
+- **Organizations.** `workspaces.organizations[]` takes a `name` and `memberGroups`. Write a group as it appears in the token's groups claim: the Dex connector id, a colon, then the group, for example `giantswarm-github:acme:developers`.
+- **Storage.** `workspaces.storage.storageClassName` is required. The class must keep POSIX semantics, file modes and symbolic links, because the volumes hold git repositories: Amazon EFS, Azure Files over NFS 4.1 (not SMB), or an NFS server. Bring your own class, or let the connectivity chart render one with `storageClass.create: true` and a `storageClass.preset` of `efs` (needs `efs.fileSystemId`), `azureFiles` or `nfs` (needs `nfs.server`). On EFS, set the CSI driver's `controller.deleteAccessPointRootDir: true`, or deleted volumes leave their data behind. `make verify-workspace-storage` covers the presets.
+- **Substrate's driver.** `workspaces.substrate.csiDriver` (`name`, `controllerEndpoint`, optional `tls`) renders the `CSIDriverConfig` Substrate mounts workspaces with. The driver must be the provisioner of the workspace StorageClass. Without it, a Session cannot mount a workspace (`make verify-workspace-substrate`).
+- **Providers.** `workspace-manager.providers[]` lists the provider instances (`name`, `kind`, `values`), for example GitHub and GitLab side by side. Every credential is a Secret reference `{name, key}`. An inline value fails the render.
+- **The person's provider token is muster's grant.** The meta chart pins the manager's `MCPServer` to one provider instance's App. A person grants that App once in muster, and muster forwards the person's token on every call. The App's callback URL is `<muster base URL>/oauth/proxy/callback`. The manager stores no token.
+- **Grants and their key set.** The connectivity chart creates the grant signing key Secret (`workspaceManager.grantKey`, default `workspace-manager-grant-keys`). To rotate, add a new entry and name it in `grantKey.key`. Remove the old one after the last grant expires. The key set is public at `https://workspace-manager.<global.domain>/.well-known/jwks.json` (`workspace-manager.oauth.baseURL`). Only that path is routed, and MCP stays cluster-internal.
+- **Session admission.** kagent admits a Session that names a workspace volume only with a valid grant. The meta chart derives `kagent.controller.session.admission.jwt` (key set, issuer, audience) from the manager's settings. `kagent.controller.auth.userIdClaim` must stay `email`.
+- **Session lifetime.** kagent deletes a Session idle for `kagent.controller.sessionIdleTTL` (`336h` here), and the manager deletes its directory with it. `workspace-manager.sessions.cleanupAfter` is derived from the TTL, and a longer own value fails the render.
+- **Network policies.** The `workspaceManager:` block admits muster, the kagent controller and the kubelet probes in, and DNS, the API server, the identity provider and each provider's hosts out. Extra hosts go in `workspaceManager.networkPolicy.egress`.
+
 ### The kagent line
 
 `components.kagent.enabled: true` installs **kagent API v2** (`api.kagent.dev/v1alpha3`). Agents run as [Agent Substrate](#agent-substrate) actors in gVisor worker pods. The build comes from the line Giant Swarm maintains, [giantswarm/kagent-upstream](https://github.com/giantswarm/kagent-upstream) (branch `giantswarm`, ledger in `FORK.md`). It publishes the charts `kagent` and `kagent-crds` to `oci://gsoci.azurecr.io/giantswarm/kagent/helm`, under the line's own semver.
@@ -288,7 +305,7 @@ Configuration:
 - **Re-pinning.** A new kagent release is a values change: move both floors to the release's version. Take it from [`builds.md`](https://github.com/giantswarm/kagent-upstream/blob/ledger/builds.md) on the fork's `ledger` branch. Move `components.substrate*` too when the line's own Substrate pin moved.
 - **Image references travel inside the chart.** The controller and UI tag and the Go ADK digest of the platform `Harness` are stamped into the chart at publish time. The meta chart forwards none of them.
   - `kagent.harness.image` is an override, by digest. It is forwarded only when set.
-  - `kagent.substrateWorkerPool.workerImage` is **derived from the floor of `components.substrate.versionRange`**, never taken from the kagent chart's stamp. An own value must carry that tag, or the render fails. See the meta chart README, [The worker image follows the chart's Substrate pin](../helm/agent-platform/README.md#the-worker-image-follows-the-charts-substrate-pin-giantswarmagent-platform466).
+  - `kagent.substrateWorkerPool.workerImage` is **derived from the floor of `components.substrate.versionRange`**, never taken from the kagent chart's stamp. An own value must carry that tag, or the render fails. See the meta chart README, [One source of the Substrate version](../helm/agent-platform/README.md#one-source-of-the-substrate-version-componentssubstrateversionrange-giantswarmagent-platform466-giantswarmagent-platform822).
 - **The `kagent:` block** uses upstream's chart shape, keys at the root. The connectivity keys are dropped before the values reach the kagent release (`components.kagent.omitKeys`): `controllerRoute`, `controller.vpa`, `fluxServiceAccountName`, `harness.snapshotStore`, `modelConfigs`, `oauth2ProxyIngress`, `remoteMcpServers`, `uiRoute`, `substrateWorkerPool.podDisruptionBudget`.
 - **Drift detection.** The kagent, muster and kserve-runtime-configs releases set `spec.driftDetection.mode: enabled` (`components.<name>.driftDetection`). helm-controller re-applies anything that drifted on every reconcile. An object can opt out with `helm.toolkit.fluxcd.io/driftDetection: disabled`. If you turn on `muster.autoscaling.enabled`, add an `ignore` rule for the Deployment's `spec.replicas`.
 
@@ -301,6 +318,7 @@ Configuration:
 - Use one credential per host. The label `ui.giantswarm.io/agent-skills-git-auth: "true"` makes the portal offer the Secret.
 - A namespace other than `kagent` also needs an entry in `substrate.credentialProvider.namespacePolicies`.
 - To rotate, replace the Secret's contents and keep its name.
+- agent-manager can keep a Secret named `agent-manager-skills-token` filled with its GitHub App's token (`agent-manager.skills.mintGitAuthSecret`). It belongs to the installation, so a tenant's Organization namespace refuses it.
 - A missing or wrong credential fails only the templates that name it: `Ready=False`, `ActorTemplateRetrying`, then `ActorTemplateFailed`.
 
 **Prerequisites.** Those of [Agent Substrate](#agent-substrate). Upgrading: [UPGRADE.md](../UPGRADE.md).
@@ -314,7 +332,7 @@ kagent API v2 runs every agent as a Substrate *actor* in a gVisor *worker* pod o
 
 What it changes on a cluster, the Pod Security exceptions and the compensating controls: [docs/substrate-security.md](substrate-security.md).
 
-- **Version.** Both components carry the same `versionRange`, of the shape `>=X.Y.Z <X.(Y+1).0`, or an exact version. Any other shape fails the render. Stable releases only. The kagent WorkerPool's worker image is derived from the range's floor, so moving the floor rolls the pool. Capacity, worker image and failure domain: [Agent Substrate: worker capacity](../helm/agent-platform/README.md#agent-substrate-worker-capacity) in the meta chart README.
+- **Version.** Both components carry the same `versionRange`, of the shape `>=X.Y.Z <X.(Y+1).0`, or an exact version. Any other shape fails the render. Stable releases only. The range is the only source of the Substrate version: the control plane and the workers both run the release Flux resolves from it (`ateController.gvisorWorker.followRelease`), so a patch within the range rolls both with no chart release. The WorkerPool's `spec.workerImage` is derived from the floor. `make verify-worker-image` checks that workers and atelet run the same release. Capacity, worker image and failure domain: [Agent Substrate: worker capacity](../helm/agent-platform/README.md#agent-substrate-worker-capacity) in the meta chart README.
 - **Order.** `substrate-crds` and `kagent-crds` first, then `agent-platform-connectivity`, then `substrate`, then `kagent`, then the managers. The connectivity release's pre-install hook creates any missing CA and JWT pools and the authentication ConfigMap that Substrate mounts. It never touches a pool that already exists.
 - **Database.** `substrate.postgres.enabled: auto`. With the platform's CNPG Cluster on (`postgres.enabled`), Substrate uses the CNPG database named by `postgres.substrateDatabase` (default `substrate`, an entry of `postgres.databases`), and the meta chart derives its DSN and the roles ate-api-server switches to. Otherwise the bundled StatefulSet runs. For an external database, set `substrate.postgres.readWriteConnectionString` (or `connectionStringSecretRef`) plus `readWriteRole` and `ownerRole`, roles its user may assume. The old `substrate.postgres.connectionString` fails the render.
 - **Snapshot store.** `kagent.harness.snapshotLocation` is **required whenever kagent is on**. It is an object-store URL such as `s3://<bucket>/<prefix>`.
@@ -328,7 +346,8 @@ What it changes on a cluster, the Pod Security exceptions and the compensating c
   - A `PodDisruptionBudget` (`kagent.substrateWorkerPool.podDisruptionBudget`, on by default) drains workers one at a time.
 - **Kyverno.** The connectivity chart ships one `PolicyException` per Substrate workload, mapped through `kyvernoPolicies.rules`. `make verify-kyverno` holds them to the rendered pod specs.
 - **Network policies** (`networkPolicy.flavor`) cover Substrate's internal hops. They also cover the actors' destinations on the egress gateway: muster, the kagent controller, the LLM provider and DNS. Workers reach only the egress gateway and DNS. `make verify-kagent-netpol` checks them.
-- **Images.** The substrate chart's third-party images come from its own `images:` map. The router and egress data plane follow the Substrate release, so the meta chart forwards no `substrate.images.agentgateway`. `make verify-substrate-images` checks every release the range admits.
+- **Credential providers.** `components.google-access-token-credential-provider` follows kagent and serves Google access tokens, from a service-account key in a Secret, to the actors of a Vertex AI ModelConfig. Its grants follow `substrate.credentialProvider.namespacePolicies`.
+- **Images.** The substrate chart's third-party images come from its own `images:` map, including the gVisor sandbox's `pause` image. The router and egress data plane follow the Substrate release, so the meta chart forwards no `substrate.images.agentgateway`. `make verify-substrate-images` checks every release the range admits.
 
 **Prerequisites** (also in [install.md](install.md#agents-managed-cloud)):
 
@@ -400,6 +419,8 @@ A `Strict` `AgentgatewayPolicy` on the Gateway verifies the bearer against `glob
 - `spec.router.scheduler` (boolean) switches the llm-d endpoint picker for one preset.
 - `resources.gpus` must equal the preset's `--tensor-parallel-size` (1 without the flag).
 
+**codex on a ChatGPT subscription.** The ModelConfig entry, the one device login per installation and where its Secret goes: [docs/chatgpt-login.md](chatgpt-login.md).
+
 **Models as OCI images.** A preset whose `spec.model.storageUri` is `oci://…` is served from a model image (KServe's modelcar). The node pulls the image, and the cache claim is not used.
 
 - The image is busybox-based, with the weights under `/models`.
@@ -428,7 +449,7 @@ make live-serving-slice NAMESPACE=<the slice's>   # on a cluster: the models-jwt
 
 A CPU workload cluster runs agents managed from the installation: the **runtime slice**, values profile [`examples/runtime-slice.yaml`](../helm/agent-platform/examples/runtime-slice.yaml).
 
-- **What it renders.** `kagent-crds`, `substrate-crds`, `substrate`, `kagent`, `agentgateway` and the connectivity release. No muster, dicebear, Valkey, model-manager or Flux engine. The agents' tools come from the installation's muster.
+- **What it renders.** `kagent-crds`, `substrate-crds`, `substrate`, `kagent`, `cloudnative-pg` (the operator for kagent's and Substrate's databases; kagent bundles no Postgres), `agentgateway` and the connectivity release. No muster, dicebear, Valkey, model-manager or Flux engine. The agents' tools come from the installation's muster.
 - **How it is delivered.** One `<cluster>-agent-platform` release per target cluster, a `HelmRelease` in the cluster's organization namespace on the installation, with `gitops.target.kubeConfig.secretRef` naming `<cluster>-kubeconfig`. The installation's Flux installs everything, and no hook of this chart renders. See [One release per target cluster](../helm/agent-platform/README.md#one-release-per-target-cluster).
 - **Placement.** The slice never runs beside the platform's own release: `components.kagent-crds.ownedCrds` refuses a second owner of kagent's CRDs. A GPU cluster that also serves models turns the serving toggles on in the same release.
 
@@ -633,3 +654,5 @@ Exceptions name policies this chart does not own. `kyvernoPolicies.rules` maps e
 ## Development
 
 `make verify-all` runs every offline render assertion, as CI's `test-ingress-modes` job does. Use Helm 3.17.3: `make pinned-helm` downloads it and prints the `HELM=` to pass. `pre-commit run -a` regenerates the schemas and READMEs. The kind-cluster ATS, a required CI check (`execute-chart-tests`), is described in [tests/ats/README.md](../tests/ats/README.md).
+
+The `gitleaks` workflow scans every commit of a pull request, not only the final tree. A literal PEM private-key marker in any commit fails the PR, so tests build PEM-like fixtures from fragments at runtime (see `tests/verify-workspace-grant-key.py`).

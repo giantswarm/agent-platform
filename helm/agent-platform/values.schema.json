@@ -83,6 +83,56 @@
                     }
                 }
             }
+        },
+        "rate-limit.schema.json": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "title": "One rate-limit entry (llmRouting.rateLimits, llmRouting.external.rateLimits): an item of AgentgatewayPolicy traffic.rateLimit.local",
+            "required": [
+                "unit"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "burst": {
+                    "type": "integer",
+                    "maximum": 2147483647,
+                    "minimum": 0
+                },
+                "key": {
+                    "type": "string",
+                    "maxLength": 16384,
+                    "minLength": 1
+                },
+                "requests": {
+                    "type": "integer",
+                    "maximum": 2147483647,
+                    "minimum": 1
+                },
+                "tokens": {
+                    "type": "integer",
+                    "maximum": 2147483647,
+                    "minimum": 1
+                },
+                "unit": {
+                    "type": "string",
+                    "enum": [
+                        "Seconds",
+                        "Minutes",
+                        "Hours"
+                    ]
+                }
+            },
+            "oneOf": [
+                {
+                    "required": [
+                        "tokens"
+                    ]
+                },
+                {
+                    "required": [
+                        "requests"
+                    ]
+                }
+            ]
         }
     },
     "type": "object",
@@ -174,6 +224,12 @@
                         },
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "repository": {
                             "type": "string"
@@ -463,6 +519,36 @@
                         }
                     }
                 },
+                "google-access-token-credential-provider": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "targetNamespace": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "gpu-operator": {
                     "type": "object",
                     "additionalProperties": true,
@@ -601,6 +687,12 @@
                         },
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "omitKeys": {
                             "type": "array",
@@ -857,14 +949,24 @@
                                 "type": "string"
                             }
                         },
-                        "prereleases": {
-                            "type": "boolean"
-                        },
                         "repository": {
                             "type": "string"
                         },
                         "targetNamespace": {
                             "type": "string"
+                        },
+                        "timeout": {
+                            "type": "string",
+                            "pattern": "^([0-9]+(\\.[0-9]+)?(ms|s|m|h))+$"
+                        },
+                        "upgradeRemediation": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "retries": {
+                                    "type": "integer"
+                                }
+                            }
                         },
                         "valuesFrom": {
                             "type": "string"
@@ -903,9 +1005,6 @@
                             "type": "string"
                         },
                         "injectGlobal": {
-                            "type": "boolean"
-                        },
-                        "prereleases": {
                             "type": "boolean"
                         },
                         "repository": {
@@ -981,6 +1080,45 @@
                             "type": "string"
                         }
                     }
+                },
+                "workspace-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
+                        },
+                        "gatedValues": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "omitEmptyKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
                 }
             }
         },
@@ -1025,6 +1163,18 @@
                             "type": "object",
                             "properties": {
                                 "agent_instance_id": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "enabled": {
+                                            "type": "boolean"
+                                        },
+                                        "expression": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "request_id": {
                                     "type": "object",
                                     "additionalProperties": false,
                                     "properties": {
@@ -1697,6 +1847,10 @@
                 }
             }
         },
+        "google-access-token-credential-provider": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "gpu-operator": {
             "type": "object",
             "additionalProperties": true
@@ -1880,6 +2034,9 @@
                         "check-seccomp-strict": {
                             "type": "string"
                         },
+                        "host-namespaces": {
+                            "type": "string"
+                        },
                         "host-path": {
                             "type": "string"
                         },
@@ -1975,6 +2132,13 @@
                                     "type": "integer"
                                 }
                             }
+                        },
+                        "rateLimits": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/$defs/rate-limit.schema.json"
+                            },
+                            "maxItems": 16
                         }
                     }
                 },
@@ -2068,6 +2232,13 @@
                         }
                     },
                     "minItems": 1
+                },
+                "rateLimits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/rate-limit.schema.json"
+                    },
+                    "maxItems": 16
                 }
             }
         },
@@ -2213,6 +2384,35 @@
                     "type": "array",
                     "items": {
                         "type": "integer"
+                    }
+                },
+                "substrate": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "credentialProvider": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "egressFQDNs": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "matchName": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "matchPattern": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2590,6 +2790,18 @@
                 "enabled": {
                     "type": "boolean"
                 },
+                "ephemeralVolumesSizeLimit": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "shm": {
+                            "type": "string"
+                        },
+                        "temporaryData": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "image": {
                     "type": "object",
                     "additionalProperties": false,
@@ -2616,6 +2828,17 @@
                 },
                 "namespace": {
                     "type": "string"
+                },
+                "primaryUpdateMethod": {
+                    "type": "string",
+                    "enum": [
+                        "switchover",
+                        "restart"
+                    ]
+                },
+                "resources": {
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "sessionsDatabase": {
                     "type": "object",
@@ -2702,6 +2925,106 @@
             "type": "object",
             "additionalProperties": true
         },
+        "tenants": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "organizations": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "Admit the agent workers of the Organizations' namespaces and turn on agent-manager's tenant reconciler. With components.agent-manager on, the agent-manager release gets `tenants.enabled` (agent-manager 2.1.0 or later), which puts a WorkerPool in each namespace labelled `giantswarm.io/organization` that holds an agent, with copies of the kagent namespace's default ModelConfig (`default-model-config`, its key Secret kagent.providers.<default>.apiKeySecretRef, which must be set in these values: the kagent chart's own provider defaults are not read) and of the workers' own policy (the CiliumNetworkPolicy `substrate-workers` in the cilium flavor, which needs cilium.io/v2 served or agent-manager does not start; the NetworkPolicy `substrate-workers-ingress` in the kubernetes flavor; none with networkPolicy.enabled off). Each tenant that holds an agent keeps 1 warm worker unless agent-manager.tenants.workerPoolReplicas sets another count. The render fails, naming the key, below agent-manager 2.1.0, with kagent off, with agent-manager's OAuth or downstream OAuth off, without kagent.fluxServiceAccountName or without that key Secret. agent-manager.tenants.workerPoolReplicas and .interval are yours; any other agent-manager.tenants key is derived and must be unset or equal. On, with Agent Substrate on, the connectivity release lets the worker pods of every such namespace reach the atenet router's tunnel, the egress gateway and the actors' dns, as the kagent namespace's workers do (both flavors), and the workers' Kyverno PolicyException covers them there when Substrate's controllers write them (ate-controller, the Deployment and ReplicaSet controllers); a labelled pod a person writes there is judged like any other. It needs Kyverno 1.15.2 or later: an older Kyverno matches the exception's namespaceSelector against no labels, so the exception never applies and the workers are refused. The namespaces are selected by the label, never listed; a namespace without the label gets nothing. Two ValidatingAdmissionPolicies hold the workers there for every requester, cluster-admin included: only agent-manager's ServiceAccount writes a WorkerPool, as a copy of the platform WorkerPool (kagent.substrateWorkerPool.name; only replicas may differ), and only Substrate's controllers write a Deployment, ReplicaSet or Pod labelled ate.dev/worker-pool; no one adds an ephemeral container to a worker, execs into one or attaches to one (Kubernetes 1.30 or later; docs/substrate-security.md). On, Substrate's credential provider also reads each such namespace's Secrets for the atespace of the same name, and for ate-golden, where every template's golden actor boots (substrate.credentialProvider.namespacePolicies). Off, the default, nothing changes."
+                        }
+                    }
+                },
+                "platform": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "editors": {
+                            "type": "array",
+                            "description": "The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects.",
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "kind",
+                                    "name"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "apiGroup": {
+                                        "type": "string"
+                                    },
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "namespace": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        },
+                        "users": {
+                            "type": "array",
+                            "description": "Every signed-in person: bound to agent-platform:user in the kagent namespace, and to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, gives this to every user. It also gives it to every ServiceAccount, so every pod in the cluster can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. To give it to people only, replace the default with an OIDC group that every user belongs to, written as the API server sees it (with the installation's OIDC groups prefix).",
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "kind",
+                                    "name"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "apiGroup": {
+                                        "type": "string"
+                                    },
+                                    "kind": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "namespace": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "platformTeam": {
+                    "type": "array",
+                    "description": "The customer's platform team, per installation: RBAC subjects bound to agent-platform:editor in the kagent namespace beside `platform.editors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation).",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "kind",
+                            "name"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "apiGroup": {
+                                "type": "string"
+                            },
+                            "kind": {
+                                "type": "string"
+                            },
+                            "name": {
+                                "type": "string"
+                            },
+                            "namespace": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "valkey": {
             "type": "object",
             "additionalProperties": true
@@ -2713,6 +3036,476 @@
         "vmManager": {
             "type": "object",
             "additionalProperties": true
+        },
+        "workspace-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "workspaceManager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "workspaces": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                },
+                "organizations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "name",
+                            "memberGroups"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "memberGroups": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "name": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "storage": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "storageClass": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "azureFiles": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "networkEndpointType": {
+                                            "type": "string"
+                                        },
+                                        "skuName": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "create": {
+                                    "type": "boolean"
+                                },
+                                "efs": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "basePath": {
+                                            "type": "string"
+                                        },
+                                        "directoryPerms": {
+                                            "type": "string"
+                                        },
+                                        "fileSystemId": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "mountOptions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "nfs": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "server": {
+                                            "type": "string"
+                                        },
+                                        "share": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "parameters": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                },
+                                "preset": {
+                                    "type": "string",
+                                    "enum": [
+                                        "",
+                                        "efs",
+                                        "azureFiles",
+                                        "nfs"
+                                    ]
+                                }
+                            }
+                        },
+                        "storageClassName": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "substrate": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "csiCompanion": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "cloudIdentity": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "aws": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                                "roleARN": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        },
+                                        "azure": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                                "workloadIdentityClientID": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "controller": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "args": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "extraArgs": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "nodeSelector": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        },
+                                        "resources": {
+                                            "type": "object",
+                                            "additionalProperties": true,
+                                            "properties": {
+                                                "limits": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "ephemeral-storage": {
+                                                            "type": "string"
+                                                        },
+                                                        "memory": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                },
+                                                "requests": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "cpu": {
+                                                            "type": "string"
+                                                        },
+                                                        "ephemeral-storage": {
+                                                            "type": "string"
+                                                        },
+                                                        "memory": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "tolerations": {
+                                            "type": "array"
+                                        }
+                                    }
+                                },
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "image": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "registry": {
+                                            "type": "string"
+                                        },
+                                        "repository": {
+                                            "type": "string"
+                                        },
+                                        "tag": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "livenessProbe": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "image": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                                "registry": {
+                                                    "type": "string"
+                                                },
+                                                "repository": {
+                                                    "type": "string"
+                                                },
+                                                "tag": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        },
+                                        "nodePort": {
+                                            "type": "integer"
+                                        },
+                                        "resources": {
+                                            "type": "object",
+                                            "additionalProperties": true,
+                                            "properties": {
+                                                "limits": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "ephemeral-storage": {
+                                                            "type": "string"
+                                                        },
+                                                        "memory": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                },
+                                                "requests": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "cpu": {
+                                                            "type": "string"
+                                                        },
+                                                        "ephemeral-storage": {
+                                                            "type": "string"
+                                                        },
+                                                        "memory": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "node": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "args": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "efs": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                                "configDir": {
+                                                    "type": "string"
+                                                },
+                                                "stateDir": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        },
+                                        "extraArgs": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "nodeSelector": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        },
+                                        "resources": {
+                                            "type": "object",
+                                            "additionalProperties": true,
+                                            "properties": {
+                                                "limits": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "ephemeral-storage": {
+                                                            "type": "string"
+                                                        },
+                                                        "memory": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                },
+                                                "requests": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "cpu": {
+                                                            "type": "string"
+                                                        },
+                                                        "ephemeral-storage": {
+                                                            "type": "string"
+                                                        },
+                                                        "memory": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "socketDir": {
+                                            "type": "string"
+                                        },
+                                        "substrateDir": {
+                                            "type": "string"
+                                        },
+                                        "tolerations": {
+                                            "type": "array"
+                                        }
+                                    }
+                                },
+                                "preset": {
+                                    "type": "string",
+                                    "enum": [
+                                        "",
+                                        "efs",
+                                        "azureFiles"
+                                    ]
+                                },
+                                "proxy": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "clientIdentity": {
+                                            "type": "string"
+                                        },
+                                        "image": {
+                                            "type": "object",
+                                            "additionalProperties": false,
+                                            "properties": {
+                                                "registry": {
+                                                    "type": "string"
+                                                },
+                                                "repository": {
+                                                    "type": "string"
+                                                },
+                                                "tag": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        },
+                                        "port": {
+                                            "type": "integer"
+                                        },
+                                        "resources": {
+                                            "type": "object",
+                                            "additionalProperties": true,
+                                            "properties": {
+                                                "limits": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "ephemeral-storage": {
+                                                            "type": "string"
+                                                        },
+                                                        "memory": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                },
+                                                "requests": {
+                                                    "type": "object",
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                        "cpu": {
+                                                            "type": "string"
+                                                        },
+                                                        "ephemeral-storage": {
+                                                            "type": "string"
+                                                        },
+                                                        "memory": {
+                                                            "type": "string"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                "service": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "port": {
+                                            "type": "integer"
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "csiDriver": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "controllerEndpoint": {
+                                    "type": "string",
+                                    "pattern": "^$|^(tcp|dns)://.+:[0-9]+$"
+                                },
+                                "name": {
+                                    "type": "string",
+                                    "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                                },
+                                "nodeSocketOverride": {
+                                    "type": "string",
+                                    "pattern": "^$|^unix://.+$"
+                                },
+                                "tls": {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "enabled": {
+                                            "type": "boolean"
+                                        },
+                                        "serverName": {
+                                            "type": "string"
+                                        },
+                                        "usePodIdentity": {
+                                            "type": "boolean"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -119,7 +119,7 @@ spec:
   targetNamespace: default
   chartRef:
     kind: OCIRepository
-    name: agent-platform-connectivity
+    name: agent-platform-connectivity-1.1.35
     namespace: default
   install:
     createNamespace: true
@@ -141,6 +141,8 @@ spec:
         ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
         semver: '>=2.0.0 <3.0.0'
       fullnameOverride: agent-manager
+      harness:
+        egress: {}
       kagent:
         apiVersion: v1alpha3
         namespace: kagent
@@ -193,7 +195,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 1.10.0
+          tag: 2.6.4
       networkPolicy:
         egress:
           cidrs: []
@@ -246,7 +248,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.3.3
+          tag: 2.4.2
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -277,7 +279,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.3.3
+          tag: 2.4.2
       resources:
         limits:
           cpu: 500m
@@ -393,6 +395,8 @@ spec:
         enabled: false
       gateway-api-crds:
         enabled: false
+      google-access-token-credential-provider:
+        enabled: true
       gpu-operator:
         enabled: false
       kagent:
@@ -441,6 +445,9 @@ spec:
             enabled: true
             expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"]
               : ""'
+          request_id:
+            enabled: true
+            expression: request.headers["x-request-id"]
       gatewayClassName: agentgateway
       http:
         maxBufferSize: 8Mi
@@ -552,6 +559,8 @@ spec:
             protocol: grpc
             tenant: giantswarm
       registry: gsoci.azurecr.io
+    google-access-token-credential-provider:
+      namespacePolicies: []
     hooks:
       kubectlImage:
         registry: gsoci.azurecr.io
@@ -613,6 +622,7 @@ spec:
           requests:
             cpu: 100m
             memory: 128Mi
+        sessionIdleTTL: 336h
         substrate:
           ateApiEndpoint: dns:///api.ate-system.svc:443
           atenetRouterURL: http://atenet-router.ate-system.svc:80
@@ -633,6 +643,7 @@ spec:
           services:
             kagent.api.v1alpha1.AgentService: []
             kagent.api.v1alpha1.AgentTemplateService: []
+            kagent.api.v1alpha1.HarnessService: []
             kagent.api.v1alpha1.ModelService: []
             kagent.api.v1alpha1.SessionService: []
             kagent.api.v1alpha1.SystemService: []
@@ -650,6 +661,7 @@ spec:
               enabled: false
           mode: Strict
         mcp:
+          displayName: Kagent
           enabled: true
           pathPrefix: /kagent/mcp
           timeout: 300
@@ -658,12 +670,9 @@ spec:
           namespace: envoy-gateway-system
       database:
         postgres:
-          bundled:
-            image:
-              name: pgvector
-              repository: pgvector
-              tag: pg18-trixie
+          urlFile: /etc/kagent-db/uri
           vectorEnabled: true
+          vectorSchema: public
       fluxServiceAccountName: kagent-flux
       fullnameOverride: kagent
       grafana-mcp:
@@ -729,12 +738,6 @@ spec:
                 ephemeral-storage: 256Mi
                 memory: 1Gi
       harnesses: []
-      kagent-tools:
-        enabled: false
-        namespaceOverride: kagent
-      kmcp:
-        enabled: false
-        namespaceOverride: kagent
       modelConfigs: []
       namespaceOverride: kagent
       oauth2-proxy:
@@ -758,7 +761,7 @@ spec:
           reverse-proxy: true
           scope: openid profile email groups offline_access
           set-authorization-header: true
-          skip-auth-regex: ^/(login|_next/static|_next/image|login-bg\.(jpg|png|webp)|logo-.*\.png|favicon\.ico).*$
+          skip-auth-regex: ^/(login|env-config\.js|favicon\.svg|assets/[^/]+\.(js|css|svg|png|woff2?))$
           skip-auth-route: ^/(health|login)$
           skip-jwt-bearer-tokens: true
           upstream: $(UPSTREAM_URL)
@@ -778,6 +781,10 @@ spec:
             name: kagent-oauth2-proxy-templates
           name: custom-templates
         fullnameOverride: kagent-oauth2-proxy
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/oauth2-proxy
+          tag: v7.15.5
         metrics:
           enabled: true
           serviceMonitor:
@@ -835,6 +842,10 @@ spec:
           maxUnavailable: 1
           minAvailable: null
           unhealthyPodEvictionPolicy: AlwaysAllow
+        priorityClass:
+          enabled: true
+          name: agent-platform-worker-pool
+          value: 1000000
         replicas: 4
         sandboxClass: gvisor
         template:
@@ -913,6 +924,7 @@ spec:
         botToken: ""
         channelAllowlist: []
         channelMode: ""
+        contextBotIDs: []
         dmMode: ""
         enabled: false
         mode: events
@@ -944,6 +956,7 @@ spec:
         app-armor: restrict-apparmor-profiles
         check-seccomp: restrict-seccomp
         check-seccomp-strict: restrict-seccomp-strict
+        host-namespaces: disallow-host-namespaces
         host-path: disallow-host-path
         host-ports-none: disallow-host-ports
         privilege-escalation: disallow-privilege-escalation
@@ -967,6 +980,7 @@ spec:
         listener:
           name: llm-external
           port: 8082
+        rateLimits: []
       listener:
         name: llm
         port: 8081
@@ -982,6 +996,7 @@ spec:
         match: claude-*
         name: anthropic
         provider: Anthropic
+      rateLimits: []
     mcp-kubernetes:
       fullnameOverride: mcp-kubernetes
       grafanaDashboards:
@@ -1079,6 +1094,15 @@ spec:
           - matchPattern: '*.blob.core.windows.net'
         workloadClusters: {}
     muster:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: muster
+              topologyKey: kubernetes.io/hostname
+            weight: 100
       crds:
         install: false
       enabled: true
@@ -1142,11 +1166,9 @@ spec:
         flavor: kubernetes
       podAnnotations:
         application.giantswarm.io/team: bumblebee
-        karpenter.sh/do-not-disrupt: "true"
       podDisruptionBudget:
         enabled: true
-        maxUnavailable: 1
-        minAvailable: ""
+        minAvailable: 1
       rbac:
         mcpServerEditor:
           subjects:
@@ -1164,6 +1186,7 @@ spec:
           - apiGroup: rbac.authorization.k8s.io
             kind: Group
             name: giantswarm-github:giantswarm:giantswarm-admins
+      replicaCount: 2
     networkPolicy:
       additionalEgressCIDRs: []
       additionalEgressFQDNs: []
@@ -1184,6 +1207,10 @@ spec:
       musterInClusterMcpPorts:
       - 8080
       - 8443
+      substrate:
+        credentialProvider:
+          egressFQDNs:
+          - matchName: oauth2.googleapis.com
     postgres:
       affinity: {}
       applicationDatabase:
@@ -1251,7 +1278,14 @@ spec:
               key: ACCESS_SECRET_KEY
               name: ""
           sidecar:
-            resources: {}
+            resources:
+              limits:
+                ephemeral-storage: 256Mi
+                memory: 256Mi
+              requests:
+                cpu: 10m
+                ephemeral-storage: 16Mi
+                memory: 64Mi
           wal:
             compression: gzip
             maxParallel: 1
@@ -1283,11 +1317,24 @@ spec:
           secretNamespaces:
           - ate-system
       enabled: false
+      ephemeralVolumesSizeLimit:
+        shm: 256Mi
+        temporaryData: 1Gi
       image:
         name: ""
       imagePullSecrets: []
       instances: 3
       namespace: kagent
+      primaryUpdateMethod: switchover
+      resources:
+        limits:
+          cpu: "1"
+          ephemeral-storage: 2Gi
+          memory: 2Gi
+        requests:
+          cpu: 100m
+          ephemeral-storage: 256Mi
+          memory: 512Mi
       sessionsDatabase:
         enabled: false
         name: sessions
@@ -1301,6 +1348,10 @@ spec:
         extensionImage:
           reference: ""
     substrate:
+      ateController:
+        busyWorker:
+          annotations:
+            karpenter.sh/do-not-disrupt: "true"
       atelet:
         affinity: {}
         extraEnv: []
@@ -1308,11 +1359,37 @@ spec:
           pinnedImages: []
         nodeSelector: {}
         priorityClass:
-          preemptionPolicy: Never
+          preemptionPolicy: PreemptLowerPriority
+        resources:
+          limits:
+            cpu: "2"
+            memory: 1Gi
+          requests:
+            cpu: 50m
+            memory: 128Mi
         storageBackend: s3
         tolerations: []
+      atenetEgress:
+        drainSignal:
+          sizeLimit: 16Mi
+        extProc:
+          resources:
+            limits:
+              ephemeral-storage: 256Mi
+            requests:
+              ephemeral-storage: 16Mi
+        resources:
+          limits:
+            ephemeral-storage: 256Mi
+          requests:
+            ephemeral-storage: 16Mi
       createNamespace: false
       credentialProvider:
+        additionalProviders:
+        - host: muster.agent-platform.svc:50051
+          uriAuthority: muster.giantswarm.io
+        - host: google-access-token-credential-provider.ate-system.svc:50051
+          uriAuthority: google-access-token.k8s.io
         namespacePolicies:
         - allowedNamespaces:
           - kagent
@@ -1325,6 +1402,7 @@ spec:
         repository: giantswarm/substrate
       images:
         awsCli: gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+        pause: gsoci.azurecr.io/giantswarm/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4
         postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
         rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
       metrics:
@@ -1345,6 +1423,22 @@ spec:
       rustfs:
         enabled: false
     substrate-crds: {}
+    tenants:
+      organizations:
+        enabled: false
+      platform:
+        editors:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-ad:giantswarm-admins
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: giantswarm-github:giantswarm:giantswarm-admins
+        users:
+        - apiGroup: rbac.authorization.k8s.io
+          kind: Group
+          name: system:authenticated
+      platformTeam: []
     valkey:
       ciliumNetworkPolicy:
         enabled: false
@@ -1574,7 +1668,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.3.3
+        tag: 2.4.2
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1627,7 +1721,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.3.3
+        tag: 2.4.2
     resources:
       limits:
         cpu: 500m
@@ -1679,6 +1773,50 @@ spec:
       enabled: false
       hostnames: []
       parentRefs: []
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: google-access-token-credential-provider
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: google-access-token-credential-provider
+  targetNamespace: ate-system
+  storageNamespace: ate-system
+  chartRef:
+    kind: OCIRepository
+    name: google-access-token-credential-provider
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: substrate
+  values:
+    namespacePolicies:
+    - allowedNamespaces:
+      - kagent
+      atespace: kagent
+    - allowedNamespaces:
+      - kagent
+      atespace: ate-golden
+    substrate:
+      namespace: ate-system
+      releaseName: substrate
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: helm.toolkit.fluxcd.io/v2
@@ -1749,18 +1887,16 @@ spec:
         requests:
           cpu: 100m
           memory: 128Mi
+      sessionIdleTTL: 336h
       substrate:
         ateApiEndpoint: dns:///api.ate-system.svc:443
         atenetRouterURL: http://atenet-router.ate-system.svc:80
         enabled: true
     database:
       postgres:
-        bundled:
-          image:
-            name: pgvector
-            repository: pgvector
-            tag: pg18-trixie
+        urlFile: /etc/kagent-db/uri
         vectorEnabled: true
+        vectorSchema: public
     fullnameOverride: kagent
     global:
       domain: ""
@@ -1796,12 +1932,6 @@ spec:
         value: "true"
       snapshotLocation: s3://ci-agent-snapshots/agents
     harnesses: []
-    kagent-tools:
-      enabled: false
-      namespaceOverride: kagent
-    kmcp:
-      enabled: false
-      namespaceOverride: kagent
     namespaceOverride: kagent
     oauth2-proxy:
       config:
@@ -1824,7 +1954,7 @@ spec:
         reverse-proxy: true
         scope: openid profile email groups offline_access
         set-authorization-header: true
-        skip-auth-regex: ^/(login|_next/static|_next/image|login-bg\.(jpg|png|webp)|logo-.*\.png|favicon\.ico).*$
+        skip-auth-regex: ^/(login|env-config\.js|favicon\.svg|assets/[^/]+\.(js|css|svg|png|woff2?))$
         skip-auth-route: ^/(health|login)$
         skip-jwt-bearer-tokens: true
         upstream: $(UPSTREAM_URL)
@@ -1844,6 +1974,10 @@ spec:
           name: kagent-oauth2-proxy-templates
         name: custom-templates
       fullnameOverride: kagent-oauth2-proxy
+      image:
+        registry: gsoci.azurecr.io
+        repository: giantswarm/oauth2-proxy
+        tag: v7.15.5
       metrics:
         enabled: true
         serviceMonitor:
@@ -1910,6 +2044,7 @@ spec:
               - ate-system
               topologyKey: kubernetes.io/hostname
             weight: 100
+        priorityClassName: agent-platform-worker-pool
         resources:
           limits:
             cpu: "2"
@@ -1917,7 +2052,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.6.1
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.14.0
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -2193,6 +2328,15 @@ spec:
   driftDetection:
     mode: enabled
   values:
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: muster
+            topologyKey: kubernetes.io/hostname
+          weight: 100
     crds:
       install: false
     enabled: true
@@ -2278,11 +2422,9 @@ spec:
       flavor: kubernetes
     podAnnotations:
       application.giantswarm.io/team: bumblebee
-      karpenter.sh/do-not-disrupt: "true"
     podDisruptionBudget:
       enabled: true
-      maxUnavailable: 1
-      minAvailable: ""
+      minAvailable: 1
     rbac:
       mcpServerEditor:
         subjects:
@@ -2300,6 +2442,7 @@ spec:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
           name: giantswarm-github:giantswarm:giantswarm-admins
+    replicaCount: 2
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: helm.toolkit.fluxcd.io/v2
@@ -2317,6 +2460,7 @@ metadata:
     helm.sh/chart: "agent-platform-1.1.35"
 spec:
   interval: 10m
+  timeout: 15m
   releaseName: substrate
   targetNamespace: ate-system
   storageNamespace: ate-system
@@ -2330,7 +2474,7 @@ spec:
       retries: 5
   upgrade:
     remediation:
-      retries: 5
+      retries: 3
   dependsOn:
     - name: substrate-crds
     - name: agent-platform-connectivity
@@ -2340,16 +2484,48 @@ spec:
       optional: true
       valuesKey: substrate-values.yaml
   values:
+    ateController:
+      busyWorker:
+        annotations:
+          karpenter.sh/do-not-disrupt: "true"
+      gvisorWorker:
+        followRelease: true
     atelet:
       affinity: {}
       extraEnv: []
       nodeSelector: {}
       priorityClass:
-        preemptionPolicy: Never
+        preemptionPolicy: PreemptLowerPriority
+      resources:
+        limits:
+          cpu: "2"
+          memory: 1Gi
+        requests:
+          cpu: 50m
+          memory: 128Mi
       storageBackend: s3
       tolerations: []
+    atenetEgress:
+      drainSignal:
+        sizeLimit: 16Mi
+      extProc:
+        resources:
+          limits:
+            ephemeral-storage: 256Mi
+          requests:
+            ephemeral-storage: 16Mi
+      resources:
+        limits:
+          ephemeral-storage: 256Mi
+        requests:
+          ephemeral-storage: 16Mi
     createNamespace: false
     credentialProvider:
+      additionalProviders:
+      - host: muster.agent-platform.svc:50051
+        uriAuthority: muster.giantswarm.io
+      - host: google-access-token-credential-provider.ate-system.svc:50051
+        uriAuthority: google-access-token.k8s.io
       namespacePolicies:
       - allowedNamespaces:
         - kagent
@@ -2362,6 +2538,7 @@ spec:
       repository: giantswarm/substrate
     images:
       awsCli: gsoci.azurecr.io/giantswarm/aws-cli:2.17.0@sha256:643507c10ada7964ca6157b3d799f030b90577643da9955d319a77399ed80d73
+      pause: gsoci.azurecr.io/giantswarm/pause:3.10.2@sha256:f548e0e8e3dc1896ca956272154dde3314e8cc4fde0a57577ee9fa1c63f5baf4
       postgres: gsoci.azurecr.io/giantswarm/postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
       rustfs: gsoci.azurecr.io/giantswarm/rustfs:1.0.0-beta.3@sha256:378642b05b7dcb4849fb77ebe6aca4ced1c3f66e7e504247df95a5c9018d3358
     metrics:
@@ -2641,13 +2818,13 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.10.0 <2.0.0"
+    semver: ">=2.3.0 <3.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
-  name: agent-platform-connectivity
+  name: agent-platform-connectivity-1.1.35
   namespace: default
   labels:
     app: "agent-platform"
@@ -2687,7 +2864,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: "0.x"
+    semver: "0.12.x"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2710,7 +2887,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: "0.x"
+    semver: "0.2.x"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2733,7 +2910,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=2.4.0 <3.0.0"
+    semver: ">=2.8.0 <3.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2756,7 +2933,30 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: "0.x"
+    semver: "0.3.x"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: google-access-token-credential-provider
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 1m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/google-access-token-credential-provider
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    semver: ">=0.1.0 <0.2.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2779,7 +2979,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.5.0 <1.6.0"
+    semver: ">=1.18.0 <1.19.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2802,7 +3002,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.5.0 <1.6.0"
+    semver: ">=1.18.0 <1.19.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2825,7 +3025,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=3.3.0 <5.0.0"
+    semver: ">=4.3.0 <5.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2871,7 +3071,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=5.31.4 <6.0.0"
+    semver: ">=5.45.0 <6.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2894,7 +3094,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.6.1 <1.7.0"
+    semver: ">=1.14.0 <1.15.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2917,7 +3117,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.6.1 <1.7.0"
+    semver: ">=1.14.0 <1.15.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2940,7 +3140,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: "0.x"
+    semver: "0.4.x"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2963,4 +3163,4 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=0.24.0 <1.0.0"
+    semver: ">=0.24.0 <0.25.0"

@@ -31,6 +31,17 @@ ingress:
 
 llmRouting:
   enabled: true
+  # Anthropic and OpenAI on the listener: the OpenAI entry serves the
+  # Responses route a codex agent calls (openai-gpt-codex below).
+  models:
+    - name: anthropic
+      provider: Anthropic
+      baseURL: https://api.anthropic.com/v1
+      match: claude-*
+    - name: openai
+      provider: OpenAI
+      baseURL: https://api.openai.com/v1
+      match: gpt-*
 
 kagent:
   namespaceOverride: kagent
@@ -50,14 +61,16 @@ kagent:
         # every installation): the Anthropic entries below inherit it too,
         # verify-max-tokens asserts the inheritance and the precedence.
         maxTokens: 32000
-  # Three extra, chart-owned ModelConfigs. The first names no baseUrl, so the
+  # Four extra, chart-owned ModelConfigs. The first names no baseUrl, so the
   # chart fills in the listener: a new entry is metered unless somebody names
   # another upstream. The second names its own, which wins — that is how a model
   # reaches a different upstream, the provider's own URL included. The third is
   # another provider with its own URL: the block that carries it is the CRD's
   # key for the provider (openAI), not the lower-cased provider name, which the
   # API server would prune — verify-kagent-crds validates this render against
-  # the kagent line's CRD, verify-llm-routing asserts the key.
+  # the kagent line's CRD, verify-llm-routing asserts the key. The fourth is a
+  # codex model: OpenAI in the Responses API format, no baseUrl, so it rides
+  # the listener's OpenAI entry at the listener URL with /v1.
   modelConfigs:
     - name: anthropic-sonnet
       displayName: Anthropic Sonnet 4.6
@@ -77,6 +90,20 @@ kagent:
       apiKeySecret: kagent-openai
       apiKeySecretKey: OPENAI_API_KEY
       baseUrl: https://api.openai.com/v1
+    - name: openai-gpt-codex
+      displayName: OpenAI GPT-5.5 (codex)
+      provider: OpenAI
+      model: gpt-5.5
+      apiKeySecret: kagent-openai
+      apiKeySecretKey: OPENAI_API_KEY
+      apiFormat: responses
+    - name: openai-chatgpt-codex
+      displayName: OpenAI GPT-5.6 Luna (ChatGPT login)
+      provider: OpenAI
+      model: gpt-5.6-luna
+      apiKeySecret: kagent-chatgpt-login
+      credentialType: chatgptOAuth
+      apiFormat: responses
 
 muster:
   muster:

@@ -1,0 +1,337 @@
+{{- /*
+The Secrets a tenant's EgressPolicy may name (giantswarm/agent-platform#1040).
+An EgressPolicy grants its namespace's workloads HTTPS origins, and a
+destination's authentication sets a header from
+spec.destinations[].authentication.secretKeyRef at the egress gateway. The
+namespace is the boundary: the reference names a Secret of the policy's own
+namespace, and anyone who may select a policy there uses its grant. A tenant
+namespace also holds the platform's Secrets (the copy of the platform's model
+key that agent-manager's tenant reconciler places there), so a policy naming
+one would send the platform's credential to any origin the tenant chooses.
+
+agent-platform-tenant-egress-credentials refuses, in every namespace labelled
+giantswarm.io/organization (selected by the label, never listed) except the
+kagent namespace, the platform tenant, an EgressPolicy whose secretKeyRef
+names a Secret without the agent-platform.tenants.credentialPrefix prefix.
+This holds for every requester, the Organization's admins and a
+HelmRelease's ServiceAccount included. A reference never names another
+namespace: secretKeyRef is a SecretKeySelector, and the CRD's schema prunes a
+namespace from it; the controller resolves it in the policy's namespace.
+
+agent-platform-tenant-model-credentials holds a ModelConfig there the same
+way: the egress gateway sets its spec.apiKeySecret's key on every request to
+the ModelConfig's base URL, so a ModelConfig names only a Secret with the
+prefix, for every requester but agent-manager's tenant reconciler
+(agent-platform.agentManager.serviceAccountUser; with agent-manager on and
+tenants.organizations.enabled), which writes the copy of the platform's
+default ModelConfig with the platform's key and base URL. A
+ModelConfig without apiKeySecret is admitted. It reads the object untyped
+(apiVersions "*") like the EgressPolicy policy.
+
+agent-platform-tenant-credentials keeps what such a reference reaches a
+tenant's own value: there a Secret named with the prefix is of type Opaque,
+created or updated. A service-account-token Secret (the token controller
+fills it with a ServiceAccount's token) or any other typed Secret under the
+prefix is refused, so no policy sends a token the cluster minted.
+
+agent-platform-tenant-platform-secrets (agent-manager on and
+tenants.organizations.enabled, which turns its tenant reconciler on) keeps the platform's Secrets of a
+tenant namespace the platform's: only the reconciler's ServiceAccount
+(agent-platform.agentManager.serviceAccountUser) creates, updates or deletes a
+Secret there that carries the reconciler's label
+agent-manager.giantswarm.io/tenant-object, before or after the write, or that
+is named as the key Secret of the default ModelConfig the reconciler copies
+(agent-platform.tenants.modelSecretName), so no one replaces the copy or takes
+its name before the reconciler does. The namespace and garbage collectors may
+also delete one, so a namespace can go. This holds for every requester, the
+Organization's admins and cluster-admin included. Every other Secret of the
+namespace stays with RBAC: a tenant's tenant-credential-* Secrets, Helm's
+release storage, the cluster's own.
+
+agent-platform-tenant-credential-refs holds the other objects that send a
+Secret of their namespace to a URL their writer chooses the same way: an
+Agent's or AgentTemplate's skill or plugin git source names only a
+tenant-credential-* Secret as credentialRef (the credential goes to the
+source's host), and a RemoteMCPServer's headersFrom names only such a Secret
+(the header goes to the server's URL). This holds for every requester, in the
+same namespaces. The installation's skills credential (agent-manager's
+skills.gitAuthSecretName, or the Secret it mints, and their earlier names) is
+the installation's, never a tenant's: it is refused there under each of its
+names, prefixed or not; the platform's own agents name it in the kagent
+namespace. An object already being
+deleted is admitted, so its controllers can release their finalizers; any
+other change of an object that still names another Secret is refused until
+the reference is renamed. It reads the three kinds untyped (apiVersions "*").
+
+The EgressPolicy policy reads the object untyped (apiVersions "*"): it admits
+every version of egresspolicies.api.kagent.dev, and matches nothing on a
+cluster that does not serve them. Kubernetes 1.30 or later
+(admissionregistration.k8s.io/v1).
+*/ -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $prefix := include "agent-platform.tenants.credentialPrefix" . }}
+{{- /* agent-manager's tenant reconciler runs with agent-manager and
+tenants.organizations.enabled; it writes the platform's copies. */}}
+{{- $reconciler := "" }}
+{{- if and (include "agent-platform.agentManager.enabled" .) (include "agent-platform.tenants.organizations" .) }}
+{{- $reconciler = include "agent-platform.agentManager.serviceAccountUser" . }}
+{{- end }}
+{{- /* The installation's skills credential, current and earlier names: never
+a tenant's credential, whatever its name. */}}
+{{- $installationCredentials := list }}
+{{- if include "agent-platform.agentManager.enabled" . }}
+{{- $skillsAuth := include "agent-platform.agentManager.skillsGitAuth" . | fromJson }}
+{{- range prepend $skillsAuth.previous $skillsAuth.current }}
+{{- if . }}
+{{- $installationCredentials = append $installationCredentials (squote .) }}
+{{- end }}
+{{- end }}
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-egress-credentials
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [{{ $kagentNs | quote }}]
+    resourceRules:
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["egresspolicies"]
+  variables:
+    # The Secret references of the policy's destinations (read untyped: the
+    # policy admits every served version).
+    - name: refs
+      expression: >-
+        has(object.spec) && has(object.spec.destinations) ?
+        dyn(object.spec.destinations).filter(d, has(d.authentication) && has(d.authentication.secretKeyRef))
+        .map(d, d.authentication.secretKeyRef) : []
+    - name: platform
+      expression: >-
+        variables.refs.filter(r, !has(r.name) || !r.name.startsWith({{ squote $prefix }}))
+  validations:
+    - expression: size(variables.platform) == 0
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'an EgressPolicy in an Organization namespace names only tenant credentials, Secrets named %s*, never a platform Secret: '" $prefix }} +
+        variables.platform.map(r, has(r.name) ? r.name : '<no name>').join(', ')
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-egress-credentials
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-tenant-egress-credentials
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-model-credentials
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [{{ $kagentNs | quote }}]
+    resourceRules:
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["modelconfigs"]
+  variables:
+    - name: secret
+      expression: >-
+        has(object.spec) && has(object.spec.apiKeySecret) ? string(dyn(object.spec).apiKeySecret) : ''
+  validations:
+    - expression: >-
+        variables.secret == '' || variables.secret.startsWith({{ squote $prefix }}){{ with $reconciler }} ||
+        request.userInfo.username == {{ squote . }}{{ end }}
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'a ModelConfig in an Organization namespace names only a tenant credential, a Secret named %s*, as its apiKeySecret%s. Refused for ' + request.userInfo.username + ': apiKeySecret ' + variables.secret" $prefix (ternary "; only agent-manager writes the copy of the platform model" "" (ne $reconciler "")) }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-model-credentials
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-tenant-model-credentials
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-credentials
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [{{ $kagentNs | quote }}]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["secrets"]
+  matchConditions:
+    - name: tenant-credential
+      expression: {{ printf "object.metadata.name.startsWith('%s')" $prefix | quote }}
+  validations:
+    - expression: "!has(object.type) || object.type == 'Opaque'"
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'a tenant credential (a Secret named %s* in an Organization namespace) is of type Opaque, not ' + object.type" $prefix }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-credentials
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-tenant-credentials
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-credential-refs
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [{{ $kagentNs | quote }}]
+    resourceRules:
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["agents", "agenttemplates", "remotemcpservers"]
+  # The objects read untyped: the policy matches three kinds of every served
+  # version.
+  variables:
+    - name: spec
+      expression: "has(object.spec) ? dyn(object.spec) : dyn({})"
+    # An Agent carries its template inline under spec.template.
+    - name: template
+      expression: >-
+        request.resource.resource == 'agents' ?
+        ('template' in variables.spec ? dyn(variables.spec.template) : dyn({})) : variables.spec
+    - name: sources
+      expression: >-
+        ('skills' in variables.template ? dyn(variables.template.skills) : dyn([])) +
+        ('plugins' in variables.template ? dyn(variables.template.plugins) : dyn([]))
+    - name: refs
+      expression: >-
+        variables.sources.filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
+        .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '') +
+        (request.resource.resource == 'remotemcpservers' && 'headersFrom' in variables.spec ?
+        dyn(variables.spec.headersFrom).filter(h, has(h.valueFrom) && has(h.valueFrom.type) && h.valueFrom.type == 'Secret')
+        .map(h, has(h.valueFrom.name) ? string(h.valueFrom.name) : '') : dyn([]))
+    - name: foreign
+      expression: {{ printf "variables.refs.filter(n, !n.startsWith('%s')%s)" $prefix (ternary (printf " || n in [%s]" (join ", " $installationCredentials)) "" (gt (len $installationCredentials) 0)) | quote }}
+  validations:
+    - expression: "has(object.metadata.deletionTimestamp) || size(variables.foreign) == 0"
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named %s*%s, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ') + '. Fix: rename each to a %s* Secret of this namespace or remove it (UPGRADE.md: the migrate run removes the installation skills credential from the platform agents)'" $prefix (ternary " other than the skills credential of the installation" "" (gt (len $installationCredentials) 0)) $prefix }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-credential-refs
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-tenant-credential-refs
+  validationActions: [Deny]
+{{- if $reconciler }}
+{{- $modelSecret := include "agent-platform.tenants.modelSecretName" . }}
+{{- if and $modelSecret (hasPrefix $prefix $modelSecret) }}
+{{- fail (printf "kagent.providers.%s.apiKeySecretRef %q starts with %s, the prefix of a tenant's own credentials: agent-manager copies this Secret into the Organizations' namespaces as the platform's, so name it without the prefix" (toString .Values.kagent.providers.default) $modelSecret $prefix) }}
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-platform-secrets
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: giantswarm.io/organization
+          operator: Exists
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [{{ $kagentNs | quote }}]
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["secrets"]
+  matchConditions:
+    # A platform Secret, before or after the write (a DELETE carries no
+    # object): the reconciler's label, or the copied model key's name.
+    - name: platform-secret
+      expression: >-
+        [dyn(object), dyn(oldObject)].exists(o, o != null &&
+        ((has(o.metadata.labels) && 'agent-manager.giantswarm.io/tenant-object' in o.metadata.labels){{ with $modelSecret }} ||
+        o.metadata.name == {{ squote . }}{{ end }}))
+  validations:
+    - expression: >-
+        request.userInfo.username == {{ squote $reconciler }} ||
+        (request.operation == 'DELETE' && request.userInfo.username in
+        ['system:serviceaccount:kube-system:namespace-controller', 'system:serviceaccount:kube-system:generic-garbage-collector'])
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'in an Organization namespace only agent-manager (%s) writes the platform Secrets it copies there; a tenant credential is a Secret named %s*. Refused for ' + request.userInfo.username + ': ' + request.name" $reconciler $prefix }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-platform-secrets
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-tenant-platform-secrets
+  validationActions: [Deny]
+{{- end }}
+{{- end }}

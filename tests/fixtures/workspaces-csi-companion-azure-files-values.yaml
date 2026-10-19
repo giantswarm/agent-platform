@@ -1,0 +1,15 @@
+# The CSI companion with the azureFiles preset: the Azure Files driver's
+# controller behind the mTLS proxy for ate-api-server and its node plugin on
+# the Substrate worker nodes, beside the azureFiles class
+# (tests/verify-workspace-csi-companion.py).
+workspaces:
+  enabled: true
+  storage:
+    storageClassName: workspaces-rwx
+    storageClass:
+      create: true
+      preset: azureFiles
+  substrate:
+    csiCompanion:
+      enabled: true
+      preset: azureFiles

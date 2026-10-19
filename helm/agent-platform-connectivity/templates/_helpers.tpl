@@ -37,6 +37,17 @@ helm.sh/chart: {{ include "chart" . | quote }}
 {{- end -}}
 
 {{/*
+The common labels of a pod template: labels.common without helm.sh/chart and
+app.kubernetes.io/version. Both change with every chart release; in a pod
+template they rolled the workload on every release although nothing of it
+changed, so they stay on the objects' own metadata. A workload merges its
+selector labels over these.
+*/}}
+{{- define "labels.podTemplate" -}}
+{{- omit (include "labels.common" . | fromYaml) "helm.sh/chart" "app.kubernetes.io/version" | toYaml -}}
+{{- end -}}
+
+{{/*
 Selector labels
 */}}
 {{- define "labels.selector" -}}
@@ -207,7 +218,7 @@ Name of the AgentgatewayParameters CR — defaults to release name.
 
 {{/*
 Truthy (emits "true") when the request topology routes through agentgateway,
-i.e. ingress.mode is agentgateway-muster or agentgateway-direct and muster is
+i.e. ingress.mode is agentgateway-muster and muster is
 on. A release without muster (a serving or runtime slice) has no ingress
 topology: it renders no data plane whatever the mode, which defaults to
 agentgateway-muster (#252). Otherwise emits nothing (empty string = falsy).
@@ -215,7 +226,7 @@ Gated templates use:
   {{- if (include "agent-platform.ingress.agentgateway" .) }}
 */}}
 {{- define "agent-platform.ingress.agentgateway" -}}
-{{- if and (or (eq .Values.ingress.mode "agentgateway-muster") (eq .Values.ingress.mode "agentgateway-direct")) (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}true{{- end -}}
+{{- if and (eq .Values.ingress.mode "agentgateway-muster") (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -308,13 +319,10 @@ inconsistent. Rendered exactly once via templates/validate.yaml.
 */}}
 {{- define "agent-platform.validateIngress" -}}
 {{- $mode := .Values.ingress.mode -}}
-{{- if not (or (eq $mode "muster-direct") (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
-{{- fail (printf "ingress.mode=%v is invalid; must be one of: muster-direct, agentgateway-muster, agentgateway-direct" $mode) -}}
+{{- if not (or (eq $mode "muster-direct") (eq $mode "agentgateway-muster")) -}}
+{{- fail (printf "ingress.mode=%v is invalid; must be one of: agentgateway-muster, muster-direct" $mode) -}}
 {{- end -}}
-{{- if eq $mode "agentgateway-direct" -}}
-{{- fail "ingress.mode=agentgateway-direct requires a DCR-capable IdP (RFC 7591/8707), e.g. Zitadel; not yet supported" -}}
-{{- end -}}
-{{- $isAgentgateway := or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct") -}}
+{{- $isAgentgateway := eq $mode "agentgateway-muster" -}}
 {{- $musterEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") -}}
 {{- /* The muster `/` route needs a Gateway in every mode; the helper fails the
 render when neither ingress.parentRefs, the chart-owned edge nor
@@ -335,10 +343,6 @@ agent-platform-mcps component. */ -}}
 {{- if eq $mode "agentgateway-muster" -}}
 {{- if not (or (eq $viaMuster true) (eq (toString $viaMuster) "true")) -}}
 {{- fail "ingress.mode=agentgateway-muster requires agent-platform-mcps.agentgateway.viaMuster=true" -}}
-{{- end -}}
-{{- else if eq $mode "agentgateway-direct" -}}
-{{- if not (or (eq $viaMuster false) (eq (toString $viaMuster) "false")) -}}
-{{- fail "ingress.mode=agentgateway-direct requires agent-platform-mcps.agentgateway.viaMuster=false" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -747,6 +751,27 @@ provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
 {{- end -}}
 
 {{/*
+Truthy when this chart routes the ModelConfigs it does not render, routing on
+or off: kagent is a component, the modelconfig-llm-routing policies are wanted
+(llmRouting.modelConfigPolicy) and the API server serves their GA group. With
+routing on the policies render (templates/llm/modelconfig-policy.yaml); either
+way the reconcile hook runs (templates/llm/modelconfig-routing-hook.yaml),
+which takes a baseUrl the policies wrote back off a ModelConfig once the
+listener no longer serves it.
+*/}}
+{{- define "agent-platform.llmRouting.modelConfigs" -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.llmRouting.modelConfigPolicy.enabled (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy") -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The annotation that marks a ModelConfig's baseUrl as the listener URL this
+chart wrote (the modelconfig-llm-routing policies, the reconcile hook), with the
+URL as its value: the hook removes exactly such a baseUrl once routing is off,
+and never one an operator set.
+*/}}
+{{- define "agent-platform.llmRouting.baseUrlMark" -}}agent-platform.giantswarm.io/llm-routing-base-url{{- end -}}
+
+{{/*
 Truthy when the LLM endpoint is also published outside the cluster
 (llmRouting.external).
 */}}
@@ -771,6 +796,23 @@ The public hostname of the external LLM endpoint: <llmRouting.external.hostPrefi
 */}}
 {{- define "agent-platform.llmRouting.externalHost" -}}
 {{- include "agent-platform.hostname" (dict "ctx" . "prefix" .Values.llmRouting.external.hostPrefix "override" "" "key" "llmRouting.external.hostPrefix") -}}
+{{- end -}}
+
+{{/*
+A rate-limit list (dict "root" . "limits" <list>) as YAML, each entry's key
+rendered through tpl so it may name the chart's own predicates
+(agent-platform.substrate.egressCall).
+*/}}
+{{- define "agent-platform.llmRouting.rateLimits" -}}
+{{- $out := list -}}
+{{- range .limits -}}
+{{- $entry := deepCopy . -}}
+{{- with $entry.key -}}
+{{- $_ := set $entry "key" (tpl . $.root) -}}
+{{- end -}}
+{{- $out = append $out $entry -}}
+{{- end -}}
+{{- toYaml $out -}}
 {{- end -}}
 
 {{/*
@@ -811,13 +853,37 @@ validateLlmRouting holds it to exactly one.
 {{- end -}}
 
 {{/*
-The provider whose ModelConfigs ride the LLM listener: the first
-llmRouting.models entry's, lower-cased (anthropic). kagent.modelConfigs entries
-and the MutatingAdmissionPolicy point a ModelConfig of this provider at the
-listener; a ModelConfig of another provider keeps its own path.
+The providers whose ModelConfigs ride the LLM listener, as a JSON list: every
+llmRouting.models entry's provider that has a baseUrl in ModelConfigSpec
+(agent-platform.modelConfigBaseUrlKey), lower-cased, once each, in the entries'
+order (["anthropic","openai"]). kagent.modelConfigs entries and the
+MutatingAdmissionPolicies point a ModelConfig of such a provider at the
+listener; a ModelConfig of any other provider keeps its own path.
+Usage: include "agent-platform.llmRouting.providers" . | fromJsonArray
 */}}
-{{- define "agent-platform.llmRouting.provider" -}}
-{{- with .Values.llmRouting.models -}}{{- lower (first .).provider -}}{{- end -}}
+{{- define "agent-platform.llmRouting.providers" -}}
+{{- $out := list -}}
+{{- range .Values.llmRouting.models -}}
+{{- $p := lower .provider -}}
+{{- if and (include "agent-platform.modelConfigBaseUrlKey" $p) (not (has $p $out)) -}}
+{{- $out = append $out $p -}}
+{{- end -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
+The baseUrl a ModelConfig of a provider (any case) reaches the LLM listener at:
+agent-platform.llmBaseUrl plus the path the provider's client expects in its
+base URL. The OpenAI clients (the kagent runtime's and codex's) append
+`/responses` or `/chat/completions` to a base that ends in its version, as
+https://api.openai.com/v1 does, so an OpenAI ModelConfig takes `/v1`; the
+Anthropic client appends `/v1/messages` to the bare origin.
+*/}}
+{{- define "agent-platform.llmListenerUrl" -}}
+{{- $root := .root -}}
+{{- $suffix := dict "openai" "/v1" -}}
+{{- printf "%s%s" (include "agent-platform.llmBaseUrl" $root) (dig (lower .provider) "" $suffix) -}}
 {{- end -}}
 
 {{/*
@@ -960,6 +1026,17 @@ kagent's own default in silence, so the template refuses it instead.
 {{- define "agent-platform.modelConfigMaxTokensKey" -}}
 {{- $keys := dict "anthropic" "anthropic" "anthropicvertexai" "anthropicVertexAI" "azureopenai" "azureOpenAI" "mistral" "mistral" "openai" "openAI" -}}
 {{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
+{{- end -}}
+
+{{/*
+Key of the ModelConfigSpec provider block that carries apiFormat (the OpenAI
+HTTP API the runtime speaks: chatCompletions, the CRD's default, or responses,
+which codex requires), for a spec.provider value in any case: OpenAI only.
+Emits nothing for every other provider (empty string = falsy), which the
+template refuses rather than letting the API server prune the field.
+*/}}
+{{- define "agent-platform.modelConfigApiFormatKey" -}}
+{{- if eq (lower .) "openai" -}}openAI{{- end -}}
 {{- end -}}
 
 {{/*
@@ -1158,17 +1235,47 @@ Usage: include "agent-platform.idpHosts" (dict "provider" "dex" "issuerUrl" $url
 {{- end -}}
 
 {{/*
-True when the portal's route attaches to the chart-owned data plane, in the
-precedence agent-platform.parentRefs resolves the route's parents with:
-`backstage.parentRefs` wins over gatewayApi.gateway.create, so a pinned route
-keeps the front Gateway as its peer even while the chart owns the edge.
+True when a public route that proxies straight to its Service attaches to the
+chart-owned data plane, in the precedence agent-platform.parentRefs resolves
+the route's parents with: the route's own parentRefs win over
+gatewayApi.gateway.create, so a pinned route keeps the front Gateway as its
+peer even while the chart owns the edge.
+Usage: include "agent-platform.route.toDataPlane" (dict "ctx" . "parentRefs" $refs)
+*/}}
+{{- define "agent-platform.route.toDataPlane" -}}
+{{- if not .parentRefs -}}
+{{- include "agent-platform.edgeIsDataPlane" .ctx -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The namespaces of the front Gateway such a route attaches to, as a JSON list,
+in the order the route names its parents: its own parentRefs when pinned, else
+`global.gatewayApi.parentRefs`. A parentRef without a namespace attaches to a
+Gateway of the route's own namespace (Gateway API), so that is what an absent
+key means here too. Empty when the route attaches to the chart-owned data
+plane — the data plane is then the peer, selected by the Gateway's own name.
+Usage: include "agent-platform.route.edgeNamespaces" (dict "ctx" . "parentRefs" $refs) | fromJsonArray
+*/}}
+{{- define "agent-platform.route.edgeNamespaces" -}}
+{{- $ctx := .ctx -}}
+{{- $refs := .parentRefs | default $ctx.Values.global.gatewayApi.parentRefs | default list -}}
+{{- $namespaces := list -}}
+{{- if not (include "agent-platform.route.toDataPlane" .) -}}
+{{- range $refs -}}
+{{- $namespaces = append $namespaces (dig "namespace" $ctx.Release.Namespace .) -}}
+{{- end -}}
+{{- end -}}
+{{- $namespaces | uniq | toJson -}}
+{{- end -}}
+
+{{/*
+True when the portal's route attaches to the chart-owned data plane
+(agent-platform.route.toDataPlane with `backstage.parentRefs`).
 Usage: include "agent-platform.backstage.routeToDataPlane" .
 */}}
 {{- define "agent-platform.backstage.routeToDataPlane" -}}
-{{- $backstage := .Values.backstage | default dict -}}
-{{- if not $backstage.parentRefs -}}
-{{- include "agent-platform.edgeIsDataPlane" . -}}
-{{- end -}}
+{{- include "agent-platform.route.toDataPlane" (dict "ctx" . "parentRefs" (dig "parentRefs" list (.Values.backstage | default dict))) -}}
 {{- end -}}
 
 {{/*
@@ -1210,25 +1317,12 @@ Usage: include "agent-platform.backstage.appConfigEdge" . | fromJson
 {{- end -}}
 
 {{/*
-The namespaces of the front Gateway the portal's route attaches to, as a JSON
-list, in the order the route names its parents: `backstage.parentRefs` when the
-route is pinned, else `global.gatewayApi.parentRefs`. A parentRef without a
-namespace attaches to a Gateway of the route's own namespace (Gateway API), so
-that is what an absent key means here too. Empty when the route attaches to the
-chart-owned data plane — the data plane is then the peer, selected by the
-Gateway's own name.
+The namespaces of the front Gateway the portal's route attaches to
+(agent-platform.route.edgeNamespaces with `backstage.parentRefs`).
 Usage: include "agent-platform.backstage.edgeNamespaces" . | fromJsonArray
 */}}
 {{- define "agent-platform.backstage.edgeNamespaces" -}}
-{{- $backstage := .Values.backstage | default dict -}}
-{{- $refs := $backstage.parentRefs | default .Values.global.gatewayApi.parentRefs | default list -}}
-{{- $namespaces := list -}}
-{{- if not (include "agent-platform.backstage.routeToDataPlane" .) -}}
-{{- range $refs -}}
-{{- $namespaces = append $namespaces (dig "namespace" $.Release.Namespace .) -}}
-{{- end -}}
-{{- end -}}
-{{- $namespaces | uniq | toJson -}}
+{{- include "agent-platform.route.edgeNamespaces" (dict "ctx" . "parentRefs" (dig "parentRefs" list (.Values.backstage | default dict))) -}}
 {{- end -}}
 
 {{/*
@@ -1980,34 +2074,6 @@ Truthy when the platform runs Agent Substrate: the substrate component is on
 */}}
 {{- define "agent-platform.substrate.enabled" -}}
 {{- include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "substrate") -}}
-{{- end -}}
-
-{{/*
-kagent's built-in tool server: the kagent-tools subchart of the kagent chart
-(kagent.kagent-tools). The subchart renders its Deployment and Services into its
-own namespaceOverride, else its release namespace, and the kagent chart composes
-the kagent-tool-server RemoteMCPServer URL from the same two inputs
-(http://<tools fullname>.<that namespace>:<port>/mcp). The egress rules this
-chart opens to the server — the kagent controller's tool discovery
-(templates/kagent/netpol.yaml) and the actors' calls through Substrate's egress
-gateway (templates/substrate/netpol.yaml) — derive the namespace the same way,
-from the same values block and the same release namespace (every platform
-HelmRelease installs into gitops.targetNamespace), so a rule names the namespace
-the server is rendered into whether or not an installation pins the override.
-Never the kagent namespace by assumption: kagent.namespaceOverride moves the
-controller, not the subchart (#421). The port is the tools Service's targetPort.
-*/}}
-{{- define "agent-platform.kagentTools.enabled" -}}
-{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
-{{- if $tools.enabled }}true{{- end -}}
-{{- end -}}
-{{- define "agent-platform.kagentTools.namespace" -}}
-{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
-{{- $tools.namespaceOverride | default .Release.Namespace -}}
-{{- end -}}
-{{- define "agent-platform.kagentTools.port" -}}
-{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
-{{- dig "service" "ports" "tools" "targetPort" "8084" $tools | toString -}}
 {{- end -}}
 
 {{/*

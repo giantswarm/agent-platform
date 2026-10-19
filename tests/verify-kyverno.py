@@ -36,6 +36,14 @@ exceptions are hand-written; this check computes them.
     it is the CNPG ImageVolume exception, whose one rule is checked too.
   * No exception may select app: kagent (the v1alpha2 agent Deployments' label;
     nothing carries it on kagent API v2).
+  * The workspaces' CSI companion (the connectivity chart's
+    templates/workspaces/csi-companion.yaml), rendered per preset from its
+    fixture: its controller Deployment and node DaemonSet are held the same way
+    to their own exceptions (csi-companion-controller, csi-companion-node),
+    which the meta chart renders (templates/csi-companion-policy-exceptions.yaml)
+    so they exist before the connectivity release reaches admission; the
+    connectivity render carries none of them, and nothing of the companion
+    renders without the block.
 
 Needs PyYAML (the CI job installs it) and network to gsoci.azurecr.io for the chart.
 """
@@ -61,9 +69,12 @@ _spec.loader.exec_module(charts)
 
 FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2", "--api-versions", "monitoring.coreos.com/v1",
               "--api-versions", "gateway.networking.k8s.io/v1", "--api-versions", "gateway.envoyproxy.io/v1alpha1"]
+# muster's credential provider releases an instance while workspaces and Substrate are on
+# (agent-platform.validateWorkspaceAuth): no provider instance to pin here, so the renders name it.
+RELEASABLE = ["--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]
 ON = [
-    "--set", "components.kagent.enabled=true",
-    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+    "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
+    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     "--set", "postgres.enabled=true",
 ]
 CONNECTIVITY_ON = [
@@ -82,6 +93,14 @@ OTHER_EXCEPTIONS = {
     # The serving model pods (root vLLM runtime image; #498), rendered with modelServing on.
     "model-serving-predictors": {"require-drop-all", "privilege-escalation", "run-as-non-root", "check-seccomp-strict"},
 }
+# The CSI companion's fixtures, one per preset: the companion's workloads and
+# exceptions render with these and with nothing else.
+COMPANION_FIXTURES = {
+    "efs": "tests/fixtures/workspaces-csi-companion-efs-values.yaml",
+    "azureFiles": "tests/fixtures/workspaces-csi-companion-azure-files-values.yaml",
+}
+COMPANION = "csi-companion"
+COMPANION_NAMESPACE = "agent-platform"
 
 # The worker pod, as ate-controller renders it (see the module docstring).
 WORKER_POD = {
@@ -155,6 +174,8 @@ def violations(spec: dict) -> set[str]:
     cs = containers(spec)
     if any((c.get("securityContext") or {}).get("privileged") for c in cs):
         v.add("privileged-containers")
+    if any(spec.get(k) for k in ("hostNetwork", "hostPID", "hostIPC")):
+        v.add("host-namespaces")
     if any(p.get("hostPort") for c in cs for p in c.get("ports", [])):
         v.add("host-ports-none")
     for vol in spec.get("volumes", []):
@@ -259,6 +280,8 @@ def substrate_release(meta: str) -> tuple[str, str, str]:
 def substrate_workloads(url: str, constraint: str, values: str) -> list[dict]:
     tags = charts.registry_tags(url)
     version = fluxsemver.resolve(tags, constraint)
+    if not version and "substrate" in charts.UNRELEASED:
+        version = charts.fallback("substrate", url, constraint, tags, "")
     if not version:
         fail(f"no published substrate chart satisfies {constraint!r} at {url}")
     with tempfile.TemporaryDirectory() as d:
@@ -291,12 +314,8 @@ def substrate_workloads(url: str, constraint: str, values: str) -> list[dict]:
     return workloads
 
 
-def main(meta: str, connectivity: str) -> int:
-    url, constraint, values = substrate_release(meta)
-    workloads = [*substrate_workloads(url, constraint, values), WORKER_POD]
-    pes = [d for d in render(connectivity, [*CONNECTIVITY_ON, *FLEET_APIS]) if d["kind"] == "PolicyException"]
-    if not pes:
-        fail("the connectivity render carries no PolicyException with kagent, Substrate and Kyverno on")
+def hold(workloads: list[dict], pes: list[dict]) -> set[str]:
+    """Hold each workload to the exceptions that select it; the names of the exceptions used."""
     used = set()
     for w in workloads:
         v = violations(w["spec"])
@@ -314,6 +333,41 @@ def main(meta: str, connectivity: str) -> int:
                  f"the pod spec violates {sorted(v)} (missing {sorted(v - named)}, over-broad {sorted(named - v)})")
         print(f"ok: {w['name']}: {sorted(v) or 'violates nothing'}"
               + (f" — excepted by {', '.join(pe['metadata']['name'] for pe in matching)}" if matching else ""))
+    return used
+
+
+def companion(meta: str, connectivity: str, preset: str, fixture: str) -> None:
+    """The CSI companion's controller and node plugin, held to the exceptions the meta chart renders for them."""
+    docs = render(connectivity, [*CONNECTIVITY_ON, *FLEET_APIS, "--namespace", COMPANION_NAMESPACE, "-f", fixture])
+    if any(d["kind"] == "PolicyException" and d["metadata"]["name"].startswith(COMPANION) for d in docs):
+        fail(f"the connectivity render carries a CSI companion exception ({preset}); Helm would create it after the workloads it excepts")
+    workloads = [{
+        "name": f"{d['kind']} {d['metadata']['namespace']}/{d['metadata']['name']} (the CSI companion, preset {preset})",
+        "kind": d["kind"],
+        "namespace": d["metadata"]["namespace"],
+        "resourceName": d["metadata"]["name"],
+        "labels": d["metadata"].get("labels") or {},
+        "spec": d["spec"]["template"]["spec"],
+    } for d in docs if d["kind"] in ("Deployment", "DaemonSet") and d["metadata"]["name"].startswith(COMPANION)]
+    if {w["kind"] for w in workloads} != {"Deployment", "DaemonSet"}:
+        fail(f"the CSI companion ({preset}) renders {[w['name'] for w in workloads]}, not one Deployment and one DaemonSet")
+    meta_docs = render(meta, ["-f", f"{meta}/ci/ci-values.yaml", "--set", "components.flux.enabled=false", "--namespace", COMPANION_NAMESPACE,
+                              "--set", "kyvernoPolicies.enabled=true", *FLEET_APIS, *ON, "-f", fixture, *RELEASABLE])
+    pes = [d for d in meta_docs if d["kind"] == "PolicyException" and d["metadata"]["name"].startswith(COMPANION)]
+    used = hold(workloads, pes)
+    if used != {pe["metadata"]["name"] for pe in pes}:
+        fail(f"the CSI companion's exceptions {sorted(pe['metadata']['name'] for pe in pes)} are not all used by its workloads ({sorted(used)})")
+
+
+def main(meta: str, connectivity: str) -> int:
+    url, constraint, values = substrate_release(meta)
+    workloads = [*substrate_workloads(url, constraint, values), WORKER_POD]
+    pes = [d for d in render(connectivity, [*CONNECTIVITY_ON, *FLEET_APIS]) if d["kind"] == "PolicyException"]
+    if not pes:
+        fail("the connectivity render carries no PolicyException with kagent, Substrate and Kyverno on")
+    if any(pe["metadata"]["name"].startswith(COMPANION) for pe in pes):
+        fail("a CSI companion exception renders without the companion's block")
+    used = hold(workloads, pes)
     for pe in pes:
         name = pe["metadata"]["name"]
         if name in used:
@@ -327,6 +381,10 @@ def main(meta: str, connectivity: str) -> int:
         if re.search(r"\bapp: kagent\b", yaml.safe_dump(pe["spec"]["match"])):
             fail(f"PolicyException {pe['metadata']['name']} selects app: kagent, the v1alpha2 agent Deployments' label; nothing carries it on kagent API v2")
     print("ok: no exception selects app: kagent")
+    for preset, fixture in COMPANION_FIXTURES.items():
+        companion(meta, connectivity, preset, fixture)
+    print("ok: the CSI companion's controller and node plugin are held to csi-companion-controller and csi-companion-node, rendered by the meta chart, per preset; "
+          "none in the connectivity render, none without the block")
     return 0
 
 

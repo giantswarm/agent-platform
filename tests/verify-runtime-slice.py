@@ -6,7 +6,8 @@ release that runs agents on a workload cluster managed from the installation.
 Each case pins one property the slice relies on:
 
 - the profile renders exactly the runtime component set — kagent-crds,
-  substrate-crds, substrate, kagent, agentgateway (the workload cluster runs no
+  substrate-crds, substrate, kagent, cloudnative-pg (their database's operator),
+  agentgateway (the workload cluster runs no
   controller of its own) and the connectivity release; no muster, dicebear,
   valkey, Backstage, agent-manager, model-manager or MCP server, the engine off;
 - the kagent release carries the profile's snapshot location (the platform
@@ -35,7 +36,8 @@ FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2
               "--api-versions", "gateway.networking.k8s.io/v1"]
 # The installation's platform inputs the profile is layered over.
 INSTALLATION = ["--namespace", "org-acme", "--set", "global.domain=wc01.example.com", "--set", "global.identity.issuerUrl=https://dex.mc.example.com"]
-RUNTIME = {"kagent-crds", "substrate-crds", "substrate", "kagent", "agentgateway", "agent-platform-connectivity"}
+# google-access-token-credential-provider follows kagent like the Substrate entries.
+RUNTIME = {"kagent-crds", "substrate-crds", "substrate", "google-access-token-credential-provider", "kagent", "cloudnative-pg", "agentgateway", "agent-platform-connectivity"}
 KUBECONFIG = "wc01-kubeconfig"
 SNAPSHOTS = "s3://<bucket>/<cluster>"
 

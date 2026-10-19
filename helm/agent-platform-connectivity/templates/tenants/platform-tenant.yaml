@@ -1,0 +1,46 @@
+{{- /*
+The platform tenant (giantswarm/agent-platform#706; the agent-permissions plan,
+D4): the kagent namespace keeps the platform's agents for everyone. Every
+signed-in person (tenants.platform.users) is agent-platform:platform-user
+there, agent-platform:user without the EgressPolicies, which name the
+platform's egress origins and the Secrets they authenticate with; the
+platform's operators (tenants.platform.editors) and the customer's platform
+team (tenants.platformTeam) are agent-platform:editor. A list left empty
+renders no binding.
+*/ -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $t := .Values.tenants }}
+{{- with include "agent-platform.tenants.subjects" (list $t.platform.users) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-platform:platform-user
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-platform:platform-user
+subjects:
+  {{- . | nindent 2 }}
+{{- end }}
+{{- with include "agent-platform.tenants.subjects" (list $t.platform.editors $t.platformTeam) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-platform:editor
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-platform:editor
+subjects:
+  {{- . | nindent 2 }}
+{{- end }}
+{{- end }}

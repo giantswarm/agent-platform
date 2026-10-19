@@ -111,6 +111,10 @@ components:  # @schema additionalProperties: true
     enabled: false
   cluster-manager:  # @schema additionalProperties: true
     enabled: false
+  # Follows workspaces.enabled in the meta chart, which forwards the entry only
+  # while it is on: absent, it is this default.
+  workspace-manager:  # @schema additionalProperties: true
+    enabled: false
   # The components the agent-platform-standalone umbrella carried on top of the
   # fleet's roster, forwarded by the meta chart like the rest so the wiring this
   # chart renders for them gates on the same answer: the Backstage app-config and
@@ -148,12 +152,8 @@ components:  # @schema additionalProperties: true
 #                        false and agent-platform-mcps.agentgateway.viaMuster: false.
 #                        Deprecated: agentgateway-muster becomes the only topology
 #                        (giantswarm/agent-platform#252).
-#   agentgateway-direct  client -> agentgateway /mcp -> servers. As above plus
-#                        optional gateway.jwksEgress; viaMuster: false.
-#                        NOT YET SUPPORTED — install blocked (needs DCR-capable
-#                        IdP, RFC 7591/8707).
 ingress:
-  mode: agentgateway-muster    # agentgateway-muster | muster-direct | agentgateway-direct
+  mode: agentgateway-muster    # agentgateway-muster | muster-direct
   parentRefs: []               # ALL modes: public Gateway, shared by both rendered routes
   hostnames: []                # ALL modes: muster public hostname(s)
   httpRoute:                   # shared base, applied to both rendered HTTPRoutes
@@ -499,6 +499,14 @@ gateway:
       agent_instance_id:
         enabled: true
         expression: '{{ include "agent-platform.substrate.egressCall" . }} ? request.headers["x-kagent-agent-instance-id"] : ""'
+      # The request's id: the x-request-id request header, which the Dev
+      # Portal's backend sets on every call it makes through the data plane
+      # and shows in an error banner, so the banner's id finds this line. The
+      # data plane generates none; a request without the header logs no id.
+      # Any caller can set it: correlation, never identity.
+      request_id:
+        enabled: true
+        expression: 'request.headers["x-request-id"]'
 
 # Chart-owned public edge (agentgateway-* modes only): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
@@ -570,14 +578,51 @@ llmRouting:
   # through untouched, so reach to the listener grants no spend. Candidates are tried in name order and the first
   # whose `match` takes the model wins, so a `*` entry would shadow every model
   # named after it — a served model (model-manager, the LLMEndpoint
-  # document) joins under its preset's name. The first entry's
-  # provider is the one whose ModelConfigs ride the listener
-  # (kagent.modelConfigs, modelConfigPolicy).
+  # document) joins under its preset's name. Every entry's provider rides the
+  # listener: its ModelConfigs (kagent.modelConfigs, modelConfigPolicy) get
+  # the listener as baseUrl. An OpenAI entry serves the Responses route
+  # (/v1/responses) a codex agent calls, metered and rate-limited like the
+  # rest:
+  #   - name: openai
+  #     provider: OpenAI
+  #     baseURL: https://api.openai.com/v1
+  #     match: gpt-*
   models:  # @schema minItems: 1; item: object; itemProperties: {"name": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63}, "provider": {"type": "string", "enum": ["Anthropic", "Baseten", "Cerebras", "Cohere", "Deepinfra", "Deepseek", "Fireworks", "Gemini", "Groq", "Huggingface", "Mistral", "OpenAI", "Openrouter", "TogetherAI", "XAI"]}, "baseURL": {"type": "string", "pattern": "^https?://[^/]+/.+"}, "match": {"type": "string"}, "visibility": {"type": "string", "enum": ["Public", "Internal"]}}
     - name: anthropic
       provider: Anthropic
       baseURL: https://api.anthropic.com/v1
       match: claude-*
+  # Token (or request) rate limits on the LLM listener: each entry is one
+  # item of an AgentgatewayPolicy's traffic.rateLimit.local, on the data-plane
+  # Gateway's `llm` listener (sectionName). Empty (the default) renders no
+  # policy. An entry sets exactly one of `tokens` (LLM tokens, input and
+  # output) or `requests` per `unit` (Seconds, Minutes, Hours), optionally
+  # `burst`, and optionally `key`: a CEL expression through tpl that gives
+  # each distinct value a bucket of its own (a request whose key cannot be
+  # evaluated shares one bucket). A request is charged against every entry.
+  #   - Without a key, one bucket is shared by every caller and every model on
+  #     the listener: agents, coding agents and served models alike. Pair it
+  #     with a keyed entry so one caller cannot drain it for the rest.
+  #   - Key by agent with the predicate the metric labels use: the kagent
+  #     runtime's identity headers count only when the call comes through the
+  #     Substrate egress, so no other pod picks its own bucket by sending them.
+  #   - Local: each data-plane replica keeps its own buckets, so the effective
+  #     limit is the value times the replicas.
+  #   - Tokens are counted once a response completes, so requests already in
+  #     flight can overshoot; a `requests` entry bounds how many.
+  #   - An empty bucket answers 429 until it refills. A per-second bucket is
+  #     drained by one long completion and an hourly one can refuse calls for
+  #     up to an hour, hence Minutes.
+  #   - It works alongside the provider's own workspace limits.
+  rateLimits: []  # @schema type: array; maxItems: 16; itemRef: files/llm/rate-limit.schema.json
+  # - tokens: 2000000          # the whole listener
+  #   unit: Minutes
+  # - tokens: 400000           # each agent
+  #   unit: Minutes
+  #   key: >-
+  #     {{ include "agent-platform.substrate.egressCall" . }}
+  #     ? request.headers["x-kagent-agent-namespace"] + "/" + request.headers["x-kagent-agent"]
+  #     : source.unverifiedWorkload.namespace + "/" + source.unverifiedWorkload.serviceAccount
   # The LLM endpoint outside the cluster (llmRouting.external): a public
   # hostname, <hostPrefix>.<global.domain>, with a route of its own on the
   # data plane that every model of the endpoint also attaches to, behind API
@@ -610,6 +655,14 @@ llmRouting:
     listener:
       name: llm-external
       port: 8082
+    # Rate limits on the external route, the same entries as
+    # llmRouting.rateLimits (a policy of its own, its own buckets): the
+    # listener's limits do not reach this route. Key by API key with
+    # `apiKey.name`, the key entry's metadata.name.
+    rateLimits: []  # @schema type: array; maxItems: 16; itemRef: files/llm/rate-limit.schema.json
+    # - tokens: 200000
+    #   unit: Minutes
+    #   key: apiKey.name
     apiKeys:
       secretRef:
         name: ""
@@ -620,9 +673,14 @@ llmRouting:
   # A MutatingAdmissionPolicy that sends a ModelConfig this chart does NOT
   # render through the LLM listener — one created by Backstage, agent-manager or
   # kubectl. Chart-owned entries already carry the baseUrl (kagent.modelConfigs
-  # below), so the policy never touches them. It writes only when the provider
-  # is the first llmRouting.models entry's and the baseUrl is absent. An object that
-  # names its own baseUrl is never touched.
+  # below), so the policy never touches them. One policy per provider of
+  # llmRouting.models; each writes only when the ModelConfig's provider is its
+  # own and the baseUrl is absent (an OpenAI ModelConfig gets the listener's
+  # URL with /v1). An object that names its own baseUrl is never touched.
+  # Each write is marked (annotation
+  # agent-platform.giantswarm.io/llm-routing-base-url), and the hook
+  # <release>-llm-routing-modelconfigs takes a marked baseUrl back off once
+  # routing is off or its provider is no longer served (giantswarm/agent-platform#1057).
   #
   # Rendered only where the API server serves
   # admissionregistration.k8s.io/v1/MutatingAdmissionPolicy, which is Kubernetes
@@ -676,6 +734,21 @@ networkPolicy:
   #   additionalEgressFQDNs:
   #     - matchName: dex.example.gigantic.io
   additionalEgressFQDNs: []
+  # Substrate's credential provider (k8s-credential-provider, ate-system),
+  # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) it reaches
+  # on 443/TCP besides the apiserver and DNS, through the DNS proxy rule the
+  # policy renders with them. The default is the token endpoint it exchanges a
+  # Vertex AI service account key at (google-access-token.k8s.io, for
+  # AnthropicVertexAI and GeminiVertexAI ModelConfigs); kagent refuses a key
+  # whose token_uri names another host. A list replaces the default as a
+  # whole: keep oauth2.googleapis.com when adding a name. [] leaves the
+  # provider the apiserver and DNS only, and every Vertex AI call fails with
+  # "could not exchange the service account key for an access token". Ignored
+  # by the kubernetes flavor, which renders no egress policy for Substrate.
+  substrate:
+    credentialProvider:
+      egressFQDNs:  # @schema item: object; itemProperties: {"matchName": {"type": "string", "minLength": 1}, "matchPattern": {"type": "string", "minLength": 1}}
+        - matchName: oauth2.googleapis.com
   # Extra in-cluster egress ports for muster -> MCP backends reached via a
   # ClusterIP whose pod listens on a non-80/443 port (e.g. the in-cluster
   # pro / runbooks MCP servers on 8080, or tunnelport RemoteApp tunnels whose
@@ -779,6 +852,7 @@ kyvernoPolicies:
   rules:  # @schema additionalProperties: true
     privileged-containers: disallow-privileged-containers
     host-ports-none: disallow-host-ports
+    host-namespaces: disallow-host-namespaces
     host-path: disallow-host-path
     restricted-volumes: restrict-volume-types
     adding-capabilities: disallow-capabilities
@@ -1069,11 +1143,8 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     # viaMuster — when true, routes all MCP traffic through muster instead of
     # having agentgateway connect to each server directly. muster keeps all
-    # per-server connection logic, OAuth, and RFC 8693 token exchange. The
-    # direct topology (false) needs a DCR-capable IdP, which is not yet
-    # available; when Zitadel or similar ships RFC 7591 + RFC 8707, muster's
-    # aggregator role can be retired.
-    viaMuster: true            # must match ingress.mode (guard-enforced): agentgateway-muster=>true, agentgateway-direct=>false
+    # per-server connection logic, OAuth, and RFC 8693 token exchange.
+    viaMuster: true            # must match ingress.mode (guard-enforced): agentgateway-muster=>true, muster-direct=>false
     # musterUrl — in-cluster address of the muster Service. Stable because
     # muster.fullnameOverride pins the Service name to `muster` regardless
     # of the umbrella release name. Override only if the namespace differs.
@@ -1327,8 +1398,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # the kagent namespace, named after the pool and selecting
     # `ate.dev/worker-pool: <name>` — the label Substrate's ate-controller puts
     # on every worker pod (giantswarm/agent-platform#472, the #439 pattern; the
-    # kagent chart has no budget template). One worker hosts one actor at a
-    # time: with maxUnavailable: 1 a voluntary drain (Karpenter consolidation,
+    # kagent chart has no budget template). A worker hosts many actors (ateom's
+    # --max-actors, default 1000): with maxUnavailable: 1 a voluntary drain (Karpenter consolidation,
     # a node roll) moves one worker at a time instead of the whole pool;
     # AlwaysAllow keeps a worker that is not Ready evictable. Exactly one of
     # minAvailable / maxUnavailable (int or percentage); the render refuses
@@ -1341,6 +1412,22 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       minAvailable: null
       maxUnavailable: 1
       unhealthyPodEvictionPolicy: AlwaysAllow
+    # The PriorityClass the pool's worker pods run at, rendered by this chart
+    # (cluster-scoped; giantswarm/agent-platform#999); the meta chart names it
+    # in the pool's template.priorityClassName unless an installation names
+    # its own. value: above the default priority 0, so a pod making room on a
+    # full node (atelet, ate-node-critical, PreemptLowerPriority) evicts the
+    # ordinary workloads before a worker, and below the cluster's own classes
+    # (monitoring, the platform's, atelet's 1000000000); the render refuses
+    # anything outside 1..999999999. preemptionPolicy Never and globalDefault
+    # false are the chart's. value is immutable on the API: change it under a
+    # new name. enabled: false renders none, and the meta chart then names
+    # none: the workers run at priority 0. Inert while
+    # components.kagent.enabled is false.
+    priorityClass:
+      enabled: true
+      name: agent-platform-worker-pool
+      value: 1000000
 
   # Keep kagent core resources in a dedicated namespace separate from the
   # umbrella release namespace. NOTE: the bundled agent subcharts each need
@@ -1451,7 +1538,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       reverse-proxy: true
       skip-jwt-bearer-tokens: true
       skip-auth-route: "^/(health|login)$"
-      skip-auth-regex: "^/(login|_next/static|_next/image|login-bg\\.(jpg|png|webp)|logo-.*\\.png|favicon\\.ico).*$"
+      # The sign-in page loads without a session: /login and what its document
+      # fetches (the UI's Vite bundle under /assets/, env-config.js,
+      # favicon.svg). Every other path needs one.
+      skip-auth-regex: "^/(login|env-config\\.js|favicon\\.svg|assets/[^/]+\\.(js|css|svg|png|woff2?))$"
       custom-templates-dir: /templates
     service:
       type: ClusterIP
@@ -1475,21 +1565,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # service account token pre-created as a Secret.
   # To enable: set grafana-mcp.grafana.serviceAccountToken (or secretRef).
   grafana-mcp:
-    enabled: false
-
-  # kagent's built-in MCP tool server: kubectl-style k8s ops, Helm releases,
-  # Argo Rollouts tools. Disabled: muster-registered MCP servers cover these
-  # surfaces. The kagent chart renders the subchart into its namespaceOverride
-  # (the release namespace without it) and composes the kagent-tool-server
-  # RemoteMCPServer URL from the same key; this chart derives the controller's
-  # and the actors' egress to it the same way (agent-platform.kagentTools.*,
-  # read by templates/kagent/netpol.yaml and templates/substrate/netpol.yaml),
-  # so the rules follow wherever the chart renders the server. No default for
-  # namespaceOverride here: the block reaches this chart and the kagent chart
-  # from the meta chart alike, and a default of this chart's own would let the
-  # two disagree the moment an installation unsets it (the meta chart pins it
-  # to the kagent namespace with the rest of kagent).
-  kagent-tools:
     enabled: false
 
   # Semantic document search MCP server (doc2vec embeddings, vector similarity).
@@ -1607,8 +1682,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Expose the kagent controller API through agentgateway: an AgentgatewayBackend
   # (h2c to the controller) and a GRPCRoute in the release namespace, matched by
   # gRPC service (controllerRoute.grpc.services) —
-  # kagent.api.v1alpha1.{AgentService, AgentTemplateService, ModelService,
-  # SessionService, SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
+  # kagent.api.v1alpha1.{AgentService, AgentTemplateService, HarnessService,
+  # ModelService, SessionService, SystemService} and lf.a2a.v1.A2AService — never by path prefix (the
   # controller has no REST). Native gRPC over HTTP/2 from the public hostname
   # and from the in-cluster agentgateway Service
   # (grpc://agentgateway.<release namespace>.svc.cluster.local:8080, h2c), and
@@ -1638,6 +1713,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       services:
         kagent.api.v1alpha1.AgentService: []
         kagent.api.v1alpha1.AgentTemplateService: []
+        kagent.api.v1alpha1.HarnessService: []
         kagent.api.v1alpha1.ModelService: []
         kagent.api.v1alpha1.SessionService: []
         kagent.api.v1alpha1.SystemService: []
@@ -1661,6 +1737,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # so the default is the CRD's maximum; a longer turn runs through the
       # MCP Tasks extension.
       timeout: 300
+      # The name the Dev Portal shows for the server (the MCPServer's
+      # ui.giantswarm.io/display-name annotation); empty renders none.
+      displayName: Kagent
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
@@ -1761,8 +1840,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # llmRouting.enabled the chart fills in the LLM listener, so the gateway
   #   # meters this model's usage. Set it to reach a different upstream: the
   #   # provider's own URL is how a model stays on the direct, unmetered path.
-  #   # An entry whose provider differs from the first llmRouting.models entry's stays
-  #   # direct either way: the listener forwards to one provider. Only the
+  #   # An entry whose provider no llmRouting.models entry serves stays direct
+  #   # either way; an OpenAI entry's listener URL ends in /v1. Only the
   #   # Anthropic, Mistral, OpenAI and SAPAICore providers carry a baseUrl in
   #   # ModelConfigSpec, under the CRD's block key (anthropic, mistral, openAI,
   #   # sapAICore); the render fails for a baseUrl on any other provider.
@@ -1779,6 +1858,28 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   # inherits kagent.providers.anthropic.config.maxTokens; unset everywhere,
   #   # kagent's built-in 8192 applies. Any other provider refuses the key.
   #   maxTokens: 32000
+  #   # Optional (OpenAI). The OpenAI HTTP API the runtime speaks:
+  #   # chatCompletions (the CRD's default) or responses. A model a codex agent
+  #   # uses needs responses and no maxTokens: the codex compiler refuses any
+  #   # other OpenAI option. Any other provider refuses the key.
+  #   apiFormat: responses
+  #   # Optional (OpenAI). What apiKeySecret holds: apiKey (the CRD's default)
+  #   # or chatgptOAuth, a ChatGPT subscription login (docs/chatgpt-login.md).
+  #   # chatgptOAuth renders no apiKeySecretKey, needs apiFormat: responses,
+  #   # and stays off the LLM listener. Any other provider refuses the key.
+  #   credentialType: chatgptOAuth
+  # - name: openai-gpt-5-5   # a codex model, through the llm listener's
+  #   provider: OpenAI       # OpenAI entry (llmRouting.models)
+  #   model: gpt-5.5
+  #   apiKeySecret: kagent-openai
+  #   apiKeySecretKey: OPENAI_API_KEY
+  #   apiFormat: responses
+  # - name: openai-chatgpt-codex   # a codex model on this installation's own
+  #   provider: OpenAI             # ChatGPT login (docs/chatgpt-login.md)
+  #   model: gpt-5.6-luna
+  #   apiKeySecret: kagent-chatgpt-login
+  #   credentialType: chatgptOAuth
+  #   apiFormat: responses
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
@@ -1811,6 +1912,16 @@ postgres:
   namespace: kagent
   clusterName: kagent-pg
   instances: 3
+  # How the operator updates the primary when a change rolls the instances
+  # (resources, image, extensions), rendered as Cluster.spec.primaryUpdateMethod
+  # with primaryUpdateStrategy unsupervised. switchover promotes an
+  # already-updated replica and restarts the old primary as a replica, so
+  # writes pause for the switchover only (seconds); restart restarts the
+  # primary in place, and writes fail until it is Ready again (minutes). With
+  # instances: 1 there is no replica to switch over to, so the primary
+  # restarts in place either way and writes fail for that time.
+  # null renders neither field: the operator's defaults (restart) apply.
+  primaryUpdateMethod: switchover  # @schema enum: [switchover, restart]
   storage:
     size: 20Gi
     # EKS: gp3. Azure: managed-premium. on-prem: rook-ceph or local-path.
@@ -1843,6 +1954,29 @@ postgres:
   #     nodeSelector:
   #       kubernetes.io/arch: amd64
   affinity: {}  # @schema type: object; additionalProperties: true
+  # Resources of the postgres container (and the operator's bootstrap init
+  # container), rendered verbatim as Cluster.spec.resources. Kyverno's
+  # require-emptydir-requests-and-limits wants ephemeral-storage requests and
+  # limits on every container that mounts an emptyDir without a sizeLimit, and
+  # the operator's plugins emptyDir (backup.method plugin) has none. The memory
+  # limit covers the shm emptyDir below, which is memory-backed. Changing these
+  # rolls the instances, replicas first, then a switchover.
+  resources:  # @schema skipProperties: true; additionalProperties: true
+    requests:
+      cpu: 100m
+      memory: 512Mi
+      ephemeral-storage: 256Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+      ephemeral-storage: 2Gi
+  # sizeLimit of the operator's two emptyDirs, rendered as
+  # Cluster.spec.ephemeralVolumesSizeLimit: shm (/dev/shm, memory-backed,
+  # PostgreSQL's dynamic shared memory) and temporaryData (scratch-data: the
+  # instance manager's /controller and /run). Empty renders no field.
+  ephemeralVolumesSizeLimit:
+    shm: 256Mi
+    temporaryData: 1Gi
   # pgvector — required for kagent Memory API (RAG / semantic retrieval).
   # pgvector is NOT a trusted extension (C functions), so CREATE EXTENSION runs
   # as superuser. Two modes:
@@ -2003,7 +2137,17 @@ postgres:
           key: ""
       # The plugin sidecar that runs in every instance pod.
       sidecar:
-        resources: {}  # @schema skipProperties: true; additionalProperties: true
+        # The sidecar mounts the operator's plugins emptyDir, which carries no
+        # sizeLimit, so Kyverno's require-emptydir-requests-and-limits wants
+        # its ephemeral-storage requests and limits.
+        resources:  # @schema skipProperties: true; additionalProperties: true
+          requests:
+            cpu: 10m
+            memory: 64Mi
+            ephemeral-storage: 16Mi
+          limits:
+            memory: 256Mi
+            ephemeral-storage: 256Mi
     # method: volumeSnapshot
     volumeSnapshot:
       className: ""
@@ -2208,12 +2352,12 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.3.3"
+      tag: "2.4.2"
   proxy:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.3.3"
+      tag: "2.4.2"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -2757,7 +2901,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 1.10.0
+      tag: 2.6.4
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
@@ -2914,6 +3058,306 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
       # networkPolicy.kubernetes.worldExcludedCIDRs) goes.
       cidrs: []
 
+# === Agent tenants (giantswarm/agent-platform#706) ===
+# The RBAC of agent tenants: with kagent on, the three ClusterRoles
+# agent-platform:user, agent-platform:editor and agent-platform:admin
+# (templates/tenants/clusterroles.yaml) and the platform tenant's
+# RoleBindings in the kagent namespace; muster's MCPServers listed to every
+# signed-in person in muster's namespace. The meta chart's copy of this block
+# documents every key and forwards it.
+tenants:
+  platform:
+    # -- Every signed-in person: agent-platform:user in the kagent namespace,
+    # list (get, watch) on muster's MCPServers in muster's namespace. The
+    # default, system:authenticated, includes every ServiceAccount: every pod
+    # with a token can read the platform tenant's Agents, RemoteMCPServer URLs
+    # and muster's MCPServer specs. An installation can set its OIDC
+    # "everyone" group instead.
+    users:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: system:authenticated
+    # -- The platform's operators: agent-platform:editor in the kagent
+    # namespace.
+    editors:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: giantswarm-ad:giantswarm-admins
+      - apiGroup: rbac.authorization.k8s.io
+        kind: Group
+        name: giantswarm-github:giantswarm:giantswarm-admins
+  # -- The customer's platform team: agent-platform:editor in the kagent
+  # namespace beside platform.editors (the meta chart also adds it to muster's
+  # editor bindings).
+  platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+  organizations:
+    # -- The worker pods of the namespaces labelled
+    # `giantswarm.io/organization` (agent-manager's tenants, its
+    # `tenants.enabled`; it copies the workers' own policy into them,
+    # `substrate-workers` in the cilium flavor, `substrate-workers-ingress` in
+    # the kubernetes flavor): with Agent Substrate on, the router, the egress
+    # gateway and the actors' dns admit them as they admit the kagent
+    # namespace's workers, and the workers' Kyverno PolicyException covers
+    # them when Substrate's controllers write them (Kyverno 1.15.2 or later;
+    # an older Kyverno never applies the exception and the workers are
+    # refused). Two ValidatingAdmissionPolicies hold the workers there for
+    # every requester: only agent-manager's ServiceAccount writes a
+    # WorkerPool, as a copy of kagent.substrateWorkerPool.name in the kagent
+    # namespace (only replicas may differ), and only Substrate's controllers
+    # write a Deployment, ReplicaSet or Pod labelled `ate.dev/worker-pool`; no
+    # one adds an ephemeral container to a worker, execs into one or
+    # attaches to one (Kubernetes 1.30 or later). A namespace without the
+    # label gets nothing. Off, the render is that of a chart without the key.
+    enabled: false
+
+# === Workspaces (workspaces, workspace-manager) ===
+# The one switch of the platform's workspaces: an Organization's repositories
+# mirrored on one shared read-write-many volume in the kagent namespace, a
+# directory per Session. On, it turns on the
+# workspace-manager component (components.workspace-manager follows it; an
+# explicit value that disagrees fails the render) and gates every later
+# workspace piece. Off, the default, the render is exactly that of a chart
+# without workspaces: no release, and nothing of the three blocks below
+# reaches the connectivity release.
+workspaces:
+  enabled: false
+  # The workspace storage: the read-write-many StorageClass the workspace
+  # volumes are claimed from (storageClassName, workspaces-rwx: the name every
+  # installation gives the class it provides; emptied while the switch is on,
+  # the render fails) and whether this chart renders it from a preset
+  # (storageClass.create; templates/workspaces/storageclass.yaml). The meta
+  # chart's copy of this block documents every key; it forwards the block
+  # while workspaces are on.
+  storage:
+    storageClassName: workspaces-rwx
+    storageClass:
+      create: false
+      preset: ""  # @schema enum: ["", efs, azureFiles, nfs]
+      efs:
+        fileSystemId: ""
+        basePath: /workspaces
+        directoryPerms: "700"
+      azureFiles:
+        skuName: PremiumV2_LRS
+        networkEndpointType: privateEndpoint
+      nfs:
+        server: ""
+        share: /
+      parameters: {}  # @schema additionalProperties: true
+      mountOptions: []  # @schema item: string
+  # Substrate's side of a Session's workspace mount: the CSI driver Substrate
+  # drives for the workspace volumes, rendered as the cluster-scoped
+  # CSIDriverConfig (templates/workspaces/csidriverconfig.yaml) while the
+  # switch is on, its name is set and Substrate's CRDs are there, and the
+  # egress of ate-api-server to the controller endpoint's port. The meta
+  # chart's copy of this block documents every key.
+  substrate:
+    csiDriver:
+      name: ""  # @schema pattern: ^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+      controllerEndpoint: ""  # @schema pattern: ^$|^(tcp|dns)://.+:[0-9]+$
+      nodeSocketOverride: ""  # @schema pattern: ^$|^unix://.+$
+      tls:
+        enabled: true
+        usePodIdentity: true
+        serverName: ""
+    # The platform's own CSI companion for the cluster's file driver
+    # (templates/workspaces/csi-companion.yaml): the driver's controller
+    # behind an mTLS proxy for ate-api-server and its node plugin on the
+    # Substrate worker nodes with substrateDir propagated, rendered while the
+    # switch is on and this is enabled; csiDriver above is derived from it
+    # while its name is empty. README "The workspaces' CSI companion"; the
+    # meta chart's copy of this block documents every key.
+    csiCompanion:
+      enabled: false
+      preset: ""  # @schema enum: ["", efs, azureFiles]
+      image:
+        registry: gsoci.azurecr.io
+        repository: ""
+        tag: ""
+      controller:
+        args: []  # @schema item: string
+        extraArgs: []  # @schema item: string
+        nodeSelector: {}  # @schema additionalProperties: true
+        tolerations: []
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 10m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            memory: 256Mi
+            ephemeral-storage: 256Mi
+      proxy:
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/envoy
+          tag: v1.40.0
+        port: 10000
+        clientIdentity: spiffe://cluster.local/ns/ate-system/sa/ate-api-server
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 10m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            memory: 256Mi
+            ephemeral-storage: 256Mi
+      service:
+        port: 50051
+      node:
+        args: []  # @schema item: string
+        extraArgs: []  # @schema item: string
+        socketDir: /var/lib/kubelet/plugins/agent-platform-csi-companion
+        substrateDir: /var/lib/ate
+        nodeSelector: {}  # @schema additionalProperties: true
+        tolerations: []
+        efs:
+          stateDir: /var/run/agent-platform-csi-companion/efs
+          configDir: /var/lib/agent-platform-csi-companion/efs-utils
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 10m
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+          limits:
+            memory: 512Mi
+            ephemeral-storage: 256Mi
+      livenessProbe:
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/livenessprobe
+          tag: v2.20.0
+        nodePort: 29662
+        resources:  # @schema additionalProperties: true
+          requests:
+            cpu: 5m
+            memory: 16Mi
+            ephemeral-storage: 16Mi
+          limits:
+            memory: 64Mi
+            ephemeral-storage: 64Mi
+      cloudIdentity:
+        aws:
+          roleARN: ""
+        azure:
+          workloadIdentityClientID: ""
+  # The Organizations whose members manage workspaces ({name, memberGroups}),
+  # which the meta chart forwards to the workspace-manager release; this chart
+  # renders nothing of them. The meta chart's copy documents the key.
+  organizations: []  # @schema item: object; itemRequired: [name, memberGroups]; itemProperties: {"name": {"type": "string"}, "memberGroups": {"type": "array", "items": {"type": "string"}}}
+
+# The workspace-manager component chart's values (giantswarm/workspace-manager),
+# as the meta chart forwards them to that release; this chart reads
+# fullnameOverride, service, oauth, muster and providers from them for the
+# wiring it renders (workspaceManager below), and the component release the
+# rest. Tools appear as x_workspace-manager_<tool> through the chart's own
+# MCPServer CR, unpinned, like every manager's. The meta chart's copy of this
+# block documents every key.
+workspace-manager:  # @schema skipProperties: true; additionalProperties: true
+  fullnameOverride: workspace-manager
+  oauth:
+    enabled: true
+    # The manager's public base URL; empty derives
+    # https://<fullnameOverride>.<global.domain>. The route
+    # (workspaceManager.route) serves its host.
+    baseURL: ""
+    dex:
+      allowPrivateURLs: true
+    sso:
+      allowPrivateIPs: true
+  muster:
+    mcpServer:
+      enabled: true
+      auth:
+        forwardToken: true
+        # The cross-client audience a portal session's id_token carries (the
+        # kube-apiserver's, like the other managers'): muster requests it at
+        # login and the chart trusts it next to oauth.trustedAudiences, so a
+        # forwarded portal token is accepted. Users sign in once more after
+        # it changes.
+        requiredAudiences:
+          - dex-k8s-authenticator
+  # The installation's provider instances, several at once: each a unique
+  # `name` (a DNS label: the name workspaces refer to), a `kind`
+  # and the kind's `values`, whose credentials (the sync credential, the OAuth
+  # client's secret) are Secret references. Kind `github` (github.com or a
+  # GitHub Enterprise Server) takes `url` (default https://github.com),
+  # `apiURL` (derived from url), `app.id` and `app.privateKey`;
+  # `oauth.clientID` and `oauth.clientSecret`, the App's OAuth client, give
+  # muster's pin its client Secret (the meta chart derives the pin), e.g.
+  #   providers:
+  #     - name: github
+  #       kind: github
+  #       values:
+  #         app:
+  #           id: "123"
+  #           privateKey: {name: workspace-github, key: private-key}
+  #         oauth:
+  #           clientID: Iv1.abc
+  #           clientSecret: {name: workspace-github, key: client-secret}
+  # The connectivity chart opens the manager's egress to each instance's hosts
+  # (url and apiURL; github.com and api.github.com for a github instance
+  # without url). Empty, the default, configures none.
+  providers: []
+
+# The wiring the connectivity chart renders for the workspace-manager
+# component (it reads this block, not the chart's). Inert while
+# workspaces.enabled is false. The tools reach muster in-cluster; only the
+# grants' key set is public (route below).
+workspaceManager:  # @schema skipProperties: true; additionalProperties: true
+  # The public route of the grants' key set on the host of
+  # workspace-manager.oauth.baseURL: /.well-known/jwks.json (Exact) to the
+  # manager's Service, nothing else (templates/workspace-manager/route.yaml). parentRefs empty: muster's
+  # (ingress.parentRefs), else the chart-owned edge, else
+  # global.gatewayApi.parentRefs.
+  route:
+    enabled: true
+    parentRefs: []
+  # Create the chart's own grant signing key Secret, secretName with the entry
+  # key, with providers and oauth.enabled: the entry generated when missing
+  # (an EC P-256 private key, PEM), every entry kept
+  # (templates/workspace-manager/grant-key.yaml). The manager gets it as
+  # workspace-manager.grant.signingKey when the installation references
+  # nothing or exactly this Secret and entry; a reference to another Secret
+  # is the installation's own key, which the chart never creates.
+  grantKey:
+    create: true
+    secretName: workspace-manager-grant-keys
+    key: key-1
+  # Network policy inputs; the policies render under networkPolicy (enabled +
+  # flavor). Ingress: muster (MCPServer on), kagent's controller (the JWKS
+  # endpoint a Session's workspace grant is verified with, kagent on), the
+  # public Gateway the route attaches to (route.enabled) and the kubelet's
+  # probes. Egress: DNS, the Kubernetes API (the workspace objects,
+  # volumes and Jobs it writes in the kagent namespace), kagent's controller
+  # API on 8083 (kagent on: workspace-manager.kagent.address; the controller
+  # admits the manager there too), the identity provider
+  # (oauth on: the Dex issuer by name, or for workspace-manager.oauth.provider
+  # google its discovery, JWKS/userinfo and token hosts), each provider
+  # instance's hosts (workspace-manager.providers) and the names and blocks of
+  # egress.
+  networkPolicy:
+    ingress:
+      # Callers admitted on the Service port next to muster and kagent's
+      # controller: a list of pod label maps (matchLabels), every one a
+      # workload in the release namespace. Empty, the default, admits no one
+      # else.
+      additionalPeers: []
+    # Further destinations of the service on 443: a provider's host the
+    # instance list does not name (a proxy, a mirror), a private identity
+    # provider.
+    egress:
+      # cilium flavor: Cilium FQDN selectors (matchName, matchPattern),
+      # resolved through the DNS proxy rule the policy renders. Ignored by the
+      # kubernetes flavor (see cidrs).
+      fqdns: []
+      # IP blocks, opened on 443 in both flavors. kubernetes flavor: vanilla
+      # NetworkPolicy selects addresses, never names, so an empty list (the
+      # default) opens 443 to every public destination for the providers —
+      # 0.0.0.0/0 minus networkPolicy.kubernetes.worldExcludedCIDRs; a list
+      # here narrows the providers' egress to exactly these blocks.
+      cidrs: []
+
 # === The standalone chart's extras: component chart values and their wiring ===
 # Values of the backstage, mcp-kubernetes, cloudnative-pg and kserve component
 # charts. Consumed by those charts and forwarded here via forwardAllValues (the
@@ -3066,6 +3510,10 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
   mcpServer:
     enabled: true
     managementCluster: ""
+    # The name the Dev Portal shows for the server (the MCPServer's
+    # ui.giantswarm.io/display-name annotation): agent-platform-mcps' kubernetes
+    # family's, which a family member shares. Empty renders none.
+    displayName: Kubernetes
 
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
 # The kagent-crds component's values (kagent main ships its CRDs as their own
@@ -3098,6 +3546,10 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
     extraEnv: []
 # The substrate-crds component's values (none); forwarded, read by nothing here.
 substrate-crds: {}  # @schema skipProperties: true; additionalProperties: true
+# The Google access-token credential provider's values (components.google-access
+# -token-credential-provider): forwarded to its own release, nothing here reads
+# them.
+google-access-token-credential-provider: {}  # @schema skipProperties: true; additionalProperties: true
 kserve-llmisvc-crd: {}  # @schema skipProperties: true; additionalProperties: true
 # The llm-d controller chart's values; this chart reads
 # kserve.createSharedResources and kserve.controller.deploymentMode for its

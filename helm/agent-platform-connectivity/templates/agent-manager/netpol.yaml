@@ -6,6 +6,12 @@
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.agentManager.oauthEnabled" . }}
+{{- /* muster's filter_tools resolves a claude Harness agent's toolset as the
+caller (the caller's IdP token as the bearer): only with OAuth on and muster in
+the release, on the port of the muster URL agent-manager composes
+(agent-platform.musterMcpUrl). */ -}}
+{{- $filterToolsOn := and $musterOn $oauthOn }}
+{{- $musterPort := include "agent-platform.musterServicePort" . }}
 {{- /* Extra same-namespace callers admitted on the Service port
 (agentManager.networkPolicy.ingress.additionalPeers): pod label maps, each
 rendered as one more ingress peer in the flavor's own dialect. */ -}}
@@ -88,7 +94,8 @@ spec:
 ---
 # Egress from agent-manager: DNS (with Cilium's proxy clause so the FQDN
 # selectors below resolve), the Kubernetes API (HelmReleases, OCIRepositories,
-# Agents, ModelConfigs, workloads — as the caller), the identity provider
+# Agents, ModelConfigs, workloads — as the caller), muster (filter_tools, OAuth
+# on), the identity provider
 # (agent-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
 # Dex issuer by name, or the three Google hosts for the google provider) and
 # the agent chart's sources — its OCI registry (versions, values schema), the
@@ -123,6 +130,17 @@ spec:
       toPorts:
         - ports:
             - port: {{ $dataplanePort | quote }}
+              protocol: TCP
+    {{- end }}
+    {{- if $filterToolsOn }}
+    # muster's filter_tools (a claude Harness agent's toolset, as the caller).
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ $musterPort | quote }}
               protocol: TCP
     {{- end }}
     {{- if $oauthOn }}
@@ -247,7 +265,8 @@ spec:
           protocol: TCP
     {{- end }}
 ---
-# Egress from agent-manager: DNS, the Kubernetes API, and — vanilla
+# Egress from agent-manager: DNS, the Kubernetes API, muster (filter_tools,
+# OAuth on), and — vanilla
 # NetworkPolicy has no FQDN selector — every public destination on 443 for the
 # identity provider (Dex or Google), the chart registry, its storage front and
 # GitHub (agentManager.networkPolicy.egress.cidrs narrows the chart egress,
@@ -304,6 +323,16 @@ spec:
               gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
       ports:
         - port: {{ $dataplanePort | int }}
+          protocol: TCP
+    {{- end }}
+    {{- if $filterToolsOn }}
+    # muster's filter_tools (a claude Harness agent's toolset, as the caller).
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: muster
+      ports:
+        - port: {{ $musterPort | int }}
           protocol: TCP
     {{- end }}
     {{- include "agent-platform.agentManager.chartSourcesEgress.kubernetes" . | nindent 4 }}

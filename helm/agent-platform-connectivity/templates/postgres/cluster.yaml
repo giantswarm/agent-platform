@@ -32,6 +32,17 @@ spec:
   # primary over when its node is drained, and its budgets stay on.
   enablePDB: false
   {{- end }}
+  {{- with .Values.postgres.primaryUpdateMethod }}
+  # A change that rolls the instances (resources, image, extensions) restarts
+  # the replicas first, then updates the primary without waiting for a person
+  # (unsupervised). switchover promotes an updated replica and restarts the old
+  # primary as a replica, so writes pause for the switchover only; restart
+  # restarts the primary in place, and writes fail until it is back. With one
+  # instance there is no replica to promote: the primary restarts in place
+  # either way.
+  primaryUpdateStrategy: unsupervised
+  primaryUpdateMethod: {{ . }}
+  {{- end }}
   {{- with include "agent-platform.postgres.serviceAccountAnnotations" . }}
   # The operator creates a ServiceAccount named after the Cluster; these
   # annotations bind it to a cloud identity (IRSA role, Azure workload identity)
@@ -53,6 +64,19 @@ spec:
   {{- with .Values.postgres.affinity }}
   # CNPG's AffinityConfiguration, forwarded verbatim.
   affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.postgres.resources }}
+  # The postgres container's and the bootstrap init container's resources.
+  # Kyverno's require-emptydir-requests-and-limits wants ephemeral-storage
+  # requests and limits on every container mounting an emptyDir without a
+  # sizeLimit: the operator's plugins volume (backup plugin) has none.
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.postgres.ephemeralVolumesSizeLimit }}
+  # sizeLimit of the operator's scratch-data (temporaryData) and shm emptyDirs.
+  ephemeralVolumesSizeLimit:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   storage:

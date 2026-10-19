@@ -185,3 +185,51 @@ Rendered as YAML list items; the caller provides the indentation.
       protocol: TCP
 {{- end }}
 {{- end -}}
+
+{{/*
+The user agent-manager's ServiceAccount authenticates as:
+system:serviceaccount:<release namespace>:<name>, the name as the component
+chart chooses it (agent-manager.serviceAccount.name, else
+agent-manager.fullnameOverride, or `default` when serviceAccount.create is
+false). The component runs in the release namespace, as its
+PodDisruptionBudget assumes. Its tenant reconciler is the only writer of
+WorkerPools in the Organizations' namespaces
+(templates/substrate/tenant-workers-admission.yaml).
+*/}}
+{{- define "agent-platform.agentManager.serviceAccountUser" -}}
+{{- $chart := include "agent-platform.agentManager.chartValues" . | fromJson -}}
+{{- $name := dig "serviceAccount" "name" "" $chart -}}
+{{- if dig "serviceAccount" "create" true $chart -}}
+{{- $name = $name | default (include "agent-platform.agentManager.fullname" .) -}}
+{{- else -}}
+{{- $name = $name | default "default" -}}
+{{- end -}}
+{{- printf "system:serviceaccount:%s:%s" .Release.Namespace $name -}}
+{{- end -}}
+
+{{/*
+The installation's skills credential as agent-manager's chart names it, a
+JSON object {current, previous}: with agent-manager.skills.mintGitAuthSecret
+the minted <fullname>-skills-token, the installation's own name, and its
+earlier name tenant-credential-<fullname>-skills-token, otherwise
+agent-manager.skills.gitAuthSecretName; agent-manager.skills.previousGitAuthSecretNames
+are earlier names in either case. The migrate run moves every release naming
+an earlier name to the current one; the credential-refs admission refuses
+every one of them in an Organization's namespace.
+*/}}
+{{- define "agent-platform.agentManager.skillsGitAuth" -}}
+{{- $am := include "agent-platform.agentManager.chartValues" . | fromJson -}}
+{{- $current := dig "skills" "gitAuthSecretName" "" $am -}}
+{{- $previous := list -}}
+{{- if dig "skills" "mintGitAuthSecret" false $am -}}
+{{- $fullname := include "agent-platform.agentManager.fullname" . -}}
+{{- $current = printf "%s-skills-token" $fullname -}}
+{{- $previous = append $previous (printf "tenant-credential-%s-skills-token" $fullname) -}}
+{{- end -}}
+{{- range (dig "skills" "previousGitAuthSecretNames" list $am) -}}
+{{- if and (ne . $current) (not (has . $previous)) -}}
+{{- $previous = append $previous . -}}
+{{- end -}}
+{{- end -}}
+{{- dict "current" $current "previous" $previous | toJson -}}
+{{- end -}}

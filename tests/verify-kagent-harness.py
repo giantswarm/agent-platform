@@ -25,12 +25,22 @@ by spec.harnessRef; the Harness has no admission selector. This test asserts:
     digest) reaches the kagent release's harness.image verbatim;
   - kagent.substrateWorkerPool.name follows an override (the Harness's
     workerPoolRef defaults to it in the chart);
+  - kagent.harnesses (a coding agent's claude, codex and omp Harnesses,
+    ci/test-coding-agents-values.yaml) reaches the kagent release's harnesses
+    unchanged, with no null, a codex entry and a BYO omp entry (its own image,
+    command and displayName) beside the claude one; by default
+    the release carries no further Harness (harnesses empty or absent) and
+    the agent-manager release no harness.egress of the chart's own;
+  - agent-manager.harness.egress reaches the agent-manager release with an
+    entry for every coding Harness of kagent.harnesses: agent-manager refuses
+    an agent on a coding Harness without one, and writes the entry's origins
+    into the Agent's spec.egress, the only origins the Substrate egress gate
+    lets it reach;
   - kagent off forwards nothing.
 
-The rendered object itself is the kagent chart's (verify-components-charts
-renders the chart the range resolves to with these values and asserts the
-Harness it emits carries no selector); structural validation against the
-Harness CRD is verify-kagent-crds.
+The rendered objects are the kagent chart's: verify-components-charts renders
+the chart the range resolves to with these values, the coding-agents block
+included, and asserts every Harness it emits against the pinned Harness CRD.
 
 Usage: verify-kagent-harness.py <connectivity chart dir> <meta chart dir>
 """
@@ -43,7 +53,7 @@ import yaml
 
 DIGEST = "localhost:5001/golang-adk@sha256:" + "a" * 64
 SNAPSHOT = "s3://bucket/agents"
-CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true"]
+CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
 MONITORING_API = ["--api-versions", "monitoring.coreos.com/v1"]  # the observability platform: the auto knobs resolve on
 ENV_PROPAGATE = {"name": "KAGENT_PROPAGATE_TOKEN", "value": "true"}
 ENV_HEADERS = {"name": "OTEL_EXPORTER_OTLP_HEADERS", "value": "X-Scope-OrgID=giantswarm"}
@@ -61,11 +71,15 @@ def render(chart: str, args: list[str]) -> list[dict]:
     return [d for d in yaml.safe_load_all(r.stdout) if isinstance(d, dict)]
 
 
-def kagent_values(docs: list[dict]) -> dict | None:
+def release_values(docs: list[dict], name: str) -> dict | None:
     for d in docs:
-        if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "kagent":
-            return d["spec"]["values"]
+        if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == name:
+            return d["spec"].get("values", {})
     return None
+
+
+def kagent_values(docs: list[dict]) -> dict | None:
+    return release_values(docs, "kagent")
 
 
 def nulls(value, path: str = "") -> list[str]:
@@ -159,6 +173,35 @@ def main(connectivity: str, meta: str) -> int:
         fail(f"the kagent release's values carry a null at {', '.join(paths)}; a null is removed — not stored — by the merge patch "
              "of a HelmRelease that already exists, so whatever it was meant to delete comes back on that installation (#418)")
     print("ok: the kagent release's values carry no null")
+
+    if values.get("harnesses"):
+        fail(f"the kagent release carries harnesses {values['harnesses']} by default; an empty kagent.harnesses renders no further Harness")
+    coding = f"{meta}/ci/test-coding-agents-values.yaml"
+    entries = yaml.safe_load(open(coding))["kagent"]["harnesses"]
+    values = kagent_values(render(meta, [*base, "-f", coding]))
+    if values.get("harnesses") != entries:
+        fail(f"kagent.harnesses does not reach the kagent release unchanged:\n  got      {values.get('harnesses')}\n  expected {entries}")
+    if paths := nulls(values):
+        fail(f"the kagent release's values carry a null at {', '.join(paths)} with kagent.harnesses set (#418)")
+    runtimes = {e.get("runtime", "claude") for e in entries}
+    if not {"claude", "codex", "byo"} <= runtimes:
+        fail(f"{coding} carries the runtimes {sorted(runtimes)}; the coding-agents values render a codex entry and a BYO omp entry beside the claude one")
+    if incomplete := [e["name"] for e in entries if e.get("runtime") == "byo" and not all(e.get(k) for k in ("image", "command", "displayName"))]:
+        fail(f"{coding}: the BYO entries {incomplete} lack an image, a command or a displayName; the kagent chart requires all three on a BYO entry")
+    print("ok: kagent.harnesses (claude, codex and a BYO omp) reaches the kagent release unchanged, with no null; by default the release carries no further Harness")
+
+    am_on = ["--set", "components.agent-manager.enabled=true"]
+    egress = yaml.safe_load(open(coding))["agent-manager"]["harness"]["egress"]
+    am = release_values(render(meta, [*base, *am_on, "-f", coding]), "agent-manager")
+    if am is None or am.get("harness", {}).get("egress") != egress:
+        fail(f"agent-manager.harness.egress does not reach the agent-manager release unchanged:\n  got      {(am or {}).get('harness', {}).get('egress')}\n  expected {egress}")
+    coding_harnesses = [e["name"] for e in entries if e.get("runtime", "claude") != "kagent"]
+    if missing := [n for n in coding_harnesses if not egress.get(n)]:
+        fail(f"the coding-agents values give the Harnesses {missing} no agent-manager.harness.egress entry; agent-manager refuses an agent on a coding Harness without one")
+    am = release_values(render(meta, [*base, *am_on]), "agent-manager")
+    if am is None or "egress" in am.get("harness", {}):
+        fail("an empty agent-manager.harness.egress reaches the agent-manager release; unset, the agent-manager chart's own list applies")
+    print(f"ok: agent-manager.harness.egress reaches the agent-manager release with an entry for every coding Harness ({', '.join(coding_harnesses)}); empty, none is forwarded")
 
     values = kagent_values(render(meta, [*base, "--set", f"kagent.harness.image={DIGEST}", "--set", "kagent.substrateWorkerPool.name=pool-b"]))
     if values["harness"].get("image") != DIGEST:

@@ -83,13 +83,19 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- if $c -}}
 {{- $on := true -}}
 {{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}
-{{- else if has .name (list "kagent-crds" "substrate" "substrate-crds") }}
+{{- else if has .name (list "kagent-crds" "substrate" "substrate-crds" "google-access-token-credential-provider") }}
 {{- /* The kagent line ships its CRDs as their own chart and has no runtime
-       without Agent Substrate; without an explicit switch these three follow
-       components.kagent, so a consumer turns on kagent and gets its CRDs and
-       its runtime (an explicit false with kagent on is refused by
+       without Agent Substrate; without an explicit switch these follow
+       components.kagent, so a consumer turns on kagent and gets its CRDs, its
+       runtime and the credential provider its Vertex AI actors need (an
+       explicit false on the first three with kagent on is refused by
        agent-platform.validateKagentCrds / agent-platform.validateSubstrate). */ -}}
 {{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true" }}
+{{- else if eq .name "workspace-manager" }}
+{{- /* The workspace-manager follows the one switch workspaces.enabled
+       (agent-platform.validateWorkspaces refuses an explicit value that
+       disagrees with it). */ -}}
+{{- $on = ($root.Values.workspaces | default dict).enabled | default false }}
 {{- end }}
 {{- if $on }}true{{- end -}}
 {{- else -}}
@@ -121,8 +127,14 @@ derived one, otherwise the render fails naming the single key to set — a silen
 overwrite would hide a values file that still spells the old key.
   muster: muster.extraCaFile.secret from global.identity.ca (secretName, key
     default ca.crt) while muster names no CA Secret of its own — the issuer's
-    private CA its OAuth server verifies the provider against.
+    private CA its OAuth server verifies the provider against. And
+    rbac.mcpServerEditor.subjects and rbac.workflowEditor.subjects: the
+    block's own subjects with tenants.platformTeam appended (each subject
+    once), while that list is not empty.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
+                 tenants, the tenant reconciler, while
+                 tenants.organizations.enabled is on
+                 (agent-platform.agentManager.tenants);
                  muster.url from the muster Service (agent-platform.musterMcpUrl);
                  kagent.controllerTarget, the kagent controller its session
                  tools call, from the agentgateway data plane
@@ -136,7 +148,13 @@ overwrite would hide a values file that still spells the old key.
     default user with (agent-platform.valkeySecretName / valkeyPasswordKey), so
     the switch is one line. These are defaults, not the single-source rule
     above: an operator's own url (an out-of-band Valkey), Secret or key wins.
-  valkey: auth.usersExistingSecret and auth.aclUsers.default.passwordKey, when
+    And workspaces.toolsPrefix while workspaces are on: x_ and
+    workspace-manager.muster.mcpServer.name and _ (x_workspace-manager_), the
+    name muster gives the manager's tools, which the gateway calls as the
+    person; only from the floor agent-platform.klausGateway.workspacesFloor
+    (4.3.0) of components.klaus-gateway.versionRange, below it nothing. Single
+    source: an own value that differs fails the render.
+  valkey:auth.usersExistingSecret and auth.aclUsers.default.passwordKey, when
     its own block leaves them empty, from the Secret and key muster reads the
     same password with (agent-platform.valkeySecretName / valkeyPasswordKey:
     muster's storage Secret, else global.identity.existingSecret; the key
@@ -149,13 +167,21 @@ overwrite would hide a values file that still spells the old key.
     and image.repository, ateom-gvisor, the floor of components.substrate.versionRange) — never the
     worker the kagent build was published against, so the worker and the
     atelet are one Substrate release whatever kagent build the range admits
-    (giantswarm/agent-platform#466). An installation's own workerImage stands
+    (giantswarm/agent-platform#466); the workers run the release the control
+    plane runs, which the substrate release's followRelease sets
+    (giantswarm/agent-platform#822). An installation's own workerImage stands
     only while its tag is that release (a mirror by another path). And
     substrateWorkerPool.template.podAffinity, the worker pods' preferred
     affinity to the atelet on their node, from the Substrate release that
     carries the field on (agent-platform.substrate.workerPoolAteletAffinity,
     giantswarm/agent-platform#756); an installation's own podAffinity stands
-    instead.
+    instead. And controller.session.admission.jwt, the jwt Session admission a
+    Session with a workspace passes, while workspaces are on and the
+    workspace-manager signs grants (agent-platform.kagent.sessionAdmission):
+    jwksURL the manager's key set through its Service, issuer its base URL,
+    audience its grant.audience — defaults as for klaus-gateway, the kagent
+    block's own value stands per key; the kagent floor that takes the block,
+    an issuer and the email claim are guarded (agent-platform.validateSessionAdmission).
   model-manager: kagent.disableWiring: true while components.kagent is off —
     on by default with no backend (giantswarm/agent-platform#329), the release
     must not wire ModelConfigs into a kagent the installation does not run;
@@ -188,7 +214,16 @@ overwrite would hide a values file that still spells the old key.
     logs in as (postgres.applicationDatabase.owner): ate-api-server runs
     SET ROLE on every connection, and the chart's default `postgres` is a
     role the Cluster's application role is not a member of (a differing
-    explicit role fails the render). Its
+    explicit role fails the render). With tenants.organizations.enabled,
+    credentialProvider.namespacePolicies: the installation's own policies,
+    the ate-golden entry with allowedNamespaceSelector on the label
+    giantswarm.io/organization (an entry added when none names ate-golden; a
+    different selector there fails the render), and an ownNamespaceSelector
+    entry on the same label, each derived entry once; a Substrate floor below
+    1.12.0 fails the render. Always ateController.gvisorWorker.followRelease:
+    true, so ate-controller runs every gVisor pool on its own release's
+    ateom-gvisor and the workers follow the release Flux resolves, patches
+    included (giantswarm/agent-platform#822; an own false fails the render). Its
     atelet.imageCache.pinnedImages is NOT derived here: the kagent release's
     ConfigMap kagent-images feeds it through the HelmRelease's valuesFrom
     (components.substrate.valuesFromRefs), so no copy of a digest lives here.
@@ -196,6 +231,18 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
 {{- $derived := dict -}}
+{{- if eq .name "google-access-token-credential-provider" -}}
+{{- /* The plugin resolves keys under the same atespace-to-namespace grants as
+Substrate's bundled provider: one list, Substrate's. The Substrate release's
+name and namespace tell the plugin which egress gateway may call it. */ -}}
+{{- $grants := dig "credentialProvider" "namespacePolicies" list (.root.Values.substrate | default dict) -}}
+{{- $own := dig "namespacePolicies" list (index .root.Values "google-access-token-credential-provider" | default dict) -}}
+{{- if and $own (ne (toJson $own) (toJson $grants)) -}}
+{{- fail (printf "google-access-token-credential-provider.namespacePolicies (%s) differs from substrate.credentialProvider.namespacePolicies (%s): an atespace resolves Google service account keys under the grants it resolves every other Secret under — set substrate.credentialProvider.namespacePolicies and leave google-access-token-credential-provider.namespacePolicies unset" (toJson $own) (toJson $grants)) -}}
+{{- end -}}
+{{- $_ := set $derived "namespacePolicies" $grants -}}
+{{- $_ := set $derived "substrate" (dict "releaseName" "substrate" "namespace" (dig "substrate" "targetNamespace" "ate-system" .root.Values.components)) -}}
+{{- end -}}
 {{- if eq .name "agent-manager" -}}
 {{- $sa := include "agent-platform.kagent.fluxServiceAccountName" .root -}}
 {{- $own := dig "flux" "helmReleaseServiceAccount" "" (index .root.Values "agent-manager" | default dict) -}}
@@ -215,6 +262,9 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- fail (printf "agent-manager.kagent.controllerTarget (%s) differs from the platform's kagent controller target (%q): agent-manager's session tools reach the controller through the agentgateway data plane this chart installs, on kagent.controllerRoute; the target follows gateway.name and gateway.listeners[0].port; leave agent-manager.kagent.controllerTarget unset" $ownTarget $target) -}}
 {{- end -}}
 {{- $_ := set $derived "kagent" (dict "controllerTarget" $target) -}}
+{{- with (include "agent-platform.agentManager.tenants" .root | fromJson) -}}
+{{- $_ := set $derived "tenants" . -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "cluster-manager" -}}
 {{- /* model-manager's namespace: where the model-manager component lands — the
@@ -228,6 +278,93 @@ runtime-registration contract there. */ -}}
 {{- end -}}
 {{- $_ := set $derived "modelManager" (dict "namespace" $ns) -}}
 {{- end -}}
+{{- if eq .name "workspace-manager" -}}
+{{- /* The workspaces' namespace: kagent's, where every Session runs and its
+Harness mounts the workspace volume, so each workspace object, its volume and
+its sync and cleanup Jobs live there too. */ -}}
+{{- $ns := include "agent-platform.kagent.namespace" .root -}}
+{{- $own := dig "workspaces" "namespace" "" (index .root.Values "workspace-manager" | default dict) -}}
+{{- if and $own (ne $own $ns) -}}
+{{- fail (printf "workspace-manager.workspaces.namespace (%s) differs from the kagent namespace (%s), where every Session runs and mounts its workspace: leave workspace-manager.workspaces.namespace unset" $own $ns) -}}
+{{- end -}}
+{{- $_ := set $derived "workspaces" (dict "namespace" $ns) -}}
+{{- /* The kagent controller the manager lists every Session's last turn from
+for the session directories' cleanup, and the namespace its NetworkPolicy
+opens the egress to: a default, so an installation that reaches kagent
+elsewhere sets workspace-manager.kagent.address (and namespace, port) itself.
+Only while the floor of components.workspace-manager.versionRange takes the
+keys (agent-platform.workspaceManager.kagentFloor): an earlier release's closed
+schema refuses a kagent block. */ -}}
+{{- $ownKagent := dig "kagent" dict (index .root.Values "workspace-manager" | default dict) -}}
+{{- $wmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "workspace-manager" "versionRange" "" .root.Values.components) | default "0.0.0") "" -}}
+{{- $takesKagent := ge ((semver $wmFloor).Compare (semver (include "agent-platform.workspaceManager.kagentFloor" .root))) 0 -}}
+{{- with include "agent-platform.kagent.controllerAddress" .root -}}
+{{- if and $takesKagent (not $ownKagent.address) -}}
+{{- if and $ownKagent.namespace (ne (toString $ownKagent.namespace) $ns) -}}
+{{- fail (printf "workspace-manager.kagent.namespace (%s) differs from the kagent namespace (%s) of the controller address this chart derives (%s): leave workspace-manager.kagent.namespace unset, or set workspace-manager.kagent.address too" (toString $ownKagent.namespace) $ns .) -}}
+{{- end -}}
+{{- $_ := set $derived "kagent" (dict "address" . "namespace" $ns) -}}
+{{- end -}}
+{{- end -}}
+{{- /* The workspace StorageClass, one value for every consumer:
+workspaces.storage.storageClassName, the class every workspace's
+PersistentVolumeClaim names. */ -}}
+{{- with dig "storage" "storageClassName" "" (.root.Values.workspaces | default dict) -}}
+{{- $ownClass := dig "storage" "storageClassName" "" (index $.root.Values "workspace-manager" | default dict) -}}
+{{- if and $ownClass (ne $ownClass .) -}}
+{{- fail (printf "workspace-manager.storage.storageClassName (%s) differs from workspaces.storage.storageClassName (%s), the class every workspace volume is claimed from: leave workspace-manager.storage.storageClassName unset" $ownClass .) -}}
+{{- end -}}
+{{- $_ := set $derived "storage" (dict "storageClassName" .) -}}
+{{- end -}}
+{{- /* A Session's directory lives as long as the Session: kagent deletes an
+idle Session after kagent.controller.sessionIdleTTL and its directory goes at
+once, so that TTL is sessions.cleanupAfter unless the block sets a shorter one
+(a longer one would never apply). 0 never deletes a Session and derives
+nothing: the manager refuses a cleanupAfter of 0. */ -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent") -}}
+{{- $ttl := toString (dig "controller" "sessionIdleTTL" "" (.root.Values.kagent | default dict)) -}}
+{{- $ttlSeconds := include "agent-platform.durationSeconds" $ttl -}}
+{{- if and $ttl (not $ttlSeconds) -}}
+{{- fail (printf "kagent.controller.sessionIdleTTL (%s) is not a Go duration such as 720h" $ttl) -}}
+{{- end -}}
+{{- if and $ttlSeconds (gt (float64 $ttlSeconds) 0.0) -}}
+{{- $own := toString (dig "sessions" "cleanupAfter" "" (index .root.Values "workspace-manager" | default dict)) -}}
+{{- if not $own -}}
+{{- $_ := set $derived "sessions" (dict "cleanupAfter" $ttl) -}}
+{{- else if gt (float64 (include "agent-platform.durationSeconds" $own | default "0")) (float64 $ttlSeconds) -}}
+{{- fail (printf "workspace-manager.sessions.cleanupAfter (%s) is longer than kagent.controller.sessionIdleTTL (%s): kagent deletes the idle Session first and its directory with it, so the cleanup never applies — leave workspace-manager.sessions.cleanupAfter unset (it follows the TTL) or raise the TTL" $own $ttl) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /* The Organizations whose members manage workspaces, from
+workspaces.organizations: the manager checks a caller's groups against them. */ -}}
+{{- with (include "agent-platform.workspaces.organizations" .root | fromJson) -}}
+{{- $_ := set $derived "organizations" . -}}
+{{- end -}}
+{{- /* The public base URL the connectivity release routes the browser's
+provider sign-in on, so the manager's callback URLs are the routed ones. */ -}}
+{{- with (include "agent-platform.workspaceManager.baseURL" .root) -}}
+{{- $_ := set $derived "oauth" (dict "baseURL" .) -}}
+{{- end -}}
+{{- /* The grant signing key: the block's own Secret reference, else the one
+the connectivity release creates with providers and oauth.enabled
+(workspaceManager.grantKey) — none without them, which the manager refuses. */ -}}
+{{- with (include "agent-platform.workspaceManager.grantSigningKey" .root | fromJson) -}}
+{{- if .name -}}
+{{- $_ := set $derived "grant" (dict "signingKey" (dict "name" .name "key" .key)) -}}
+{{- end -}}
+{{- end -}}
+{{- /* muster's pin of the registration to one provider instance's App: the
+instance and the Secret with the App's OAuth client, the block's own or
+derived (agent-platform.workspaceManager.musterPin). */ -}}
+{{- with (include "agent-platform.workspaceManager.musterPin" .root | fromJson) -}}
+{{- if and .provider .secretName -}}
+{{- $server := dict "clientCredentialsSecretRef" (dict "name" .secretName) -}}
+{{- if .issuer -}}{{- $_ := set $server "issuer" .issuer -}}{{- end -}}
+{{- $_ := set $derived "muster" (dict "mcpServer" (dict "auth" (dict "provider" .provider "authorizationServer" $server))) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if eq .name "klaus-gateway" -}}
 {{- $kg := .root.Values.klausGateway | default dict -}}
 {{- if and (eq (dig "routing" "store" "" $kg) "valkey") (include "agent-platform.componentEnabled" (dict "root" .root "name" "valkey")) -}}
@@ -237,6 +374,22 @@ runtime-registration contract there. */ -}}
 {{- if and $v (not (dig $k "" $own)) -}}{{- $_ := set $valkey $k $v -}}{{- end -}}
 {{- end -}}
 {{- if $valkey -}}{{- $_ := set $derived "routing" (dict "valkey" $valkey) -}}{{- end -}}
+{{- end -}}
+{{- /* The workspace-manager's tools by the name muster gives them, while
+workspaces are on: x_<the manager's MCPServer name>_, which the gateway calls
+as the person. Only while the floor of components.klaus-gateway.versionRange
+takes the key (agent-platform.klausGateway.workspacesFloor): an earlier
+release's closed schema refuses a workspaces block. */ -}}
+{{- if (.root.Values.workspaces | default dict).enabled -}}
+{{- $kgFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "klaus-gateway" "versionRange" "" .root.Values.components) | default "0.0.0") "" -}}
+{{- if ge ((semver $kgFloor).Compare (semver (include "agent-platform.klausGateway.workspacesFloor" .root))) 0 -}}
+{{- $prefix := printf "x_%s_" (dig "muster" "mcpServer" "name" "workspace-manager" (index .root.Values "workspace-manager" | default dict)) -}}
+{{- $own := dig "workspaces" "toolsPrefix" "" $kg -}}
+{{- if and $own (ne $own $prefix) -}}
+{{- fail (printf "klausGateway.workspaces.toolsPrefix (%s) differs from the prefix muster gives the workspace-manager's tools (%s, x_ and workspace-manager.muster.mcpServer.name): the gateway calls them by that name — leave klausGateway.workspaces.toolsPrefix unset" $own $prefix) -}}
+{{- end -}}
+{{- $_ := set $derived "workspaces" (dict "toolsPrefix" $prefix) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "valkey" -}}
@@ -251,6 +404,26 @@ runtime-registration contract there. */ -}}
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
+{{- end -}}
+{{- if and (eq .name "kagent") .root.Values.postgres.enabled (ne (dig "databases" "kagent-v2" "enabled" true .root.Values.postgres) false) -}}
+{{- /* The kagent line's v1.11 chart reads the controller's connection string
+only from the Secret database.postgres.connectionStringSecretRef names and runs
+SET ROLE database.postgres.role; the 1.10 line reads urlFile. Both shapes are
+derived beside the installation's own urlFile, so either line installs
+(giantswarm/agent-platform#977). The Secret is the one the connectivity release
+derives for postgres.databases.kagent-v2 in the kagent namespace; the role is
+the one CNPG creates, postgres.applicationDatabase.owner. An own value stands. */ -}}
+{{- $pg := dig "database" "postgres" dict (.root.Values.kagent | default dict) -}}
+{{- $out := dict -}}
+{{- if not (dig "connectionStringSecretRef" "name" "" $pg) -}}
+{{- $_ := set $out "connectionStringSecretRef" (dict "name" (printf "%s-kagent-v2-app" .root.Values.postgres.clusterName) "key" "uri") -}}
+{{- end -}}
+{{- if not $pg.role -}}
+{{- $_ := set $out "role" (.root.Values.postgres.applicationDatabase.owner | default "kagent") -}}
+{{- end -}}
+{{- if $out -}}
+{{- $_ := set $derived "database" (dict "postgres" $out) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "kagent" -}}
 {{- /* The worker image follows the chart's Substrate pin, not the kagent build's
@@ -277,6 +450,38 @@ installation's own podAffinity stands instead. */ -}}
 {{- $_ := set $pool "template" (dict "podAffinity" $affinity) -}}
 {{- $_ := set $derived "substrateWorkerPool" $pool -}}
 {{- end -}}
+{{- /* Workers above the default priority 0, so a pod making room on a full
+node (atelet) evicts the ordinary workloads first (giantswarm/agent-platform#999):
+the PriorityClass the connectivity chart ships (kagent.substrateWorkerPool
+.priorityClass); an installation's own template.priorityClassName stands
+instead. */ -}}
+{{- $pc := dig "substrateWorkerPool" "priorityClass" dict (.root.Values.kagent | default dict) -}}
+{{- if and $pc.enabled $pc.name (not (dig "substrateWorkerPool" "template" "priorityClassName" "" (.root.Values.kagent | default dict))) -}}
+{{- $pool := get $derived "substrateWorkerPool" | default dict -}}
+{{- $template := get $pool "template" | default dict -}}
+{{- $_ := set $template "priorityClassName" $pc.name -}}
+{{- $_ := set $pool "template" $template -}}
+{{- $_ := set $derived "substrateWorkerPool" $pool -}}
+{{- end -}}
+{{- /* The jwt Session admission a Session with a workspace passes: the
+workspace-manager's key set, issuer and audience, while workspaces are on and
+the manager signs grants (agent-platform.kagent.sessionAdmission); the block's
+own value stands per key. Guarded first: the kagent floor that takes the
+block, an issuer, the email claim, an own block set in part. */ -}}
+{{- include "agent-platform.validateSessionAdmission" .root -}}
+{{- with (include "agent-platform.kagent.sessionAdmission" .root | fromJson) -}}
+{{- $controller := get $derived "controller" | default dict -}}
+{{- $session := dict "admission" (dict "jwt" .) -}}
+{{- /* The credential provider a Session's provider hosts resolve through:
+muster's authority, which muster answers with the person's token
+(muster.credentialProvider); an own value stands. */ -}}
+{{- $_ := set $session "credentialAuthority" (dig "controller" "session" "credentialAuthority" (dig "muster" "credentialProvider" "authority" "muster.giantswarm.io" ($.root.Values.muster | default dict)) ($.root.Values.kagent | default dict)) -}}
+{{- with (include "agent-platform.kagent.musterActorJWTProvider" $.root | fromJson) -}}
+{{- $_ := set $session "actorJWTProviders" (dict "muster" .) -}}
+{{- end -}}
+{{- $_ := set $controller "session" $session -}}
+{{- $_ := set $derived "controller" $controller -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "muster" -}}
 {{- /* The identity provider's private CA (global.identity.ca) is what muster's
@@ -285,7 +490,33 @@ installation names its own. Without it a lab Dex fails muster's OIDC discovery
 and muster never turns Ready (giantswarm/agent-platform#309). */ -}}
 {{- $ca := dig "identity" "ca" dict (.root.Values.global | default dict) -}}
 {{- if and $ca.secretName (not (dig "muster" "extraCaFile" "secret" "name" "" (.root.Values.muster | default dict))) -}}
-{{- $_ := set $derived "muster" (dict "extraCaFile" (dict "secret" (dict "name" $ca.secretName "key" ($ca.key | default "ca.crt")))) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $muster "extraCaFile" (dict "secret" (dict "name" $ca.secretName "key" ($ca.key | default "ca.crt"))) -}}
+{{- $_ := set $derived "muster" $muster -}}
+{{- end -}}
+{{- /* muster's credential provider (agent-platform.muster.credentialProvider);
+without a releasable instance agent-platform.validateWorkspaceAuth has failed
+the render. */ -}}
+{{- $provider := include "agent-platform.muster.credentialProvider" .root | fromJson -}}
+{{- if $provider.releasable -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $muster "credentialProvider" $provider -}}
+{{- $_ := set $derived "muster" $muster -}}
+{{- end -}}
+{{- /* The customer's platform team writes the servers and workflows of
+muster's namespace beside the Giant Swarm admin groups
+(giantswarm/agent-platform#706): tenants.platformTeam is appended to both
+editor bindings' subjects, so an installation names its team without
+repeating the admin groups. */ -}}
+{{- with (.root.Values.tenants | default dict).platformTeam -}}
+{{- $team := . -}}
+{{- $rbac := dict -}}
+{{- range $role := list "mcpServerEditor" "workflowEditor" -}}
+{{- $subjects := dig "rbac" $role "subjects" list ($.root.Values.muster | default dict) -}}
+{{- range $team -}}{{- if not (has . $subjects) -}}{{- $subjects = append $subjects . -}}{{- end -}}{{- end -}}
+{{- $_ := set $rbac $role (dict "subjects" $subjects) -}}
+{{- end -}}
+{{- $_ := set $derived "rbac" $rbac -}}
 {{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
@@ -337,6 +568,49 @@ and muster never turns Ready (giantswarm/agent-platform#309). */ -}}
 {{- end -}}
 {{- $_ := set $derived "postgres" (dict "connectionStringSecretRef" $ref "readWriteRole" $role "ownerRole" $role) -}}
 {{- end -}}
+{{- if eq .name "substrate" -}}
+{{- /* The workers run the release the control plane runs
+(giantswarm/agent-platform#822): ate-controller starts every gVisor pool on
+its own release's ateom-gvisor, so a Substrate patch Flux resolves within the
+range rolls the pool with the atelet, no chart release. Set here rather than
+left to the Substrate chart's default; an own false fails the render. */ -}}
+{{- if eq (toString (dig "ateController" "gvisorWorker" "followRelease" true (.root.Values.substrate | default dict))) "false" -}}
+{{- fail "substrate.ateController.gvisorWorker.followRelease is false: the workers would run the WorkerPool's spec.workerImage (the floor of components.substrate.versionRange) while the atelet runs the release Flux resolves, so a Substrate patch would run a newer atelet beside an older worker — leave it unset; the chart sets it (giantswarm/agent-platform#822)" -}}
+{{- end -}}
+{{- $_ := set $derived "ateController" (dict "gvisorWorker" (dict "followRelease" true)) -}}
+{{- end -}}
+{{- if and (eq .name "substrate") (dig "organizations" "enabled" false (.root.Values.tenants | default dict)) -}}
+{{- /* The Organizations' agents (giantswarm/agent-platform#1041): each
+namespace labelled giantswarm.io/organization is read by the atespace of its
+own name only (an ownNamespaceSelector entry), and ate-golden, where every
+template's golden actor boots, reads them all (allowedNamespaceSelector on
+its entry, so that entry's secretSelector narrows it there too). The
+installation's own policies stay, each derived entry once; an ate-golden entry
+that selects other namespaces fails, and so does a Substrate floor below 1.12.0,
+whose provider refuses the selectors. */ -}}
+{{- $pin := include "agent-platform.substrate.pinnedVersion" .root -}}
+{{- if semverCompare "<1.12.0-0" $pin -}}
+{{- fail (printf "tenants.organizations.enabled needs Substrate 1.12.0 or later, whose credential provider reads namespace policies by label: components.substrate.versionRange selects %s, whose provider refuses the policy file at start" $pin) -}}
+{{- end -}}
+{{- $sel := dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists")) -}}
+{{- $policies := list -}}
+{{- $golden := false -}}
+{{- $own := false -}}
+{{- range $i, $p := dig "credentialProvider" "namespacePolicies" list ($.root.Values.substrate | default dict) -}}
+{{- if eq (toJson ($p.ownNamespaceSelector | default dict)) (toJson $sel) -}}{{- $own = true -}}{{- end -}}
+{{- if eq ($p.atespace | default "") "ate-golden" -}}
+{{- if and $p.allowedNamespaceSelector (ne (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
+{{- fail (printf "substrate.credentialProvider.namespacePolicies[%d] (ate-golden) has an allowedNamespaceSelector (%s) other than the Organizations' namespaces (%s), which tenants.organizations.enabled sets on it: leave it unset" $i (toJson $p.allowedNamespaceSelector) (toJson $sel)) -}}
+{{- end -}}
+{{- $p = merge (dict "allowedNamespaceSelector" $sel) $p -}}
+{{- $golden = true -}}
+{{- end -}}
+{{- $policies = append $policies $p -}}
+{{- end -}}
+{{- if not $golden -}}{{- $policies = append $policies (dict "atespace" "ate-golden" "allowedNamespaceSelector" $sel) -}}{{- end -}}
+{{- if not $own -}}{{- $policies = append $policies (dict "ownNamespaceSelector" $sel) -}}{{- end -}}
+{{- $_ := set $derived "credentialProvider" (dict "namespacePolicies" $policies) -}}
+{{- end -}}
 {{- if and (eq .name "kserve-llmisvc-resources") (include "agent-platform.componentEnabled" (dict "root" .root "name" "modelServing")) -}}
 {{- /* The models Gateway (modelServing.modelsGateway, rendered by the
 connectivity release in the platform's namespace) is the Gateway every
@@ -353,6 +627,362 @@ shared inferenceservice-config ConfigMap its own release renders. */ -}}
 {{- end -}}
 {{- end -}}
 {{- $derived | toJson -}}
+{{- end -}}
+
+{{/*
+The workspace-manager's public base URL, without a trailing slash:
+workspace-manager.oauth.baseURL, else
+https://<workspace-manager.fullnameOverride>.<global.domain> (the component
+chart's own derivation). The connectivity release routes the browser's
+provider sign-in on its host (workspaceManager.route), the component release
+receives it as oauth.baseURL, NOTES prints it. Empty when neither is set.
+*/}}
+{{- define "agent-platform.workspaceManager.baseURL" -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $url := dig "oauth" "baseURL" "" $wm -}}
+{{- if and (not $url) .Values.global.domain -}}
+{{- $url = printf "https://%s.%s" ($wm.fullnameOverride | default "workspace-manager") .Values.global.domain -}}
+{{- end -}}
+{{- $url | trimSuffix "/" -}}
+{{- end -}}
+
+{{/*
+The key the workspace-manager signs its workspace grants with, as the
+component release receives it (workspace-manager.grant.signingKey, a Secret
+reference {name, key}): the block's own when it names one; else, with
+provider instances, oauth.enabled and workspaceManager.grantKey.create, the
+Secret the connectivity release creates (workspaceManager.grantKey.secretName
+and .key); else empty — the manager refuses a key without providers and
+OAuth. The connectivity chart derives the same reference for the Secret it
+creates (templates/workspace-manager/_helpers.tpl, grantSigningKey), so both
+name one Secret. Emits JSON: {name, key}, or {}.
+*/}}
+{{- define "agent-platform.workspaceManager.grantSigningKey" -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $own := dig "grant" "signingKey" dict $wm | default dict -}}
+{{- $gk := dig "grantKey" dict (.Values.workspaceManager | default dict) -}}
+{{- $out := dict -}}
+{{- if and (kindIs "map" $own) (or $own.name $own.key) -}}
+{{- $out = dict "name" (toString ($own.name | default "")) "key" (toString ($own.key | default "")) -}}
+{{- else if and $wm.providers (dig "oauth" "enabled" false $wm) (dig "create" true $gk) -}}
+{{- $out = dict "name" (toString (dig "secretName" "" $gk)) "key" (toString (dig "key" "" $gk)) -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+muster's pin of the workspace-manager's registration, with provider instances
+and oauth.enabled (nothing otherwise): the provider instance whose App the
+person grants once in muster (muster.mcpServer.auth.provider) and the Secret
+with that App's OAuth client under client-id and client-secret, which muster
+reads (muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name),
+and the issuer muster files each person's grant of that App under
+(muster.mcpServer.auth.authorizationServer.issuer). The block's own value
+stands; else the provider is the only instance of kind github, the Secret that
+of the instance's values.oauth.clientSecret when its key is client-secret,
+muster's default key, and the issuer <values.url, default https://github.com>/apps/<values.app.id>
+of a github instance: an identity only, unique per App on its host, since the
+workspace-manager chart pins the endpoints and checks GitHub's own `iss`
+(expectedIssuer), so muster discovers nothing under it. Any is empty when
+neither applies; agent-platform.validateWorkspaceAuth then fails naming the
+key. Emits JSON {provider, secretName, issuer}, or {}.
+Usage: include "agent-platform.workspaceManager.musterPin" . | fromJson
+*/}}
+{{- define "agent-platform.workspaceManager.musterPin" -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $out := dict -}}
+{{- if and $wm.providers (dig "oauth" "enabled" false $wm) -}}
+{{- $auth := dig "muster" "mcpServer" "auth" dict $wm | default dict -}}
+{{- $provider := toString ($auth.provider | default "") -}}
+{{- if not $provider -}}
+{{- $github := list -}}
+{{- range $wm.providers -}}{{- if eq (toString .kind) "github" -}}{{- $github = append $github (toString .name) -}}{{- end -}}{{- end -}}
+{{- if eq (len $github) 1 -}}{{- $provider = first $github -}}{{- end -}}
+{{- end -}}
+{{- $secret := toString (dig "authorizationServer" "clientCredentialsSecretRef" "name" "" $auth) -}}
+{{- if and $provider (not $secret) -}}
+{{- range $wm.providers -}}
+{{- if eq (toString .name) $provider -}}
+{{- $oauth := (.values | default dict).oauth | default dict -}}
+{{- $client := ternary $oauth.clientSecret dict (kindIs "map" $oauth) | default dict -}}
+{{- if and (kindIs "map" $client) (eq (toString ($client.key | default "")) "client-secret") -}}
+{{- $secret = toString ($client.name | default "") -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $issuer := toString (dig "authorizationServer" "issuer" "" $auth) -}}
+{{- if and $provider (not $issuer) -}}
+{{- range $wm.providers -}}
+{{- $v := .values | default dict -}}
+{{- $id := toString (dig "app" "id" "" $v) -}}
+{{- if and (eq (toString .name) $provider) (eq (toString .kind) "github") $id -}}
+{{- $issuer = printf "%s/apps/%s" (trimSuffix "/" (toString ($v.url | default "https://github.com"))) $id -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out = dict "provider" $provider "secretName" $secret "issuer" $issuer -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+muster's credential provider while workspaces and Substrate are on: muster
+answers the egress gateway's credential fetches for a workspace Session's
+provider hosts (ate-secret://muster.giantswarm.io/<provider instance>/<git|api>)
+and agent-manager's session bindings. muster serves FetchSecret on Substrate's
+pod certificates, which only a cluster running Substrate issues, and answers
+the gateway's pod identity alone
+(spiffe://cluster.local/ns/<substrate targetNamespace>/sa/atenet-egress).
+releasable, the provider instances whose grants muster releases, is the
+instance muster's registration of the workspace-manager is pinned to under its
+App's issuer, own or derived (agent-platform.workspaceManager.musterPin), the
+same instance name the Session's credential URIs and agent-manager's binding
+carry. actorBearer: muster serves a Session's own MCP calls as the person the
+Session's actor is bound to, verifying the actor JWT Substrate's egress gateway
+injects against the issuer ate-api-server signs it as and ate-idp-server serves
+(the Substrate line from 1.13.0; substrate.ateApi.actorJWTIssuer, else the idp
+Service of the release `substrate`, https://idp.<substrate namespace>.svc), for
+muster's own audience (its oauth.server.baseUrl, the muster chart's default);
+only a binding that lists the reserved provider `muster` is served.
+muster.credentialProvider's own keys stand. muster refuses a credential
+provider that releases nothing, so an empty releasable fails the render
+(agent-platform.validateWorkspaceAuth). Emits JSON, {} with workspaces or
+Substrate off.
+Usage: include "agent-platform.muster.credentialProvider" . | fromJson
+*/}}
+{{- define "agent-platform.muster.credentialProvider" -}}
+{{- $provider := dict -}}
+{{- if and (.Values.workspaces | default dict).enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
+{{- $substrateNs := dig "substrate" "targetNamespace" "ate-system" (.Values.components | default dict) -}}
+{{- $own := dig "muster" "credentialProvider" dict (.Values.muster | default dict) | default dict -}}
+{{- $issuer := dig "ateApi" "actorJWTIssuer" "" (.Values.substrate | default dict) | default (printf "https://idp.%s.svc" $substrateNs) -}}
+{{- $provider = dict "enabled" true "gatewayIdentity" (printf "spiffe://cluster.local/ns/%s/sa/atenet-egress" $substrateNs) "actorBearer" (dict "enabled" true "issuer" $issuer) -}}
+{{- $pin := include "agent-platform.workspaceManager.musterPin" . | fromJson -}}
+{{- if and $pin.provider $pin.issuer -}}
+{{- $_ := set $provider "releasable" (dict $pin.provider $pin.issuer) -}}
+{{- end -}}
+{{- $provider = mergeOverwrite $provider $own -}}
+{{- /* mergeOverwrite never lets a false win: an own actorBearer.enabled: false turns it off. */ -}}
+{{- $ownBearer := $own.actorBearer | default dict -}}
+{{- if and (kindIs "map" $ownBearer) (hasKey $ownBearer "enabled") -}}
+{{- $_ := set $provider.actorBearer "enabled" $ownBearer.enabled -}}
+{{- end -}}
+{{- end -}}
+{{- $provider | toJson -}}
+{{- end -}}
+
+{{/*
+kagent's reserved actor-JWT provider `muster` (kagent.controller.session
+.actorJWTProviders.muster, the kagent line from 1.17.0): while muster trusts the
+actor JWT (agent-platform.muster.credentialProvider's actorBearer on), kagent
+adds `muster` to every Session admitted with a workspace grant and compiles it
+into an actor_jwt rule on muster's host, so Substrate's egress gateway hands
+muster the Session Actor's JWT and muster serves the Session's person.
+hostname is the host of the in-cluster MCP URL every agent's RemoteMCPServer
+targets (agent-platform.musterMcpUrl); audience is the one muster verifies, its
+own actorBearer.audience, else its oauth.server.baseUrl. An own key of the
+kagent block's muster entry stands. Emits JSON, {} with the actor bearer or
+muster off, or without an audience (kagent's controller refuses an entry
+without one, and muster verifies none then).
+Usage: include "agent-platform.kagent.musterActorJWTProvider" . | fromJson
+*/}}
+{{- define "agent-platform.kagent.musterActorJWTProvider" -}}
+{{- $entry := dict -}}
+{{- $bearer := (include "agent-platform.muster.credentialProvider" . | fromJson).actorBearer | default dict -}}
+{{- $url := include "agent-platform.musterMcpUrl" . -}}
+{{- if and $bearer.enabled $url -}}
+{{- $muster := dig "muster" dict (.Values.muster | default dict) | default dict -}}
+{{- $audience := $bearer.audience | default (dig "oauth" "server" "baseUrl" "" $muster) -}}
+{{- $own := dig "controller" "session" "actorJWTProviders" "muster" dict (.Values.kagent | default dict) | default dict -}}
+{{- $entry = mergeOverwrite (dict "hostname" (urlParse $url).hostname "audience" $audience) $own -}}
+{{- end -}}
+{{- if $entry.audience -}}
+{{- $entry | toJson -}}
+{{- else -}}
+{}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The guards of the workspace-manager's provider authorization, while workspaces
+are on, here where a failure is seen instead of inside the component release:
+- with provider instances and oauth.enabled: the floor of
+  components.workspace-manager.versionRange at
+  agent-platform.workspaceManager.musterGrantFloor; muster's pin
+  (agent-platform.workspaceManager.musterPin) names a provider instance of
+  workspace-manager.providers and a Secret with the App's OAuth client, and
+  muster.mcpServer.auth.authorizationServer.issuer is set or derived — without the pin no
+  person has a provider token and every workspace is refused;
+- with Substrate on: muster's credential provider
+  (agent-platform.muster.credentialProvider) releases an instance, pinned or
+  own — muster refuses it with an empty releasable;
+- workspace-manager.grant.signingKey, when set, only with providers and
+  oauth.enabled (the manager refuses to start with a key without them), and
+  the reference the manager gets names a Secret and a data key.
+Emits nothing; fails naming the key and the fix.
+*/}}
+{{- define "agent-platform.validateWorkspaceAuth" -}}
+{{- if (.Values.workspaces | default dict).enabled -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- if and $wm.providers (dig "oauth" "enabled" false $wm) -}}
+{{- $range := dig "workspace-manager" "versionRange" "" .Values.components -}}
+{{- $wmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- $floor := include "agent-platform.workspaceManager.musterGrantFloor" . -}}
+{{- if lt ((semver $wmFloor).Compare (semver $floor)) 0 -}}
+{{- fail (printf "components.workspace-manager.versionRange (%s) admits releases before %s, whose manager keeps each person's provider sign-in in a store of its own that this chart no longer feeds: the person's provider token is muster's grant of the provider instance's App from %s on — raise the floor to %s" $range $floor $floor $floor) -}}
+{{- end -}}
+{{- $pin := include "agent-platform.workspaceManager.musterPin" . | fromJson -}}
+{{- $names := list -}}
+{{- range $wm.providers -}}{{- $names = append $names (toString .name) -}}{{- end -}}
+{{- if not $pin.provider -}}
+{{- fail (printf "workspace-manager.muster.mcpServer.auth.provider is empty and the provider instances (%s) have not exactly one of kind github to pin by default: name the instance whose App the person grants in muster" (join ", " $names)) -}}
+{{- end -}}
+{{- if not (has $pin.provider $names) -}}
+{{- fail (printf "workspace-manager.muster.mcpServer.auth.provider %q names no provider instance of workspace-manager.providers (%s)" $pin.provider (join ", " $names)) -}}
+{{- end -}}
+{{- if not $pin.secretName -}}
+{{- fail (printf "workspace-manager.muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name is empty and provider instance %s has no values.oauth.clientSecret with key client-secret to take it from: name the Secret with the App's OAuth client under client-id and client-secret, which muster reads" $pin.provider) -}}
+{{- end -}}
+{{- if not $pin.issuer -}}
+{{- fail (printf "workspace-manager.muster.mcpServer.auth.authorizationServer.issuer is empty and provider instance %s is no github instance with values.app.id to take it from: muster files each person's grant of the instance's App under that issuer, the App's own identity; set it" $pin.provider) -}}
+{{- end -}}
+{{- end -}}
+{{- $provider := include "agent-platform.muster.credentialProvider" . | fromJson -}}
+{{- if and $provider (not $provider.releasable) -}}
+{{- fail "workspaces.enabled with Substrate on, but muster releases no provider instance's grant: without workspace-manager.providers and workspace-manager.oauth.enabled muster's registration of the workspace-manager is pinned to no instance, so muster.muster.credentialProvider.releasable is empty, muster refuses its credential provider, and agent-manager's session bindings (/session-bindings) answer 404 — add the provider instances with oauth.enabled (muster then releases the pinned instance's grants), or name the instances in muster.muster.credentialProvider.releasable (<instance>: <its App's issuer>)" -}}
+{{- end -}}
+{{- $grant := dig "grant" "signingKey" dict $wm | default dict -}}
+{{- if and (kindIs "map" $grant) (or $grant.name $grant.key) (not (and $wm.providers (dig "oauth" "enabled" false $wm))) -}}
+{{- fail (printf "workspace-manager.grant.signingKey names %s/%s but the manager refuses a grant signing key without provider instances and oauth.enabled (--grant-signing-key needs providers and --enable-oauth): add workspace-manager.providers, or leave the key empty" (toString ($grant.name | default "")) (toString ($grant.key | default ""))) -}}
+{{- end -}}
+{{- with (include "agent-platform.workspaceManager.grantSigningKey" . | fromJson) -}}
+{{- if .name -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$" .name) -}}
+{{- fail (printf "workspace-manager.grant.signingKey.name %q is not a Secret name (a DNS subdomain)" .name) -}}
+{{- end -}}
+{{- if not (regexMatch "^[-._a-zA-Z0-9]+$" .key) -}}
+{{- fail (printf "workspace-manager.grant.signingKey.key %q is not a Secret data key (letters, digits, -, _ and .): the entry of Secret %s holding the PEM private key" .key .name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The first release of the kagent line (giantswarm/kagent-upstream) whose chart
+takes controller.session.admission.jwt: the jwt Session admission a create
+that names a volume source passes with the workspace-manager's grant. An
+earlier chart ignores the block, so with the admission derived (below) every
+Session naming a workspace volume would be refused: the render fails under
+that floor (agent-platform.validateSessionAdmission). One line, no comment
+inside the define.
+*/}}
+{{- define "agent-platform.kagent.sessionAdmissionFloor" -}}1.6.0{{- end -}}
+
+{{/*
+The workspace-manager's key set as kagent's controller reads it in-cluster:
+http://<workspace-manager.fullnameOverride>.<the manager's namespace>.svc:<workspace-manager.service.port>/.well-known/jwks.json
+— the Service the connectivity chart's policies target (its name and port as
+the component chart renders them; kagent-controller-to-workspace-manager
+admits the controller there), in the namespace the component's release
+installs into (components.workspace-manager.targetNamespace, else the
+platform's); plain http, since the controller and the manager share the
+cluster and the key set is public by design. Empty while the component is off.
+Usage: include "agent-platform.workspaceManager.jwksURL" .
+*/}}
+{{- define "agent-platform.workspaceManager.jwksURL" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager") -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $ns := dig "workspace-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- printf "http://%s.%s.svc:%v/.well-known/jwks.json" ($wm.fullnameOverride | default "workspace-manager") $ns (dig "service" "port" 8080 $wm) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+kagent's jwt Session admission as the kagent release receives it
+(kagent.controller.session.admission.jwt: jwksURL, issuer, audience), while
+kagent and the workspace-manager are on and the manager signs grants (the
+reference agent-platform.workspaceManager.grantSigningKey resolves, so the
+manager serves authorize_workspace and its key set): the key set through the
+manager's Service (agent-platform.workspaceManager.jwksURL), the issuer the
+manager writes into every grant's iss (its base URL,
+agent-platform.workspaceManager.baseURL) and the audience it writes into aud
+(workspace-manager.grant.audience; kagent, the chart's default). A value the
+kagent block sets for one of the three stands, the rest is derived: the kagent
+chart needs all three together. With the derived key set (derived, or an own
+jwksURL that names the same URL), allowHTTP is true:
+the kagent chart from 1.11.5 refuses a plain http jwksURL without it, and this
+one is the manager's own Service, which serves no TLS and which the controller
+reaches in-cluster (kagent-controller-to-workspace-manager); an own allowHTTP
+stands.
+Another own jwksURL carries no derived allowHTTP, so an external key set stays
+https unless the kagent block opts in itself. Emits JSON {jwksURL, issuer,
+audience[, allowHTTP]}, or {}
+while nothing is derived (the switch off, no grant key, kagent off): the kagent
+block's own admission, if any, then reaches the release as written.
+Usage: include "agent-platform.kagent.sessionAdmission" . | fromJson
+*/}}
+{{- define "agent-platform.kagent.sessionAdmission" -}}
+{{- $out := dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager")) -}}
+{{- $key := include "agent-platform.workspaceManager.grantSigningKey" . | fromJson -}}
+{{- if $key.name -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $own := dig "controller" "session" "admission" "jwt" dict (.Values.kagent | default dict) | default dict -}}
+{{- $derived := dict "jwksURL" (include "agent-platform.workspaceManager.jwksURL" .) "issuer" (include "agent-platform.workspaceManager.baseURL" .) "audience" (toString (dig "grant" "audience" "kagent" $wm)) -}}
+{{- range $k, $v := $derived -}}
+{{- $_ := set $out $k (toString (dig $k "" $own) | default $v) -}}
+{{- end -}}
+{{- if eq $out.jwksURL $derived.jwksURL -}}
+{{- $_ := set $out "allowHTTP" (dig "allowHTTP" true $own) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The guards of kagent's jwt Session admission, run while the kagent component
+renders (agent-platform.componentDerivedValues):
+- with the admission derived, the kagent range's floor is at least
+  agent-platform.kagent.sessionAdmissionFloor, the first chart that takes the
+  block (an earlier one ignores it and refuses every Session naming a volume);
+- with the admission derived, the grants have an issuer: workspace-manager
+  .oauth.baseURL or global.domain (the manager refuses to start without one);
+- with the admission derived, kagent.controller.auth.userIdClaim is email, the
+  claim the workspace-manager names the person by in every grant's sub, which
+  the controller compares with the caller that claim derives: another claim
+  admits nobody;
+- without it, an own kagent.controller.session.admission.jwt names all three
+  of jwksURL, issuer and audience or none: the kagent chart refuses a part.
+Emits nothing; fails naming the key and the fix.
+*/}}
+{{- define "agent-platform.validateSessionAdmission" -}}
+{{- $adm := include "agent-platform.kagent.sessionAdmission" . | fromJson -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- if $adm -}}
+{{- $floor := include "agent-platform.kagent.sessionAdmissionFloor" . -}}
+{{- $range := dig "kagent" "versionRange" "" .Values.components -}}
+{{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- if lt ((semver $have).Compare (semver $floor)) 0 -}}
+{{- fail (printf "components.kagent.versionRange %q admits a kagent release below %s, the first whose chart takes controller.session.admission.jwt: with workspaces.enabled and a grant signing key this chart derives kagent's jwt Session admission (the workspace-manager's key set, issuer and audience) onto the kagent release, which an earlier chart ignores, so every Session naming a workspace volume would be refused — move the floor to %s or later" $range $floor $floor) -}}
+{{- end -}}
+{{- if not $adm.issuer -}}
+{{- fail "kagent's Session admission has no issuer: the workspace-manager names its base URL as every grant's iss and refuses to start without one — set global.domain (the base URL is then https://<workspace-manager.fullnameOverride>.<global.domain>) or workspace-manager.oauth.baseURL" -}}
+{{- end -}}
+{{- $claim := toString (dig "controller" "auth" "userIdClaim" "" $kagent) -}}
+{{- if ne $claim "email" -}}
+{{- fail (printf "kagent.controller.auth.userIdClaim is %q but the workspace-manager's grant names the person by email (its sub), which kagent's Session admission compares with the caller that claim derives, so a Session with a workspace would admit nobody: with workspaces.enabled and a grant signing key keep the chart's email" $claim) -}}
+{{- end -}}
+{{- else -}}
+{{- $own := dig "controller" "session" "admission" "jwt" dict $kagent | default dict -}}
+{{- $set := list -}}
+{{- range $k := list "jwksURL" "issuer" "audience" -}}{{- if toString (dig $k "" $own) -}}{{- $set = append $set $k -}}{{- end -}}{{- end -}}
+{{- if and $set (ne (len $set) 3) -}}
+{{- fail (printf "kagent.controller.session.admission.jwt sets %s but the kagent chart needs jwksURL, issuer and audience together; this chart derives the three from the workspace-manager with workspaces.enabled and a grant signing key, and fills what the block leaves unset only then — set all three, or none" (join ", " $set)) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -814,8 +1444,9 @@ a minor. So the range is an exact version (a BOM pin, `1.0.0`) or a floor with
 the ceiling of its own minor, `>=X.Y.Z <X.(Y+1).0` — and no `-0` anywhere: Flux's
 Masterminds semver skips every prerelease while no bound of a range carries one
 and evaluates them all once one does, so `<1.1.0-0` would admit the line's dev
-builds. A later patch of the pinned minor may reach the control plane ahead of
-the worker, a `1.1.0` never. `0.x`, `~1.0.0`, `^1.0.0`, `<1.1.0`, a `-0` bound, a
+builds. A later patch of the pinned minor reaches the control plane and, through
+ate-controller's followRelease, the workers with it (giantswarm/agent-platform#822);
+a `1.1.0` never reaches either. `0.x`, `~1.0.0`, `^1.0.0`, `<1.1.0`, a `-0` bound, a
 `<=` ceiling, a patch ceiling and the former `>=X.Y.Z-gs.N <X.Y.(Z+1)-0` are
 refused. Called by
 agent-platform.validateSubstrate while components.substrate is on.
@@ -870,10 +1501,10 @@ The worker pods' preferred affinity to the atelet pod on their node, as JSON
 ({} while the pinned Substrate release predates
 agent-platform.substrate.workerPoolAffinityFloor; a release candidate of that
 release carries the field too). A worker runs sandboxes only
-through its node's atelet, and atelet's PriorityClass never preempts: when the
-atelet DaemonSet rolls on a node without spare CPU, a worker scheduled in the
-gap takes the CPU the old atelet pod freed, the new atelet pod stays Pending,
-the rollout stops at that node and the substrate release's upgrade times out
+through its node's atelet: when the atelet DaemonSet rolls on a node without
+spare CPU, a worker scheduled in the gap takes the CPU the old atelet pod
+freed, and under a non-preempting atelet class the new atelet pod stays
+Pending and the substrate release's upgrade times out
 (giantswarm/agent-platform#756). The term, weight 100, steers a worker to a node
 where an atelet pod is bound whenever one has room; a running worker is never
 evicted by it. It is preferred, not required: Karpenter cannot see a
@@ -891,6 +1522,57 @@ Usage: include "agent-platform.substrate.workerPoolAteletAffinity" $root | fromJ
 {{- else -}}
 {{- $term := dict "topologyKey" "kubernetes.io/hostname" "namespaces" (list (dig "substrate" "targetNamespace" "ate-system" .Values.components)) "labelSelector" (dict "matchLabels" (dict "app" "atelet")) -}}
 {{- dict "preferredDuringSchedulingIgnoredDuringExecution" (list (dict "weight" 100 "podAffinityTerm" $term)) | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The first release of the Substrate line whose chart bounds the egress
+gateway's ephemeral storage itself: atenetEgress.resources,
+atenetEgress.extProc.resources and atenetEgress.drainSignal.sizeLimit
+(giantswarm/substrate#255). From it on the substrate: block's keys reach the
+chart; below it agent-platform.substrate.egressStoragePatch applies the same
+bound as a postRenderer (giantswarm/agent-platform#880). One line, no comment
+inside the define: tests/verify-substrate-egress-ephemeral-storage.py reads
+the value from this file.
+*/}}
+{{- define "agent-platform.substrate.egressStorageFloor" -}}1.8.0{{- end -}}
+
+{{/*
+The Flux postRenderer that bounds the atenet-egress Deployment's ephemeral
+storage while the pinned Substrate release predates
+agent-platform.substrate.egressStorageFloor, as JSON ({} from the floor on,
+and with every knob of substrate.atenetEgress null): one kustomize
+strategic-merge patch on the Deployment the substrate release renders — its
+containers agentgateway and ext-proc merged by name with
+substrate.atenetEgress.resources and .extProc.resources, its volume
+drain-signal with substrate.atenetEgress.drainSignal.sizeLimit. Those names
+are upstream's canonical ate-system render, unchanged across the line's
+releases, and components.substrate.versionRange confines one minor
+(agent-platform.substrate.validateRange), so a Substrate patch within it keeps
+them; a re-pin past the floor retires the patch and the chart renders the
+bound from the forwarded keys. Kyverno's require-emptydir-requests-and-limits
+skips a volume that carries a sizeLimit and otherwise requires
+ephemeral-storage requests and limits on every container mounting it; the
+patch sets both, as the hook Jobs do.
+Usage: include "agent-platform.substrate.egressStoragePatch" $root | fromJson
+*/}}
+{{- define "agent-platform.substrate.egressStoragePatch" -}}
+{{- $pin := regexReplaceAll "-.*$" (include "agent-platform.substrate.pinnedVersion" .) "" -}}
+{{- $egress := dig "atenetEgress" dict (.Values.substrate | default dict) | default dict -}}
+{{- $gateway := dig "resources" dict $egress | default dict -}}
+{{- $extProc := dig "resources" dict (dig "extProc" dict $egress | default dict) | default dict -}}
+{{- $sizeLimit := dig "sizeLimit" "" (dig "drainSignal" dict $egress | default dict) | default "" -}}
+{{- $spec := dict -}}
+{{- $containers := list -}}
+{{- with $gateway }}{{ $containers = append $containers (dict "name" "agentgateway" "resources" .) }}{{ end -}}
+{{- with $extProc }}{{ $containers = append $containers (dict "name" "ext-proc" "resources" .) }}{{ end -}}
+{{- with $containers }}{{ $_ := set $spec "containers" . }}{{ end -}}
+{{- with $sizeLimit }}{{ $_ := set $spec "volumes" (list (dict "name" "drain-signal" "emptyDir" (dict "sizeLimit" .))) }}{{ end -}}
+{{- if or (not $spec) (ge ((semver $pin).Compare (semver (include "agent-platform.substrate.egressStorageFloor" .))) 0) -}}
+{{- dict | toJson -}}
+{{- else -}}
+{{- $patch := dict "apiVersion" "apps/v1" "kind" "Deployment" "metadata" (dict "name" "atenet-egress") "spec" (dict "template" (dict "spec" $spec)) -}}
+{{- dict "kustomize" (dict "patches" (list (dict "target" (dict "kind" "Deployment" "name" "atenet-egress") "patch" (toYaml $patch)))) | toJson -}}
 {{- end -}}
 {{- end -}}
 
@@ -1023,6 +1705,288 @@ at render time instead.
 {{- end -}}
 
 {{/*
+The kagent line's charts from 1.16.0 carry no kagent-tools or kmcp subchart:
+the switch would render nothing, so an installation that turns one on is told
+at render time instead of running without the server it asked for.
+*/}}
+{{- define "agent-platform.validateKagentSubcharts" -}}
+{{- range $sub := list "kagent-tools" "kmcp" -}}
+{{- if dig $sub "enabled" false ($.Values.kagent | default dict) -}}
+{{- fail (printf "kagent.%s.enabled is true, but the kagent line's charts from 1.16.0 carry no %s subchart; muster-registered MCP servers cover it — turn it off" $sub $sub) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Workspaces are one switch, workspaces.enabled: the workspace-manager component
+follows it, and so does every later workspace piece. An explicit
+components.workspace-manager.enabled that disagrees with the switch fails the
+render, either way round. The switch on with the kagent component off fails
+the render too: the workspaces' namespace is kagent's (every Session runs and
+mounts its workspace there), so the workspace-manager release would apply its
+sync ServiceAccount and Roles into a namespace that does not exist. With the
+switch on, every credential of the
+workspace-manager block is a Secret reference ({name, key}), never a value:
+the provider instances' (any key of a provider's values named privateKey,
+clientSecret, secret, token, password or apiKey, at any depth) and the grant
+signing key.
+*/}}
+{{- define "agent-platform.validateWorkspaces" -}}
+{{- $on := (.Values.workspaces | default dict).enabled | default false -}}
+{{- $c := index .Values.components "workspace-manager" | default dict -}}
+{{- if and (hasKey $c "enabled") (ne (toString $c.enabled) (toString $on)) -}}
+{{- fail (printf "components.workspace-manager.enabled is %v but workspaces.enabled is %v: workspaces are one switch — set workspaces.enabled and leave components.workspace-manager.enabled unset" $c.enabled $on) -}}
+{{- end -}}
+{{- if $on -}}
+{{- if ne (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true" -}}
+{{- fail "workspaces.enabled is true but components.kagent.enabled is not: workspaces need the agents — they live in the kagent namespace, where every Session runs and mounts its workspace, and the workspace-manager's sync ServiceAccount, Roles and volumes go there; turn components.kagent.enabled on, or workspaces off" -}}
+{{- end -}}
+{{- include "agent-platform.workspaces.storage.validate" . -}}
+{{- include "agent-platform.workspaces.substrate.validate" . -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $names := dict -}}
+{{- range $i, $p := ($wm.providers | default list) -}}
+{{- if not (kindIs "map" $p) -}}
+{{- fail (printf "workspace-manager.providers[%d] is not a map: a provider instance is {name, kind, values}" $i) -}}
+{{- end -}}
+{{- $name := toString ($p.name | default "") -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" $name) -}}
+{{- fail (printf "workspace-manager.providers[%d].name %q is not a DNS label: it is the name workspaces and sign-ins refer to" $i $name) -}}
+{{- end -}}
+{{- if hasKey $names $name -}}
+{{- fail (printf "workspace-manager.providers[%d].name %q is a duplicate: every provider instance has a name of its own" $i $name) -}}
+{{- end -}}
+{{- $_ := set $names $name true -}}
+{{- if not $p.kind -}}
+{{- fail (printf "workspace-manager.providers[%d] (%s) names no kind" $i $name) -}}
+{{- end -}}
+{{- if eq (toString $p.kind) "gitlab" -}}
+{{- $range := dig "workspace-manager" "versionRange" "" $.Values.components -}}
+{{- $wmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- $gitlabFloor := include "agent-platform.workspaceManager.gitlabFloor" $ -}}
+{{- if lt ((semver $wmFloor).Compare (semver $gitlabFloor)) 0 -}}
+{{- fail (printf "workspace-manager.providers[%d] (%s) is of kind gitlab, which workspace-manager has from %s on, but components.workspace-manager.versionRange (%s) admits earlier releases, whose manager refuses the kind at start: raise its floor to %s" $i $name $gitlabFloor $range $gitlabFloor) -}}
+{{- end -}}
+{{- end -}}
+{{- include "agent-platform.workspaces.secretRefs" (dict "node" ($p.values | default dict) "at" (printf "workspace-manager.providers[%d].values" $i)) -}}
+{{- end -}}
+{{- with dig "grant" "signingKey" dict $wm -}}
+{{- include "agent-platform.workspaces.secretRef" (dict "ref" . "at" "workspace-manager.grant.signingKey") -}}
+{{- end -}}
+{{- include "agent-platform.workspaces.organizations.validate" . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The guards of workspaces.organizations, the Organizations whose members manage
+workspaces, run while workspaces are on: each entry a map with a DNS-label name
+(the Organization's) that no other entry has, and at least one member group,
+each a non-empty string. The list is the one source the workspace-manager's
+organizations map is derived from: an own workspace-manager.organizations fails.
+The manager writes every workspace object as its own ServiceAccount, through
+the component chart's Role and RoleBinding in the kagent namespace, so
+workspace-manager.rbac.create false fails too. Emits nothing; fails naming the
+path.
+*/}}
+{{- define "agent-platform.workspaces.organizations.validate" -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- if $wm.organizations -}}
+{{- fail "workspace-manager.organizations is set: the Organizations and their member groups are workspaces.organizations [{name, memberGroups}], which the meta chart forwards as the workspace-manager's organizations map; move them there and leave workspace-manager.organizations unset" -}}
+{{- end -}}
+{{- if eq (toString (dig "rbac" "create" true $wm)) "false" -}}
+{{- fail "workspace-manager.rbac.create is false: the workspace-manager writes every Workspace, its volume and its sync Jobs in the kagent namespace as its own ServiceAccount, which only the component chart's Role and RoleBinding there allow, and members are bound to nothing; leave workspace-manager.rbac.create unset" -}}
+{{- end -}}
+{{- $names := dict -}}
+{{- range $i, $o := ((.Values.workspaces | default dict).organizations | default list) -}}
+{{- if not (kindIs "map" $o) -}}
+{{- fail (printf "workspaces.organizations[%d] is not a map: an Organization is {name, memberGroups}" $i) -}}
+{{- end -}}
+{{- $name := toString ($o.name | default "") -}}
+{{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" $name) -}}
+{{- fail (printf "workspaces.organizations[%d].name %q is not a DNS label: it is the Organization's name, which every workspace records" $i $name) -}}
+{{- end -}}
+{{- if hasKey $names $name -}}
+{{- fail (printf "workspaces.organizations[%d].name %q is a duplicate: an Organization is listed once, with every group of its members" $i $name) -}}
+{{- end -}}
+{{- $_ := set $names $name true -}}
+{{- $groups := $o.memberGroups | default list -}}
+{{- if not $groups -}}
+{{- fail (printf "workspaces.organizations[%d] (%s) has no memberGroups: an Organization without a group has no members, so nobody could manage its workspaces; name the groups of the forwarded identity that make a caller a member, or remove the entry" $i $name) -}}
+{{- end -}}
+{{- range $j, $g := $groups -}}
+{{- if not (toString ($g | default "")) -}}
+{{- fail (printf "workspaces.organizations[%d] (%s).memberGroups[%d] is empty: a member group is a group name of the forwarded identity" $i $name $j) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The workspace-manager's organizations map, {<name>: {memberGroups}}, from
+workspaces.organizations, as JSON; empty ({}) without Organizations. For a
+validated list only.
+*/}}
+{{- define "agent-platform.workspaces.organizations" -}}
+{{- $out := dict -}}
+{{- range ((.Values.workspaces | default dict).organizations | default list) -}}
+{{- $groups := list -}}
+{{- range .memberGroups -}}{{- $groups = append $groups (toString .) -}}{{- end -}}
+{{- $_ := set $out (toString .name) (dict "memberGroups" $groups) -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+Walk a provider's values: every key that names a credential holds a Secret
+reference. Emits nothing; fails naming the path.
+*/}}
+{{- define "agent-platform.workspaces.secretRefs" -}}
+{{- $at := .at -}}
+{{- range $k, $v := .node -}}
+{{- if has (lower $k) (list "privatekey" "clientsecret" "secret" "token" "password" "apikey") -}}
+{{- include "agent-platform.workspaces.secretRef" (dict "ref" $v "at" (printf "%s.%s" $at $k)) -}}
+{{- else if kindIs "map" $v -}}
+{{- include "agent-platform.workspaces.secretRefs" (dict "node" $v "at" (printf "%s.%s" $at $k)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "agent-platform.workspaces.secretRef" -}}
+{{- $r := .ref -}}
+{{- if not (and (kindIs "map" $r) $r.name $r.key (eq (len (keys $r)) 2)) -}}
+{{- fail (printf "%s is a credential: it takes a Secret reference {name, key} of a Secret in the platform's namespace, never the value (the value would land in clear text in the workspace-manager HelmRelease and in Helm release storage)" .at) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The template-time guards of the workspace storage (workspaces.storage,
+giantswarm/agent-platform#900), run while workspaces are on, by this chart and
+by the connectivity chart alike (its templates/workspaces/_helpers.tpl carries
+the same definition): the class is named; a rendered class names a preset and
+the preset's required input; the azureFiles preset keeps protocol nfs, since
+an SMB share does not serve git. Emits nothing; fails naming the key.
+*/}}
+{{- define "agent-platform.workspaces.storage.validate" -}}
+{{- $storage := dig "storage" dict (.Values.workspaces | default dict) -}}
+{{- if not ($storage.storageClassName | default "") -}}
+{{- fail "workspaces.enabled is true but workspaces.storage.storageClassName is empty: a workspace is one read-write-many volume (bare mirrors and a directory per Session, used by git), claimed from a StorageClass that keeps POSIX semantics — Amazon EFS, Azure Files over NFS 4.1, an NFS server — which a cluster rarely has by default; leave the default, workspaces-rwx, the name every installation gives the class it provides, name a class of another name it provides, or name a new one and set workspaces.storage.storageClass.create with a preset to render it" -}}
+{{- end -}}
+{{- $sc := $storage.storageClass | default dict -}}
+{{- if $sc.create -}}
+{{- $preset := toString ($sc.preset | default "") -}}
+{{- if not (has $preset (list "efs" "azureFiles" "nfs")) -}}
+{{- fail (printf "workspaces.storage.storageClass.create is true but workspaces.storage.storageClass.preset is %q: the presets are efs (Amazon EFS, an access point per volume), azureFiles (Azure Files over NFS 4.1) and nfs (an NFS server through the NFS CSI driver)" $preset) -}}
+{{- end -}}
+{{- if and (eq $preset "efs") (not (dig "efs" "fileSystemId" "" $sc)) -}}
+{{- fail "workspaces.storage.storageClass.preset is efs but workspaces.storage.storageClass.efs.fileSystemId is empty: every volume is an access point on that file system (fs-…), which the installation provides" -}}
+{{- end -}}
+{{- if and (eq $preset "nfs") (not (dig "nfs" "server" "" $sc)) -}}
+{{- fail "workspaces.storage.storageClass.preset is nfs but workspaces.storage.storageClass.nfs.server is empty: every volume is a directory of that server's export (nfs.share)" -}}
+{{- end -}}
+{{- $protocol := toString (dig "parameters" "protocol" "nfs" $sc) -}}
+{{- if and (eq $preset "azureFiles") (ne $protocol "nfs") -}}
+{{- fail (printf "workspaces.storage.storageClass.parameters.protocol is %q on the azureFiles preset: an Azure Files share over SMB fixes every file's mode at mount and has no symbolic links, so git does not work on it; the workspaces need protocol nfs, the preset's own" $protocol) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The template-time guards of Substrate's workspace driver
+(workspaces.substrate.csiDriver, giantswarm/agent-platform#888), run while
+workspaces are on, by this chart and by the connectivity chart alike (its templates/workspaces/_helpers.tpl
+carries the same definition): a driver without a name sets nothing; one with a
+name has a controller endpoint with a port (the network policy admits it); TLS
+takes Substrate's pod identity, the CSIDriverConfig's only client certificate;
+a class rendered from a preset is provisioned by that driver. Emits
+nothing; fails naming the key.
+*/}}
+{{- define "agent-platform.workspaces.substrate.validate" -}}
+{{- $csi := dig "substrate" "csiDriver" dict (.Values.workspaces | default dict) -}}
+{{- $name := toString ($csi.name | default "") -}}
+{{- $endpoint := toString ($csi.controllerEndpoint | default "") -}}
+{{- if not $name -}}
+{{- if or $endpoint ($csi.nodeSocketOverride | default "") ($csi.tls | default dict).serverName -}}
+{{- fail "workspaces.substrate.csiDriver.name is empty but other csiDriver keys are set: the CSIDriverConfig is named after the driver and renders only with a name; name the workspace StorageClass's provisioner, or unset the driver's keys" -}}
+{{- end -}}
+{{- else -}}
+{{- if not (regexMatch "^(tcp|dns)://.+:[0-9]+$" $endpoint) -}}
+{{- fail (printf "workspaces.substrate.csiDriver.controllerEndpoint is %q: Substrate's ate-api-server calls the driver's controller service at tcp://<host>:<port> or dns://<host>:<port>, and the network policy admits that port" $endpoint) -}}
+{{- end -}}
+{{- $tls := $csi.tls | default dict -}}
+{{- if and $tls.enabled (not $tls.usePodIdentity) -}}
+{{- fail "workspaces.substrate.csiDriver.tls.enabled is true but tls.usePodIdentity is not: Substrate presents its own pod identity to the controller endpoint, the only client certificate a CSIDriverConfig takes" -}}
+{{- end -}}
+{{- end -}}
+{{- include "agent-platform.workspaces.csiCompanion.validate" . -}}
+{{- $resolved := toString ((include "agent-platform.workspaces.csiDriver.resolved" . | fromJson).name | default "") -}}
+{{- if $resolved -}}
+{{- $sc := dig "storage" "storageClass" dict (.Values.workspaces | default dict) -}}
+{{- $provisioner := get (dict "efs" "efs.csi.aws.com" "azureFiles" "file.csi.azure.com" "nfs" "nfs.csi.k8s.io") (toString ($sc.preset | default "")) -}}
+{{- if and $sc.create (ne $provisioner $resolved) -}}
+{{- fail (printf "workspaces.substrate.csiDriver.name (%s) differs from the provisioner of the workspace StorageClass rendered from preset %s (%s): Substrate mounts a workspace's volume through the driver that provisioned it" $resolved $sc.preset $provisioner) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The CSI companion's guards and the registration derived from it
+(giantswarm/agent-platform#889), the connectivity chart's definitions
+(templates/workspaces/_helpers.tpl there), carried here so the meta chart
+refuses the same values the connectivity release would: a companion names a
+preset of the driver it stands in for; a csiDriver named beside it is that
+driver; the proxy admits one SPIFFE identity; the node socket is under the
+kubelet's plugins directory. The resolved registration is the installation's
+own csiDriver while its name is set, else the companion's driver.
+*/}}
+{{- define "agent-platform.workspaces.csiCompanion.enabled" -}}
+{{- if and (dig "enabled" false (.Values.workspaces | default dict)) (dig "substrate" "csiCompanion" "enabled" false (.Values.workspaces | default dict)) }}true{{ end -}}
+{{- end -}}
+
+{{- define "agent-platform.workspaces.csiCompanion.presets" -}}
+{{- dict
+  "efs" (dict "provisioner" "efs.csi.aws.com")
+  "azureFiles" (dict "provisioner" "file.csi.azure.com")
+  | toJson -}}
+{{- end -}}
+
+{{- define "agent-platform.workspaces.csiCompanion.validate" -}}
+{{- if include "agent-platform.workspaces.csiCompanion.enabled" . -}}
+{{- $c := dig "substrate" "csiCompanion" dict (.Values.workspaces | default dict) -}}
+{{- $preset := toString ($c.preset | default "") -}}
+{{- $presets := include "agent-platform.workspaces.csiCompanion.presets" . | fromJson -}}
+{{- if not (hasKey $presets $preset) -}}
+{{- fail (printf "workspaces.substrate.csiCompanion.enabled is true but workspaces.substrate.csiCompanion.preset is %q: the companion runs the cluster's file driver for Substrate — efs (Amazon EFS, efs.csi.aws.com) or azureFiles (Azure Files over NFS, file.csi.azure.com); name the driver the workspace StorageClass is provisioned with" $preset) -}}
+{{- end -}}
+{{- $provisioner := (get $presets $preset).provisioner -}}
+{{- $own := toString (dig "substrate" "csiDriver" "name" "" (.Values.workspaces | default dict)) -}}
+{{- if and $own (ne $own $provisioner) -}}
+{{- fail (printf "workspaces.substrate.csiDriver.name (%s) is not the driver of the CSI companion's preset %s (%s): Substrate registers one driver for the workspace volumes; set the companion's preset to that driver, or leave csiDriver.name empty and the registration is derived from the companion" $own $preset $provisioner) -}}
+{{- end -}}
+{{- $identity := toString (dig "proxy" "clientIdentity" "spiffe://cluster.local/ns/ate-system/sa/ate-api-server" $c) -}}
+{{- if not (hasPrefix "spiffe://" $identity) -}}
+{{- fail (printf "workspaces.substrate.csiCompanion.proxy.clientIdentity is %q: the proxy admits the client certificate that carries this SPIFFE ID, ate-api-server's (spiffe://<trust domain>/ns/<namespace>/sa/ate-api-server)" $identity) -}}
+{{- end -}}
+{{- $socketDir := toString (dig "node" "socketDir" "/var/lib/kubelet/plugins/agent-platform-csi-companion" $c) -}}
+{{- if not (hasPrefix "/var/lib/kubelet/plugins/" $socketDir) -}}
+{{- fail (printf "workspaces.substrate.csiCompanion.node.socketDir is %q: atelet reaches a node plugin's socket under /var/lib/kubelet/plugins, the directory it mounts" $socketDir) -}}
+{{- end -}}
+{{- if and (eq (include "agent-platform.shape.kyvernoPolicies" .) "true") (include "agent-platform.targetSecretName" .) -}}
+{{- fail "workspaces.substrate.csiCompanion is on with gitops.target and Kyverno policies: the companion's PolicyExceptions must exist before its workloads, and this chart renders them on its own cluster, not the target; provide them on the target cluster and set kyvernoPolicies.enabled false, or run the companion without a target" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "agent-platform.workspaces.csiDriver.resolved" -}}
+{{- $own := dig "substrate" "csiDriver" dict (.Values.workspaces | default dict) -}}
+{{- if and (not ($own.name | default "")) (include "agent-platform.workspaces.csiCompanion.enabled" .) -}}
+{{- $preset := toString (dig "substrate" "csiCompanion" "preset" "" (.Values.workspaces | default dict)) -}}
+{{- dict "name" ((get (include "agent-platform.workspaces.csiCompanion.presets" . | fromJson) $preset | default dict).provisioner | default "") | toJson -}}
+{{- else -}}
+{{- $own | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The api.kagent.dev line (kagent 1.3 and later) refuses a database that holds the
 1.x schema: its controller exits at start-up, the kagent upgrade times out with
 the line's resources half applied, and Helm's rollback cannot undo that in
@@ -1047,6 +2011,59 @@ A first install and an installation already on the line render as before.
 Skipped with gitops.target set (the lookups see the installation, not the
 target); `lookup` is empty under `helm template`, where the guard is silent.
 */}}
+{{- /*
+agent-platform.validateKagentDatabase: the kagent chart deploys no PostgreSQL
+from 1.11 on (the 1.10 chart's bundled instance is gone, and its claim with
+it). kagent on a range that admits 1.11 or later therefore needs the platform's
+CloudNativePG database (postgres.enabled with postgres.databases.kagent-v2) or
+an own connection (kagent.database.postgres.urlFile or connectionStringSecretRef);
+anything else fails the render here instead of leaving the controller without
+a database.
+*/ -}}
+{{- define "agent-platform.validateKagentDatabase" -}}
+{{- if eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true" -}}
+{{- $range := index .Values.components "kagent" "versionRange" | default "" -}}
+{{- $probes := list "1.11.0" "1.11.99999" -}}
+{{- range (regexFindAll "[0-9]+\\.[0-9]+" $range -1) -}}
+{{- if semverCompare ">=1.11.0-0" (printf "%s.0" .) -}}
+{{- $probes = append (append $probes (printf "%s.0" .)) (printf "%s.99999" .) -}}
+{{- end -}}
+{{- end -}}
+{{- $bundleless := false -}}
+{{- range $probes }}{{ if semverCompare $range . }}{{ $bundleless = true }}{{ end }}{{ end -}}
+{{- $pg := dig "database" "postgres" dict (.Values.kagent | default dict) -}}
+{{- $platform := and .Values.postgres.enabled (ne (dig "databases" "kagent-v2" "enabled" true .Values.postgres) false) -}}
+{{- if and $bundleless (not $platform) (not $pg.urlFile) (not (dig "connectionStringSecretRef" "name" "" $pg)) -}}
+{{- fail (printf "components.kagent selects kagent %s, whose chart deploys no PostgreSQL: run kagent on the platform's CloudNativePG database, the supported shape (postgres.enabled: true with postgres.databases.kagent-v2, and the CloudNativePG operator on the cluster or components.cloudnative-pg.enabled: true), or point kagent.database.postgres.urlFile or connectionStringSecretRef at an own database. An installation still on the 1.10 chart's bundled PostgreSQL moves its data first: the 1.11 chart's upgrade deletes the bundled claim" $range) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+"true" while muster's pods mount Substrate certificates the cluster may not issue
+yet: muster serves FetchSecret (its values' credentialProvider.enabled) and the
+substrate release is not Ready on the cluster the HelmReleases live on. The
+signers' ClusterTrustBundles come from the connectivity release's hook and the
+certificates from the substrate release, both behind muster (connectivity
+dependsOn muster, substrate dependsOn connectivity), so a fresh install and an
+in-place switch of workspaces and Substrate on would wait on muster for ever
+(giantswarm/agent-platform#1107). Without a cluster to read (an offline render,
+a target cluster) it counts as not Ready.
+Usage: include "agent-platform.muster.awaitsSubstrate" (dict "root" $root "values" $vals)
+*/}}
+{{- define "agent-platform.muster.awaitsSubstrate" -}}
+{{- if dig "muster" "credentialProvider" "enabled" false .values -}}
+{{- $ready := false -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" .root "name" "substrate")) (not (include "agent-platform.targetSecretName" .root)) -}}
+{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" (.root.Values.gitops.namespace | default .root.Release.Namespace) (include "agent-platform.childName" (dict "root" .root "name" (index .root.Values.components "substrate" "chart"))) -}}
+{{- range (dig "status" "conditions" list ($release | default dict)) -}}
+{{- if and (eq .type "Ready") (eq .status "True") -}}{{- $ready = true -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if not $ready -}}true{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "agent-platform.validateKagentLineCrossing" -}}
 {{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
 {{- $range := index .Values.components "kagent" "versionRange" | default "" -}}
@@ -1132,7 +2149,8 @@ by anyone allowed to get HelmReleases there.
       (list "model-manager" (list "oauth" "dex" "clientSecret"))
       (list "agent-manager" (list "oauth" "dex" "clientSecret"))
       (list "vm-manager" (list "oauth" "dex" "clientSecret"))
-      (list "cluster-manager" (list "oauth" "dex" "clientSecret")) -}}
+      (list "cluster-manager" (list "oauth" "dex" "clientSecret"))
+      (list "workspace-manager" (list "oauth" "dex" "clientSecret")) -}}
 {{- range $paths -}}
 {{- $cur := index $v (first .) | default dict -}}
 {{- $ok := kindIs "map" $cur -}}
@@ -1169,7 +2187,7 @@ The message names the key paths only.
 {{- define "agent-platform.validateInlineSecrets" -}}
 {{- if .Values.gitops.forbidInlineSecrets -}}
 {{- with (include "agent-platform.inlineSecretPaths" .) -}}
-{{- fail (printf "gitops.forbidInlineSecrets is true but these values carry credentials inline, which would land in clear text in the component HelmReleases and in Helm release storage: %s. Move each into a pre-created Secret and reference it (kagent providers.<name>.apiKeySecretRef with an empty apiKey, kagent.oauth2-proxy.config.existingSecret, muster.muster.oauth.server.existingSecret and .storage.valkey.existingSecret, valkey.valkey.auth.usersExistingSecret, klausGateway.slack.secretName with an empty botToken, klausGateway.obo.existingSecret, model-manager/agent-manager/vm-manager oauth.existingSecret), or set gitops.forbidInlineSecrets: false" .) -}}
+{{- fail (printf "gitops.forbidInlineSecrets is true but these values carry credentials inline, which would land in clear text in the component HelmReleases and in Helm release storage: %s. Move each into a pre-created Secret and reference it (kagent providers.<name>.apiKeySecretRef with an empty apiKey, kagent.oauth2-proxy.config.existingSecret, muster.muster.oauth.server.existingSecret and .storage.valkey.existingSecret, valkey.valkey.auth.usersExistingSecret, klausGateway.slack.secretName with an empty botToken, klausGateway.obo.existingSecret, model-manager/agent-manager/vm-manager/cluster-manager/workspace-manager oauth.existingSecret), or set gitops.forbidInlineSecrets: false" .) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -1213,16 +2231,6 @@ Name of the AgentgatewayParameters CR — defaults to release name.
 */}}
 {{- define "agent-platform.parametersName" -}}
 {{- default .Release.Name .Values.gateway.parameters.name -}}
-{{- end -}}
-
-{{/*
-Truthy (emits "true") when the request topology routes through agentgateway,
-i.e. ingress.mode is agentgateway-muster or agentgateway-direct. Otherwise
-emits nothing (empty string = falsy). Gated templates use:
-  {{- if (include "agent-platform.ingress.agentgateway" .) }}
-*/}}
-{{- define "agent-platform.ingress.agentgateway" -}}
-{{- if or (eq .Values.ingress.mode "agentgateway-muster") (eq .Values.ingress.mode "agentgateway-direct") -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -1339,48 +2347,6 @@ shared ingress.httpRoute.annotations). Emits nothing when both are empty.
 {{- $h := .ctx.Values.ingress.httpRoute -}}
 {{- $merged := merge (deepCopy (dig .route "annotations" dict $h)) ($h.annotations | default dict) -}}
 {{- with $merged }}{{- toYaml . }}{{- end -}}
-{{- end -}}
-
-{{/*
-Validate the ingress.mode selector and the dependent toggles it implies.
-Fails the render with an actionable message when the configuration is
-inconsistent. Rendered exactly once via templates/validate.yaml.
-*/}}
-{{- define "agent-platform.validateIngress" -}}
-{{- $mode := .Values.ingress.mode -}}
-{{- if not (or (eq $mode "muster-direct") (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
-{{- fail (printf "ingress.mode=%v is invalid; must be one of: muster-direct, agentgateway-muster, agentgateway-direct" $mode) -}}
-{{- end -}}
-{{- if eq $mode "agentgateway-direct" -}}
-{{- fail "ingress.mode=agentgateway-direct requires a DCR-capable IdP (RFC 7591/8707), e.g. Zitadel; not yet supported" -}}
-{{- end -}}
-{{- $isAgentgateway := or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct") -}}
-{{- if not .Values.ingress.parentRefs -}}
-{{- fail "ingress.parentRefs is required in all modes — the umbrella-owned muster `/` route (and the agentgateway `/mcp` route in agentgateway-* modes) attaches to it; an empty parentRefs renders a route bound to no Gateway, leaving muster unreachable while install reports success" -}}
-{{- end -}}
-{{- /* viaMuster only matters when the mcps sub-chart is installed; with no MCP
-servers there is nothing to route, so the consistency check is scoped to the
-agent-platform-mcps component. */ -}}
-{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps") -}}
-{{- $mcpsVals := index .Values "agent-platform-mcps" | default dict -}}
-{{- $viaMuster := dig "agentgateway" "viaMuster" false $mcpsVals -}}
-{{- if eq $mode "agentgateway-muster" -}}
-{{- if not (or (eq $viaMuster true) (eq (toString $viaMuster) "true")) -}}
-{{- fail "ingress.mode=agentgateway-muster requires agent-platform-mcps.agentgateway.viaMuster=true" -}}
-{{- end -}}
-{{- else if eq $mode "agentgateway-direct" -}}
-{{- if not (or (eq $viaMuster false) (eq (toString $viaMuster) "false")) -}}
-{{- fail "ingress.mode=agentgateway-direct requires agent-platform-mcps.agentgateway.viaMuster=false" -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
-{{- $agentgatewayEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway") -}}
-{{- if and $isAgentgateway (not $agentgatewayEnabled) -}}
-{{- fail "components.agentgateway.enabled must be true in agentgateway-* modes; the controller dependency condition must match ingress.mode" -}}
-{{- end -}}
-{{- if and (eq $mode "muster-direct") $agentgatewayEnabled -}}
-{{- fail "components.agentgateway.enabled must be false in muster-direct mode (it defaults to true, with ingress.mode agentgateway-muster); the controller dependency condition must match ingress.mode" -}}
-{{- end -}}
 {{- end -}}
 
 {{/*
@@ -1599,6 +2565,7 @@ answers, but only where the leaf is left at `auto`:
                                model-manager.serviceMonitor.enabled,
                                agent-manager.serviceMonitor.enabled,
                                cluster-manager.serviceMonitor.enabled,
+                               workspace-manager.serviceMonitor.enabled,
                                kserve-llmisvc-resources.kserve.llmisvc
                                .controller.serviceMonitor.enabled,
                                substrate.metrics.podMonitor.enabled (the six
@@ -1678,6 +2645,7 @@ connectivity release both read the resolved value. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "model-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "agent-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "cluster-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "workspace-manager" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "kserve-llmisvc-resources" "kserve" "llmisvc" "controller" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- /* valkey PodMonitor: the chart's own default is on, so only "off" is written. */ -}}
 {{- if not $monitors -}}
@@ -1735,7 +2703,8 @@ klaus-gateway gates read the endpoints. Emits nothing.
               modelServing.networkPolicy.otlpEndpoint from that preset's
               resolved endpoint (the model pods' egress);
               <manager>.observability.otel.endpoint (model-manager,
-              agent-manager, vm-manager, cluster-manager, backstage);
+              agent-manager, vm-manager, cluster-manager, workspace-manager,
+              backstage);
               mcp-kubernetes.mcpKubernetes.instrumentation.otlpEndpoint as
               host:port (the scheme and path dropped, the port the scheme's or
               protocol's default when it names none), with .otlpInsecure false for an
@@ -1820,7 +2789,7 @@ is turned off, where the chart would export to the SDK's localhost default. */ -
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" $path "value" $protocol) -}}
 {{- end -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "otel" "headers") "value" $joined) -}}
-{{- range $name := list "model-manager" "agent-manager" "vm-manager" "cluster-manager" "backstage" -}}
+{{- range $name := list "model-manager" "agent-manager" "vm-manager" "cluster-manager" "workspace-manager" "backstage" -}}
 {{- $base := list $name "observability" "otel" -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "endpoint") "value" $endpoint) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "protocol") "value" $protocol) -}}
@@ -2006,7 +2975,7 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
 {{- $login = dict "issuerURL" (dig "dex" "issuerUrl" "" $server) "clientID" (dig "dex" "clientId" "" $server) "existingSecret" (dig "existingSecret" "" $server) -}}
 {{- end -}}
-{{- range $name, $wiring := dict "model-manager" "modelManager" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" -}}
+{{- range $name, $wiring := dict "model-manager" "modelManager" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" "workspace-manager" "" -}}
 {{- $block := index $v $name -}}
 {{- if and (kindIs "map" $block) (kindIs "map" (index $block "oauth")) (dig "oauth" "enabled" false $block) -}}
 {{- $oauth := index $block "oauth" -}}
@@ -2020,7 +2989,7 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- end -}}
 {{- if and $login.existingSecret (not $oauth.existingSecret) (not $dex.clientSecret) (not $identity.existingSecret) }}{{ $_ := set $oauth "existingSecret" $login.existingSecret }}{{ end -}}
 {{- end -}}
-{{- if and $wiring (not $oauth.baseURL) (or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
+{{- if and $wiring (not $oauth.baseURL) (eq $mode "agentgateway-muster") -}}
 {{- $route := dig $wiring "route" dict $v -}}
 {{- if eq $wiring "modelManager" }}{{ $route = dict "pathPrefix" "/model-manager" }}{{ end -}}
 {{- $host := $route.hostname -}}
@@ -2083,6 +3052,193 @@ Usage: include "agent-platform.kagent.namespace" .
 */}}
 {{- define "agent-platform.kagent.namespace" -}}
 {{- dig "namespaceOverride" "" (.Values.kagent | default dict) | default (include "agent-platform.targetNamespace" .) -}}
+{{- end -}}
+
+{{/*
+The first release of the workspace-manager line (giantswarm/workspace-manager)
+whose chart takes kagent.address, kagent.namespace and kagent.port (the session
+directories' cleanup from kagent's record of each Session's last turn); every
+earlier release's closed values schema refuses a kagent block. From it on
+(a release candidate of it included) the chart derives
+workspace-manager.kagent.address (agent-platform.componentDerivedValues). One
+line, no comment inside the define.
+*/}}
+{{- define "agent-platform.workspaceManager.kagentFloor" -}}0.4.0{{- end -}}
+
+{{/*
+The agent-manager release that carries the tenant reconciler (its chart's
+tenants block, flag --multi-tenant; giantswarm/agent-manager#160). One line,
+no comment inside the define.
+*/}}
+{{- define "agent-platform.agentManager.tenantsFloor" -}}2.1.0{{- end -}}
+
+{{/*
+agent-manager's tenants block (its tenant reconciler) while
+tenants.organizations.enabled is on, as JSON; {} while it is off, so the
+agent-manager release carries no tenants key and its values are those of a
+chart without the reconciler (an agent-manager 1.x chart's closed schema
+refuses the key). One switch: the connectivity release admits the
+Organizations' workers on the same key (templates/substrate/ in that chart).
+On, from what this chart already has for the kagent namespace:
+  enabled                    true;
+  modelConfig.name           default-model-config, the ModelConfig the kagent
+                             chart renders from kagent.providers;
+  modelConfig.apiKeySecretName
+                             kagent.providers.<providers.default>.apiKeySecretRef,
+                             its key Secret;
+  networkPolicy              the workers' own policy the connectivity release
+                             renders in the kagent namespace with Agent
+                             Substrate and networkPolicy.enabled on: flavor
+                             cilium, names [substrate-workers]; flavor
+                             kubernetes, names [substrate-workers-ingress];
+                             none with networkPolicy.enabled off;
+  workerPoolReplicas         1, the warm workers of each tenant that holds an
+                             agent; a default: agent-manager.tenants.workerPoolReplicas
+                             stands.
+agent-manager.tenants.interval is the operator's (the chart's default without
+it). Every other key is single-source: an own value in agent-manager.tenants
+that differs fails the render, and so does agent-manager.tenants.enabled set
+against the switch.
+The render fails, naming what is missing, when the switch is on and:
+  * components.agent-manager.versionRange's floor is below
+    agent-platform.agentManager.tenantsFloor (an older chart has no tenants
+    block);
+  * a kind the reconciler watches is not served: agent-manager refuses to
+    start with --multi-tenant otherwise. The api.kagent.dev Agents, Harnesses
+    and ModelConfigs come with components.kagent-crds, the ate.dev WorkerPools
+    with components.substrate-crds; both follow components.kagent, which must
+    be on (agent-platform.validateKagentCrds and validateSubstrate refuse
+    either off with kagent on). Flux's
+    HelmReleases and OCIRepositories are what this chart installs through;
+    the network policy kind is the flavor networkPolicy.flavor resolved for
+    the cluster (`auto` reads it from the cluster);
+  * agent-manager.oauth.enabled or agent-manager.oauth.downstream.enabled is
+    off (a request in a tenant runs as the caller);
+  * kagent.fluxServiceAccountName is empty (agent-manager's
+    flux.helmReleaseServiceAccount, which the agents' HelmReleases in a tenant
+    run as);
+  * the default ModelConfig has no key Secret (kagent.providers empty, or its
+    default provider without apiKeySecretRef).
+Called from agent-platform.componentDerivedValues, i.e. only while
+components.agent-manager is on.
+Usage: include "agent-platform.agentManager.tenants" $root | fromJson
+*/}}
+{{- define "agent-platform.agentManager.tenants" -}}
+{{- $am := index .Values "agent-manager" | default dict -}}
+{{- $own := dig "tenants" dict $am | default dict -}}
+{{- if not (dig "organizations" "enabled" false (.Values.tenants | default dict)) -}}
+{{- if dig "enabled" false $own -}}
+{{- fail "agent-manager.tenants.enabled is true but tenants.organizations.enabled is not: the tenant reconciler is turned on with tenants.organizations.enabled, which also admits the Organizations' workers in the connectivity release; set it and leave agent-manager.tenants.enabled unset" -}}
+{{- end -}}
+{}
+{{- else -}}
+{{- if and (hasKey $own "enabled") (not $own.enabled) -}}
+{{- fail "agent-manager.tenants.enabled is false but tenants.organizations.enabled is true: the tenant reconciler follows tenants.organizations.enabled; leave agent-manager.tenants.enabled unset" -}}
+{{- end -}}
+{{- $range := dig "agent-manager" "versionRange" "" .Values.components -}}
+{{- $floor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range) "" -}}
+{{- $want := include "agent-platform.agentManager.tenantsFloor" . -}}
+{{- if or (not $floor) (lt ((semver $floor).Compare (semver $want)) 0) -}}
+{{- fail (printf "tenants.organizations.enabled needs agent-manager %s or later, the release with the tenant reconciler (giantswarm/agent-manager#160), and components.agent-manager.versionRange %q has the floor %q: move the range to >=%s" $want $range $floor $want) -}}
+{{- end -}}
+{{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
+{{- fail "tenants.organizations.enabled with agent-manager on needs components.kagent: the tenant reconciler watches api.kagent.dev Agents, Harnesses and ModelConfigs (kagent-crds) and ate.dev WorkerPools (substrate-crds), which follow components.kagent, and agent-manager refuses to start with --multi-tenant when one is not served" -}}
+{{- end -}}
+{{- if not (and (dig "oauth" "enabled" false $am) (dig "oauth" "downstream" "enabled" false $am)) -}}
+{{- fail "tenants.organizations.enabled needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled: a request in a tenant runs as the caller, whose RoleBindings there grant the writes" -}}
+{{- end -}}
+{{- if not (include "agent-platform.kagent.fluxServiceAccountName" .) -}}
+{{- fail "tenants.organizations.enabled needs kagent.fluxServiceAccountName: it is agent-manager's flux.helmReleaseServiceAccount, the ServiceAccount the agents' HelmReleases in a tenant run as" -}}
+{{- end -}}
+{{- $providers := dig "providers" dict (.Values.kagent | default dict) | default dict -}}
+{{- $provider := toString (dig "default" "" $providers) -}}
+{{- $secret := dig $provider "apiKeySecretRef" "" $providers -}}
+{{- if not $secret -}}
+{{- fail (printf "tenants.organizations.enabled needs kagent.providers.%s.apiKeySecretRef (kagent.providers.default %q): the Secret with the key of the default ModelConfig, which agent-manager copies into a tenant with its first agent; set it in this chart's values, which do not read the kagent chart's own provider defaults" $provider $provider) -}}
+{{- end -}}
+{{- $tenants := dict "enabled" true "modelConfig" (dict "name" "default-model-config" "apiKeySecretName" $secret) -}}
+{{- if and .Values.networkPolicy.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
+{{- $flavor := include "agent-platform.shape.networkPolicyFlavor" . -}}
+{{- $_ := set $tenants "networkPolicy" (dict "flavor" $flavor "names" (list (ternary "substrate-workers" "substrate-workers-ingress" (eq $flavor "cilium")))) -}}
+{{- end -}}
+{{- range $key, $value := dict "modelConfig.name" $tenants.modelConfig.name "modelConfig.apiKeySecretName" $tenants.modelConfig.apiKeySecretName "networkPolicy.flavor" (dig "networkPolicy" "flavor" "" $tenants) "networkPolicy.names" (dig "networkPolicy" "names" list $tenants) -}}
+{{- $path := splitList "." $key -}}
+{{- $mine := dig (first $path) (last $path) nil $own -}}
+{{- if and (not (kindIs "invalid" $mine)) (ne (toJson $mine) (toJson $value)) -}}
+{{- fail (printf "agent-manager.tenants.%s (%s) differs from what tenants.organizations.enabled derives (%s) from the kagent namespace's values: leave agent-manager.tenants.%s unset" $key (toJson $mine) (toJson $value) $key) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (hasKey $own "workerPoolReplicas") -}}
+{{- $_ := set $tenants "workerPoolReplicas" 1 -}}
+{{- end -}}
+{{- toJson $tenants -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+A Go duration (time.ParseDuration: 720h, 1h30m, 0, 1.5h) in seconds, empty
+for anything else (a sign, a day unit, a bare number other than 0).
+Usage: include "agent-platform.durationSeconds" "720h"
+*/}}
+{{- define "agent-platform.durationSeconds" -}}
+{{- $d := toString . -}}
+{{- $unit := dict "h" 3600.0 "m" 60.0 "s" 1.0 "ms" 0.001 "us" 0.000001 "µs" 0.000001 "ns" 0.000000001 -}}
+{{- $num := "([0-9]+(\\.[0-9]*)?|\\.[0-9]+)" -}}
+{{- if eq $d "0" -}}0
+{{- else if regexMatch (printf "^(%s(ns|us|µs|ms|h|m|s))+$" $num) $d -}}
+{{- $total := 0.0 -}}
+{{- range regexFindAll (printf "%s(ns|us|µs|ms|h|m|s)" $num) $d -1 -}}
+{{- $total = addf $total (mulf (float64 (regexFind $num .)) (get $unit (regexReplaceAll (printf "^%s" $num) . ""))) -}}
+{{- end -}}
+{{- $total -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The first release of the workspace-manager line whose manager has the provider
+kind gitlab (gitlab.com or a self-managed GitLab: url, apiURL, a group access
+token as the sync credential, an OAuth application as the sign-in); an earlier
+manager refuses the kind at start. A gitlab provider instance needs the floor of
+components.workspace-manager.versionRange at it or later (a release candidate
+of it included), or the render fails (agent-platform.validateWorkspaces). One
+line, no comment inside the define.
+*/}}
+{{- define "agent-platform.workspaceManager.gitlabFloor" -}}0.5.0{{- end -}}
+
+{{/*
+The first release of the workspace-manager line whose person's provider token
+is muster's grant of a provider instance's App (muster.mcpServer.auth.provider)
+and which keeps no sign-in store of its own; an earlier manager with provider
+instances and OAuth needs the sign-in keys this chart no longer creates. With
+provider instances and oauth.enabled the floor of
+components.workspace-manager.versionRange is at it or later (a release
+candidate of it included), or the render fails
+(agent-platform.validateWorkspaceAuth). One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.workspaceManager.musterGrantFloor" -}}0.10.0{{- end -}}
+
+{{/*
+The first release of the klaus-gateway line (giantswarm/klaus-gateway) whose
+chart takes workspaces.toolsPrefix (the workspace-manager client over muster);
+every earlier release's closed values schema refuses a workspaces block. From
+it on (a release candidate of it included) the chart derives
+klausGateway.workspaces.toolsPrefix while workspaces are on
+(agent-platform.componentDerivedValues). One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.klausGateway.workspacesFloor" -}}4.3.0{{- end -}}
+
+{{/*
+The kagent controller's in-cluster gRPC API (in-cluster h2c), straight to its
+Service: grpc://<kagent.fullnameOverride>-controller.<kagent namespace>.svc:8083
+while the kagent component is on, "" otherwise. 8083 is the port the kagent
+controller serves its API on, the one the connectivity chart's policies and
+controller route name.
+Usage: include "agent-platform.kagent.controllerAddress" .
+*/}}
+{{- define "agent-platform.kagent.controllerAddress" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") -}}
+{{- printf "grpc://%s-controller.%s.svc:8083" (dig "fullnameOverride" "" (.Values.kagent | default dict) | default "kagent") (include "agent-platform.kagent.namespace" .) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -2211,6 +3367,27 @@ Usage: include "agent-platform.childName" (dict "root" $ "name" $chart)
 {{- printf "%s-%s" (dig "target" "name" "" .root.Values.gitops | default .root.Release.Name) .name -}}
 {{- else -}}
 {{- .name -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The name of a component's OCIRepository, which its HelmRelease's chartRef names:
+the child name, and for a chart released with this chart at an exact version
+(components.<name>.releasedWithChart) `<child>-<version>`. Helm applies the two
+objects in kind order, HelmRelease before OCIRepository, so with one name for
+every version helm-controller would apply a step's new values to the previous
+chart, whose closed schema refuses a key the step adds, and spend a retry
+(giantswarm/agent-platform#1019). A versioned name moves the version into the
+HelmRelease's own spec: helm-controller waits until the source of that name
+holds that version's artifact, and the previous source is pruned with the step.
+A range or a dev channel keeps the child name.
+Usage: include "agent-platform.sourceName" (dict "child" $child "entry" $c "semver" $semver)
+*/}}
+{{- define "agent-platform.sourceName" -}}
+{{- if and .entry.releasedWithChart (regexMatch "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$" .semver) -}}
+{{- printf "%s-%s" .child (regexReplaceAll "[^a-z0-9.-]+" (lower (trimPrefix "v" .semver)) "-") -}}
+{{- else -}}
+{{- .child -}}
 {{- end -}}
 {{- end -}}
 
@@ -2653,4 +3830,36 @@ The helm-and-shell image the hooks that need helm run (gitops.hooks.helmImage).
 {{- define "agent-platform.hooks.helmImage" -}}
 {{- $i := .Values.gitops.hooks.helmImage -}}
 {{- printf "%s/%s:%s" $i.registry $i.repository $i.tag -}}
+{{- end -}}
+
+{{/*
+=== Kyverno PolicyExceptions ===
+
+The `exceptions:` list of a PolicyException from the rules one workload
+violates: each rule is looked up in kyvernoPolicies.rules (rule → the
+ClusterPolicy of the cluster's PSS set; a rule without an entry fails the
+render naming it), the rules are grouped by policy, and each rule is cited
+with its autogen-<rule> — the copy Kyverno generates for the controller kinds
+(Deployment, DaemonSet, ...) a pod-level rule matches through. Rendered as YAML
+list items; the caller provides the `exceptions:` key.
+Usage: include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "host-path" "privileged-containers"))
+*/}}
+{{- define "agent-platform.kyverno.exceptions" -}}
+{{- $root := .root -}}
+{{- $byPolicy := dict -}}
+{{- range .rules -}}
+{{- $policy := index ($root.Values.kyvernoPolicies.rules | default dict) . -}}
+{{- if not $policy -}}
+{{- fail (printf "kyvernoPolicies.rules names no ClusterPolicy for the rule %q; add `%s: <policy>` (the PSS policy of the cluster's kyverno-policies chart that carries the rule)" . .) -}}
+{{- end -}}
+{{- $_ := set $byPolicy $policy (append (index $byPolicy $policy | default list) .) -}}
+{{- end -}}
+{{- range $policy, $rules := $byPolicy }}
+- policyName: {{ $policy }}
+  ruleNames:
+  {{- range $rules }}
+    - {{ . }}
+    - autogen-{{ . }}
+  {{- end }}
+{{- end }}
 {{- end -}}

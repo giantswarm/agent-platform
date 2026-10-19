@@ -27,10 +27,11 @@ spec:
 # global.identity, one installation (backstage.installationName, default the
 # release name), the matching in-cluster Kubernetes entry (the frontend mints
 # the kagent token from it), the muster installation, the pg database block
-# when the Backstage chart's postgresql engine is on, app.extensions limited to
-# the Agent Platform pages, and the Agent Platform plugin's own block (the
-# tenant identity of the agents' HelmReleases, the skill repositories, the
-# kagent and model-manager API routes). The backstage chart mounts it through
+# when the Backstage chart's postgresql engine is on, the Agent Platform shell
+# (app.portals), app.extensions limited to the Agent Platform pages, and the
+# Agent Platform plugin's own block (the tenant identity of the agents'
+# HelmReleases, the skill repositories, the kagent and model-manager API
+# routes). The backstage chart mounts it through
 # backstage.extraAppConfig; the ConfigMap name and the file name are fixed
 # there. The Backstage release's pod checksums never see this ConfigMap —
 # changes here reach the running pod through the config-reload hook
@@ -54,10 +55,10 @@ data:
     app:
       title: Agent Platform
       baseUrl: https://backstage.ci.example.com
-      rootRedirect: /agent-platform
+      portals:
+        agentPlatform: true
       extensions:
         - page:agent-platform
-        - nav-item:agent-platform
         - page:gs/clusters: false
         - nav-item:gs/clusters: false
         - page:gs/deployments: false
@@ -9705,12 +9706,20 @@ data:
       - --enable-auto-tool-choice
       - --tool-call-parser=mistral
       - --gpu-memory-utilization=0.90
+      - --limit-mm-per-prompt.image=0
       description: |
         Mistral Small 4: a 119B-parameter mixture of experts with 6.5B active
         (128 experts, 4 routed per token plus 1 shared, MLA attention), the
         successor of the Instruct, Magistral and Devstral lines in one
-        checkpoint — tool calling, reasoning on request (reasoning_effort=high;
-        none by default) and vision (Pixtral encoder, images up to 1540 px).
+        checkpoint — tool calling and reasoning on request (reasoning_effort=high;
+        none by default).
+        Text only: the model's vision (Pixtral encoder) is switched off with
+        --limit-mm-per-prompt.image=0, and a request with an image is refused.
+        The vLLM in llm-d-cuda v0.8.0 lacks fetch_images on its Mistral image
+        processor, which the image's transformers calls while profiling, so with
+        images on the predictor crash-loops before serving. Image inputs come
+        back once the runtime's vLLM carries vllm-project/vllm#45180
+        (giantswarm/llm-d#37).
         Served as Mistral's own NVFP4 checkpoint (66 GiB of weights, the mistral
         format: params.json and consolidated safetensors, hence --tokenizer-mode,
         --config-format and --load-format mistral) across four 48 GB GPUs of the
@@ -9757,7 +9766,6 @@ data:
         - chat
         - tools
         - reasoning
-        - vision
         - coding
         contextLength: 131072
         format: vLLM
@@ -10824,6 +10832,48 @@ subjects:
   name: agentgateway-controller
   namespace: agent-platform
 ---
+# Source: agent-platform-connectivity/templates/tenants/muster-mcpservers.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agent-platform:mcpserver-viewer
+  namespace: agent-platform
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+rules:
+  - apiGroups: ["muster.giantswarm.io"]
+    resources: ["mcpservers"]
+    verbs: ["get", "list", "watch"]
+---
+# Source: agent-platform-connectivity/templates/tenants/muster-mcpservers.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-platform:mcpserver-viewer
+  namespace: agent-platform
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agent-platform:mcpserver-viewer
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: system:authenticated
+---
 # Source: agent-platform-connectivity/templates/agentgateway/agentgatewayparameters.yaml
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayParameters
@@ -10842,7 +10892,7 @@ spec:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/agentgateway-upstream/agentgateway
-    tag: 2.3.3
+    tag: 2.4.2
   service:
     spec:
       type: ClusterIP
@@ -10919,6 +10969,8 @@ spec:
         add:
           - name: agent_instance_id
             expression: '(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""'
+          - name: request_id
+            expression: 'request.headers["x-request-id"]'
 ---
 # Source: agent-platform-connectivity/templates/agentgateway/healthz.yaml
 apiVersion: agentgateway.dev/v1alpha1
@@ -11844,7 +11896,8 @@ spec:
             - --namespace=agent-platform
             - --selector=app=backstage
             - --overwrite
-            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=ef632ed5c3ea94aafc7b3382a3c301f8e17ae990a68ef6632fb0b036eb1193d9
+            - --field-manager=agent-platform-config-reload
+            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=17dfed0c93c61330ee2942c868b67df5a07b24457ad3b08924e09bfbf86ccb14
           env:
             # kubectl keeps its discovery/http cache under $HOME; the root
             # filesystem is read-only.

@@ -1,0 +1,83 @@
+{{- /*
+Kyverno PolicyExceptions for the workspaces' CSI companion, which the
+connectivity release renders (templates/workspaces/csi-companion.yaml there),
+on a cluster that enforces the restricted Pod Security Standard through
+Kyverno (kyvernoPolicies), one per workload, naming exactly the rules its pod
+spec violates — `make verify-kyverno` computes them from the render and holds
+the lists:
+
+  * the controller (Deployment): every container runs as root — the driver
+    images do, and the proxy must, to connect to the driver's root-owned
+    socket (runAsUser 0) — with everything else of the restricted profile
+    declared (no privilege escalation, all capabilities dropped, the runtime's
+    seccomp profile).
+  * the node plugin (DaemonSet): privileged on the node's network with host
+    paths (the socket, Substrate's volume directory, efs-utils' state and
+    configuration or the node's cloud configuration), as the cluster's own
+    node plugin is — root, no drop ALL and no allowPrivilegeEscalation: false
+    on the privileged container (the API refuses the latter), the runtime's
+    seccomp profile on the pod.
+
+This chart renders them, not the connectivity chart: Helm creates kinds it
+does not know after every built-in one, so in the connectivity release the
+DaemonSet would reach admission before its exception exists. Applied with this
+release, they are in place before helm-controller reconciles the connectivity
+release. Matched by the workloads' labels in the connectivity release's
+namespace, Pod and controller kinds. With gitops.target the companion and
+Kyverno policies are refused together (agent-platform.workspaces.csiCompanion.validate):
+these objects land on this cluster, not the target.
+*/ -}}
+{{- if and (include "agent-platform.workspaces.csiCompanion.enabled" .) (eq (include "agent-platform.shape.kyvernoPolicies" .) "true") (not (include "agent-platform.targetSecretName" .)) }}
+{{- $polexNs := .Values.kyvernoPolicies.policyExceptionNamespace }}
+{{- $connectivity := index (.Values.components | default dict) "agent-platform-connectivity" | default dict }}
+{{- $releaseNs := $connectivity.targetNamespace | default (include "agent-platform.targetNamespace" .) }}
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: csi-companion-controller
+  namespace: {{ $polexNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  exceptions:
+  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "run-as-non-root" "run-as-non-root-user")) | nindent 2 }}
+  match:
+    any:
+    - resources:
+        kinds:
+        - Pod
+        - Deployment
+        - ReplicaSet
+        namespaces:
+        - {{ $releaseNs }}
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: csi-companion
+            app.kubernetes.io/component: controller
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: csi-companion-node
+  namespace: {{ $polexNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: node
+spec:
+  exceptions:
+  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "privileged-containers" "host-namespaces" "host-path" "restricted-volumes" "require-drop-all" "privilege-escalation" "run-as-non-root")) | nindent 2 }}
+  match:
+    any:
+    - resources:
+        kinds:
+        - Pod
+        - DaemonSet
+        namespaces:
+        - {{ $releaseNs }}
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: csi-companion
+            app.kubernetes.io/component: node
+{{- end }}

@@ -1,0 +1,10 @@
+# The workspace StorageClass rendered from the azureFiles preset: Azure Files
+# over NFS 4.1 on a provisioned v2 SSD FileStorage account behind a private
+# endpoint (tests/verify-workspace-storage.py).
+workspaces:
+  enabled: true
+  storage:
+    storageClassName: workspaces-rwx
+    storageClass:
+      create: true
+      preset: azureFiles

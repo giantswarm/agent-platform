@@ -56,7 +56,7 @@ FLEET_APIS = [
 ]
 # Makefile.custom.mk's VM: the all-modes ingress guard satisfied, the Harness's
 # snapshot store set, the fleet's API groups served.
-VM = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", *FLEET_APIS]
+VM = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", *FLEET_APIS]
 ENGINE_OFF = ["--set", "components.flux.enabled=false"]
 FLUX_KINDS = {"OCIRepository", "HelmRelease"}
 # The hook identity and its policy (hooks/*.yaml), the only objects an engine-off
@@ -71,7 +71,7 @@ KNOB_KEY = ["--set", "gitops.target.kubeConfig.secretRef.key=value"]
 CONN_FULL = [
     *VM,
     "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster",
-    "--set", "components.kagent.enabled=true", "--set", "components.substrate.enabled=true",
+    "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "components.substrate.enabled=true",
     "--set", "components.substrate-crds.enabled=true", "--set", "networkPolicy.musterInClusterMcpPorts[0]=8080",
 ]
 # Makefile.custom.mk's WIRING_BACKSTAGE: the portal on, whose CSP carries the avatars host.
@@ -326,10 +326,11 @@ def check_toggles(meta: str, connectivity: str) -> None:
         if marker in off:
             sys.exit(f"FAIL: connectivity still renders {marker!r} with components.muster.enabled=false")
     # Without muster there is no ingress topology (#252): the data plane in front
-    # of it goes with the /mcp route, whatever ingress.mode says.
+    # of it goes with the /mcp route, whatever ingress.mode says. The Role that
+    # lists muster's MCPServers to every signed-in person (#706) goes too.
     kinds = {kind for kind, _ in documents(on)} - {kind for kind, _ in documents(off)}
-    if kinds != {"HTTPRoute", "Gateway", "AgentgatewayParameters", "AgentgatewayPolicy"}:
-        sys.exit(f"FAIL: muster off dropped {sorted(kinds)} from the connectivity render; expected the /mcp HTTPRoute and the data plane in front of muster")
+    if kinds != {"HTTPRoute", "Gateway", "AgentgatewayParameters", "AgentgatewayPolicy", "Role"}:
+        sys.exit(f"FAIL: muster off dropped {sorted(kinds)} from the connectivity render; expected the /mcp HTTPRoute, the data plane in front of muster and the MCPServer viewer Role")
     ok("connectivity with muster off: no /mcp route, no data plane, no muster egress policy, no rule selecting muster pods")
 
     on = helm(connectivity, CONN_BACKSTAGE)
@@ -413,10 +414,14 @@ def check_placement(meta: str) -> None:
             sys.exit(f"FAIL: {kind} {name} is not named after its release")
         if kind == "HelmRelease":
             component = name.removeprefix("wc01-agent-platform-")
-            for line in (f"  releaseName: {component}", "  targetNamespace: agent-platform", "  storageNamespace: agent-platform",
-                         f"    name: {name}"):
+            for line in (f"  releaseName: {component}", "  targetNamespace: agent-platform", "  storageNamespace: agent-platform"):
                 if f"\n{line}\n" not in f"\n{doc}\n":
                     sys.exit(f"FAIL: HelmRelease {name} lacks `{line.strip()}`")
+            # Its chart comes from its own OCIRepository: the child name, or with the
+            # version for a chart released with this one (agent-platform.sourceName).
+            ref = re.search(r"^  chartRef:\n    kind: OCIRepository\n    name: (\S+)$", doc, re.M)
+            if not ref or ("OCIRepository", ref.group(1)) not in one or not (ref.group(1) == name or ref.group(1).startswith(f"{name}-")):
+                sys.exit(f"FAIL: HelmRelease {name} does not take its chart from an OCIRepository of its own: {ref and ref.group(1)}")
             for dep in re.findall(r"^    - name: (\S+)$", doc, re.M):
                 if not dep.startswith("wc01-agent-platform-"):
                     sys.exit(f"FAIL: HelmRelease {name} depends on {dep}, not a child of its own release")

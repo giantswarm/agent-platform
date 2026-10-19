@@ -93,8 +93,10 @@ spec:
   template:
     metadata:
       labels:
-        {{- /* The selector's name wins over the chart's common name label. */}}
-        {{- merge (deepCopy $selector) (include "labels.common" . | fromYaml) | toYaml | nindent 8 }}
+        {{- /* The selector's name wins over the chart's common name label;
+        labels.podTemplate keeps the version-bearing labels off the pods
+        (giantswarm/agent-platform#941). */}}
+        {{- merge (deepCopy $selector) (include "labels.podTemplate" . | fromYaml) | toYaml | nindent 8 }}
         {{- if $capz }}
         azure.workload.identity/use: "true"
         {{- end }}
