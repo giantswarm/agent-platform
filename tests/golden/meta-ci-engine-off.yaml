@@ -195,7 +195,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.6.1
+          tag: 2.6.4
       networkPolicy:
         egress:
           cidrs: []
@@ -248,7 +248,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.4.1
+          tag: 2.4.2
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -279,7 +279,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.4.1
+          tag: 2.4.2
       resources:
         limits:
           cpu: 500m
@@ -1668,7 +1668,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.4.1
+        tag: 2.4.2
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1721,7 +1721,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.4.1
+        tag: 2.4.2
     resources:
       limits:
         cpu: 500m
