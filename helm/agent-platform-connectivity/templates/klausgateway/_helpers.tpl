@@ -40,7 +40,22 @@ applies (bolt, memory, reviews off).
 */}}
 {{- define "agent-platform.klausGateway.apiServerEgress" -}}
 {{- $kg := .Values.klausGateway -}}
-{{- if or (dig "reviews" "enabled" false $kg) (and (dig "obo" "enabled" false $kg) (eq (dig "obo" "store" "bolt" $kg) "secret")) -}}true{{- end -}}
+{{- if or (dig "reviews" "enabled" false $kg) (and (dig "obo" "enabled" false $kg) (eq (dig "obo" "store" "bolt" $kg) "secret")) (include "agent-platform.klausGateway.refusalsOn" .) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy (emits "true") while klaus-gateway runs the egress refusal notices
+(giantswarm/giantswarm#38667) — the meta chart's define of the same name,
+which this chart must agree with: klaus-gateway with Slack and
+klausGateway.refusals.enabled on, kagent and Substrate on, the controller in
+the kubernetes authorization mode. The gateway then reads the Kubernetes API
+(the egress's EndpointSlices, the Agents), the stats port of Substrate's
+atenet-egress and the kagent controller's API port
+(-klausgateway-refusals-egress).
+*/}}
+{{- define "agent-platform.klausGateway.refusalsOn" -}}
+{{- $kg := .Values.klausGateway | default dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) (dig "slack" "enabled" false $kg) (dig "refusals" "enabled" false $kg) (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) (eq (toString (dig "controller" "authorization" "mode" "" (.Values.kagent | default dict))) "kubernetes") -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -66,7 +81,7 @@ default 6379) — the one the meta chart puts into the gateway's routing.valkey.
 Truthy (emits "true") when the gateway pod reaches any store beyond its own
 process — the gate of the -klausgateway-store-egress policy: the Valkey
 routing store or anything on the Kubernetes API (the Secret link store, the
-team-review endpoint's TokenReview).
+team-review endpoint's TokenReview, the refusal notices' reads).
 */}}
 {{- define "agent-platform.klausGateway.storeEgress" -}}
 {{- if or (include "agent-platform.klausGateway.valkeyEgress" .) (include "agent-platform.klausGateway.apiServerEgress" .) -}}true{{- end -}}

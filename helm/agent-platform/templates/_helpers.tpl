@@ -443,6 +443,23 @@ release's closed schema refuses a workspaces block. */ -}}
 {{- $_ := set $derived "workspaces" (dict "toolsPrefix" $prefix) -}}
 {{- end -}}
 {{- end -}}
+{{- /* The egress refusal notices, while they are on
+(agent-platform.klausGateway.refusalsOn): where the Substrate egress and the
+kagent controller are, and the audience of the token the controller's session
+reader admits. An own value that differs fails the render. */ -}}
+{{- if include "agent-platform.klausGateway.refusalsOn" .root -}}
+{{- $want := dict
+  "egressService" (printf "%s/atenet-egress" (dig "substrate" "targetNamespace" "ate-system" .root.Values.components))
+  "kagentTarget" (include "agent-platform.kagent.controllerAddress" .root | trimPrefix "grpc://")
+  "kagentAudience" (include "agent-platform.kagent.tokenAudience" .root) -}}
+{{- $own := dig "refusals" dict $kg -}}
+{{- range $k, $v := $want -}}
+{{- if and (dig $k "" $own) (ne (toString (dig $k "" $own)) $v) -}}
+{{- fail (printf "klausGateway.refusals.%s (%s) differs from what the platform runs (%s): the gateway reads the egress and asks the kagent controller where the chart installs them — leave klausGateway.refusals.%s unset" $k (toString (dig $k "" $own)) $v $k) -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $derived "refusals" $want -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "valkey" -}}
 {{- $auth := dig "valkey" "auth" dict (.root.Values.valkey | default dict) -}}
@@ -710,6 +727,16 @@ Usage: include "agent-platform.kagent.authorization" . | fromJson
 {{- fail (printf "components.workspace-manager.versionRange (floor %s) admits a workspace-manager before %s, which calls the kagent controller without a ServiceAccount token, so the kubernetes authorization mode refuses its Session listing and no session directory is cleaned up — raise the floor, or set kagent.controller.authorization.mode: noop" $wmFloor (include "agent-platform.workspaceManager.tokenFloor" .)) -}}
 {{- end -}}
 {{- end -}}
+{{- $refusals := include "agent-platform.klausGateway.refusalsOn" . -}}
+{{- if $refusals -}}
+{{- $reader := printf "%s/%s" (include "agent-platform.klausGateway.namespace" .) (include "agent-platform.klausGateway.name" .) -}}
+{{- $ownReader := toString (dig "sessionReaderServiceAccount" "" $authz) -}}
+{{- if and $ownReader (ne $ownReader $reader) -}}
+{{- fail (printf "kagent.controller.authorization.sessionReaderServiceAccount (%s) differs from klaus-gateway's ServiceAccount (%s), which reads the Session of every egress refusal — leave it unset, or set klausGateway.refusals.enabled: false" $ownReader $reader) -}}
+{{- end -}}
+{{- $_ := set $a "sessionReaderServiceAccount" $reader -}}
+{{- $_ := set $a "serviceAccountTokenAudience" (include "agent-platform.kagent.tokenAudience" .) -}}
+{{- end -}}
 {{- if $a -}}{{- $_ := set $out "authorization" $a -}}{{- end -}}
 {{- $np := dig "controller" "networkPolicy" dict $kagent -}}
 {{- if eq (toString (dig "enabled" "" $np)) "false" -}}
@@ -723,6 +750,9 @@ Usage: include "agent-platform.kagent.authorization" . | fromJson
 {{- if $wmOn -}}
 {{- $wmNs := dig "workspace-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
 {{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $wmNs)) "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" ($wm.nameOverride | default "workspace-manager")))) -}}
+{{- end -}}
+{{- if $refusals -}}
+{{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" (include "agent-platform.klausGateway.namespace" .))) "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" (include "agent-platform.klausGateway.name" .)))) -}}
 {{- end -}}
 {{- range (dig "from" list $np) -}}
 {{- if not (has . $peers) -}}{{- $peers = append $peers . -}}{{- end -}}
@@ -3349,6 +3379,43 @@ Usage: include "agent-platform.kagent.controllerAddress" .
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") -}}
 {{- printf "grpc://%s-controller.%s.svc:8083" (dig "fullnameOverride" "" (.Values.kagent | default dict) | default "kagent") (include "agent-platform.kagent.namespace" .) -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+The audience of the ServiceAccount tokens the kagent controller's TokenReview
+admits (kagent.controller.authorization.serviceAccountTokenAudience): the
+block's own, else workspace-manager's (workspace-manager.kagent.tokenAudience),
+else kagent, both charts' default. Every caller with a ServiceAccount token
+(workspace-manager, klaus-gateway's session reads) projects it for this one.
+*/}}
+{{- define "agent-platform.kagent.tokenAudience" -}}
+{{- $own := toString (dig "controller" "authorization" "serviceAccountTokenAudience" "" (.Values.kagent | default dict)) -}}
+{{- $own | default (dig "kagent" "tokenAudience" "" (index .Values "workspace-manager" | default dict)) | default "kagent" -}}
+{{- end -}}
+
+{{/*
+klaus-gateway's release namespace and the name of its ServiceAccount and pods
+(klausGateway.fullnameOverride, else klaus-gateway).
+*/}}
+{{- define "agent-platform.klausGateway.namespace" -}}
+{{- dig "klaus-gateway" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- end -}}
+{{- define "agent-platform.klausGateway.name" -}}
+{{- dig "fullnameOverride" "" (.Values.klausGateway | default dict) | default "klaus-gateway" -}}
+{{- end -}}
+
+{{/*
+Truthy (emits "true") while the egress refusal notices run
+(giantswarm/giantswarm#38667): klaus-gateway with Slack on
+(klausGateway.slack.enabled), klausGateway.refusals.enabled (on by default),
+kagent and Substrate on, and the controller in the kubernetes authorization
+mode, whose session reader admits the gateway. The gateway then reads the
+Substrate egress's refusal counter and tells each agent's creator by direct
+message. The connectivity chart asks the same (its copy of this define).
+*/}}
+{{- define "agent-platform.klausGateway.refusalsOn" -}}
+{{- $kg := .Values.klausGateway | default dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) (dig "slack" "enabled" false $kg) (dig "refusals" "enabled" false $kg) (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) (eq (toString (dig "controller" "authorization" "mode" "" (.Values.kagent | default dict))) "kubernetes") -}}true{{- end -}}
 {{- end -}}
 
 {{/*

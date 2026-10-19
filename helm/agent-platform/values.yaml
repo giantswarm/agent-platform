@@ -4312,6 +4312,23 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     # Example: https://avatars.{codename}.{base}/v1/{agent}.png
     fallbackIconUrlTemplate: ""
 
+  # Egress refusal notices (giantswarm/giantswarm#38667): when the Substrate
+  # egress refuses a destination an agent's egress does not declare, the
+  # agent's creator (the Agent's agent-platform.giantswarm.io/created-by,
+  # which agent-manager records) gets a direct message from the app, one per
+  # agent and destination within `window` (24h), later refusals counted into
+  # it. Runs while Slack is on, kagent and Substrate are on and the
+  # controller is in the kubernetes authorization mode
+  # (agent-platform.klausGateway.refusalsOn). The chart derives
+  # egressService (Substrate's atenet-egress), kagentTarget (the controller's
+  # in-cluster gRPC API) and kagentAudience (the controller's ServiceAccount
+  # token audience), admits this gateway as the controller's session reader
+  # (kagent.controller.authorization.sessionReaderServiceAccount) and to its
+  # API port, and the connectivity chart opens the gateway's egress to both.
+  # agentURLTemplate ({namespace}, {name}) is the notice's Open agent link.
+  refusals:
+    enabled: true
+
   # Agentgateway route — exposes the Slack channel path (/channels/slack, with
   # slack.enabled) on the agentgateway data-plane Gateway (agentgateway-*
   # ingress modes only).
