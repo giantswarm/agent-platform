@@ -15,17 +15,25 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (Kubernetes 1.36 or later)
+
+The charts expect Kubernetes 1.36 or later and no longer check the version: the 1.30 render guard of self-management and the render-time check that the API server serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy are gone. With `llmRouting.enabled` on, the connectivity release now always carries the `modelconfig-llm-routing` policies (unless `llmRouting.modelConfigPolicy.enabled` is off).
+
+### Operator action
+
+- **None** on Kubernetes 1.36 or later. Upgrade an older cluster to 1.36 first: below it, the install fails at apply time.
+
 ## \<current\> → \<next\> (`tenants.organizations.enabled`: a tenant's own model, on the `llm` listener)
 
 giantswarm/agent-platform#759: with kagent and `tenants.organizations.enabled` on, every ModelConfig in a namespace labelled `giantswarm.io/organization` goes through the `llm` listener ([README: A tenant's own model](./README.md#a-tenants-own-model)). The `modelconfig-llm-routing` MutatingAdmissionPolicies fill in a missing `baseUrl` there, and `agent-platform-tenant-model-routing` refuses any other `baseUrl` and any provider the listener does not serve.
 
-- **The connectivity render fails** with `tenants.organizations.enabled` on and `llmRouting.enabled` off (the default), with a default ModelConfig provider (`kagent.providers.<default>.provider`) the listener does not serve, or without the routing policy (`llmRouting.modelConfigPolicy.enabled` off, or an API server that does not serve `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, as below Kubernetes 1.36). The connectivity HelmRelease then stops reconciling.
+- **The connectivity render fails** with `tenants.organizations.enabled` on and `llmRouting.enabled` off (the default), with a default ModelConfig provider (`kagent.providers.<default>.provider`) the listener does not serve, or without the routing policy (`llmRouting.modelConfigPolicy.enabled` off). The connectivity HelmRelease then stops reconciling.
 - **A ModelConfig in an Organization namespace that is not on the listener** (a Bedrock one, a direct provider URL) can no longer be updated; only its deletion stays possible.
 
 ### Operator action
 
 - **None** with `tenants.organizations.enabled` off.
-- **`tenants.organizations.enabled` on**: before the upgrade, set `llmRouting.enabled: true`, keep `llmRouting.modelConfigPolicy.enabled: true` on Kubernetes 1.36 or later, give the default ModelConfig a provider of `llmRouting.models` and leave `kagent.providers.<default>.config.baseUrl` empty or the listener URL (agent-manager copies it into each Organization namespace, where another `baseUrl` is refused). Then point every ModelConfig already in an Organization namespace at the listener (remove its `baseUrl`, or set the listener URL), or delete it.
+- **`tenants.organizations.enabled` on**: before the upgrade, set `llmRouting.enabled: true`, keep `llmRouting.modelConfigPolicy.enabled: true`, give the default ModelConfig a provider of `llmRouting.models` and leave `kagent.providers.<default>.config.baseUrl` empty or the listener URL (agent-manager copies it into each Organization namespace, where another `baseUrl` is refused). Then point every ModelConfig already in an Organization namespace at the listener (remove its `baseUrl`, or set the listener URL), or delete it.
 - **Turning routing off later**: turn `tenants.organizations.enabled` off first (the render needs it), then delete or repoint the Organization namespaces' ModelConfigs whose `baseUrl` carries the annotation `agent-platform.giantswarm.io/llm-routing-base-url`: the routing hook takes it off in the kagent namespace only.
 
 ## \<current\> → \<next\> (kagent 1.18: no caller bearer to muster on a workspace Session)

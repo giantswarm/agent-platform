@@ -3794,28 +3794,18 @@ the same tag as this chart (components.<name>.releasedWithChart).
 {{- end -}}
 
 {{/*
-Render guards of self-management, evaluated only when it is on:
-
-1. Kubernetes >= 1.30: the admission policy is admissionregistration.k8s.io/v1
-   ValidatingAdmissionPolicy (GA in 1.30). An older apiserver would fail the
-   install at apply time with `no matches for kind`; the render says why and
-   names the way out (gitops.self.enabled=false keeps the Helm CLI as the
-   day-2 tool). `helm template --kube-version` exercises it offline.
-2. The hand-back annotation together with self-management on: the policy would
-   admit the Helm CLI while the bundled helm-controller holds the release — two
-   writers on one release, which is what the whole shape forbids (a CLI
-   revision pending while the controller reconciles is unlocked and upgraded
-   with whatever the values Secret holds). The hand-back upgrade carries
-   gitops.self.enabled=false; a stale annotation is removed. `lookup` is live
-   under the Helm CLI, --dry-run=server and helm-controller (where the guard
-   surfaces on the self HelmRelease for the duration of a hand-back), empty
-   under `helm template`.
+Render guard of self-management, evaluated only when it is on: the hand-back
+annotation together with self-management on. The policy would admit the Helm
+CLI while the bundled helm-controller holds the release — two writers on one
+release, which is what the whole shape forbids (a CLI revision pending while
+the controller reconciles is unlocked and upgraded with whatever the values
+Secret holds). The hand-back upgrade carries gitops.self.enabled=false; a stale
+annotation is removed. `lookup` is live under the Helm CLI, --dry-run=server
+and helm-controller (where the guard surfaces on the self HelmRelease for the
+duration of a hand-back), empty under `helm template`.
 */}}
 {{- define "agent-platform.validateSelf" -}}
 {{- if eq (include "agent-platform.selfEnabled" .) "true" -}}
-{{- if semverCompare "<1.30.0-0" .Capabilities.KubeVersion.Version -}}
-{{- fail (printf "self-management (gitops.self.enabled) needs Kubernetes >= 1.30 for its ValidatingAdmissionPolicy (admissionregistration.k8s.io/v1); this cluster reports %s. Set gitops.self.enabled=false to install without it — the Helm CLI then stays the day-2 tool" .Capabilities.KubeVersion.Version) -}}
-{{- end -}}
 {{- $ns := lookup "v1" "Namespace" "" .Release.Namespace -}}
 {{- $ann := include "agent-platform.self.handBackAnnotation" . -}}
 {{- if and $ns (eq (dig "metadata" "annotations" $ann "" $ns) "allow") -}}

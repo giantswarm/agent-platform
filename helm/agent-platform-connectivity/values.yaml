@@ -686,12 +686,6 @@ llmRouting:
   # where agent-platform-tenant-model-routing refuses a baseUrl that is not the
   # listener; tenants.organizations.enabled fails the render without this
   # policy. The hook reads the kagent namespace only.
-  #
-  # Rendered only where the API server serves
-  # admissionregistration.k8s.io/v1/MutatingAdmissionPolicy, which is Kubernetes
-  # 1.36 and later. On 1.34 and 1.35 the API is beta and its feature gate is off
-  # by default, so the object would exist and mutate nothing; the chart renders
-  # nothing there instead. Leaving this true on an older cluster is safe.
   modelConfigPolicy:
     enabled: true
   # USD per one million tokens, by provider and model, OVER the gateway's
@@ -3109,7 +3103,7 @@ tenants:
     # namespace (only replicas may differ), and only Substrate's controllers
     # write a Deployment, ReplicaSet or Pod labelled `ate.dev/worker-pool`; no
     # one adds an ephemeral container to a worker, execs into one or
-    # attaches to one (Kubernetes 1.30 or later). With kagent on, a tenant
+    # attaches to one. With kagent on, a tenant
     # also brings its own ModelConfig and model key, metered on the `llm`
     # listener (giantswarm/agent-platform#759): the modelconfig-llm-routing
     # policies fill in the listener as the baseUrl of a ModelConfig there
@@ -3121,8 +3115,7 @@ tenants:
     # tenant-credential- prefix; only agent-manager's copy of the default ModelConfig names the
     # platform's key. It needs llmRouting.enabled, a default ModelConfig
     # provider the listener serves, and the modelconfig-llm-routing policy
-    # (llmRouting.modelConfigPolicy.enabled, served
-    # MutatingAdmissionPolicy); the render fails otherwise. A namespace
+    # (llmRouting.modelConfigPolicy.enabled); the render fails otherwise. A namespace
     # without the label gets nothing. Off, the render is that of a chart
     # without the key.
     enabled: false

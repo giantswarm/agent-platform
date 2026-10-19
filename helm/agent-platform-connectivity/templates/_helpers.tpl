@@ -753,14 +753,14 @@ provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
 {{/*
 Truthy when this chart routes the ModelConfigs it does not render, routing on
 or off: kagent is a component, the modelconfig-llm-routing policies are wanted
-(llmRouting.modelConfigPolicy) and the API server serves their GA group. With
+(llmRouting.modelConfigPolicy). With
 routing on the policies render (templates/llm/modelconfig-policy.yaml); either
 way the reconcile hook runs (templates/llm/modelconfig-routing-hook.yaml),
 which takes a baseUrl the policies wrote back off a ModelConfig once the
 listener no longer serves it.
 */}}
 {{- define "agent-platform.llmRouting.modelConfigs" -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.llmRouting.modelConfigPolicy.enabled (.Capabilities.APIVersions.Has "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy") -}}true{{- end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.llmRouting.modelConfigPolicy.enabled -}}true{{- end -}}
 {{- end -}}
 
 {{/*

@@ -125,8 +125,7 @@ def render(chart):
                         "--set", "llmRouting.models[0].baseURL=https://api.anthropic.com/v1",
                         "--set", "llmRouting.models[1].name=openai", "--set", "llmRouting.models[1].provider=OpenAI",
                         "--set", "llmRouting.models[1].baseURL=https://api.openai.com/v1",
-                        "--set", "tenants.organizations.enabled=true",
-                        "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"], capture_output=True, text=True)
+                        "--set", "tenants.organizations.enabled=true"], capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit(f"FAIL: helm template:\n{r.stderr}")
     return [d for d in yaml.safe_load_all(r.stdout) if d]

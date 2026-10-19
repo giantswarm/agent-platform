@@ -19,7 +19,7 @@ The released chart carries the examples: `helm pull oci://gsoci.azurecr.io/chart
 
 ### Every shape
 
-- **Kubernetes ≥ 1.33** and **Helm 4** (Helm 4's `--wait` waits for the component `HelmRelease`s to be Ready; Helm 3 returns before they are).
+- **Kubernetes ≥ 1.36** and **Helm 4** (Helm 4's `--wait` waits for the component `HelmRelease`s to be Ready; Helm 3 returns before they are).
 - **The Gateway API CRDs**, the one cluster prerequisite the chart does not bring:
 
   ```bash
