@@ -3350,11 +3350,13 @@ Usage: include "agent-platform.agentManager.tenants" $root | fromJson
 {{- end -}}
 
 {{/*
-The first muster release whose chart takes muster.mcpServersInAllNamespaces
-(giantswarm/muster#1601); an earlier chart's schema refuses the key. One line,
-no comment inside the define.
+The first muster release that serves tenant MCP servers safely: its chart takes
+muster.mcpServersInAllNamespaces (5.47.0, giantswarm/muster#1601; an earlier
+chart's schema refuses the key), and a tenant server's sign-ins go with the
+MCPServer objects that made them, not with the namespace's name (5.48.0,
+giantswarm/muster#1603). One line, no comment inside the define.
 */}}
-{{- define "agent-platform.muster.tenantsFloor" -}}5.47.0{{- end -}}
+{{- define "agent-platform.muster.tenantsFloor" -}}5.48.0{{- end -}}
 
 {{/*
 "true" while tenants.organizations.enabled is on, empty while it is off: the

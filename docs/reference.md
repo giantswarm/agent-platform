@@ -558,12 +558,13 @@ With `tenants.organizations.enabled` (and muster on), the muster release gets `m
 - muster lists the servers of each namespace with the person's own Dex token for that audience. A person sees a server only where Kubernetes RBAC lets them `list` `mcpservers.muster.giantswarm.io`: muster's namespace through `agent-platform:mcpserver-viewer` (bound to `tenants.platform.users`), an Organization's namespace through `agent-platform:user`, `:editor` or `:admin` there. A server that a person may not see does not exist for that person.
 - A tenant server signs in through `<muster>/oauth/ns/<namespace>/callback`, and its token stays in its namespace.
 
-Do not set `muster.muster.mcpServersInAllNamespaces` yourself: a value against the switch fails the render. A `muster.muster.writesAsCaller.kubernetesAudience` that differs from `mcp-kubernetes.kubernetesAudience` also fails it: set the audience in `mcp-kubernetes.kubernetesAudience`. The render also fails when the muster range admits a muster below 5.47.0, when muster's OAuth server is off or not on the `dex` provider, and when `tenants.platform.users` is empty.
+Do not set `muster.muster.mcpServersInAllNamespaces` yourself: a value against the switch fails the render. A `muster.muster.writesAsCaller.kubernetesAudience` that differs from `mcp-kubernetes.kubernetesAudience` also fails it: set the audience in `mcp-kubernetes.kubernetesAudience`. The render also fails when the muster range admits a muster below 5.48.0, when muster's OAuth server is off or not on the `dex` provider, and when `tenants.platform.users` is empty.
 
 The chart cannot do these steps. Do them before you turn the switch on:
 
 - **Dex.** Dex must let muster's client (`muster.muster.oauth.server.dex.clientId`) ask for the audience of `mcp-kubernetes.kubernetesAudience`: the Dex client of that audience lists muster's client in its `trustedPeers`.
 - **The callbacks.** Each OAuth app of an MCP server in an Organization's namespace registers `<muster's public URL>/oauth/ns/<namespace>/callback`. The chart's NOTES print this URL.
+- **The client Secrets.** muster gets no read of an Organization's Secrets. For each MCP server there that names a client Secret (`clientCredentialsSecretRef`), whoever declares the server also declares a Role in that namespace that gives muster's ServiceAccount `get` on that Secret alone (`resourceNames`), and its RoleBinding. Without them, a sign-in to that server answers that it is not ready and names the Secret and the Role.
 
 ### OAuth secrets
 

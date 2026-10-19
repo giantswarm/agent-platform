@@ -418,9 +418,14 @@ components:  # @schema additionalProperties: true
     # workspace-manager's MCPServer pins (giantswarm/muster#1597), and a
     # client subscribes to a backend's resources per user
     # (subscriptions/listen, giantswarm/muster#1348).
+    # Floor 5.48.0: a tenant server's sign-ins go with the MCPServer
+    # objects that made them, so an Organization's namespace created again
+    # under a deleted one's name starts with none, and a tenant server whose
+    # client Secret muster may not read says so at sign-in
+    # (giantswarm/muster#1603); tenants.organizations.enabled needs it.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.47.0 <6.0.0"
+    versionRange: ">=5.48.0 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -5378,7 +5383,7 @@ tenants:
     # only where Kubernetes RBAC lets them list `mcpservers` (muster's
     # namespace through tenants.platform.users). An own
     # muster.muster.mcpServersInAllNamespaces against this switch fails the
-    # render. The render fails, naming the key, below muster 5.47.0, with
+    # render. The render fails, naming the key, below muster 5.48.0, with
     # muster's OAuth server off or not on the dex provider, and with
     # tenants.platform.users empty. muster's
     # muster.writesAsCaller.kubernetesAudience follows

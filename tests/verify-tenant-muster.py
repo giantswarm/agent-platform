@@ -30,7 +30,7 @@ import tempfile
 import yaml
 
 HELM = os.environ.get("HELM", "helm")
-MUSTER_FLOOR = "5.47.0"
+MUSTER_FLOOR = "5.48.0"
 MUSTER_CHART = "oci://gsoci.azurecr.io/charts/giantswarm/muster"
 
 BASE = [
@@ -129,7 +129,7 @@ def main() -> None:
          "muster.muster.mcpServersInAllNamespaces is false but tenants.organizations.enabled is true"),
         ("an own audience that differs", [*ON, "--set", "muster.muster.writesAsCaller.kubernetesAudience=kubernetes"],
          "muster.muster.writesAsCaller.kubernetesAudience (kubernetes) differs from mcp-kubernetes.kubernetesAudience"),
-        ("a muster range below the floor", [*ON, "--set", "components.muster.versionRange=>=5.46.0 <6.0.0"],
+        ("a muster range below the floor", [*ON, "--set", "components.muster.versionRange=>=5.47.0 <6.0.0"],
          f"needs muster {MUSTER_FLOOR} or later"),
         ("muster's OAuth server off", [*ON, "--set", "muster.muster.oauth.server.enabled=false"],
          "needs muster.muster.oauth.server.enabled with the provider dex"),
