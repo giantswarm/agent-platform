@@ -1420,8 +1420,7 @@ spec:
       - 8443
       substrate:
         credentialProvider:
-          egressFQDNs:
-          - matchName: oauth2.googleapis.com
+          egressFQDNs: []
     postgres:
       affinity: {}
       applicationDatabase:
