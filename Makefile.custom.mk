@@ -121,7 +121,14 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # kagent.substrateWorkerPool.priorityClass.enabled=false (the kagent block is
 # additionalProperties: true), and verify-workerpool asserts the class on, off
 # and its guards.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false
+# The twelfth (the served-API gate of the ModelConfig routing): the reconcile
+# of llmRouting (templates/llm/modelconfig-routing-hook.yaml, its Job and the
+# hooks identity's ClusterRole rule) renders again only where the render sees
+# admissionregistration.k8s.io/v1/MutatingAdmissionPolicy, which an offline
+# render does not. Both sides render with
+# llmRouting.modelConfigPolicy.enabled=false, and
+# verify-llm-routing-modelconfigs asserts the hook with and without the API.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false --set llmRouting.modelConfigPolicy.enabled=false
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 # GOLDEN_REF defaults to the merge-base of HEAD and GOLDEN_BASE: a branch is held
