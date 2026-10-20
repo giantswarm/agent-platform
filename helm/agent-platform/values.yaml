@@ -1119,11 +1119,14 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.11.0, the first release whose MCPServer pins the
-    # provider's revocation endpoint
+    # The floor is 0.12.0, the first release that admits an Organization's
+    # members by verified email or domain (workspaces.organizations[].memberEmails,
+    # .memberDomains; agent-platform.workspaceManager.memberEmailsFloor), for an
+    # identity provider that sends no groups claim. The earlier floors it
+    # covers: 0.11.0 the MCPServer pinning the provider's revocation endpoint
     # (muster.mcpServer.auth.authorizationServer.revocationEndpoint), so a
     # person's disconnect in muster revokes their grant at the provider
-    # (giantswarm/muster#1597). The earlier floors it covers: 0.10.0 the
+    # (giantswarm/muster#1597), 0.10.0 the
     # person's provider token as muster's grant of the provider instance's App
     # (muster.mcpServer.auth.provider, which this chart derives; an earlier
     # release keeps its own sign-in store, which this chart no longer feeds:
@@ -1134,7 +1137,7 @@ components:  # @schema additionalProperties: true
     # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
     # minor: a workspace-manager minor rolls in with the chart release that
     # renders its values.
-    versionRange: ">=0.11.0 <0.12.0"
+    versionRange: ">=0.12.0 <0.13.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
@@ -5722,33 +5725,43 @@ workspaces:
         azure:
           workloadIdentityClientID: ""
   # The Organizations whose members manage workspaces: each its name (a DNS
-  # label, the Organization's) and memberGroups, the groups of the forwarded
-  # identity that make a caller a member. A member creates, edits, deletes and
-  # selects the workspaces of their Organization, through the
-  # workspace-manager only; an Organization not listed has no members. The
-  # meta chart forwards the list to the workspace-manager release as its
-  # organizations map ({<name>: {memberGroups}}); a
-  # workspace-manager.organizations of its own fails the render. An empty
-  # memberGroups or a duplicate name fails the render. Nothing by default: the
-  # installation lists its Organizations, e.g.
+  # label, the Organization's) and its members, any of memberGroups (the groups
+  # of the forwarded identity), memberEmails (verified emails, the identity
+  # provider's email_verified) and memberDomains (the domain after the @ of a
+  # verified email, no subdomain). A caller who matches any of them is a member.
+  # An identity provider that sends no groups claim (Google) admits by email or
+  # domain only. A member creates, edits, deletes and selects the workspaces of
+  # their Organization, through the workspace-manager only; an Organization not
+  # listed has no members. The meta chart forwards the list to the
+  # workspace-manager release as its organizations map ({<name>: {memberGroups,
+  # memberEmails, memberDomains}}, each field only where named); a
+  # workspace-manager.organizations of its own fails the render. An entry with
+  # no member of any kind, an empty group, an email or domain that is not one,
+  # or a duplicate name fails the render; memberEmails or memberDomains need
+  # components.workspace-manager.versionRange at 0.12.0 or later. Nothing by
+  # default: the installation lists its Organizations, e.g.
   #   organizations:
   #     - name: acme
   #       memberGroups: [giantswarm-github:acme:developers, giantswarm-github:acme:sre]
+  #     - name: example
+  #       memberDomains: [example.com]
+  #       memberEmails: [jane@partner.example.org]
   #
   # A group is written as the platform sees it in the token's groups claim: the
   # Dex connector id, a colon, then the group as the connector reports it (for
   # the GitHub connector <org>:<team>). The prefix is the id of the connector
   # (`connectors[].id`) in the installation's Dex configuration; a group
-  # without it never matches.
+  # without it never matches. Emails and domains are written as the identity
+  # provider reports them, without a prefix.
   #
   # Every workspace, its volume, its sync Jobs and every Session live in the
   # kagent namespace, where Organization membership cannot be namespace RBAC:
-  # the workspace-manager checks the caller's groups itself and writes every
-  # object as its own ServiceAccount, bound by the component chart's Role and
-  # RoleBinding in the kagent namespace (workspace-manager.rbac.create, which
-  # the render keeps on). No member and no group is bound to anything, and
+  # the workspace-manager checks the caller's groups and email itself and
+  # writes every object as its own ServiceAccount, bound by the component
+  # chart's Role and RoleBinding in the kagent namespace
+  # (workspace-manager.rbac.create, which the render keeps on). No member and no group is bound to anything, and
   # nothing is granted cluster-wide.
-  organizations: []  # @schema item: object; itemRequired: [name, memberGroups]; itemProperties: {"name": {"type": "string"}, "memberGroups": {"type": "array", "items": {"type": "string"}}}
+  organizations: []  # @schema item: object; itemRequired: [name]; itemProperties: {"name": {"type": "string"}, "memberGroups": {"type": "array", "items": {"type": "string"}}, "memberEmails": {"type": "array", "items": {"type": "string"}}, "memberDomains": {"type": "array", "items": {"type": "string"}}}
 
 # Values forwarded verbatim to the workspace-manager component release
 # (giantswarm/workspace-manager), MCP only: tools appear as
