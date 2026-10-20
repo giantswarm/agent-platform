@@ -195,7 +195,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.7.1
+          tag: 2.7.2
       networkPolicy:
         egress:
           cidrs: []
@@ -248,7 +248,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/controller
-          tag: 2.6.0
+          tag: 2.6.5
         replicaCount: 2
       fullnameOverride: agentgateway-controller
       image:
@@ -279,7 +279,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agentgateway-upstream/agentgateway
-          tag: 2.6.0
+          tag: 2.6.5
       resources:
         limits:
           cpu: 500m
@@ -1676,7 +1676,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/controller
-        tag: 2.6.0
+        tag: 2.6.5
       replicaCount: 2
     fullnameOverride: agentgateway-controller
     global:
@@ -1729,7 +1729,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/agentgateway-upstream/agentgateway
-        tag: 2.6.0
+        tag: 2.6.5
     resources:
       limits:
         cpu: 500m
@@ -2083,7 +2083,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.16.0
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.17.0
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -3010,7 +3010,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.20.0 <1.21.0"
+    semver: ">=1.21.0 <1.22.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3033,7 +3033,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.20.0 <1.21.0"
+    semver: ">=1.21.0 <1.22.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3125,7 +3125,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.16.0 <1.17.0"
+    semver: ">=1.17.0 <1.18.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3148,7 +3148,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.16.0 <1.17.0"
+    semver: ">=1.17.0 <1.18.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

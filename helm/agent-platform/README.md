@@ -147,7 +147,7 @@ and the worker pool together, **with no chart release**.
 
 The WorkerPool's `spec.workerImage` is **derived by this chart** from the range's
 floor: `<substrate.image.registry>/ateom-gvisor:<floor>`
-(`gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.16.0` today), merged over
+(`gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.17.0` today), merged over
 the kagent block the chart forwards. It is the image the pool runs right after a
 re-pin. The pool's `status.workerImage` names the image its pods run; after a patch
 it is the patch, and the condition `WorkerImageOverridden` is `True` (reason
@@ -173,7 +173,7 @@ What follows from it:
   beside a later patch's atelet. The flag exists from Substrate `1.4.0` on;
   `make verify-worker-image` fails when the chart the range resolves to lacks it.
 - **The Substrate range confines one runtime contract**: an exact version (the
-  BOM's `1.16.0`) or `>=X.Y.Z <X.(Y+1).0`, the ceiling of the pinned minor and no
+  BOM's `1.17.0`) or `>=X.Y.Z <X.(Y+1).0`, the ceiling of the pinned minor and no
   `-0` anywhere. Flux's Masterminds semver skips every prerelease while no bound
   of a range carries one, and evaluates them all once one does, so `<1.1.0-0`
   would admit the line's dev builds. A patch of the line is carried patches or a
@@ -436,7 +436,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.20.0 <1.21.0"` |  |
+| components.kagent.versionRange | string | `">=1.21.0 <1.22.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -460,19 +460,19 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.20.0 <1.21.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.21.0 <1.22.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.16.0 <1.17.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.17.0 <1.18.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.16.0 <1.17.0"` |  |
+| components.substrate.versionRange | string | `">=1.17.0 <1.18.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -1227,12 +1227,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.6.0"` |  |
+| agentgateway.controller.image.tag | string | `"2.6.5"` |  |
 | agentgateway.controller.replicaCount | int | `2` |  |
 | agentgateway.inferenceExtension.enabled | bool | `true` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.6.0"` |  |
+| agentgateway.proxy.image.tag | string | `"2.6.5"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1374,7 +1374,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.7.1"` |  |
+| agentManager.migration.image.tag | string | `"2.7.2"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |

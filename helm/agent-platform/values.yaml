@@ -604,8 +604,12 @@ components:  # @schema additionalProperties: true
     # floor), an EgressPolicy takes tls://host:port destinations, the claude
     # Harness reaches actor-JWT hosts without the forwarder, and a Session
     # without a workspace lists the actor-JWT providers when its creator binds
-    # its actor (agent-manager's start_session, 2.7.2 and later).
-    versionRange: ">=1.20.0 <1.21.0"
+    # its actor (agent-manager's start_session, 2.7.2 and later). From 1.21.0
+    # an Agent's spec.egress takes tls://host:port destinations, and a claude
+    # workspace Session whose agent has a tool selection on muster keeps
+    # only the placeholder in Claude Code's MCP config, never the forwarder's
+    # loopback token.
+    versionRange: ">=1.21.0 <1.22.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -719,7 +723,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.20.0 <1.21.0"
+    versionRange: ">=1.21.0 <1.22.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -769,7 +773,11 @@ components:  # @schema additionalProperties: true
     # kagent line's own pin moves
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
-    # The floor is 1.16.0: its egress gateway runs agentgateway 2.5.0, which
+    # The floor is 1.17.0: ate-api serves the actor JWT mint as
+    # Control.MintActorJwt and its egress gateway runs agentgateway 2.6.5,
+    # which mints through that name (a 1.16 ate-api with that gateway, or a
+    # 1.17 ate-api with an older one, answers every actor_jwt header source
+    # with 500); from 1.16.0 the egress gateway
     # relays the TCP a `tcp` egress rule allows, applies a path-prefixed
     # credential to a path with a percent-encoded `/`, and answers a denied
     # request with a 403 naming the destination; from 1.15.0 atelet counts
@@ -778,7 +786,7 @@ components:  # @schema additionalProperties: true
     # (https://idp.<namespace>.svc) muster verifies a Session's actor JWT
     # against (muster.credentialProvider.actorBearer, with workspaces on).
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.16.0 <1.17.0"
+    versionRange: ">=1.17.0 <1.18.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
     # release Flux resolved (ateController.gvisorWorker.followRelease, which
@@ -807,7 +815,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.16.0 <1.17.0"
+    versionRange: ">=1.17.0 <1.18.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -4387,7 +4395,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.6.0"
+      tag: "2.6.5"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -4421,7 +4429,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.6.0"
+      tag: "2.6.5"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -5086,7 +5094,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.7.1
+      tag: 2.7.2
     dryRun: false
     gitopsNamespaces: []
 

@@ -86,7 +86,8 @@ FLOOR_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 # 1.14 stays on v0.5.0-alpha2 as well: its bundled credential provider serves k8s.io alone (giantswarm/substrate#455), a change on the egress gateway's side the kagent controller never sees.
 # 1.15 stays on v0.5.0-alpha2 as well: the per-actor DNS query count travels between the worker and atelet (`WorkloadStatsSample.dns_queries`, field 14), which the kagent controller never sees.
 # 1.16 stays on v0.5.0-alpha2 as well: `EgressRule.tcp` is a new oneof member (field 4) no earlier client sets, and agentgateway 2.5.0 is the egress gateway's own, so kagent's egress-policy writes keep their meaning.
-SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}, (1, 8): {(1, 7)}, (1, 10): {(1, 9)}, (1, 11): {(1, 9), (1, 10)}, (1, 12): {(1, 9), (1, 10), (1, 11)}, (1, 13): {(1, 9), (1, 10), (1, 11), (1, 12)}, (1, 14): {(1, 9), (1, 10), (1, 11), (1, 12), (1, 13)}, (1, 15): {(1, 9), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14)}, (1, 16): {(1, 9), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14), (1, 15)}}
+# 1.17 stays on v0.5.0-alpha2 as well: the actor JWT mint's rename to `MintActorJwt` is between ate-api and the egress gateway, which the kagent controller never calls.
+SAME_UPSTREAM = {(1, 2): {(1, 1)}, (1, 3): {(1, 1), (1, 2)}, (1, 8): {(1, 7)}, (1, 10): {(1, 9)}, (1, 11): {(1, 9), (1, 10)}, (1, 12): {(1, 9), (1, 10), (1, 11)}, (1, 13): {(1, 9), (1, 10), (1, 11), (1, 12)}, (1, 14): {(1, 9), (1, 10), (1, 11), (1, 12), (1, 13)}, (1, 15): {(1, 9), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14)}, (1, 16): {(1, 9), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14), (1, 15)}, (1, 17): {(1, 9), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14), (1, 15), (1, 16)}}
 
 
 def tuple_of(version: str) -> str:
