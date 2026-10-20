@@ -1217,16 +1217,20 @@ The hosts a platform service that validates tokens itself (mcp-oauth) reaches
 at its login identity provider, as a JSON list: the discovery document, the
 JWKS (validating the id_tokens muster and the portal forward), userinfo and
 the token endpoint. The dex provider serves all of them from the issuer host.
-Google spreads them over three hosts, none of which its issuer URL
-(https://accounts.google.com) names: accounts.google.com (discovery,
-authorization), www.googleapis.com (JWKS /oauth2/v3/certs, userinfo) and
-oauth2.googleapis.com (token, revocation) — the endpoints mcp-oauth's google
-provider dials. Empty for the dex provider without an issuer.
+Google spreads them over four hosts: accounts.google.com (the issuer:
+discovery, authorization), www.googleapis.com (JWKS /oauth2/v3/certs),
+openidconnect.googleapis.com (userinfo, mcp-oauth's fallback when an ID token
+does not validate) and oauth2.googleapis.com (token, revocation). The Google
+list applies to the google provider and to any issuer on accounts.google.com,
+whatever provider the caller names: the issuer is what the service validates
+against, and a provider that defaults to dex must not narrow Google's egress
+to the issuer host. Empty for the dex provider without an issuer.
 Usage: include "agent-platform.idpHosts" (dict "provider" "dex" "issuerUrl" $url)
 */}}
 {{- define "agent-platform.idpHosts" -}}
-{{- if eq (.provider | default "dex") "google" -}}
-{{- list "accounts.google.com" "www.googleapis.com" "oauth2.googleapis.com" | toJson -}}
+{{- $google := eq (include "agent-platform.urlHost" .issuerUrl | lower) "accounts.google.com" -}}
+{{- if or (eq (.provider | default "dex") "google") $google -}}
+{{- list "accounts.google.com" "www.googleapis.com" "openidconnect.googleapis.com" "oauth2.googleapis.com" | toJson -}}
 {{- else -}}
 {{- $hosts := list -}}
 {{- with (include "agent-platform.urlHost" .issuerUrl) }}{{- $hosts = list . -}}{{- end -}}
