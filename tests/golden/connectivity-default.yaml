@@ -10788,7 +10788,7 @@ spec:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/agentgateway-upstream/agentgateway
-    tag: 2.6.5
+    tag: 2.6.6
   service:
     spec:
       type: ClusterIP

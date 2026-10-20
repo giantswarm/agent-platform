@@ -1950,7 +1950,7 @@ path.
 {{- define "agent-platform.workspaces.organizations.validate" -}}
 {{- $wm := index .Values "workspace-manager" | default dict -}}
 {{- if $wm.organizations -}}
-{{- fail "workspace-manager.organizations is set: the Organizations and their member groups are workspaces.organizations [{name, memberGroups}], which the meta chart forwards as the workspace-manager's organizations map; move them there and leave workspace-manager.organizations unset" -}}
+{{- fail "workspace-manager.organizations is set: the Organizations and their members are workspaces.organizations [{name, memberGroups, memberEmails, memberDomains}], which the meta chart forwards as the workspace-manager's organizations map; move them there and leave workspace-manager.organizations unset" -}}
 {{- end -}}
 {{- if eq (toString (dig "rbac" "create" true $wm)) "false" -}}
 {{- fail "workspace-manager.rbac.create is false: the workspace-manager writes every Workspace, its volume and its sync Jobs in the kagent namespace as its own ServiceAccount, which only the component chart's Role and RoleBinding there allow, and members are bound to nothing; leave workspace-manager.rbac.create unset" -}}
@@ -1958,7 +1958,7 @@ path.
 {{- $names := dict -}}
 {{- range $i, $o := ((.Values.workspaces | default dict).organizations | default list) -}}
 {{- if not (kindIs "map" $o) -}}
-{{- fail (printf "workspaces.organizations[%d] is not a map: an Organization is {name, memberGroups}" $i) -}}
+{{- fail (printf "workspaces.organizations[%d] is not a map: an Organization is {name, memberGroups, memberEmails, memberDomains}" $i) -}}
 {{- end -}}
 {{- $name := toString ($o.name | default "") -}}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" $name) -}}
@@ -1969,28 +1969,53 @@ path.
 {{- end -}}
 {{- $_ := set $names $name true -}}
 {{- $groups := $o.memberGroups | default list -}}
-{{- if not $groups -}}
-{{- fail (printf "workspaces.organizations[%d] (%s) has no memberGroups: an Organization without a group has no members, so nobody could manage its workspaces; name the groups of the forwarded identity that make a caller a member, or remove the entry" $i $name) -}}
+{{- $emails := $o.memberEmails | default list -}}
+{{- $domains := $o.memberDomains | default list -}}
+{{- if not (or $groups $emails $domains) -}}
+{{- fail (printf "workspaces.organizations[%d] (%s) has no members: an Organization without memberGroups, memberEmails or memberDomains has no members, so nobody could manage its workspaces; name the groups of the forwarded identity, or the verified emails or email domains, that make a caller a member, or remove the entry" $i $name) -}}
 {{- end -}}
 {{- range $j, $g := $groups -}}
 {{- if not (toString ($g | default "")) -}}
 {{- fail (printf "workspaces.organizations[%d] (%s).memberGroups[%d] is empty: a member group is a group name of the forwarded identity" $i $name $j) -}}
 {{- end -}}
 {{- end -}}
+{{- range $j, $e := $emails -}}
+{{- if not (regexMatch "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$" (toString ($e | default ""))) -}}
+{{- fail (printf "workspaces.organizations[%d] (%s).memberEmails[%d] %q is not an email address: a member email is the verified email of the forwarded identity, e.g. jane@example.com" $i $name $j (toString ($e | default ""))) -}}
+{{- end -}}
+{{- end -}}
+{{- range $j, $d := $domains -}}
+{{- if not (regexMatch "^[^@\\s]+\\.[^@\\s]+$" (toString ($d | default ""))) -}}
+{{- fail (printf "workspaces.organizations[%d] (%s).memberDomains[%d] %q is not an email domain: a member domain is what follows the @ of a verified email, without the @, e.g. example.com" $i $name $j (toString ($d | default ""))) -}}
+{{- end -}}
+{{- end -}}
+{{- if or $emails $domains -}}
+{{- $range := dig "workspace-manager" "versionRange" "" $.Values.components -}}
+{{- $wmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- $emailFloor := include "agent-platform.workspaceManager.memberEmailsFloor" $ -}}
+{{- if lt ((semver $wmFloor).Compare (semver $emailFloor)) 0 -}}
+{{- fail (printf "workspaces.organizations[%d] (%s) names memberEmails or memberDomains, which workspace-manager has from %s on, but components.workspace-manager.versionRange (%s) admits earlier releases, whose closed values schema refuses them: raise its floor to %s, or name memberGroups only" $i $name $emailFloor $range $emailFloor) -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
 {{/*
-The workspace-manager's organizations map, {<name>: {memberGroups}}, from
-workspaces.organizations, as JSON; empty ({}) without Organizations. For a
-validated list only.
+The workspace-manager's organizations map, {<name>: {memberGroups,
+memberEmails, memberDomains}}, from workspaces.organizations, as JSON, each
+member field only when the entry names it; empty ({}) without Organizations.
+For a validated list only.
 */}}
 {{- define "agent-platform.workspaces.organizations" -}}
 {{- $out := dict -}}
-{{- range ((.Values.workspaces | default dict).organizations | default list) -}}
-{{- $groups := list -}}
-{{- range .memberGroups -}}{{- $groups = append $groups (toString .) -}}{{- end -}}
-{{- $_ := set $out (toString .name) (dict "memberGroups" $groups) -}}
+{{- range $o := ((.Values.workspaces | default dict).organizations | default list) -}}
+{{- $members := dict -}}
+{{- range $key := list "memberGroups" "memberEmails" "memberDomains" -}}
+{{- $vals := list -}}
+{{- range (get $o $key | default list) -}}{{- $vals = append $vals (toString .) -}}{{- end -}}
+{{- with $vals -}}{{- $_ := set $members $key . -}}{{- end -}}
+{{- end -}}
+{{- $_ := set $out (toString $o.name) $members -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}
@@ -3439,6 +3464,19 @@ of it included), or the render fails (agent-platform.validateWorkspaces). One
 line, no comment inside the define.
 */}}
 {{- define "agent-platform.workspaceManager.gitlabFloor" -}}0.5.0{{- end -}}
+
+{{/*
+The first release of the workspace-manager line that admits an Organization's
+members by verified email or email domain (organizations.<name>.memberEmails,
+.memberDomains), for an identity provider that sends no groups claim; an
+earlier release's closed values schema refuses both keys. An Organization in
+workspaces.organizations with either needs the floor of
+components.workspace-manager.versionRange at it or later (a release candidate
+of it included), or the render fails
+(agent-platform.workspaces.organizations.validate). One line, no comment inside
+the define.
+*/}}
+{{- define "agent-platform.workspaceManager.memberEmailsFloor" -}}0.12.0{{- end -}}
 
 {{/*
 The first release of the workspace-manager line whose person's provider token

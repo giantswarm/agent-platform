@@ -3057,11 +3057,22 @@
                     "items": {
                         "type": "object",
                         "required": [
-                            "name",
-                            "memberGroups"
+                            "name"
                         ],
                         "additionalProperties": false,
                         "properties": {
+                            "memberDomains": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "memberEmails": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
                             "memberGroups": {
                                 "type": "array",
                                 "items": {

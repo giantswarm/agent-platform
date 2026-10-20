@@ -2355,12 +2355,12 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.6.5"
+      tag: "2.6.6"
   proxy:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.6.5"
+      tag: "2.6.6"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -3258,10 +3258,11 @@ workspaces:
           roleARN: ""
         azure:
           workloadIdentityClientID: ""
-  # The Organizations whose members manage workspaces ({name, memberGroups}),
+  # The Organizations whose members manage workspaces ({name, memberGroups,
+  # memberEmails, memberDomains}),
   # which the meta chart forwards to the workspace-manager release; this chart
   # renders nothing of them. The meta chart's copy documents the key.
-  organizations: []  # @schema item: object; itemRequired: [name, memberGroups]; itemProperties: {"name": {"type": "string"}, "memberGroups": {"type": "array", "items": {"type": "string"}}}
+  organizations: []  # @schema item: object; itemRequired: [name]; itemProperties: {"name": {"type": "string"}, "memberGroups": {"type": "array", "items": {"type": "string"}}, "memberEmails": {"type": "array", "items": {"type": "string"}}, "memberDomains": {"type": "array", "items": {"type": "string"}}}
 
 # The workspace-manager component chart's values (giantswarm/workspace-manager),
 # as the meta chart forwards them to that release; this chart reads
