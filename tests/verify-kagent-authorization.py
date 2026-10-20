@@ -223,7 +223,9 @@ def main() -> None:
             "KAGENT_AUTHORIZATION_GROUPS_CLAIM": "groups", "KAGENT_AUTHORIZATION_GROUPS_PREFIX": "",
             "KAGENT_AUTHORIZATION_NAMESPACE_SELECTOR": "giantswarm.io/organization",
             "KAGENT_AUTHORIZATION_INCLUDE_NAMESPACES": "kagent",
-            "KAGENT_AUTHORIZATION_SERVICE_ACCOUNT_TOKEN_AUDIENCE": "kagent"},
+            "KAGENT_AUTHORIZATION_SERVICE_ACCOUNT_TOKEN_AUDIENCE": "kagent",
+            # From 1.20.0 the chart renders the session reader, empty without one.
+            "KAGENT_AUTHORIZATION_SESSION_READER_SERVICE_ACCOUNT": ""},
            f"the kagent chart {floor} configures the authorizer from the forwarded block")
     np = find(docs, "NetworkPolicy", "kagent-controller")
     if np is None:

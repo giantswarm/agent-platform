@@ -598,8 +598,14 @@ components:  # @schema additionalProperties: true
     # ServiceAccount token with a TokenReview and reviews every creator's
     # Session list as cluster-wide `list` on sessions.api.kagent.dev
     # (giantswarm/kagent-upstream#633), so workspace-manager passes the
-    # authorizer this chart turns on (kagent.controller.authorization).
-    versionRange: ">=1.19.0 <1.20.0"
+    # authorizer this chart turns on (kagent.controller.authorization). From
+    # 1.20.0 one ServiceAccount reads any Session by ID (klaus-gateway's, for
+    # its egress refusal notices: klausGateway.refusals turns on at this
+    # floor), an EgressPolicy takes tls://host:port destinations, the claude
+    # Harness reaches actor-JWT hosts without the forwarder, and a Session
+    # without a workspace lists the actor-JWT providers when its creator binds
+    # its actor (agent-manager's start_session, 2.7.2 and later).
+    versionRange: ">=1.20.0 <1.21.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -713,7 +719,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.19.0 <1.20.0"
+    versionRange: ">=1.20.0 <1.21.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
