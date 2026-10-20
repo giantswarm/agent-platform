@@ -35,10 +35,10 @@ renders for a WorkerPool) and holds the lists to them:
     the Substrate line from 1.1.0): non-root user, drops ALL,
     allowPrivilegeEscalation false, read-only root — but no seccompProfile.
 
-With tenants.organizations.enabled the worker pods' exception also matches the
-same workers in every namespace labelled giantswarm.io/organization, by a
-namespaceSelector, and only when Substrate's controller chain writes them
-(agent-platform#1036; the comment at the entries says why).
+With tenants.organizations.enabled a second exception, substrate-workers-tenants,
+matches the same workers in every namespace labelled giantswarm.io/organization,
+by a namespaceSelector, and only when Substrate's controller chain writes them
+(agent-platform#1036; the comment at it says why).
 
 Kinds: the Pod and the controller kind of each workload (Kyverno evaluates the
 controller through its autogen rules, then the pod). A selector is matched
@@ -54,6 +54,7 @@ is its successor.
 {{- $pcNs := include "agent-platform.substrate.podcertNamespace" . }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $polexNs := .Values.kyvernoPolicies.policyExceptionNamespace }}
+{{- $workerRules := (list "host-path" "restricted-volumes" "adding-capabilities" "adding-capabilities-strict" "run-as-non-root" "run-as-non-root-user" "privilege-escalation" "check-seccomp" "check-seccomp-strict" "app-armor") }}
 ---
 apiVersion: kyverno.io/v2
 kind: PolicyException
@@ -88,7 +89,7 @@ metadata:
     agent-platform.giantswarm.io/substrate-workload: workers
 spec:
   exceptions:
-  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "host-path" "restricted-volumes" "adding-capabilities" "adding-capabilities-strict" "run-as-non-root" "run-as-non-root-user" "privilege-escalation" "check-seccomp" "check-seccomp-strict" "app-armor")) | nindent 2 }}
+  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" $workerRules) | nindent 2 }}
   match:
     any:
     - resources:
@@ -102,17 +103,35 @@ spec:
           matchExpressions:
           - key: ate.dev/worker-pool
             operator: Exists
-    {{- if include "agent-platform.tenants.organizations" . }}
-    {{- /* The same workers in the Organizations' namespaces
-    (tenants.organizations.enabled): selected by the namespace's label, never
-    listed (Kyverno matches an exception's namespaceSelector from 1.15.2,
-    kyverno/kyverno#13975). An Organization's admins may write pods there, so
-    a matching label is no proof that Substrate made the pod: each kind is
-    excepted only when its writer is the controller chain that makes the
-    workers (agent-platform.tenants.workerWriters). The admission policy
-    agent-platform-tenant-workers refuses a labelled Deployment, ReplicaSet or
-    Pod there from any other writer (tenant-workers-admission.yaml). A
-    background scan has no writer, so it reports these workers. */}}
+{{- if include "agent-platform.tenants.organizations" . }}
+{{- /* The same workers in the Organizations' namespaces
+(tenants.organizations.enabled): selected by the namespace's label, never
+listed (Kyverno matches an exception's namespaceSelector from 1.15.2,
+kyverno/kyverno#13975). An Organization's admins may write pods there, so a
+matching label is no proof that Substrate made the pod: each kind is excepted
+only when its writer is the controller chain that makes the workers
+(agent-platform.tenants.workerWriters). The admission policy
+agent-platform-tenant-workers refuses a labelled Deployment, ReplicaSet or Pod
+there from any other writer (tenant-workers-admission.yaml). An exception of
+its own, with background false: Kyverno refuses subjects in an exception that
+background scans apply, since a scan has no writer to match. Those scans
+report these workers as violations; substrate-workers keeps its background
+default, so the kagent namespace's workers stay excepted there. */}}
+---
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: substrate-workers-tenants
+  namespace: {{ $polexNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/substrate-workload: workers
+spec:
+  background: false
+  exceptions:
+  {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" $workerRules) | nindent 2 }}
+  match:
+    any:
     {{- range $kind, $writers := include "agent-platform.tenants.workerWriters" . | fromJson }}
     - resources:
         kinds:
