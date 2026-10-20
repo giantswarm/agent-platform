@@ -5850,6 +5850,24 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
         # disconnect revokes the grant at GitLab; GitHub has no RFC 7009
         # endpoint and leaves it empty. The render fails naming the key that
         # is missing.
+        # GitHub and GitLab side by side
+        # (agent-platform.workspaceManager.providerApps): with two or more
+        # instances with person sign-in (values.oauth.clientSecret, key
+        # client-secret) and no own `provider`, nothing is pinned. muster
+        # keeps one provider App per instance (muster.muster.providerApps)
+        # and the registration receives the grants of each
+        # (`providerApps: [<instance>, …]`, one X-Muster-Grant-<instance>
+        # header per App the person granted); muster's credentialProvider
+        # releases each under its App's issuer. A github instance's App takes
+        # the issuer above and GitHub's endpoints on its url. A gitlab
+        # instance's App takes its url as issuer, GitLab's endpoints with
+        # revocationEndpoint <url>/oauth/revoke, values.oauth.scopes (default
+        # `api read_user read_repository write_repository`, exactly the
+        # scopes the GitLab application lists) and git user oauth2. It needs
+        # muster.muster.oauth.mcpClient.enabled. An own `providerApps` names
+        # the instances itself, and an own muster.muster.providerApps entry
+        # stands in place of the derived one. One instance with sign-in keeps
+        # the pin.
   # The installation's provider instances, several at once: each a unique
   # `name` (a DNS label: the name workspaces refer to), a `kind`
   # and the kind's `values`, whose credentials (the sync credential, the OAuth
@@ -5857,7 +5875,8 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   # GitHub Enterprise Server) takes `url` (default https://github.com),
   # `apiURL` (derived from url), `app.id` and `app.privateKey`;
   # `oauth.clientID` and `oauth.clientSecret`, the App's OAuth client, are
-  # ignored by the manager and give muster's pin its client Secret (above), e.g.
+  # ignored by the manager and give muster's pin or provider App its client
+  # Secret (above), e.g.
   #   providers:
   #     - name: github
   #       kind: github
@@ -5873,13 +5892,18 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
   # gitlab.com; named, since the connectivity chart opens the egress to it),
   # `apiURL` (default <url>/api/v4) and `token` (a group access token with
   # read_api and read_repository, the sync's); a source's owner is a
-  # top-level group, its sub-groups' projects included, or a user. Beside the
-  # github instance above, e.g.
+  # top-level group, its sub-groups' projects included, or a user;
+  # `oauth.clientSecret`, the GitLab OAuth application's (its Secret also
+  # carrying client-id), and `oauth.scopes` give its person sign-in, muster's
+  # provider App beside the github one (above). Beside the github instance
+  # above, e.g.
   #     - name: gitlab
   #       kind: gitlab
   #       values:
   #         url: https://gitlab.example.com
   #         token: {name: workspace-gitlab, key: token}
+  #         oauth:
+  #           clientSecret: {name: workspace-gitlab-oauth, key: client-secret}
   # The connectivity chart opens the manager's egress to each instance's hosts
   # (url and apiURL; github.com and api.github.com for a github instance
   # without url; an instance of another kind without url fails the render).
