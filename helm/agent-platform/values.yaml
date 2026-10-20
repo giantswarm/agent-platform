@@ -608,8 +608,10 @@ components:  # @schema additionalProperties: true
     # an Agent's spec.egress takes tls://host:port destinations, and a claude
     # workspace Session whose agent has a tool selection on muster keeps
     # only the placeholder in Claude Code's MCP config, never the forwarder's
-    # loopback token.
-    versionRange: ">=1.21.0 <1.22.0"
+    # loopback token. From 1.22.0 an actor's egress lists the actor-JWT hosts
+    # only during a turn, the egress trust bundle carries the public roots,
+    # and the omp Harness loads the skills an Agent selects from Agent Plugins.
+    versionRange: ">=1.22.0 <1.23.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -723,7 +725,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.21.0 <1.22.0"
+    versionRange: ">=1.22.0 <1.23.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false

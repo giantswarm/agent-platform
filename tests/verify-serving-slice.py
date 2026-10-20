@@ -324,6 +324,33 @@ def check_controller_jwks_egress(connectivity: str, base: list[str]) -> None:
     ok("the slice on a workload cluster renders the controller policy without an ingress mode and admits the issuer's JWKS host on 443 (toFQDNs + DNS proxy; the wide rule's 443), an own jwks.host beside it; beside the platform none")
 
 
+def check_google_issuer_jwks(connectivity: str, base: list[str]) -> None:
+    """A Google issuer publishes its key set on www.googleapis.com:443 at
+    /oauth2/v3/certs (its discovery document's jwks_uri), not on the issuer host
+    (giantswarm/agent-platform#1171). The models Gateway's JWKS backend, which
+    defaults to the platform issuer, dials that endpoint, and the controller's
+    egress opens www.googleapis.com on 443 and not accounts.google.com, which
+    serves no key set. An own jwks.host keeps the block's own port and path.
+    """
+    google = [*base, "--set", "components.agentgateway.enabled=true", "--set", "networkPolicy.flavor=cilium",
+              "--set", "global.identity.issuerUrl=https://accounts.google.com"]
+    docs = documents(helm(connectivity, google))
+    be = docs.get(("AgentgatewayBackend", "models-jwks"))
+    if not be:
+        sys.exit("FAIL: no AgentgatewayBackend models-jwks with a Google issuer")
+    for needle in ("    host: www.googleapis.com", "    port: 443", "    tls:"):
+        need(be, needle, "the JWKS backend with a Google issuer")
+    need(docs[("AgentgatewayPolicy", "models-jwt")], 'jwksPath: "/oauth2/v3/certs"', "the models policy with a Google issuer")
+    cil = docs[("CiliumNetworkPolicy", "agent-platform-connectivity-controller")]
+    need(cil, '        - matchName: "www.googleapis.com"\n      toPorts:\n        - ports:\n            - port: "443"', "the controller's egress to Google's JWKS")
+    if 'matchName: "accounts.google.com"' in cil:
+        sys.exit(f"FAIL: the controller's egress opens accounts.google.com, which serves no key set:\n{cil}")
+    own = documents(helm(connectivity, [*google, "--set", "modelServing.modelsGateway.jwtAuthentication.jwks.host=keys.other.example.com"]))
+    need(own[("AgentgatewayBackend", "models-jwks")], "    host: keys.other.example.com", "the JWKS backend with an own jwks.host")
+    need(own[("AgentgatewayPolicy", "models-jwt")], 'jwksPath: "/keys"', "the models policy with an own jwks.host")
+    ok("a Google issuer: the models JWKS backend dials www.googleapis.com:443 at /oauth2/v3/certs and the controller's egress opens www.googleapis.com, not accounts.google.com; an own jwks.host keeps its own path")
+
+
 def check_gateway(connectivity: str, base: list[str]) -> None:
     render = helm(connectivity, base)
     docs = documents(render)
@@ -1132,6 +1159,7 @@ def main(meta: str, connectivity: str) -> int:
         check_policy_exception(connectivity, base)
         check_controller_xds(connectivity, base)
         check_controller_jwks_egress(connectivity, base)
+        check_google_issuer_jwks(connectivity, base)
         check_gateway(connectivity, base)
         check_cache(connectivity, base)
         check_preset_args(connectivity, base)
