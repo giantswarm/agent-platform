@@ -3,9 +3,10 @@
 
 Each case pins one property:
 
-- klausGateway.refusals.enabled is auto by default and resolves off while the
+- klausGateway.refusals.enabled is auto by default and resolves on with the
+  chart's default ranges (klaus-gateway 4.11, kagent 1.20), and off while the
   floor of components.klaus-gateway.versionRange is below 4.11.0 or that of
-  components.kagent.versionRange below 1.20.0: the klaus-gateway release gets
+  components.kagent.versionRange below 1.20.0 (a kagent range pinned to 1.19): the klaus-gateway release gets
   no refusals block (an older chart's closed schema refuses it), the kagent
   release no session reader, the connectivity release refusals.enabled false
   and no -klausgateway-refusals-egress policy;
@@ -55,6 +56,10 @@ FLOORS = {"components": {
     "kagent": {"versionRange": ">=1.20.0 <1.21.0"},
     "kagent-crds": {"versionRange": ">=1.20.0 <1.21.0"},
 }}
+BELOW = {"components": {
+    "kagent": {"versionRange": ">=1.19.0 <1.20.0"},
+    "kagent-crds": {"versionRange": ">=1.19.0 <1.20.0"},
+}}
 READER = f"{NAMESPACE}/klaus-gateway"
 PEER = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}},
         "podSelector": {"matchLabels": {"app.kubernetes.io/name": "klaus-gateway"}}}
@@ -92,14 +97,14 @@ def expect(got, want, what: str) -> None:
 
 def render(flags: list, floors: bool) -> list:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
-        yaml.safe_dump(FLOORS if floors else {}, f)
+        yaml.safe_dump(FLOORS if floors else BELOW, f)
         f.flush()
         return [d for d in yaml.safe_load_all(helm(CHART, [*BASE, "-f", f.name, *flags])) if d]
 
 
 def must_fail(flags: list, floors: bool, needle: str, what: str) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
-        yaml.safe_dump(FLOORS if floors else {}, f)
+        yaml.safe_dump(FLOORS if floors else BELOW, f)
         f.flush()
         err = helm(CHART, [*BASE, "-f", f.name, *flags], expect_fail=True)
     if needle not in err:
@@ -147,11 +152,14 @@ def state(docs: list) -> tuple:
 
 def main() -> None:
     off = (None, None, False, False)
+    default = [d for d in yaml.safe_load_all(helm(CHART, BASE)) if d]
+    expect(state(default)[1:], (READER, True, True), "default ranges: the session reader, the peer and connectivity on")
+    expect(state(default)[0].get("enabled"), True, "default ranges: the klaus-gateway release runs the notices")
     docs = render([], floors=False)
-    expect(state(docs), off, "default ranges: no refusals block, no session reader, no peer, connectivity off")
+    expect(state(docs), off, "kagent 1.19: no refusals block, no session reader, no peer, connectivity off")
     if find(connectivity(docs), "CiliumNetworkPolicy", POLICY):
-        fail(f"default ranges: {POLICY} renders")
-    ok(f"default ranges: no {POLICY}")
+        fail(f"kagent 1.19: {POLICY} renders")
+    ok(f"kagent 1.19: no {POLICY}")
     expect(state(render(["--set", "klausGateway.refusals.agentURLTemplate=https://p/{name}"], floors=False))[0], None,
            "below the floors an own agentURLTemplate is not forwarded either")
 
