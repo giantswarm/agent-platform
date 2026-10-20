@@ -5367,6 +5367,13 @@ tenants:
     # credential provider also reads each such namespace's Secrets for the
     # atespace of the same name, and for ate-golden, where every template's
     # golden actor boots (substrate.credentialProvider.namespacePolicies).
+    # That ate-golden grant crosses tenants: while components.substrate.versionRange
+    # is below the release that carries agent-substrate/substrate#2543 (golden
+    # actors in their template's atespace), one atespace reads every
+    # Organization's Secrets, held back only by kagent naming the template's
+    # own namespace in its egress policy. Keep this off on customer
+    # installations and keep the switch itself until that floor moves; the
+    # re-pin that moves it also drops the ate-golden entry.
     # On, a tenant also brings its own model key (giantswarm/agent-platform#759;
     # README, "A tenant's own model"), and every model call of an
     # Organization's namespace still goes through the `llm` listener, so the
