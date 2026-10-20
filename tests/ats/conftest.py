@@ -37,8 +37,8 @@ lab value, so a run that sets nothing behaves as the CI job does. See
 scenarios.py and README.md.
 
 Local run (a throwaway kind cluster; the lab URLs carry their ports, so the lab
-Dex port and the muster port must be free — ATS_MUSTER_BASE_URL moves muster's,
-see scenarios.py and lab-dex.yaml):
+Dex port, the muster port and the MCP port must be free — ATS_MUSTER_BASE_URL
+moves muster's, ATS_MCP_URL the MCP endpoint's, see scenarios.py and lab-dex.yaml):
 
   helm package helm/agent-platform --version 3.99.0-dev.local -d dist
   cd tests/ats && KUBECONFIG=… ATS_CHART_PATH=$PWD/../../dist/agent-platform-3.99.0-dev.local.tgz \
@@ -70,7 +70,7 @@ import yaml
 from pytest_helm_charts.clusters import Cluster
 
 import scenarios
-from scenarios import ATS_DIR, LOOPBACK, MUSTER_SERVICE_PORT, REPO_ROOT, Scenario
+from scenarios import AGENTGATEWAY_SERVICE, AGENTGATEWAY_SERVICE_PORT, ATS_DIR, LOOPBACK, MUSTER_SERVICE_PORT, REPO_ROOT, Scenario
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +160,9 @@ LOGIN_SCOPES = f"openid profile email groups audience:server:client_id:{CROSS_CL
 # echoes it. Empty when the values files already carry that URL.
 MUSTER_BASE_URL = SCENARIO.muster_base_url
 MUSTER_BASE_URL_SETS = scenarios.base_url_sets(SCENARIO)
+# The MCP endpoint the tests call: agentgateway's /mcp in front of muster, the
+# platform's one ingress topology.
+MCP_URL = SCENARIO.mcp_url
 
 # The in-cluster registry (tests/ats/registry.yaml).
 REGISTRY_MANIFEST = ATS_DIR / "registry.yaml"
@@ -578,7 +581,7 @@ class PortForward:
             err = (self._proc.stderr.read() if self._proc.stderr else "")[:500]
             raise AssertionError(
                 f"port-forward to {self.namespace}/{self.service} on local port {self.local_port} exited with {self._proc.returncode}: {err}\n"
-                f"(a process already listening on {self.local_port}? the scenario's URLs carry the port — free it, or move muster's with ATS_MUSTER_BASE_URL)")
+                f"(a process already listening on {self.local_port}? the scenario's URLs carry the port — free it, or move it with ATS_MUSTER_BASE_URL or ATS_MCP_URL)")
 
     def alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
@@ -888,12 +891,13 @@ def parse_mcp_response(resp: requests.Response) -> Dict[str, Any]:
 
 
 class MusterSession:
-    """One MCP Streamable-HTTP session against muster with a bearer token —
-    the path every MCP client takes (Claude Code after its login, the portal,
+    """One MCP Streamable-HTTP session against muster with a bearer token, on
+    the MCP endpoint a client is given (agentgateway's /mcp in front of muster)
+    — the path every MCP client takes (Claude Code after its login, the portal,
     an agent's kagent runtime with the propagated user token)."""
 
-    def __init__(self, base_url: str, token: str, client_name: str = "ats") -> None:
-        self.url = f"{base_url}/mcp"
+    def __init__(self, mcp_url: str, token: str, client_name: str = "ats") -> None:
+        self.url = mcp_url
         self.token = token
         self.client_name = client_name
         self.session_id = ""
@@ -984,14 +988,19 @@ class MusterSession:
             raise AssertionError(f"{name} returned no JSON: {text[:300]}") from exc
 
 
-def unauthenticated_mcp_challenge(base_url: str) -> Dict[str, Any]:
-    """No token -> 401 with the RFC 9728 WWW-Authenticate discovery chain;
+def unauthenticated_initialize(mcp_url: str) -> requests.Response:
+    """A well-formed MCP initialize without a token (muster validates the
+    content type before the bearer: a bare POST is a 400, not the challenge)."""
+    return requests.post(mcp_url, headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+                         data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                             "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "ats", "version": "1"}}}), timeout=30)
+
+
+def unauthenticated_mcp_challenge(mcp_url: str, base_url: str) -> Dict[str, Any]:
+    """No token on the MCP endpoint -> muster's 401 with the RFC 9728
+    WWW-Authenticate discovery chain, which points at muster's base URL;
     returns the authorization-server metadata the chain leads to."""
-    # A well-formed initialize without a token (muster validates the content
-    # type before the bearer: a bare POST is a 400, not the challenge).
-    r = requests.post(f"{base_url}/mcp", headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
-                      data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-                          "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "ats", "version": "1"}}}), timeout=30)
+    r = unauthenticated_initialize(mcp_url)
     assert r.status_code == 401, f"expected 401, got {r.status_code}: {r.text[:300]}"
     challenge = r.headers.get("WWW-Authenticate", "")
     prm_url = f"{base_url}/.well-known/oauth-protected-resource"
@@ -1073,6 +1082,19 @@ def wait_for_muster_healthy(base_url: str, timeout: Optional[float] = None) -> N
         r = requests.get(f"{base_url}/health", timeout=10)
         return r.ok and r.json().get("status") == "ok"
     wait_for("muster /health ok", ok, timeout, interval=5)
+
+
+def wait_for_mcp_route(mcp_url: str, timeout: Optional[float] = None) -> None:
+    """The MCP endpoint answers muster's challenge: on the data plane, the
+    agentgateway controller programs the route to muster after the releases are
+    Ready, and until then the data plane has no route for /mcp."""
+    timeout = READY_TIMEOUT_S if timeout is None else timeout
+    def challenged() -> bool:
+        try:
+            return unauthenticated_initialize(mcp_url).status_code == 401
+        except requests.RequestException:
+            return False
+    wait_for(f"{mcp_url} answers muster's 401", challenged, timeout, interval=5)
 
 
 # ---------------------------------------------------------------------------
@@ -1199,6 +1221,20 @@ def muster_forward(kube: Kube) -> Iterator[Optional[PortForward]]:
         return
     wait_for_endpoints(kube, NAMESPACE, "muster")
     pf = PortForward(kube.kubeconfig, NAMESPACE, "muster", SCENARIO.muster_port, MUSTER_SERVICE_PORT).start()
+    yield pf
+    pf.stop()
+
+
+@pytest.fixture(scope="module")
+def mcp_forward(kube: Kube) -> Iterator[Optional[PortForward]]:
+    """The MCP endpoint, answerable from the test: a port-forward to the
+    agentgateway data plane's Service on the port the MCP URL carries, or a real
+    hostname whose public /mcp route ends on the data plane, which needs none."""
+    if not SCENARIO.via_port_forward:
+        yield None
+        return
+    wait_for_endpoints(kube, NAMESPACE, AGENTGATEWAY_SERVICE)
+    pf = PortForward(kube.kubeconfig, NAMESPACE, AGENTGATEWAY_SERVICE, SCENARIO.mcp_port, AGENTGATEWAY_SERVICE_PORT).start()
     yield pf
     pf.stop()
 

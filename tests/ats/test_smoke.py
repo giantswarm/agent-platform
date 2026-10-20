@@ -8,7 +8,8 @@ module top to bottom; each one builds on the state the previous left):
      platform's identity Secret, a self-signed CA, the CoreDNS rewrite) and an
      in-cluster registry the candidate archive is pushed to;
   2. `helm install --wait` of the candidate with the quick start's shape —
-     helm/agent-platform/examples/kind-lab-dex.yaml (muster, dicebear, connectivity; the bundled Flux
+     helm/agent-platform/examples/kind-lab-dex.yaml (muster, dicebear, connectivity, and the
+     platform's one ingress topology: agentgateway in front of muster; the bundled Flux
      engine on) + values-kagent.yaml (the kagent runtime) + values-round-trips.yaml
      (the lab Dex as global.identity, muster's OAuth server on, agent-manager) —
      and self-management ON against the in-cluster registry: the chart's own
@@ -20,10 +21,12 @@ module top to bottom; each one builds on the state the previous left):
      agent-platform-flux, the engine objects, the operator managing the Flux CRDs;
   4. adoption: the bundled helm-controller takes the CLI's release over —
      `helm history` shows the install and one adoption revision;
-  5. the auth round trip: an unauthenticated /mcp is a 401 with the RFC 9728
-     discovery chain; a lab Dex user reaches /mcp with a token from the OAuth
-     password grant (a trusted audience) and with muster's own login flow (RFC 7591
-     registration, authorization code + PKCE, the Dex login form);
+  5. the auth round trip, every MCP call on agentgateway's /mcp in front of
+     muster (the data plane's Service; muster's OAuth endpoints on its own): an
+     unauthenticated /mcp is muster's 401 with the RFC 9728 discovery chain; a
+     lab Dex user reaches /mcp with a token from the OAuth password grant (a
+     trusted audience) and with muster's own login flow (RFC 7591 registration,
+     authorization code + PKCE, the Dex login form);
   6. the agent round trips on kagent API v2: Agent Substrate, installed by the
      chart under test, has its WorkerPool's gVisor worker Ready; a declarative
      Agent on the platform Harness, against the chart's
@@ -92,6 +95,7 @@ from conftest import (
     MODEL_CONFIG,
     MUSTER_BASE_URL,
     MUSTER_BASE_URL_SETS,
+    MCP_URL,
     MusterSession,
     NAMESPACE,
     OPERATOR_CRDS,
@@ -130,28 +134,32 @@ from conftest import (
     agent_state,
     unauthenticated_mcp_challenge,
     wait_for,
+    wait_for_mcp_route,
     wait_for_muster_healthy,
     wait_for_substrate,
     wait_for_agent_ready,
 )
-from scenarios import EXAMPLES_DIR, KIND_LAB_VALUES
+from scenarios import AGENTGATEWAY_SERVICE, EXAMPLES_DIR, KIND_LAB_VALUES
 
 logger = logging.getLogger(__name__)
 
 # The component HelmReleases the smoke values turn on: the quick start's three,
+# the ingress (agentgateway, and agent-platform-mcps with its route to muster),
 # kagent with its CRD chart, Agent Substrate with its CRD chart and the Google
 # access-token credential provider (all follow components.kagent), the CloudNativePG operator for kagent's and Substrate's
 # database, agent-manager, and model-manager — on by default with no backend
 # (giantswarm/agent-platform#329), nothing in the smoke values names it.
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "google-access-token-credential-provider", "cloudnative-pg", "agent-manager", "model-manager")
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "agentgateway", "agent-platform-mcps", "kagent", "kagent-crds", "substrate", "substrate-crds", "google-access-token-credential-provider", "cloudnative-pg", "agent-manager", "model-manager")
 # The platform's CloudNativePG Cluster, kagent's and Substrate's database: the
 # connectivity release renders it with helm.sh/resource-policy: keep, so the
 # conversations outlive an uninstall.
 POSTGRES_CLUSTER = "kagent-pg"
 # The Deployments `helm install --wait` leaves running in the release namespace
-# (the kagent controller runs in the kagent namespace and is waited for separately).
+# (the kagent controller runs in the kagent namespace and is waited for separately;
+# the agentgateway data plane is the controller's Deployment, created from the
+# connectivity release's Gateway, and is waited for with the MCP route).
 # model-manager Ready here is the zero-backend start-up: no backend registered.
-CORE_DEPLOYMENTS = ("flux-operator", "source-controller", "helm-controller", "muster", "agent-manager", "model-manager")
+CORE_DEPLOYMENTS = ("flux-operator", "source-controller", "helm-controller", "muster", "agentgateway-controller", "agent-manager", "model-manager")
 DECLARATIVE_AGENT = "ats-smoke-agent"
 MANAGED_AGENT = "ats-managed-agent"
 # The kagent release's own RemoteMCPServer: the controller's API as MCP tools
@@ -193,6 +201,7 @@ def dump_platform(kube: Kube) -> None:
 
 def dump_auth(kube: Kube) -> None:
     kube.dump([f"-n {NAMESPACE} logs deployment/muster --tail=120", f"-n {NAMESPACE} logs deployment/lab-dex --tail=60",
+               f"-n {NAMESPACE} logs deployment/{AGENTGATEWAY_SERVICE} --tail=60", f"-n {NAMESPACE} get gateways,httproutes -o wide",
                f"-n {NAMESPACE} logs deployment/agent-manager --tail=60"])
 
 
@@ -239,11 +248,15 @@ def app_deployment(kube: Kube, helm: Helm, prerequisites: None, chart_archive: P
 
 
 @pytest.fixture(scope="module")
-def muster(muster_forward: Optional[PortForward], app_deployment: float) -> Optional[PortForward]:
-    """muster reachable and healthy (its OAuth server discovers the issuer)."""
+def muster(muster_forward: Optional[PortForward], mcp_forward: Optional[PortForward], app_deployment: float) -> Optional[PortForward]:
+    """muster reachable and healthy (its OAuth server discovers the issuer), and
+    its MCP endpoint reachable through agentgateway."""
     started = time.monotonic()
     wait_for_muster_healthy(MUSTER_BASE_URL)
     TIMINGS.record("muster /health ok after the install", time.monotonic() - started)
+    started = time.monotonic()
+    wait_for_mcp_route(MCP_URL)
+    TIMINGS.record("agentgateway /mcp routed to muster after /health", time.monotonic() - started)
     return muster_forward
 
 
@@ -382,7 +395,7 @@ def test_self_management_adopts_the_release(kube: Kube, helm: Helm, candidate_ve
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
 def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: Optional[PortForward]) -> None:
     try:
-        meta = unauthenticated_mcp_challenge(MUSTER_BASE_URL)
+        meta = unauthenticated_mcp_challenge(MCP_URL, MUSTER_BASE_URL)
     except AssertionError:
         dump_auth(kube)
         raise
@@ -403,7 +416,7 @@ def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: Optional
         assert claims.get("email") == SCENARIO.user, claims
         aud = claims.get("aud") if isinstance(claims.get("aud"), list) else [claims.get("aud")]
         assert CROSS_CLIENT_AUDIENCE in aud, f"the token lacks the {CROSS_CLIENT_AUDIENCE} audience: {aud}"
-        session = MusterSession(MUSTER_BASE_URL, token, "ats-password-grant").initialize()
+        session = MusterSession(MCP_URL, token, "ats-password-grant").initialize()
         tools = session.list_tools()
         assert {"list_tools", "call_tool"} <= set(tools), f"muster's meta-tools missing from tools/list: {tools}"
         aggregated = session.aggregated_tools()
@@ -425,7 +438,7 @@ def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: Option
     started = time.monotonic()
     try:
         token = login_through_muster(MUSTER_BASE_URL, dex)
-        session = MusterSession(MUSTER_BASE_URL, token, "ats-login").initialize()
+        session = MusterSession(MCP_URL, token, "ats-login").initialize()
         assert "call_tool" in session.list_tools()
         assert any(t.startswith("core_") for t in session.aggregated_tools())
     except AssertionError:
@@ -492,7 +505,7 @@ def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, must
     controller compiles it and Substrate boots it."""
     started = time.monotonic()
     token = STATE.dex_token or dex_password_grant(dex)
-    session = MusterSession(MUSTER_BASE_URL, token, "ats-agent-manager").initialize()
+    session = MusterSession(MCP_URL, token, "ats-agent-manager").initialize()
     try:
         # muster connects to a forwardToken server per session, after the first
         # authenticated request; the tools appear once the SSO connection is up.
@@ -726,8 +739,12 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     left = sorted(n for n in crds if n.endswith(FLUX_CRD_SUFFIX))
     assert not left, f"Flux CRDs left behind after the uninstall: {left}"
     assert OPERATOR_CRDS <= set(crds), "the operator CRDs must remain (Helm never deletes crds/)"
-    for name in ("flux-operator", "source-controller", "helm-controller", "muster", "agent-manager"):
+    for name in ("flux-operator", "source-controller", "helm-controller", "muster", "agentgateway-controller", "agent-manager"):
         assert kube.get("deployment", name, namespace=NAMESPACE) is None, f"Deployment {name} survived the uninstall"
+    # The data plane is the controller's object, owned by the connectivity
+    # release's Gateway: garbage-collected after it.
+    wait_for(f"the agentgateway data plane {AGENTGATEWAY_SERVICE} gone with its Gateway",
+             lambda: kube.get("deployment", AGENTGATEWAY_SERVICE, namespace=NAMESPACE) is None, 120, interval=3)
     # No Job of the release is left (the lab Dex's cert-gen Job is the prerequisite's, not the chart's).
     jobs = [j["metadata"]["name"] for j in kube.items("jobs", "-l", f"app.kubernetes.io/instance={RELEASE}", namespace=NAMESPACE)]
     assert not jobs, f"Jobs of the release left behind: {jobs}"

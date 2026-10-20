@@ -78,16 +78,17 @@ def main() -> int:
     check("kind installs the lab Dex", kind.install_lab_dex)
     check("kind reaches muster through a port-forward", kind.via_port_forward)
     check("kind base URL", kind.muster_base_url == f"http://localhost:{scenarios.LAB_MUSTER_PORT}", kind.muster_base_url)
+    check("kind MCP URL is the data plane's forward", kind.mcp_url == f"http://localhost:{scenarios.LAB_MCP_PORT}/mcp", kind.mcp_url)
     check("kind issuer", kind.issuer_url == scenarios.LAB_DEX_ISSUER, kind.issuer_url)
     check("kind has a static user", bool(kind.user and kind.password))
     check("kind names a CA Secret", kind.ca_secret == scenarios.LAB_CA_SECRET, kind.ca_secret)
     check("kind own-Flux values", [p.name for p in kind.own_flux_values] == [
         "kind-lab-dex.yaml", "values-kagent.yaml"], str([p.name for p in kind.own_flux_values]))
-    print("ok: the kind scenario's defaults — the three lab values files, the lab issuer, a static user, the port-forward")
+    print("ok: the kind scenario's defaults — the three lab values files, the lab issuer, a static user, the port-forwards to muster and to the agentgateway data plane")
 
     # `make e2e` passes every derived variable, empty ones included, so an
     # empty variable must leave the scenario's default in place.
-    blanked = load(ATS_MUSTER_BASE_URL="", ATS_VALUES="", ATS_OVERLAY_VALUES="",
+    blanked = load(ATS_MUSTER_BASE_URL="", ATS_MCP_URL="", ATS_VALUES="", ATS_OVERLAY_VALUES="",
                    E2E_DOMAIN="", E2E_ISSUER_URL="", E2E_CLIENT_ID="", E2E_IDP_CA_SECRET="")
     # A reload rebinds the dataclass, so the two instances compare by field.
     check("an empty variable keeps the kind default",
@@ -100,6 +101,8 @@ def main() -> int:
     check("eks installs no lab Dex", not eks.install_lab_dex)
     check("eks port-forwards nothing", not eks.via_port_forward)
     check("eks has no static user", not eks.user, eks.user)
+    check("eks MCP URL is the base URL's /mcp (the public route ends on the data plane)",
+          eks.mcp_url == "https://muster.example.com/mcp", eks.mcp_url)
     check("eks names no CA Secret by default", not eks.ca_secret, eks.ca_secret)
     check("eks issuer port", eks.issuer_port == 443, str(eks.issuer_port))
     check("eks budgets", (eks.install_timeout, eks.uninstall_budget_s, eks.ready_timeout_s) == ("20m", 300, 900),
@@ -128,6 +131,10 @@ def main() -> int:
     check("a moved base URL moves the port", moved.muster_port == 9000, str(moved.muster_port))
     check("an https URL without a port is 443", eks.issuer_port == 443, str(eks.issuer_port))
     check("a hostname base URL is 443", eks.muster_port == 443, str(eks.muster_port))
+    check("the kind MCP port is the MCP URL's", kind.mcp_port == scenarios.LAB_MCP_PORT, str(kind.mcp_port))
+    moved_mcp = load(ATS_MCP_URL="http://localhost:9001/mcp")
+    check("a moved MCP URL moves its port, not muster's",
+          (moved_mcp.mcp_port, moved_mcp.muster_port) == (9001, scenarios.LAB_MUSTER_PORT), str((moved_mcp.mcp_port, moved_mcp.muster_port)))
     print("ok: the derived ports — each read out of the URL that carries it, a scheme's default where the URL names none")
 
     # --- the E2E_ fallback of `make e2e`
@@ -140,6 +147,7 @@ def main() -> int:
     check("E2E_IDP_CA_SECRET fills the CA Secret", e2e.ca_secret == "idp-ca", e2e.ca_secret)
     check("E2E_DOMAIN derives muster's base URL", e2e.muster_base_url == "https://muster.example.com",
           e2e.muster_base_url)
+    check("E2E_DOMAIN derives the MCP URL on muster's host", e2e.mcp_url == "https://muster.example.com/mcp", e2e.mcp_url)
     won = load(ATS_CLUSTER_TYPE="eks", E2E_DOMAIN="example.com",
                E2E_ISSUER_URL="https://dex.example.com", E2E_CLIENT_ID="platform",
                ATS_ISSUER_URL="https://own.example.com",
