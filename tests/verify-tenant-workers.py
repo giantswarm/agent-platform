@@ -12,8 +12,10 @@ With tenants.organizations.enabled, in both flavors:
   pods (ate.dev/worker-pool exists) of every namespace that carries the label
   (exists), on the same ports: the namespaces are selected by the label, never
   listed, and only worker pods are selected;
-- the substrate-workers PolicyException matches the same pods in those
-  namespaces by a namespaceSelector, excepts the same rules, and only when
+- the substrate-tenant-workers PolicyException (background false: Kyverno
+  refuses user info in an exception background scans apply; substrate-workers
+  does not change) matches the same pods in those namespaces by a
+  namespaceSelector, excepts the same rules, and only when
   Substrate's controller chain writes them: ate-controller the Deployment, the
   deployment controller the ReplicaSet, the ReplicaSet controller the Pods (an
   Organization's admins may write pods there; a labelled pod they write is
@@ -153,26 +155,39 @@ WRITERS = {
 def check_exception(on, off):
     polex_on = find(on, "PolicyException", "substrate-workers")["spec"]
     polex_off = find(off, "PolicyException", "substrate-workers")["spec"]
-    if polex_on["exceptions"] != polex_off["exceptions"]:
-        fail("the PolicyException excepts other rules with tenants.organizations on")
-    kagent, *rest = polex_on["match"]["any"]
-    if kagent != polex_off["match"]["any"][0]:
-        fail("the kagent namespace's entry of substrate-workers changed with tenants.organizations on")
+    if polex_on != polex_off:
+        fail("substrate-workers changed with tenants.organizations on; the Organizations' workers belong in substrate-tenant-workers")
+    if any(d["kind"] == "PolicyException" and d["metadata"]["name"] == "substrate-tenant-workers" for d in off):
+        fail("tenants.organizations off: substrate-tenant-workers renders")
+    tenant = find(on, "PolicyException", "substrate-tenant-workers")["spec"]
+    # Kyverno refuses subjects in an exception that background scans apply:
+    # "spec.match.any[].subjects: Forbidden: Usage of user info is forbidden".
+    if tenant.get("background") is not False:
+        fail("substrate-tenant-workers: background is not false; Kyverno refuses its subjects (Usage of user info is forbidden)")
+    if tenant["exceptions"] != polex_off["exceptions"]:
+        fail("substrate-tenant-workers excepts other rules than substrate-workers")
+    kagent = polex_off["match"]["any"][0]
     got = {}
-    for entry in rest:
+    for entry in tenant["match"]["any"]:
         res = entry.get("resources") or {}
         if res.get("namespaces") or res.get("namespaceSelector") != {"matchExpressions": [{"key": ORG, "operator": "Exists"}]}:
-            fail(f"substrate-workers: an Organizations' entry does not select every labelled namespace by the label: {entry}")
+            fail(f"substrate-tenant-workers: an entry does not select every labelled namespace by the label: {entry}")
         if res.get("selector") != kagent["resources"]["selector"]:
-            fail(f"substrate-workers: an Organizations' entry selects other pods than the kagent workers': {entry}")
+            fail(f"substrate-tenant-workers: an entry selects other pods than the kagent workers': {entry}")
         if set(entry) != {"resources", "subjects"}:
-            fail(f"substrate-workers: an Organizations' entry is not limited to its writers: {entry}")
+            fail(f"substrate-tenant-workers: an entry is not limited to its writers: {entry}")
         for kind in res.get("kinds") or []:
             if kind in got:
-                fail(f"substrate-workers: {kind} matched twice in the Organizations' namespaces")
+                fail(f"substrate-tenant-workers: {kind} matched twice")
             got[kind] = entry["subjects"]
     if got != WRITERS:
-        fail(f"substrate-workers: the Organizations' workers are excepted for writers {got}, not Substrate's controller chain {WRITERS}; anyone who writes a labelled pod there would get the workers' exception")
+        fail(f"substrate-tenant-workers: the Organizations' workers are excepted for writers {got}, not Substrate's controller chain {WRITERS}; anyone who writes a labelled pod there would get the workers' exception")
+    # Every other exception stays in the background scans: user info anywhere
+    # else is the same refusal.
+    for d in on:
+        if d["kind"] == "PolicyException" and d["metadata"]["name"] != "substrate-tenant-workers":
+            if any(set(e) & {"subjects", "roles", "clusterRoles"} for e in d["spec"]["match"].get("any") or []) and d["spec"].get("background") is not False:
+                fail(f"{d['metadata']['name']}: user info in an exception with background scans; Kyverno refuses it")
 
 
 # The policies' namespaces: every labelled namespace but the kagent one, whose
@@ -255,7 +270,7 @@ def main():
             fail(f"tenants.organizations off ({flavor}): the admission policies render")
         on = render(chart, args + ON)
         selecting = {(d["kind"], d["metadata"]["name"]) for d in on if ORG in yaml.safe_dump(d)}
-        want = {(kind, name) for kind, name, _, _ in HOPS[flavor]} | {("PolicyException", "substrate-workers")} | {
+        want = {(kind, name) for kind, name, _, _ in HOPS[flavor]} | {("PolicyException", "substrate-tenant-workers")} | {
             ("ValidatingAdmissionPolicy", WORKERS_POLICY), ("ValidatingAdmissionPolicy", COPY_POLICY)} | {
             ("ValidatingAdmissionPolicy", n) for n in EGRESS_POLICIES} | MODEL_POLICIES
         if selecting != want:
