@@ -44,17 +44,21 @@ muster. Each case below pins one property of its wiring:
   to connectivity are unchanged), nothing else of the render moves but the kagent
   release's jwt Session admission (tests/verify-workspace-session-admission.py),
   and no MCPServer renders anywhere for the component or a provider;
-- the Organizations (#886): workspaces.organizations [{name, memberGroups}] reaches
-  the release as the chart's organizations map and moves nothing else; the
+- the Organizations (#886): workspaces.organizations [{name, memberGroups,
+  memberEmails, memberDomains}] reaches the release as the chart's organizations
+  map, each member field only where named, and moves nothing else; the
   component chart, rendered at the BOM's pin with the forwarded block, gives the
   manager's ServiceAccount one Role and RoleBinding in kagent and one in its own
   namespace (the provider Secrets, the removal of earlier releases' sign-ins),
   cluster-wide only `get` on PersistentVolumes (a workspace volume's CSI driver
   and handle, which the grant names), StorageClasses (whether the class
   provisions a size the controller grows) and its own CRD, and no binding of a
-  member or group; a duplicate, groupless,
-  empty-group or non-DNS Organization, an own workspace-manager.organizations and
-  workspace-manager.rbac.create false fail the render;
+  member or group; a duplicate, memberless,
+  empty-group or non-DNS Organization, an email or domain that is not one, email
+  or domain members below agent-platform.workspaceManager.memberEmailsFloor
+  (0.12.0, a release candidate of it included), an own
+  workspace-manager.organizations and workspace-manager.rbac.create false fail
+  the render;
 - inline credentials, a duplicate or non-DNS provider name, a provider without a
   kind fail the render naming the path; a gitlab instance below the floor
   agent-platform.workspaceManager.gitlabFloor (0.5.0, a release candidate of it
@@ -432,15 +436,25 @@ def main(meta: str, connectivity: str) -> int:
     if rbac["subjects"] - {"ServiceAccount"}:
         fail(f"a binding of the component chart names a subject other than a ServiceAccount (a member, a group): {sorted(rbac['subjects'])}")
     must_fail(meta, [*ON, "-f", ORGS, "--set", "workspaces.organizations[1].name=acme"], "is a duplicate", "a duplicate Organization")
-    must_fail(meta, [*ON, "-f", ORGS, "--set-json", "workspaces.organizations[1].memberGroups=[]"], "has no memberGroups", "an empty group list")
+    must_fail(meta, [*ON, "-f", ORGS, "--set-json", "workspaces.organizations[1].memberGroups=[]"], "has no members", "an Organization without members")
+    # Members by verified email or domain (an identity provider without a groups
+    # claim): forwarded beside the groups, from the 0.12.0 floor on.
+    by_email = ["--set", f"components.{NAME}.versionRange=>=0.12.0-0 <0.13.0",
+                "--set-json", 'workspaces.organizations[2]={"name": "initech", "memberDomains": ["initech.example"], "memberEmails": ["jane@partner.example"]}']
+    must_have(documents(helm(meta, [*ON, "-f", ORGS, *by_email, *IDENTITY]))[("HelmRelease", NAME)], (
+        "      initech:\n        memberDomains:\n        - initech.example\n        memberEmails:\n        - jane@partner.example\n",
+    ), "the HelmRelease with an Organization of email and domain members")
+    must_fail(meta, [*ON, "-f", ORGS, by_email[2], by_email[3]], "raise its floor to 0.12.0", "email or domain members below the 0.12.0 floor")
+    must_fail(meta, [*ON, "-f", ORGS, *by_email, "--set", "workspaces.organizations[2].memberEmails[0]=jane"], "memberEmails[0] \"jane\" is not an email address", "a member email that is not one")
+    must_fail(meta, [*ON, "-f", ORGS, *by_email, "--set", "workspaces.organizations[2].memberDomains[0]=@initech.example"], "is not an email domain", "a member domain with its @")
     must_fail(meta, [*ON, "-f", ORGS, "--set-json", 'workspaces.organizations[1].memberGroups=[""]'], "memberGroups[0] is empty", "an empty group")
     must_fail(meta, [*ON, "-f", ORGS, "--set", "workspaces.organizations[1].name=Glo_bex"], "is not a DNS label", "a non-DNS Organization name")
     must_fail(meta, [*ON, "--set", f"{NAME}.organizations.acme.memberGroups[0]=g"], f"{NAME}.organizations is set", "an own organizations map")
     must_fail(meta, [*ON, "--set", f"{NAME}.rbac.create=false"], f"{NAME}.rbac.create is false", "the manager's RBAC off")
     helm(connectivity, ["--set", "ingress.parentRefs[0].name=x", "--set", f"components.{NAME}.enabled=true", "-f", FIXTURE, "-f", ORGS, *IDENTITY], ci_values=False)
     ok(f"two Organizations forwarded as the organizations map, nothing else moved; the component chart {rbac['version']} renders one Role and RoleBinding "
-       "in kagent and one in its own namespace for the manager's ServiceAccount, cluster-wide only get on PersistentVolumes, StorageClasses and its CRD, no member binding; a duplicate, groupless, empty-group or non-DNS "
-       "Organization, an own organizations map and rbac.create false fail; connectivity takes the key")
+       "in kagent and one in its own namespace for the manager's ServiceAccount, cluster-wide only get on PersistentVolumes, StorageClasses and its CRD, no member binding; email and domain members forwarded from 0.12.0 on; a duplicate, memberless, empty-group or non-DNS "
+       "Organization, a bad email or domain, email or domain members below 0.12.0, an own organizations map and rbac.create false fail; connectivity takes the key")
 
     # --- inline credentials and bad instances -----------------------------------------
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[0].values.app.privateKey=abc"],
