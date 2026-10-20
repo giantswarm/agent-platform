@@ -649,12 +649,19 @@ modelServing.modelsGateway.enabled.
 
 {{/*
 The models Gateway's JWKS block with the host resolved (JSON): the block's own
-host, else the issuer's hostname — the public issuer on 443.
+host, else the JWKS endpoint the issuer publishes (agent-platform.idp.jwks) —
+the public issuer's host on the block's port for Dex, and for Google
+www.googleapis.com:443 at /oauth2/v3/certs, its host, port and path together.
 */}}
 {{- define "agent-platform.modelServing.modelsGateway.jwks" -}}
 {{- $jwks := deepCopy .Values.modelServing.modelsGateway.jwtAuthentication.jwks -}}
 {{- if not $jwks.host -}}
-{{- $_ := set $jwks "host" (urlParse (include "agent-platform.modelServing.modelsGateway.issuer" .)).hostname -}}
+{{- $published := include "agent-platform.idp.jwks" (include "agent-platform.modelServing.modelsGateway.issuer" .) | fromJson -}}
+{{- $_ := set $jwks "host" ($published.host | default "") -}}
+{{- if $published.path -}}
+{{- $_ := set $jwks "port" $published.port -}}
+{{- $_ := set $jwks "path" $published.path -}}
+{{- end -}}
 {{- end -}}
 {{- $jwks | toJson -}}
 {{- end -}}

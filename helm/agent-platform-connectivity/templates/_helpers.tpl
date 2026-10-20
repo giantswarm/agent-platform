@@ -1213,6 +1213,35 @@ empty or has no host. Usage: include "agent-platform.urlHost" $url
 {{- end -}}
 
 {{/*
+Truthy ("true") when an issuer URL is Google's: its host is accounts.google.com
+in any case. Usage: include "agent-platform.idp.googleIssuer" $url
+*/}}
+{{- define "agent-platform.idp.googleIssuer" -}}
+{{- if eq (include "agent-platform.urlHost" . | lower) "accounts.google.com" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The JWKS endpoint an issuer publishes (its discovery document's jwks_uri), as
+JSON { "host": <host>, "port": <int>, "path": <path> }; empty while the URL is
+unset or has no host. Google serves its key set on www.googleapis.com:443 at
+/oauth2/v3/certs, not on the issuer host. Every other issuer (Dex) serves it
+from its own host and port (the URL's port, else 443); path is then empty and
+the caller keeps its own (Dex's /keys).
+Usage: include "agent-platform.idp.jwks" $url | fromJson
+*/}}
+{{- define "agent-platform.idp.jwks" -}}
+{{- if include "agent-platform.idp.googleIssuer" . -}}
+{{- dict "host" "www.googleapis.com" "port" 443 "path" "/oauth2/v3/certs" | toJson -}}
+{{- else if . -}}
+{{- $u := urlParse . -}}
+{{- $port := regexFind ":[0-9]+$" ($u.host | default "") | trimPrefix ":" | default "443" | int -}}
+{{- with $u.hostname -}}
+{{- dict "host" . "port" $port "path" "" | toJson -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The hosts a platform service that validates tokens itself (mcp-oauth) reaches
 at its login identity provider, as a JSON list: the discovery document, the
 JWKS (validating the id_tokens muster and the portal forward), userinfo and
@@ -1228,8 +1257,7 @@ to the issuer host. Empty for the dex provider without an issuer.
 Usage: include "agent-platform.idpHosts" (dict "provider" "dex" "issuerUrl" $url)
 */}}
 {{- define "agent-platform.idpHosts" -}}
-{{- $google := eq (include "agent-platform.urlHost" .issuerUrl | lower) "accounts.google.com" -}}
-{{- if or (eq (.provider | default "dex") "google") $google -}}
+{{- if or (eq (.provider | default "dex") "google") (include "agent-platform.idp.googleIssuer" .issuerUrl) -}}
 {{- list "accounts.google.com" "www.googleapis.com" "openidconnect.googleapis.com" "oauth2.googleapis.com" | toJson -}}
 {{- else -}}
 {{- $hosts := list -}}
@@ -1538,17 +1566,16 @@ aside. */ -}}
 
 {{/*
 The platform's identity provider as a JWKS target, { "host": "<host>", "port":
-<int> } from global.identity.issuerUrl (the URL's port, else 443 — the port the
-models Gateway's default JWKS source dials); empty while the URL is unset.
+<int> }: the JWKS endpoint global.identity.issuerUrl publishes
+(agent-platform.idp.jwks — www.googleapis.com:443 for Google, else the issuer's
+host on the URL's port or 443, the port the models Gateway's default JWKS
+source dials); empty while the URL is unset.
 Usage: include "agent-platform.jwks.issuerTarget" .
 */}}
 {{- define "agent-platform.jwks.issuerTarget" -}}
-{{- with .Values.global.identity.issuerUrl -}}
-{{- $u := urlParse . -}}
-{{- $port := regexFind ":[0-9]+$" ($u.host | default "") | trimPrefix ":" | default "443" | int -}}
-{{- with $u.hostname -}}
-{{- dict "host" . "port" $port | toJson -}}
-{{- end -}}
+{{- with (include "agent-platform.idp.jwks" .Values.global.identity.issuerUrl) -}}
+{{- $jwks := . | fromJson -}}
+{{- dict "host" $jwks.host "port" $jwks.port | toJson -}}
 {{- end -}}
 {{- end -}}
 

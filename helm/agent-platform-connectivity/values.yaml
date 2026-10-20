@@ -4343,8 +4343,10 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
       # the id_token a person holds after the Dex login (kubectl, the portal).
       # A token for another client (an agent's, a service's) is refused.
       audiences: [dex-k8s-authenticator]
-      # JWKS source. An empty host takes the issuer's host on 443 — the public
-      # issuer, which needs no gateway.jwksEgress (the port implies TLS). The
+      # JWKS source. An empty host takes the JWKS endpoint the issuer
+      # publishes: for Dex the issuer's host on 443 — the public issuer, which
+      # needs no gateway.jwksEgress (the port implies TLS) — and for Google
+      # www.googleapis.com:443 at /oauth2/v3/certs, replacing port and path. The
       # agentgateway CONTROLLER fetches the key set and pushes it to the data
       # plane over xDS, so the controller's network policy must reach this
       # host on this port: it admits global.identity.issuerUrl's host on 443
