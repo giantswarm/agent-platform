@@ -642,8 +642,9 @@ def test_edited_muster_object_is_reverted_on_the_next_reconcile(kube: Kube, must
     revision = hr["status"]["history"][0]["version"]
     before = kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)
     assert before, f"no PodDisruptionBudget muster in {NAMESPACE} to edit"
-    # muster runs two replicas behind minAvailable: 1 (giantswarm/agent-platform#1080);
-    # the hand edit lowers it to 0, which every replica count tolerates.
+    # The chart's budget is minAvailable: 1 (giantswarm/agent-platform#1080; the
+    # smoke runs one replica, its OAuth state in memory, and drains no node); the
+    # hand edit lowers it to 0, which every replica count tolerates.
     assert before["spec"].get("minAvailable") == 1, f"the muster PDB is not minAvailable: 1; pick another drift target: {before['spec']}"
     started = time.monotonic()
     kube.cmd(["-n", NAMESPACE, "patch", "poddisruptionbudgets", "muster", "--type=merge", "-p", '{"spec":{"minAvailable":0}}'])
