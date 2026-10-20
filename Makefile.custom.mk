@@ -1732,6 +1732,12 @@ verify-substrate-idp-netpol: ## Assert the path to Substrate's actor-JWT issuer 
 	@python3 tests/verify-substrate-idp-netpol.py $(CONNECTIVITY_DIR) $(KAGENT_NETPOL)
 	@echo "substrate idp network path verified."
 
+.PHONY: verify-idp-egress
+verify-idp-egress: ## Assert the identity provider egress of the services that validate tokens themselves (giantswarm/agent-platform#1169), cilium flavour: the workspace-, cluster-, agent-, vm- and model-manager egress policies and the portal's open, for an issuer on accounts.google.com, exactly accounts.google.com, www.googleapis.com (JWKS), openidconnect.googleapis.com (userinfo) and oauth2.googleapis.com (token) on 443, whatever provider their block names; for a Dex issuer its host alone. HELM selects the binary.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 tests/verify-idp-egress.py $(CONNECTIVITY_DIR)
+	@echo "identity provider egress verified."
+
 .PHONY: verify-kagent-netpol
 verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, no AOF; an installation's own fragment reaches the release verbatim. Its readers (giantswarm/agent-platform#851): ciliumNetworkPolicy.ingress.clients names exactly muster and klaus-gateway, by the pod labels the connectivity chart's muster-to-* and klausgateway-store-egress policies select.
 	@echo "====> $@ ($(CHART_DIR))"
