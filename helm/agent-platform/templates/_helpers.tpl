@@ -977,7 +977,8 @@ pin's own issuer and client Secret, so its grants stay filed where they are. */ 
 {{- $scopes := toString (dig "oauth" "scopes" "" $v) -}}
 {{- if eq (toString .kind) "github" -}}
 {{- $url := trimSuffix "/" (toString ($v.url | default "https://github.com")) -}}
-{{- $issuer := ternary $ownIssuer "" (and $ownIssuer (eq $name $pinned)) -}}
+{{- $issuer := "" -}}
+{{- if eq $name $pinned -}}{{- $issuer = $ownIssuer -}}{{- end -}}
 {{- with toString (dig "app" "id" "" $v) -}}{{- $issuer = $issuer | default (printf "%s/apps/%s" $url .) -}}{{- end -}}
 {{- with $issuer -}}
 {{- $app = dict "name" $name "issuer" . "authorizationEndpoint" (printf "%s/login/oauth/authorize" $url) "tokenEndpoint" (printf "%s/login/oauth/access_token" $url) "clientCredentialsSecretRef" $ref -}}

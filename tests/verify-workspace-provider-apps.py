@@ -24,7 +24,8 @@ sign-in side by side (giantswarm/giantswarm#38672, agent-platform.workspaceManag
 - the guards name the key: an own providerApps entry naming no instance, an instance
   whose App cannot be derived, a workspace-manager floor below
   agent-platform.workspaceManager.providerAppsFloor (0.12.0) and a muster floor below
-  agent-platform.muster.providerAppsFloor (5.48.0).
+  agent-platform.muster.providerAppsFloor (5.48.0), and muster's OAuth client role
+  (muster.muster.oauth.mcpClient.enabled) off.
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
@@ -41,7 +42,9 @@ REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
 BOM = "helm/agent-platform/examples/customer-bom.yaml"
 CI = ["--set", "components.flux.enabled=false"]
 SINGLE = ["-f", "tests/fixtures/workspaces-values.yaml", "-f", "tests/fixtures/workspaces-agents-values.yaml"]
-BOTH = [*SINGLE, "-f", "tests/fixtures/workspaces-provider-apps-values.yaml"]
+# muster's OAuth client role, which signs the person in to each App.
+MCP_CLIENT = ["--set", "muster.muster.oauth.mcpClient.enabled=true", "--set", "muster.muster.oauth.mcpClient.publicUrl=https://muster.ci.example.com"]
+BOTH = [*SINGLE, "-f", "tests/fixtures/workspaces-provider-apps-values.yaml", *MCP_CLIENT]
 SUBSTRATE = ["--set", "components.substrate.enabled=true"]
 # The identity the component charts need with OAuth on.
 IDENTITY = [
@@ -224,7 +227,9 @@ def main(meta: str) -> int:
               f"components.{NAME}.versionRange (>=0.11.0 <0.13.0) admits releases before 0.12.0", "a workspace-manager floor below 0.12.0")
     must_fail(meta, [*BOTH, "--set", "components.muster.versionRange=>=5.47.0 <6.0.0"],
               "components.muster.versionRange (>=5.47.0 <6.0.0) admits releases before 5.48.0", "a muster floor below 5.48.0")
-    ok("the guards: an App of no instance, an underivable App, the workspace-manager and muster floors")
+    must_fail(meta, [*BOTH, "--set", "muster.muster.oauth.mcpClient.enabled=false"],
+              "but muster.muster.oauth.mcpClient.enabled is off", "provider Apps without muster's OAuth client")
+    ok("the guards: an App of no instance, an underivable App, the workspace-manager and muster floors, muster's OAuth client off")
     return 0
 
 
