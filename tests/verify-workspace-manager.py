@@ -438,13 +438,13 @@ def main(meta: str, connectivity: str) -> int:
     must_fail(meta, [*ON, "-f", ORGS, "--set", "workspaces.organizations[1].name=acme"], "is a duplicate", "a duplicate Organization")
     must_fail(meta, [*ON, "-f", ORGS, "--set-json", "workspaces.organizations[1].memberGroups=[]"], "has no members", "an Organization without members")
     # Members by verified email or domain (an identity provider without a groups
-    # claim): forwarded beside the groups, from the 0.12.0 floor on.
-    by_email = ["--set", f"components.{NAME}.versionRange=>=0.12.0-0 <0.13.0",
-                "--set-json", 'workspaces.organizations[2]={"name": "initech", "memberDomains": ["initech.example"], "memberEmails": ["jane@partner.example"]}']
+    # claim): forwarded beside the groups at the chart's range, refused on a
+    # range below the 0.12.0 floor.
+    by_email = ["--set-json", 'workspaces.organizations[2]={"name": "initech", "memberDomains": ["initech.example"], "memberEmails": ["jane@partner.example"]}']
     must_have(documents(helm(meta, [*ON, "-f", ORGS, *by_email, *IDENTITY]))[("HelmRelease", NAME)], (
         "      initech:\n        memberDomains:\n        - initech.example\n        memberEmails:\n        - jane@partner.example\n",
     ), "the HelmRelease with an Organization of email and domain members")
-    must_fail(meta, [*ON, "-f", ORGS, by_email[2], by_email[3]], "raise its floor to 0.12.0", "email or domain members below the 0.12.0 floor")
+    must_fail(meta, [*ON, "-f", ORGS, *by_email, "--set", f"components.{NAME}.versionRange=>=0.11.0 <0.12.0"], "raise its floor to 0.12.0", "email or domain members below the 0.12.0 floor")
     must_fail(meta, [*ON, "-f", ORGS, *by_email, "--set", "workspaces.organizations[2].memberEmails[0]=jane"], "memberEmails[0] \"jane\" is not an email address", "a member email that is not one")
     must_fail(meta, [*ON, "-f", ORGS, *by_email, "--set", "workspaces.organizations[2].memberDomains[0]=@initech.example"], "is not an email domain", "a member domain with its @")
     must_fail(meta, [*ON, "-f", ORGS, "--set-json", 'workspaces.organizations[1].memberGroups=[""]'], "memberGroups[0] is empty", "an empty group")

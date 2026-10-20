@@ -1119,11 +1119,14 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.11.0, the first release whose MCPServer pins the
-    # provider's revocation endpoint
+    # The floor is 0.12.0, the first release that admits an Organization's
+    # members by verified email or domain (workspaces.organizations[].memberEmails,
+    # .memberDomains; agent-platform.workspaceManager.memberEmailsFloor), for an
+    # identity provider that sends no groups claim. The earlier floors it
+    # covers: 0.11.0 the MCPServer pinning the provider's revocation endpoint
     # (muster.mcpServer.auth.authorizationServer.revocationEndpoint), so a
     # person's disconnect in muster revokes their grant at the provider
-    # (giantswarm/muster#1597). The earlier floors it covers: 0.10.0 the
+    # (giantswarm/muster#1597), 0.10.0 the
     # person's provider token as muster's grant of the provider instance's App
     # (muster.mcpServer.auth.provider, which this chart derives; an earlier
     # release keeps its own sign-in store, which this chart no longer feeds:
@@ -1134,7 +1137,7 @@ components:  # @schema additionalProperties: true
     # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
     # minor: a workspace-manager minor rolls in with the chart release that
     # renders its values.
-    versionRange: ">=0.11.0 <0.12.0"
+    versionRange: ">=0.12.0 <0.13.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
