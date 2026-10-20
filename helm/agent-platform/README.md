@@ -541,7 +541,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.workspace-manager.chart | string | `"workspace-manager"` |  |
 | components.workspace-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.workspace-manager.versionRange | string | `">=0.11.0 <0.12.0"` |  |
+| components.workspace-manager.versionRange | string | `">=0.12.0 <0.13.0"` |  |
 | components.workspace-manager.valuesFrom | string | `"workspace-manager"` |  |
 | components.workspace-manager.dependsOn[0] | string | `"muster"` |  |
 | components.workspace-manager.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
@@ -1227,12 +1227,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.6.5"` |  |
+| agentgateway.controller.image.tag | string | `"2.6.6"` |  |
 | agentgateway.controller.replicaCount | int | `2` |  |
 | agentgateway.inferenceExtension.enabled | bool | `true` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.6.5"` |  |
+| agentgateway.proxy.image.tag | string | `"2.6.6"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
