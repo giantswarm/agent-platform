@@ -2,7 +2,7 @@
 #
 #    devctl
 #
-#    https://github.com/giantswarm/devctl/blob/dbac0c3a3941b5fc5734313b93764632ac19e700/pkg/gen/input/workflows/internal/file/helm-docs-regen.yaml.template
+#    https://github.com/giantswarm/devctl/blob/0cc103490e0438858949bc6fe67d9cc67f9b967a/pkg/gen/input/workflows/internal/file/helm-docs-regen.yaml.template
 #
 # Regenerates the files the generated pre-commit hooks derive from a chart's
 # values.yaml -- the helm-docs README and values.schema.json -- on Renovate and
@@ -26,9 +26,9 @@
 #     would reject anyway.
 #   * A clean tree is a no-op. The push re-triggers this workflow on the new
 #     head; that run finds nothing to change and exits, so it never loops.
-#   * The push uses the taylorbot PAT, not GITHUB_TOKEN: a GITHUB_TOKEN push
-#     does not re-trigger the required checks on the new commit and the PR
-#     would sit on "Expected" statuses.
+#   * The push uses a short-lived token of the giantswarm-release GitHub App,
+#     not GITHUB_TOKEN: a GITHUB_TOKEN push does not re-trigger the required
+#     checks on the new commit and the PR would sit on "Expected" statuses.
 #   * The generated renovate.json5 lists the commit author in
 #     gitIgnoredAuthors, so Renovate keeps rebasing and autoclosing the PR as
 #     if the commit were its own.
@@ -65,13 +65,14 @@ jobs:
       - name: Check the bot token is available
         id: token
         env:
-          TAYLORBOT_GITHUB_ACTION: ${{ secrets.TAYLORBOT_GITHUB_ACTION }}
+          RELEASE_BOT_CLIENT_ID: ${{ secrets.RELEASE_BOT_CLIENT_ID }}
+          RELEASE_BOT_PRIVATE_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
         run: |
-          if [ -z "$TAYLORBOT_GITHUB_ACTION" ]; then
+          if [ -z "$RELEASE_BOT_CLIENT_ID" ] || [ -z "$RELEASE_BOT_PRIVATE_KEY" ]; then
             # Fork PRs never see secrets, and Dependabot-triggered runs only see
             # Dependabot secrets, so the regen job is skipped rather than failed:
             # the PR then behaves as it did before this workflow existed.
-            echo "::warning::TAYLORBOT_GITHUB_ACTION is not available to this run, nothing is regenerated. For dependabot/ branches add the PAT as a Dependabot secret as well."
+            echo "::warning::The giantswarm-release App secrets (RELEASE_BOT_CLIENT_ID, RELEASE_BOT_PRIVATE_KEY) are not available to this run, nothing is regenerated. Fork PRs and Dependabot runs see no Actions secrets, so this is expected there."
             echo "available=false" >> "$GITHUB_OUTPUT"
           else
             echo "available=true" >> "$GITHUB_OUTPUT"
@@ -118,12 +119,19 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Generate the giantswarm-release token
+        id: release-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
       - name: Check out the PR branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.head_ref }}
-          # The PAT is kept in the checkout so `git push` below uses it.
-          token: ${{ secrets.TAYLORBOT_GITHUB_ACTION }}
+          # The App token is kept in the checkout so `git push` below uses it.
+          token: ${{ steps.release-token.outputs.token }}
       - name: Install helm-docs
         if: needs.preflight.outputs.helm-docs-version != ''
         uses: giantswarm/install-binary-action@5bef88f65012037dd836117c8d344b21bb559854 # v4.1.0
@@ -163,8 +171,8 @@ jobs:
           done
       - name: Set up git identity
         run: |
-          git config --local user.email "dev@giantswarm.io"
-          git config --local user.name "taylorbot"
+          git config --local user.email "342014845+giantswarm-release[bot]@users.noreply.github.com"
+          git config --local user.name "giantswarm-release[bot]"
       - name: Commit and push the regenerated files
         run: |
           set -euo pipefail
