@@ -14,7 +14,7 @@ With tenants.organizations.enabled, in both flavors:
   listed, and only worker pods are selected;
 - substrate-workers stays as it is off; the PolicyException
   substrate-workers-tenants (background false: Kyverno refuses subjects
-  otherwise) matches the same pods in those namespaces by a
+  otherwise; verify-policyexception-userinfo holds it) matches the same pods in those namespaces by a
   namespaceSelector, excepts the same rules, and only when
   Substrate's controller chain writes them: ate-controller the Deployment, the
   deployment controller the ReplicaSet, the ReplicaSet controller the Pods (an
@@ -160,10 +160,9 @@ def check_exception(on, off):
         fail("substrate-workers changed with tenants.organizations on: the kagent namespace's workers keep their exception as it is")
     if any(d["kind"] == "PolicyException" and d["metadata"]["name"] == TENANT_EXCEPTION for d in off):
         fail(f"tenants.organizations off: {TENANT_EXCEPTION} renders")
+    # Its background: false, which Kyverno requires beside subjects, is held by
+    # verify-policyexception-userinfo with every other exception of the charts.
     polex = find(on, "PolicyException", TENANT_EXCEPTION)["spec"]
-    # Kyverno refuses subjects in an exception that background scans apply.
-    if polex.get("background") is not False:
-        fail(f"{TENANT_EXCEPTION}: background is {polex.get('background')!r}, not false; Kyverno refuses its subjects")
     if polex["exceptions"] != workers_off["exceptions"]:
         fail(f"{TENANT_EXCEPTION} excepts other rules than substrate-workers")
     kagent = workers_off["match"]["any"][0]
