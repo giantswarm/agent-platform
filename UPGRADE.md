@@ -31,17 +31,18 @@ giantswarm/muster#1601: with `tenants.organizations.enabled` and muster on, the 
   - For each MCP server in an Organization's namespace that names a client Secret (`clientCredentialsSecretRef`), a Role in that namespace gives muster's ServiceAccount `get` on that Secret alone (`resourceNames`), with its RoleBinding. muster gets no other read of an Organization's Secrets; without the Role, a sign-in to that server answers that it is not ready and names the Secret and the Role.
 - **`components.muster.versionRange` is `>=5.48.0 <6.0.0`** (was `>=5.47.0 <6.0.0`), and the switch needs 5.48.0 or later: muster 5.48.0 (giantswarm/muster#1603) files a tenant server's sign-ins under the MCPServer objects that made them, so an Organization's namespace that is created again under a deleted one's name starts with no sign-ins. muster rolls in place; no store or session format changes, and nobody signs in again in muster's namespace. Where the switch was already on (agentlab), the first registration of each tenant server after the upgrade forgets that namespace's earlier sign-ins once. An installation that pins the BOM moves `muster` to `5.48.0`.
 
-## \<current\> → \<next\> (Substrate 1.16.0: `tcp` egress rules, agentgateway 2.5.0)
+## \<current\> → \<next\> (Substrate 1.17.0: `tcp` egress rules, the actor JWT mint as `MintActorJwt`, agentgateway 2.6.5)
 
-`components.substrate{,-crds}.versionRange` selects Substrate 1.16 (`>=1.16.0 <1.17.0`, was `>=1.14.0 <1.15.0`). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.16.0 (`ateom-gvisor:1.16.0`); the kagent CRDs and the kagent release are unchanged. 1.15 and 1.16 stay on upstream v0.5.0-alpha2: 1.15 adds `ate_actor_stats_dns_queries_total`, 1.16 the `tcp` egress rule and agentgateway 2.5.0 on the egress gateway. No CRD, Postgres schema or snapshot layout changes (Substrate's `docs/upgrade.md`, "The 1.14 to 1.15 step" and "The 1.15 to 1.16 step"): no migration, no snapshot reset, no manual step; conversations, goldens and durable volumes survive the roll.
+`components.substrate{,-crds}.versionRange` selects Substrate 1.17 (`>=1.17.0 <1.18.0`, was `>=1.14.0 <1.15.0`). The Substrate control plane, the atelet and the kagent WorkerPool roll in place to 1.17.0 (`ateom-gvisor:1.17.0`); the kagent CRDs and the kagent release are unchanged. 1.15, 1.16 and 1.17 stay on upstream v0.5.0-alpha2: 1.15 adds `ate_actor_stats_dns_queries_total`, 1.16 the `tcp` egress rule, 1.17 serves the actor JWT mint as `Control.MintActorJwt` and runs agentgateway 2.6.5 on the egress gateway, which mints through that name. No CRD, Postgres schema or snapshot layout changes (Substrate's `docs/upgrade.md`, "The 1.14 to 1.15 step", "The 1.15 to 1.16 step" and "The 1.16 to 1.17 step"): no migration, no snapshot reset, no manual step; conversations, goldens and durable volumes survive the roll.
 
-- **During the roll** a 1.14 worker reports no DNS count, and a request path with a percent-encoded `/` gets only the host-wide credential until the egress gateway runs 1.16.
-- **`kubectl ate`**: the egress contract is `v0.4.0-alpha1+path-prefix+tcp`; a 1.14 or 1.15 `kubectl ate` and a 1.16 ate-api refuse each other's egress-policy writes. Use the `kubectl ate` of 1.16.
+- **During the roll** a 1.14 worker reports no DNS count, and a request path with a percent-encoded `/` gets only the host-wide credential until the egress gateway runs 1.17. While ate-api-server and the egress gateway run different releases, a request whose egress rule has an `actor_jwt` header source (a Session's caller credential, muster's actor bearer) is answered `500`; other egress rules are unaffected.
+- **Metrics**: `atenet_router_egress_refused_total` is gone from the egress gateway's `metrics` port (it always read zero). An alert or dashboard on it moves to `agentgateway_atenet_egress_refusals_total` on the `stats` port.
+- **`kubectl ate`**: the egress contract is `v0.4.0-alpha1+path-prefix+tcp`; a 1.14 or 1.15 `kubectl ate` and a 1.16 or 1.17 ate-api refuse each other's egress-policy writes. Use the `kubectl ate` of 1.17.
 
 ### Operator action
 
 - **None** for an installation that follows the chart's ranges.
-- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.16.0`.
+- **An installation that pins the BOM**: move `substrate` and `substrate-crds` to `1.17.0`.
 
 ## \<current\> → \<next\> (workspace-manager 0.11, muster 5.47: a disconnect revokes the grant at the provider)
 
