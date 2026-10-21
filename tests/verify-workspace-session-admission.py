@@ -253,6 +253,23 @@ def main(meta: str) -> int:
         fail("an own muster.muster.credentialProvider.actorBearer.enabled=false does not stand")
     if "          audience: https://muster.example\n" not in bearer_of(["--set", "muster.muster.credentialProvider.actorBearer.audience=https://muster.example"]):
         fail("an own muster.muster.credentialProvider.actorBearer.audience does not stand")
+    # agent-manager is told muster trusts the actor JWT: it reports an agent's toolset as
+    # bound to each session at its start (giantswarm/agent-manager#228).
+    AM_ON = ["--set", "components.agent-manager.enabled=true"]
+    def am_muster(flags: list) -> str:
+        return block(block(documents(helm(meta, [*base, *AM_ON, *flags])).get(("HelmRelease", "agent-manager"), ""), "values", 2), "muster", 4)
+    if "      actorBearer: true\n" not in am_muster(["--set", "components.substrate.enabled=true"]):
+        fail(f"with muster trusting the actor JWT the agent-manager release's muster.actorBearer is not true:\n{am_muster(['--set', 'components.substrate.enabled=true'])}")
+    off = am_muster(["--set", "components.substrate.enabled=true", "--set", "muster.muster.credentialProvider.actorBearer.enabled=false"])
+    if "actorBearer" in off:
+        fail(f"with muster's actorBearer off the agent-manager release carries muster.actorBearer:\n{off}")
+    must_fail(meta, [*base, *AM_ON, "--set", "components.substrate.enabled=true", "--set", "agent-manager.muster.actorBearer=false"],
+              "agent-manager.muster.actorBearer", "an own agent-manager.muster.actorBearer that differs")
+    must_fail(meta, [*base, *AM_ON, "--set", "components.substrate.enabled=true", "--set", "components.agent-manager.versionRange=>=2.8.0 <3.0.0"],
+              "components.agent-manager.versionRange", "an agent-manager range below the toolset-binding floor")
+    must_fail(meta, [*base, *AM_ON, "--set", "components.substrate.enabled=true", "--set", "components.muster.versionRange=>=5.48.0 <6.0.0"],
+              "components.muster.versionRange", "a muster range below the toolset-binding floor")
+    ok("agent-manager's muster.actorBearer follows muster's actor bearer: true with it on, absent with it off, an own value that differs fails the render")
     ok("with workspaces and Substrate on muster accepts Substrate's actor JWT (actorBearer, issuer https://idp.<substrate namespace>.svc "
        "or substrate.ateApi.actorJWTIssuer); an own enabled: false or audience stands")
     def actor_jwt_of(flags: list) -> str:
