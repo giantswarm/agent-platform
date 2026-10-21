@@ -211,7 +211,7 @@ These are the main non-component settings. Component switches are in [Enabling a
 | `global.identity.{issuerUrl,clientId,existingSecret}` | `""` | The platform's one OIDC provider. See [install.md §2](install.md#the-identity-provider). |
 | `global.gatewayApi.parentRefs` | `[]` | The public Gateway that routes attach to by default. |
 | `global.registry` | `gsoci.azurecr.io` | Container image registry. |
-| `ingress.mode` | `agentgateway-muster` | Request topology. `muster-direct` is deprecated. `agentgateway-direct` was removed. See [Ingress topology](#ingress-topology). |
+| `ingress.mode` | `agentgateway-muster` | The one request topology, agentgateway in front of muster. `muster-direct` is deprecated. See [Ingress topology](#ingress-topology). |
 | `ingress.parentRefs` / `ingress.hostnames` | `[]` | Overrides for muster's route. Empty means `global.gatewayApi.parentRefs` (or the chart-owned edge) and `muster.<global.domain>`. |
 | `ingress.backendTrafficPolicy.enabled` | `false` | Route-scoped `BackendTrafficPolicy` (keeps `WWW-Authenticate`, sets `requestTimeout: 0s`). |
 | `gateway.name` / `gateway.gatewayClassName` | `agentgateway` | Name and class of the data-plane `Gateway`. |
@@ -614,15 +614,16 @@ The chart ships two presets, `infrastructure` and `agent-platform`, under `muste
 
 ## Ingress topology
 
-`ingress.mode` selects the request path. For the full auth flow, see [authentication.md](authentication.md).
+The platform has one request path: the agentgateway data plane in front of muster. For the full auth flow, see [authentication.md](authentication.md).
 
-| `ingress.mode` | Path |
+| Path on `muster.<domain>` | Route |
 |---|---|
-| `agentgateway-muster` (default) | `/mcp` → agentgateway → muster; everything else → muster |
-| `muster-direct` | everything → muster. Needs `components.agentgateway.enabled: false`, and no agentgateway objects from agent-platform-mcps, the kagent controller route or the klaus-gateway route. |
-| `agentgateway-direct` | not supported: the render fails |
+| `/mcp` | public Gateway → agentgateway data plane (`:8080`) → route `agent-platform-mcps` → muster `/mcp` |
+| everything else (`/.well-known/*`, `/oauth/*`) | public Gateway → muster |
 
-Both routes attach to `ingress.parentRefs`. If that is empty they fall back to the chart-owned edge (`gatewayApi.gateway.create`), then to `global.gatewayApi.parentRefs`. With none set, the render fails. Hostnames are `ingress.hostnames`, or `muster.<global.domain>` when unset. `ingress.httpRoute` labels and annotations apply to both routes, with per-route overrides under `muster` and `mcp`.
+The data plane's route to muster comes from the agent-platform-mcps component: set `components.agent-platform-mcps.enabled: true` and leave `agent-platform-mcps.agentgateway.viaMuster` at `true`. It renders the route even while `agent-platform-mcps.mcpServers` is empty. The render fails when the agentgateway component is off while muster is on, or when `viaMuster` is `false` while agent-platform-mcps is on. `ingress.mode: muster-direct` still renders but is deprecated and goes in a major release; plan an installation without it.
+
+The two public routes attach to `ingress.parentRefs`. If that is empty they fall back to the chart-owned edge (`gatewayApi.gateway.create`), then to `global.gatewayApi.parentRefs`. With none set, the render fails. Hostnames are `ingress.hostnames`, or `muster.<global.domain>` when unset. `ingress.httpRoute` labels and annotations apply to both routes, with per-route overrides under `muster` and `mcp`.
 
 ## Observability
 

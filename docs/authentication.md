@@ -4,20 +4,17 @@ How a request authenticates against the Agent Platform. Every person signs in at
 
 ## 1. The request path
 
-A client is given one URL: **`https://muster.<domain>/mcp`** (`ingress.hostnames` overrides the hostname). `ingress.mode` decides what sits behind it:
+A client is given one URL: **`https://muster.<domain>/mcp`** (`ingress.hostnames` overrides the hostname). Behind it, the agentgateway data plane sits in front of muster. Two routes share the hostname, split by Gateway API path specificity (`/mcp` beats `/`):
 
-| `ingress.mode` | Behind `muster.<domain>` |
-|---|---|
-| `agentgateway-muster` (default) | Two routes on the same hostname: `/mcp` goes to the agentgateway data plane (`:8080`), which forwards it to muster; every other path (`/.well-known/*`, `/oauth/*`, registration) goes straight to muster. Gateway API path specificity (`/mcp` beats `/`) splits them. |
-| `muster-direct` (deprecated) | One route, `/` to muster. No agentgateway. Needs `components.agentgateway.enabled: false` and `agent-platform-mcps.agentgateway.viaMuster: false` too. The kind example uses it. |
-| `agentgateway-direct` | Refused at render: it needs an IdP with dynamic client registration (RFC 7591/8707). |
+- **`/mcp`** goes to the agentgateway data plane (`:8080`). On the data plane, the hostname-less route `agent-platform-mcps` sends it to the `AgentgatewayBackend` of the same name, which is muster's `/mcp` (`agent-platform-mcps.agentgateway.musterUrl`). The agent-platform-mcps component renders both (`components.agent-platform-mcps.enabled: true`, with `agent-platform-mcps.agentgateway.viaMuster: true`, the default). Without the component the data plane has no route to muster.
+- **Every other path** (`/.well-known/*`, `/oauth/*`, registration) goes straight to muster.
 
 ```mermaid
 flowchart LR
     client["MCP client"] -->|"HTTPS muster.&lt;domain&gt;"| gw["public Gateway<br/>TLS"]
     gw -->|"/mcp"| agw["agentgateway :8080"]
     gw -->|"/ (OAuth, discovery)"| muster["muster :8090"]
-    agw --> muster
+    agw -->|"route agent-platform-mcps"| muster
 ```
 
 With the chart-owned edge (`gatewayApi.gateway.create: true`) the agentgateway data plane *is* the public Gateway, and the separate `/mcp` route is not rendered: muster's hostname-specific route serves `/mcp` too. The client URL is the same.
@@ -32,7 +29,7 @@ All of it happens on muster's hostname:
 2. The protected-resource metadata names muster as the authorization server; `/.well-known/oauth-authorization-server` gives its registration and token endpoints.
 3. The client registers (gated: [install.md §5](install.md#5-after-the-install)), signs the person in at Dex through `https://muster.<domain>/oauth/callback`, and retries `/mcp` with the token.
 
-A Gateway that rewrites error responses can strip `WWW-Authenticate`, and clients then cannot find the authorization server. On Envoy Gateway, `ingress.backendTrafficPolicy.enabled: true` renders route-scoped `BackendTrafficPolicy` objects that keep the header and lift the request timeout for streams (`timeout: "0s"`). It is off by default. It covers muster's route in every mode, and the `/mcp` route when that route is rendered.
+A Gateway that rewrites error responses can strip `WWW-Authenticate`, and clients then cannot find the authorization server. On Envoy Gateway, `ingress.backendTrafficPolicy.enabled: true` renders route-scoped `BackendTrafficPolicy` objects that keep the header and lift the request timeout for streams (`timeout: "0s"`). It is off by default. It covers muster's route, and the `/mcp` route when that route is rendered.
 
 ## 3. Token handling at muster
 
