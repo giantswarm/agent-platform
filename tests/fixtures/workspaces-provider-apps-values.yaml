@@ -1,0 +1,22 @@
+# Layered over tests/fixtures/workspaces-values.yaml: the GitLab instance gets
+# person sign-in too, so GitHub and GitLab sign-in work side by side — one muster
+# provider App per instance, the workspace-manager's registration naming both
+# (tests/verify-workspace-provider-apps.py).
+workspace-manager:
+  providers:
+    - name: github
+      kind: github
+      values:
+        app:
+          id: "123"
+          privateKey: {name: workspace-github, key: private-key}
+        oauth:
+          clientID: Iv1.abc
+          clientSecret: {name: workspace-github, key: client-secret}
+    - name: gitlab
+      kind: gitlab
+      values:
+        url: https://gitlab.example.com:8443
+        token: {name: workspace-gitlab, key: token}
+        oauth:
+          clientSecret: {name: workspace-gitlab-oauth, key: client-secret}
