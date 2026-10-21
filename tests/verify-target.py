@@ -54,7 +54,7 @@ FLEET_APIS = [
     "--api-versions", "gateway.networking.k8s.io/v1",
     "--api-versions", "gateway.envoyproxy.io/v1alpha1",
 ]
-# Makefile.custom.mk's VM: the all-modes ingress guard satisfied, the Harness's
+# Makefile.custom.mk's VM: the ingress guard satisfied, the Harness's
 # snapshot store set, the fleet's API groups served.
 VM = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", *FLEET_APIS]
 ENGINE_OFF = ["--set", "components.flux.enabled=false"]
@@ -70,7 +70,7 @@ KNOB_KEY = ["--set", "gitops.target.kubeConfig.secretRef.key=value"]
 # the Substrate egress and muster's own in-cluster MCP egress.
 CONN_FULL = [
     *VM,
-    "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster",
+    "--set", "components.agentgateway.enabled=true",
     "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "components.substrate.enabled=true",
     "--set", "components.substrate-crds.enabled=true", "--set", "networkPolicy.musterInClusterMcpPorts[0]=8080",
 ]
@@ -330,7 +330,7 @@ def check_toggles(meta: str, connectivity: str) -> None:
         if marker in off:
             sys.exit(f"FAIL: connectivity still renders {marker!r} with components.muster.enabled=false")
     # Without muster there is no ingress topology (#252): the data plane in front
-    # of it goes with the /mcp route, whatever ingress.mode says. The Role that
+    # of it goes with the /mcp route. The Role that
     # lists muster's MCPServers to every signed-in person (#706) goes too.
     kinds = {kind for kind, _ in documents(on)} - {kind for kind, _ in documents(off)}
     if kinds != {"HTTPRoute", "Gateway", "AgentgatewayParameters", "AgentgatewayPolicy", "Role"}:

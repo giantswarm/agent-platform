@@ -211,7 +211,7 @@ These are the main non-component settings. Component switches are in [Enabling a
 | `global.identity.{issuerUrl,clientId,existingSecret}` | `""` | The platform's one OIDC provider. See [install.md §2](install.md#the-identity-provider). |
 | `global.gatewayApi.parentRefs` | `[]` | The public Gateway that routes attach to by default. |
 | `global.registry` | `gsoci.azurecr.io` | Container image registry. |
-| `ingress.mode` | `agentgateway-muster` | The one request topology, agentgateway in front of muster. `muster-direct` is deprecated. See [Ingress topology](#ingress-topology). |
+| `ingress.mode` | `agentgateway-muster` | Deprecated and inert: the name of the one request topology, agentgateway in front of muster, and the only value the schema accepts. Drop it from installation values. See [Ingress topology](#ingress-topology). |
 | `ingress.parentRefs` / `ingress.hostnames` | `[]` | Overrides for muster's route. Empty means `global.gatewayApi.parentRefs` (or the chart-owned edge) and `muster.<global.domain>`. |
 | `ingress.backendTrafficPolicy.enabled` | `false` | Route-scoped `BackendTrafficPolicy` (keeps `WWW-Authenticate`, sets `requestTimeout: 0s`). |
 | `gateway.name` / `gateway.gatewayClassName` | `agentgateway` | Name and class of the data-plane `Gateway`. |

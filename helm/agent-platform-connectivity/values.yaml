@@ -140,22 +140,20 @@ components:  # @schema additionalProperties: true
     enabled: false
 
 # === Ingress topology ===
-# mode selects the whole request topology. What each mode renders/consumes:
-#   agentgateway-muster  (default) client -> agentgateway /mcp -> muster. Adds the
-#                        agentgateway controller (components.agentgateway.enabled), the
-#                        data-plane Gateway (gateway.*), the /mcp route and the optional
-#                        ingress.backendTrafficPolicy. Requires
-#                        agent-platform-mcps.agentgateway.viaMuster: true (the default).
-#   muster-direct        client -> muster. Only ingress.parentRefs/hostnames used.
-#                        Opting out of agentgateway takes all three keys:
-#                        ingress.mode: muster-direct, components.agentgateway.enabled:
-#                        false and agent-platform-mcps.agentgateway.viaMuster: false.
-#                        Deprecated: agentgateway-muster becomes the only topology
-#                        (giantswarm/agent-platform#252).
+# The platform has one request topology (giantswarm/agent-platform#252): client
+# -> agentgateway /mcp -> muster, every other path straight to muster. It takes
+# the agentgateway controller (components.agentgateway.enabled, on by default),
+# the data-plane Gateway (gateway.*), the /mcp route, the optional
+# ingress.backendTrafficPolicy and agent-platform-mcps.agentgateway.viaMuster:
+# true (the default). A release without muster (a serving or runtime slice)
+# renders no ingress at all.
 ingress:
-  mode: agentgateway-muster    # agentgateway-muster | muster-direct
-  parentRefs: []               # ALL modes: public Gateway, shared by both rendered routes
-  hostnames: []                # ALL modes: muster public hostname(s)
+  # Deprecated and inert: the only topology's name, kept so values that still
+  # set it render. Any other value (muster-direct, removed) is refused. Drop the
+  # key from installation values (UPGRADE.md).
+  mode: agentgateway-muster  # @schema enum: [agentgateway-muster]
+  parentRefs: []               # public Gateway, shared by both rendered routes
+  hostnames: []                # muster public hostname(s)
   httpRoute:                   # shared base, applied to both rendered HTTPRoutes
     annotations: {}
     labels: {}
@@ -176,13 +174,13 @@ ingress:
     # nothing (the pre-contract behavior); Envoy-specific policies stay
     # opt-in under ingress.backendTrafficPolicy.
     timeouts: {}  # @schema type: object; additionalProperties: true
-  backendTrafficPolicy:        # agentgateway-* modes only; preserves WWW-Authenticate
+  backendTrafficPolicy:        # preserves WWW-Authenticate
     enabled: false
     timeout: "0s"
     annotations: {}
     labels: {}
 
-# Data-plane infrastructure — agentgateway-* modes only. Reconciled by the
+# Data-plane infrastructure, in front of muster. Reconciled by the
 # agentgateway controller. Both public routes (muster's `/` and the agentgateway
 # `/mcp`) are owned by the umbrella and configured via the `ingress.*` block above.
 gateway:
@@ -199,7 +197,7 @@ gateway:
   # keys to the data plane over xDS) and the data plane reach an in-cluster
   # JWKS endpoint. Required when the JWKS service runs on a port not covered
   # by the default cluster egress rules (80/443) — typically Dex on 5556.
-  jwksEgress:                  # any agentgateway-* mode with a non-muster JWKS source
+  jwksEgress:                  # a non-muster JWKS source
     enabled: false
     # The namespace and the port of the in-cluster issuer a route names. Under
     # networkPolicy.enabled the render fails when a route's in-cluster
@@ -508,7 +506,7 @@ gateway:
         enabled: true
         expression: 'request.headers["x-request-id"]'
 
-# Chart-owned public edge (agentgateway-* modes only): the agentgateway
+# Chart-owned public edge (muster on): the agentgateway
 # data-plane Gateway (gateway.*) also terminates TLS for *.<global.domain>,
 # instead of sitting behind a separate TLS-terminating front Gateway. Off by
 # default — the Giant Swarm fleet fronts the platform with the cluster's
@@ -549,7 +547,7 @@ gatewayApi:
 #        http://<gateway.name>.<release namespace>.svc:<llmRouting.listener.port>
 #      — points kagent's default ModelConfig at the listener. This is the
 #      cutover; rollback is the removal of this second value.
-# Requires the agentgateway component (an agentgateway-* ingress.mode). The
+# Requires the agentgateway component, in front of muster. The
 # render fails when llmRouting.enabled is true and that component is off.
 llmRouting:
   enabled: false
@@ -1147,7 +1145,7 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
     # viaMuster — when true, routes all MCP traffic through muster instead of
     # having agentgateway connect to each server directly. muster keeps all
     # per-server connection logic, OAuth, and RFC 8693 token exchange.
-    viaMuster: true            # must match ingress.mode (guard-enforced): agentgateway-muster=>true, muster-direct=>false
+    viaMuster: true            # must be true (guard-enforced): agentgateway in front of muster is the only topology
     # musterUrl — in-cluster address of the muster Service. Stable because
     # muster.fullnameOverride pins the Service name to `muster` regardless
     # of the umbrella release name. Override only if the namespace differs.
@@ -2330,8 +2328,7 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     url: "grpc://agentgateway.agent-platform.svc.cluster.local:8080"
 
   # Agentgateway route — exposes the Slack channel path (/channels/slack, with
-  # slack.enabled) on the agentgateway data-plane Gateway (agentgateway-*
-  # ingress modes only).
+  # slack.enabled) on the agentgateway data-plane Gateway (muster on).
   agentgatewayRoute:
     enabled: false
     # Hostname on which the agentgateway Gateway will match these paths.
@@ -2776,7 +2773,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
   # https://agentgateway.<domain><pathPrefix> (the same shape as
   # kagent.controllerRoute). Off by default: the MCP tools reach muster in-cluster
   # without it; turn it on for a portal or CLI that calls the REST API.
-  # Requires an agentgateway-* ingress.mode.
+  # Requires muster, which the data plane fronts.
   route:
     enabled: false
     pathPrefix: /agent-manager

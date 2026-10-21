@@ -203,7 +203,7 @@ ok("guards: an unknown name, a preset that is not oci://, a name listed twice, a
 
 # --- the meta chart forwards the blocks, and its forwarded values render alike
 # The meta chart's defaults with the fixture on top and the engine off (the CI values would trip the
-# wiring's ingress-mode guards, as tests/verify-components.py notes); the connectivity HelmRelease's spec.values.
+# wiring's ingress guards, as tests/verify-components.py notes); the connectivity HelmRelease's spec.values.
 meta = documents(helm(META, [*SERVING, "-f", FIXTURE, "--set", "components.flux.enabled=false"]))
 release = meta.get(("HelmRelease", "agent-platform-connectivity"))
 if release is None:

@@ -208,9 +208,9 @@ def main() -> None:
         ("meta: defaults", meta, []),
         ("meta: fleet APIs, the engine and every component on", meta, [*FLEET_APIS, *INPUTS, *every_component_on(meta)]),
         ("connectivity: defaults", connectivity, ["--set", "ingress.parentRefs[0].name=x"]),
-        # agentgateway on is the agentgateway-muster ingress mode with the MCPs behind muster.
+        # agentgateway in front of muster, with the MCPs behind muster.
         ("connectivity: fleet APIs and every component on", connectivity,
-         [*FLEET_APIS, *INPUTS, "--set", "ingress.parentRefs[0].name=x", "--set", "ingress.mode=agentgateway-muster",
+         [*FLEET_APIS, *INPUTS, "--set", "ingress.parentRefs[0].name=x",
           "--set", "agent-platform-mcps.agentgateway.viaMuster=true", *every_component_on(connectivity)]),
     ]
     objects = 0

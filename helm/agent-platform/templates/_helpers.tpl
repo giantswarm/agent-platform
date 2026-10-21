@@ -71,7 +71,7 @@ Used to drop a dependsOn reference to a component that is toggled off, so a
 consumer does not wait forever on a HelmRelease that was never rendered. With
 app-owned CRDs a CR consumer dependsOn the component that ships the CRD (e.g.
 connectivity dependsOn agentgateway + kagent), but those components can be off —
-kagent by default, agentgateway in muster-direct and beside a slice — and then
+kagent by default, agentgateway beside a slice — and then
 render no HelmRelease, so
 an unfiltered dependsOn would block the always-on consumer indefinitely. An
 unknown name (not in components) is kept rather than silently dropped.
@@ -3346,7 +3346,7 @@ fails the render when either disagrees with muster's). Only for the dex
 provider, while muster's OAuth server is on (with it off, model-manager's oauth
 is off: componentDerivedValues).
 oauth.baseURL of model-manager and agent-manager is
-https://<host><pathPrefix> under an agentgateway-* ingress.mode: for
+https://<host><pathPrefix>: for
 agent-manager the hostname and prefix of its route (agentManager.route.hostname,
 else agentgateway.<global.domain>), for model-manager, which has no route,
 agentgateway.<global.domain> and /model-manager, the resource URL it has always
@@ -3362,7 +3362,6 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- $global := index $v "global" | default dict -}}
 {{- $identity := dig "identity" dict $global -}}
 {{- $domain := dig "domain" "" $global -}}
-{{- $mode := dig "ingress" "mode" "" $v -}}
 {{- $server := dig "muster" "oauth" "server" dict (index $v "muster" | default dict) -}}
 {{- $login := dict -}}
 {{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
@@ -3382,7 +3381,7 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- end -}}
 {{- if and $login.existingSecret (not $oauth.existingSecret) (not $dex.clientSecret) (not $identity.existingSecret) }}{{ $_ := set $oauth "existingSecret" $login.existingSecret }}{{ end -}}
 {{- end -}}
-{{- if and $wiring (not $oauth.baseURL) (eq $mode "agentgateway-muster") -}}
+{{- if and $wiring (not $oauth.baseURL) -}}
 {{- $route := dig $wiring "route" dict $v -}}
 {{- if eq $wiring "modelManager" }}{{ $route = dict "pathPrefix" "/model-manager" }}{{ end -}}
 {{- $host := $route.hostname -}}

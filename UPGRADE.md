@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (`ingress.mode: muster-direct` is removed)
+
+giantswarm/agent-platform#252: agentgateway in front of muster is the only ingress topology. Both charts' schemas accept `ingress.mode` only as `agentgateway-muster`; `muster-direct` fails the render. With muster on, `components.agentgateway.enabled` and `agent-platform-mcps.agentgateway.viaMuster` must stay `true` (their defaults).
+
+### Operator action
+
+- **None** for an installation on the default topology (every Giant Swarm installation): its render does not change. The key `ingress.mode: agentgateway-muster` still renders and can be dropped from the installation's values.
+- **An installation that still sets `ingress.mode: muster-direct`**: drop the key and `components.agentgateway.enabled: false` / `agent-platform-mcps.agentgateway.viaMuster: false`, as in the step to agentgateway in front of muster below. Clients keep their URL; `/mcp` then goes through the agentgateway data plane.
+
 ## \<current\> → \<next\> (GitHub and GitLab sign-in side by side)
 
 giantswarm/giantswarm#38672: with two or more workspace provider instances with person sign-in (`values.oauth.clientSecret`) and no own `workspace-manager.muster.mcpServer.auth.provider`, muster keeps one provider App per instance, and the workspace-manager's registration is no longer pinned to one App. An installation with one instance with sign-in renders as before.
@@ -518,7 +527,7 @@ giantswarm/agent-platform#252: both charts default to `ingress.mode: agentgatewa
 ### Operator action
 
 - **Nothing**, where the installation already sets the agentgateway-muster keys (Giant Swarm's fleet does, from the shared configuration) or is fine moving to agentgateway.
-- **To stay on muster-direct** for now, set all three keys: `ingress.mode: muster-direct`, `components.agentgateway.enabled: false`, `agent-platform-mcps.agentgateway.viaMuster: false`. Setting the mode alone fails the render, naming `components.agentgateway.enabled`. `muster-direct` is deprecated and goes away in a later major release.
+- **To stay on muster-direct** for now, set all three keys: `ingress.mode: muster-direct`, `components.agentgateway.enabled: false`, `agent-platform-mcps.agentgateway.viaMuster: false`. Setting the mode alone fails the render, naming `components.agentgateway.enabled`. `muster-direct` has since been removed (step `ingress.mode: muster-direct` is removed, above).
 - **A slice release beside the platform's release** (`components.muster.enabled: false` on the installation's own cluster) sets `components.agentgateway.enabled: false`, as `examples/serving-slice.yaml` does: the platform's release owns the agentgateway controller and its CRDs there, and the slice would otherwise render a second agentgateway release. A release without muster renders no data plane whatever `ingress.mode` says.
 
 ## \<current\> → \<next\> (the portal registers no agent-deployment template)

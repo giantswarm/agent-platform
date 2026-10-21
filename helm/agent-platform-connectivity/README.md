@@ -33,8 +33,8 @@ The gateway holds no provider credential. Agent pods keep their own
 `ANTHROPIC_API_KEY`, and the client `x-api-key` header passes through
 untouched, so network reach to the LLM listener grants no spend.
 
-The feature needs the agentgateway data plane (`ingress.mode:
-agentgateway-muster`). The render fails when `llmRouting.enabled` is true and
+The feature needs the agentgateway data plane in front of muster. The render
+fails when `llmRouting.enabled` is true and
 that component is off.
 
 ### Rollout

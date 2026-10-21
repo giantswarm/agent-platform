@@ -217,25 +217,24 @@ Name of the AgentgatewayParameters CR — defaults to release name.
 {{- end -}}
 
 {{/*
-Truthy (emits "true") when the request topology routes through agentgateway,
-i.e. ingress.mode is agentgateway-muster and muster is
-on. A release without muster (a serving or runtime slice) has no ingress
-topology: it renders no data plane whatever the mode, which defaults to
-agentgateway-muster (#252). Otherwise emits nothing (empty string = falsy).
-Gated templates use:
+Truthy (emits "true") when the release serves the platform's ingress through
+agentgateway: muster is on. agentgateway in front of muster is the only
+topology (#252); a release without muster (a serving or runtime slice) has no
+ingress topology and renders no data plane. Otherwise emits nothing (empty
+string = falsy). Gated templates use:
   {{- if (include "agent-platform.ingress.agentgateway" .) }}
 */}}
 {{- define "agent-platform.ingress.agentgateway" -}}
-{{- if and (eq .Values.ingress.mode "agentgateway-muster") (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}true{{- end -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
-Truthy when the agentgateway controller runs in this release: an agentgateway-*
-ingress mode, or the component on with muster off — the serving slice on a
+Truthy when the agentgateway controller runs in this release: muster's ingress,
+or the component on with muster off — the serving slice on a
 workload cluster (components.agentgateway.enabled: true, muster off, no edge
 Gateway), whose controller serves the models
 Gateway and fetches its JWKS. The controller's network policies follow this,
-not the ingress mode: a controller without its policy has no egress rule for
+not muster's ingress: a controller without its policy has no egress rule for
 the issuer, and one with the edge's policy alone has no route to the public
 issuer either. Usage:
   {{- if (include "agent-platform.agentgateway.controller" .) }}
@@ -313,24 +312,20 @@ shared ingress.httpRoute.annotations). Emits nothing when both are empty.
 {{- end -}}
 
 {{/*
-Validate the ingress.mode selector and the dependent toggles it implies.
-Fails the render with an actionable message when the configuration is
-inconsistent. Rendered exactly once via templates/validate.yaml.
+Validate the ingress topology (agentgateway in front of muster) and the
+dependent toggles it implies. Fails the render with an actionable message when
+the configuration is inconsistent. Rendered exactly once via
+templates/validate.yaml.
 */}}
 {{- define "agent-platform.validateIngress" -}}
-{{- $mode := .Values.ingress.mode -}}
-{{- if not (or (eq $mode "muster-direct") (eq $mode "agentgateway-muster")) -}}
-{{- fail (printf "ingress.mode=%v is invalid; must be one of: agentgateway-muster, muster-direct" $mode) -}}
-{{- end -}}
-{{- $isAgentgateway := eq $mode "agentgateway-muster" -}}
 {{- $musterEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") -}}
-{{- /* The muster `/` route needs a Gateway in every mode; the helper fails the
-render when neither ingress.parentRefs, the chart-owned edge nor
-global.gatewayApi.parentRefs names one — an empty result would render a route
-bound to no Gateway, leaving muster unreachable while install reports success.
-Only while muster is on: a release without muster (the serving slice,
-examples/serving-slice.yaml) renders no route that could be left unbound and
-has no edge of its own — its Gateway is the models Gateway (#490). */ -}}
+{{- /* The muster `/` route needs a Gateway; the helper fails the render when
+neither ingress.parentRefs, the chart-owned edge nor global.gatewayApi.parentRefs
+names one — an empty result would render a route bound to no Gateway, leaving
+muster unreachable while install reports success. Only while muster is on: a
+release without muster (the serving slice, examples/serving-slice.yaml) renders
+no route that could be left unbound and has no edge of its own — its Gateway is
+the models Gateway (#490). */ -}}
 {{- if $musterEnabled -}}
 {{- $_ := include "agent-platform.parentRefs" (dict "ctx" . "override" .Values.ingress.parentRefs "key" "ingress.parentRefs") -}}
 {{- end -}}
@@ -340,40 +335,16 @@ agent-platform-mcps component. */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps")) -}}
 {{- $mcpsVals := index .Values "agent-platform-mcps" | default dict -}}
 {{- $viaMuster := dig "agentgateway" "viaMuster" false $mcpsVals -}}
-{{- if eq $mode "agentgateway-muster" -}}
 {{- if not (or (eq $viaMuster true) (eq (toString $viaMuster) "true")) -}}
-{{- fail "ingress.mode=agentgateway-muster requires agent-platform-mcps.agentgateway.viaMuster=true" -}}
+{{- fail "agentgateway in front of muster is the only ingress topology: it requires agent-platform-mcps.agentgateway.viaMuster=true" -}}
 {{- end -}}
 {{- end -}}
-{{- end -}}
-{{- $agentgatewayEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway") -}}
 {{- /* Without muster there is no muster ingress the agentgateway toggle has to
-agree with, in either mode: the serving slice beside the platform's release
-runs no agentgateway (the installation's own serves it) and on a workload
-cluster runs it (the target has no controller of its own), both in the
-default mode. */ -}}
-{{- if and $isAgentgateway (not $agentgatewayEnabled) $musterEnabled -}}
-{{- fail "components.agentgateway.enabled must be true in agentgateway-* modes; the controller dependency condition must match ingress.mode" -}}
-{{- end -}}
-{{- if and (eq $mode "muster-direct") $agentgatewayEnabled $musterEnabled -}}
-{{- fail "components.agentgateway.enabled must be false in muster-direct mode (it defaults to true, with ingress.mode agentgateway-muster); the controller dependency condition must match ingress.mode" -}}
-{{- end -}}
-{{- /* muster-direct runs without the agentgateway component, so its CRDs are
-not on the cluster: anything that renders an agentgateway.dev object or attaches
-to the agentgateway Gateway must fail here, naming the knob, instead of shipping
-objects the API server rejects (the agent-manager route already
-guards itself the same way). */ -}}
-{{- if eq $mode "muster-direct" -}}
-{{- $mcpsValues := index .Values "agent-platform-mcps" | default dict -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps")) (dig "agentgateway" "enabled" false $mcpsValues) (dig "mcpServers" (list) $mcpsValues) -}}
-{{- fail "muster-direct mode cannot serve the agentgateway.dev resources agent-platform-mcps renders per MCP server; set agent-platform-mcps.agentgateway.enabled=false to reach the MCP servers through muster" -}}
-{{- end -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.kagent.controllerRoute.enabled -}}
-{{- fail "kagent.controllerRoute renders agentgateway.dev resources on the agentgateway Gateway; it requires an agentgateway-* ingress.mode" -}}
-{{- end -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) .Values.klausGateway.agentgatewayRoute.enabled -}}
-{{- fail "klausGateway.agentgatewayRoute renders agentgateway.dev resources on the agentgateway Gateway; it requires an agentgateway-* ingress.mode" -}}
-{{- end -}}
+agree with: the serving slice beside the platform's release runs no
+agentgateway (the installation's own serves it) and on a workload cluster runs
+it (the target has no controller of its own). */ -}}
+{{- if and $musterEnabled (not (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway"))) -}}
+{{- fail "components.agentgateway.enabled must be true while muster is on: agentgateway in front of muster is the only ingress topology" -}}
 {{- end -}}
 {{- end -}}
 
@@ -683,7 +654,7 @@ Guards on the global.* contract. Rendered once via templates/validate.yaml.
 {{- define "agent-platform.validateGlobal" -}}
 {{- if .Values.gatewayApi.gateway.create -}}
 {{- if not (include "agent-platform.ingress.agentgateway" .) -}}
-{{- fail "gatewayApi.gateway.create is true but ingress.mode is muster-direct: the chart-owned edge is the agentgateway data-plane Gateway, so set ingress.mode: agentgateway-muster and components.agentgateway.enabled: true" -}}
+{{- fail "gatewayApi.gateway.create is true but muster is off: the chart-owned edge is the agentgateway data-plane Gateway in front of muster" -}}
 {{- end -}}
 {{- if not .Values.gatewayApi.gateway.tls.secretName -}}
 {{- fail "gatewayApi.gateway.create is true but gatewayApi.gateway.tls.secretName is empty: the HTTPS listener for *.<global.domain> needs the wildcard certificate Secret" -}}
@@ -1060,14 +1031,14 @@ Validate the LLM routing block. Rendered exactly once via templates/validate.yam
 
 The feature has no data plane of its own: it adds a listener to the
 agentgateway Gateway and models the agentgateway controller reconciles. With
-the component off (which includes ingress.mode: muster-direct) the
+the component off, or no muster to front, the
 listener would exist in values only, kagent's base URL would point at nothing,
 and every agent would lose inference at the cutover. Fail the render instead.
 */}}
 {{- define "agent-platform.validateLlmRouting" -}}
 {{- if (include "agent-platform.llmRouting" .) -}}
 {{- if not (include "agent-platform.ingress.agentgateway" .) -}}
-{{- fail (printf "llmRouting.enabled requires the agentgateway data plane: ingress.mode is %s, set it to agentgateway-muster" .Values.ingress.mode) -}}
+{{- fail "llmRouting.enabled requires the agentgateway data plane, which runs in front of muster: muster is off" -}}
 {{- end -}}
 {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway")) -}}
 {{- fail "llmRouting.enabled requires components.agentgateway.enabled: true; the LLM listener is reconciled by the agentgateway controller" -}}
