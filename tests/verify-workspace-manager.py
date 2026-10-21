@@ -372,6 +372,14 @@ def main(meta: str, connectivity: str) -> int:
             if prefix not in (on or ""):
                 fail(f"switching workspaces on did not derive the gateway's workspaces.toolsPrefix onto {key}")
             on = on.replace(prefix, "", 1)
+        if key == ("HelmRelease", "agent-manager"):
+            # And agent-manager told that muster trusts the actor JWT, so it
+            # reports each session's toolset as bound
+            # (agent-platform.validateToolsetBinding).
+            bearer = "      actorBearer: true\n"
+            if bearer not in block(block(on or "", "values", 2), "muster", 4):
+                fail(f"switching workspaces on did not derive agent-manager.muster.actorBearer onto {key}")
+            on = on.replace(bearer, "", 1)
         if key == ("HelmRelease", "muster"):
             # And muster's credential provider, which answers the egress gateway
             # for a workspace Session's provider hosts while Substrate is on
