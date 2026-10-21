@@ -149,13 +149,11 @@ KAGENT = ["kagent-crds", "kagent"]
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
 UNRELEASED: dict[str, str] = {
-    "agent-manager": "2.9.0",  # giantswarm/agent-manager#228
 }
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
 RENDER_AGAINST: dict[str, str] = {
-    "agent-manager": "2.9.0-rc.1",  # giantswarm/agent-manager#228
 }
 # The layer every OCIRepository of the meta chart selects, and the manifest
 # types a Helm chart artifact is fetched as.
