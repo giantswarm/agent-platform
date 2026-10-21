@@ -299,7 +299,20 @@ plugin which egress gateway may call it. */ -}}
 {{- if and $ownUrl (ne $ownUrl $url) -}}
 {{- fail (printf "agent-manager.muster.url (%s) differs from the platform's muster MCP URL (%s): agent-manager composes every agent's RemoteMCPServer against the muster this chart installs — the URL follows muster.fullnameOverride and muster.service.port; leave agent-manager.muster.url unset" $ownUrl $url) -}}
 {{- end -}}
-{{- $_ := set $derived "muster" (dict "url" $url) -}}
+{{- $musterValues := dict "url" $url -}}
+{{- /* muster trusts a bound Session's actor JWT: every Session start_session
+binds carries the agent's toolset, and agent-manager reports it as bound to
+each session at its start (agent-manager 2.9.0, giantswarm/agent-manager#228). */ -}}
+{{- $bearer := (include "agent-platform.muster.credentialProvider" .root | fromJson).actorBearer | default dict -}}
+{{- $ownBearer := dig "muster" "actorBearer" nil (index .root.Values "agent-manager" | default dict) -}}
+{{- if and (not (kindIs "invalid" $ownBearer)) (ne (toString $ownBearer) (toString (and $bearer.enabled true))) -}}
+{{- fail (printf "agent-manager.muster.actorBearer (%v) differs from whether muster trusts the actor JWT (%v, muster.muster.credentialProvider.actorBearer.enabled with workspaces and Substrate on): agent-manager reports an agent's toolset as bound only where muster binds it; leave agent-manager.muster.actorBearer unset" $ownBearer (and $bearer.enabled true)) -}}
+{{- end -}}
+{{- if $bearer.enabled -}}
+{{- include "agent-platform.validateToolsetBinding" .root -}}
+{{- $_ := set $musterValues "actorBearer" true -}}
+{{- end -}}
+{{- $_ := set $derived "muster" $musterValues -}}
 {{- $target := include "agent-platform.kagentControllerTarget" .root -}}
 {{- $ownTarget := dig "kagent" "controllerTarget" "" (index .root.Values "agent-manager" | default dict) -}}
 {{- if and $ownTarget (ne $ownTarget $target) -}}
@@ -1060,7 +1073,9 @@ Usage: include "agent-platform.muster.credentialProvider" . | fromJson
 kagent's reserved actor-JWT provider `muster` (kagent.controller.session
 .actorJWTProviders.muster, the kagent line from 1.17.0): while muster trusts the
 actor JWT (agent-platform.muster.credentialProvider's actorBearer on), kagent
-adds `muster` to every Session admitted with a workspace grant and compiles it
+adds `muster` to every Session admitted with a workspace grant, and to every
+Session a binding caller (agent-manager's start_session) creates without one,
+and compiles it
 into an actor_jwt rule on muster's host, so Substrate's egress gateway hands
 muster the Session Actor's JWT and muster serves the Session's person.
 hostname is the host of the in-cluster MCP URL every agent's RemoteMCPServer
@@ -1183,6 +1198,33 @@ Emits nothing; fails naming the key and the fix.
 {{- fail (printf "workspace-manager.grant.signingKey.key %q is not a Secret data key (letters, digits, -, _ and .): the entry of Secret %s holding the PEM private key" .key .name) -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The floors of the toolset bound to a Session (giantswarm/giantswarm#38688):
+agent-manager from 2.9.0 sends the agent's toolset with the Session binding
+and its chart takes muster.actorBearer; muster from 5.49.0 stores it, and an
+earlier muster refuses such a binding, so a Session would not start. One line
+each, no comment inside the define.
+*/}}
+{{- define "agent-platform.agentManager.toolsetBindingFloor" -}}2.9.0{{- end -}}
+{{- define "agent-platform.muster.toolsetBindingFloor" -}}5.49.0{{- end -}}
+
+{{/*
+While muster trusts the actor JWT, agent-manager is told so
+(muster.actorBearer) and binds every Session with the agent's toolset: the
+floors of components.agent-manager.versionRange and components.muster.versionRange
+must admit only releases that do. Emits nothing; fails naming the key and the fix.
+*/}}
+{{- define "agent-platform.validateToolsetBinding" -}}
+{{- range $name := list "agent-manager" "muster" -}}
+{{- $floor := include (printf "agent-platform.%s.toolsetBindingFloor" (ternary "agentManager" "muster" (eq $name "agent-manager"))) $ -}}
+{{- $range := dig $name "versionRange" "" $.Values.components -}}
+{{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- if lt ((semver $have).Compare (semver $floor)) 0 -}}
+{{- fail (printf "components.%s.versionRange %q admits a release below %s: while muster trusts the actor JWT (muster.muster.credentialProvider.actorBearer with workspaces and Substrate on), agent-manager 2.9.0 binds every Session with the agent's toolset and muster 5.49.0 stores it — an older agent-manager chart refuses muster.actorBearer, an older muster refuses the binding and the Session does not start; move the floor to %s or later" $name $range $floor $floor) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

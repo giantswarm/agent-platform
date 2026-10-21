@@ -423,9 +423,13 @@ components:  # @schema additionalProperties: true
     # under a deleted one's name starts with none, and a tenant server whose
     # client Secret muster may not read says so at sign-in
     # (giantswarm/muster#1603); tenants.organizations.enabled needs it.
+    # Floor 5.49.0: a Session binding carries the agent's toolset, and every
+    # request of the Session's sandbox resolves within it (binding ∩ header,
+    # giantswarm/muster#1618); agent-manager from 2.9.0 sends it, which an
+    # older muster refuses, so the two floors move together.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.48.0 <6.0.0"
+    versionRange: ">=5.49.0 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -1035,8 +1039,11 @@ components:  # @schema additionalProperties: true
     # an agent on a claude Harness without a harness.egress entry
     # (giantswarm/agent-manager#150, #71, #148). 2.3.0 names the minted
     # skills credential tenant-credential-agent-manager-skills-token, keeps
-    # its earlier name filled, and its migrate moves the agents over.
-    versionRange: ">=2.3.0 <3.0.0"
+    # its earlier name filled, and its migrate moves the agents over. 2.9.0
+    # binds a Session with the agent's toolset and takes muster.actorBearer,
+    # which this chart sets while muster trusts the actor JWT; it moves with
+    # muster's floor 5.49.0 (giantswarm/agent-manager#228).
+    versionRange: ">=2.9.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the

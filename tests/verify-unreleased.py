@@ -38,7 +38,7 @@ HELM = os.environ.get("HELM", "helm")
 HERE = pathlib.Path(__file__).resolve().parent
 RELEASE = "agent-platform"
 NAMESPACE = "agent-platform"
-COMPONENT, RANGE, WAITS_FOR = "agent-manager", ">=2.3.0 <3.0.0", "2.3.0"
+COMPONENT, RANGE, WAITS_FOR = "agent-manager", ">=2.9.0 <3.0.0", "2.9.0"
 DEV = "4.116.1-r7fb489f8t20261006135307h75833ed"
 JOB = f"{RELEASE}-waits-for-{COMPONENT}-{WAITS_FOR}"
 
