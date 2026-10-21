@@ -18,8 +18,9 @@ muster. Each case below pins one property of its wiring:
   round, one that agrees passes; the switch on with components.kagent off fails
   naming kagent, whose namespace the workspaces live in (the meta renders below
   layer tests/fixtures/workspaces-agents-values.yaml);
-- on with two provider instances (a GitHub one and a second kind,
-  tests/fixtures/workspaces-values.yaml): ONE OCIRepository and ONE HelmRelease that
+- on with two provider instances (a GitHub one with person sign-in and a second
+  kind without, tests/fixtures/workspaces-values.yaml; both with sign-in is
+  tests/verify-workspace-provider-apps.py): ONE OCIRepository and ONE HelmRelease that
   dependsOn muster and the connectivity release (the grant key Secret first),
   the block forwarded — the pinned Service name, the OAuth resource
   server, the chart's own muster registration pinned to the github instance's
@@ -327,8 +328,8 @@ def main(meta: str, connectivity: str) -> int:
         if rest or not all(line.startswith(e) for line, e in zip(after, expect)) or len(after) < 2:
             fail(f"{key} in the HelmRelease is not a Secret reference {{key, name}}: {m.group(0)!r} {after}")
         refs += 1
-    if refs != 5:
-        fail(f"expected the 5 credentials of the fixture as Secret references in the HelmRelease, found {refs}")
+    if refs != 4:
+        fail(f"expected the 4 credentials of the fixture as Secret references in the HelmRelease, found {refs}")
     # The baseline of the comparison below: the agents on, workspaces off.
     off_docs = documents(helm(meta, ["-f", AGENTS]))
     conn = off_docs[("HelmRelease", "agent-platform-connectivity")]

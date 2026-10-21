@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (GitHub and GitLab sign-in side by side)
+
+giantswarm/giantswarm#38672: with two or more workspace provider instances with person sign-in (`values.oauth.clientSecret`) and no own `workspace-manager.muster.mcpServer.auth.provider`, muster keeps one provider App per instance, and the workspace-manager's registration is no longer pinned to one App. An installation with one instance with sign-in renders as before.
+
+### Operator action
+
+- **None** for an installation with one instance with sign-in, or one that sets its own `auth.provider`.
+- **An installation that adds person sign-in to a second instance**: each provider's OAuth application registers muster's callback, `<muster's public URL>/oauth/proxy/callback`, and its Secret carries `client-id` beside `client-secret`. A GitLab application lists exactly the scopes muster asks for (`values.oauth.scopes`, default `api read_user read_repository write_repository`). `muster.muster.oauth.mcpClient.enabled` is on. A person grants each provider's App once in muster; the GitHub grant made under the pin stays valid, since its App keeps the pin's issuer.
+
 ## \<current\> → \<next\> (`tenants.organizations.enabled` also turns on muster's MCP servers per tenant)
 
 giantswarm/muster#1601: with `tenants.organizations.enabled` and muster on, the muster release gets `muster.mcpServersInAllNamespaces: true` and `muster.writesAsCaller.kubernetesAudience` from `mcp-kubernetes.kubernetesAudience`. muster then serves the `MCPServer`s of the namespaces named `org-…` and lists them with the person's Dex token for that audience ([Reference: A tenant's own MCP servers](docs/reference.md#a-tenants-own-mcp-servers)). With the switch off (the default) nothing changes. Where the switch is already on (agentlab), muster gets the setting with this upgrade.
