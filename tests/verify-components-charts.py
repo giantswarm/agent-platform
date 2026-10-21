@@ -39,12 +39,11 @@ QUICKSTART carries the inputs every meta render here needs (the identity block,
 the managers' and the kagent line's required inputs); ALL_ON_INPUTS the inputs
 an installation supplies and the meta chart's values leave empty once EVERY
 component is on — the resource servers' OAuth clients, a public Gateway for the
-routes, the ingress mode that admits agentgateway. Without them the charts
+routes, the MCPs behind muster. Without them the charts
 refuse to render at all, and the point here is a full render, not merely an
 accepted schema. The two lists are apart because
 tests/verify-kagent-controller-vpa.py imports QUICKSTART for renders with a much
-smaller component set, where the all-on ingress mode would trip the connectivity
-chart's guard.
+smaller component set.
 
 The meta chart is rendered in every SHAPE an installation can give it: the
 vanilla cluster (no --api-versions, every `auto` knob off) and the Giant Swarm
@@ -244,17 +243,15 @@ QUICKSTART = [
 ]
 # The inputs that only matter once EVERY component is turned on, kept out of
 # QUICKSTART because tests/verify-kagent-controller-vpa.py imports that list
-# for renders with a much smaller component set: ingress.mode and its
-# companion are tied to which components are enabled, and a mode that disagrees
-# with them fails the connectivity chart's guard.
+# for renders with a much smaller component set: viaMuster is tied to the
+# agent-platform-mcps component, which only the full set turns on.
 ALL_ON_INPUTS = [
     # Every route the connectivity chart renders needs a public Gateway to
     # hang off (the chart's own guard); set once for all of them, the name is
     # immaterial to a render.
     "--set", "global.gatewayApi.parentRefs[0].name=x",
-    # agentgateway is among the components here, so the ingress mode must be
-    # the one that admits it (the connectivity chart's guard ties them).
-    "--set", "ingress.mode=agentgateway-muster",
+    # agent-platform-mcps is among the components here, so its MCPs go behind
+    # muster (the connectivity chart's guard).
     "--set", "agent-platform-mcps.agentgateway.viaMuster=true",
     # The OAuth clients each resource server needs. An installation supplies
     # these; they are not in the meta chart's values, and without them the

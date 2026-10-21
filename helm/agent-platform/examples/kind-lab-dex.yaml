@@ -16,8 +16,7 @@
 # needs nothing but the Gateway API CRDs the smoke pre-applies — muster, dicebear
 # and the connectivity wiring, the bundled valkey off, muster without its own
 # OAuth server, no network policies (Cilium is environment infra). The ingress
-# is the platform's one topology, the chart's default (ingress.mode
-# agentgateway-muster): the agentgateway controller and its data-plane Gateway,
+# is the platform's one topology, agentgateway in front of muster: the agentgateway controller and its data-plane Gateway,
 # with agent-platform-mcps routing that Gateway's MCP traffic to muster, so a
 # client's /mcp crosses agentgateway as it does on every installation. The
 # cluster-shape knobs left at `auto` resolve the rest on kind: no Kyverno

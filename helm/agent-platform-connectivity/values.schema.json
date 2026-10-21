@@ -1081,7 +1081,10 @@
                     }
                 },
                 "mode": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                        "agentgateway-muster"
+                    ]
                 },
                 "parentRefs": {
                     "type": "array"

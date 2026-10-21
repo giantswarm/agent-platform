@@ -20,22 +20,22 @@ import subprocess
 import sys
 
 # component key -> the marker that only this component's connectivity wiring
-# renders, and the extra flags each side of the toggle needs. agentgateway's
-# ingress.mode must agree with its own toggle, so the two sides differ.
+# renders, and the extra flags each side of the toggle needs. agentgateway is
+# off only without muster (agentgateway in front of muster is the one ingress
+# topology), so its off side turns muster off too.
 WIRING = {
     "agentgateway": (
         "agentgateway-listenerset-t",
-        ["--set", "ingress.mode=agentgateway-muster"],
-        ["--set", "ingress.mode=muster-direct"],
+        [],
+        ["--set", "components.muster.enabled=false"],
     ),
     "kagent": ("agent-platform-connectivity-kagent-controller", [], []),
     # The route renders agentgateway.dev objects on the agentgateway Gateway, so
-    # it needs an agentgateway-* mode with the agentgateway component on (the
-    # ingress guard refuses it in muster-direct).
+    # it needs the agentgateway component on.
     "klaus-gateway": (
         "agent-platform-connectivity-dataplane-to-klausgateway",
-        ["--set", "klausGateway.agentgatewayRoute.enabled=true", "--set", "ingress.mode=agentgateway-muster", "--set", "components.agentgateway.enabled=true"],
-        ["--set", "klausGateway.agentgatewayRoute.enabled=true", "--set", "ingress.mode=agentgateway-muster", "--set", "components.agentgateway.enabled=true"],
+        ["--set", "klausGateway.agentgatewayRoute.enabled=true"],
+        ["--set", "klausGateway.agentgatewayRoute.enabled=true"],
     ),
     "agent-sandbox": ("agent-platform-connectivity-agent-sandbox-pod-security", [], []),
     # The egress policy renders whenever the component is on (networkPolicy is

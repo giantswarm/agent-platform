@@ -23,8 +23,8 @@ spec:
   muster.<domain>/mcp: Gateway API precedence puts hostname specificity first,
   so requests go straight to the muster Service instead of through the
   hostname-less MCP route (the AgentgatewayBackend multiplexing layer). muster
-  serves /mcp itself, so the MCP path degrades to muster-direct semantics on
-  this hostname. Accepted for the standalone edge; behavioral acceptance is
+  serves /mcp itself, so the MCP path reaches muster without the data plane
+  on this hostname. Accepted for the standalone edge; behavioral acceptance is
   owned by the standalone kind smoke. */}}
   parentRefs:
     {{- include "agent-platform.parentRefs" (dict "ctx" . "override" .Values.ingress.parentRefs "key" "ingress.parentRefs") | nindent 4 }}

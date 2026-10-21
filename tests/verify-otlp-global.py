@@ -57,7 +57,7 @@ ON = [
     "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     "--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true",
     "--set", "components.klaus-gateway.enabled=true",
-    "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster",
+    "--set", "components.agentgateway.enabled=true",
     # OAuth off for the managers and mcp-kubernetes: their OTLP keys and
     # egress do not depend on it, and on it needs each one's issuer and client.
     *[f for c in ("agent-manager", "vm-manager", "cluster-manager", "backstage", "mcp-kubernetes")

@@ -634,7 +634,7 @@ def main(meta: str, connectivity: str) -> int:
 
     # --- the forwarded tree validates against the connectivity chart --------------
     # The meta chart's defaults plus the one input every render needs; the CI
-    # values would trip connectivity's ingress-mode guards, which is not the point.
+    # values would trip connectivity's ingress guards, which is not the point.
     # With the extras (and the modelServing switch) on, the wiring needs the
     # quick-start inputs Backstage takes by design: global.domain, global.identity
     # and a public Gateway for its route.
