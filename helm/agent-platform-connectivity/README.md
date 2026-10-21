@@ -387,8 +387,7 @@ of one conversation. Accounting, never authorization.
 
 **Guards.** The schema holds every entry to `{expression, enabled}`; the render
 fails, naming the entry, on a missing, empty or multi-line expression. No
-policy renders in `muster-direct` or with every entry off. `make
-verify-access-log` asserts it.
+policy renders with every entry off. `make verify-access-log` asserts it.
 
 ## The data plane's buffer
 

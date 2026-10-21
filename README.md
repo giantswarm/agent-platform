@@ -100,7 +100,7 @@ helm install agent-platform oci://gsoci.azurecr.io/charts/giantswarm/agent-platf
   --namespace agent-platform --create-namespace -f values.yaml --wait --timeout 10m
 ```
 
-Then point any MCP client at `https://muster.<your-domain>/mcp`. Agents also need the Substrate feature gates, a database and an object store. The [installation guide](docs/install.md) covers each cluster shape step by step.
+Then point any MCP client at `https://muster.<your-domain>/mcp`. Its traffic crosses the agentgateway data plane in front of muster, whose route to muster comes with `components.agent-platform-mcps.enabled: true` ([ingress topology](docs/reference.md#ingress-topology)). Agents also need the Substrate feature gates, a database and an object store. The [installation guide](docs/install.md) covers each cluster shape step by step.
 
 ## Documentation
 
