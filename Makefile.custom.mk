@@ -221,7 +221,7 @@ verify-modes: ## Assert the single ingress topology (agentgateway in front of mu
 	@for m in muster-direct agentgateway-direct bogus; do \
 		if $(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set ingress.mode=$$m >$(VERIFY_TMP)/vm-enum.out 2>&1; then \
 			echo "FAIL: ingress.mode=$$m rendered"; exit 1; \
-		elif ! grep -q "/ingress/mode.*agentgateway-muster" $(VERIFY_TMP)/vm-enum.out; then \
+		elif ! grep -qE "(/ingress/mode|ingress\.mode).*agentgateway-muster" $(VERIFY_TMP)/vm-enum.out; then \
 			echo "FAIL: ingress.mode=$$m refused for the wrong reason"; cat $(VERIFY_TMP)/vm-enum.out; exit 1; \
 		fi; \
 		if $(HELM) template t $(CHART_DIR) --set components.flux.enabled=false --set ingress.parentRefs[0].name=x --set ingress.mode=$$m >$(VERIFY_TMP)/vm-enum-meta.out 2>&1; then \
