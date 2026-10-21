@@ -15,11 +15,16 @@
 # the bundled Flux engine on (the default) and the minimal component set that
 # needs nothing but the Gateway API CRDs the smoke pre-applies — muster, dicebear
 # and the connectivity wiring, the bundled valkey off, muster without its own
-# OAuth server, no network policies (Cilium is environment infra). The
+# OAuth server, no network policies (Cilium is environment infra). The ingress
+# is the platform's one topology, the chart's default (ingress.mode
+# agentgateway-muster): the agentgateway controller and its data-plane Gateway,
+# with agent-platform-mcps routing that Gateway's MCP traffic to muster, so a
+# client's /mcp crosses agentgateway as it does on every installation. The
 # cluster-shape knobs left at `auto` resolve the rest on kind: no Kyverno
-# objects, no monitor objects, no Envoy-only avatar route. The routes name a
-# Gateway that does not exist on kind — an unattached HTTPRoute is fine, the
-# releases are Ready without it. Also the third fleet-render shape of the fleet
+# objects, no monitor objects, no Envoy-only avatar route. The public routes
+# (muster's `/`, the agentgateway `/mcp`) name an edge Gateway that does not
+# exist on kind — an unattached HTTPRoute is fine, the releases are Ready
+# without it; the smoke reaches the data plane by its Service. Also the third fleet-render shape of the fleet
 # diff (BRIEF (c)), so keep the component set and every key here deliberate.
 #
 # Self-management is OFF here (the lab shape): the chart under test is an
@@ -33,7 +38,6 @@ gitops:
     enabled: false
 
 ingress:
-  mode: muster-direct
   parentRefs:
     - name: giantswarm-default
       namespace: envoy-gateway-system
@@ -64,9 +68,10 @@ agentManager:
     enabled: false
 
 components:
-  # muster-direct runs without the agentgateway component (on by default).
-  agentgateway:
-    enabled: false
+  # The data-plane Gateway's route to muster (an AgentgatewayBackend in front
+  # of muster's /mcp), with no MCP server of its own listed.
+  agent-platform-mcps:
+    enabled: true
   valkey:
     enabled: false
 

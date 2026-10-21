@@ -10,7 +10,7 @@
 # CoreDNS Corefile (kind's default plus one rewrite rule).
 #
 # Ported from the standalone chart's prerequisites/lab-dex.yaml with one change:
-# the meta chart's smoke runs no edge Gateway (ingress.mode: muster-direct), so
+# the meta chart's smoke runs no edge Gateway (its routes stay unattached), so
 # Dex terminates TLS itself on 5554 with the certificate minted below, and the
 # issuer is https://dex.127.0.0.1.nip.io:5554 — the SAME URL inside the cluster
 # (CoreDNS rewrites the name to the lab-dex Service) and from the test (nip.io

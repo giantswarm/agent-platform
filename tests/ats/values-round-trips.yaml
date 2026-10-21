@@ -33,6 +33,11 @@ components:
     enabled: true
 
 muster:
+  # One replica: the OAuth state is in memory (storage below), so a token muster
+  # issued is known to the pod that issued it only. The MCP calls reach muster
+  # through the agentgateway data plane, which balances over the Service's
+  # pods; the chart's two replicas share that state through Valkey.
+  replicaCount: 1
   # CI sizing (two cores), see values-kagent.yaml.
   resources:
     requests:
