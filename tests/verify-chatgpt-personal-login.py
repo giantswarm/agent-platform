@@ -119,7 +119,7 @@ def providers(render: str, name: str, indent: int) -> str:
 def model(render: str, name: str) -> str:
     for doc in render.split("\n---\n"):
         if re.search(r"^kind: ModelConfig$", doc, re.M) and f'  name: "{name}"\n' in doc:
-            return doc
+            return doc.rstrip("\n") + "\n"
     fail(f"no ModelConfig {name} in the render")
     return ""
 
