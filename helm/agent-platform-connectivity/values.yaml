@@ -1748,7 +1748,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # and expiry, refuses a token without the identity claim, and sets the
     # identity header the controller reads — x-user-id — from the verified
     # claim named by kagent.controller.auth.userIdClaim (email), replacing any
-    # value the client sent. The controller re-derives the identity from the
+    # value the client sent, and removes x-agent-name and x-user-groups (the
+    # controller's agent-call headers, sent only by an agent's runtime from
+    # inside the cluster). The controller re-derives the identity from the
     # same bearer (its trusted-proxy authenticator decodes it without verifying
     # the signature), which is why this boundary must stay in front of it and
     # the network policy admits no other caller.
