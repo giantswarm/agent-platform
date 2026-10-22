@@ -2164,6 +2164,89 @@ Usage: include "agent-platform.substrate.egressStoragePatch" $root | fromJson
 {{- end -}}
 
 {{/*
+The Flux postRenderer that runs the kagent controller as the kagent-extensions
+binary (kagentExtensions.enabled), as JSON ({} while it is off or kagent is
+off): one kustomize strategic-merge patch on the controller Deployment the
+kagent release renders, its container controller merged by name with the
+binary's image and its KAGENT_EXTENSIONS_* environment. The kagent chart takes
+the controller's tag from its stamped top-level tag before
+controller.image.tag, so the image cannot be set through the release's values.
+
+The binary identifies callers from their bearer token alone and authorizes them
+with SubjectAccessReviews (giantswarm/kagent-extensions). Its settings are the
+controller's own, as the release receives them (an own value, else the derived
+one):
+- the people's issuer: controller.auth.issuer and jwksURL
+  (agent-platform.kagent.authentication), with kagentExtensions.audiences, the
+  client IDs whose tokens reach the controller;
+- the user ID claim controller.auth.userIdClaim (sub when empty), and
+  controller.authorization's groupsClaim, usernamePrefix and groupsPrefix;
+- the namespaces a collection read ranges over: namespaceSelector and
+  includeNamespaces;
+- the machine callers: workspace-manager's ServiceAccount while workspaces are
+  on, with the audience of its token (serviceAccountTokenAudience), and the
+  session reader, klaus-gateway's ServiceAccount while refusal notices are on.
+The release keeps the kubernetes authorization mode, so the kagent chart still
+grants the controller its reviews and renders its NetworkPolicy.
+
+Fails the render, naming the key: another authorization mode than kubernetes,
+another authentication mode than trusted-proxy, no issuer or key set, no
+audience, no image tag.
+Usage: include "agent-platform.kagent.extensionsPostRenderer" $root | fromJson
+*/}}
+{{- define "agent-platform.kagent.extensionsPostRenderer" -}}
+{{- $ext := .Values.kagentExtensions | default dict -}}
+{{- if not (and $ext.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent"))) -}}
+{{- dict | toJson -}}
+{{- else -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- $authz := merge (deepCopy (dig "controller" "authorization" dict $kagent | default dict)) ((include "agent-platform.kagent.authorization" . | fromJson).authorization | default dict) -}}
+{{- $auth := merge (deepCopy (dig "controller" "auth" dict $kagent | default dict)) ((include "agent-platform.kagent.authentication" . | fromJson).auth | default dict) -}}
+{{- if ne (toString (dig "mode" "" $authz)) "kubernetes" -}}
+{{- fail (printf "kagentExtensions.enabled needs kagent.controller.authorization.mode kubernetes (it is %q): the kagent chart grants the controller its TokenReviews and SubjectAccessReviews and renders its NetworkPolicy only in that mode" (toString (dig "mode" "" $authz))) -}}
+{{- end -}}
+{{- if ne (toString (dig "mode" "" $auth)) "trusted-proxy" -}}
+{{- fail (printf "kagentExtensions.enabled needs kagent.controller.auth.mode trusted-proxy (it is %q): the chart takes the binary's issuer and key set from that mode's controller.auth.issuer and jwksURL" (toString (dig "mode" "" $auth))) -}}
+{{- end -}}
+{{- if not (and $auth.issuer $auth.jwksURL) -}}
+{{- fail "kagentExtensions.enabled needs the people's issuer and key set: set global.identity.issuerUrl and kagent.controllerRoute.jwtAuthentication.jwks, or kagent.controller.auth.issuer and jwksURL" -}}
+{{- end -}}
+{{- $audiences := $ext.audiences | default list -}}
+{{- if not $audiences -}}
+{{- fail "kagentExtensions.audiences is empty: name the client ID of every Dex client whose ID token reaches the kagent controller (the kagent UI's oauth2-proxy, Backstage, muster, klaus-gateway, the CLI); the binary refuses a person's token that names none of them" -}}
+{{- end -}}
+{{- $image := $ext.image | default dict -}}
+{{- if not $image.tag -}}
+{{- fail "kagentExtensions.image.tag is empty: name the kagent-extensions release to run" -}}
+{{- end -}}
+{{- $env := list
+  (dict "name" "KAGENT_EXTENSIONS_OIDC_ISSUERS" "value" (list (dict "issuer" $auth.issuer "audiences" $audiences "jwksURL" $auth.jwksURL) | toJson))
+  (dict "name" "KAGENT_EXTENSIONS_OIDC_USERNAME_CLAIM" "value" (toString ($auth.userIdClaim | default "sub")))
+  (dict "name" "KAGENT_EXTENSIONS_OIDC_GROUPS_CLAIM" "value" (toString (dig "groupsClaim" "" $authz)))
+  (dict "name" "KAGENT_EXTENSIONS_OIDC_USERNAME_PREFIX" "value" (toString (dig "usernamePrefix" "" $authz)))
+  (dict "name" "KAGENT_EXTENSIONS_OIDC_GROUPS_PREFIX" "value" (toString (dig "groupsPrefix" "" $authz)))
+  (dict "name" "KAGENT_EXTENSIONS_AUTHORIZATION_MODE" "value" "kubernetes")
+  (dict "name" "KAGENT_EXTENSIONS_NAMESPACE_SELECTOR" "value" (toString (dig "namespaceSelector" "" $authz)))
+  (dict "name" "KAGENT_EXTENSIONS_INCLUDE_NAMESPACE" "value" (join "," (dig "includeNamespaces" list $authz)))
+  (dict "name" "KAGENT_EXTENSIONS_MACHINE_AUDIENCE" "value" (include "agent-platform.kagent.tokenAudience" .)) -}}
+{{- $callers := list -}}
+{{- if and (dig "enabled" false (.Values.workspaces | default dict)) (include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager")) -}}
+{{- $wm := index .Values "workspace-manager" | default dict -}}
+{{- $sa := dig "serviceAccount" dict $wm | default dict -}}
+{{- $saName := dig "name" "" $sa | default (ternary ($wm.fullnameOverride | default "workspace-manager") "default" (ne (toString (dig "create" true $sa)) "false")) -}}
+{{- $wmNs := dig "workspace-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $callers = append $callers (printf "%s/%s" $wmNs $saName) -}}
+{{- end -}}
+{{- $env = append $env (dict "name" "KAGENT_EXTENSIONS_MACHINE_CALLER" "value" (join "," $callers)) -}}
+{{- $env = append $env (dict "name" "KAGENT_EXTENSIONS_SESSION_READER" "value" (toString (dig "sessionReaderServiceAccount" "" $authz))) -}}
+{{- $name := printf "%s-controller" ($kagent.fullnameOverride | default "kagent") -}}
+{{- $container := dict "name" "controller" "image" (printf "%s/%s:%s" ($image.registry | default "gsoci.azurecr.io") ($image.repository | default "giantswarm/kagent-extensions") $image.tag) "env" $env -}}
+{{- $patch := dict "apiVersion" "apps/v1" "kind" "Deployment" "metadata" (dict "name" $name) "spec" (dict "template" (dict "spec" (dict "containers" (list $container)))) -}}
+{{- dict "kustomize" (dict "patches" (list (dict "target" (dict "kind" "Deployment" "name" $name) "patch" (toYaml $patch)))) | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Fail the render when kagent.substrateWorkerPool.template would not reach the
 cluster as written (giantswarm/agent-platform#457, #472). The kagent chart
 forwards the template verbatim into WorkerPool.spec.template (toYaml), and the

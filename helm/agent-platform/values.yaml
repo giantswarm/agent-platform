@@ -1514,6 +1514,10 @@ components:  # @schema additionalProperties: true
       # The well-known configs' values (components.kserve-runtime-configs); no
       # wiring reads them, so the connectivity chart never sees the block.
       - kserve-runtime-configs
+      # Read by the meta chart alone (the kagent release's postRenderer,
+      # agent-platform.kagent.extensionsPostRenderer); the connectivity chart
+      # never sees it.
+      - kagentExtensions
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -2768,6 +2772,28 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
   #       group: kubernetes
   #       url: https://example.com/mcp
   mcpServers: []
+
+# kagentExtensions runs the kagent controller as the kagent-extensions binary
+# (giantswarm/kagent-extensions): the kagent controller with its own
+# authenticator and authorizer. It identifies a caller from the bearer token
+# alone (people by the issuer's keys, machines by a TokenReview) and reads no
+# identity header. The chart patches the controller Deployment the kagent
+# release renders (a Flux postRenderer) with the binary's image and settings,
+# taken from kagent.controller.auth and kagent.controller.authorization. It
+# needs the kubernetes authorization mode and the trusted-proxy authentication
+# mode.
+kagentExtensions:
+  enabled: false
+  image:
+    registry: gsoci.azurecr.io
+    repository: giantswarm/kagent-extensions
+    # The kagent-extensions release to run. Required when enabled.
+    tag: ""
+  # The client ID of every Dex client whose ID token reaches the kagent
+  # controller: the kagent UI's oauth2-proxy, Backstage, muster (whose
+  # forwarded token agent-manager sends), klaus-gateway and the CLI. A
+  # person's token that names none of them is refused. Required when enabled.
+  audiences: []
 
 # kagent — Kubernetes-native AI agent runtime (controller + UI).
 # All keys pass through to the kagent subchart (no strict schema filtering).
