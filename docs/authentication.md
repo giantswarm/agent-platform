@@ -52,8 +52,8 @@ An in-cluster issuer (for example Dex on `:5556` in another namespace) needs `ga
 
 `kagent.controllerRoute.enabled` (off by default; rendered with `components.kagent` on) exposes the kagent controller's API: the kagent API v2 gRPC services and A2A v1, native gRPC or gRPC-Web. The controller does not verify the token it is given, so it is reachable only through two authentication boundaries:
 
-- **agentgateway** (`GRPCRoute kagent-controller`, `kagent-controller-public`), with `AgentgatewayPolicy kagent-controller-jwt`. JWT validation is on by default (`kagent.controllerRoute.jwtAuthentication`). A token is required and must carry the identity claim, `kagent.controller.auth.userIdClaim` (`email`). The policy **sets** `x-user-id` from the verified claim, which replaces any value the client sent, and passes the bearer through.
-- **the kagent UI** (`kagent.uiRoute` behind `kagent.oauth2-proxy`). Its route removes `x-user-id`, and the bearer comes from the oauth2-proxy session.
+- **agentgateway** (`GRPCRoute kagent-controller`, `kagent-controller-public`), with `AgentgatewayPolicy kagent-controller-jwt`. JWT validation is on by default (`kagent.controllerRoute.jwtAuthentication`). A token is required and must carry the identity claim, `kagent.controller.auth.userIdClaim` (`email`). The policy **sets** `x-user-id` from the verified claim, which replaces any value the client sent, **removes** `x-agent-name` and `x-user-groups`, and passes the bearer through.
+- **the kagent UI** (`kagent.uiRoute` behind `kagent.oauth2-proxy`). Its route removes `x-user-id`, `x-agent-name` and `x-user-groups`, and the bearer comes from the oauth2-proxy session.
 
 The controller (`kagent.controller.auth.mode: trusted-proxy`) takes the caller from the bearer's `email` claim. It never verifies a signature, so its API port (`:8083`) admits only the kagent UI, the agentgateway data plane, Substrate's egress gateway and, with workspaces on, workspace-manager.
 
@@ -63,7 +63,9 @@ With `kagent.controller.authorization.mode: kubernetes` (the default from kagent
 |---|---|
 | no token, foreign issuer, expired or bad signature | `401` |
 | valid token without the identity claim | `403` |
-| valid token | passed through, `x-user-id` = the claim |
+| valid token | passed through, `x-user-id` = the claim, `x-agent-name` and `x-user-groups` removed |
+
+`x-agent-name` and `x-user-groups` are the controller's agent-call headers: only an agent's runtime sends them, from inside the cluster and never through these routes. The identity contract through the routes is `x-user-id` alone. The same policy covers the in-cluster `kagent-mcp` route.
 
 No audience is required: every Dex client a person signs in with is accepted.
 

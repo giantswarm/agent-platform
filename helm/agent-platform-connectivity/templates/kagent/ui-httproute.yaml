@@ -40,12 +40,16 @@ spec:
       # included). The identity on this path is the bearer oauth2-proxy
       # forwards, which the controller verifies itself; a client-supplied
       # identity header is dropped here, at the route, before it can be
-      # trusted (docs/authentication.md, "The kagent controller route").
+      # trusted (docs/authentication.md, "The kagent controller route"), and
+      # so are the controller's agent-call headers (x-agent-name,
+      # x-user-groups), which only an agent's runtime sends.
       filters:
         - type: RequestHeaderModifier
           requestHeaderModifier:
             remove:
               - x-user-id
+              - x-agent-name
+              - x-user-groups
       backendRefs:
         {{- if $oauth2proxyEnabled }}
         {{- /* The oauth2-proxy subchart of the kagent chart names its Service
