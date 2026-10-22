@@ -111,7 +111,7 @@ Then point any MCP client at `https://muster.<your-domain>/mcp`. Its traffic cro
 | [Authentication](docs/authentication.md) | The request path, OAuth discovery, token forwarding and exchange, edge JWT validation |
 | [Toolset presets](docs/toolset-presets.md) | Choosing which tools an agent gets |
 | [Serving presets](docs/serving-presets.md) | Adding and benchmarking a model recipe |
-| [ChatGPT login](docs/chatgpt-login.md) | Running codex on a ChatGPT subscription |
+| [ChatGPT login](docs/chatgpt-login.md) | Running codex on each person's own ChatGPT subscription |
 | [Agent Substrate security](docs/substrate-security.md) | What the agent runtime changes on the cluster, and what protects it |
 | [Upgrading](UPGRADE.md) | Version-to-version upgrade notes |
 

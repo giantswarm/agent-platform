@@ -222,13 +222,13 @@ On the installation, after the cutover:
   `tls` and `apiKeyPassthrough`; the chart renders none of them for such an
   entry, and refuses `apiFormat` on any other provider.
 - **codex on a ChatGPT subscription**: an `OpenAI` entry with `credentialType:
-  chatgptOAuth` and `apiFormat: responses` names the installation's own
-  ChatGPT login Secret in `apiKeySecret` and renders no `apiKeySecretKey`. It
+  chatgptOAuth`, `apiFormat: responses` and no `apiKeySecret` is the Session
+  person's own ChatGPT login and renders no `apiKeySecretKey`. It
   stays off the listener: the chart writes no listener `baseUrl`, the policy
   skips it and the hook takes one it wrote off again, because the listener's
   OpenAI route serves the OpenAI API, not the ChatGPT Codex backend, and a
   subscription has no per-token price. Its turns are not in the GenAI usage
-  metrics. How each installation's login is created and placed:
+  metrics. What a person connects and what the chart derives:
   [docs/chatgpt-login.md](../../docs/chatgpt-login.md).
   The `baseUrl` lands under the CRD's block for the entry's provider —
   `anthropic`, `mistral`, `openAI`, `sapAICore`, the four `ModelConfigSpec` gives one —

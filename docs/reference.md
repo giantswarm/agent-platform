@@ -419,7 +419,7 @@ A `Strict` `AgentgatewayPolicy` on the Gateway verifies the bearer against `glob
 - `spec.router.scheduler` (boolean) switches the llm-d endpoint picker for one preset.
 - `resources.gpus` must equal the preset's `--tensor-parallel-size` (1 without the flag).
 
-**codex on a ChatGPT subscription.** The ModelConfig entry, the one device login per installation and where its Secret goes: [docs/chatgpt-login.md](chatgpt-login.md).
+**codex on a person's own ChatGPT subscription.** What a person connects in the Dev Portal, the ModelConfig entry an installation adds and what the chart derives from it: [docs/chatgpt-login.md](chatgpt-login.md).
 
 **Models as OCI images.** A preset whose `spec.model.storageUri` is `oci://…` is served from a model image (KServe's modelcar). The node pulls the image, and the cache claim is not used.
 
