@@ -83,6 +83,15 @@ Serve open-weight models on your own GPUs, or use hosted providers such as Anthr
 - **Adapts to the cluster.** The chart detects Cilium, Kyverno and Prometheus and renders for what the cluster actually serves, so a laptop and a production fleet install the same chart.
 - **Spans clusters.** A GPU cluster can run only the serving slice, and a workload cluster only the agent runtime slice, both managed from one installation.
 
+## What an agent can reach
+
+Every connection an agent opens leaves its sandbox through Substrate's egress gateway. A destination the agent is not allowed is refused with a `403` that names the denial ([how a refusal looks](docs/substrate-security.md#what-an-actor-can-reach-and-how-a-refusal-looks)).
+
+- **Without an entry:** its model, its tools through muster, the sources of its skills and plugins, and telemetry.
+- **Typed origins:** an `http(s)://` origin, or `tls://host:port` for another service that speaks TLS such as a database, in the Agent's `spec.egress`. A leading `*` matches one host label. In the portal they are the agent's *Extra egress origins*. agent-manager takes them as `egress`.
+- **EgressPolicies:** kagent's namespaced `EgressPolicy` is a named set of origins your tenant admins keep, such as everything a GitHub or Go modules workflow needs. An origin can carry a credential that the gateway adds as a request header, so the agent uses it without ever holding the Secret. An agent picks policies of its own namespace by name in `spec.egressPolicyRefs`, next to its typed origins. In the portal that is the *EgressPolicies* list on the agent's form; agent-manager takes `egressPolicyRefs` and lists the choices with `list_egress_policies`. A change to a policy reaches every agent that picks it from its next session on, with no edit of the agents.
+- **Coding agents** (Claude Code, Codex) reach only the origins the platform sets for their Harness. They pick no EgressPolicy.
+
 ## Quick start
 
 **On your laptop:** [AgentLab](https://github.com/giantswarm/agentlab) runs the whole platform on kind with one binary, including the portal, agents, models and a bundled identity provider:
