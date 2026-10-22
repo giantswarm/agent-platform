@@ -1536,6 +1536,12 @@ verify-workspace-manager: ## Assert the workspace-manager component behind the o
 	@python3 tests/verify-workspace-manager.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "workspace-manager component verified."
 
+.PHONY: verify-chatgpt-personal-login
+verify-chatgpt-personal-login: ## Assert the wiring of a person's own ChatGPT login (giantswarm/giantswarm#38731): a kagent.modelConfigs[] entry with credentialType chatgptOAuth and no apiKeySecret derives muster's provider App chatgpt (flow chatgptDeviceCode) and kagent's installation provider chatgpt (chatgpt.com, /backend-api/codex/, Bearer) for the kagent and connectivity releases, own values stand, the installation's own login derives nothing, and muster 5.51.0 and kagent 1.24.0 take the values; the guards (muster's token encryption, its OAuth client, the credential provider, the kagent, kagent-crds and muster floors); the connectivity chart renders the model without apiKeySecret, as "ChatGPT (your subscription)", only beside the provider, and still requires apiFormat responses; the muster chart refuses the App without its encryption key. Network: gsoci.azurecr.io (the component charts). HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-chatgpt-personal-login.py $(CHART_DIR)
+	@echo "ChatGPT personal login verified."
+
 .PHONY: verify-workspace-provider-apps
 verify-workspace-provider-apps: ## Assert muster's provider Apps of the workspace provider instances, GitHub and GitLab sign-in side by side (giantswarm/giantswarm#38672): with two instances with sign-in (tests/fixtures/workspaces-provider-apps-values.yaml) the muster release keeps one App per instance (github: the pin's issuer, GitHub's endpoints and iss, its client Secret; gitlab: its url as issuer, <url>/oauth/revoke, default scopes, git user oauth2), the workspace-manager's registration names both and pins none, muster's credentialProvider releases both (gitlab with git user oauth2), and the component charts at the BOM's pins take the values; one instance with sign-in renders as before (pinned, no Apps); the github issuer derived as <url>/apps/<app.id> on the instance's url; an own pin, own auth.providerApps and an own muster App stand; the guards (an App of no instance, an underivable App, the workspace-manager floor 0.12.0, the muster floor 5.48.0, muster.muster.oauth.mcpClient off). Network: gsoci.azurecr.io (the component charts). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"

@@ -236,8 +236,10 @@ def check_rules(kind: str, spec: dict, path: str, errors: list[str]) -> None:
         chatgpt = (spec.get("openAI") or {}).get("credentialType") == "chatgptOAuth"
         if "apiKeySecret" in spec and "apiKeySecretKey" not in spec and provider not in ("Bedrock", "SAPAICore") and not chatgpt:
             errors.append(f"{path}.apiKeySecret: set without apiKeySecretKey")
-        if chatgpt and ("apiKeySecret" not in spec or "apiKeySecretKey" in spec):
-            errors.append(f"{path}: a ChatGPT login (openAI.credentialType chatgptOAuth) requires apiKeySecret and no apiKeySecretKey")
+        # Without apiKeySecret it is the Session person's own login (the kagent line from
+        # 1.24.0, which agent-platform.validateChatGPTPersonalLogin holds the range to).
+        if chatgpt and "apiKeySecretKey" in spec:
+            errors.append(f"{path}: a ChatGPT login (openAI.credentialType chatgptOAuth) takes no apiKeySecretKey")
         if spec.get("apiKeyPassthrough") and spec.get("apiKeySecret"):
             errors.append(f"{path}: apiKeyPassthrough and apiKeySecret are mutually exclusive")
 

@@ -24,8 +24,15 @@ the kagent controller refreshes, and the codex compiler sends its turns to the
 ChatGPT Codex backend. The CRD admits it on OpenAI only and without
 apiKeySecretKey; the codex compiler only with apiFormat responses. It stays off
 the listener, whose OpenAI route serves the OpenAI API, not the ChatGPT
-backend: kagent sends the login to the baseUrl it finds. */}}
+backend: kagent sends the login to the baseUrl it finds.
+Without apiKeySecret the entry is a person's own ChatGPT login ("ChatGPT (your
+subscription)"): no Secret is read, and the egress gateway sets the login the
+Session's person connected in muster, which kagent's installation provider
+chatgpt (controller.session.actorJWTProviders.chatgpt, derived by the meta
+chart) resolves by credential URI. The entry renders only beside that provider:
+without it every turn would reach the backend with the placeholder. */}}
 {{- $chatgpt := false }}
+{{- $personal := false }}
 {{- with .credentialType }}
 {{- if not (has (toString .) (list "apiKey" "chatgptOAuth")) }}
 {{- fail (printf "kagent.modelConfigs[].credentialType %q on %q is not one of the CRD's values apiKey, chatgptOAuth" (toString .) $name) }}
@@ -42,6 +49,10 @@ backend: kagent sends the login to the baseUrl it finds. */}}
 {{- if ne (toString .apiFormat) "responses" }}
 {{- fail (printf "kagent.modelConfigs[].credentialType chatgptOAuth on %q needs apiFormat: responses; a ChatGPT login serves codex only, and the codex compiler refuses any other format" $name) }}
 {{- end }}
+{{- $personal = not .apiKeySecret }}
+{{- if and $personal (not (dig "controller" "session" "actorJWTProviders" "chatgpt" "hostname" "" ($.Values.kagent | default dict))) }}
+{{- fail (printf "kagent.modelConfigs[] %q is a person's own ChatGPT login (credentialType chatgptOAuth without apiKeySecret), but kagent.controller.session.actorJWTProviders has no chatgpt entry, the provider every bound Session resolves the person's login through: the meta chart derives it from this entry — set it (hostname chatgpt.com, pathPrefix /backend-api/codex/, scheme Bearer), or name the installation's login Secret in apiKeySecret" $name) }}
+{{- end }}
 {{- end }}
 {{- $baseUrl := .baseUrl }}
 {{- if and (not $baseUrl) (not $chatgpt) $routed (has (lower $provider) $listenerProviders) }}
@@ -53,14 +64,16 @@ kind: ModelConfig
 metadata:
   name: {{ $name | quote }}
   namespace: {{ $ns }}
-  {{- with .displayName }}
+  {{- with .displayName | default (ternary "ChatGPT (your subscription)" "" $personal) }}
   annotations:
     ui.giantswarm.io/display-name: {{ . | quote }}
   {{- end }}
 spec:
   provider: {{ $provider | quote }}
   model: {{ required "kagent.modelConfigs[].model is required" .model | quote }}
+  {{- if not $personal }}
   apiKeySecret: {{ required "kagent.modelConfigs[].apiKeySecret is required" .apiKeySecret | quote }}
+  {{- end }}
   {{- if not $chatgpt }}
   apiKeySecretKey: {{ .apiKeySecretKey | default "ANTHROPIC_API_KEY" | quote }}
   {{- end }}

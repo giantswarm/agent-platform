@@ -3777,6 +3777,15 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   apiKeySecret: kagent-chatgpt-login
   #   credentialType: chatgptOAuth
   #   apiFormat: responses
+  # - name: chatgpt-subscription   # "ChatGPT (your subscription)": a codex
+  #   provider: OpenAI              # model on the ChatGPT subscription the
+  #   model: gpt-5.5-codex          # Session's person connected in muster.
+  #   credentialType: chatgptOAuth  # No apiKeySecret: the chart derives
+  #   apiFormat: responses          # muster's provider App chatgpt and kagent's
+  #                                 # provider chatgpt from it (needs workspaces
+  #                                 # with Substrate, muster's
+  #                                 # oauth.server.encryptionKey and
+  #                                 # oauth.mcpClient, kagent 1.24, muster 5.51)
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
