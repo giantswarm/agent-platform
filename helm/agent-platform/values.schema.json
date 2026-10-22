@@ -1992,21 +1992,6 @@
                 },
                 "enabled": {
                     "type": "boolean"
-                },
-                "image": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "registry": {
-                            "type": "string"
-                        },
-                        "repository": {
-                            "type": "string"
-                        },
-                        "tag": {
-                            "type": "string"
-                        }
-                    }
                 }
             }
         },

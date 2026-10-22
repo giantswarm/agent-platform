@@ -879,9 +879,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagentExtensions.enabled | bool | `false` |  |
-| kagentExtensions.image.registry | string | `"gsoci.azurecr.io"` |  |
-| kagentExtensions.image.repository | string | `"giantswarm/kagent-extensions"` |  |
-| kagentExtensions.image.tag | string | `""` |  |
 | kagentExtensions.audiences | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
 | kagent.registry | string | `"gsoci.azurecr.io"` |  |

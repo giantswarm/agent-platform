@@ -496,13 +496,6 @@ spec:
   {{- $postRenderers = append $postRenderers . }}
   {{- end }}
   {{- end }}
-  {{- /* The controller as the kagent-extensions binary, while
-  kagentExtensions.enabled (agent-platform.kagent.extensionsPostRenderer). */ -}}
-  {{- if eq $key "kagent" }}
-  {{- with include "agent-platform.kagent.extensionsPostRenderer" $root | fromJson }}
-  {{- $postRenderers = append $postRenderers . }}
-  {{- end }}
-  {{- end }}
   {{- with $postRenderers }}
   postRenderers:
     {{- toYaml . | nindent 4 }}
