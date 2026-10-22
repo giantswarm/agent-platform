@@ -2120,7 +2120,7 @@ verify-kagent-netpol: ## Assert no egress to kagent's built-in tool server rende
 KAGENT_ROUTE := $(VM) --namespace agent-platform --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set kagent.controllerRoute.enabled=true --set global.domain=ci.example.com --set global.identity.issuerUrl=https://dex.ci.example.com --set gateway.jwksEgress.enabled=true
 # $(call kagent_route_doc,<kind>,<name>,<render file>,<out file>): one rendered object.
 define kagent_route_doc
-	@python3 -c 'import sys; docs=open("$(3)").read().split("\n---\n"); hit=[d for d in docs if "\nkind: $(1)\n" in d and "\n  name: $(2)\n" in d]; sys.exit("FAIL: $(1) $(2) missing from the render") if len(hit)!=1 else open("$(4)","w").write(hit[0])'
+	@python3 -c 'import sys; docs=open("$(3)").read().split("\n---\n"); hit=[d for d in docs if "\nkind: $(1)\n" in d and "\n  name: $(2)\n" in d]; sys.exit("FAIL: $(1) $(2) missing from the render") if len(hit)!=1 else open("$(4)","w").write(hit[0].rstrip("\n")+"\n")'
 endef
 
 .PHONY: verify-kagent-route
