@@ -148,6 +148,8 @@ KAGENT = ["kagent-crds", "kagent"]
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
 UNRELEASED: dict[str, str] = {
+    "kagent": "1.24.1",
+    "kagent-crds": "1.24.1",
 }
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
@@ -538,9 +540,9 @@ def flux_layer(name: str, url: str, version: str, doc: str) -> None:
 
 def fallback(name: str, url: str, constraint: str, tags: list[str], kagent_tag: str) -> str:
     """The chart to render a RANGE against while nothing the constraint admits is
-    published: the kagent build the values name (the kagent range's floor — the
-    chart version of the same build), the branch build RENDER_AGAINST names, else
-    the newest release tag. Only for a range UNRELEASED names, or for a BOM pin
+    published: the branch build RENDER_AGAINST names, else the kagent build the
+    values name (the kagent range's floor, the chart version of the same build)
+    while it is published, else the newest release tag. Only for a range UNRELEASED names, or for a BOM pin
     that IS the version UNRELEASED names — the one release the range waits for;
     any other unpublished pin fails, because no installation on it can install.
     Under --strict there is no fallback: the release waits for the floor."""
@@ -548,11 +550,29 @@ def fallback(name: str, url: str, constraint: str, tags: list[str], kagent_tag: 
         fail(waits_for(name, url, constraint, tags))
     if name not in UNRELEASED:
         fail(f"no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED); the release would wait for {name} {floor(constraint)}")
-    chosen = RENDER_AGAINST.get(name) or (kagent_tag if name in KAGENT else fluxsemver.resolve(tags, ">=0.0.0"))
+    chosen = RENDER_AGAINST.get(name) or (kagent_tag if name in KAGENT and kagent_tag in tags else fluxsemver.resolve(tags, ">=0.0.0"))
     if not chosen or chosen not in tags:
         fail(f"no published chart of {name} to render against while {constraint!r} waits for {UNRELEASED[name]}")
     print(f"NOTE: {name}: {constraint!r} matches no published chart yet (waits for {UNRELEASED[name]}); rendering against {chosen}")
     return chosen
+
+
+def floor_chart(name: str, url: str, constraint: str) -> str:
+    """The chart version a check renders for the floor of a range: the floor
+    while it is published, else the chart fallback() renders against while
+    UNRELEASED names the release the range waits for."""
+    tags = registry_tags(url)
+    version = floor(constraint)
+    if version in tags:
+        return version
+    return fallback(name, url, constraint, tags, "")
+
+
+def range_chart(name: str, url: str, constraint: str) -> str:
+    """The chart version a check renders for a range: the one Flux resolves,
+    else, while nothing the range admits is published, the one floor_chart()
+    names."""
+    return fluxsemver.resolve(resolve_tags(registry_tags(url), constraint), constraint) or floor_chart(name, url, constraint)
 
 
 def roster(meta: str) -> dict[str, dict]:

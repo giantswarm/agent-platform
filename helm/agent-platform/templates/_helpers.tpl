@@ -602,6 +602,13 @@ the kubernetes authorization mode (agent-platform.kagent.authorization). */ -}}
 {{- with (include "agent-platform.kagent.authorization" .root | fromJson) -}}
 {{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .) -}}
 {{- end -}}
+{{- /* The controller's verification of people's tokens in the trusted-proxy
+mode (agent-platform.kagent.authentication), guarded first: the kagent floor
+that takes the keys. */ -}}
+{{- include "agent-platform.validateKagentAuthentication" .root -}}
+{{- with (include "agent-platform.kagent.authentication" .root | fromJson) -}}
+{{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "muster" -}}
 {{- /* The identity provider's private CA (global.identity.ca) is what muster's
@@ -841,6 +848,104 @@ Usage: include "agent-platform.kagent.authorization" . | fromJson
 {{- $_ := set $out "networkPolicy" (dict "enabled" true "from" $peers) -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The kagent controller's verification of people's tokens, which the kagent
+release receives in the trusted-proxy authentication mode
+(kagent.controller.auth.mode), as a partial controller block:
+- auth.issuer: the issuer the controller route's AgentgatewayPolicy
+  kagent-controller-jwt verifies, kagent.controllerRoute.jwtAuthentication
+  .issuer, else global.identity.issuerUrl;
+- auth.jwksURL: the key set that policy fetches, from
+  kagent.controllerRoute.jwtAuthentication.jwks: https://<host>[:<port>]<path>
+  with TLS (jwks.tls.enabled, or port 443), else http://<host>:<port><path>;
+- auth.jwksAllowHTTP: true beside a derived plain-http jwksURL (the in-cluster
+  Dex serves no TLS).
+The controller then checks the signature, iss and exp of a person's token
+against the issuer's keys before it reads a claim. Each key the block sets
+stands, and the derived jwksAllowHTTP accompanies only the derived jwksURL.
+Emits {} without an issuer or a JWKS host, in another mode and with kagent off.
+A derived https jwksURL verified against a private CA (jwks.tls.caSecretName,
+or global.identity.ca.secretName under jwks.tls.enabled) fails the render: the
+controller trusts the system roots only, so it names the URL to set instead.
+Usage: include "agent-platform.kagent.authentication" . | fromJson
+*/}}
+{{- define "agent-platform.kagent.authentication" -}}
+{{- $out := dict -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- $own := dig "controller" "auth" dict $kagent | default dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (eq (toString (dig "mode" "" $own)) "trusted-proxy") -}}
+{{- $jwt := dig "controllerRoute" "jwtAuthentication" dict $kagent | default dict -}}
+{{- $issuer := toString ($own.issuer | default ($jwt.issuer | default (dig "identity" "issuerUrl" "" (.Values.global | default dict)))) -}}
+{{- $jwks := $jwt.jwks | default dict -}}
+{{- $host := $jwks.host | default "" | toString | lower | trimSuffix "." -}}
+{{- $url := "" -}}
+{{- $tls := false -}}
+{{- if $host -}}
+{{- $port := $jwks.port | default 443 | int -}}
+{{- $tls = or (dig "tls" "enabled" false $jwks) (eq $port 443) -}}
+{{- $path := printf "/%s" ($jwks.path | default "/keys" | toString | trimPrefix "/") -}}
+{{- if $tls -}}
+{{- $url = printf "https://%s%s%s" $host (ternary "" (printf ":%d" $port) (eq $port 443)) $path -}}
+{{- else -}}
+{{- $url = printf "http://%s:%d%s" $host $port $path -}}
+{{- end -}}
+{{- end -}}
+{{- if and $issuer ($own.jwksURL | default $url) -}}
+{{- $a := dict -}}
+{{- if not $own.issuer -}}{{- $_ := set $a "issuer" $issuer -}}{{- end -}}
+{{- if not $own.jwksURL -}}
+{{- $ca := dig "tls" "caSecretName" "" $jwks -}}
+{{- if and (not $ca) (dig "tls" "enabled" false $jwks) -}}
+{{- $ca = dig "identity" "ca" "secretName" "" (.Values.global | default dict) -}}
+{{- end -}}
+{{- if and $tls $ca -}}
+{{- fail (printf "the kagent controller verifies people's tokens against %s, whose certificate the CA in Secret %s signs, but the controller trusts the system roots only: set kagent.controller.auth.jwksURL to a key set the controller can fetch (the issuer's in-cluster Service on plain http, with kagent.controller.auth.jwksAllowHTTP: true)" $url $ca) -}}
+{{- end -}}
+{{- $_ := set $a "jwksURL" $url -}}
+{{- if and (not $tls) (not (hasKey $own "jwksAllowHTTP")) -}}{{- $_ := set $a "jwksAllowHTTP" true -}}{{- end -}}
+{{- end -}}
+{{- with $a -}}{{- $_ := set $out "auth" . -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The first release of the kagent line whose controller verifies a person's
+token against the issuer's keys (controller.auth.issuer, jwksURL and
+jwksAllowHTTP; giantswarm/kagent-upstream#837). An earlier chart ignores the
+keys and its controller reads the claims of a token it never verified, so with
+them set the render fails under that floor
+(agent-platform.validateKagentAuthentication). One line, no comment inside the
+define.
+*/}}
+{{- define "agent-platform.kagent.authenticationFloor" -}}1.24.1{{- end -}}
+
+{{/*
+The guards of the kagent controller's verification of people's tokens, run
+while the kagent component renders (agent-platform.componentDerivedValues):
+- with an issuer on the release (own or agent-platform.kagent.authentication)
+  in the trusted-proxy mode, the floor of components.kagent.versionRange is at
+  least agent-platform.kagent.authenticationFloor; a release candidate of it
+  passes.
+Emits nothing; fails naming the key and the fix.
+*/}}
+{{- define "agent-platform.validateKagentAuthentication" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") -}}
+{{- $own := dig "controller" "auth" dict (.Values.kagent | default dict) | default dict -}}
+{{- $mode := toString (dig "mode" "" $own) -}}
+{{- $derived := (include "agent-platform.kagent.authentication" . | fromJson).auth | default dict -}}
+{{- if and (eq $mode "trusted-proxy") (or $own.issuer $derived.issuer) -}}
+{{- $floor := include "agent-platform.kagent.authenticationFloor" . -}}
+{{- $range := dig "kagent" "versionRange" "" .Values.components -}}
+{{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- if lt ((semver $have).Compare (semver $floor)) 0 -}}
+{{- fail (printf "components.kagent.versionRange %q admits a kagent release below %s, the first whose controller verifies people's tokens against the issuer's keys: in the trusted-proxy mode this chart sets kagent.controller.auth.issuer and jwksURL on the kagent release, which an earlier chart ignores; move the floor to %s or later" $range $floor $floor) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

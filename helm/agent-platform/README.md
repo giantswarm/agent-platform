@@ -436,7 +436,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.22.0 <1.23.0"` |  |
+| components.kagent.versionRange | string | `">=1.24.1 <1.25.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -460,19 +460,19 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.22.0 <1.23.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.24.1 <1.25.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.17.0 <1.18.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.17.5 <1.18.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.17.0 <1.18.0"` |  |
+| components.substrate.versionRange | string | `">=1.17.5 <1.18.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |

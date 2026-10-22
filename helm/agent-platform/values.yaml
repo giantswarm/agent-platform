@@ -615,7 +615,12 @@ components:  # @schema additionalProperties: true
     # loopback token. From 1.22.0 an actor's egress lists the actor-JWT hosts
     # only during a turn, the egress trust bundle carries the public roots,
     # and the omp Harness loads the skills an Agent selects from Agent Plugins.
-    versionRange: ">=1.22.0 <1.23.0"
+    # From 1.24.1 the controller in the trusted-proxy mode verifies a person's
+    # token against the issuer's keys (controller.auth.issuer, jwksURL and
+    # jwksAllowHTTP, which this chart derives: agent-platform.kagent
+    # .authentication, giantswarm/kagent-upstream#837) and refuses an agent's
+    # call in the kubernetes authorization mode.
+    versionRange: ">=1.24.1 <1.25.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -729,7 +734,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.22.0 <1.23.0"
+    versionRange: ">=1.24.1 <1.25.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -779,7 +784,9 @@ components:  # @schema additionalProperties: true
     # kagent line's own pin moves
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
-    # The floor is 1.17.0: ate-api serves the actor JWT mint as
+    # The floor is 1.17.5, the Substrate release the kagent line's 1.24
+    # builds are published against (tests/verify-worker-image.py). From
+    # 1.17.0 ate-api serves the actor JWT mint as
     # Control.MintActorJwt and its egress gateway runs agentgateway 2.6.5,
     # which mints through that name (a 1.16 ate-api with that gateway, or a
     # 1.17 ate-api with an older one, answers every actor_jwt header source
@@ -792,7 +799,7 @@ components:  # @schema additionalProperties: true
     # (https://idp.<namespace>.svc) muster verifies a Session's actor JWT
     # against (muster.credentialProvider.actorBearer, with workspaces on).
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.17.0 <1.18.0"
+    versionRange: ">=1.17.5 <1.18.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
     # release Flux resolved (ateController.gvisorWorker.followRelease, which
@@ -821,7 +828,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.17.0 <1.18.0"
+    versionRange: ">=1.17.5 <1.18.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -2815,13 +2822,15 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       ateApiEndpoint: dns:///api.ate-system.svc:443
       atenetRouterURL: http://atenet-router.ate-system.svc:80
     auth:
-      # Default on GS clusters. trusted-proxy reads Authorization: Bearer JWT and
-      # decodes claims WITHOUT signature verification — it relies on a front proxy
-      # having already validated the JWT. That boundary is agentgateway (which
-      # validates the JWT) for the controllerRoute path, and the netpols restrict
-      # controller ingress to agentgateway + the release/kagent namespaces, so the
-      # controller is never directly reachable. Use "insecure" only for local dev
-      # without any front proxy.
+      # Default on GS clusters. trusted-proxy reads Authorization: Bearer JWT.
+      # With an issuer the meta chart sets controller.auth.issuer, jwksURL and
+      # jwksAllowHTTP on the kagent release (the issuer and the key set of the
+      # controller route's policy below), and the controller checks the
+      # token's signature, issuer and expiry against the issuer's keys before
+      # it reads a claim; each key set here stands. agentgateway verifies the
+      # same token on the controllerRoute path, and the netpols restrict
+      # controller ingress to agentgateway + the release/kagent namespaces. Use
+      # "insecure" only for local dev without any front proxy.
       mode: trusted-proxy
       # email, not sub: dex subs are opaque connector-prefixed identifiers
       # (connector-coupled and unreadable in session listings); email is the
@@ -2849,7 +2858,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     #     and every caller through the edge), Substrate's egress gateway
     #     (atenet-egress: the agents' calls) and, with workspaces on,
     #     workspace-manager. Whoever reaches that port picks whose RBAC applies
-    #     (the caller's token is decoded, not verified, behind the edge). Own
+    #     where the controller does not verify people's tokens (no issuer). Own
     #     `from` peers are admitted beside them; `enabled: false` fails the
     #     render.
     authorization:
@@ -3682,9 +3691,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # value the client sent, and removes x-agent-name and x-user-groups (the
     # controller's agent-call headers, sent only by an agent's runtime from
     # inside the cluster). The controller re-derives the identity from the
-    # same bearer (its trusted-proxy authenticator decodes it without verifying
-    # the signature), which is why this boundary must stay in front of it and
-    # the network policy admits no other caller.
+    # same bearer, verified against the same issuer and key set (the meta
+    # chart's kagent.controller.auth derivation), and the network policy admits
+    # no caller but this boundary and the platform's own.
     # Every caller must present a JWT the issuer signed (opaque muster tokens
     # and Kubernetes ServiceAccount tokens are refused). gateway.jwksEgress
     # must be on so the data plane can reach the issuer's JWKS.

@@ -1980,6 +1980,44 @@ Usage: include "agent-platform.kagent.controllerHostname" .
 {{- end -}}
 
 {{/*
+The JWKS endpoint the kagent controller fetches to verify people's tokens, as
+{ "host": "<host>", "port": <int>, "inCluster": <bool> }: in the
+trusted-proxy mode (kagent.controller.auth.mode) with an issuer
+(kagent.controller.auth.issuer, kagent.controllerRoute.jwtAuthentication
+.issuer, else global.identity.issuerUrl), the host and port of
+kagent.controller.auth.jwksURL, else of
+kagent.controllerRoute.jwtAuthentication.jwks: the key set the meta chart
+derives onto the kagent release (agent-platform.kagent.authentication there).
+Emits {} otherwise and with kagent off.
+Usage: include "agent-platform.kagent.authenticationJwks" . | fromJson
+*/}}
+{{- define "agent-platform.kagent.authenticationJwks" -}}
+{{- $out := dict -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- $auth := dig "controller" "auth" dict $kagent | default dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (eq (toString (dig "mode" "" $auth)) "trusted-proxy") -}}
+{{- $jwt := dig "controllerRoute" "jwtAuthentication" dict $kagent | default dict -}}
+{{- if $auth.issuer | default ($jwt.issuer | default (dig "identity" "issuerUrl" "" (.Values.global | default dict))) -}}
+{{- $host := "" -}}
+{{- $port := 0 -}}
+{{- if $auth.jwksURL -}}
+{{- $u := urlParse (toString $auth.jwksURL) -}}
+{{- $host = $u.hostname -}}
+{{- $port = regexFind ":[0-9]+$" ($u.host | default "") | trimPrefix ":" | default (ternary "80" "443" (eq $u.scheme "http")) | int -}}
+{{- else -}}
+{{- $host = dig "jwks" "host" "" $jwt -}}
+{{- $port = dig "jwks" "port" 443 $jwt | int -}}
+{{- end -}}
+{{- $host = include "agent-platform.jwks.normalizeHost" $host -}}
+{{- if $host -}}
+{{- $out = dict "host" $host "port" $port "inCluster" (eq (include "agent-platform.jwks.inCluster" $host) "true") -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
 The JWT claim the caller's identity is taken from — kagent.controller.auth.userIdClaim
 (default email), the ONE value both authentication layers read: the controller's
 KAGENT_AUTH_USER_ID_CLAIM (kagent chart) and the gateway's x-user-id transformation

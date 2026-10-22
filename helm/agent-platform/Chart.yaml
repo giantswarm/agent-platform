@@ -24,6 +24,7 @@ annotations:
   io.giantswarm.application.audience: all
   io.giantswarm.application.managed: "true"
   io.giantswarm.application.team: bumblebee
+  agent-platform.giantswarm.io/unreleased: '{"kagent":{"versionRange":">=1.24.1 <1.25.0","waitsFor":"1.24.1"},"kagent-crds":{"versionRange":">=1.24.1 <1.25.0","waitsFor":"1.24.1"}}'
 # META-PACKAGE (app-of-apps): the ONLY dependency is the engine, never a component.
 #
 # Previously this was a Helm umbrella that pinned each component (muster,

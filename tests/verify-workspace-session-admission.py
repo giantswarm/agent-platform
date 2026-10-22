@@ -59,6 +59,7 @@ below pins one property:
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
 
+import importlib.util
 import json
 import os
 import re
@@ -68,6 +69,10 @@ import sys
 import tempfile
 
 HELM = os.environ.get("HELM", "helm")
+HERE = os.path.dirname(os.path.abspath(__file__))
+_spec = importlib.util.spec_from_file_location("components_charts", os.path.join(HERE, "verify-components-charts.py"))
+cc = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(cc)
 NAME = "workspace-manager"
 NAMESPACE = "agent-platform"
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
@@ -91,6 +96,10 @@ WANT = {"jwksURL": JWKS, "issuer": ISSUER, "audience": "kagent", "allowHTTP": "t
 # The first kagent chart whose Session admission refuses a plain http jwksURL without
 # controller.session.admission.jwt.allowHTTP.
 ALLOW_HTTP_CHART = "1.11.5-rc.1"
+# A kagent range below agent-platform.kagent.authenticationFloor renders only
+# outside the trusted-proxy mode, in which the meta chart derives the
+# controller's verification of people's tokens.
+BELOW_AUTH_FLOOR = ["--set", "kagent.controller.auth.mode=insecure"]
 MUSTER_BASE_URL = ["--set", "muster.muster.oauth.server.baseUrl=https://muster.ci.example.com"]
 ACTOR_JWT_PROVIDERS = ("        actorJWTProviders:\n          muster:\n            audience: https://muster.ci.example.com\n"
                        f"            hostname: muster.{NAMESPACE}.svc.cluster.local\n")
@@ -176,13 +185,15 @@ def notes(chart: str, flags: list) -> str:
 
 
 def kagent_floor(chart: str) -> str:
-    """The floor of components.kagent.versionRange as values.yaml pins it."""
+    """The floor of components.kagent.versionRange as values.yaml pins it; while
+    the floor is unpublished (UNRELEASED), the chart verify-components-charts
+    renders against."""
     with open(f"{chart}/values.yaml", encoding="utf-8") as f:
         entry = block(f.read(), "kagent", 2)
     m = re.search(r'^    versionRange: ">=([0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?)[ "]', entry, re.M)
     if not m:
         fail("components.kagent.versionRange in values.yaml has no `>=X.Y.Z` or `>=X.Y.Z-rc.N` floor")
-    return m.group(1)
+    return cc.floor_chart("kagent", KAGENT_CHART, f">={m.group(1)}")
 
 
 def kagent_chart_render(hr: str, version: str) -> str:
@@ -388,9 +399,9 @@ def main(meta: str) -> int:
     for rng in (">=1.5.0 <1.6.0", "1.5.9"):
         ranges = ["--set", f"components.kagent.versionRange={rng}", "--set", f"components.kagent-crds.versionRange={rng}"]
         must_fail(meta, [*base, *ranges], "admits a kagent release below 1.6.0", f"a kagent range {rng} with the admission derived")
-        helm(meta, [*KAGENT, *IDENTITY, *ranges])
+        helm(meta, [*KAGENT, *IDENTITY, *ranges, *BELOW_AUTH_FLOOR])
     for rng in (">=1.6.0 <1.7.0", "1.6.0", ">=1.6.0-rc.1 <1.7.0"):
-        kagent_release([*base, "--set", f"components.kagent.versionRange={rng}", "--set", f"components.kagent-crds.versionRange={rng}"], meta)
+        kagent_release([*base, "--set", f"components.kagent.versionRange={rng}", "--set", f"components.kagent-crds.versionRange={rng}", *BELOW_AUTH_FLOOR], meta)
     no_client = ["--set", f"{NAME}.providers[0].values.oauth.clientID=", "--set", f"{NAME}.providers[1].values.oauth.clientID="]
     must_fail(meta, [*ON, *KAGENT, *no_client, "--set", f"{NAME}.oauth.baseURL="], "kagent's Session admission has no issuer", "no issuer")
     must_fail(meta, [*base, "--set", "kagent.controller.auth.userIdClaim=sub"], 'kagent.controller.auth.userIdClaim is "sub"', "another user-id claim")

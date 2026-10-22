@@ -42,9 +42,8 @@ spec:
 # Ingress to the kagent controller: the agentgateway data plane (cross-namespace)
 # and the kagent UI, nothing else. Both are authentication boundaries the
 # controller relies on — agentgateway validates the JWT and sets x-user-id, the
-# UI's route strips it and oauth2-proxy supplies the bearer — while the
-# controller itself decodes the bearer without verifying it, so every other pod
-# is kept off the API port. Agent pods do not call the controller from inside
+# UI's route strips it and oauth2-proxy supplies the bearer — and every other
+# pod is kept off the API port. Agent pods do not call the controller from inside
 # the namespace any more (the Substrate actors' egress is a separate policy).
 # The metrics port serves no API and is admitted from the cluster entity, as
 # the platform's other metrics ports are.
@@ -86,8 +85,9 @@ spec:
 # gateway kagent.otel names (the pods of the endpoint's
 # namespace on its port, nothing when both exporters are off;
 # agent-platform.kagent.otlpEgress, shared with the actors' egress gateway),
-# muster, Substrate's ate-api and atenet router, and the built-in tool server
-# when it is enabled.
+# muster, Substrate's ate-api and atenet router, the built-in tool server
+# when it is enabled, and the JWKS endpoint the controller verifies people's
+# tokens against (agent-platform.kagent.authenticationJwks).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -146,6 +146,36 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
+    {{- end }}
+    {{- with (include "agent-platform.kagent.authenticationJwks" . | fromJson) }}
+    {{- if .inCluster }}
+    {{- $ns := index (splitList "." .host) 1 }}
+    {{- $egress := $.Values.gateway.jwksEgress | default dict }}
+    # The in-cluster issuer's pods: the namespace its qualified Service name
+    # resolves in, narrowed by gateway.jwksEgress.podSelector when that names
+    # the same namespace.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ $ns | quote }}
+            {{- if eq (toString $egress.namespace) $ns }}
+            {{- with $egress.podSelector }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- end }}
+      toPorts:
+        - ports:
+            - port: {{ .port | toString | quote }}
+              protocol: TCP
+    {{- else if ne (.port | int) 443 }}
+    # An external issuer on a port other than 443, which the world rule above
+    # opens already.
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: {{ .port | toString | quote }}
+              protocol: TCP
+    {{- end }}
     {{- end }}
 {{- if .Values.postgres.enabled }}
 ---
