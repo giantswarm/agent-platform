@@ -1,6 +1,6 @@
 # Installing the Agent Platform
 
-This guide takes a cluster from nothing to a running Agent Platform with one `helm install`. Pick the shape of your cluster, prepare what that shape needs, install with its example values, then register the redirect URIs the install prints. The chart's [README](../README.md) is the reference for every value; this page is the path through it.
+This guide takes a cluster from nothing to a running Agent Platform with one `helm install`. Pick the shape of your cluster, prepare what that shape needs, install with its example values, then register the redirect URIs the install prints. The [operator reference](reference.md) covers for every value; this page is the path through it.
 
 ## 1. Pick your cluster shape
 
@@ -8,10 +8,12 @@ Each shape has a values file under [`helm/agent-platform/examples/`](../helm/age
 
 | Example | Cluster | Public edge | What runs |
 |---|---|---|---|
-| [`kind-lab-dex.yaml`](../helm/agent-platform/examples/kind-lab-dex.yaml) | kind on a laptop, with the lab Dex | none (port-forward) | muster (without sign-in until you add the lab Dex overlay in [4. Install](#4-install)), model-manager, the avatar service, the connectivity wiring. What the chart's kind smoke installs. |
-| [`own-gateway.yaml`](../helm/agent-platform/examples/own-gateway.yaml) | any cluster with its own public Gateway | your Gateway (`global.gatewayApi.parentRefs`) | muster with its OAuth server and session store, behind `https://muster.<domain>/mcp` |
-| [`chart-owned-edge.yaml`](../helm/agent-platform/examples/chart-owned-edge.yaml) | a cluster with a LoadBalancer but no Gateway | the chart's agentgateway data plane (`gatewayApi.gateway.create: true`) | the above, with MCP traffic through agentgateway and the bundled MCP servers |
-| [`managed-cloud.yaml`](../helm/agent-platform/examples/managed-cloud.yaml) | EKS, AKS, GKE, … with an external Postgres | your Gateway | the full platform: kagent on Agent Substrate, agent-manager, the portal (Backstage), the Kubernetes MCP server, the kagent UI |
+| [`kind-lab-dex.yaml`](../helm/agent-platform/examples/kind-lab-dex.yaml) | kind on a laptop, with the lab Dex | none (port-forward) | muster behind the agentgateway data plane, with agent-platform-mcps for the data plane's route to muster (no Valkey, no sign-in until you add the lab Dex overlay in [4. Install](#4-install)), model-manager, the avatar service, the connectivity wiring. What the chart's kind smoke installs. |
+| [`own-gateway.yaml`](../helm/agent-platform/examples/own-gateway.yaml) | any cluster with its own public Gateway | your Gateway (`global.gatewayApi.parentRefs`) | the defaults: muster with its OAuth server and its session store (the bundled Valkey), the agentgateway data plane in front of muster on `/mcp`, model-manager, the avatar service. The data plane reaches muster through agent-platform-mcps' route: add `components.agent-platform-mcps.enabled: true` ([reference](reference.md#ingress-topology)). |
+| [`chart-owned-edge.yaml`](../helm/agent-platform/examples/chart-owned-edge.yaml) | a cluster with a LoadBalancer but no Gateway | the chart's agentgateway data plane (`gatewayApi.gateway.create: true`) | the same set plus agent-platform-mcps, the data plane's route to muster. On this edge `muster.<domain>/mcp` goes straight to muster's route. |
+| [`managed-cloud.yaml`](../helm/agent-platform/examples/managed-cloud.yaml) | EKS, AKS, GKE, … with an external Postgres | your Gateway | own-gateway's set plus kagent on Agent Substrate, agent-manager, the portal (Backstage), the Kubernetes MCP server, the kagent UI behind oauth2-proxy. |
+
+In every shape the MCP endpoint is `https://muster.<domain>/mcp`. The other files under `examples/` are not cluster shapes but profiles described in the reference: [`runtime-slice.yaml`](reference.md#the-runtime-slice-on-workload-clusters), [`serving-slice.yaml`](reference.md#the-serving-slice-and-the-models-gateway) and the pinned bill-of-materials [`customer-bom.yaml`](reference.md#how-the-chart-works).
 
 The released chart carries the examples: `helm pull oci://gsoci.azurecr.io/charts/giantswarm/agent-platform --untar` puts them in `agent-platform/examples/`.
 
@@ -19,15 +21,15 @@ The released chart carries the examples: `helm pull oci://gsoci.azurecr.io/chart
 
 ### Every shape
 
-- **Kubernetes ≥ 1.33** and **Helm 4** (Helm 4's `--wait` waits for the component `HelmRelease`s to be Ready; Helm 3 returns before they are).
-- **The Gateway API CRDs**, the one cluster prerequisite the chart does not bring:
+- **Kubernetes ≥ 1.35** and **Helm 4** (Helm 4's `--wait` waits for the component `HelmRelease`s to be Ready; Helm 3 returns before they are).
+- **The Gateway API CRDs**, which a default install does not bring (`components.gateway-api-crds.enabled: true` installs them):
 
   ```bash
   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.5.0/standard-install.yaml
   ```
 
 - **A default StorageClass** (`kubectl get storageclass` marks one `(default)`): the bundled Valkey, Substrate's bundled Postgres and the CloudNativePG Cluster claim volumes without naming a class.
-- **No Flux of its own**, or install through it: the chart brings the Flux engine where the cluster has none. A cluster that runs Flux sets `components.flux.enabled: false` and installs the chart through that Flux ([README: Clusters that run Flux](../README.md#clusters-that-run-flux)).
+- **No Flux of its own**, or install through it: the chart brings the Flux engine where the cluster has none. A cluster that runs Flux sets `components.flux.enabled: false` and installs the chart through that Flux ([Reference: Clusters that run Flux](reference.md#clusters-that-run-flux)).
 
 ### A public Gateway (own-gateway, managed-cloud)
 
@@ -75,13 +77,12 @@ No Gateway to prepare: the agentgateway data plane becomes the edge. It needs th
 
 ### Agents (managed-cloud)
 
-- **Kubernetes ≥ 1.35 with the `PodCertificateRequest`, `ClusterTrustBundle` and `ClusterTrustBundleProjection` feature gates** on kube-apiserver, kube-controller-manager and every kubelet. Agent Substrate, which runs every agent, takes its identities from them; a live install refuses a cluster that does not serve `certificates.k8s.io/v1beta1` `PodCertificateRequest`.
-- **On Cilium with kube-proxy replacement: `socketLB.hostNamespaceOnly: true`** (`bpf-lb-sock-hostns-only`), or the agents cannot resolve names over UDP from their sandboxes ([README: Agent Substrate](../README.md#agent-substrate)).
+- **The `PodCertificateRequest`, `ClusterTrustBundle` and `ClusterTrustBundleProjection` feature gates** on kube-apiserver, kube-controller-manager and every kubelet. Agent Substrate, which runs every agent, takes its identities from them; a live install refuses a cluster that does not serve `certificates.k8s.io/v1beta1` `PodCertificateRequest`.
+- **On Cilium with kube-proxy replacement: `socketLB.hostNamespaceOnly: true`** (`bpf-lb-sock-hostns-only`), or the agents cannot resolve names over UDP from their sandboxes ([Reference: Agent Substrate](reference.md#agent-substrate)).
 - **An object store bucket** for the agents' snapshots, `kagent.harness.snapshotLocation` (`s3://<bucket>/<prefix>`), writable from the nodes (IRSA, Workload Identity, or credentials in `substrate.atelet.extraEnv`).
-- **A database**, one of three:
-  - the bundled single-instance Postgres of kagent and of Substrate (the defaults; a lab or a trial);
-  - the platform's CloudNativePG Cluster: `components.cloudnative-pg.enabled: true` and `postgres.enabled: true` ([README: Backstage, mcp-kubernetes, CloudNativePG and KServe](../README.md#backstage-mcp-kubernetes-cloudnativepg-and-kserve));
-  - an external Postgres with the `pgvector` extension available (managed-cloud): the connection URL in Secret `kagent-postgres` (key `uri`) in the `kagent` namespace and the connection string in Secret `substrate-postgres` (key `connectionString`) in `ate-system`, both created before the install.
+- **A database**, one of two. The kagent chart deploys no Postgres, so the render fails without one; Substrate alone falls back to its bundled single-instance Postgres.
+  - the platform's CloudNativePG Cluster: `components.cloudnative-pg.enabled: true` and `postgres.enabled: true` ([Reference: Backstage, mcp-kubernetes, CloudNativePG and KServe](reference.md#backstage-mcp-kubernetes-cloudnativepg-and-kserve));
+  - an external Postgres with the `pgvector` extension available (managed-cloud): the connection URL in Secret `kagent-postgres` (key `uri`) in the `kagent` namespace and the connection string in Secret `substrate-postgres` (key `connectionString`) in `ate-system`, both created before the install. Set `substrate.postgres.readWriteRole` and `ownerRole` to a role that connection's user may assume (`examples/managed-cloud.yaml`).
 - The portal (Backstage) keeps its database in SQLite, or in a CloudNativePG Cluster with `backstage.database.engine: postgresql` and the `cloudnative-pg` component; it takes no external database.
 
 ### Pod Security
@@ -97,7 +98,7 @@ One OIDC provider signs in every person, **Dex only today** (Keycloak and Entra 
 | `global.identity.clientId` (e.g. `agent-platform`) | `https://muster.<domain>/oauth/callback` | always (muster's OAuth server) |
 | the same client | `https://backstage.<domain>/api/auth/oidc-agent-platform/handler/frame` | `components.backstage` |
 | a client of its own for the kagent UI's oauth2-proxy | `https://kagent.<domain>/oauth2/callback` | `kagent.uiRoute` with `kagent.oauth2-proxy` |
-| `dex-k8s-authenticator` (the audience your kube-apiserver trusts), `trustedPeers: [<global.identity.clientId>]`, no redirect URI | — | model-manager, agent-manager and mcp-kubernetes: muster forwards the person's token to them with this audience, and they act on the cluster as that person |
+| `dex-k8s-authenticator` (the audience your kube-apiserver trusts), `trustedPeers: [<global.identity.clientId>]`, no redirect URI | — | model-manager, agent-manager, cluster-manager, workspace-manager and mcp-kubernetes: muster forwards the person's token to them with this audience, and they act on the cluster as that person |
 
 In Dex's config:
 
@@ -151,18 +152,17 @@ The kagent UI's oauth2-proxy reads Secret `kagent-oauth2-proxy` in the `kagent` 
 
 The meta chart injects `global` into every component release; these keys are the installation's contract.
 
-| Key | Default | Meaning |
-|---|---|---|
-| `global.domain` | `""` | The one hostname input: `muster.`, `backstage.`, `kagent.`, `agentgateway.` and `avatars.<domain>` derive from it, each overridable next to its route. TLS and DNS for `*.<domain>` stay outside the chart. |
-| `global.identity.issuerUrl` | `""` | The OIDC issuer exactly as it appears in the tokens' `iss` claim. |
-| `global.identity.clientId` | `""` | The platform's OAuth client at the provider. |
-| `global.identity.existingSecret` | `""` | The platform Secret in the release namespace (keys above). |
-| `global.identity.ca.secretName`, `.key` | unset, `ca.crt` | The CA of a provider with a private certificate, a Secret in the release namespace. muster's OAuth server, the managers and the portal verify the issuer against it; without it muster's OIDC discovery fails and muster never turns Ready. |
-| `global.gatewayApi.parentRefs` | `[]` | The public Gateway every route attaches to, unless a route names its own or `gatewayApi.gateway.create` makes the chart's data plane the edge. |
-| `global.registry` | `gsoci.azurecr.io` | The registry every component pulls from; a mirror goes here ([README: Private registry overrides](../README.md#private-registry-overrides)). |
-| `global.imagePullSecrets` | `[]` | Pull secrets for every component. |
-| `global.observability.metrics.serviceMonitor.enabled` | `auto` | Monitor objects where `monitoring.coreos.com/v1` is served. |
-| `global.observability.traces.otlp.endpoint` | `http://otlp-gateway.kube-system.svc:4317` | The collector every exporter sends traces to; the default is a Giant Swarm cluster's OTLP gateway. Elsewhere name your collector, or `""` to export nothing (the examples do). |
+| Key | Meaning |
+|---|---|
+| `global.domain` | The one hostname input: `muster.`, `backstage.`, `kagent.` and `agentgateway.<domain>` derive from it, each overridable next to its route. TLS and DNS for `*.<domain>` stay outside the chart. |
+| `global.identity.issuerUrl` | The OIDC issuer exactly as it appears in the tokens' `iss` claim. |
+| `global.identity.clientId` | The platform's OAuth client at the provider. |
+| `global.identity.existingSecret` | The platform Secret in the release namespace (keys above). |
+| `global.identity.ca.secretName`, `.key` (default `ca.crt`) | Only for a provider with a private certificate: its CA, a Secret in the release namespace. Without it muster's OIDC discovery fails and muster never turns Ready. |
+| `global.gatewayApi.parentRefs` | The public Gateway every route attaches to; not needed with `gatewayApi.gateway.create`. |
+| `global.observability.traces.otlp.endpoint` | Defaults to a Giant Swarm cluster's OTLP gateway. Name your collector, or `""` to export nothing (the examples do). |
+
+A registry mirror and pull secrets go in `global.registry` and `global.imagePullSecrets` ([Reference: Private registry overrides](reference.md#private-registry-overrides)).
 
 muster's OAuth server reads its own keys and must agree with `global.identity` (the render fails when they differ): every example sets `muster.muster.oauth.server.{baseUrl, dex.issuerUrl, dex.clientId, existingSecret}` and `muster.muster.oauth.mcpClient.publicUrl` next to it.
 
@@ -174,7 +174,7 @@ helm install agent-platform oci://gsoci.azurecr.io/charts/giantswarm/agent-platf
   -f own-gateway.yaml --wait --timeout 10m
 ```
 
-`--wait` returns when every component `HelmRelease` is Ready: about two minutes for muster alone, four to six with kagent and Substrate. That `helm install` is the last Helm command besides `helm uninstall`: the release manages itself through the Flux engine it brought, rolls forward inside its major, and takes a values change as a rewrite of Secret `agent-platform-values` ([README: Self-management](../README.md#self-management)). The kind example turns self-management off and stays with `helm upgrade`.
+`--wait` returns when every component `HelmRelease` is Ready: about two minutes for muster alone, four to six with kagent and Substrate. That `helm install` is the last Helm command besides `helm uninstall`: the release manages itself through the Flux engine it brought, rolls forward inside its major, and takes a values change as a rewrite of Secret `agent-platform-values` ([Reference: Self-management](reference.md#self-management)). The kind example turns self-management off and stays with `helm upgrade`.
 
 The kind example, from a checkout of this repository:
 
@@ -245,4 +245,4 @@ Point an MCP client at `https://muster.<domain>/mcp`. It registers itself at mus
 
 A client that meets none of them gets `invalid_token: Registration requires authentication`.
 
-Upgrades, and what an operator does when a release changes CRDs: [UPGRADE.md](../UPGRADE.md). Removing the platform: [README: Uninstalling](../README.md#uninstalling).
+Upgrades, and what an operator does when a release changes CRDs: [UPGRADE.md](../UPGRADE.md). Removing the platform: [Reference: Uninstalling](reference.md#uninstalling).

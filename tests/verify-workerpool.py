@@ -70,8 +70,6 @@ import tempfile
 
 import yaml
 
-import fluxsemver
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 _spec = importlib.util.spec_from_file_location("components_charts", os.path.join(HERE, "verify-components-charts.py"))
 cc = importlib.util.module_from_spec(_spec)
@@ -407,9 +405,7 @@ def main(meta: str) -> int:
         # The rendered object: the kagent chart the range resolves to, with the
         # values the meta chart forwards for the pin and the knobs.
         url, rng = source.split(" ", 1)
-        version = fluxsemver.resolve(cc.registry_tags(url), rng)
-        if not version:
-            cc.fail(f"no published kagent chart satisfies {rng!r} at {url}")
+        version = cc.range_chart("kagent", url, rng)
         chart_dir = os.path.join(tmp, "kagent")
         resolved = cc.pull(url, version, chart_dir)
         derived_affinity = {k: template[k] for k in ("podAffinity", "priorityClassName") if k in template}

@@ -55,12 +55,10 @@ data:
     app:
       title: Agent Platform
       baseUrl: https://backstage.ci.example.com
-      rootRedirect: /agent-platform
       portals:
         agentPlatform: true
       extensions:
         - page:agent-platform
-        - nav-item:agent-platform
         - page:gs/clusters: false
         - nav-item:gs/clusters: false
         - page:gs/deployments: false
@@ -10894,7 +10892,7 @@ spec:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/agentgateway-upstream/agentgateway
-    tag: 2.4.0
+    tag: 2.6.7
   service:
     spec:
       type: ClusterIP
@@ -10971,6 +10969,8 @@ spec:
         add:
           - name: agent_instance_id
             expression: '(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""'
+          - name: request_id
+            expression: 'request.headers["x-request-id"]'
 ---
 # Source: agent-platform-connectivity/templates/agentgateway/healthz.yaml
 apiVersion: agentgateway.dev/v1alpha1
@@ -11896,7 +11896,8 @@ spec:
             - --namespace=agent-platform
             - --selector=app=backstage
             - --overwrite
-            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=5922d9131c090f246dfb28b32abbef09fd8bdb13d32b02f836291b5b9d8407bd
+            - --field-manager=agent-platform-config-reload
+            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=17dfed0c93c61330ee2942c868b67df5a07b24457ad3b08924e09bfbf86ccb14
           env:
             # kubectl keeps its discovery/http cache under $HOME; the root
             # filesystem is read-only.

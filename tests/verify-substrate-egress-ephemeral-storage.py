@@ -162,10 +162,14 @@ def main(meta: str) -> int:
     url, rng = cc.source(rendered[("OCIRepository", "substrate")])
     floor = worker.floor_of(rng)
     below = stable(floor) < stable(floor_release)
+    # A floor re-pinned ahead of its release (verify-components-charts'
+    # UNRELEASED) is rendered against the chart that check renders against.
+    tags = cc.registry_tags(url)
+    chart = floor if floor in tags else cc.fallback("substrate", url, rng, tags, "")
     with tempfile.TemporaryDirectory() as tmp:
-        got = cc.pull(url, floor, tmp)
-        if got != floor:
-            cc.fail(f"helm pull {url} --version {floor} unpacked {got}")
+        got = cc.pull(url, chart, tmp)
+        if got != chart:
+            cc.fail(f"helm pull {url} --version {chart} unpacked {got}")
         spec = render_chart(os.path.join(tmp, url.rsplit("/", 1)[1]), forwarded, tmp)
     own_render = problems(spec)
 

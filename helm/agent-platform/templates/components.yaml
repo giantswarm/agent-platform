@@ -103,7 +103,9 @@ knowledge:
       flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName, the
       tenant identity the connectivity chart renders, and its muster.url from
       the muster Service (agent-platform.musterMcpUrl, the URL every agent's
-      own RemoteMCPServer targets). Never written back into
+      own RemoteMCPServer targets). A forwardAllValues release gets them too:
+      the connectivity release's workspaceManager.namespace, the namespace of
+      the workspace-manager release when it is not its own. Never written back into
       .Values, so the whole-tree forward stays what the operator wrote.
   injectGlobal  — inject `.Values.global` into the forwarded values (default
       true). Set false for components whose strict values.schema.json
@@ -173,9 +175,12 @@ knowledge:
       HelmRelease: the first install is reported successful as soon as the
       manifests are applied, without waiting for the workload to become ready.
       Upgrades keep waiting. For a component whose workload cannot start until a
-      dependant of the component has installed — kagent's controller mounts the
-      CNPG Secret the connectivity release renders, while connectivity dependsOn
-      kagent for its CRDs — so that the pair can bootstrap instead of deadlocking.
+      dependant of the component has installed, so that the pair can bootstrap
+      instead of deadlocking. muster's install AND upgrade skip the wait while
+      agent-platform.muster.awaitsSubstrate: it serves FetchSecret on Substrate's
+      pod certificates and the substrate release, behind it, is not Ready yet —
+      a fresh install and an in-place switch of workspaces and Substrate alike
+      (giantswarm/agent-platform#1107). Once Substrate is Ready both wait again.
   disableWaitForJobs — render `disableWaitForJobs: true` on the child
       HelmRelease's install and upgrade: helm-controller then does not wait for
       the release's plain Jobs to complete (hooks are unaffected). It does not
@@ -225,8 +230,9 @@ knowledge:
 {{- include "agent-platform.validateRemovedComponents" . -}}
 {{- include "agent-platform.validateRemovedBackstageKeys" . -}}
 {{- include "agent-platform.validateKagentCrds" . -}}
+{{- include "agent-platform.validateKagentSubcharts" . -}}
 {{- include "agent-platform.validateWorkspaces" . -}}
-{{- include "agent-platform.validateWorkspaceSignIn" . -}}
+{{- include "agent-platform.validateWorkspaceAuth" . -}}
 {{- include "agent-platform.validateKagentLineCrossing" . -}}
 {{- include "agent-platform.validateKagentDatabase" . -}}
 {{- include "agent-platform.validateSubstrate" . -}}
@@ -318,6 +324,8 @@ connectivity chart's migrate Job read the same range and filter. */ -}}
 {{- /* ...and so does its roster entry, with gatedRoster (see gatedValues above). */ -}}
 {{- if and $gc.gatedRoster (not (index $roster $gated).enabled) }}{{- $_ := set $vals "components" (omit $vals.components $gated) }}{{- end }}
 {{- end }}
+{{- /* Derived values reach a whole-tree release too (see derived values above). */ -}}
+{{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the
@@ -338,6 +346,8 @@ always-on consumer (e.g. connectivity) does not block on a HelmRelease that was
 never rendered. With app-owned CRDs a consumer dependsOn the opt-in component
 that ships the CRD it needs; when that component is off it renders no CR for
 that CRD either, so the dependency is moot. */ -}}
+{{- $awaitsSubstrate := and (eq $key "muster") (include "agent-platform.muster.awaitsSubstrate" (dict "root" $root "values" $vals)) }}
+{{- $installDisableWait := or $c.installDisableWait $awaitsSubstrate }}
 {{- $deps := list }}
 {{- range ($c.dependsOn | default list) }}
 {{- if include "agent-platform.componentEnabled" (dict "root" $root "name" .) }}
@@ -430,7 +440,7 @@ spec:
     {{- with $c.crds }}
     crds: {{ . }}
     {{- end }}
-    {{- if $c.installDisableWait }}
+    {{- if $installDisableWait }}
     disableWait: true
     {{- end }}
     {{- if $c.disableWaitForJobs }}
@@ -441,6 +451,9 @@ spec:
   upgrade:
     {{- with $c.crds }}
     crds: {{ . }}
+    {{- end }}
+    {{- if $awaitsSubstrate }}
+    disableWait: true
     {{- end }}
     {{- if $c.disableWaitForJobs }}
     disableWaitForJobs: true

@@ -39,12 +39,11 @@ QUICKSTART carries the inputs every meta render here needs (the identity block,
 the managers' and the kagent line's required inputs); ALL_ON_INPUTS the inputs
 an installation supplies and the meta chart's values leave empty once EVERY
 component is on — the resource servers' OAuth clients, a public Gateway for the
-routes, the ingress mode that admits agentgateway. Without them the charts
+routes, the MCPs behind muster. Without them the charts
 refuse to render at all, and the point here is a full render, not merely an
 accepted schema. The two lists are apart because
-tests/verify-kagent-tools-namespace.py imports QUICKSTART for renders with a much
-smaller component set, where the all-on ingress mode would trip the connectivity
-chart's guard.
+tests/verify-kagent-controller-vpa.py imports QUICKSTART for renders with a much
+smaller component set.
 
 The meta chart is rendered in every SHAPE an installation can give it: the
 vanilla cluster (no --api-versions, every `auto` knob off) and the Giant Swarm
@@ -94,7 +93,11 @@ applies anything. A release ignores it: --strict passed, so it waits for nothing
 
 Network: pulls from gsoci.azurecr.io, and from ghcr.io for the CloudNativePG
 chart (three attempts each); the tag
-list comes from the registry's anonymous `/v2/<repo>/tags/list`. Every Helm call
+list comes from the registry's anonymous `/v2/<repo>/tags/list`, and a throttled
+answer (429, 503) of the distribution API is retried with bounded backoff,
+honouring Retry-After, and so is a transient network error (a timeout, the TLS
+handshake's included, or a reset connection) (registry_open;
+tests/verify-registry-retry.py). Every Helm call
 is bounded (TIMEOUT). PyYAML is in the CI image (the job installs python3-yaml).
 
 The components are independent, and the work is registry round trips and Helm
@@ -105,6 +108,7 @@ in roster order that fails ends the run with its FAIL, as before.
 """
 
 import concurrent.futures
+import email.utils
 import hashlib
 import importlib.util
 import io
@@ -143,12 +147,14 @@ KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
-UNRELEASED: dict[str, str] = {}
+UNRELEASED: dict[str, str] = {
+    "kagent": "1.24.1",
+    "kagent-crds": "1.24.1",
+}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
 RENDER_AGAINST: dict[str, str] = {
-    "agent-manager": "1.9.3-rf107e304t20261006134136h2486711",  # giantswarm/agent-manager#101
 }
 # The layer every OCIRepository of the meta chart selects, and the manifest
 # types a Helm chart artifact is fetched as.
@@ -165,8 +171,8 @@ STRICT = False
 UNRELEASED_ANNOTATION = "agent-platform.giantswarm.io/unreleased"
 WAITS: dict[str, dict[str, str]] = {}
 WRITE = False
-# A coding agent's Harness on top of the reference shape: the kagent block it
-# forwards is rendered at the range with the others.
+# A coding agent's Harnesses on top of the reference shape: the kagent and
+# agent-manager blocks it forwards are rendered at the range with the others.
 CODING_AGENTS = "coding agents (ci/test-coding-agents-values.yaml)"
 
 
@@ -238,18 +244,16 @@ QUICKSTART = [
     "--set", "postgres.enabled=true",
 ]
 # The inputs that only matter once EVERY component is turned on, kept out of
-# QUICKSTART because tests/verify-kagent-tools-namespace.py imports that list
-# for renders with a much smaller component set: ingress.mode and its
-# companion are tied to which components are enabled, and a mode that disagrees
-# with them fails the connectivity chart's guard.
+# QUICKSTART because tests/verify-kagent-controller-vpa.py imports that list
+# for renders with a much smaller component set: viaMuster is tied to the
+# agent-platform-mcps component, which only the full set turns on.
 ALL_ON_INPUTS = [
     # Every route the connectivity chart renders needs a public Gateway to
     # hang off (the chart's own guard); set once for all of them, the name is
     # immaterial to a render.
     "--set", "global.gatewayApi.parentRefs[0].name=x",
-    # agentgateway is among the components here, so the ingress mode must be
-    # the one that admits it (the connectivity chart's guard ties them).
-    "--set", "ingress.mode=agentgateway-muster",
+    # agent-platform-mcps is among the components here, so its MCPs go behind
+    # muster (the connectivity chart's guard).
     "--set", "agent-platform-mcps.agentgateway.viaMuster=true",
     # The OAuth clients each resource server needs. An installation supplies
     # these; they are not in the meta chart's values, and without them the
@@ -263,6 +267,11 @@ ALL_ON_INPUTS = [
     # installation names it, and the meta chart refuses the workspaces switch
     # without it (giantswarm/agent-platform#900).
     "--set", "workspaces.storage.storageClassName=workspaces-rwx",
+    # The provider instance muster releases grants of while workspaces and
+    # Substrate are on: an installation pins one (provider instances with
+    # oauth.enabled) or names it, and the meta chart refuses the switch
+    # without (giantswarm/agent-platform#1103).
+    "--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents",
 ]
 
 # Components without a toggle of their own: each follows its switch, and a
@@ -387,24 +396,89 @@ def resolve_tags(tags: list[str], constraint: str) -> list[str]:
 
 # Anonymous bearer tokens, one per OCI repository (`oci://host/path`).
 TOKENS: dict[str, str] = {}
+# A throttled registry answers 429 Too Many Requests with a Retry-After (ACR
+# throttles every anonymous request to a registry as one identity, so this
+# check shares gsoci.azurecr.io's anonymous budget with every anonymous puller),
+# or 503 while it sheds load. Such an answer is retried, REGISTRY_ATTEMPTS calls in
+# all, after the wait its Retry-After names, else REGISTRY_BACKOFF seconds
+# doubling per retry; no wait is longer than REGISTRY_MAX_WAIT. The last
+# throttled answer is the error, so a registry that stays throttled still ends
+# in a FAIL line, about two minutes later. A transient network error (a timeout,
+# the TLS handshake's included, or a reset or refused connection) is retried the
+# same way with the backoff; the last one is the error.
+REGISTRY_THROTTLED = frozenset({429, 503})
+REGISTRY_ATTEMPTS = 6
+REGISTRY_BACKOFF = 2.0
+REGISTRY_MAX_WAIT = 60.0
+
+
+def retry_wait(e: urllib.error.HTTPError, retry: int) -> float:
+    """Seconds to wait before retrying a throttled answer: its Retry-After
+    (delay-seconds or an HTTP date), else the backoff of the retry'th retry."""
+    value = (e.headers.get("Retry-After") or "").strip() if e.headers else ""
+    if value.isdigit():
+        wait = float(value)
+    else:
+        try:
+            wait = email.utils.parsedate_to_datetime(value).timestamp() - time.time()
+        except (TypeError, ValueError, AttributeError):
+            wait = REGISTRY_BACKOFF * 2 ** retry
+    return min(max(wait, 0.0), REGISTRY_MAX_WAIT)
+
+
+def transient(e: OSError) -> bool:
+    """Whether a network error is worth a retry: a timeout (the TLS handshake's
+    included) or a reset, aborted or refused connection, raised as is or as the
+    reason of a URLError. An HTTP answer is not (see REGISTRY_THROTTLED)."""
+    if isinstance(e, urllib.error.HTTPError):
+        return False
+    if isinstance(e, urllib.error.URLError) and isinstance(e.reason, OSError):
+        e = e.reason
+    return isinstance(e, (TimeoutError, ConnectionError))
+
+
+def registry_open(target: str | urllib.request.Request):
+    """urlopen against a registry, retrying a throttled answer (see
+    REGISTRY_THROTTLED) and a transient network error; any other error, and
+    the last throttled or transient one, raise."""
+    url = target.full_url if isinstance(target, urllib.request.Request) else target
+    for retry in range(REGISTRY_ATTEMPTS):
+        last = retry == REGISTRY_ATTEMPTS - 1
+        try:
+            return urllib.request.urlopen(target, timeout=60)
+        except urllib.error.HTTPError as e:
+            if e.code not in REGISTRY_THROTTLED or last:
+                raise
+            wait = retry_wait(e, retry)
+            e.close()
+            reason = f"HTTP {e.code}"
+        except OSError as e:
+            if not transient(e) or last:
+                raise
+            wait = min(REGISTRY_BACKOFF * 2 ** retry, REGISTRY_MAX_WAIT)
+            reason = str(e.reason if isinstance(e, urllib.error.URLError) else e) or type(e).__name__
+        print(f"NOTE: {url.split('?', 1)[0]}: {reason}, retry {retry + 1}/{REGISTRY_ATTEMPTS - 1} in {wait:.0f}s")
+        time.sleep(wait)
+    raise AssertionError("unreachable")
 
 
 def registry_get(url: str, target: str, accept: str = "application/json") -> tuple[dict, dict]:
     """GET one distribution API URL of an OCI repository (`oci://host/path`)
     anonymously, answering the token challenge (again, once, when a held token
-    is refused); the JSON body and the response headers."""
+    is refused); the JSON body and the response headers. A throttled answer,
+    the token's included, is retried with backoff (registry_open)."""
     for attempt in range(2):
         headers = {"Accept": accept}
         if url in TOKENS:
             headers["Authorization"] = f"Bearer {TOKENS[url]}"
         try:
-            with urllib.request.urlopen(urllib.request.Request(target, headers=headers), timeout=60) as r:
+            with registry_open(urllib.request.Request(target, headers=headers)) as r:
                 return json.load(r), r.headers
         except urllib.error.HTTPError as e:
             if e.code != 401 or attempt:
                 raise
             challenge = dict(re.findall(r'(\w+)="([^"]*)"', e.headers.get("Www-Authenticate", "")))
-            with urllib.request.urlopen(f"{challenge['realm']}?service={challenge['service']}&scope={challenge['scope']}", timeout=60) as t:
+            with registry_open(f"{challenge['realm']}?service={challenge['service']}&scope={challenge['scope']}") as t:
                 body = json.load(t)
             TOKENS[url] = body.get("access_token") or body.get("token")
     raise AssertionError("unreachable")
@@ -416,7 +490,14 @@ def registry_tags(url: str) -> list[str]:
     host, _, path = url.removeprefix("oci://").partition("/")
     next_url, tags = f"https://{host}/v2/{path}/tags/list?n=1000", []
     for _ in range(100):
-        body, headers = registry_get(url, next_url)
+        try:
+            body, headers = registry_get(url, next_url)
+        except urllib.error.HTTPError as e:
+            # A repository nothing was ever pushed to: a chart with no release
+            # yet is UNRELEASED like one whose range admits none.
+            if e.code == 404:
+                return tags
+            raise
         tags += body.get("tags") or []
         m = re.search(r"<([^>]+)>", headers.get("Link", ""))
         if not m:
@@ -459,9 +540,9 @@ def flux_layer(name: str, url: str, version: str, doc: str) -> None:
 
 def fallback(name: str, url: str, constraint: str, tags: list[str], kagent_tag: str) -> str:
     """The chart to render a RANGE against while nothing the constraint admits is
-    published: the kagent build the values name (the kagent range's floor — the
-    chart version of the same build), the branch build RENDER_AGAINST names, else
-    the newest release tag. Only for a range UNRELEASED names, or for a BOM pin
+    published: the branch build RENDER_AGAINST names, else the kagent build the
+    values name (the kagent range's floor, the chart version of the same build)
+    while it is published, else the newest release tag. Only for a range UNRELEASED names, or for a BOM pin
     that IS the version UNRELEASED names — the one release the range waits for;
     any other unpublished pin fails, because no installation on it can install.
     Under --strict there is no fallback: the release waits for the floor."""
@@ -469,11 +550,29 @@ def fallback(name: str, url: str, constraint: str, tags: list[str], kagent_tag: 
         fail(waits_for(name, url, constraint, tags))
     if name not in UNRELEASED:
         fail(f"no published version of {name} satisfies {constraint!r}, and nothing says it is expected (UNRELEASED); the release would wait for {name} {floor(constraint)}")
-    chosen = RENDER_AGAINST.get(name) or (kagent_tag if name in KAGENT else fluxsemver.resolve(tags, ">=0.0.0"))
+    chosen = RENDER_AGAINST.get(name) or (kagent_tag if name in KAGENT and kagent_tag in tags else fluxsemver.resolve(tags, ">=0.0.0"))
     if not chosen or chosen not in tags:
         fail(f"no published chart of {name} to render against while {constraint!r} waits for {UNRELEASED[name]}")
     print(f"NOTE: {name}: {constraint!r} matches no published chart yet (waits for {UNRELEASED[name]}); rendering against {chosen}")
     return chosen
+
+
+def floor_chart(name: str, url: str, constraint: str) -> str:
+    """The chart version a check renders for the floor of a range: the floor
+    while it is published, else the chart fallback() renders against while
+    UNRELEASED names the release the range waits for."""
+    tags = registry_tags(url)
+    version = floor(constraint)
+    if version in tags:
+        return version
+    return fallback(name, url, constraint, tags, "")
+
+
+def range_chart(name: str, url: str, constraint: str) -> str:
+    """The chart version a check renders for a range: the one Flux resolves,
+    else, while nothing the range admits is published, the one floor_chart()
+    names."""
+    return fluxsemver.resolve(resolve_tags(registry_tags(url), constraint), constraint) or floor_chart(name, url, constraint)
 
 
 def roster(meta: str) -> dict[str, dict]:
@@ -540,8 +639,11 @@ def check_harnesses(manifest: str, values: str, what: str) -> None:
     kagent.harnesses entry, each valid against the pinned Harness CRD. The
     platform Harness carries no admission selector: an Agent names its Harness
     by spec.harnessRef, and the line's CRD has no allowedAgentTemplates. A
-    claude entry reaches its Harness as forwarded (snapshot location, env,
-    limits) and takes the chart's claude-harness image at its digest."""
+    claude or codex entry reaches its Harness as forwarded (snapshot location,
+    env) and takes the chart's claude-harness or codex-harness image at its
+    digest; a claude one carries no turn limits, which the line withdrew from
+    the Harness API in 1.12.0. A byo entry (omp) runs its own image and
+    command and carries its displayName as the portal's annotation."""
     entries = (yaml.safe_load(values) or {}).get("harnesses") or []
     rendered = [d for d in yaml.safe_load_all(manifest) if isinstance(d, dict) and d.get("kind") == "Harness"]
     if len(rendered) != 1 + len(entries):
@@ -556,20 +658,34 @@ def check_harnesses(manifest: str, values: str, what: str) -> None:
         spec = by_name.get(entry["name"], {}).get("spec")
         if spec is None:
             fail(f"{what} renders no Harness for the kagent.harnesses entry {entry['name']!r}")
-        if entry.get("runtime", "claude") != "claude":
+        runtime = entry.get("runtime", "claude")
+        if runtime not in ("claude", "codex", "byo"):
+            continue
+        harness = by_name[entry["name"]]
+        if runtime == "byo":
+            got = {
+                "runtime": [r for r in ("kagent", "claude", "codex", "byo") if r in spec],
+                "image": spec.get("workload", {}).get("image"),
+                "command": spec.get("workload", {}).get("command"),
+                "displayName": harness.get("metadata", {}).get("annotations", {}).get("ui.giantswarm.io/display-name"),
+                "snapshotLocation": spec.get("substrate", {}).get("snapshotPolicy", {}).get("location"),
+            }
+            want = {"runtime": ["byo"], "image": entry.get("image"), "command": entry.get("command"), "displayName": entry.get("displayName"), "snapshotLocation": entry.get("snapshotLocation")}
+            if got != want:
+                fail(f"{what} renders the byo Harness {entry['name']!r} off its entry:\n  got      {got}\n  expected {want}")
             continue
         got = {
-            "claude": "claude" in spec,
+            "runtime": [r for r in ("kagent", "claude", "codex", "byo") if r in spec],
             "snapshotLocation": spec.get("substrate", {}).get("snapshotPolicy", {}).get("location"),
             "env": spec.get("env"),
-            "limits": spec.get("claude", {}).get("limits"),
+            "settings": spec.get(runtime),
         }
-        want = {"claude": True, "snapshotLocation": entry.get("snapshotLocation"), "env": entry.get("env"), "limits": entry.get("limits")}
+        want = {"runtime": [runtime], "snapshotLocation": entry.get("snapshotLocation"), "env": entry.get("env"), "settings": {}}
         if got != want:
-            fail(f"{what} renders the claude Harness {entry['name']!r} off its entry:\n  got      {got}\n  expected {want}")
+            fail(f"{what} renders the {runtime} Harness {entry['name']!r} off its entry:\n  got      {got}\n  expected {want}")
         image = spec.get("workload", {}).get("image", "")
-        if "image" not in entry and not re.search(r"/claude-harness@sha256:[0-9a-f]{64}$", image):
-            fail(f"{what} renders the claude Harness {entry['name']!r} with image {image!r}, not the chart's claude-harness at its digest")
+        if "image" not in entry and not re.search(rf"/{runtime}-harness@sha256:[0-9a-f]{{64}}$", image):
+            fail(f"{what} renders the {runtime} Harness {entry['name']!r} with image {image!r}, not the chart's {runtime}-harness at its digest")
     module, crds = kagent_crds()
     if errors := [e for h in rendered for e in module.validate(h, crds, what)]:
         fail("a rendered Harness does not validate against the pinned Harness CRD:\n  " + "\n  ".join(errors))
@@ -662,7 +778,7 @@ def main(meta: str) -> int:
         for shape, (w, p) in renders.items():
             blocks.setdefault(("range", hr_values(w[("HelmRelease", chart)])), []).append(shape)
             blocks.setdefault(("BOM pin", hr_values(p[("HelmRelease", chart)])), []).append(shape)
-        if name == "kagent":
+        if name in ("kagent", "agent-manager"):
             blocks.setdefault(("range", hr_values(coding[("HelmRelease", chart)])), []).append(CODING_AGENTS)
         if name in released:
             # One version matters, the working tree's: every distinct block of
@@ -681,6 +797,13 @@ def main(meta: str) -> int:
         if pin != pins[name]:
             fail(f"{name}: the BOM render carries {pin!r} while examples/customer-bom.yaml pins {pins[name]!r} — the pin did not reach the OCIRepository")
         tags = registry_tags(url)
+        if not tags and name in UNRELEASED and not STRICT:
+            # A chart nobody has published yet: nothing to render the forwarded
+            # block against until its first build. The release waits for it.
+            own = components[name]["versionRange"]
+            WAITS[name] = {"versionRange": own, "waitsFor": floor(own)}
+            print(f"NOTE: {name}: {url} publishes nothing yet (waits for {UNRELEASED[name]}); the forwarded block is rendered once a build exists")
+            return
         version_range = fluxsemver.resolve(resolve_tags(tags, rng), rng)
         if not version_range:
             version_range = fallback(name, url, rng, tags, kagent_tag)

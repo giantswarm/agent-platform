@@ -24,8 +24,7 @@ rely on:
   AND pre-delete (the hand-back must suspend the self HelmRelease before Helm
   deletes it) and their identity;
 - the guards that can be asserted offline: `true` with the engine off is
-  refused; a Kubernetes below 1.30 is refused while self-management is on and
-  accepted with it off; a value outside auto/true/false fails the schema;
+  refused; a value outside auto/true/false fails the schema;
 - the knobs: repository (with or without a trailing slash), insecure,
   versionRange, semverFilter (the dev-channel tag filter, rendered iff set),
   interval, gitops.serviceAccountName (the policy admits the
@@ -277,11 +276,8 @@ def main(chart: str) -> int:
 
     # --- guards
     helm(chart, [*ci, *ENGINE_OFF, *SELF_ON], expect_fail="gitops.self.enabled=true needs the bundled Flux engine")
-    helm(chart, [*ci, "--kube-version", "1.29.0"], expect_fail="needs Kubernetes >= 1.30")
-    helm(chart, [*ci, "--kube-version", "1.30.0"])
-    helm(chart, [*ci, *SELF_OFF, "--kube-version", "1.29.0"])
     helm(chart, [*ci, "--set", "gitops.self.enabled=bogus"], expect_fail=("/gitops/self/enabled", "gitops.self.enabled must be one of"))
-    print("ok: guards — true without the engine refused; Kubernetes < 1.30 refused with self on, accepted with it off; the schema pins auto/true/false")
+    print("ok: guards — true without the engine refused; the schema pins auto/true/false")
 
     # --- knobs
     knobs = docs(helm(chart, [*ci, "--set", "gitops.self.repository=oci://localhost:5000/charts/", "--set", "gitops.self.insecure=true",

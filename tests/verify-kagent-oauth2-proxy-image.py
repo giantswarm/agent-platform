@@ -10,8 +10,9 @@ registry's mirror). The pin holds the tag of the subchart the kagent release at
 the range's floor bundles, so a kagent re-pin that bumps the subchart moves it.
 
 The check renders the meta chart, reads the kagent HelmRelease's forwarded
-oauth2-proxy.image, pulls the kagent chart at the range's floor, reads the
-bundled subchart's appVersion and default repository, and requires the pin's
+oauth2-proxy.image, pulls the kagent chart at the range's floor (while the
+floor is unpublished, the chart verify-components-charts renders against:
+UNRELEASED), reads the bundled subchart's appVersion and default repository, and requires the pin's
 registry to be gsoci.azurecr.io, its repository giantswarm/<the default's
 image name>, its tag v<appVersion>, and the copy published.
 
@@ -39,7 +40,6 @@ def load(name: str):
 
 
 cc = load("verify-components-charts")
-worker = load("verify-worker-image")
 images = load("verify-substrate-images")
 
 REGISTRY = "gsoci.azurecr.io"
@@ -79,7 +79,7 @@ def main(meta: str) -> int:
         cc.fail(f"the kagent HelmRelease does not forward values.yaml's kagent.{SUBCHART}.image verbatim")
 
     url, rng = cc.source(rendered[("OCIRepository", "kagent")])
-    floor = worker.floor_of(rng)
+    floor = cc.floor_chart("kagent", url, rng)
     with tempfile.TemporaryDirectory() as tmp:
         got = cc.pull(url, floor, tmp)
         if got != floor:

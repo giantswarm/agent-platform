@@ -1,7 +1,7 @@
 {{/*
 The hook Jobs of this release, and their one identity.
 
-Four hooks: the Agent Substrate bootstrap (templates/substrate/bootstrap.yaml,
+Six hooks: the Agent Substrate bootstrap (templates/substrate/bootstrap.yaml,
 pre-install + pre-upgrade — mints the CA and JWT pools, the actor-identity trust
 anchor and ate-api-server's authentication config the Substrate pods mount and
 cannot start without, once, and keeps them), the derived Postgres connection
@@ -14,7 +14,13 @@ wait, which would otherwise wait for a Bind that only the first predictor brings
 #483) and the pre-pull cleanup (templates/model-serving/prepull.yaml,
 pre-delete — deletes the pre-pull DaemonSet, itself a post-install/post-upgrade
 hook object outside Helm's wait, which an uninstall would otherwise leave
-behind; #563). All run under the
+behind; #563) and the ModelConfig reconcile of llmRouting
+(templates/llm/modelconfig-routing-hook.yaml, post-install + post-upgrade —
+takes the listener URL the policies wrote back off the ModelConfigs once
+routing is off, which Helm cannot: it never owned the baseUrl) and the sign-in
+keys cleanup (templates/workspace-manager/signin-keys-cleanup.yaml,
+post-install + post-upgrade — deletes the workspace-manager sign-in keys Secret
+an earlier release kept). All run under the
 restricted pod security profile (this chart's Jobs have to be admitted where
 restricted PSS is enforced — the hook pods themselves violate nothing) as the
 ServiceAccount <release>-hooks (templates/substrate/hooks-rbac.yaml): a
@@ -84,13 +90,18 @@ with the cluster.
 The hook events the identity is created for, comma-separated for the
 helm.sh/hook annotation: the install and upgrade events while the bootstrap,
 the databases hook or the cache claim hook renders, pre-delete while the
-pre-pull DaemonSet does (its cleanup Job runs then). Empty when no hook Job
-renders.
+pre-pull DaemonSet does (its cleanup Job runs then), the post events alone
+while only the ModelConfig reconcile of llmRouting
+(templates/llm/modelconfig-routing-hook.yaml) or the sign-in keys cleanup
+(templates/workspace-manager/signin-keys-cleanup.yaml) renders. Empty when no
+hook Job renders.
 */}}
 {{- define "agent-platform.hooks.events" -}}
 {{- $events := list -}}
 {{- if or (include "agent-platform.substrate.enabled" .) (include "agent-platform.postgres.databases" . | fromJsonArray) (include "agent-platform.modelServing.cacheClaimManaged" .) -}}
 {{- $events = list "pre-install" "pre-upgrade" "post-install" "post-upgrade" -}}
+{{- else if or (include "agent-platform.llmRouting.modelConfigs" .) (include "agent-platform.workspaceManager.signinKeysOrphan" .) -}}
+{{- $events = list "post-install" "post-upgrade" -}}
 {{- end -}}
 {{- if include "agent-platform.modelServing.prepull.enabled" . -}}
 {{- $events = append $events "pre-delete" -}}

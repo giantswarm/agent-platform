@@ -9,8 +9,8 @@
 # #328) and components.agentgateway on — agentgateway is part of every
 # installation and cannot be switched out, so nothing is detected: the
 # operator sets the toggle by the target's shape. Layer this file over the
-# installation's platform inputs (global.domain, global.identity, ingress.mode
-# agentgateway-*, gatewayApi.gateway.tls.secretName) and a BOM
+# installation's platform inputs (global.domain, global.identity,
+# gatewayApi.gateway.tls.secretName) and a BOM
 # (examples/customer-bom.yaml). The target runs cert-manager (the llm-d
 # controller's webhook certificate comes from a self-signed Issuer of the
 # release namespace) — part of every Giant Swarm installation; the well-known

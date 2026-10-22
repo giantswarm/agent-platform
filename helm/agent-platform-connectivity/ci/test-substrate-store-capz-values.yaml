@@ -8,9 +8,6 @@
 # s3://giantswarm-ci-substrate/kagent and hands the substrate release the
 # façade's S3 environment; this chart renders the cloud objects and the façade.
 components:
-  # muster-direct runs without the agentgateway component (on by default).
-  agentgateway:
-    enabled: false
   kagent:
     enabled: true
   substrate:
@@ -60,9 +57,8 @@ postgres:
     extensionImage:
       reference: gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
-# muster-direct: this case exercises the store, not routing.
+# This case exercises the store, not routing.
 ingress:
-  mode: muster-direct
   parentRefs:
     - name: giantswarm-default
       namespace: envoy-gateway-system

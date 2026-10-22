@@ -1,0 +1,28 @@
+# A person's own ChatGPT login (tests/verify-chatgpt-personal-login.py), layered
+# after tests/fixtures/workspaces-values.yaml and
+# tests/fixtures/workspaces-agents-values.yaml with Substrate on: the model
+# entry without apiKeySecret is the switch; muster keeps tokens encrypted and
+# signs people in to provider Apps; the kagent line and muster at the floors
+# that serve it.
+components:
+  kagent:
+    versionRange: ">=1.24.1-0 <1.25.0"
+  kagent-crds:
+    versionRange: ">=1.24.1-0 <1.25.0"
+  muster:
+    versionRange: ">=5.51.0 <6.0.0"
+muster:
+  muster:
+    oauth:
+      server:
+        encryptionKey: true
+      mcpClient:
+        enabled: true
+        publicUrl: https://muster.ci.example.com
+kagent:
+  modelConfigs:
+    - name: chatgpt-subscription
+      provider: OpenAI
+      model: gpt-5.5-codex
+      credentialType: chatgptOAuth
+      apiFormat: responses

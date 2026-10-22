@@ -1,41 +1,34 @@
 #!/usr/bin/env python3
-"""Assert the workspace-manager's public sign-in route (giantswarm/agent-platform#885).
+"""Assert the workspace-manager's public route (giantswarm/agent-platform#885).
 
-A person connects a workspace provider in the browser: the manager signs the
-browser in to Dex at <baseURL>/signin, starts the provider's consent at
-<baseURL>/connect/<instance>, and the provider redirects back to
-<baseURL>/callback/<instance>. Those three paths, and the key set that verifies the
-grants the manager issues as <baseURL> (<baseURL>/.well-known/jwks.json), are the
-manager's only public surface. Each case below pins one property:
+The grants the manager issues name its base URL as their issuer, so the key set
+that verifies them, <baseURL>/.well-known/jwks.json, is the manager's only public
+surface; a person's provider sign-in is muster's grant of the provider
+instance's App, so no sign-in, connect or callback path and no sign-in keys
+Secret is the manager's. Each case below pins one property:
 
-- the connectivity chart routes exactly /signin and /.well-known/jwks.json (Exact),
-  /connect and /callback (PathPrefix) on the base URL's host — derived https://workspace-manager.<global.domain>,
-  or the host of workspace-manager.oauth.baseURL, its port dropped — straight to the
-  manager's Service, on muster's public parents (ingress.parentRefs) unless the route
-  names its own; with the route off, or no host, no route;
+- the connectivity chart routes exactly /.well-known/jwks.json (Exact) on the base
+  URL's host — derived https://workspace-manager.<global.domain>, or the host of
+  workspace-manager.oauth.baseURL, its port dropped — straight to the manager's
+  Service, on muster's public parents (ingress.parentRefs) unless the route names
+  its own; with the route off, or no host, no route;
 - on that host, a Gateway API match over every HTTPRoute of the render routes
-  /signin, /.well-known/jwks.json, /connect/<i> and /callback/<i> to the manager and
-  nothing else of the manager's: MCP, the token exchange, its own OAuth server and
-  its metadata, and the probes are not routed;
+  /.well-known/jwks.json to the manager and nothing else of the manager's: MCP, the
+  retired sign-in, connect, callback and token paths, its own OAuth server and its
+  metadata, and the probes are not routed;
 - the network policies admit the route's Gateway on the Service port, both flavors:
   the Envoy edge of the parents' namespaces, or the agentgateway data plane when it
   is the edge; none with the route off;
-- the sign-in keys Secret workspace-manager.signin.keys names: with providers and
-  oauth.enabled, ONE Secret holding the current key id with 32 random bytes, kept on
-  uninstall; none without providers, with oauth off or with signinKeys.create false;
+- no sign-in keys Secret renders, with providers and oauth.enabled included;
 - the meta chart forwards the resolved base URL to the component release
-  (oauth.baseURL, derived or the explicit one) with the sign-in keys' names, and
-  NOTES prints the Dex redirect URI <baseURL>/signin and each provider instance's
-  callback URL;
-- the guards, in both charts: a provider instance with an OAuth client and no
-  callback host, with the route off and no explicit base URL, or with a base URL a
-  browser cannot reach (a cluster name, http off loopback); a bad key id or no
-  Secret name.
+  (oauth.baseURL, derived or the explicit one) and no signin block, and NOTES
+  prints the routed key set and muster's pin instead of a Dex redirect URI or
+  provider callback URLs;
+- a base URL the installation routes itself (the route off) renders.
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
 
-import base64
 import json
 import os
 import re
@@ -47,6 +40,8 @@ import tempfile
 HELM = os.environ.get("HELM", "helm")
 NAME = "workspace-manager"
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
+# The agents beside them: the meta chart refuses workspaces without kagent.
+AGENTS = "tests/fixtures/workspaces-agents-values.yaml"
 BASE = "https://workspaces.ci.example.com"
 HOST = "workspaces.ci.example.com"
 IDENTITY = [
@@ -59,9 +54,9 @@ CONN = ["--set", "ingress.parentRefs[0].name=edge", "--set", "ingress.parentRefs
         "--set", f"components.{NAME}.enabled=true", "-f", FIXTURE, *IDENTITY]
 # The chart-owned edge: the agentgateway data plane is the public Gateway.
 EDGE = ["--set", "gatewayApi.gateway.create=true", "--set", "gatewayApi.gateway.tls.secretName=wildcard", "--set", "ingress.parentRefs=null"]
-META = ["--set", "components.flux.enabled=false", "-f", FIXTURE]
-ROUTED = ("/signin", "/.well-known/jwks.json", "/connect/github", "/connect/gitlab", "/callback/github", "/callback/gitlab")
-INTERNAL = ("/mcp", "/mcp/", "/token", "/.well-known/jwks.json/x", "/.well-known/oauth-authorization-server",
+META = ["--set", "components.flux.enabled=false", "-f", FIXTURE, "-f", AGENTS]
+ROUTED = ("/.well-known/jwks.json",)
+INTERNAL = ("/signin", "/connect/github", "/connect/gitlab", "/callback/github", "/callback/gitlab", "/mcp", "/mcp/", "/token", "/.well-known/jwks.json/x", "/.well-known/oauth-authorization-server",
             "/.well-known/oauth-protected-resource", "/oauth/token", "/oauth/callback", "/oauth/authorize",
             "/oauth/register", "/healthz", "/readyz", "/metrics", "/", "/signin/x", "/signins", "/callbacks/github",
             "/connector/github")
@@ -174,16 +169,16 @@ def main(meta: str, connectivity: str) -> int:
     parsed = [r for r in routes(docs) if r["name"] == f"{NAME}-public"][0]
     if parsed["hostnames"] != [HOST]:
         fail(f"the route serves {parsed['hostnames']}, expected [{HOST}]")
-    if [sorted(r["matches"]) for r in parsed["rules"]] != [sorted([("Exact", "/signin"), ("Exact", "/.well-known/jwks.json"), ("PathPrefix", "/connect"), ("PathPrefix", "/callback")])]:
-        fail(f"the route's matches are not exactly /signin and /.well-known/jwks.json (Exact), /connect and /callback (PathPrefix):\n{route}")
+    if [sorted(r["matches"]) for r in parsed["rules"]] != [[("Exact", "/.well-known/jwks.json")]]:
+        fail(f"the route's matches are not exactly /.well-known/jwks.json (Exact):\n{route}")
     if parsed["rules"][0]["backends"] != [NAME] or "          port: 8080\n" not in route:
         fail(f"the route does not proxy straight to the {NAME} Service on 8080:\n{route}")
     if "  parentRefs:\n    - name: edge\n      namespace: envoy-gateway-system\n" not in route:
         fail(f"the route does not attach to muster's public parents (ingress.parentRefs):\n{route}")
     others = [r["name"] for r in routes(docs) if HOST in r["hostnames"] and r["name"] != f"{NAME}-public"]
     if others:
-        fail(f"other HTTPRoutes name the sign-in host: {others}")
-    ok(f"the route serves {HOST} with exactly /signin and /.well-known/jwks.json (Exact), /connect and /callback (PathPrefix) to {NAME}:8080 on muster's parents")
+        fail(f"other HTTPRoutes name the manager's host: {others}")
+    ok(f"the route serves {HOST} with exactly /.well-known/jwks.json (Exact) to {NAME}:8080 on muster's parents")
 
     # --- what the host routes ----------------------------------------------------------------
     for flags in ([], EDGE):
@@ -193,11 +188,11 @@ def main(meta: str, connectivity: str) -> int:
                 fail(f"{path} on {HOST} is not routed to {NAME} alone ({sorted(routed_to(everything, HOST, path))}) {' '.join(flags)}")
         for path in INTERNAL:
             if NAME in routed_to(everything, HOST, path):
-                fail(f"{path} on {HOST} reaches {NAME}: only the sign-in paths are public {' '.join(flags)}")
+                fail(f"{path} on {HOST} reaches {NAME}: only the key set is public {' '.join(flags)}")
         for r in everything:
             if r["name"] != f"{NAME}-public" and any(NAME in rule["backends"] for rule in r["rules"]):
-                fail(f"HTTPRoute {r['name']} reaches {NAME}: the sign-in route is its only one")
-    ok(f"on {HOST}: {', '.join(ROUTED)} reach {NAME}; MCP, the token exchange, the OAuth server and its metadata, the probes and look-alike paths do not "
+                fail(f"HTTPRoute {r['name']} reaches {NAME}: the key-set route is its only one")
+    ok(f"on {HOST}: {', '.join(ROUTED)} reach {NAME}; the retired sign-in, connect, callback and token paths, MCP, the OAuth server and its metadata, the probes and look-alike paths do not "
        "(front Gateway and chart-owned edge)")
 
     # --- the host: derived, explicit, with a port; off ---------------------------------------
@@ -238,62 +233,37 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"{flavor}: the route off still admits a Gateway:\n{closed}")
     ok("network policies, both flavors: the route's Envoy edge (its parents' namespaces) or the data plane admitted on the Service port; none with the route off")
 
-    # --- the sign-in keys Secret -----------------------------------------------------------------
-    secret = docs.get(("Secret", "workspace-manager-signin-keys"))
-    if not secret:
-        fail("providers with oauth on rendered no Secret workspace-manager-signin-keys")
-    data = re.findall(r"^  (\S+): (\S+)$", secret.split("\ndata:\n", 1)[1], re.M)
-    if [k for k, _ in data] != ["key-1"] or len(base64.b64decode(data[0][1])) != 32:
-        fail(f"the Secret does not hold exactly key-1 with 32 bytes:\n{secret}")
-    if "    helm.sh/resource-policy: keep\n" not in secret:
-        fail("the sign-in keys Secret is not kept on uninstall")
-    rotated = documents(helm(connectivity, [*CONN, "--set", f"{NAME}.signin.keys.current=key-2"]))[("Secret", "workspace-manager-signin-keys")]
-    if "  key-2: " not in rotated:
-        fail("signin.keys.current does not name the generated key")
-    # The fixture's own grant signing key goes with the providers and OAuth: the manager
-    # refuses it without them, and so does the render (verify-workspace-grant-key).
-    no_grant = ["--set", f"{NAME}.grant.signingKey=null"]
-    for flags, what in ((["--set", f"{NAME}.providers=null", *no_grant], "without providers"),
-                        (["--set", f"{NAME}.oauth.enabled=false", *no_grant], "with oauth off"),
-                        (["--set", "workspaceManager.signinKeys.create=false"], "with signinKeys.create false")):
+    # --- no sign-in keys Secret ---------------------------------------------------------------
+    for flags, what in (([], "with providers and oauth on"), (["--set", "workspaceManager.signinKeys.create=true"], "with the retired signinKeys.create")):
         if any(k == "Secret" and "signin" in n for k, n in documents(helm(connectivity, [*CONN, *flags]))):
-            fail(f"the sign-in keys Secret renders {what}")
-    ok("the sign-in keys Secret: the current key id with 32 random bytes, kept on uninstall, follows signin.keys.current; "
-       "none without providers, with oauth off or with signinKeys.create false")
+            fail(f"a sign-in keys Secret renders {what}: the person's provider token is muster's grant")
+    ok("no sign-in keys Secret, with providers and oauth on")
 
     # --- the meta chart: the forward and NOTES ----------------------------------------------------
     hr = documents(helm(meta, META))[("HelmRelease", NAME)]
-    for line in (f"      baseURL: {BASE}\n", "    signin:\n      keys:\n        current: key-1\n        secretName: workspace-manager-signin-keys\n"):
-        if line not in hr:
-            fail(f"the {NAME} HelmRelease lacks {line!r}")
+    if f"      baseURL: {BASE}\n" not in hr:
+        fail(f"the {NAME} HelmRelease lacks the base URL {BASE}")
+    if "\n    signin:" in hr:
+        fail(f"the {NAME} HelmRelease forwards a signin block: the manager keeps no sign-in")
     derived_hr = documents(helm(meta, [*META, "--set", f"{NAME}.oauth.baseURL=", "--set", "global.domain=example.org"]))[("HelmRelease", NAME)]
     if "      baseURL: https://workspace-manager.example.org\n" not in derived_hr:
         fail("the meta chart does not forward the derived base URL https://workspace-manager.<global.domain>")
     text = notes(meta, META)
-    for line in (f"    {BASE}/signin\n", f"    github: {BASE}/callback/github\n", f"    gitlab: {BASE}/callback/gitlab\n"):
+    for line in (f"Workspaces, base URL {BASE} (routed: /.well-known/jwks.json):\n",
+                 "  Provider sign-in: muster, pinned to provider instance github's App (issuer https://github.com/apps/ci-agents, OAuth client in Secret workspace-github)"):
         if line not in text:
             fail(f"NOTES lacks {line.strip()!r}:\n{text}")
-    ok("meta: the base URL forwarded (explicit, or derived from global.domain) with the sign-in keys' names; NOTES prints the Dex redirect URI "
-       "<baseURL>/signin and each instance's callback URL")
+    for gone in (f"{BASE}/signin", f"{BASE}/callback/"):
+        if gone in text:
+            fail(f"NOTES still prints {gone}")
+    ok("meta: the base URL forwarded (explicit, or derived from global.domain), no signin block; NOTES prints the key set and muster's pin, "
+       "no Dex redirect URI and no provider callback URL")
 
-    # --- the guards ------------------------------------------------------------------------------
-    for chart, flags in ((meta, META), (connectivity, [*CONN, "--set", "global.domain="])):
-        must_fail(chart, [*flags, "--set", f"{NAME}.oauth.baseURL="], "callback has no host", f"{chart}: an OAuth client without a host")
+    # --- a route of the installation's own -------------------------------------------------------
     for chart, flags in ((meta, [*META, "--set", "global.domain=example.org"]), (connectivity, CONN)):
-        must_fail(chart, [*flags, "--set", f"{NAME}.oauth.baseURL=", "--set", "workspaceManager.route.enabled=false"],
-                  "nothing routes", f"{chart}: the route off without an explicit base URL")
         helm(chart, [*flags, "--set", "workspaceManager.route.enabled=false"])
-        for url in ("http://workspace-manager.agent-platform.svc:8080", "https://workspace-manager.agent-platform.svc.cluster.local",
-                    "http://workspaces.example.org"):
-            must_fail(chart, [*flags, "--set", f"{NAME}.oauth.baseURL={url}"], "is not reachable from the person's browser",
-                      f"{chart}: base URL {url}")
         helm(chart, [*flags, "--set", f"{NAME}.oauth.baseURL=http://workspace-manager.lab.localhost:8080"])
-        must_fail(chart, [*flags, "--set", f"{NAME}.signin.keys.current=Key_1"], "is not a key id", f"{chart}: a bad key id")
-        must_fail(chart, [*flags, "--set", f"{NAME}.signin.keys.secretName="], "signin.keys.secretName is empty", f"{chart}: no Secret name")
-    helm(meta, [*META, "--set", f"{NAME}.oauth.baseURL=", "--set", f"{NAME}.providers[0].values.oauth=null",
-                "--set", f"{NAME}.providers[1].values.oauth=null"])
-    ok("guards, both charts: an OAuth client without a host, the route off without an explicit base URL, a cluster name or http off loopback, "
-       "a bad key id, no Secret name; providers without an OAuth client and an explicit base URL with the route off pass")
+    ok("both charts: the route off with an explicit base URL and a loopback base URL render")
     return 0
 
 

@@ -50,10 +50,6 @@ SERVING = [
     "--set", "components.kserve-llmisvc-crd.enabled=true",
     "--set", "components.kserve-llmisvc-resources.enabled=true",
     "--set", "components.modelServing.enabled=true",
-    # The serving layer without the agentgateway data plane, which became the
-    # default (#252) and is not what this compares; origin/main renders the same.
-    "--set", "ingress.mode=muster-direct",
-    "--set", "components.agentgateway.enabled=false",
 ]
 UNTAINTED = ["--set", "modelServing.gpuPool.taint.key="]
 POOL_TOL = {"effect": "NoSchedule", "key": "nvidia.com/gpu", "operator": "Exists"}

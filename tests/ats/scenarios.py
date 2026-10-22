@@ -59,6 +59,14 @@ LAB_CALLBACK_PORT = 18763
 # muster's in-cluster Service port, the remote end of the port-forward.
 MUSTER_SERVICE_PORT = 8090
 
+# The MCP endpoint in the lab: the agentgateway data plane, the platform's one
+# ingress topology (client -> agentgateway /mcp -> muster), reached through a
+# port-forward to its Service. The Service carries the data-plane Gateway's name
+# (the meta chart's gateway.name) and its listener's port.
+LAB_MCP_PORT = 8091
+AGENTGATEWAY_SERVICE = "agentgateway"
+AGENTGATEWAY_SERVICE_PORT = 8080
+
 # The local end of every kubectl port-forward: the address the test connects to
 # once a forward is up. A property of port-forwarding, not of any one cluster.
 LOOPBACK = "127.0.0.1"
@@ -156,8 +164,15 @@ class Scenario:
     # configured with: the two must agree, because muster's OAuth metadata
     # echoes its own base URL, so the install pins it with `--set`.
     muster_base_url: str = f"http://localhost:{LAB_MUSTER_PORT}"
-    # port-forward: a kubectl port-forward to svc/muster on the URL's port.
-    # hostname: the URL is a real hostname served through the Gateway.
+    # The MCP endpoint every MCP call of the tests goes to: agentgateway's /mcp,
+    # which fronts muster. Behind a real hostname it is the base URL's /mcp (the
+    # public /mcp route ends on the data plane); on kind, with no edge Gateway,
+    # the data plane's Service on its own loopback port. muster's OAuth
+    # endpoints stay on the base URL either way.
+    mcp_url: str = f"http://localhost:{LAB_MCP_PORT}/mcp"
+    # port-forward: kubectl port-forwards to svc/muster and to the data plane's
+    # Service on the URLs' ports.
+    # hostname: the URLs are a real hostname served through the Gateway.
     muster_reach: str = VIA_PORT_FORWARD
 
     # --- the OAuth redirect --------------------------------------------------
@@ -186,6 +201,11 @@ class Scenario:
         """The local port of the port-forward to svc/muster, from the base URL:
         the port is part of the URL muster is configured with."""
         return _port_of(self.muster_base_url)
+
+    @property
+    def mcp_port(self) -> int:
+        """The local port of the port-forward to the data plane, from the MCP URL."""
+        return _port_of(self.mcp_url)
 
     @property
     def values_files(self) -> List[Path]:
@@ -233,6 +253,7 @@ def _eks() -> Scenario:
         ca_secret="",
         install_lab_dex=False,
         muster_base_url="",
+        mcp_url="",
         muster_reach=VIA_HOSTNAME,
         install_timeout="20m",
         uninstall_timeout="10m",
@@ -261,6 +282,10 @@ def load() -> Scenario:
     domain = os.environ.get("E2E_DOMAIN")
     if not muster_base_url and domain and base.muster_reach == VIA_HOSTNAME:
         muster_base_url = f"https://muster.{domain}"
+    # Behind a hostname the public /mcp route is agentgateway's, on muster's host.
+    mcp_url = _env(("ATS_MCP_URL",), base.mcp_url)
+    if not mcp_url and muster_base_url:
+        mcp_url = f"{muster_base_url}/mcp"
 
     scenario = Scenario(
         name=base.name,
@@ -275,6 +300,7 @@ def load() -> Scenario:
         ca_secret=_env(("ATS_IDP_CA_SECRET", "E2E_IDP_CA_SECRET"), base.ca_secret),
         install_lab_dex=base.install_lab_dex,
         muster_base_url=muster_base_url,
+        mcp_url=mcp_url,
         muster_reach=_env(("ATS_MUSTER_REACH",), base.muster_reach),
         callback=_env(("ATS_OAUTH_CALLBACK",), base.callback),
         install_timeout=_env(("ATS_INSTALL_TIMEOUT",), base.install_timeout),
@@ -331,5 +357,5 @@ def _display(path: Path) -> str:
 def summary(scenario: Scenario) -> str:
     values = ", ".join(_display(p) for p in scenario.values_files)
     return (f"scenario {scenario.name}: values [{values}], issuer {scenario.issuer_url}, "
-            f"muster {scenario.muster_base_url} ({scenario.muster_reach}), "
+            f"muster {scenario.muster_base_url}, MCP {scenario.mcp_url} ({scenario.muster_reach}), "
             f"lab Dex {'installed' if scenario.install_lab_dex else 'not installed'}")

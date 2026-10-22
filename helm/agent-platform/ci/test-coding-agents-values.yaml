@@ -1,5 +1,6 @@
-# A coding agent's Harness, the entry an installation copies from
-# kagent.harnesses in values.yaml (verify-kagent-harness,
+# A coding agent's Harnesses, the entries an installation copies from
+# kagent.harnesses in values.yaml, and each one's egress origins from
+# agent-manager.harness.egress (verify-kagent-harness,
 # verify-components-charts).
 kagent:
   harnesses:
@@ -9,3 +10,36 @@ kagent:
       env:
         - name: KAGENT_PROPAGATE_TOKEN
           value: "true"
+    - name: codex
+      runtime: codex
+      snapshotLocation: s3://ci-agent-snapshots/codex
+      env:
+        - name: KAGENT_PROPAGATE_TOKEN
+          value: "true"
+    # omp is a BYO Harness: the kagent line's omp-harness by digest (the
+    # floor release's runtimeImages.ompHarness.digest), its command and the
+    # display name the portal shows.
+    - name: omp
+      runtime: byo
+      displayName: oh-my-pi
+      image: gsoci.azurecr.io/giantswarm/kagent/omp-harness@sha256:92c442a23fc482a871c88adddaa4b06c6ca83373c09b171c5a230a20e5055b90
+      command: [/usr/local/bin/kagent-omp]
+      snapshotLocation: s3://ci-agent-snapshots/omp
+agent-manager:
+  harness:
+    egress:
+      claude:
+        - https://github.com
+        - https://api.github.com
+        - https://codeload.github.com
+        - https://*.githubusercontent.com
+      codex:
+        - https://github.com
+        - https://api.github.com
+        - https://codeload.github.com
+        - https://*.githubusercontent.com
+      omp:
+        - https://github.com
+        - https://api.github.com
+        - https://codeload.github.com
+        - https://*.githubusercontent.com

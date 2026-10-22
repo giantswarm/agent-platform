@@ -54,7 +54,7 @@ FLEET_APIS = [
     "--api-versions", "gateway.networking.k8s.io/v1",
     "--api-versions", "gateway.envoyproxy.io/v1alpha1",
 ]
-# Makefile.custom.mk's VM: the all-modes ingress guard satisfied, the Harness's
+# Makefile.custom.mk's VM: the ingress guard satisfied, the Harness's
 # snapshot store set, the fleet's API groups served.
 VM = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", *FLEET_APIS]
 ENGINE_OFF = ["--set", "components.flux.enabled=false"]
@@ -70,7 +70,7 @@ KNOB_KEY = ["--set", "gitops.target.kubeConfig.secretRef.key=value"]
 # the Substrate egress and muster's own in-cluster MCP egress.
 CONN_FULL = [
     *VM,
-    "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster",
+    "--set", "components.agentgateway.enabled=true",
     "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "components.substrate.enabled=true",
     "--set", "components.substrate-crds.enabled=true", "--set", "networkPolicy.musterInClusterMcpPorts[0]=8080",
 ]
@@ -119,7 +119,9 @@ def releases(manifest: str) -> set[str]:
 def targeted(doc: str) -> str:
     """A default-render Flux document as the target knob places it (#688): its own,
     its chartRef's and its dependsOn names prefixed with the release name, its
-    workloads and their Helm storage in agent-platform."""
+    workloads and their Helm storage in agent-platform, so the namespace a
+    release's values name for the platform's pods (the kagent controller's
+    NetworkPolicy peers, controller.networkPolicy.from) is agent-platform too."""
     out, section = [], ""
     for line in doc.split("\n"):
         if re.match(r"^  \S", line):
@@ -128,6 +130,8 @@ def targeted(doc: str) -> str:
             line = line.replace("name: ", "name: t-", 1)
         elif section in ("chartRef:", "dependsOn:") and re.match(r"^    (- )?name: ", line):
             line = line.replace("name: ", "name: t-", 1)
+        elif re.match(r"^ +kubernetes\.io/metadata\.name: default$", line):
+            line = line.replace(": default", ": agent-platform")
         elif line == "  targetNamespace: default":
             out.append("  targetNamespace: agent-platform")
             line = "  storageNamespace: agent-platform"
@@ -326,7 +330,7 @@ def check_toggles(meta: str, connectivity: str) -> None:
         if marker in off:
             sys.exit(f"FAIL: connectivity still renders {marker!r} with components.muster.enabled=false")
     # Without muster there is no ingress topology (#252): the data plane in front
-    # of it goes with the /mcp route, whatever ingress.mode says. The Role that
+    # of it goes with the /mcp route. The Role that
     # lists muster's MCPServers to every signed-in person (#706) goes too.
     kinds = {kind for kind, _ in documents(on)} - {kind for kind, _ in documents(off)}
     if kinds != {"HTTPRoute", "Gateway", "AgentgatewayParameters", "AgentgatewayPolicy", "Role"}:

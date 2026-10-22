@@ -43,6 +43,7 @@ that accepts everything cannot pass.
 Usage: verify-kagent-crds.py <connectivity chart dir>
 """
 import glob
+import importlib.util
 import json
 import os
 import re
@@ -53,6 +54,11 @@ import urllib.request
 
 import yaml
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+_spec = importlib.util.spec_from_file_location("components_charts", os.path.join(HERE, "verify-components-charts.py"))
+cc = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(cc)
+KAGENT_CRDS_CHART = "oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent-crds"
 # The meta chart's values: the floor of components.kagent-crds.versionRange is
 # the kagent line's release the platform pins, so a re-pin moves this test too.
 META_VALUES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "helm", "agent-platform", "values.yaml")
@@ -103,12 +109,17 @@ def fail(msg: str) -> None:
 
 
 def pinned_ref() -> str:
-    """The tag of the floor of the meta chart's components.kagent-crds range."""
+    """The tag of the floor of the meta chart's components.kagent-crds range;
+    while the floor is unpublished (UNRELEASED), the tag of the chart
+    verify-components-charts renders against."""
     rng = yaml.safe_load(open(META_VALUES))["components"]["kagent-crds"]["versionRange"]
     m = re.match(r">=\s*(\d+\.\d+\.\d+(?:-rc\.\d+)?)\s", rng)
     if not m:
         fail(f"components.kagent-crds.versionRange {rng!r} has no >=X.Y.Z or >=X.Y.Z-rc.N floor to read the pinned release from")
-    return "v" + m.group(1)
+    version = m.group(1)
+    if not os.environ.get("KAGENT_CRDS_DIR") and version == cc.UNRELEASED.get("kagent-crds"):
+        version = cc.floor_chart("kagent-crds", KAGENT_CRDS_CHART, rng)
+    return "v" + version
 
 
 KAGENT_LINE_REF = pinned_ref()
@@ -233,8 +244,13 @@ def check_rules(kind: str, spec: dict, path: str, errors: list[str]) -> None:
                 errors.append(f"{path}.{key}: the {owner} block on a {provider} ModelConfig (the CRD refuses it)")
         if "apiKeySecretKey" in spec and "apiKeySecret" not in spec:
             errors.append(f"{path}.apiKeySecretKey: set without apiKeySecret")
-        if "apiKeySecret" in spec and "apiKeySecretKey" not in spec and provider not in ("Bedrock", "SAPAICore"):
+        chatgpt = (spec.get("openAI") or {}).get("credentialType") == "chatgptOAuth"
+        if "apiKeySecret" in spec and "apiKeySecretKey" not in spec and provider not in ("Bedrock", "SAPAICore") and not chatgpt:
             errors.append(f"{path}.apiKeySecret: set without apiKeySecretKey")
+        # Without apiKeySecret it is the Session person's own login (the kagent line from
+        # 1.24.0, which agent-platform.validateChatGPTPersonalLogin holds the range to).
+        if chatgpt and "apiKeySecretKey" in spec:
+            errors.append(f"{path}: a ChatGPT login (openAI.credentialType chatgptOAuth) takes no apiKeySecretKey")
         if spec.get("apiKeyPassthrough") and spec.get("apiKeySecret"):
             errors.append(f"{path}: apiKeyPassthrough and apiKeySecret are mutually exclusive")
 

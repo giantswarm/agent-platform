@@ -20,7 +20,8 @@ MCP server tier -- the servers for the infrastructure the platform runs on,
 next to the platform's own management surface (agent-manager, model-manager:
 agent-platform, stamped by their charts) and the servers an installation
 registers (no label). The portal's MCP servers page, the toolset presets and
-the docs group servers by it.
+the docs group servers by it; it names the server by mcpServer.displayName
+(the ui.giantswarm.io/display-name annotation) when set.
 
 mcp-kubernetes.mcpServer picks one of three shapes:
   - enabled: false renders no CR; the registration is agent-platform-mcps'
@@ -53,6 +54,10 @@ metadata:
     muster.giantswarm.io/type: mcp-kubernetes
     agent-platform.giantswarm.io/tool-group: infrastructure
     {{- include "labels.common" . | nindent 4 }}
+  {{- with dig "displayName" "" $reg }}
+  annotations:
+    ui.giantswarm.io/display-name: {{ . | quote }}
+  {{- end }}
 spec:
   autoStart: true
   type: streamable-http

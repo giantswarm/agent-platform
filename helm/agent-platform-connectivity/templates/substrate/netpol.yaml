@@ -4,7 +4,7 @@ what (the substrate chart's arguments and Service definitions):
 
   actors ── (atunnel, CONNECT) ──▶ atenet-egress :8443 ──▶ the actors' destinations:
         muster (tool calls), the kagent controller :8083 (A2A, task and session
-        state), the LLM provider (world:443, or the agentgateway LLM listener),
+        state), the LLM provider (world, or the agentgateway LLM listener),
         the built-in tool server when it is on, cluster:443/10443 (a public
         hostname behind an internal LB), the OTLP gateway kagent's exporters
         send to (the actors' traces and logs, kagent.otel — the pods of the
@@ -14,7 +14,13 @@ what (the substrate chart's arguments and Service definitions):
         credential provider k8s-credential-provider :50051 for the Secret
         values a policy's credential injection names (the Substrate line from
         1.1.0; without this hop every injection ends in UpstreamCallTimeout
-        and the golden boot's git fetch gets 403) — nothing
+        and the golden boot's git fetch gets 403), and the plugin
+        google-access-token-credential-provider :50051 for a Vertex AI
+        ModelConfig's access token (without it the turn fails with
+        "credential provider google-access-token.k8s.io unavailable"), and with
+        workspaces muster :50051 for a workspace Session's git and GitHub API
+        credentials (without it "credential provider muster.giantswarm.io
+        unavailable") — nothing
         leaves a worker pod for those destinations directly; the sandbox's
         outbound traffic is tunnelled to atenet-egress, so the actors' egress
         allow-list lives on atenet-egress and the worker pods reach only the
@@ -38,6 +44,9 @@ what (the substrate chart's arguments and Service definitions):
   ate-controller, dns, podcertificate-controller, k8s-credential-provider ──▶
         the apiserver (and ate-controller ──▶ ate-api :443); dns answers the
         actors' lookups; the credential provider reads the agents' Secrets.
+  muster ──▶ ate-idp-server :8443 (the Service idp :443): the key set of the
+        actor-JWT issuer, which muster verifies a Session's injected actor JWT
+        against; ate-idp-server dials nothing.
   the bundled stores, while they run (substrate.postgres resolving to the
         bundled StatefulSet, substrate.rustfs.enabled): Postgres `app: postgres`
         :5432 ◀── ate-api-server; rustfs `app: rustfs` :9000 ◀── ate-api-server,
@@ -50,14 +59,15 @@ what (the substrate chart's arguments and Service definitions):
   k8s-credential-provider 9090, the agentgateway sidecars 15020) —
   admitted from the cluster entity, as the platform's other metrics ports are.
 
-Contract for actor authors: an actor reaches the world on 443/TCP only (the
-substrate-atenet-egress rule below), plus the destinations listed above. The
-cluster policy is enforced at the node, before the actor's egress policy is
-consulted: plaintext HTTP to port 80, or any other port, is dropped and the
-actor sees a 503 from the egress gateway after about 11 s, where a denial by
-the actor's egress policy answers 403 at once. The way out is HTTPS; a host
-model server is opened by its own rule, from the address the ModelConfigs carry. docs/substrate-security.md
-("What an actor can reach, and how a refusal looks") carries the table.
+Contract for actor authors: the egress gateway reaches the world on every TCP
+port (the substrate-atenet-egress rule below), plus the destinations listed
+above, and the actor's egress policy is the control on where an actor
+connects: an origin it declares on any port is reached, one it does not
+declare answers 403 at once. A host model server, which may sit on a node of
+the cluster outside the world entity, is opened by its own rule, from the
+address the ModelConfigs carry. The instance metadata services and Azure's WireServer are denied
+whatever a policy declares. docs/substrate-security.md ("What an actor can
+reach, and how a refusal looks") carries the table.
 
 The kubernetes flavour renders the ingress policies only — the chart's
 kubernetes flavour restricts what reaches a workload and leaves egress open,
@@ -76,12 +86,15 @@ the render.
 {{- $pgMode := include "agent-platform.substrate.postgresMode" . }}
 {{- $rustfs := dig "rustfs" "enabled" false (.Values.substrate | default dict) }}
 {{- $s3proxy := include "agent-platform.substrateStore.s3proxy" . }}
-{{- /* kagent's built-in tool server, where the kagent chart renders it (the
-agent-platform.kagentTools.* helpers, _helpers.tpl). */}}
-{{- $toolsEnabled := include "agent-platform.kagentTools.enabled" . }}
-{{- $toolsNs := include "agent-platform.kagentTools.namespace" . }}
-{{- $toolsPort := include "agent-platform.kagentTools.port" . }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
+{{- $musterOn := and .Values.muster.enabled (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
+{{- /* The workers of the Organizations' namespaces (tenants.organizations.enabled,
+agent-platform#1036): agent-manager's tenant reconciler puts a WorkerPool in
+each labelled namespace that holds an agent, with a copy of the workers' own
+policy (its tenants.networkPolicy.names: substrate-workers in the cilium
+flavor, substrate-workers-ingress in the kubernetes one). The policies here
+admit them wherever they admit the kagent namespace's workers. */}}
+{{- $orgs := include "agent-platform.tenants.organizations" . }}
 {{- /* The host model servers an actor may dial for inference: the address
 model-manager writes into the ModelConfigs (agentHost, falling back to the
 endpoint it dials itself), split for the policy. Empty unless a model-manager
@@ -425,6 +438,9 @@ spec:
               operator: In
               values:
                 - {{ $kagentNs }}
+        {{- if $orgs }}
+        {{- include "agent-platform.tenants.organizationWorkers" "cilium" | nindent 8 }}
+        {{- end }}
       toPorts:
         - ports:
             - port: "443"
@@ -439,11 +455,14 @@ spec:
 # on 8443; every connection an actor opens leaves from here, so this is where
 # the actors' destinations are allowed: muster (tool calls as the caller), the
 # kagent controller (A2A, sessions), the LLM provider — through the
-# agentgateway LLM listener when llmRouting is on, the provider's endpoint on
-# world:443 either way — the built-in tool server when it is on, the OTLP
-# gateway of kagent's exporters (the actors' traces and logs), and
-# cluster:443/10443 (muster's OAuth endpoints on the public hostname resolve to
-# an internal LB VIP; 10443 is the Envoy listener after an Azure LB DNAT).
+# agentgateway LLM listener when llmRouting is on, the provider's endpoint in
+# the world either way — the built-in tool server when it is on, the OTLP
+# gateway of kagent's exporters (the actors' traces and logs), the world on
+# every TCP port (the origins the actors' egress policies declare, on whatever
+# port they name: the policy is the control, this rule does not second-guess
+# it), and cluster:443/10443 (muster's OAuth endpoints on the public hostname
+# resolve to an internal LB VIP; 10443 is the Envoy listener after an Azure LB
+# DNAT).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -464,6 +483,9 @@ spec:
               operator: In
               values:
                 - {{ $kagentNs }}
+        {{- if $orgs }}
+        {{- include "agent-platform.tenants.organizationWorkers" "cilium" | nindent 8 }}
+        {{- end }}
       toPorts:
         - ports:
             - port: "8443"
@@ -500,6 +522,18 @@ spec:
         - ports:
             - port: "50051"
               protocol: TCP
+    {{- if and $kagentOn (include "agent-platform.componentEnabled" (dict "root" . "name" "google-access-token-credential-provider")) }}
+    # The Google access-token credential provider plugin, which the Substrate
+    # chart routes the class google-access-token.k8s.io to (a Vertex AI
+    # ModelConfig's token), asked per request like the bundled provider.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: google-access-token-credential-provider
+      toPorts:
+        - ports:
+            - port: "50051"
+              protocol: TCP
+    {{- end }}
     {{- if and $kagentOn .Values.muster.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
     - toEndpoints:
         - matchLabels:
@@ -509,6 +543,15 @@ spec:
         - ports:
             - port: {{ include "agent-platform.musterServicePort" . | quote }}
               protocol: TCP
+            {{- if include "agent-platform.workspaces.enabled" . }}
+            # muster's credential provider (FetchSecret), which the egress
+            # gateway asks for a workspace Session's ate-secret://muster.giantswarm.io
+            # credentials (substrate.credentialProvider.additionalProviders);
+            # without it every git and GitHub API call of the Session ends in
+            # "credential provider muster.giantswarm.io unavailable".
+            - port: "50051"
+              protocol: TCP
+            {{- end }}
     {{- end }}
     {{- if $kagentOn }}
     - toEndpoints:
@@ -532,7 +575,7 @@ spec:
     {{- end }}
     {{- if (include "agent-platform.llmRouting" .) }}
     # Model inference through the agentgateway LLM listener. Additive: the
-    # world:443 rule below still stands, so a direct call to the provider keeps
+    # world rule below still stands, so a direct call to the provider keeps
     # working.
     - toEndpoints:
         - matchLabels:
@@ -543,20 +586,9 @@ spec:
             - port: {{ .Values.llmRouting.listener.port | quote }}
               protocol: TCP
     {{- end }}
-    {{- if $toolsEnabled }}
-    # The actors' calls to the built-in tool server, where the kagent chart
-    # renders it (the controller's discovery of it is templates/kagent/netpol.yaml).
-    - toEndpoints:
-        - matchLabels:
-            app.kubernetes.io/name: kagent-tools
-            io.kubernetes.pod.namespace: {{ $toolsNs }}
-      toPorts:
-        - ports:
-            - port: {{ $toolsPort | quote }}
-              protocol: TCP
-    {{- end }}
-    {{- /* A host model server is neither on 443 nor HTTPS, so the world rule
-           below does not reach it: an actor whose ModelConfig points at an
+    {{- /* A host model server may sit on a node of the cluster (the host or
+           remote-node entity) or behind a name that resolves into it, where
+           the world rule below does not reach it: an actor whose ModelConfig points at an
            Ollama, a Lemonade Server or an LM Studio on the host needs that
            address and port opened. model-manager's own policy opens the
            endpoint it manages models through; this is the inference path, at
@@ -588,11 +620,13 @@ spec:
               protocol: TCP
     {{- end }}
     {{- end }}
+    # Every TCP port (port 0 is Cilium's wildcard): the actors' egress policy
+    # decides which origin, on which port, an actor reaches.
     - toEntities:
         - world
       toPorts:
         - ports:
-            - port: "443"
+            - port: "0"
               protocol: TCP
     - toEntities:
         - cluster
@@ -602,6 +636,15 @@ spec:
               protocol: TCP
             - port: "10443"
               protocol: TCP
+  # The node's cloud identity stays out of reach whatever an egress policy
+  # declares: the instance metadata services (link-local, AWS's IPv6 endpoint)
+  # and Azure's WireServer serve plaintext on ports the world rule above now
+  # admits. A deny wins over every allow.
+  egressDeny:
+    - toCIDRSet:
+        - cidr: 169.254.0.0/16
+        - cidr: 168.63.129.16/32
+        - cidr: fd00:ec2::254/128
 ---
 # dns: the actors' resolver (CoreDNS with a controller that writes the
 # Corefile from the router's Service); it forwards to the cluster DNS.
@@ -625,6 +668,9 @@ spec:
               operator: In
               values:
                 - {{ $kagentNs }}
+        {{- if $orgs }}
+        {{- include "agent-platform.tenants.organizationWorkers" "cilium" | nindent 8 }}
+        {{- end }}
       toPorts:
         - ports:
             - port: "53"
@@ -638,7 +684,7 @@ spec:
 ---
 # k8s-credential-provider: the egress gateway asks it (50051, mTLS) for the
 # Secret values a policy's credential injection names; it reads those Secrets
-# from the apiserver and nothing else. Prometheus scrapes 9090.
+# from the apiserver. Prometheus scrapes 9090.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -665,9 +711,82 @@ spec:
             - port: "9090"
               protocol: TCP
   egress:
+    {{- with ((((.Values.networkPolicy).substrate).credentialProvider).egressFQDNs) }}
+    {{- include "agent-platform.dnsEgressWithProxy" $ | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+    - toFQDNs:
+        {{- toYaml . | nindent 8 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- else }}
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
     - toEntities:
         - kube-apiserver
+    {{- end }}
+---
+# ate-idp-server: serves the actor-JWT issuer's discovery document and key set
+# (8443, behind the Service idp on 443) from the mounted signing pool; muster,
+# which verifies the actor JWTs the egress gateway injects
+# (muster.credentialProvider.actorBearer), reads it, and the kubelet probes it.
+# It dials nothing.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: substrate-ate-idp-server
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ate-idp-server
+  ingress:
+    {{- if $musterOn }}
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+    {{- end }}
+    - fromEntities:
+        - host
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+{{- if $musterOn }}
+---
+# muster ──▶ ate-idp-server :8443: the actor-JWT issuer's key set, whatever
+# networkPolicy.musterInClusterMcpPorts opens.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: muster-to-substrate-idp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            app: ate-idp-server
+            io.kubernetes.pod.namespace: {{ $ns }}
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP
+{{- end }}
 ---
 # podcertificate-controller: signs the Substrate pods' PodCertificateRequests
 # from the two CA pools; it needs the apiserver and nothing else.
@@ -946,6 +1065,9 @@ spec:
             matchExpressions:
               - key: ate.dev/worker-pool
                 operator: Exists
+        {{- if $orgs }}
+        {{- include "agent-platform.tenants.organizationWorkers" "kubernetes" | nindent 8 }}
+        {{- end }}
       ports:
         - port: 8443
           protocol: TCP
@@ -982,6 +1104,62 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: substrate-ate-idp-server-ingress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: ate-idp-server
+  policyTypes: [Ingress]
+  {{- if $musterOn }}
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: muster
+      ports:
+        - port: 8443
+          protocol: TCP
+  {{- else }}
+  ingress: []
+  {{- end }}
+{{- if $musterOn }}
+---
+# muster's egress is default-deny beyond the union of the policies selecting it
+# (-mcp-egress): the actor-JWT issuer's key set is opened here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: muster-to-substrate-idp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: muster
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchLabels:
+              app: ate-idp-server
+      ports:
+        - port: 8443
+          protocol: TCP
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: substrate-dns-ingress
   namespace: {{ $ns }}
   labels:
@@ -1000,6 +1178,9 @@ spec:
             matchExpressions:
               - key: ate.dev/worker-pool
                 operator: Exists
+        {{- if $orgs }}
+        {{- include "agent-platform.tenants.organizationWorkers" "kubernetes" | nindent 8 }}
+        {{- end }}
       ports:
         - port: 53
           protocol: UDP

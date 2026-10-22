@@ -23,7 +23,7 @@ below pins one property:
   without it; NOTES prints them; no null anywhere in the release's values;
 - the same with the connectivity release's key (no own reference, providers and
   oauth.enabled); nothing without a grant key: no providers, oauth off,
-  grantKey.create false; nothing with kagent off;
+  grantKey.create false; workspaces with kagent off fail the render;
 - the derivation follows fullnameOverride, service.port, gitops.targetNamespace and
   components.workspace-manager.targetNamespace (the key set), global.domain (the
   issuer) and grant.audience; a value the kagent block sets for one of the three
@@ -32,18 +32,34 @@ below pins one property:
   unless the block opts in);
 - without the derivation an own block reaches the release as written, and one set in
   part fails the render naming the keys (the kagent chart needs all three);
+- muster's credentialProvider with workspaces and Substrate on: without a provider pin
+  (no providers, oauth off) it releases nothing and the render fails naming
+  muster.muster.credentialProvider.releasable (giantswarm/agent-platform#1103); an own
+  releasable alone turns it on;
+- with Substrate on muster serves FetchSecret and mounts Substrate's pod certificates, which
+  only releases after muster publish and issue: until the substrate release is Ready
+  (offline: never) its install and upgrade do not wait for its pods (disableWait);
+  nothing with workspaces off (giantswarm/agent-platform#1107);
 - the guards: a kagent range whose floor is below 1.6.0
   (agent-platform.kagent.sessionAdmissionFloor; an exact pin and a release candidate
   of 1.6.0 judged alike), no issuer (neither global.domain nor oauth.baseURL), a
   userIdClaim other than email — each only with the admission derived;
 - the kagent chart at the range's floor renders the three KAGENT_SESSION_ADMISSION_JWT_*
-  entries of the controller ConfigMap from the forwarded block, and the first chart that
+  entries and KAGENT_SESSION_CREDENTIAL_AUTHORITY (the workspace write path, from
+  kagent 1.15.0) of the controller ConfigMap from the forwarded block, and the first chart that
   takes the opt-in renders KAGENT_SESSION_ADMISSION_JWT_ALLOW_HTTP "true" from it
-  (network: gsoci).
+  (network: gsoci);
+- kagent's actor-JWT provider muster (giantswarm/giantswarm#38607): while muster trusts
+  the actor JWT the kagent release carries controller.session.actorJWTProviders.muster,
+  the host of the agents' in-cluster MCP URL and muster's audience (its own
+  actorBearer.audience, else oauth.server.baseUrl); an own key stands; nothing with the
+  actor bearer off or without an audience; the kagent chart at the range's floor renders
+  KAGENT_SESSION_ACTOR_JWT_PROVIDERS from it.
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
 
+import importlib.util
 import json
 import os
 import re
@@ -53,12 +69,18 @@ import sys
 import tempfile
 
 HELM = os.environ.get("HELM", "helm")
+HERE = os.path.dirname(os.path.abspath(__file__))
+_spec = importlib.util.spec_from_file_location("components_charts", os.path.join(HERE, "verify-components-charts.py"))
+cc = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(cc)
 NAME = "workspace-manager"
 NAMESPACE = "agent-platform"
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
+# The agents beside them: the meta chart refuses workspaces without kagent.
+AGENTS = "tests/fixtures/workspaces-agents-values.yaml"
 KAGENT_CHART = "oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent"
 CI = ["--set", "components.flux.enabled=false"]
-ON = ["-f", FIXTURE]
+ON = ["-f", FIXTURE, "-f", AGENTS]
 KAGENT = ["--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "kagent.harness.snapshotLocation=s3://ci/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
 IDENTITY = [
     "--set", "global.domain=ci.example.com",
@@ -74,6 +96,13 @@ WANT = {"jwksURL": JWKS, "issuer": ISSUER, "audience": "kagent", "allowHTTP": "t
 # The first kagent chart whose Session admission refuses a plain http jwksURL without
 # controller.session.admission.jwt.allowHTTP.
 ALLOW_HTTP_CHART = "1.11.5-rc.1"
+# A kagent range below agent-platform.kagent.authenticationFloor renders only
+# outside the trusted-proxy mode, in which the meta chart derives the
+# controller's verification of people's tokens.
+BELOW_AUTH_FLOOR = ["--set", "kagent.controller.auth.mode=insecure"]
+MUSTER_BASE_URL = ["--set", "muster.muster.oauth.server.baseUrl=https://muster.ci.example.com"]
+ACTOR_JWT_PROVIDERS = ("        actorJWTProviders:\n          muster:\n            audience: https://muster.ci.example.com\n"
+                       f"            hostname: muster.{NAMESPACE}.svc.cluster.local\n")
 ENV = {"jwksURL": "KAGENT_SESSION_ADMISSION_JWT_JWKS_URL", "issuer": "KAGENT_SESSION_ADMISSION_JWT_ISSUER",
        "audience": "KAGENT_SESSION_ADMISSION_JWT_AUDIENCE"}
 
@@ -156,13 +185,15 @@ def notes(chart: str, flags: list) -> str:
 
 
 def kagent_floor(chart: str) -> str:
-    """The floor of components.kagent.versionRange as values.yaml pins it."""
+    """The floor of components.kagent.versionRange as values.yaml pins it; while
+    the floor is unpublished (UNRELEASED), the chart verify-components-charts
+    renders against."""
     with open(f"{chart}/values.yaml", encoding="utf-8") as f:
         entry = block(f.read(), "kagent", 2)
     m = re.search(r'^    versionRange: ">=([0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?)[ "]', entry, re.M)
     if not m:
         fail("components.kagent.versionRange in values.yaml has no `>=X.Y.Z` or `>=X.Y.Z-rc.N` floor")
-    return m.group(1)
+    return cc.floor_chart("kagent", KAGENT_CHART, f">={m.group(1)}")
 
 
 def kagent_chart_render(hr: str, version: str) -> str:
@@ -208,15 +239,120 @@ def main(meta: str) -> int:
     ok(f"with the switch on and a grant signing key (own or created) the kagent release carries {JWT}: "
        f"jwksURL {JWKS}, issuer {ISSUER}, audience kagent, allowHTTP true; NOTES prints it; no null in the release's values")
 
+    # --- the person's credential on the providers' hosts ------------------------------------------
+    session = block(block(hr, "controller", 4), "session", 6)
+    if "        credentialAuthority: muster.giantswarm.io\n" not in session:
+        fail(f"the kagent release's controller.session names no credentialAuthority muster.giantswarm.io:\n{session}")
+    own = block(block(kagent_release([*base, "--set", "kagent.controller.session.credentialAuthority=creds.example.com"], meta), "controller", 4), "session", 6)
+    if "        credentialAuthority: creds.example.com\n" not in own:
+        fail(f"an own kagent.controller.session.credentialAuthority does not stand:\n{own}")
+    docs = documents(helm(meta, [*base, "--set", "components.substrate.enabled=true"]))
+    muster = block(block(docs.get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6)
+    for line in ("        enabled: true\n", "        gatewayIdentity: spiffe://cluster.local/ns/ate-system/sa/atenet-egress\n"):
+        if line not in muster:
+            fail(f"with workspaces and Substrate on the muster release's credentialProvider lacks {line.strip()!r}:\n{muster}")
+    bearer = block(muster, "actorBearer", 8)
+    if bearer != "        actorBearer:\n          enabled: true\n          issuer: https://idp.ate-system.svc\n":
+        fail(f"with workspaces and Substrate on the muster release's credentialProvider.actorBearer is not on with Substrate's issuer https://idp.ate-system.svc:\n{muster}")
+    def bearer_of(flags: list) -> str:
+        return block(block(block(documents(helm(meta, [*base, "--set", "components.substrate.enabled=true", *flags])).get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6), "actorBearer", 8)
+    if "          issuer: https://idp.substrate.example\n" not in bearer_of(["--set", "substrate.ateApi.actorJWTIssuer=https://idp.substrate.example"]):
+        fail("an own substrate.ateApi.actorJWTIssuer does not become muster's actorBearer.issuer")
+    if "          issuer: https://idp.ate.svc\n" not in bearer_of(["--set", "components.substrate.targetNamespace=ate"]):
+        fail("muster's actorBearer.issuer does not follow components.substrate.targetNamespace")
+    if "          enabled: false\n" not in bearer_of(["--set", "muster.muster.credentialProvider.actorBearer.enabled=false"]):
+        fail("an own muster.muster.credentialProvider.actorBearer.enabled=false does not stand")
+    if "          audience: https://muster.example\n" not in bearer_of(["--set", "muster.muster.credentialProvider.actorBearer.audience=https://muster.example"]):
+        fail("an own muster.muster.credentialProvider.actorBearer.audience does not stand")
+    # agent-manager is told muster trusts the actor JWT: it reports an agent's toolset as
+    # bound to each session at its start (giantswarm/agent-manager#228).
+    AM_ON = ["--set", "components.agent-manager.enabled=true"]
+    def am_muster(flags: list) -> str:
+        return block(block(documents(helm(meta, [*base, *AM_ON, *flags])).get(("HelmRelease", "agent-manager"), ""), "values", 2), "muster", 4)
+    if "      actorBearer: true\n" not in am_muster(["--set", "components.substrate.enabled=true"]):
+        fail(f"with muster trusting the actor JWT the agent-manager release's muster.actorBearer is not true:\n{am_muster(['--set', 'components.substrate.enabled=true'])}")
+    off = am_muster(["--set", "components.substrate.enabled=true", "--set", "muster.muster.credentialProvider.actorBearer.enabled=false"])
+    if "actorBearer" in off:
+        fail(f"with muster's actorBearer off the agent-manager release carries muster.actorBearer:\n{off}")
+    must_fail(meta, [*base, *AM_ON, "--set", "components.substrate.enabled=true", "--set", "agent-manager.muster.actorBearer=false"],
+              "agent-manager.muster.actorBearer", "an own agent-manager.muster.actorBearer that differs")
+    must_fail(meta, [*base, *AM_ON, "--set", "components.substrate.enabled=true", "--set", "components.agent-manager.versionRange=>=2.8.0 <3.0.0"],
+              "components.agent-manager.versionRange", "an agent-manager range below the toolset-binding floor")
+    must_fail(meta, [*base, *AM_ON, "--set", "components.substrate.enabled=true", "--set", "components.muster.versionRange=>=5.48.0 <6.0.0"],
+              "components.muster.versionRange", "a muster range below the toolset-binding floor")
+    ok("agent-manager's muster.actorBearer follows muster's actor bearer: true with it on, absent with it off, an own value that differs fails the render")
+    ok("with workspaces and Substrate on muster accepts Substrate's actor JWT (actorBearer, issuer https://idp.<substrate namespace>.svc "
+       "or substrate.ateApi.actorJWTIssuer); an own enabled: false or audience stands")
+    def actor_jwt_of(flags: list) -> str:
+        return block(block(block(kagent_release([*base, *flags], meta), "controller", 4), "session", 6), "actorJWTProviders", 8)
+    if actor_jwt_of(MUSTER_BASE_URL) != ACTOR_JWT_PROVIDERS:
+        fail(f"with muster trusting the actor JWT the kagent release's controller.session.actorJWTProviders is not muster's "
+             f"in-cluster host and its oauth.server.baseUrl:\n{actor_jwt_of(MUSTER_BASE_URL)}")
+    if "            audience: https://muster.example\n" not in actor_jwt_of([*MUSTER_BASE_URL, "--set", "muster.muster.credentialProvider.actorBearer.audience=https://muster.example"]):
+        fail("kagent's muster actor-JWT provider does not take muster's own actorBearer.audience")
+    if "            hostname: muster.example.internal\n" not in actor_jwt_of([*MUSTER_BASE_URL, "--set", "kagent.controller.session.actorJWTProviders.muster.hostname=muster.example.internal"]):
+        fail("an own kagent.controller.session.actorJWTProviders.muster.hostname does not stand")
+    if "            hostname: muster-gw.agent-platform.svc.cluster.local\n" not in actor_jwt_of([*MUSTER_BASE_URL, "--set", "muster.fullnameOverride=muster-gw"]):
+        fail("kagent's muster actor-JWT provider does not follow muster.fullnameOverride, the host every agent's RemoteMCPServer targets")
+    for flags, what in (([*MUSTER_BASE_URL, "--set", "muster.muster.credentialProvider.actorBearer.enabled=false"], "with muster's actorBearer off"),
+                        ([], "without an audience (no oauth.server.baseUrl): kagent's controller refuses an entry without one")):
+        if actor_jwt_of(flags):
+            fail(f"the kagent release names an actor-JWT provider {what}:\n{actor_jwt_of(flags)}")
+    ok("with muster trusting the actor JWT the kagent release names muster as its actor-JWT provider: the host of the agents' "
+       "in-cluster MCP URL (following muster.fullnameOverride) and muster's audience (actorBearer.audience, else oauth.server.baseUrl); "
+       "an own key stands; nothing with the actor bearer off or without an audience")
+    releasable = block(muster, "releasable", 8)
+    if "          github: https://github.com/apps/ci-agents\n" not in releasable:
+        fail(f"the muster release's credentialProvider.releasable does not name the pinned provider instance github under its App's issuer:\n{muster}")
+    own = block(block(block(documents(helm(meta, [*base, "--set", "components.substrate.enabled=true", "--set", "muster.muster.credentialProvider.releasable.gitlab=https://gitlab.example.com"])).get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6), "releasable", 8)
+    for line in ("          github: https://github.com/apps/ci-agents\n", "          gitlab: https://gitlab.example.com\n"):
+        if line not in own:
+            fail(f"an own muster.muster.credentialProvider.releasable entry does not stand beside the pinned instance's ({line.strip()!r}):\n{own}")
+    derived = block(block(block(documents(helm(meta, [*base, "--set", "components.substrate.enabled=true", "--set", f"{NAME}.muster.mcpServer.auth.authorizationServer.issuer="])).get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6), "releasable", 8)
+    if "          github: https://github.com/apps/123\n" not in derived:
+        fail(f"without an own issuer the muster release's credentialProvider.releasable does not name github under the derived https://github.com/apps/<app.id>:\n{derived}")
+    substrate = block(block(docs.get(("HelmRelease", "substrate"), ""), "credentialProvider", 4), "additionalProviders", 6)
+    if "uriAuthority: muster.giantswarm.io" not in substrate or "host: muster.agent-platform.svc:50051" not in substrate:
+        fail(f"the substrate release's credentialProvider.additionalProviders lacks muster's FetchSecret:\n{substrate}")
+    off = documents(helm(meta, [*KAGENT, *IDENTITY, "--set", "components.substrate.enabled=true"]))
+    if "credentialProvider:" in block(off.get(("HelmRelease", "muster"), ""), "muster", 4):
+        fail("the muster release carries a credentialProvider with workspaces off")
+    # muster's pods mount Substrate's pod certificates and trust bundles, which the
+    # connectivity release's hook publishes and the substrate release issues, both after
+    # muster: until the substrate release is Ready its install and upgrade do not wait
+    # for its pods (giantswarm/agent-platform#1107). Offline no release is Ready.
+    release = docs.get(("HelmRelease", "muster"), "")
+    for action in ("install", "upgrade"):
+        if "    disableWait: true\n" not in block(release, action, 2):
+            fail(f"with a credentialProvider and Substrate not Ready the muster release's {action} waits for pods that mount Substrate's certificates, issued only after muster (giantswarm/agent-platform#1107):\n{block(release, action, 2)}")
+        if "disableWait" in block(off.get(("HelmRelease", "muster"), ""), action, 2):
+            fail(f"the muster release's {action} does not wait with workspaces off")
+    ok("with the switch on the kagent release names muster.giantswarm.io as its credentialAuthority (an own value stands), "
+       "the muster release serves FetchSecret to the egress gateway's identity with Substrate on and releases the pinned provider instance github's grants under its own or derived issuer (an own entry stands beside it), "
+       "and Substrate routes the authority to muster; until Substrate is Ready its install and upgrade do not wait for the pods that mount Substrate's certificates; "
+       "with workspaces off muster gets no credentialProvider")
+    sub = ["--set", "components.substrate.enabled=true"]
+    unpinned = (([*NO_OWN, "--set", f"{NAME}.providers=null", "--set", "workspaceManager.route.enabled=false"], "without providers"),
+                ([*NO_OWN, "--set", f"{NAME}.oauth.enabled=false"], "with oauth off"))
+    for flags, what in unpinned:
+        must_fail(meta, [*base, *sub, *flags], "muster releases no provider instance's grant",
+                  f"workspaces and Substrate on {what} (no provider pin, no own releasable)")
+    own = block(block(block(documents(helm(meta, [*base, *sub, *unpinned[0][0], "--set", "muster.muster.credentialProvider.releasable.gitlab=https://gitlab.example.com"])).get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6), "releasable", 8)
+    if own != "        releasable:\n          gitlab: https://gitlab.example.com\n":
+        fail(f"without a provider pin an own muster.muster.credentialProvider.releasable does not reach the muster release alone:\n{own}")
+    ok("without a provider pin (no providers, oauth off) workspaces and Substrate fail the render naming muster's releasable, "
+       "and an own releasable alone turns muster's credentialProvider on")
+
     # --- nothing without a grant key, or without kagent ------------------------------------------
-    for flags, what in (([*NO_OWN, "--set", f"{NAME}.providers=null", "--set", "workspaceManager.route.enabled=false"], "without providers"),
-                        ([*NO_OWN, "--set", f"{NAME}.oauth.enabled=false"], "with oauth off"),
+    # Substrate follows kagent: without a provider pin muster's releasable is the installation's own.
+    releasable = ["--set", "muster.muster.credentialProvider.releasable.gitlab=https://gitlab.example.com"]
+    for flags, what in (([*NO_OWN, "--set", f"{NAME}.providers=null", "--set", "workspaceManager.route.enabled=false", *releasable], "without providers"),
+                        ([*NO_OWN, "--set", f"{NAME}.oauth.enabled=false", *releasable], "with oauth off"),
                         ([*NO_OWN, "--set", "workspaceManager.grantKey.create=false"], "with grantKey.create false")):
         if admission(kagent_release([*base, *flags], meta)) is not None:
             fail(f"the kagent release carries a Session admission {what}: the manager signs no grant then")
-    if ("HelmRelease", "kagent") in documents(helm(meta, [*ON, *IDENTITY, "--set", "components.kagent.enabled=false"])):
-        fail("a kagent release renders with kagent off")
-    ok("nothing without a grant key (no providers, oauth off, grantKey.create false) and nothing with kagent off")
+    must_fail(meta, [*ON, *IDENTITY, "--set", "components.kagent.enabled=false"], "workspaces need the agents", "workspaces on with kagent off")
+    ok("nothing without a grant key (no providers, oauth off, grantKey.create false); workspaces with kagent off fail the render")
 
     # --- what the derivation follows -------------------------------------------------------------
     moved = admission(kagent_release([*base, "--set", f"{NAME}.fullnameOverride=wm", "--set", f"{NAME}.service.port=9090",
@@ -263,9 +399,9 @@ def main(meta: str) -> int:
     for rng in (">=1.5.0 <1.6.0", "1.5.9"):
         ranges = ["--set", f"components.kagent.versionRange={rng}", "--set", f"components.kagent-crds.versionRange={rng}"]
         must_fail(meta, [*base, *ranges], "admits a kagent release below 1.6.0", f"a kagent range {rng} with the admission derived")
-        helm(meta, [*KAGENT, *IDENTITY, *ranges])
+        helm(meta, [*KAGENT, *IDENTITY, *ranges, *BELOW_AUTH_FLOOR])
     for rng in (">=1.6.0 <1.7.0", "1.6.0", ">=1.6.0-rc.1 <1.7.0"):
-        kagent_release([*base, "--set", f"components.kagent.versionRange={rng}", "--set", f"components.kagent-crds.versionRange={rng}"], meta)
+        kagent_release([*base, "--set", f"components.kagent.versionRange={rng}", "--set", f"components.kagent-crds.versionRange={rng}", *BELOW_AUTH_FLOOR], meta)
     no_client = ["--set", f"{NAME}.providers[0].values.oauth.clientID=", "--set", f"{NAME}.providers[1].values.oauth.clientID="]
     must_fail(meta, [*ON, *KAGENT, *no_client, "--set", f"{NAME}.oauth.baseURL="], "kagent's Session admission has no issuer", "no issuer")
     must_fail(meta, [*base, "--set", "kagent.controller.auth.userIdClaim=sub"], 'kagent.controller.auth.userIdClaim is "sub"', "another user-id claim")
@@ -282,7 +418,18 @@ def main(meta: str) -> int:
     for key, env in ENV.items():
         if f'{env}: "{WANT[key]}"' not in cm[0]:
             fail(f"the kagent chart {floor} does not render {env} from the forwarded {JWT}.{key}:\n{cm[0]}")
-    ok(f"the kagent chart {floor} renders the three KAGENT_SESSION_ADMISSION_JWT_* entries of the controller ConfigMap from the forwarded block")
+    if 'KAGENT_SESSION_CREDENTIAL_AUTHORITY: "muster.giantswarm.io"' not in cm[0]:
+        fail(f"the kagent chart {floor} does not render KAGENT_SESSION_CREDENTIAL_AUTHORITY from the forwarded "
+             f"kagent.controller.session.credentialAuthority: the range admits no release of the workspace write path:\n{cm[0]}")
+    ok(f"the kagent chart {floor} renders the three KAGENT_SESSION_ADMISSION_JWT_* entries and KAGENT_SESSION_CREDENTIAL_AUTHORITY "
+       f"of the controller ConfigMap from the forwarded block")
+    render = kagent_chart_render(kagent_release([*base, *MUSTER_BASE_URL], meta), floor)
+    cm = [d for d in render.split("\n---\n") if re.search(r"^kind: ConfigMap$", d, re.M) and "KAGENT_CONTROLLER_NAME:" in d]
+    want = json.dumps({"muster": {"audience": "https://muster.ci.example.com", "hostname": f"muster.{NAMESPACE}.svc.cluster.local"}}, separators=(",", ":"))
+    if not cm or f"KAGENT_SESSION_ACTOR_JWT_PROVIDERS: {json.dumps(want)}" not in cm[0]:
+        fail(f"the kagent chart {floor} does not render KAGENT_SESSION_ACTOR_JWT_PROVIDERS {want} from the forwarded "
+             f"kagent.controller.session.actorJWTProviders: the range admits no release that compiles muster's actor JWT:\n{cm[0] if cm else render}")
+    ok(f"the kagent chart {floor} renders KAGENT_SESSION_ACTOR_JWT_PROVIDERS with muster's host and audience from the forwarded block")
     render = kagent_chart_render(hr, ALLOW_HTTP_CHART)
     cm = [d for d in render.split("\n---\n") if re.search(r"^kind: ConfigMap$", d, re.M) and "KAGENT_CONTROLLER_NAME:" in d]
     if not cm or 'KAGENT_SESSION_ADMISSION_JWT_ALLOW_HTTP: "true"' not in cm[0]:

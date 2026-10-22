@@ -64,8 +64,14 @@ and range (2.x on the api.kagent.dev line), the GitOps namespaces the GitOps-own
 releases are read from, and the platform Harness name. It reads no GitHub
 token: public skill repositories resolve, private refs are reported as
 pending (agents read private skills through agent-manager's minted
-agent-manager-skills-token, whose Basic form `migrate` cannot use). The
-CronJob, its start hook, its migration-only bindings (migrate-rbac.yaml) and
+agent-manager-skills-token, whose Basic form `migrate` cannot use). It moves
+every release whose skills credential is an earlier name of the
+installation's (tenant-credential-agent-manager-skills-token, the name under
+the tenant credential prefix) to the current one, once that Secret exists.
+With tenants.organizations on it also covers the Organization namespaces
+(AGENT_MANAGER_MULTI_TENANT), where an agent never names the installation's
+credential: a release there that does stalls its next update on the
+agent-platform-tenant-credential-refs admission. The CronJob, its start hook, its migration-only bindings (migrate-rbac.yaml) and
 this note retire in a later 4.x release once the last installation is cut
 over.
 */ -}}
@@ -91,10 +97,27 @@ over.
 {{- with (dig "agentChart" "semverFilter" "" $am) }}
 {{- $env = append $env (dict "name" "AGENT_CHART_SEMVER_FILTER" "value" .) }}
 {{- end }}
+{{- if (include "agent-platform.tenants.organizations" .) }}
+{{- /* The Organization namespaces, discovered by their label as agent-manager's
+tenant reconciler finds them: the run covers their agents as well (the rights
+are migrate-rbac.yaml's ClusterRole -tenants). An image without the tenant
+pass ignores the variable. */ -}}
+{{- $env = append $env (dict "name" "AGENT_MANAGER_MULTI_TENANT" "value" "true") }}
+{{- end }}
 {{- with $m.gitopsNamespaces }}
 {{- /* The namespaces the GitOps-owned releases are read from (the Roles of
 migrate-rbac.yaml grant exactly that read there). */ -}}
 {{- $env = append $env (dict "name" "AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES" "value" (join "," .)) }}
+{{- end }}
+{{- /* The installation's skills credential and its earlier names, as
+agent-manager's chart derives them: a release naming an earlier name is moved
+to the current one. */ -}}
+{{- $skillsAuth := include "agent-platform.agentManager.skillsGitAuth" . | fromJson }}
+{{- with $skillsAuth.current }}
+{{- $env = append $env (dict "name" "AGENT_MANAGER_SKILLS_GIT_AUTH_SECRET_NAME" "value" .) }}
+{{- end }}
+{{- with $skillsAuth.previous }}
+{{- $env = append $env (dict "name" "AGENT_MANAGER_SKILLS_GIT_AUTH_PREVIOUS_SECRET_NAMES" "value" (join "," .)) }}
 {{- end }}
 {{- /* The platform Harness every migrated Agent names. agent-manager's own
 default and the Harness the kagent chart renders are both `kagent`, so it is
