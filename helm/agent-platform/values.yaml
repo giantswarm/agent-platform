@@ -427,9 +427,14 @@ components:  # @schema additionalProperties: true
     # request of the Session's sandbox resolves within it (binding ∩ header,
     # giantswarm/muster#1618); agent-manager from 2.9.0 sends it, which an
     # older muster refuses, so the two floors move together.
+    # Floor 5.52.5: a person's ChatGPT login (a kagent.modelConfigs entry
+    # with credentialType chatgptOAuth and no apiKeySecret) is muster's
+    # provider App chatgpt, whose device-code grant muster files as the
+    # person's from 5.52.5 (giantswarm/muster#1653); an older muster files it
+    # under the asking session only and refuses every codex request.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.49.0 <6.0.0"
+    versionRange: ">=5.52.5 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them

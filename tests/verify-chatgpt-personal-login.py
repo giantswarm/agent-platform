@@ -12,11 +12,11 @@ connected in muster.
   (host chatgpt.com, path prefix /backend-api/codex/, scheme Bearer); an own key
   of that entry and an own muster App named chatgpt stand; without such an entry
   nothing of it renders; the component charts at the floors take the forwarded
-  values (muster 5.51.0 keeps the App, kagent 1.24.0's controller lists the
+  values (muster 5.52.5 keeps the App, kagent 1.24.0's controller lists the
   provider);
 - the meta chart's guards name the key: muster's token encryption off, its OAuth
   client role off, the credential provider off (workspaces off), the kagent,
-  kagent-crds and muster floors below 1.24.0, 1.24.0 and 5.51.0;
+  kagent-crds and muster floors below 1.24.0, 1.24.0 and 5.52.5;
 - the connectivity chart renders the person's ModelConfig without apiKeySecret
   and apiKeySecretKey, named "ChatGPT (your subscription)" unless the entry names
   itself, only beside the provider entry; a chatgptOAuth entry without
@@ -43,7 +43,7 @@ ON = ["-f", "tests/fixtures/workspaces-values.yaml", "-f", "tests/fixtures/works
       "--set", "global.identity.clientId=platform",
       "--set", "global.identity.existingSecret=platform-oauth",
       "--set", "muster.muster.oauth.server.existingSecret=platform-oauth"]
-MUSTER_CHART = ("oci://gsoci.azurecr.io/charts/giantswarm/muster", "5.51.0")
+MUSTER_CHART = ("oci://gsoci.azurecr.io/charts/giantswarm/muster", "5.52.5")
 KAGENT_CHART = ("oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent", "1.24.0-rc.1")
 PROVIDER = "chatgpt:\n{i}  hostname: chatgpt.com\n{i}  pathPrefix: /backend-api/codex/\n{i}  scheme: Bearer\n"
 APP = "- flow: chatgptDeviceCode\n{i}  name: chatgpt\n"
@@ -182,7 +182,7 @@ def main(chart: str) -> int:
         (["--set", "workspaces.enabled=false"], "the credential provider is off", "the credential provider off"),
         (["--set", "components.kagent.versionRange=>=1.23.0 <1.25.0"], "components.kagent.versionRange (>=1.23.0 <1.25.0) admits releases before 1.24.0", "the kagent floor"),
         (["--set", "components.kagent-crds.versionRange=>=1.23.0 <1.25.0"], "components.kagent-crds.versionRange (>=1.23.0 <1.25.0) admits releases before 1.24.0", "the kagent-crds floor"),
-        (["--set", "components.muster.versionRange=>=5.50.0 <6.0.0"], "components.muster.versionRange (>=5.50.0 <6.0.0) admits releases before 5.51.0", "the muster floor"),
+        (["--set", "components.muster.versionRange=>=5.50.0 <6.0.0"], "components.muster.versionRange (>=5.50.0 <6.0.0) admits releases before 5.52.5", "the muster floor"),
     ):
         err = meta(chart, [*ON, *flags], expect_fail=True)
         must_fail(err, what, case)
