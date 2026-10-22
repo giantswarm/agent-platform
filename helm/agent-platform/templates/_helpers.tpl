@@ -1324,11 +1324,12 @@ Emits nothing; fails naming the key and the fix.
 The first kagent release (and its kagent-crds) that admits a ChatGPT login
 without apiKeySecret and admits every bound Session with a credential-URI
 provider (giantswarm/kagent-upstream#823), and the first muster release with the
-ChatGPT provider App (giantswarm/muster#1639). One line each, no comment inside
+ChatGPT provider App that files the person's grant (giantswarm/muster#1639,
+giantswarm/muster#1653). One line each, no comment inside
 the define.
 */}}
 {{- define "agent-platform.kagent.chatgptPersonalLoginFloor" -}}1.24.0{{- end -}}
-{{- define "agent-platform.muster.chatgptAppFloor" -}}5.51.0{{- end -}}
+{{- define "agent-platform.muster.chatgptAppFloor" -}}5.52.5{{- end -}}
 {{/*
 The guards of the workspace-manager's provider authorization, while workspaces
 are on, here where a failure is seen instead of inside the component release:
