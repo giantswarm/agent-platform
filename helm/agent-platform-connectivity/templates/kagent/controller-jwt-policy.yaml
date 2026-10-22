@@ -52,8 +52,8 @@ kagent-mcp-jwt is the same boundary in front of the controller's /mcp
 # the controller reads — x-user-id — from that claim, replacing whatever the
 # client sent, and removes the agent-call headers (x-agent-name,
 # x-user-groups). The controller re-derives the identity from the same bearer
-# (trusted-proxy authenticator, unverified decode), which is why agentgateway
-# must stay the only path to it.
+# and, with the meta chart's kagent.controller.auth derivation, verifies it
+# against the same issuer and key set.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:

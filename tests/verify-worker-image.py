@@ -202,7 +202,7 @@ def main(meta: str) -> int:
                      f"an own workerImage with {what}")
     print(f"ok: an own workerImage with another tag or a digest alone fails the render naming the key, the pinned release {floor} and the derived image")
 
-    older_range = f">={previous_minor(floor)} <{tuple_of(floor)}"
+    older_range = f">={previous_minor(floor)} <{next_minor(previous_minor(floor))}"
     values, _, _ = kagent_release(meta, ["--set", f"components.substrate.versionRange={older_range}"])
     old_floor = floor_of(older_range)
     if worker_image(values) != f"{REGISTRY}/{REPOSITORY}/{WORKER}:{old_floor}":
@@ -262,9 +262,7 @@ def main(meta: str) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         values, forwarded, source = kagent_release(meta, [])
         url, kagent_rng = source.split(" ", 1)
-        version = fluxsemver.resolve(cc.registry_tags(url), kagent_rng)
-        if not version:
-            cc.fail(f"no published kagent chart satisfies {kagent_rng!r} at {url}")
+        version = cc.range_chart("kagent", url, kagent_rng)
         chart_dir = os.path.join(tmp, "kagent")
         resolved = cc.pull(url, version, chart_dir)
         forwarded_file = os.path.join(tmp, "forwarded.yaml")

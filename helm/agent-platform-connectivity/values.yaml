@@ -1331,13 +1331,15 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     skillsInitImage:
       repository: kagent-skills-init
     auth:
-      # Default on GS clusters. trusted-proxy reads Authorization: Bearer JWT and
-      # decodes claims WITHOUT signature verification — it relies on a front proxy
-      # having already validated the JWT. That boundary is agentgateway (which
-      # validates the JWT) for the controllerRoute path, and the netpols restrict
-      # controller ingress to agentgateway + the release/kagent namespaces, so the
-      # controller is never directly reachable. Use "insecure" only for local dev
-      # without any front proxy.
+      # Default on GS clusters. trusted-proxy reads Authorization: Bearer JWT.
+      # With an issuer the meta chart sets controller.auth.issuer, jwksURL and
+      # jwksAllowHTTP on the kagent release (the issuer and the key set of the
+      # controller route's policy below), and the controller checks the
+      # token's signature, issuer and expiry against the issuer's keys before
+      # it reads a claim; each key set here stands. agentgateway verifies the
+      # same token on the controllerRoute path, and the netpols restrict
+      # controller ingress to agentgateway + the release/kagent namespaces. Use
+      # "insecure" only for local dev without any front proxy.
       mode: trusted-proxy
       # email, not sub: dex subs are opaque connector-prefixed identifiers
       # (connector-coupled and unreadable in session listings); email is the
@@ -1751,9 +1753,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # value the client sent, and removes x-agent-name and x-user-groups (the
     # controller's agent-call headers, sent only by an agent's runtime from
     # inside the cluster). The controller re-derives the identity from the
-    # same bearer (its trusted-proxy authenticator decodes it without verifying
-    # the signature), which is why this boundary must stay in front of it and
-    # the network policy admits no other caller.
+    # same bearer, verified against the same issuer and key set (the meta
+    # chart's kagent.controller.auth derivation), and the network policy admits
+    # no caller but this boundary and the platform's own.
     # Every caller must present a JWT the issuer signed (opaque muster tokens
     # and Kubernetes ServiceAccount tokens are refused). gateway.jwksEgress
     # must be on so the data plane can reach the issuer's JWKS.

@@ -27,15 +27,32 @@ Each case pins one property:
   `list` on sessions.api.kagent.dev and nothing else, following
   workspace-manager.serviceAccount.name and the manager's release namespace
   (components.workspace-manager.targetNamespace); nothing without workspaces;
+- in the trusted-proxy mode the release carries controller.auth.issuer
+  (global.identity.issuerUrl, else kagent.controllerRoute.jwtAuthentication
+  .issuer), jwksURL (the controller route's key set, http to the in-cluster
+  Dex, https to an issuer on 443) and jwksAllowHTTP true beside a plain-http
+  jwksURL; each own key stands, an own jwksURL carries no derived
+  jwksAllowHTTP; nothing in the insecure mode or without an issuer; a kagent
+  range whose floor is below agent-platform.kagent.authenticationFloor fails
+  naming it (a release candidate of it passes), and so does a derived https
+  key set behind a private CA;
+- the connectivity release's controller egress (cilium) opens the in-cluster
+  Dex's namespace on the JWKS port, an external issuer's port other than 443
+  to the world, and nothing in the insecure mode;
 - the kagent chart at the range's floor, rendered with the values the release
   forwards, renders the KAGENT_AUTHORIZATION_* entries of the controller
   ConfigMap, the NetworkPolicy kagent-controller that admits on the API port
-  exactly kagent's UI and the derived peers, and the ClusterRole that lets the
-  controller create subjectaccessreviews and tokenreviews (network: gsoci).
+  exactly kagent's UI and the derived peers, the ClusterRole that lets the
+  controller create subjectaccessreviews and tokenreviews, and the
+  KAGENT_AUTH_ISSUER, KAGENT_AUTH_JWKS_URL and KAGENT_AUTH_JWKS_ALLOW_HTTP
+  entries; while the floor is unpublished (UNRELEASED) the chart
+  verify-components-charts renders against stands in, and the KAGENT_AUTH_*
+  check waits for the floor (network: gsoci).
 
 Needs PyYAML. HELM selects the binary.
 """
 
+import importlib.util
 import os
 import re
 import subprocess
@@ -45,6 +62,10 @@ import tempfile
 import yaml
 
 HELM = os.environ.get("HELM", "helm")
+HERE = os.path.dirname(os.path.abspath(__file__))
+_spec = importlib.util.spec_from_file_location("components_charts", os.path.join(HERE, "verify-components-charts.py"))
+cc = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(cc)
 CHART, CONNECTIVITY = sys.argv[1], sys.argv[2]
 NAMESPACE = "agent-platform"
 KAGENT_CHART = "oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent"
@@ -73,6 +94,13 @@ UI = {"podSelector": {"matchLabels": {"app.kubernetes.io/component": "ui", "app.
 DEFAULT = {"mode": "kubernetes", "usernamePrefix": "", "groupsClaim": "groups", "groupsPrefix": "",
            "namespaceSelector": "giantswarm.io/organization", "includeNamespaces": ["kagent"]}
 ROLE = "agent-platform:workspace-manager-sessions"
+AUTH = "kagent.controller.auth"
+DEX_KEYS = "http://dex.giantswarm.svc.cluster.local:5556/keys"
+AUTHENTICATION = {"mode": "trusted-proxy", "userIdClaim": "email", "issuer": "https://dex.ci.example.com",
+                  "jwksURL": DEX_KEYS, "jwksAllowHTTP": True}
+DEX_EGRESS = {"toEndpoints": [{"matchLabels": {"io.kubernetes.pod.namespace": "giantswarm"}}],
+              "toPorts": [{"ports": [{"port": "5556", "protocol": "TCP"}]}]}
+CILIUM = ["--set", "networkPolicy.enabled=true", "--set", "networkPolicy.flavor=cilium"]
 
 
 def fail(msg: str) -> None:
@@ -123,12 +151,68 @@ def expect(got, want, what: str) -> None:
     ok(what)
 
 
+def controller_egress(flags: list) -> list:
+    """The egress rules of the connectivity release's kagent controller policy (cilium)."""
+    docs = connectivity([*CILIUM, *flags])
+    policy = find(docs, "CiliumNetworkPolicy", "agent-platform-connectivity-kagent-controller-egress")
+    if policy is None:
+        fail(f"no CiliumNetworkPolicy agent-platform-connectivity-kagent-controller-egress: {' '.join(flags)}")
+    return policy["spec"]["egress"]
+
+
 def connectivity(flags: list) -> list:
     """The connectivity chart rendered with the values the meta chart forwards to its release."""
     with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
         yaml.safe_dump(release_values(flags, "agent-platform-connectivity"), f)
         f.flush()
         return [d for d in yaml.safe_load_all(helm(CONNECTIVITY, ["-n", NAMESPACE, "-f", f.name])) if d]
+
+
+def authentication_floor() -> str:
+    """agent-platform.kagent.authenticationFloor, read from the meta chart's helpers."""
+    with open(f"{CHART}/templates/_helpers.tpl", encoding="utf-8") as f:
+        m = re.search(r'^\{\{- define "agent-platform\.kagent\.authenticationFloor" -\}\}([0-9.]+)\{\{- end -\}\}$', f.read(), re.M)
+    if not m:
+        fail("templates/_helpers.tpl has no one-line define agent-platform.kagent.authenticationFloor")
+    return m.group(1)
+
+
+def check_authentication() -> None:
+    expect(controller([]).get("auth"), AUTHENTICATION,
+           "trusted-proxy: the controller verifies people's tokens against global.identity.issuerUrl and the in-cluster Dex's key set")
+    expect(controller(["--set", "kagent.controllerRoute.jwtAuthentication.issuer=https://route.example.com"])["auth"]["issuer"],
+           "https://route.example.com", "the issuer follows kagent.controllerRoute.jwtAuthentication.issuer")
+    public = ["--set", "kagent.controllerRoute.jwtAuthentication.jwks.host=dex.ci.example.com",
+              "--set", "kagent.controllerRoute.jwtAuthentication.jwks.port=443"]
+    got = controller(public)["auth"]
+    expect((got.get("jwksURL"), "jwksAllowHTTP" in got), ("https://dex.ci.example.com/keys", False),
+           "an issuer on 443: an https key set and no jwksAllowHTTP")
+    expect(controller(["--set", f"{AUTH}.issuer=https://own.example.com"])["auth"],
+           {**AUTHENTICATION, "issuer": "https://own.example.com"}, "an own issuer stands, the key set is derived")
+    got = controller(["--set", f"{AUTH}.jwksURL=https://keys.example.com/jwks"])["auth"]
+    expect((got.get("issuer"), got.get("jwksURL"), "jwksAllowHTTP" in got),
+           ("https://dex.ci.example.com", "https://keys.example.com/jwks", False),
+           "an own jwksURL stands and carries no derived jwksAllowHTTP")
+    expect(controller(["--set", f"{AUTH}.jwksAllowHTTP=false"])["auth"].get("jwksAllowHTTP"), False, "an own jwksAllowHTTP stands")
+    expect(controller(["--set", f"{AUTH}.mode=insecure"])["auth"], {"mode": "insecure", "userIdClaim": "email"},
+           "the insecure mode: nothing derived")
+    expect(controller(["--set", "global.identity.issuerUrl="])["auth"], {"mode": "trusted-proxy", "userIdClaim": "email"},
+           "without an issuer: nothing derived")
+    floor = authentication_floor()
+    must_fail(["--set", "components.kagent.versionRange=>=1.0.0 <1.1.0"], f"admits a kagent release below {floor}",
+              "a kagent floor below the first release that verifies people's tokens")
+    controller(["--set", f"components.kagent.versionRange=>={floor}-rc.1 <1.25.0-0"])
+    ok(f"a release candidate of {floor} passes the floor guard")
+    must_fail(["--set", "kagent.controllerRoute.jwtAuthentication.jwks.tls.enabled=true",
+               "--set", "kagent.controllerRoute.jwtAuthentication.jwks.tls.caSecretName=dex-ca"],
+              "the controller trusts the system roots only", "a derived https key set behind a private CA")
+
+    egress = controller_egress([])
+    expect(DEX_EGRESS in egress, True, "cilium: the controller's egress opens the in-cluster Dex on the JWKS port")
+    expect(DEX_EGRESS in controller_egress(["--set", f"{AUTH}.mode=insecure"]), False, "cilium: no Dex rule in the insecure mode")
+    world = {"toEntities": ["world"], "toPorts": [{"ports": [{"port": "8443", "protocol": "TCP"}]}]}
+    expect(world in controller_egress(["--set", f"{AUTH}.jwksURL=https://keys.example.com:8443/jwks"]), True,
+           "cilium: an own external key set on 8443 is opened to the world on that port")
 
 
 def kagent_floor() -> str:
@@ -213,7 +297,10 @@ def main() -> None:
                f"{ROLE} is bound to workspace-manager's ServiceAccount {ns}/{sa} only")
     expect(find(connectivity([]), "ClusterRole", ROLE), None, f"without workspaces no {ROLE}")
 
-    floor = kagent_floor()
+    check_authentication()
+
+    pinned = kagent_floor()
+    floor = cc.floor_chart("kagent", KAGENT_CHART, f">={pinned}")
     docs = kagent_chart_render(values, floor)
     cm = find(docs, "ConfigMap", "kagent-controller")
     if cm is None:
@@ -237,6 +324,12 @@ def main() -> None:
     expect(role and sorted((g, res, v) for r in role["rules"] for g in r["apiGroups"] for res in r["resources"] for v in r["verbs"]),
            [("authentication.k8s.io", "tokenreviews", "create"), ("authorization.k8s.io", "subjectaccessreviews", "create")],
            f"the kagent chart {floor} lets the controller create subjectaccessreviews and tokenreviews")
+    if floor != pinned:
+        print(f"NOTE: the KAGENT_AUTH_* check waits for kagent {pinned} (UNRELEASED); {floor} does not carry the keys")
+        return
+    expect({k: v for k, v in cm["data"].items() if k in ("KAGENT_AUTH_ISSUER", "KAGENT_AUTH_JWKS_URL", "KAGENT_AUTH_JWKS_ALLOW_HTTP")},
+           {"KAGENT_AUTH_ISSUER": "https://dex.ci.example.com", "KAGENT_AUTH_JWKS_URL": DEX_KEYS, "KAGENT_AUTH_JWKS_ALLOW_HTTP": "true"},
+           f"the kagent chart {floor} configures the verification of people's tokens from the forwarded block")
 
 
 if __name__ == "__main__":

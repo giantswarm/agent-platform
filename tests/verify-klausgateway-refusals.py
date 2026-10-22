@@ -4,9 +4,11 @@
 Each case pins one property:
 
 - klausGateway.refusals.enabled is auto by default and resolves on with the
-  chart's default ranges (klaus-gateway 4.11, kagent 1.20), and off while the
+  chart's default ranges (klaus-gateway 4.11 and kagent 1.20 or later), and off while the
   floor of components.klaus-gateway.versionRange is below 4.11.0 or that of
-  components.kagent.versionRange below 1.20.0 (a kagent range pinned to 1.19): the klaus-gateway release gets
+  components.kagent.versionRange below 1.20.0 (a kagent range pinned to 1.19,
+  rendered in the insecure authentication mode, the only one that admits a
+  kagent floor below 1.24.1): the klaus-gateway release gets
   no refusals block (an older chart's closed schema refuses it), the kagent
   release no session reader, the connectivity release refusals.enabled false
   and no -klausgateway-refusals-egress policy;
@@ -53,13 +55,17 @@ BASE = [
 ]
 FLOORS = {"components": {
     "klaus-gateway": {"versionRange": ">=4.11.0 <5.0.0"},
-    "kagent": {"versionRange": ">=1.20.0 <1.21.0"},
-    "kagent-crds": {"versionRange": ">=1.20.0 <1.21.0"},
+    "kagent": {"versionRange": ">=1.24.1 <1.25.0"},
+    "kagent-crds": {"versionRange": ">=1.24.1 <1.25.0"},
 }}
 BELOW = {"components": {
     "kagent": {"versionRange": ">=1.19.0 <1.20.0"},
     "kagent-crds": {"versionRange": ">=1.19.0 <1.20.0"},
 }}
+# A kagent range below agent-platform.kagent.authenticationFloor renders only
+# outside the trusted-proxy mode, in which the meta chart derives the
+# controller's verification of people's tokens.
+BELOW_AUTH_FLOOR = ["--set", "kagent.controller.auth.mode=insecure"]
 READER = f"{NAMESPACE}/klaus-gateway"
 PEER = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}},
         "podSelector": {"matchLabels": {"app.kubernetes.io/name": "klaus-gateway"}}}
@@ -99,14 +105,16 @@ def render(flags: list, floors: bool) -> list:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
         yaml.safe_dump(FLOORS if floors else BELOW, f)
         f.flush()
-        return [d for d in yaml.safe_load_all(helm(CHART, [*BASE, "-f", f.name, *flags])) if d]
+        below = [] if floors else BELOW_AUTH_FLOOR
+        return [d for d in yaml.safe_load_all(helm(CHART, [*BASE, "-f", f.name, *below, *flags])) if d]
 
 
 def must_fail(flags: list, floors: bool, needle: str, what: str) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
         yaml.safe_dump(FLOORS if floors else BELOW, f)
         f.flush()
-        err = helm(CHART, [*BASE, "-f", f.name, *flags], expect_fail=True)
+        below = [] if floors else BELOW_AUTH_FLOOR
+        err = helm(CHART, [*BASE, "-f", f.name, *below, *flags], expect_fail=True)
     if needle not in err:
         fail(f"{what} failed for another reason (expected {needle!r}):\n{err}")
     ok(f"{what} fails the render naming {needle}")

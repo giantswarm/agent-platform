@@ -6,9 +6,9 @@
 # that serve it.
 components:
   kagent:
-    versionRange: ">=1.24.0-0 <1.25.0"
+    versionRange: ">=1.24.1-0 <1.25.0"
   kagent-crds:
-    versionRange: ">=1.24.0-0 <1.25.0"
+    versionRange: ">=1.24.1-0 <1.25.0"
   muster:
     versionRange: ">=5.51.0 <6.0.0"
 muster:

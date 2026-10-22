@@ -43,6 +43,7 @@ that accepts everything cannot pass.
 Usage: verify-kagent-crds.py <connectivity chart dir>
 """
 import glob
+import importlib.util
 import json
 import os
 import re
@@ -53,6 +54,11 @@ import urllib.request
 
 import yaml
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+_spec = importlib.util.spec_from_file_location("components_charts", os.path.join(HERE, "verify-components-charts.py"))
+cc = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(cc)
+KAGENT_CRDS_CHART = "oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent-crds"
 # The meta chart's values: the floor of components.kagent-crds.versionRange is
 # the kagent line's release the platform pins, so a re-pin moves this test too.
 META_VALUES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "helm", "agent-platform", "values.yaml")
@@ -103,12 +109,17 @@ def fail(msg: str) -> None:
 
 
 def pinned_ref() -> str:
-    """The tag of the floor of the meta chart's components.kagent-crds range."""
+    """The tag of the floor of the meta chart's components.kagent-crds range;
+    while the floor is unpublished (UNRELEASED), the tag of the chart
+    verify-components-charts renders against."""
     rng = yaml.safe_load(open(META_VALUES))["components"]["kagent-crds"]["versionRange"]
     m = re.match(r">=\s*(\d+\.\d+\.\d+(?:-rc\.\d+)?)\s", rng)
     if not m:
         fail(f"components.kagent-crds.versionRange {rng!r} has no >=X.Y.Z or >=X.Y.Z-rc.N floor to read the pinned release from")
-    return "v" + m.group(1)
+    version = m.group(1)
+    if not os.environ.get("KAGENT_CRDS_DIR") and version == cc.UNRELEASED.get("kagent-crds"):
+        version = cc.floor_chart("kagent-crds", KAGENT_CRDS_CHART, rng)
+    return "v" + version
 
 
 KAGENT_LINE_REF = pinned_ref()
