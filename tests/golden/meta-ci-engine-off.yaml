@@ -2358,6 +2358,8 @@ spec:
       retries: 5
   driftDetection:
     mode: enabled
+  dependsOn:
+    - name: valkey
   values:
     affinity:
       podAntiAffinity:
