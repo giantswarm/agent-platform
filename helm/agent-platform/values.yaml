@@ -644,7 +644,7 @@ components:  # @schema additionalProperties: true
     # toolchain-manager's sources, agent-platform.kagent.sessionToolImages) and
     # their origins from controller.sessionToolImageEgressOrigins
     # (giantswarm/kagent-upstream#879).
-    versionRange: ">=1.26.0 <1.27.0"
+    versionRange: ">=1.26.2 <1.27.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -758,7 +758,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.26.0 <1.27.0"
+    versionRange: ">=1.26.2 <1.27.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -2881,7 +2881,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # the bearer token alone and authorizes every call with a
       # SubjectAccessReview. The chart then sets its settings in env, from
       # auth and authorization (agent-platform.kagent.extensions); it needs
-      # components.kagent.versionRange at 1.25.2 or later.
+      # components.kagent.versionRange at 1.26.2 or later.
       repository: giantswarm/kagent/controller
     # The Go ADK image the chart requires for the controller's ConfigMap
     # (IMAGE_REGISTRY / IMAGE_TAG). On kagent API v2 the image an agent runs on
