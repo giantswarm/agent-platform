@@ -50,7 +50,7 @@ components:
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "1.14.0" }
-  agent-manager:                 { versionRange: "2.9.0" }
+  agent-manager:                 { versionRange: "2.14.0" }
   vm-manager:                    { versionRange: "0.24.0" }
   # The cluster write surface (components.cluster-manager, off by default).
   cluster-manager:               { versionRange: "0.22.0" }

@@ -22,6 +22,8 @@ knows (agent-platform.toolchainManager.derived). Each case below pins one proper
 - own values stand: issuer, trusted audiences, the pin, muster.mcpServer.enabled;
 - additionalSources follow sources and are not forwarded as such;
 - muster off: the registration off and no dependsOn on muster;
+- agent-manager's muster.toolchainsToolsPrefix is x_<the MCPServer name>_ while the component is
+  on, from agent-manager 2.14.0 (none off or below the floor), an own value that differs fails;
 - the guards: no issuer, no OAuth client, a repository named twice;
 - examples/customer-bom.yaml pins the exact version and the pin reaches the OCIRepository.
 
@@ -213,6 +215,21 @@ def main(meta: str, connectivity: str) -> int:
         fail(f"with muster off the {NAME} release must render without dependsOn:\n{hr}")
     must_have(values(hr), ("muster:\n  mcpServer:\n    enabled: false\n",), "the release values with muster off")
     ok("muster off: the registration off, no dependsOn on a release that does not exist")
+
+    # --- agent-manager asks list_toolchains by muster's name ------------------------
+    AGENTS = ["--set", "components.kagent.enabled=true", "--set", "components.agent-manager.enabled=true"]
+    PREFIX = "  toolchainsToolsPrefix: x_toolchain-manager_\n"
+    d = documents(helm(meta, [*ON, *IDENTITY, *AGENTS]))
+    must_have(values(d[("HelmRelease", "agent-manager")]), (PREFIX,), "the agent-manager release values with the component on")
+    d = documents(helm(meta, [*IDENTITY, *AGENTS]))
+    must_lack(values(d[("HelmRelease", "agent-manager")]), ("toolchainsToolsPrefix",), "the agent-manager release values with the component off")
+    d = documents(helm(meta, [*ON, *IDENTITY, *AGENTS, "--set", "toolchain-manager.muster.mcpServer.name=toolchains"]))
+    must_have(values(d[("HelmRelease", "agent-manager")]), ("  toolchainsToolsPrefix: x_toolchains_\n",), "the agent-manager release values with a renamed MCPServer")
+    d = documents(helm(meta, [*ON, *IDENTITY, *AGENTS, "--set", "components.agent-manager.versionRange=>=2.13.0 <3.0.0"]))
+    must_lack(values(d[("HelmRelease", "agent-manager")]), ("toolchainsToolsPrefix",), "the agent-manager release values below the 2.14.0 floor")
+    if "differs from the prefix muster gives" not in helm(meta, [*ON, *IDENTITY, *AGENTS, "--set", "agent-manager.muster.toolchainsToolsPrefix=x_other_"], expect_fail=True):
+        fail("an own agent-manager.muster.toolchainsToolsPrefix that differs failed for the wrong reason")
+    ok("agent-manager's muster.toolchainsToolsPrefix is x_<the MCPServer name>_ while the component is on, from agent-manager 2.14.0; none off or below the floor; an own value that differs fails")
 
     # --- guards --------------------------------------------------------------------
     for flags, needle, what in (
