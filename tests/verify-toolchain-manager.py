@@ -26,6 +26,10 @@ knows (agent-platform.toolchainManager.derived). Each case below pins one proper
   on, from agent-manager 2.14.0 (none off or below the floor), an own value that differs fails;
 - toolchain-manager's muster.mcpUrl and muster.agentManagerToolsPrefix (deprecate_toolchain)
   derived from toolchain-manager 0.3.0, the prefix empty while agent-manager is off;
+- with klaus-gateway on and klausGateway.reviews.enabled, from toolchain-manager 0.4.0:
+  toolchain-manager's klausGateway.url (the gateway's Service) and .audience, and the manager's
+  ServiceAccount in klaus-gateway's reviews.allowedCallers after the block's own callers (else
+  the chart's default); none with reviews off or below the floor; own url and audience stand;
 - the guards: no issuer, no OAuth client, a repository named twice;
 - examples/customer-bom.yaml pins the exact version and the pin reaches the OCIRepository.
 
@@ -240,6 +244,46 @@ def main(meta: str, connectivity: str) -> int:
     must_lack(values(d[("HelmRelease", NAME)]), ("agentManagerToolsPrefix", "mcpUrl"), "the toolchain-manager release values below the 0.3.0 floor")
     ok("toolchain-manager's muster.mcpUrl is muster's Service and muster.agentManagerToolsPrefix agent-manager's x_agent-manager_ (empty while agent-manager is off), from toolchain-manager 0.3.0; none below the floor")
     ok("agent-manager's muster.toolchainsToolsPrefix is x_<the MCPServer name>_ while the component is on, from agent-manager 2.14.0; none off or below the floor; an own value that differs fails")
+
+    # --- the notices and asks through klaus-gateway --------------------------------
+    GATEWAY = ["--set", "components.klaus-gateway.enabled=true"]
+    REVIEWS = [*GATEWAY, "--set", "klausGateway.reviews.enabled=true"]
+    CALLER = "  - system:serviceaccount:default:toolchain-manager\n"
+    DEFAULT_CALLER = "  - system:serviceaccount:giantswarm-platform-manager:giantswarm-platform-manager\n"
+    d = documents(helm(meta, [*ON, *IDENTITY, *REVIEWS]))
+    must_have(values(d[("HelmRelease", NAME)]), (
+        "klausGateway:\n  audience: klaus-gateway\n  url: http://klaus-gateway.default.svc.cluster.local:8080\n",
+    ), "the toolchain-manager release values with klaus-gateway's reviews on")
+    must_have(values(d[("HelmRelease", "klaus-gateway")]), ("  allowedCallers:\n" + DEFAULT_CALLER + CALLER,), "the klaus-gateway release values with the component on")
+    d = documents(helm(meta, [*ON, *IDENTITY, *REVIEWS,
+                              "--set", "klausGateway.reviews.allowedCallers[0]=system:serviceaccount:x:y",
+                              "--set", "klausGateway.reviews.audience=reviews",
+                              "--set", "klausGateway.server.port=9090",
+                              "--set", "klausGateway.fullnameOverride=kg",
+                              "--set", "components.toolchain-manager.targetNamespace=toolchains"]))
+    must_have(values(d[("HelmRelease", NAME)]), (
+        "klausGateway:\n  audience: reviews\n  url: http://kg.default.svc.cluster.local:9090\n",
+    ), "the toolchain-manager release values with klaus-gateway's own name, port and audience")
+    kg = values(d[("HelmRelease", "klaus-gateway")])
+    must_have(kg, ("  allowedCallers:\n  - system:serviceaccount:x:y\n  - system:serviceaccount:toolchains:toolchain-manager\n",), "the klaus-gateway release values with own callers")
+    must_lack(kg, (DEFAULT_CALLER,), "the klaus-gateway release values with own callers")
+    d = documents(helm(meta, [*ON, *IDENTITY, *REVIEWS, "--set", "klausGateway.reviews.allowedCallers[0]=system:serviceaccount:default:toolchain-manager"]))
+    if values(d[("HelmRelease", "klaus-gateway")]).count("toolchain-manager") != 1:
+        fail("a caller the block already lists is added again")
+    tm = values(documents(helm(meta, [*ON, *IDENTITY, *REVIEWS, "--set", "toolchain-manager.klausGateway.url=http://own:1", "--set", "toolchain-manager.klausGateway.audience=own"]))[("HelmRelease", NAME)])
+    must_have(tm, ("klausGateway:\n  audience: own\n  url: http://own:1\n",), "the toolchain-manager release values with own klausGateway keys")
+    for flags, what in (
+        ([*ON, *IDENTITY, *GATEWAY], "reviews off"),
+        ([*ON, *IDENTITY, "--set", "klausGateway.reviews.enabled=true", "--set", "components.klaus-gateway.enabled=false"], "klaus-gateway off"),
+        ([*ON, *IDENTITY, *REVIEWS, "--set", "components.toolchain-manager.versionRange=>=0.3.0 <0.4.0"], "below the 0.4.0 floor"),
+        ([*IDENTITY, *REVIEWS], "the component off"),
+    ):
+        d = documents(helm(meta, flags))
+        if ("HelmRelease", NAME) in d:
+            must_lack(values(d[("HelmRelease", NAME)]), ("klausGateway",), f"the toolchain-manager release values with {what}")
+        if ("HelmRelease", "klaus-gateway") in d:
+            must_lack(values(d[("HelmRelease", "klaus-gateway")]), ("toolchain-manager",), f"the klaus-gateway release values with {what}")
+    ok("with klaus-gateway's reviews on, from toolchain-manager 0.4.0: klausGateway.url and .audience derived (own values stand) and the manager's ServiceAccount added to reviews.allowedCallers after the own callers, else the chart's default; nothing with reviews off, the gateway off, below the floor or the component off")
 
     # --- guards --------------------------------------------------------------------
     for flags, needle, what in (

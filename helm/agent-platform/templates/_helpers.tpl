@@ -196,7 +196,11 @@ overwrite would hide a values file that still spells the old key.
     name muster gives the manager's tools, which the gateway calls as the
     person; only from the floor agent-platform.klausGateway.workspacesFloor
     (4.3.0) of components.klaus-gateway.versionRange, below it nothing. Single
-    source: an own value that differs fails the render.
+    source: an own value that differs fails the render. And
+    reviews.allowedCallers while the toolchain-manager posts its notices and
+    asks there (agent-platform.toolchainManager.reviews): the block's own list,
+    else the klaus-gateway chart's default, with the toolchain-manager's
+    ServiceAccount added.
   valkey:auth.usersExistingSecret and auth.aclUsers.default.passwordKey, when
     its own block leaves them empty, from the Secret and key muster reads the
     same password with (agent-platform.valkeySecretName / valkeyPasswordKey:
@@ -227,7 +231,8 @@ overwrite would hide a values file that still spells the old key.
     an issuer and the email claim are guarded (agent-platform.validateSessionAdmission).
   toolchain-manager: the login, the muster registration and its pin to the
     installation's agents GitHub App, and the sources with additionalSources
-    after them (agent-platform.toolchainManager.derived); the connectivity
+    after them, klausGateway.url and .audience while klaus-gateway takes its
+    notices and asks (agent-platform.toolchainManager.derived); the connectivity
     release its MCP backend entry, networkPolicy.mcpBackends.toolchain-manager
     (agent-platform.toolchainManager.mcpBackend), and agent-manager
     muster.toolchainsToolsPrefix, x_<its MCPServer name>_ (from agent-manager
@@ -505,6 +510,16 @@ release's closed schema refuses a workspaces block. */ -}}
 {{- end -}}
 {{- $_ := set $derived "workspaces" (dict "toolsPrefix" $prefix) -}}
 {{- end -}}
+{{- end -}}
+{{- /* The toolchain-manager posts its outdated notices and a major update's
+ask through the team-review endpoint as its own ServiceAccount
+(agent-platform.toolchainManager.reviews): the callers the block lists, else
+the klaus-gateway chart's default (Helm replaces a list, so the derived one
+carries it), and the manager. */ -}}
+{{- with (include "agent-platform.toolchainManager.reviews" .root | fromJson) -}}
+{{- $callers := dig "reviews" "allowedCallers" (list "system:serviceaccount:giantswarm-platform-manager:giantswarm-platform-manager") $kg -}}
+{{- if not (has .caller $callers) -}}{{- $callers = append $callers .caller -}}{{- end -}}
+{{- $_ := set $derived "reviews" (dict "allowedCallers" $callers) -}}
 {{- end -}}
 {{- /* The egress refusal notices, while they are on
 (agent-platform.klausGateway.refusalsOn): where the Substrate egress and the
@@ -1103,7 +1118,11 @@ components.toolchain-manager is on; each key the block sets stands:
   muster.agentManagerToolsPrefix, x_<agent-manager's MCPServer name>_ while
   agent-manager and muster are on, else empty (deprecate_toolchain then not
   served), from the toolchain-manager floor
-  agent-platform.toolchainManager.deprecateFloor.
+  agent-platform.toolchainManager.deprecateFloor;
+- klausGateway.url, klaus-gateway's Service, and klausGateway.audience, its
+  reviews.audience, while the gateway takes the manager's notices and asks
+  (agent-platform.toolchainManager.reviews), else nothing (the manager then
+  posts nothing).
 Emits JSON, {} while the component is off.
 Usage: include "agent-platform.toolchainManager.derived" . | fromJson
 */}}
@@ -1180,6 +1199,13 @@ takes the keys (agent-platform.toolchainManager.deprecateFloor). */ -}}
 {{- end -}}
 {{- end -}}
 {{- with $muster -}}{{- $_ := set $out "muster" . -}}{{- end -}}
+{{- with (include "agent-platform.toolchainManager.reviews" . | fromJson) -}}
+{{- $ownKg := dig "klausGateway" dict $tm | default dict -}}
+{{- $kgValues := dict -}}
+{{- if not $ownKg.url -}}{{- $_ := set $kgValues "url" .url -}}{{- end -}}
+{{- if not $ownKg.audience -}}{{- $_ := set $kgValues "audience" .audience -}}{{- end -}}
+{{- with $kgValues -}}{{- $_ := set $out "klausGateway" . -}}{{- end -}}
+{{- end -}}
 {{- with $tm.additionalSources -}}
 {{- $sources := concat ($tm.sources | default list) . -}}
 {{- $seen := dict -}}
@@ -1209,6 +1235,33 @@ Usage: include "agent-platform.toolchainManager.mcpBackend" . | fromJson
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "toolchain-manager") -}}
 {{- $ns := dig "toolchain-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
 {{- $out = dict "namespace" $ns "ports" (list 8080) "podSelector" (dict "app.kubernetes.io/name" "toolchain-manager") -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+Where the toolchain-manager posts its outdated notices and a major update's
+ask with its Approve button: klaus-gateway's team-review endpoint, while the
+component and klaus-gateway are on, klausGateway.reviews.enabled is true and
+the floor of components.toolchain-manager.versionRange is at or above
+agent-platform.toolchainManager.reviewsFloor. url is the gateway's Service
+(klausGateway.fullnameOverride, its namespace, klausGateway.server.port,
+default 8080), audience its reviews.audience (default klaus-gateway) and
+caller the manager's ServiceAccount as the gateway's TokenReview names it
+(system:serviceaccount:<its namespace>:toolchain-manager). Emits JSON, {}
+otherwise.
+Usage: include "agent-platform.toolchainManager.reviews" . | fromJson
+*/}}
+{{- define "agent-platform.toolchainManager.reviews" -}}
+{{- $out := dict -}}
+{{- $kg := .Values.klausGateway | default dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "toolchain-manager")) (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) (eq (toString (dig "reviews" "enabled" false $kg)) "true") -}}
+{{- $tmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "toolchain-manager" "versionRange" "" .Values.components) | default "0.0.0") "" -}}
+{{- if ge ((semver $tmFloor).Compare (semver (include "agent-platform.toolchainManager.reviewsFloor" .))) 0 -}}
+{{- $url := printf "http://%s.%s.svc.cluster.local:%v" (include "agent-platform.klausGateway.name" .) (include "agent-platform.klausGateway.namespace" .) (dig "server" "port" 8080 $kg) -}}
+{{- $tmNs := dig "toolchain-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $out = dict "url" $url "audience" (toString (dig "reviews" "audience" "klaus-gateway" $kg)) "caller" (printf "system:serviceaccount:%s:toolchain-manager" $tmNs) -}}
+{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}
@@ -4130,6 +4183,17 @@ closed values schema refuses the keys. From it on the chart derives both
 define.
 */}}
 {{- define "agent-platform.toolchainManager.deprecateFloor" -}}0.3.0{{- end -}}
+
+{{/*
+The first release of the toolchain-manager line whose chart takes
+klausGateway (url, audience) and a source's team and slackChannel (the
+outdated notices and a major update's ask through klaus-gateway); an earlier
+release's closed values schema refuses them. From it on (a release candidate
+of it included) the chart derives klausGateway and lists the manager in
+klaus-gateway's reviews.allowedCallers (agent-platform.toolchainManager.reviews).
+One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.toolchainManager.reviewsFloor" -}}0.4.0{{- end -}}
 
 {{/*
 The kagent controller's in-cluster gRPC API (in-cluster h2c), straight to its
