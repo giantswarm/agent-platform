@@ -1200,10 +1200,10 @@ components:  # @schema additionalProperties: true
     # notices and major-update asks go to a source's team channel through
     # klaus-gateway's team-review endpoint (klausGateway.url and .audience,
     # derived while klausGateway.reviews.enabled, which then lists the
-    # manager's ServiceAccount in its allowedCallers); a release candidate of
-    # it until 0.4.0 is promoted. The ceiling is the next minor: a toolchain-manager minor rolls in with the chart release that
+    # manager's ServiceAccount in its allowedCallers). The ceiling is the next
+    # minor: a toolchain-manager minor rolls in with the chart release that
     # renders its values.
-    versionRange: ">=0.4.0-rc.1 <0.5.0-0"
+    versionRange: ">=0.4.0 <0.5.0"
     valuesFrom: toolchain-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
