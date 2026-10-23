@@ -196,7 +196,11 @@ overwrite would hide a values file that still spells the old key.
     name muster gives the manager's tools, which the gateway calls as the
     person; only from the floor agent-platform.klausGateway.workspacesFloor
     (4.3.0) of components.klaus-gateway.versionRange, below it nothing. Single
-    source: an own value that differs fails the render.
+    source: an own value that differs fails the render. And
+    reviews.allowedCallers while the toolchain-manager posts its notices and
+    asks there (agent-platform.toolchainManager.reviews): the block's own list,
+    else the klaus-gateway chart's default, with the toolchain-manager's
+    ServiceAccount added.
   valkey:auth.usersExistingSecret and auth.aclUsers.default.passwordKey, when
     its own block leaves them empty, from the Secret and key muster reads the
     same password with (agent-platform.valkeySecretName / valkeyPasswordKey:
@@ -225,6 +229,15 @@ overwrite would hide a values file that still spells the old key.
     audience its grant.audience — defaults as for klaus-gateway, the kagent
     block's own value stands per key; the kagent floor that takes the block,
     an issuer and the email claim are guarded (agent-platform.validateSessionAdmission).
+  toolchain-manager: the login, the muster registration and its pin to the
+    installation's agents GitHub App, and the sources with additionalSources
+    after them, klausGateway.url and .audience while klaus-gateway takes its
+    notices and asks (agent-platform.toolchainManager.derived); the connectivity
+    release its MCP backend entry, networkPolicy.mcpBackends.toolchain-manager
+    (agent-platform.toolchainManager.mcpBackend), and agent-manager
+    muster.toolchainsToolsPrefix, x_<its MCPServer name>_ (from agent-manager
+    agent-platform.agentManager.toolchainsFloor; an own value must agree),
+    while the component is on.
   model-manager: kagent.disableWiring: true while components.kagent is off —
     on by default with no backend (giantswarm/agent-platform#329), the release
     must not wire ModelConfigs into a kagent the installation does not run;
@@ -312,6 +325,21 @@ each session at its start (agent-manager 2.9.0, giantswarm/agent-manager#228). *
 {{- include "agent-platform.validateToolsetBinding" .root -}}
 {{- $_ := set $musterValues "actorBearer" true -}}
 {{- end -}}
+{{- /* The toolchain-manager's tools by the name muster gives them, while the
+component is on: x_<its MCPServer name>_, whose list_toolchains start_session
+asks as the caller. Only while the floor of components.agent-manager.versionRange
+takes the key (agent-platform.agentManager.toolchainsFloor). */ -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "toolchain-manager") -}}
+{{- $amFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "agent-manager" "versionRange" "" .root.Values.components) | default "0.0.0") "" -}}
+{{- if ge ((semver $amFloor).Compare (semver (include "agent-platform.agentManager.toolchainsFloor" .root))) 0 -}}
+{{- $prefix := printf "x_%s_" (dig "muster" "mcpServer" "name" "toolchain-manager" (index .root.Values "toolchain-manager" | default dict)) -}}
+{{- $ownPrefix := dig "muster" "toolchainsToolsPrefix" "" (index .root.Values "agent-manager" | default dict) -}}
+{{- if and $ownPrefix (ne $ownPrefix $prefix) -}}
+{{- fail (printf "agent-manager.muster.toolchainsToolsPrefix (%s) differs from the prefix muster gives the toolchain-manager's tools (%s, x_ and toolchain-manager.muster.mcpServer.name): start_session calls list_toolchains by that name — leave agent-manager.muster.toolchainsToolsPrefix unset" $ownPrefix $prefix) -}}
+{{- end -}}
+{{- $_ := set $musterValues "toolchainsToolsPrefix" $prefix -}}
+{{- end -}}
+{{- end -}}
 {{- $_ := set $derived "muster" $musterValues -}}
 {{- $target := include "agent-platform.kagentControllerTarget" .root -}}
 {{- $ownTarget := dig "kagent" "controllerTarget" "" (index .root.Values "agent-manager" | default dict) -}}
@@ -340,6 +368,15 @@ which the connectivity chart requires beside the model
 {{- with (include "agent-platform.chatgpt.personalLogin" .root | fromJson).provider -}}
 {{- $_ := set $derived "kagent" (dict "controller" (dict "session" (dict "actorJWTProviders" (dict "chatgpt" .)))) -}}
 {{- end -}}
+{{- /* muster alone reaches the toolchain-manager's pods, while the component
+is on: an MCP backend entry, whose ingress policy the connectivity chart
+renders (networkPolicy.mcpBackends). */ -}}
+{{- with (include "agent-platform.toolchainManager.mcpBackend" .root | fromJson) -}}
+{{- $_ := set $derived "networkPolicy" (dict "mcpBackends" (dict "toolchain-manager" .)) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .name "toolchain-manager" -}}
+{{- $derived = include "agent-platform.toolchainManager.derived" .root | fromJson -}}
 {{- end -}}
 {{- if eq .name "cluster-manager" -}}
 {{- /* model-manager's namespace: where the model-manager component lands — the
@@ -473,6 +510,16 @@ release's closed schema refuses a workspaces block. */ -}}
 {{- end -}}
 {{- $_ := set $derived "workspaces" (dict "toolsPrefix" $prefix) -}}
 {{- end -}}
+{{- end -}}
+{{- /* The toolchain-manager posts its outdated notices and a major update's
+ask through the team-review endpoint as its own ServiceAccount
+(agent-platform.toolchainManager.reviews): the callers the block lists, else
+the klaus-gateway chart's default (Helm replaces a list, so the derived one
+carries it), and the manager. */ -}}
+{{- with (include "agent-platform.toolchainManager.reviews" .root | fromJson) -}}
+{{- $callers := dig "reviews" "allowedCallers" (list "system:serviceaccount:giantswarm-platform-manager:giantswarm-platform-manager") $kg -}}
+{{- if not (has .caller $callers) -}}{{- $callers = append $callers .caller -}}{{- end -}}
+{{- $_ := set $derived "reviews" (dict "allowedCallers" $callers) -}}
 {{- end -}}
 {{- /* The egress refusal notices, while they are on
 (agent-platform.klausGateway.refusalsOn): where the Substrate egress and the
@@ -1046,6 +1093,180 @@ Usage: include "agent-platform.workspaceManager.musterPin" . | fromJson
 {{- end -}}
 {{- end -}}
 {{- $out = dict "provider" $provider "secretName" $secret "issuer" $issuer -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+What the toolchain-manager release receives beyond its block, while
+components.toolchain-manager is on; each key the block sets stands:
+- auth.dex.issuerURL: global.identity.issuerUrl, else muster's login
+  (muster.muster.oauth.server.dex.issuerUrl, with the dex provider on); none
+  fails the render, since the chart would serve its tools unauthenticated;
+- auth.trustedAudiences: [global.identity.clientId, else the login's
+  clientId]; none fails the render;
+- auth.dex.caSecret: global.identity.ca (secretName, key default ca.crt), the
+  private CA of the issuer;
+- muster.mcpServer.enabled: whether the muster component is on (the
+  MCPServer CRD ships with it), forced false while it is off;
+- muster.mcpServer.authorizationServer: the registration pinned to the
+  installation's agents GitHub App, the App of the workspace-manager's github
+  provider instance (agent-platform.workspaceManager.musterPin) while
+  workspaces are on: its issuer, GitHub's endpoints on the instance's url
+  (default https://github.com) and, on github.com, the iss GitHub names
+  (https://github.com/login/oauth), and the App's client Secret (client-id,
+  client-secret) in the workspace-manager's namespace; muster files a person's
+  grant under the issuer, so one grant serves both registrations;
+- sources: the block's sources followed by additionalSources, while
+  additionalSources names any; a repository named twice fails the render;
+- muster.mcpUrl, muster's MCP endpoint (agent-platform.musterMcpUrl), and
+  muster.agentManagerToolsPrefix, x_<agent-manager's MCPServer name>_ while
+  agent-manager and muster are on, else empty (deprecate_toolchain then not
+  served), from the toolchain-manager floor
+  agent-platform.toolchainManager.deprecateFloor;
+- klausGateway.url, klaus-gateway's Service, and klausGateway.audience, its
+  reviews.audience, while the gateway takes the manager's notices and asks
+  (agent-platform.toolchainManager.reviews), else nothing (the manager then
+  posts nothing).
+Emits JSON, {} while the component is off.
+Usage: include "agent-platform.toolchainManager.derived" . | fromJson
+*/}}
+{{- define "agent-platform.toolchainManager.derived" -}}
+{{- $out := dict -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "toolchain-manager") -}}
+{{- $tm := index .Values "toolchain-manager" | default dict -}}
+{{- $identity := dig "identity" dict (.Values.global | default dict) -}}
+{{- $server := dig "muster" "oauth" "server" dict (.Values.muster | default dict) -}}
+{{- $login := dict -}}
+{{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
+{{- $login = dig "dex" dict $server -}}
+{{- end -}}
+{{- $ownDex := dig "auth" "dex" dict $tm | default dict -}}
+{{- $dex := dict -}}
+{{- $issuer := toString ($ownDex.issuerURL | default ($identity.issuerUrl | default ($login.issuerUrl | default ""))) -}}
+{{- if not $issuer -}}
+{{- fail "components.toolchain-manager needs the platform's login: set global.identity.issuerUrl (or muster.muster.oauth.server.dex.issuerUrl), or toolchain-manager.auth.dex.issuerURL; without an issuer the chart serves its tools to anyone who reaches the Service" -}}
+{{- end -}}
+{{- if not $ownDex.issuerURL -}}{{- $_ := set $dex "issuerURL" $issuer -}}{{- end -}}
+{{- with $identity.ca -}}
+{{- if and .secretName (not (dig "caSecret" "name" "" $ownDex)) -}}
+{{- $_ := set $dex "caSecret" (dict "name" .secretName "key" (.key | default "ca.crt")) -}}
+{{- end -}}
+{{- end -}}
+{{- $auth := dict -}}
+{{- with $dex -}}{{- $_ := set $auth "dex" . -}}{{- end -}}
+{{- if not (dig "auth" "trustedAudiences" list $tm) -}}
+{{- $client := toString ($identity.clientId | default ($login.clientId | default "")) -}}
+{{- if not $client -}}
+{{- fail "components.toolchain-manager needs the platform's OAuth client: set global.identity.clientId (or muster.muster.oauth.server.dex.clientId), or toolchain-manager.auth.trustedAudiences" -}}
+{{- end -}}
+{{- $_ := set $auth "trustedAudiences" (list $client) -}}
+{{- end -}}
+{{- with $auth -}}{{- $_ := set $out "auth" . -}}{{- end -}}
+{{- $ownMcp := dig "muster" "mcpServer" dict $tm | default dict -}}
+{{- $mcp := dict -}}
+{{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") -}}
+{{- if not $musterOn -}}
+{{- $_ := set $mcp "enabled" false -}}
+{{- else if not (hasKey $ownMcp "enabled") -}}
+{{- $_ := set $mcp "enabled" true -}}
+{{- end -}}
+{{- if and $musterOn (not $ownMcp.authorizationServer) (dig "enabled" false (.Values.workspaces | default dict)) -}}
+{{- $pin := include "agent-platform.workspaceManager.musterPin" . | fromJson -}}
+{{- if and $pin.provider $pin.secretName $pin.issuer -}}
+{{- $url := "https://github.com" -}}
+{{- range (index .Values "workspace-manager" | default dict).providers -}}
+{{- if eq (toString .name) $pin.provider -}}{{- $url = trimSuffix "/" (toString ((.values | default dict).url | default $url)) -}}{{- end -}}
+{{- end -}}
+{{- $ns := dig "workspace-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $as := dict "issuer" $pin.issuer "authorizationEndpoint" (printf "%s/login/oauth/authorize" $url) "tokenEndpoint" (printf "%s/login/oauth/access_token" $url) "clientCredentialsSecretRef" (dict "name" $pin.secretName "namespace" $ns "clientIdKey" "client-id" "clientSecretKey" "client-secret") -}}
+{{- if eq $url "https://github.com" -}}{{- $_ := set $as "expectedIssuer" "https://github.com/login/oauth" -}}{{- end -}}
+{{- $_ := set $mcp "authorizationServer" $as -}}
+{{- end -}}
+{{- end -}}
+{{- $muster := dict -}}
+{{- with $mcp -}}{{- $_ := set $muster "mcpServer" . -}}{{- end -}}
+{{- /* deprecate_toolchain asks agent-manager through muster, as the person,
+which agents and Sessions use a toolchain: muster's MCP endpoint and
+agent-manager's tool prefix, empty while either is off (the tool is then not
+served). Only while the floor of components.toolchain-manager.versionRange
+takes the keys (agent-platform.toolchainManager.deprecateFloor). */ -}}
+{{- $tmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "toolchain-manager" "versionRange" "" .Values.components) | default "0.0.0") "" -}}
+{{- if ge ((semver $tmFloor).Compare (semver (include "agent-platform.toolchainManager.deprecateFloor" .))) 0 -}}
+{{- $ownMuster := dig "muster" dict $tm | default dict -}}
+{{- if not (hasKey $ownMuster "mcpUrl") -}}{{- $_ := set $muster "mcpUrl" (include "agent-platform.musterMcpUrl" .) -}}{{- end -}}
+{{- if not (hasKey $ownMuster "agentManagerToolsPrefix") -}}
+{{- $amPrefix := "" -}}
+{{- if and $musterOn (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) -}}
+{{- $amPrefix = printf "x_%s_" (dig "muster" "mcpServer" "name" "agent-manager" (index .Values "agent-manager" | default dict)) -}}
+{{- end -}}
+{{- $_ := set $muster "agentManagerToolsPrefix" $amPrefix -}}
+{{- end -}}
+{{- end -}}
+{{- with $muster -}}{{- $_ := set $out "muster" . -}}{{- end -}}
+{{- with (include "agent-platform.toolchainManager.reviews" . | fromJson) -}}
+{{- $ownKg := dig "klausGateway" dict $tm | default dict -}}
+{{- $kgValues := dict -}}
+{{- if not $ownKg.url -}}{{- $_ := set $kgValues "url" .url -}}{{- end -}}
+{{- if not $ownKg.audience -}}{{- $_ := set $kgValues "audience" .audience -}}{{- end -}}
+{{- with $kgValues -}}{{- $_ := set $out "klausGateway" . -}}{{- end -}}
+{{- end -}}
+{{- with $tm.additionalSources -}}
+{{- $sources := concat ($tm.sources | default list) . -}}
+{{- $seen := dict -}}
+{{- range $sources -}}
+{{- $repo := toString (.repository | default "") -}}
+{{- if hasKey $seen $repo -}}
+{{- fail (printf "toolchain-manager: the source %s is named twice (sources and additionalSources); name each repository once" $repo) -}}
+{{- end -}}
+{{- $_ := set $seen $repo true -}}
+{{- end -}}
+{{- $_ := set $out "sources" $sources -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The toolchain-manager's MCP backend entry for the connectivity release
+(networkPolicy.mcpBackends.toolchain-manager), while the component is on: its
+pods in the namespace its release lands in, on the port the manager listens
+on, so the connectivity chart's ingress policy admits muster and the
+namespace's own pods only. Emits JSON, {} while the component is off.
+Usage: include "agent-platform.toolchainManager.mcpBackend" . | fromJson
+*/}}
+{{- define "agent-platform.toolchainManager.mcpBackend" -}}
+{{- $out := dict -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "toolchain-manager") -}}
+{{- $ns := dig "toolchain-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $out = dict "namespace" $ns "ports" (list 8080) "podSelector" (dict "app.kubernetes.io/name" "toolchain-manager") -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+Where the toolchain-manager posts its outdated notices and a major update's
+ask with its Approve button: klaus-gateway's team-review endpoint, while the
+component and klaus-gateway are on, klausGateway.reviews.enabled is true and
+the floor of components.toolchain-manager.versionRange is at or above
+agent-platform.toolchainManager.reviewsFloor. url is the gateway's Service
+(klausGateway.fullnameOverride, its namespace, klausGateway.server.port,
+default 8080), audience its reviews.audience (default klaus-gateway) and
+caller the manager's ServiceAccount as the gateway's TokenReview names it
+(system:serviceaccount:<its namespace>:toolchain-manager). Emits JSON, {}
+otherwise.
+Usage: include "agent-platform.toolchainManager.reviews" . | fromJson
+*/}}
+{{- define "agent-platform.toolchainManager.reviews" -}}
+{{- $out := dict -}}
+{{- $kg := .Values.klausGateway | default dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "toolchain-manager")) (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) (eq (toString (dig "reviews" "enabled" false $kg)) "true") -}}
+{{- $tmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "toolchain-manager" "versionRange" "" .Values.components) | default "0.0.0") "" -}}
+{{- if ge ((semver $tmFloor).Compare (semver (include "agent-platform.toolchainManager.reviewsFloor" .))) 0 -}}
+{{- $url := printf "http://%s.%s.svc.cluster.local:%v" (include "agent-platform.klausGateway.name" .) (include "agent-platform.klausGateway.namespace" .) (dig "server" "port" 8080 $kg) -}}
+{{- $tmNs := dig "toolchain-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $out = dict "url" $url "audience" (toString (dig "reviews" "audience" "klaus-gateway" $kg)) "caller" (printf "system:serviceaccount:%s:toolchain-manager" $tmNs) -}}
+{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}
@@ -4039,6 +4260,38 @@ klausGateway.workspaces.toolsPrefix while workspaces are on
 (agent-platform.componentDerivedValues). One line, no comment inside the define.
 */}}
 {{- define "agent-platform.klausGateway.workspacesFloor" -}}4.3.0{{- end -}}
+
+{{/*
+The first release of the agent-manager line (giantswarm/agent-manager) whose
+chart takes muster.toolchainsToolsPrefix (start_session starts a toolchain
+only at a version the toolchain-manager's list_toolchains lists); an earlier
+release's closed values schema refuses the key. From it on (a release
+candidate of it included) the chart derives agent-manager.muster.toolchainsToolsPrefix
+while components.toolchain-manager is on (agent-platform.componentDerivedValues).
+One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.agentManager.toolchainsFloor" -}}2.14.0{{- end -}}
+
+{{/*
+The first release of the toolchain-manager line (giantswarm/toolchain-manager)
+whose chart takes muster.mcpUrl and muster.agentManagerToolsPrefix
+(deprecate_toolchain asks agent-manager through muster); an earlier release's
+closed values schema refuses the keys. From it on the chart derives both
+(agent-platform.toolchainManager.derived). One line, no comment inside the
+define.
+*/}}
+{{- define "agent-platform.toolchainManager.deprecateFloor" -}}0.3.0{{- end -}}
+
+{{/*
+The first release of the toolchain-manager line whose chart takes
+klausGateway (url, audience) and a source's team and slackChannel (the
+outdated notices and a major update's ask through klaus-gateway); an earlier
+release's closed values schema refuses them. From it on (a release candidate
+of it included) the chart derives klausGateway and lists the manager in
+klaus-gateway's reviews.allowedCallers (agent-platform.toolchainManager.reviews).
+One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.toolchainManager.reviewsFloor" -}}0.4.0{{- end -}}
 
 {{/*
 The kagent controller's in-cluster gRPC API (in-cluster h2c), straight to its

@@ -1021,6 +1021,42 @@
                         }
                     }
                 },
+                "toolchain-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
+                        },
+                        "omitKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "valkey": {
                     "type": "object",
                     "additionalProperties": true,
@@ -3027,6 +3063,10 @@
                     }
                 }
             }
+        },
+        "toolchain-manager": {
+            "type": "object",
+            "additionalProperties": true
         },
         "valkey": {
             "type": "object",
