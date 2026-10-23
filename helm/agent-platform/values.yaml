@@ -624,8 +624,15 @@ components:  # @schema additionalProperties: true
     # token against the issuer's keys (controller.auth.issuer, jwksURL and
     # jwksAllowHTTP, which this chart derives: agent-platform.kagent
     # .authentication, giantswarm/kagent-upstream#837) and refuses an agent's
-    # call in the kubernetes authorization mode.
-    versionRange: ">=1.24.1 <1.25.0"
+    # call in the kubernetes authorization mode. From 1.25.0 an EgressPolicy
+    # change reaches running and suspended actors, its grant columns migrated
+    # by the line's own migration; 1.25.1 publishes controller-extensions. From
+    # 1.26.0 a Session mounts the tool images it is created with, admitted from
+    # controller.sessionToolImageRepositories (derived from the
+    # toolchain-manager's sources, agent-platform.kagent.sessionToolImages) and
+    # their origins from controller.sessionToolImageEgressOrigins
+    # (giantswarm/kagent-upstream#879).
+    versionRange: ">=1.26.0 <1.27.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -739,7 +746,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.24.1 <1.25.0"
+    versionRange: ">=1.26.0 <1.27.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false

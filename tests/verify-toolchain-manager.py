@@ -26,6 +26,8 @@ knows (agent-platform.toolchainManager.derived). Each case below pins one proper
   on, from agent-manager 2.14.0 (none off or below the floor), an own value that differs fails;
 - toolchain-manager's muster.mcpUrl and muster.agentManagerToolsPrefix (deprecate_toolchain)
   derived from toolchain-manager 0.3.0, the prefix empty while agent-manager is off;
+- kagent's controller.sessionToolImageRepositories are the sources' registries while the
+  component is on, from kagent 1.26.0 (none off or below the floor), an own list stands;
 - with klaus-gateway on and klausGateway.reviews.enabled, from toolchain-manager 0.4.0:
   toolchain-manager's klausGateway.url (the gateway's Service) and .audience, and the manager's
   ServiceAccount in klaus-gateway's reviews.allowedCallers after the block's own callers (else
@@ -244,6 +246,22 @@ def main(meta: str, connectivity: str) -> int:
     must_lack(values(d[("HelmRelease", NAME)]), ("agentManagerToolsPrefix", "mcpUrl"), "the toolchain-manager release values below the 0.3.0 floor")
     ok("toolchain-manager's muster.mcpUrl is muster's Service and muster.agentManagerToolsPrefix agent-manager's x_agent-manager_ (empty while agent-manager is off), from toolchain-manager 0.3.0; none below the floor")
     ok("agent-manager's muster.toolchainsToolsPrefix is x_<the MCPServer name>_ while the component is on, from agent-manager 2.14.0; none off or below the floor; an own value that differs fails")
+
+    # --- kagent admits the sources' tool images ------------------------------------
+    KAGENT = ["--set", "components.kagent.enabled=true"]
+    REPOS = "  sessionToolImageRepositories:\n  - gsoci.azurecr.io/giantswarm/agent-toolchains\n"
+    must_have(values(documents(helm(meta, [*ON, *IDENTITY, *KAGENT]))[("HelmRelease", "kagent")]), (REPOS,), "the kagent release values with the component on")
+    must_have(values(documents(helm(meta, [*ON, *IDENTITY, *KAGENT,
+                                           "--set", "toolchain-manager.additionalSources[0].repository=acme/toolchains",
+                                           "--set", "toolchain-manager.additionalSources[0].registry=registry.acme.example/toolchains"]))[("HelmRelease", "kagent")]),
+              (REPOS + "  - registry.acme.example/toolchains\n",), "the kagent release values with additionalSources")
+    must_lack(values(documents(helm(meta, [*IDENTITY, *KAGENT]))[("HelmRelease", "kagent")]), ("sessionToolImageRepositories",), "the kagent release values with the component off")
+    must_lack(values(documents(helm(meta, [*ON, *IDENTITY, *KAGENT, "--set", "components.kagent.versionRange=>=1.25.0 <1.26.0",
+                                           "--set", "components.kagent-crds.versionRange=>=1.25.0 <1.26.0"]))[("HelmRelease", "kagent")]),
+              ("sessionToolImageRepositories",), "the kagent release values below the 1.26.0 floor")
+    must_have(values(documents(helm(meta, [*ON, *IDENTITY, *KAGENT, "--set", "kagent.controller.sessionToolImageRepositories[0]=registry.own.example/tools"]))[("HelmRelease", "kagent")]),
+              ("  sessionToolImageRepositories:\n  - registry.own.example/tools\n",), "the kagent release values with an own list")
+    ok("kagent's controller.sessionToolImageRepositories are the sources' registries while the component is on, from kagent 1.26.0; none off or below the floor; an own list stands")
 
     # --- the notices and asks through klaus-gateway --------------------------------
     GATEWAY = ["--set", "components.klaus-gateway.enabled=true"]
