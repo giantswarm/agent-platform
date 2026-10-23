@@ -661,6 +661,11 @@ it (agent-platform.kagent.extensions). */ -}}
 {{- with (include "agent-platform.kagent.extensions" .root | fromJson) -}}
 {{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .controller) -}}
 {{- end -}}
+{{- /* The repositories a Session's tool images may come from: the toolchain
+sources' registries (agent-platform.kagent.sessionToolImages). */ -}}
+{{- with (include "agent-platform.kagent.sessionToolImages" .root | fromJson) -}}
+{{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .controller) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "muster" -}}
 {{- /* The identity provider's private CA (global.identity.ca) is what muster's
@@ -2398,6 +2403,47 @@ fails under that floor (agent-platform.kagent.extensions). One line, no comment
 inside the define.
 */}}
 {{- define "agent-platform.kagent.extensionsFloor" -}}1.25.2{{- end -}}
+
+{{/*
+The first release of the kagent line whose controller mounts the tool images a
+Session is created with (controller.sessionToolImageRepositories and
+sessionToolImageEgressOrigins; giantswarm/kagent-upstream#879). One line, no
+comment inside the define.
+*/}}
+{{- define "agent-platform.kagent.sessionToolImagesFloor" -}}1.26.0{{- end -}}
+
+{{/*
+The repositories the kagent controller admits a Session's tool images from,
+while the toolchain-manager component is on and components.kagent.versionRange
+is at least agent-platform.kagent.sessionToolImagesFloor (a release candidate of
+it included): the registry of every toolchain source the installation offers
+(toolchain-manager.sources and additionalSources), as the release's controller
+values ({controller: {sessionToolImageRepositories}}, or {} otherwise). An own
+kagent.controller.sessionToolImageRepositories stands. The egress origins the
+toolchains need are the installation's own
+(kagent.controller.sessionToolImageEgressOrigins): without them a toolchain that
+names an origin is refused at the Session's start.
+Usage: include "agent-platform.kagent.sessionToolImages" $root | fromJson
+*/}}
+{{- define "agent-platform.kagent.sessionToolImages" -}}
+{{- $out := dict -}}
+{{- $own := dig "controller" "sessionToolImageRepositories" list (.Values.kagent | default dict) -}}
+{{- if and (not $own) (include "agent-platform.componentEnabled" (dict "root" . "name" "toolchain-manager")) (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
+{{- $range := dig "kagent" "versionRange" "" .Values.components -}}
+{{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- if ge ((semver $have).Compare (semver (include "agent-platform.kagent.sessionToolImagesFloor" .))) 0 -}}
+{{- $tm := index .Values "toolchain-manager" | default dict -}}
+{{- $repositories := list -}}
+{{- range concat ($tm.sources | default list) ($tm.additionalSources | default list) -}}
+{{- with .registry -}}{{- $repositories = append $repositories (toString .) -}}{{- end -}}
+{{- end -}}
+{{- with ($repositories | uniq) -}}
+{{- $_ := set $out "controller" (dict "sessionToolImageRepositories" .) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
 
 {{/*
 The settings of the kagent-extensions binary, while the kagent release's
