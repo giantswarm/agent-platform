@@ -5196,7 +5196,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.17.1
+      tag: 2.17.2
     dryRun: false
     gitopsNamespaces: []
 
