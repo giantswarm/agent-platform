@@ -2853,6 +2853,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # must stay allowed.
   controller:  # @schema additionalProperties: true
     image:
+      # giantswarm/kagent/controller-extensions runs the controller as the
+      # kagent-extensions binary (giantswarm/kagent-extensions), which the
+      # kagent line publishes with each release: it identifies a caller from
+      # the bearer token alone and authorizes every call with a
+      # SubjectAccessReview. The chart then sets its settings in env, from
+      # auth and authorization (agent-platform.kagent.extensions); it needs
+      # components.kagent.versionRange at 1.25.2 or later.
       repository: giantswarm/kagent/controller
     # The Go ADK image the chart requires for the controller's ConfigMap
     # (IMAGE_REGISTRY / IMAGE_TAG). On kagent API v2 the image an agent runs on

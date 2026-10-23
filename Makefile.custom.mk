@@ -4516,6 +4516,13 @@ verify-kagent-authorization: ## Assert the kagent controller's authorizer (giant
 	@HELM="$(HELM)" python3 tests/verify-kagent-authorization.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-kagent-extensions
+verify-kagent-extensions: ## Assert the kagent controller run as the kagent-extensions binary (kagent.controller.image.repository giantswarm/kagent/controller-extensions): off by default no variable of the binary; on, controller.env sets the binary's KAGENT_EXTENSIONS_* variables from the controller's own settings (the issuer and key set of controller.auth, a token of any of its clients, the claims and prefixes, the namespace selector and included namespaces, the machine audience, workspace-manager's ServiceAccount while workspaces are on, klaus-gateway's ServiceAccount as the session reader while refusal notices are on), each a flag of the binary, an own env entry standing; the noop authorization mode, the insecure authentication mode and a kagent range below 1.25.2 fail; the kagent chart of the floor (until published, the newest release below it) runs controller-extensions of its own release with the binary's variables and IMAGE_TAG naming that release. Needs PyYAML. Network: gsoci.azurecr.io (the kagent chart). HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-kagent-extensions.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-klausgateway-refusals
 verify-klausgateway-refusals: ## Assert klaus-gateway's egress refusal notices (giantswarm/giantswarm#38667): klausGateway.refusals.enabled auto resolves on with the default ranges and off below klaus-gateway 4.11.0 or kagent 1.20.0 (no refusals block to the klaus-gateway release, no session reader, connectivity off, no -klausgateway-refusals-egress) and on above them with Slack, kagent and Substrate on (the derived egressService, kagentTarget and kagentAudience beside the block's own keys, agent-platform/klaus-gateway as the controller's session reader admitted to its API port, the gateway's egress to atenet-egress's stats port and the controller's API port in both flavours); enabled false or Slack off keeps it off; enabled true below the floors, an own egressService and an own session reader that differ fail. Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
