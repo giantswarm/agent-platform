@@ -225,6 +225,11 @@ overwrite would hide a values file that still spells the old key.
     audience its grant.audience — defaults as for klaus-gateway, the kagent
     block's own value stands per key; the kagent floor that takes the block,
     an issuer and the email claim are guarded (agent-platform.validateSessionAdmission).
+  toolchain-manager: the login, the muster registration and its pin to the
+    installation's agents GitHub App, and the sources with additionalSources
+    after them (agent-platform.toolchainManager.derived); the connectivity
+    release its MCP backend entry, networkPolicy.mcpBackends.toolchain-manager
+    (agent-platform.toolchainManager.mcpBackend), while the component is on.
   model-manager: kagent.disableWiring: true while components.kagent is off —
     on by default with no backend (giantswarm/agent-platform#329), the release
     must not wire ModelConfigs into a kagent the installation does not run;
@@ -340,6 +345,15 @@ which the connectivity chart requires beside the model
 {{- with (include "agent-platform.chatgpt.personalLogin" .root | fromJson).provider -}}
 {{- $_ := set $derived "kagent" (dict "controller" (dict "session" (dict "actorJWTProviders" (dict "chatgpt" .)))) -}}
 {{- end -}}
+{{- /* muster alone reaches the toolchain-manager's pods, while the component
+is on: an MCP backend entry, whose ingress policy the connectivity chart
+renders (networkPolicy.mcpBackends). */ -}}
+{{- with (include "agent-platform.toolchainManager.mcpBackend" .root | fromJson) -}}
+{{- $_ := set $derived "networkPolicy" (dict "mcpBackends" (dict "toolchain-manager" .)) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .name "toolchain-manager" -}}
+{{- $derived = include "agent-platform.toolchainManager.derived" .root | fromJson -}}
 {{- end -}}
 {{- if eq .name "cluster-manager" -}}
 {{- /* model-manager's namespace: where the model-manager component lands — the
@@ -1041,6 +1055,118 @@ Usage: include "agent-platform.workspaceManager.musterPin" . | fromJson
 {{- end -}}
 {{- end -}}
 {{- $out = dict "provider" $provider "secretName" $secret "issuer" $issuer -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+What the toolchain-manager release receives beyond its block, while
+components.toolchain-manager is on; each key the block sets stands:
+- auth.dex.issuerURL: global.identity.issuerUrl, else muster's login
+  (muster.muster.oauth.server.dex.issuerUrl, with the dex provider on); none
+  fails the render, since the chart would serve its tools unauthenticated;
+- auth.trustedAudiences: [global.identity.clientId, else the login's
+  clientId]; none fails the render;
+- auth.dex.caSecret: global.identity.ca (secretName, key default ca.crt), the
+  private CA of the issuer;
+- muster.mcpServer.enabled: whether the muster component is on (the
+  MCPServer CRD ships with it), forced false while it is off;
+- muster.mcpServer.authorizationServer: the registration pinned to the
+  installation's agents GitHub App, the App of the workspace-manager's github
+  provider instance (agent-platform.workspaceManager.musterPin) while
+  workspaces are on: its issuer, GitHub's endpoints on the instance's url
+  (default https://github.com) and, on github.com, the iss GitHub names
+  (https://github.com/login/oauth), and the App's client Secret (client-id,
+  client-secret) in the workspace-manager's namespace; muster files a person's
+  grant under the issuer, so one grant serves both registrations;
+- sources: the block's sources followed by additionalSources, while
+  additionalSources names any; a repository named twice fails the render.
+Emits JSON, {} while the component is off.
+Usage: include "agent-platform.toolchainManager.derived" . | fromJson
+*/}}
+{{- define "agent-platform.toolchainManager.derived" -}}
+{{- $out := dict -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "toolchain-manager") -}}
+{{- $tm := index .Values "toolchain-manager" | default dict -}}
+{{- $identity := dig "identity" dict (.Values.global | default dict) -}}
+{{- $server := dig "muster" "oauth" "server" dict (.Values.muster | default dict) -}}
+{{- $login := dict -}}
+{{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
+{{- $login = dig "dex" dict $server -}}
+{{- end -}}
+{{- $ownDex := dig "auth" "dex" dict $tm | default dict -}}
+{{- $dex := dict -}}
+{{- $issuer := toString ($ownDex.issuerURL | default ($identity.issuerUrl | default ($login.issuerUrl | default ""))) -}}
+{{- if not $issuer -}}
+{{- fail "components.toolchain-manager needs the platform's login: set global.identity.issuerUrl (or muster.muster.oauth.server.dex.issuerUrl), or toolchain-manager.auth.dex.issuerURL; without an issuer the chart serves its tools to anyone who reaches the Service" -}}
+{{- end -}}
+{{- if not $ownDex.issuerURL -}}{{- $_ := set $dex "issuerURL" $issuer -}}{{- end -}}
+{{- with $identity.ca -}}
+{{- if and .secretName (not (dig "caSecret" "name" "" $ownDex)) -}}
+{{- $_ := set $dex "caSecret" (dict "name" .secretName "key" (.key | default "ca.crt")) -}}
+{{- end -}}
+{{- end -}}
+{{- $auth := dict -}}
+{{- with $dex -}}{{- $_ := set $auth "dex" . -}}{{- end -}}
+{{- if not (dig "auth" "trustedAudiences" list $tm) -}}
+{{- $client := toString ($identity.clientId | default ($login.clientId | default "")) -}}
+{{- if not $client -}}
+{{- fail "components.toolchain-manager needs the platform's OAuth client: set global.identity.clientId (or muster.muster.oauth.server.dex.clientId), or toolchain-manager.auth.trustedAudiences" -}}
+{{- end -}}
+{{- $_ := set $auth "trustedAudiences" (list $client) -}}
+{{- end -}}
+{{- with $auth -}}{{- $_ := set $out "auth" . -}}{{- end -}}
+{{- $ownMcp := dig "muster" "mcpServer" dict $tm | default dict -}}
+{{- $mcp := dict -}}
+{{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") -}}
+{{- if not $musterOn -}}
+{{- $_ := set $mcp "enabled" false -}}
+{{- else if not (hasKey $ownMcp "enabled") -}}
+{{- $_ := set $mcp "enabled" true -}}
+{{- end -}}
+{{- if and $musterOn (not $ownMcp.authorizationServer) (dig "enabled" false (.Values.workspaces | default dict)) -}}
+{{- $pin := include "agent-platform.workspaceManager.musterPin" . | fromJson -}}
+{{- if and $pin.provider $pin.secretName $pin.issuer -}}
+{{- $url := "https://github.com" -}}
+{{- range (index .Values "workspace-manager" | default dict).providers -}}
+{{- if eq (toString .name) $pin.provider -}}{{- $url = trimSuffix "/" (toString ((.values | default dict).url | default $url)) -}}{{- end -}}
+{{- end -}}
+{{- $ns := dig "workspace-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $as := dict "issuer" $pin.issuer "authorizationEndpoint" (printf "%s/login/oauth/authorize" $url) "tokenEndpoint" (printf "%s/login/oauth/access_token" $url) "clientCredentialsSecretRef" (dict "name" $pin.secretName "namespace" $ns "clientIdKey" "client-id" "clientSecretKey" "client-secret") -}}
+{{- if eq $url "https://github.com" -}}{{- $_ := set $as "expectedIssuer" "https://github.com/login/oauth" -}}{{- end -}}
+{{- $_ := set $mcp "authorizationServer" $as -}}
+{{- end -}}
+{{- end -}}
+{{- with $mcp -}}{{- $_ := set $out "muster" (dict "mcpServer" .) -}}{{- end -}}
+{{- with $tm.additionalSources -}}
+{{- $sources := concat ($tm.sources | default list) . -}}
+{{- $seen := dict -}}
+{{- range $sources -}}
+{{- $repo := toString (.repository | default "") -}}
+{{- if hasKey $seen $repo -}}
+{{- fail (printf "toolchain-manager: the source %s is named twice (sources and additionalSources); name each repository once" $repo) -}}
+{{- end -}}
+{{- $_ := set $seen $repo true -}}
+{{- end -}}
+{{- $_ := set $out "sources" $sources -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The toolchain-manager's MCP backend entry for the connectivity release
+(networkPolicy.mcpBackends.toolchain-manager), while the component is on: its
+pods in the namespace its release lands in, on the port the manager listens
+on, so the connectivity chart's ingress policy admits muster and the
+namespace's own pods only. Emits JSON, {} while the component is off.
+Usage: include "agent-platform.toolchainManager.mcpBackend" . | fromJson
+*/}}
+{{- define "agent-platform.toolchainManager.mcpBackend" -}}
+{{- $out := dict -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "toolchain-manager") -}}
+{{- $ns := dig "toolchain-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $out = dict "namespace" $ns "ports" (list 8080) "podSelector" (dict "app.kubernetes.io/name" "toolchain-manager") -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}

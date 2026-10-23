@@ -45,6 +45,7 @@ By default there is no filter and no prerelease.
 | vm-manager | `components.vm-manager.enabled` | `false` |
 | cluster-manager | `components.cluster-manager.enabled` | `false` |
 | workspace-manager | `workspaces.enabled` (`components.workspace-manager` follows it) | `false` |
+| toolchain-manager | `components.toolchain-manager.enabled` | `false` |
 | Backstage | `components.backstage.enabled` | `false` |
 | mcp-kubernetes | `components.mcp-kubernetes.enabled` | `false` |
 | CloudNativePG operator | `components.cloudnative-pg.enabled` | `false` |
@@ -295,6 +296,19 @@ A workspace is an Organization's set of repositories, mirrored on one shared rea
 - **Session admission.** kagent admits a Session that names a workspace volume only with a valid grant. The meta chart derives `kagent.controller.session.admission.jwt` (key set, issuer, audience) from the manager's settings. `kagent.controller.auth.userIdClaim` must stay `email`.
 - **Session lifetime.** kagent deletes a Session idle for `kagent.controller.sessionIdleTTL` (`336h` here), and the manager deletes its directory with it. `workspace-manager.sessions.cleanupAfter` is derived from the TTL, and a longer own value fails the render.
 - **Network policies.** The `workspaceManager:` block admits muster, the kagent controller and the kubelet probes in, and DNS, the API server, the identity provider and each provider's hosts out. Extra hosts go in `workspaceManager.networkPolicy.egress`.
+
+### Toolchains
+
+**[toolchain-manager](https://github.com/giantswarm/toolchain-manager)** serves the toolchains coding agents mount: the toolchain sources an installation offers, package search, the binaries and the Dockerfile a toolchain is built from. MCP is its only surface, through muster as the signed-in person (`x_toolchain-manager_*`).
+
+- `components.toolchain-manager` is off by default and `dependsOn: [muster]`: toolchains are an installation's opt-in. The chart values go in the `toolchain-manager:` block.
+- The login is derived: the Dex issuer and the trusted audience from `global.identity` (else muster's `muster.muster.oauth.server.dex`), the issuer's CA from `global.identity.ca`. The render fails without an issuer or a client. Where the issuer's public name does not resolve in the cluster, set `toolchain-manager.auth.dex.jwksURL` to its in-cluster key set.
+- With workspaces on, the manager's `MCPServer` is pinned to the installation's agents GitHub App, the App of the workspace-manager's github provider instance, so a person grants it once for workspaces and toolchains. An own `toolchain-manager.muster.mcpServer.authorizationServer` stands. Set `toolchain-manager.github.appInstallURL` to the App's `https://github.com/apps/<slug>/installations/new`.
+- `toolchain-manager.owners` (Dex `groups`, verified `emails`) approve a source a person adds. Without owners, an added source is never approved.
+- `toolchain-manager.sources` offers giantswarm/agent-toolchains. The installation's own go in `additionalSources`, offered after it. A repository named twice fails the render.
+- The connectivity chart admits muster to the manager's pods only (an MCP backend entry, derived while the component is on).
+
+`make verify-toolchain-manager` covers it.
 
 ### The kagent line
 
