@@ -442,6 +442,18 @@ components:  # @schema additionalProperties: true
     # on its own). It owns their version, so no CRD dependsOn; consumers of its CR
     # kinds (agent-platform-mcps) dependsOn muster instead.
     crds: CreateReplace
+    # muster's start waits for its Valkey (the session and token stores) with
+    # a backoff up to 8 s and binds its port only once Valkey answers, so a
+    # muster pod that starts while muster-valkey is recreated (Recreate, one
+    # replica on an RWO volume) stays unready until Valkey is back and the next
+    # retry. A Flux pass that upgraded both at once rolled muster into that gap:
+    # where no other muster replica was ready (the agentlab: one replica,
+    # maxSurge 0) the edge answered 503 `no healthy backends` for the Valkey
+    # restart plus the backoff (giantswarm/agent-platform#1208). helm-controller
+    # upgrades muster only once the valkey release is Ready again; a Valkey
+    # recreation alone never takes a running muster down. Dropped while
+    # components.valkey is off (an out-of-band Valkey).
+    dependsOn: [valkey]
     # Drift detection on this release (HelmRelease v2 spec.driftDetection): on
     # every reconcile — gitops.interval — helm-controller compares the release's
     # manifest with the cluster and re-applies what differs, as a server-side

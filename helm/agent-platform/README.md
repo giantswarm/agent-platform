@@ -409,6 +409,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.muster.versionRange | string | `">=5.52.5 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
+| components.muster.dependsOn[0] | string | `"valkey"` |  |
 | components.muster.driftDetection.mode | string | `"enabled"` |  |
 | components.muster.enabled | bool | `true` |  |
 | components.muster.ownedCrds[0] | string | `"mcpservers.muster.giantswarm.io"` |  |
