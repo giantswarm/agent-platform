@@ -406,6 +406,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **PostgreSQL ImageVolume admission covers the documented restore Cluster** (giantswarm/agent-platform#852). The exception now allows Pods and Jobs labelled with the source Cluster name or its exact `<clusterName>-restore` name, within the source namespace.
 - **kagent's sign-in page loads again behind oauth2-proxy** (giantswarm/agent-platform#989). kagent's UI is a Vite build, so `/login` loads its bundle from `/assets/`, its settings from `/env-config.js` and its icon from `/favicon.svg`, but `kagent.oauth2-proxy.extraArgs.skip-auth-regex` still admitted the Next.js paths (`/_next/static`, …), so oauth2-proxy answered 403 for the page's own files and the sign-in button never appeared. The regex now admits `/login`, `/env-config.js`, `/favicon.svg` and the bundle's files directly under `/assets/`, anchored at the end: every other path needs a session, including the paths that only began with `/login`, which the old regex left open. `make verify-kagent-login-public-paths` matches both charts' arguments against the paths the page fetches and the app's own.
 
 ## [4.130.1-rc.2] - 2026-10-13
