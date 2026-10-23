@@ -2473,12 +2473,13 @@ Usage: include "agent-platform.substrate.egressStoragePatch" $root | fromJson
 {{/*
 The first release of the kagent line whose controller-extensions image runs the
 line's own migrations and accepts a person's token of any client of the issuer
-(giantswarm/kagent-upstream#872). An earlier image migrates the database without
-the line's tables, so with the controller on controller-extensions the render
-fails under that floor (agent-platform.kagent.extensions). One line, no comment
+(giantswarm/kagent-upstream#872, giantswarm/kagent-upstream#884). An earlier image
+migrates the database without the line's tables or refuses every person's token
+until an audience is listed, so with the controller on controller-extensions the
+render fails under that floor (agent-platform.kagent.extensions). One line, no comment
 inside the define.
 */}}
-{{- define "agent-platform.kagent.extensionsFloor" -}}1.25.2{{- end -}}
+{{- define "agent-platform.kagent.extensionsFloor" -}}1.26.2{{- end -}}
 
 {{/*
 The first release of the kagent line whose controller mounts the tool images a

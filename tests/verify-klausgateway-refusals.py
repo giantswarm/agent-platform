@@ -55,8 +55,8 @@ BASE = [
 ]
 FLOORS = {"components": {
     "klaus-gateway": {"versionRange": ">=4.11.0 <5.0.0"},
-    "kagent": {"versionRange": ">=1.24.1 <1.25.0"},
-    "kagent-crds": {"versionRange": ">=1.24.1 <1.25.0"},
+    "kagent": {"versionRange": ">=1.26.2 <1.27.0"},
+    "kagent-crds": {"versionRange": ">=1.26.2 <1.27.0"},
 }}
 BELOW = {"components": {
     "kagent": {"versionRange": ">=1.19.0 <1.20.0"},

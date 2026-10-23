@@ -58,9 +58,9 @@ CHART, BASE, WORKSPACES = ka.CHART, ka.BASE, ka.WORKSPACES
 
 DEPLOYMENT = "kagent-controller"
 REPOSITORY = "giantswarm/kagent/controller-extensions"
-FLOOR = "1.25.2"
-BELOW_FLOOR = "1.25.1"
-RANGE = ["--set", f"components.kagent.versionRange=>={FLOOR} <1.26.0"]
+FLOOR = "1.26.2"
+BELOW_FLOOR = "1.26.1"
+RANGE = ["--set", f"components.kagent.versionRange=>={FLOOR} <1.27.0"]
 SWITCH = ["--set", f"kagent.controller.image.repository={REPOSITORY}"]
 ON = [*SWITCH, *RANGE]
 REFUSALS = ["--set", "components.klaus-gateway.enabled=true", "--set", "klausGateway.slack.enabled=true",
@@ -152,7 +152,7 @@ def main() -> None:
 
     must_fail([*ON, "--set", f"{ka.AUTHZ}.mode=noop"], "kagent.controller.authorization.mode", "on in the noop authorization mode")
     must_fail([*ON, "--set", f"{ka.AUTH}.mode=insecure"], "kagent.controller.auth.mode", "on in the insecure authentication mode")
-    must_fail([*ON, "--set", f"components.kagent.versionRange=>={BELOW_FLOOR} <1.26.0"],
+    must_fail([*ON, "--set", f"components.kagent.versionRange=>={BELOW_FLOOR} <{FLOOR}"],
               "components.kagent.versionRange", f"on with a kagent range below {FLOOR}")
     if "KAGENT_EXTENSIONS_OIDC_ISSUERS" not in env(controller(SWITCH)):
         fail("on with the default kagent range, the binary's variables are missing")
