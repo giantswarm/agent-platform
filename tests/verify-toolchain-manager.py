@@ -247,6 +247,34 @@ def main(meta: str, connectivity: str) -> int:
     ok("toolchain-manager's muster.mcpUrl is muster's Service and muster.agentManagerToolsPrefix agent-manager's x_agent-manager_ (empty while agent-manager is off), from toolchain-manager 0.3.0; none below the floor")
     ok("agent-manager's muster.toolchainsToolsPrefix is x_<the MCPServer name>_ while the component is on, from agent-manager 2.14.0; none off or below the floor; an own value that differs fails")
 
+    # --- the other side of a toolchain: read and pulled with the sources' registries and one pull secret
+    LAB = "gsociprivate.azurecr.io/giantswarm/agent-toolchains-lab"
+    PRIVATE = ["--set", "toolchain-manager.additionalSources[0].repository=giantswarm/agent-toolchains-lab",
+               "--set", f"toolchain-manager.additionalSources[0].registry={LAB}",
+               "--set", "toolchain-manager.registryPullSecret=toolchains-pull"]
+    LINES = ["--set", "components.substrate.versionRange=1.18.0-rc.1", "--set", "components.substrate-crds.versionRange=1.18.0-rc.1",
+             "--set", "components.agent-manager.versionRange=>=2.16.0 <3.0.0"]
+    PULL = "  imagePullSecrets:\n  - name: toolchains-pull\n"
+    d = documents(helm(meta, [*ON, *IDENTITY, *AGENTS, *PRIVATE, *LINES]))
+    must_have(values(d[("HelmRelease", "agent-manager")]), (
+        "toolchains:\n  registryConfig:\n    secretName: toolchains-pull\n  repository: gsoci.azurecr.io/giantswarm/agent-toolchains\n",
+    ), "the agent-manager release values with a private source")
+    must_have(values(d[("HelmRelease", "substrate")]), (PULL,), "the substrate release values with a private source")
+    must_lack(values(d[("HelmRelease", NAME)]), ("registryPullSecret",), "the toolchain-manager release values")
+    d = documents(helm(meta, [*ON, *IDENTITY, *AGENTS, *PRIVATE, *LINES,
+                              "--set", "agent-manager.toolchains.repository=registry.example.com/toolchains",
+                              "--set", "substrate.atelet.imagePullSecrets[0].name=own"]))
+    must_have(values(d[("HelmRelease", "agent-manager")]), ("  repository: registry.example.com/toolchains\n",), "the agent-manager release values with an own repository")
+    must_have(values(d[("HelmRelease", "substrate")]), ("  imagePullSecrets:\n  - name: own\n  - name: toolchains-pull\n",), "the substrate release values with an own pull secret")
+    d = documents(helm(meta, [*IDENTITY, *AGENTS, *PRIVATE, *LINES]))
+    must_lack(values(d[("HelmRelease", "agent-manager")]), ("registryConfig", "agent-toolchains"), "the agent-manager release values with the component off")
+    must_lack(values(d[("HelmRelease", "substrate")]), ("toolchains-pull",), "the substrate release values with the component off")
+    d = documents(helm(meta, [*ON, *IDENTITY, *AGENTS, *PRIVATE, "--set", "components.agent-manager.versionRange=>=2.14.0 <3.0.0"]))
+    must_lack(values(d[("HelmRelease", "agent-manager")]), ("registryConfig",), "the agent-manager release values below the 2.16.0 floor")
+    must_lack(values(d[("HelmRelease", "substrate")]), ("toolchains-pull",), "the substrate release values below the 1.18.0 floor")
+    if "differs from toolchain-manager.registryPullSecret" not in helm(meta, [*ON, *IDENTITY, *AGENTS, *PRIVATE, *LINES, "--set", "agent-manager.toolchains.registryConfig.secretName=other"], expect_fail=True):
+        fail("an own agent-manager.toolchains.registryConfig.secretName that differs failed for the wrong reason")
+    ok("while the component is on: agent-manager's toolchains.repository the first source's registry (an own value stands) and toolchains.registryConfig.secretName toolchain-manager.registryPullSecret from agent-manager 2.16.0 (an own value that differs fails), Substrate's atelet.imagePullSecrets the pull secret after its own from Substrate 1.18.0; none off or below a floor; registryPullSecret not forwarded")
     # --- kagent admits the sources' tool images ------------------------------------
     KAGENT = ["--set", "components.kagent.enabled=true"]
     REPOS = "  sessionToolImageRepositories:\n  - gsoci.azurecr.io/giantswarm/agent-toolchains\n"

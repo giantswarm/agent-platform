@@ -566,6 +566,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.toolchain-manager.enabled | bool | `false` |  |
 | components.toolchain-manager.dependsOn[0] | string | `"muster"` |  |
 | components.toolchain-manager.omitKeys[0] | string | `"additionalSources"` |  |
+| components.toolchain-manager.omitKeys[1] | string | `"registryPullSecret"` |  |
 | components.toolchain-manager.gatedRoster | bool | `true` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
@@ -1522,6 +1523,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | toolchain-manager.sources[0].repository | string | `"giantswarm/agent-toolchains"` |  |
 | toolchain-manager.sources[0].registry | string | `"gsoci.azurecr.io/giantswarm/agent-toolchains"` |  |
 | toolchain-manager.additionalSources | list | `[]` |  |
+| toolchain-manager.registryPullSecret | string | `""` |  |
 | toolchain-manager.github.appInstallURL | string | `""` |  |
 | backstage.observability.otel.endpoint | string | `"auto"` |  |
 | backstage.observability.otel.protocol | string | `"auto"` |  |
