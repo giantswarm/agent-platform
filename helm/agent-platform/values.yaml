@@ -1065,8 +1065,11 @@ components:  # @schema additionalProperties: true
     # muster.toolchainsToolsPrefix, which this chart sets to the
     # toolchain-manager's tools while components.toolchain-manager is on, so
     # start_session starts only a toolchain version list_toolchains lists
-    # (giantswarm/agent-manager#248).
-    versionRange: ">=2.14.0 <3.0.0"
+    # (giantswarm/agent-manager#248). 2.16.0 starts a Session of an agent
+    # without defaultToolchains with the github toolchain, so gh stays in its
+    # Sessions once the Harness images carry none; it is the floor before any
+    # kagent line without gh in its Harness images (giantswarm/agent-manager#252).
+    versionRange: ">=2.16.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
