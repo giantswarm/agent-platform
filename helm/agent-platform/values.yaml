@@ -1192,10 +1192,13 @@ components:  # @schema additionalProperties: true
     # are an installation's opt-in.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # 0.2.0 is the first release with create_toolchain and
-    # toolchain_build_status (giantswarm/toolchain-manager#12). The ceiling is
-    # the next minor: a toolchain-manager minor rolls in with the chart release
-    # that renders its values.
-    versionRange: ">=0.2.0 <0.3.0"
+    # toolchain_build_status (giantswarm/toolchain-manager#12). The floor is
+    # 0.3.0: published[] per toolchain and deprecate_toolchain, which asks
+    # agent-manager through muster which agents and Sessions use a toolchain
+    # (muster.mcpUrl and muster.agentManagerToolsPrefix, derived). The ceiling
+    # is the next minor: a toolchain-manager minor rolls in with the chart
+    # release that renders its values.
+    versionRange: ">=0.3.0 <0.4.0"
     valuesFrom: toolchain-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);

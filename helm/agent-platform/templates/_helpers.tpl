@@ -1098,7 +1098,12 @@ components.toolchain-manager is on; each key the block sets stands:
   client-secret) in the workspace-manager's namespace; muster files a person's
   grant under the issuer, so one grant serves both registrations;
 - sources: the block's sources followed by additionalSources, while
-  additionalSources names any; a repository named twice fails the render.
+  additionalSources names any; a repository named twice fails the render;
+- muster.mcpUrl, muster's MCP endpoint (agent-platform.musterMcpUrl), and
+  muster.agentManagerToolsPrefix, x_<agent-manager's MCPServer name>_ while
+  agent-manager and muster are on, else empty (deprecate_toolchain then not
+  served), from the toolchain-manager floor
+  agent-platform.toolchainManager.deprecateFloor.
 Emits JSON, {} while the component is off.
 Usage: include "agent-platform.toolchainManager.derived" . | fromJson
 */}}
@@ -1155,7 +1160,26 @@ Usage: include "agent-platform.toolchainManager.derived" . | fromJson
 {{- $_ := set $mcp "authorizationServer" $as -}}
 {{- end -}}
 {{- end -}}
-{{- with $mcp -}}{{- $_ := set $out "muster" (dict "mcpServer" .) -}}{{- end -}}
+{{- $muster := dict -}}
+{{- with $mcp -}}{{- $_ := set $muster "mcpServer" . -}}{{- end -}}
+{{- /* deprecate_toolchain asks agent-manager through muster, as the person,
+which agents and Sessions use a toolchain: muster's MCP endpoint and
+agent-manager's tool prefix, empty while either is off (the tool is then not
+served). Only while the floor of components.toolchain-manager.versionRange
+takes the keys (agent-platform.toolchainManager.deprecateFloor). */ -}}
+{{- $tmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "toolchain-manager" "versionRange" "" .Values.components) | default "0.0.0") "" -}}
+{{- if ge ((semver $tmFloor).Compare (semver (include "agent-platform.toolchainManager.deprecateFloor" .))) 0 -}}
+{{- $ownMuster := dig "muster" dict $tm | default dict -}}
+{{- if not (hasKey $ownMuster "mcpUrl") -}}{{- $_ := set $muster "mcpUrl" (include "agent-platform.musterMcpUrl" .) -}}{{- end -}}
+{{- if not (hasKey $ownMuster "agentManagerToolsPrefix") -}}
+{{- $amPrefix := "" -}}
+{{- if and $musterOn (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) -}}
+{{- $amPrefix = printf "x_%s_" (dig "muster" "mcpServer" "name" "agent-manager" (index .Values "agent-manager" | default dict)) -}}
+{{- end -}}
+{{- $_ := set $muster "agentManagerToolsPrefix" $amPrefix -}}
+{{- end -}}
+{{- end -}}
+{{- with $muster -}}{{- $_ := set $out "muster" . -}}{{- end -}}
 {{- with $tm.additionalSources -}}
 {{- $sources := concat ($tm.sources | default list) . -}}
 {{- $seen := dict -}}
@@ -4096,6 +4120,16 @@ while components.toolchain-manager is on (agent-platform.componentDerivedValues)
 One line, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.toolchainsFloor" -}}2.14.0{{- end -}}
+
+{{/*
+The first release of the toolchain-manager line (giantswarm/toolchain-manager)
+whose chart takes muster.mcpUrl and muster.agentManagerToolsPrefix
+(deprecate_toolchain asks agent-manager through muster); an earlier release's
+closed values schema refuses the keys. From it on the chart derives both
+(agent-platform.toolchainManager.derived). One line, no comment inside the
+define.
+*/}}
+{{- define "agent-platform.toolchainManager.deprecateFloor" -}}0.3.0{{- end -}}
 
 {{/*
 The kagent controller's in-cluster gRPC API (in-cluster h2c), straight to its

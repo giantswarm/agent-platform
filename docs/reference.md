@@ -308,6 +308,7 @@ A workspace is an Organization's set of repositories, mirrored on one shared rea
 - `toolchain-manager.sources` offers giantswarm/agent-toolchains. The installation's own go in `additionalSources`, offered after it. A repository named twice fails the render.
 - The connectivity chart admits muster to the manager's pods only (an MCP backend entry, derived while the component is on).
 - agent-manager's `start_session` starts a toolchain only at a version `list_toolchains` lists for the caller: the chart sets `agent-manager.muster.toolchainsToolsPrefix` to `x_<toolchain-manager.muster.mcpServer.name>_` while the component is on (agent-manager 2.14.0 or later). A different own value fails the render.
+- `deprecate_toolchain` asks agent-manager through muster which agents and Sessions use a toolchain: the chart sets `toolchain-manager.muster.mcpUrl` to muster's Service and `muster.agentManagerToolsPrefix` to agent-manager's tools, empty while agent-manager is off (toolchain-manager 0.3.0 or later).
 
 `make verify-toolchain-manager` covers it.
 
