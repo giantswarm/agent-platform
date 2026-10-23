@@ -407,7 +407,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.17.0
+          tag: 2.17.2
       networkPolicy:
         egress:
           cidrs: []
@@ -2011,6 +2011,8 @@ spec:
       retries: 5
   driftDetection:
     mode: enabled
+  dependsOn:
+    - name: valkey
   values:
     affinity:
       podAntiAffinity:
@@ -5119,10 +5121,12 @@ spec:
               # The platform HelmReleases in reverse dependency order (a CRD chart's release
               # only after the releases whose objects are its CRs); kubectl waits for
               # helm-controller to uninstall a wave before the next one starts.
-              echo "wave 1: agent-platform-connectivity dicebear model-manager valkey"
-              kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m agent-platform-connectivity dicebear model-manager valkey
+              echo "wave 1: agent-platform-connectivity dicebear model-manager"
+              kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m agent-platform-connectivity dicebear model-manager
               echo "wave 2: agentgateway muster"
               kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m agentgateway muster
+              echo "wave 3: valkey"
+              kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m valkey
           env:
             # kubectl keeps its discovery cache and helm its cache and config
             # under $HOME; the root filesystem is read-only.

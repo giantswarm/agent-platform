@@ -898,6 +898,12 @@
                         "crds": {
                             "type": "string"
                         },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
                         "driftDetection": {
                             "type": "object",
                             "additionalProperties": true,

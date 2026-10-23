@@ -1768,6 +1768,11 @@ verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform
 	@awk "/^  name: valkey$$/,/^---/" $(VERIFY_TMP)/vv-auth-own.out | grep -q 'usersExistingSecret: own' || { echo "FAIL: an own usersExistingSecret does not win"; exit 1; }
 	@awk "/^  name: valkey$$/,/^---/" $(VERIFY_TMP)/vv-auth-own.out | grep -q 'passwordKey: pw' || { echo "FAIL: an own passwordKey does not win"; exit 1; }
 	@echo "ok: the default user's password follows the platform Secret"
+	@echo "--> muster's release waits for the valkey release (giantswarm/agent-platform#1208); without the component, for nothing"
+	@awk '/^  name: muster$$/{f=1} f&&/^  dependsOn:/{d=1} d&&/- name: valkey$$/{v=1} /^---/{if(f&&d&&v){ok=1}; f=0;d=0;v=0} END{if(ok)exit 0; else exit 1}' $(VERIFY_TMP)/vv-meta.out || { echo "FAIL: the muster HelmRelease does not dependsOn valkey"; exit 1; }
+	@$(HELM) template t $(CHART_DIR) $(VM) --set components.valkey.enabled=false >$(VERIFY_TMP)/vv-off.out 2>&1 || { cat $(VERIFY_TMP)/vv-off.out; exit 1; }
+	@! awk '/^  name: muster$$/{f=1} f&&/- name: valkey$$/{print} /^---/{f=0}' $(VERIFY_TMP)/vv-off.out | grep -q . || { echo "FAIL: muster dependsOn valkey while components.valkey is off"; exit 1; }
+	@echo "ok: muster is upgraded only once the valkey release is Ready, and waits for nothing without it"
 	@echo "$@: all passed"
 
 verify-klausgateway-valkey: ## Assert the gateway's Valkey routing-store defaults (giantswarm/klaus-gateway#252): with klausGateway.routing.store: valkey the klaus-gateway release's routing.valkey url, existingSecret and passwordKey are filled from the valkey release (Service name, auth Secret, default user's key); an operator's own value wins; any other store forwards nothing about Valkey.
