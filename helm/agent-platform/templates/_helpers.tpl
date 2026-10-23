@@ -241,10 +241,11 @@ overwrite would hide a values file that still spells the old key.
     toolchain-manager.registryPullSecret (agent-platform.toolchains.registries)
     on the other side of a toolchain: agent-manager toolchains.repository (the
     first source's registry, an own value stands) and
-    toolchains.registryConfig.secretName (an own value must agree), kagent
-    controller.sessionToolImageRepositories and substrate
-    atelet.imagePullSecrets (each after the installation's own entries), each
-    from the floor of that component's line that takes the key.
+    toolchains.registryConfig.secretName (an own value must agree), and
+    substrate atelet.imagePullSecrets (after the installation's own entries),
+    each from the floor of that component's line that takes the key; kagent's
+    controller.sessionToolImageRepositories comes from
+    agent-platform.kagent.sessionToolImages.
   model-manager: kagent.disableWiring: true while components.kagent is off —
     on by default with no backend (giantswarm/agent-platform#329), the release
     must not wire ModelConfigs into a kagent the installation does not run;
@@ -688,14 +689,10 @@ it (agent-platform.kagent.extensions). */ -}}
 {{- with (include "agent-platform.kagent.extensions" .root | fromJson) -}}
 {{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .controller) -}}
 {{- end -}}
-{{- /* A Session's tool images come only from the toolchain sources'
-registries, while the toolchain-manager is on: the installation's own
-entries, then each source's registry, from the kagent floor that takes the key
-(agent-platform.kagent.sessionToolImagesFloor). */ -}}
-{{- $toolchains := include "agent-platform.toolchains.registries" .root | fromJson -}}
-{{- if and $toolchains.registries (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "kagent" "version" (include "agent-platform.kagent.sessionToolImagesFloor" .root))) -}}
-{{- $own := dig "controller" "sessionToolImageRepositories" list (.root.Values.kagent | default dict) -}}
-{{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) (dict "sessionToolImageRepositories" (uniq (concat $own $toolchains.registries)))) -}}
+{{- /* The repositories a Session's tool images may come from: the toolchain
+sources' registries (agent-platform.kagent.sessionToolImages). */ -}}
+{{- with (include "agent-platform.kagent.sessionToolImages" .root | fromJson) -}}
+{{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .controller) -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "muster" -}}
@@ -1281,8 +1278,7 @@ additionalSources, each once (registries, the first the sources' own), and
 toolchain-manager.registryPullSecret (pullSecret), the one
 kubernetes.io/dockerconfigjson Secret with read credentials for the private
 ones. They wire the other side of a toolchain: agent-manager reads a
-toolchain's image with them, the kagent controller admits a Session's tool
-images from them and Substrate's atelet pulls them
+toolchain's image with them and Substrate's atelet pulls it
 (agent-platform.componentDerivedValues). Emits JSON, {} while the component is
 off.
 Usage: include "agent-platform.toolchains.registries" $root | fromJson
@@ -2483,6 +2479,47 @@ fails under that floor (agent-platform.kagent.extensions). One line, no comment
 inside the define.
 */}}
 {{- define "agent-platform.kagent.extensionsFloor" -}}1.25.2{{- end -}}
+
+{{/*
+The first release of the kagent line whose controller mounts the tool images a
+Session is created with (controller.sessionToolImageRepositories and
+sessionToolImageEgressOrigins; giantswarm/kagent-upstream#879). One line, no
+comment inside the define.
+*/}}
+{{- define "agent-platform.kagent.sessionToolImagesFloor" -}}1.26.0{{- end -}}
+
+{{/*
+The repositories the kagent controller admits a Session's tool images from,
+while the toolchain-manager component is on and components.kagent.versionRange
+is at least agent-platform.kagent.sessionToolImagesFloor (a release candidate of
+it included): the registry of every toolchain source the installation offers
+(toolchain-manager.sources and additionalSources), as the release's controller
+values ({controller: {sessionToolImageRepositories}}, or {} otherwise). An own
+kagent.controller.sessionToolImageRepositories stands. The egress origins the
+toolchains need are the installation's own
+(kagent.controller.sessionToolImageEgressOrigins): without them a toolchain that
+names an origin is refused at the Session's start.
+Usage: include "agent-platform.kagent.sessionToolImages" $root | fromJson
+*/}}
+{{- define "agent-platform.kagent.sessionToolImages" -}}
+{{- $out := dict -}}
+{{- $own := dig "controller" "sessionToolImageRepositories" list (.Values.kagent | default dict) -}}
+{{- if and (not $own) (include "agent-platform.componentEnabled" (dict "root" . "name" "toolchain-manager")) (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
+{{- $range := dig "kagent" "versionRange" "" .Values.components -}}
+{{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
+{{- if ge ((semver $have).Compare (semver (include "agent-platform.kagent.sessionToolImagesFloor" .))) 0 -}}
+{{- $tm := index .Values "toolchain-manager" | default dict -}}
+{{- $repositories := list -}}
+{{- range concat ($tm.sources | default list) ($tm.additionalSources | default list) -}}
+{{- with .registry -}}{{- $repositories = append $repositories (toString .) -}}{{- end -}}
+{{- end -}}
+{{- with ($repositories | uniq) -}}
+{{- $_ := set $out "controller" (dict "sessionToolImageRepositories" .) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
 
 {{/*
 The settings of the kagent-extensions binary, while the kagent release's
@@ -4366,15 +4403,6 @@ candidate of it included) the chart derives it from
 toolchain-manager.registryPullSecret. One line, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.registryConfigFloor" -}}2.16.0{{- end -}}
-
-{{/*
-The first release of the kagent line (giantswarm/kagent-upstream) whose chart
-takes controller.sessionToolImageRepositories (the repositories a Session's
-tool images may come from). From it on (a release candidate of it included)
-the chart derives it from the toolchain sources' registries while
-components.toolchain-manager is on. One line, no comment inside the define.
-*/}}
-{{- define "agent-platform.kagent.sessionToolImagesFloor" -}}1.26.0{{- end -}}
 
 {{/*
 The first release of the Substrate line (giantswarm/substrate) whose chart

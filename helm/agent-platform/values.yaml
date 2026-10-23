@@ -624,8 +624,15 @@ components:  # @schema additionalProperties: true
     # token against the issuer's keys (controller.auth.issuer, jwksURL and
     # jwksAllowHTTP, which this chart derives: agent-platform.kagent
     # .authentication, giantswarm/kagent-upstream#837) and refuses an agent's
-    # call in the kubernetes authorization mode.
-    versionRange: ">=1.24.1 <1.25.0"
+    # call in the kubernetes authorization mode. From 1.25.0 an EgressPolicy
+    # change reaches running and suspended actors, its grant columns migrated
+    # by the line's own migration; 1.25.1 publishes controller-extensions. From
+    # 1.26.0 a Session mounts the tool images it is created with, admitted from
+    # controller.sessionToolImageRepositories (derived from the
+    # toolchain-manager's sources, agent-platform.kagent.sessionToolImages) and
+    # their origins from controller.sessionToolImageEgressOrigins
+    # (giantswarm/kagent-upstream#879).
+    versionRange: ">=1.26.0 <1.27.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -739,7 +746,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.24.1 <1.25.0"
+    versionRange: ">=1.26.0 <1.27.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -1058,8 +1065,11 @@ components:  # @schema additionalProperties: true
     # muster.toolchainsToolsPrefix, which this chart sets to the
     # toolchain-manager's tools while components.toolchain-manager is on, so
     # start_session starts only a toolchain version list_toolchains lists
-    # (giantswarm/agent-manager#248).
-    versionRange: ">=2.14.0 <3.0.0"
+    # (giantswarm/agent-manager#248). 2.16.0 starts a Session of an agent
+    # without defaultToolchains with the github toolchain, so gh stays in its
+    # Sessions once the Harness images carry none; it is the floor before any
+    # kagent line without gh in its Harness images (giantswarm/agent-manager#252).
+    versionRange: ">=2.16.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -5174,7 +5184,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.14.0
+      tag: 2.17.0
     dryRun: false
     gitopsNamespaces: []
 
@@ -6147,7 +6157,7 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
 #   - agent-manager.toolchains.repository, the first source's registry (an
 #     own value stands), and .registryConfig.secretName, registryPullSecret;
 #   - kagent.controller.sessionToolImageRepositories, every source's registry
-#     after the installation's own entries (kagent 1.26.0 and later);
+#     (kagent 1.26.0 and later; an own list stands);
 #   - substrate.atelet.imagePullSecrets, registryPullSecret after the
 #     installation's own entries (Substrate 1.18.0 and later);
 #   - klausGateway.url (klaus-gateway's Service) and klausGateway.audience
