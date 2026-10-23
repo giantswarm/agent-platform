@@ -1983,18 +1983,6 @@
             "type": "object",
             "additionalProperties": true
         },
-        "kagentExtensions": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "audiences": {
-                    "type": "array"
-                },
-                "enabled": {
-                    "type": "boolean"
-                }
-            }
-        },
         "klausGateway": {
             "type": "object",
             "additionalProperties": true

@@ -1514,9 +1514,6 @@ components:  # @schema additionalProperties: true
       # The well-known configs' values (components.kserve-runtime-configs); no
       # wiring reads them, so the connectivity chart never sees the block.
       - kserve-runtime-configs
-      # Read by the meta chart alone (the kagent release's controller values,
-      # agent-platform.kagent.extensions); the connectivity chart never sees it.
-      - kagentExtensions
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -2772,24 +2769,6 @@ agent-platform-mcps:  # @schema skipProperties: true; additionalProperties: true
   #       url: https://example.com/mcp
   mcpServers: []
 
-# kagentExtensions runs the kagent controller as the kagent-extensions binary
-# (giantswarm/kagent-extensions): the kagent controller with its own
-# authenticator and authorizer. It identifies a caller from the bearer token
-# alone (people by the issuer's keys, machines by a TokenReview) and reads no
-# identity header. The kagent line publishes it with each release as
-# giantswarm/kagent/controller-extensions; the chart sets that repository on the
-# kagent release and the binary's settings in kagent.controller.env, taken from
-# kagent.controller.auth and kagent.controller.authorization. It needs the
-# kubernetes authorization mode, the trusted-proxy authentication mode and
-# components.kagent.versionRange at 1.25.2 or later.
-kagentExtensions:
-  enabled: false
-  # The client ID of every Dex client whose ID token reaches the kagent
-  # controller: the kagent UI's oauth2-proxy, Backstage, muster (whose
-  # forwarded token agent-manager sends), klaus-gateway and the CLI. A
-  # person's token that names none of them is refused. Required when enabled.
-  audiences: []
-
 # kagent — Kubernetes-native AI agent runtime (controller + UI).
 # All keys pass through to the kagent subchart (no strict schema filtering).
 # The kagent.dev + kmcp CRDs ship with the kagent app chart itself (app-owned
@@ -2832,6 +2811,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # must stay allowed.
   controller:  # @schema additionalProperties: true
     image:
+      # giantswarm/kagent/controller-extensions runs the controller as the
+      # kagent-extensions binary (giantswarm/kagent-extensions), which the
+      # kagent line publishes with each release: it identifies a caller from
+      # the bearer token alone and authorizes every call with a
+      # SubjectAccessReview. The chart then sets its settings in env, from
+      # auth and authorization (agent-platform.kagent.extensions); it needs
+      # components.kagent.versionRange at 1.25.2 or later.
       repository: giantswarm/kagent/controller
     # The Go ADK image the chart requires for the controller's ConfigMap
     # (IMAGE_REGISTRY / IMAGE_TAG). On kagent API v2 the image an agent runs on

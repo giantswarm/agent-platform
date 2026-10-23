@@ -641,7 +641,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.omitKeys[1] | string | `"scheduling"` |  |
 | components.agent-platform-connectivity.omitKeys[2] | string | `"gpu-operator"` |  |
 | components.agent-platform-connectivity.omitKeys[3] | string | `"kserve-runtime-configs"` |  |
-| components.agent-platform-connectivity.omitKeys[4] | string | `"kagentExtensions"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -878,8 +877,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-platform-mcps.agentgateway.viaMuster | bool | `true` |  |
 | agent-platform-mcps.agentgateway.musterUrl | string | `"http://muster.agent-platform.svc.cluster.local:8090/mcp"` |  |
 | agent-platform-mcps.mcpServers | list | `[]` |  |
-| kagentExtensions.enabled | bool | `false` |  |
-| kagentExtensions.audiences | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
 | kagent.registry | string | `"gsoci.azurecr.io"` |  |
 | kagent.controller.image.repository | string | `"giantswarm/kagent/controller"` |  |
