@@ -1195,10 +1195,15 @@ components:  # @schema additionalProperties: true
     # toolchain_build_status (giantswarm/toolchain-manager#12). The floor is
     # 0.3.0: published[] per toolchain and deprecate_toolchain, which asks
     # agent-manager through muster which agents and Sessions use a toolchain
-    # (muster.mcpUrl and muster.agentManagerToolsPrefix, derived). The ceiling
-    # is the next minor: a toolchain-manager minor rolls in with the chart
-    # release that renders its values.
-    versionRange: ">=0.3.0 <0.4.0"
+    # (muster.mcpUrl and muster.agentManagerToolsPrefix, derived). The floor is
+    # 0.4.0: update_toolchain, approve_update and the outdated mark, whose
+    # notices and major-update asks go to a source's team channel through
+    # klaus-gateway's team-review endpoint (klausGateway.url and .audience,
+    # derived while klausGateway.reviews.enabled, which then lists the
+    # manager's ServiceAccount in its allowedCallers); a release candidate of
+    # it until 0.4.0 is promoted. The ceiling is the next minor: a toolchain-manager minor rolls in with the chart release that
+    # renders its values.
+    versionRange: ">=0.4.0-rc.1 <0.5.0-0"
     valuesFrom: toolchain-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
@@ -6130,7 +6135,11 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
 #     github provider instance (agent-platform.workspaceManager.musterPin), so
 #     a person grants the App once for workspaces and toolchains: the App's
 #     issuer, GitHub's endpoints and the App's client credentials Secret;
-#   - sources: the block's sources followed by additionalSources.
+#   - sources: the block's sources followed by additionalSources;
+#   - klausGateway.url (klaus-gateway's Service) and klausGateway.audience
+#     (klausGateway.reviews.audience) while klaus-gateway is on with
+#     klausGateway.reviews.enabled, which then lists the manager's
+#     ServiceAccount in klausGateway.reviews.allowedCallers (own callers kept).
 # The connectivity release admits muster to the manager's pods only
 # (networkPolicy.mcpBackends.toolchain-manager, derived while the component is
 # on).
@@ -6143,8 +6152,10 @@ toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
     emails: []
   # The toolchain sources every installation offers, approved by being named
   # here: a GitHub repository (owner/name) and the registry prefix its
-  # toolchains publish under (slackChannel, optional: the team that approves
-  # its updates).
+  # toolchains publish under. Optional: the owning team's GitHub team slug
+  # (team), which approves a major update, and its Slack channel's ID
+  # (slackChannel, C0123ABCDE), where the outdated notices and a major
+  # update's ask go through klaus-gateway (klausGateway.reviews.enabled).
   sources:
     - repository: giantswarm/agent-toolchains
       registry: gsoci.azurecr.io/giantswarm/agent-toolchains
