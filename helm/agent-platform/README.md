@@ -517,7 +517,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `">=2.9.0 <3.0.0"` |  |
+| components.agent-manager.versionRange | string | `">=2.14.0 <3.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.omitEmptyKeys[0] | string | `"harness.egress"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
@@ -561,7 +561,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.workspace-manager.omitEmptyKeys[9] | string | `"storage.sizing.maxSize"` |  |
 | components.toolchain-manager.chart | string | `"toolchain-manager"` |  |
 | components.toolchain-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.toolchain-manager.versionRange | string | `">=0.2.0 <0.3.0"` |  |
+| components.toolchain-manager.versionRange | string | `">=0.3.0 <0.4.0"` |  |
 | components.toolchain-manager.valuesFrom | string | `"toolchain-manager"` |  |
 | components.toolchain-manager.enabled | bool | `false` |  |
 | components.toolchain-manager.dependsOn[0] | string | `"muster"` |  |

@@ -1054,8 +1054,12 @@ components:  # @schema additionalProperties: true
     # its earlier name filled, and its migrate moves the agents over. 2.9.0
     # binds a Session with the agent's toolset and takes muster.actorBearer,
     # which this chart sets while muster trusts the actor JWT; it moves with
-    # muster's floor 5.49.0 (giantswarm/agent-manager#228).
-    versionRange: ">=2.9.0 <3.0.0"
+    # muster's floor 5.49.0 (giantswarm/agent-manager#228). 2.14.0 takes
+    # muster.toolchainsToolsPrefix, which this chart sets to the
+    # toolchain-manager's tools while components.toolchain-manager is on, so
+    # start_session starts only a toolchain version list_toolchains lists
+    # (giantswarm/agent-manager#248).
+    versionRange: ">=2.14.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -1188,10 +1192,13 @@ components:  # @schema additionalProperties: true
     # are an installation's opt-in.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # 0.2.0 is the first release with create_toolchain and
-    # toolchain_build_status (giantswarm/toolchain-manager#12). The ceiling is
-    # the next minor: a toolchain-manager minor rolls in with the chart release
-    # that renders its values.
-    versionRange: ">=0.2.0 <0.3.0"
+    # toolchain_build_status (giantswarm/toolchain-manager#12). The floor is
+    # 0.3.0: published[] per toolchain and deprecate_toolchain, which asks
+    # agent-manager through muster which agents and Sessions use a toolchain
+    # (muster.mcpUrl and muster.agentManagerToolsPrefix, derived). The ceiling
+    # is the next minor: a toolchain-manager minor rolls in with the chart
+    # release that renders its values.
+    versionRange: ">=0.3.0 <0.4.0"
     valuesFrom: toolchain-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);

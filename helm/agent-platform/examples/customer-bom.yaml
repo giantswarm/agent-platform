@@ -50,7 +50,7 @@ components:
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "1.14.0" }
-  agent-manager:                 { versionRange: "2.9.0" }
+  agent-manager:                 { versionRange: "2.14.0" }
   vm-manager:                    { versionRange: "0.24.0" }
   # The cluster write surface (components.cluster-manager, off by default).
   cluster-manager:               { versionRange: "0.22.0" }
@@ -58,7 +58,7 @@ components:
   # workspaces.enabled, off by default).
   workspace-manager:             { versionRange: "0.14.0" }
   # The toolchain surface (components.toolchain-manager, off by default).
-  toolchain-manager:             { versionRange: "0.2.0" }
+  toolchain-manager:             { versionRange: "0.3.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08; the kserve charts move together (one

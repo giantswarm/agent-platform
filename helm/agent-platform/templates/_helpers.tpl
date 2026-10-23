@@ -229,7 +229,10 @@ overwrite would hide a values file that still spells the old key.
     installation's agents GitHub App, and the sources with additionalSources
     after them (agent-platform.toolchainManager.derived); the connectivity
     release its MCP backend entry, networkPolicy.mcpBackends.toolchain-manager
-    (agent-platform.toolchainManager.mcpBackend), while the component is on.
+    (agent-platform.toolchainManager.mcpBackend), and agent-manager
+    muster.toolchainsToolsPrefix, x_<its MCPServer name>_ (from agent-manager
+    agent-platform.agentManager.toolchainsFloor; an own value must agree),
+    while the component is on.
   model-manager: kagent.disableWiring: true while components.kagent is off —
     on by default with no backend (giantswarm/agent-platform#329), the release
     must not wire ModelConfigs into a kagent the installation does not run;
@@ -316,6 +319,21 @@ each session at its start (agent-manager 2.9.0, giantswarm/agent-manager#228). *
 {{- if $bearer.enabled -}}
 {{- include "agent-platform.validateToolsetBinding" .root -}}
 {{- $_ := set $musterValues "actorBearer" true -}}
+{{- end -}}
+{{- /* The toolchain-manager's tools by the name muster gives them, while the
+component is on: x_<its MCPServer name>_, whose list_toolchains start_session
+asks as the caller. Only while the floor of components.agent-manager.versionRange
+takes the key (agent-platform.agentManager.toolchainsFloor). */ -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "toolchain-manager") -}}
+{{- $amFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "agent-manager" "versionRange" "" .root.Values.components) | default "0.0.0") "" -}}
+{{- if ge ((semver $amFloor).Compare (semver (include "agent-platform.agentManager.toolchainsFloor" .root))) 0 -}}
+{{- $prefix := printf "x_%s_" (dig "muster" "mcpServer" "name" "toolchain-manager" (index .root.Values "toolchain-manager" | default dict)) -}}
+{{- $ownPrefix := dig "muster" "toolchainsToolsPrefix" "" (index .root.Values "agent-manager" | default dict) -}}
+{{- if and $ownPrefix (ne $ownPrefix $prefix) -}}
+{{- fail (printf "agent-manager.muster.toolchainsToolsPrefix (%s) differs from the prefix muster gives the toolchain-manager's tools (%s, x_ and toolchain-manager.muster.mcpServer.name): start_session calls list_toolchains by that name — leave agent-manager.muster.toolchainsToolsPrefix unset" $ownPrefix $prefix) -}}
+{{- end -}}
+{{- $_ := set $musterValues "toolchainsToolsPrefix" $prefix -}}
+{{- end -}}
 {{- end -}}
 {{- $_ := set $derived "muster" $musterValues -}}
 {{- $target := include "agent-platform.kagentControllerTarget" .root -}}
@@ -1080,7 +1098,12 @@ components.toolchain-manager is on; each key the block sets stands:
   client-secret) in the workspace-manager's namespace; muster files a person's
   grant under the issuer, so one grant serves both registrations;
 - sources: the block's sources followed by additionalSources, while
-  additionalSources names any; a repository named twice fails the render.
+  additionalSources names any; a repository named twice fails the render;
+- muster.mcpUrl, muster's MCP endpoint (agent-platform.musterMcpUrl), and
+  muster.agentManagerToolsPrefix, x_<agent-manager's MCPServer name>_ while
+  agent-manager and muster are on, else empty (deprecate_toolchain then not
+  served), from the toolchain-manager floor
+  agent-platform.toolchainManager.deprecateFloor.
 Emits JSON, {} while the component is off.
 Usage: include "agent-platform.toolchainManager.derived" . | fromJson
 */}}
@@ -1137,7 +1160,26 @@ Usage: include "agent-platform.toolchainManager.derived" . | fromJson
 {{- $_ := set $mcp "authorizationServer" $as -}}
 {{- end -}}
 {{- end -}}
-{{- with $mcp -}}{{- $_ := set $out "muster" (dict "mcpServer" .) -}}{{- end -}}
+{{- $muster := dict -}}
+{{- with $mcp -}}{{- $_ := set $muster "mcpServer" . -}}{{- end -}}
+{{- /* deprecate_toolchain asks agent-manager through muster, as the person,
+which agents and Sessions use a toolchain: muster's MCP endpoint and
+agent-manager's tool prefix, empty while either is off (the tool is then not
+served). Only while the floor of components.toolchain-manager.versionRange
+takes the keys (agent-platform.toolchainManager.deprecateFloor). */ -}}
+{{- $tmFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "toolchain-manager" "versionRange" "" .Values.components) | default "0.0.0") "" -}}
+{{- if ge ((semver $tmFloor).Compare (semver (include "agent-platform.toolchainManager.deprecateFloor" .))) 0 -}}
+{{- $ownMuster := dig "muster" dict $tm | default dict -}}
+{{- if not (hasKey $ownMuster "mcpUrl") -}}{{- $_ := set $muster "mcpUrl" (include "agent-platform.musterMcpUrl" .) -}}{{- end -}}
+{{- if not (hasKey $ownMuster "agentManagerToolsPrefix") -}}
+{{- $amPrefix := "" -}}
+{{- if and $musterOn (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) -}}
+{{- $amPrefix = printf "x_%s_" (dig "muster" "mcpServer" "name" "agent-manager" (index .Values "agent-manager" | default dict)) -}}
+{{- end -}}
+{{- $_ := set $muster "agentManagerToolsPrefix" $amPrefix -}}
+{{- end -}}
+{{- end -}}
+{{- with $muster -}}{{- $_ := set $out "muster" . -}}{{- end -}}
 {{- with $tm.additionalSources -}}
 {{- $sources := concat ($tm.sources | default list) . -}}
 {{- $seen := dict -}}
@@ -4067,6 +4109,27 @@ klausGateway.workspaces.toolsPrefix while workspaces are on
 (agent-platform.componentDerivedValues). One line, no comment inside the define.
 */}}
 {{- define "agent-platform.klausGateway.workspacesFloor" -}}4.3.0{{- end -}}
+
+{{/*
+The first release of the agent-manager line (giantswarm/agent-manager) whose
+chart takes muster.toolchainsToolsPrefix (start_session starts a toolchain
+only at a version the toolchain-manager's list_toolchains lists); an earlier
+release's closed values schema refuses the key. From it on (a release
+candidate of it included) the chart derives agent-manager.muster.toolchainsToolsPrefix
+while components.toolchain-manager is on (agent-platform.componentDerivedValues).
+One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.agentManager.toolchainsFloor" -}}2.14.0{{- end -}}
+
+{{/*
+The first release of the toolchain-manager line (giantswarm/toolchain-manager)
+whose chart takes muster.mcpUrl and muster.agentManagerToolsPrefix
+(deprecate_toolchain asks agent-manager through muster); an earlier release's
+closed values schema refuses the keys. From it on the chart derives both
+(agent-platform.toolchainManager.derived). One line, no comment inside the
+define.
+*/}}
+{{- define "agent-platform.toolchainManager.deprecateFloor" -}}0.3.0{{- end -}}
 
 {{/*
 The kagent controller's in-cluster gRPC API (in-cluster h2c), straight to its
