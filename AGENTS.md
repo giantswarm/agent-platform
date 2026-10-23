@@ -13,3 +13,14 @@ placement* section, kept in its internal plans repository.
   dry-run of the rendered objects, so the API server's schema, CEL rules and admission policies
   give the answer.
 - A workaround for an upstream gap names the upstream issue or pull request that removes it.
+
+## Chart changes
+
+- Before pushing a change to either chart, run `make verify-all` and `pre-commit run --all-files`
+  until it passes unchanged: its first run after a values change rewrites the values schemas and the
+  chart READMEs.
+- The default render is compared byte for byte with the render of the branch's fork point
+  (`GOLDEN_REF` in `Makefile.custom.mk`). An intended change of it is held equal on both sides by the
+  golden flags, with a comment saying why, and asserted by a `verify-*` target of its own.
+- A change that moves the committed renders under `tests/golden/` on purpose runs
+  `make golden-update` and commits the diff, which is what a reviewer reads.
