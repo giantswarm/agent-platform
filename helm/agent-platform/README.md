@@ -890,7 +890,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-platform-mcps.mcpServers | list | `[]` |  |
 | kagent.fullnameOverride | string | `"kagent"` |  |
 | kagent.registry | string | `"gsoci.azurecr.io"` |  |
-| kagent.controller.image.repository | string | `"giantswarm/kagent/controller"` |  |
+| kagent.controller.image.repository | string | `"giantswarm/kagent/controller-extensions"` |  |
 | kagent.controller.agentImage.repository | string | `"giantswarm/kagent/golang-adk"` |  |
 | kagent.controller.substrate.enabled | bool | `true` |  |
 | kagent.controller.substrate.ateApiEndpoint | string | `"dns:///api.ate-system.svc:443"` |  |

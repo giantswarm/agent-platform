@@ -4,6 +4,11 @@
 # every component here exercises the full render path in chart-testing.
 gitops:
   engine: flux
+# The identity provider every installation has: the kagent controller (the
+# kagent-extensions binary) identifies people by its tokens.
+global:
+  identity:
+    issuerUrl: https://dex.ci.example.com
 components:
   agentgateway:
     enabled: true

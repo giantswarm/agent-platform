@@ -180,8 +180,8 @@ def main(chart: str) -> int:
         (["--set", "muster.muster.oauth.server.encryptionKey=false"], "muster.muster.oauth.server.encryptionKey is off", "token encryption off"),
         (["--set", "muster.muster.oauth.mcpClient.enabled=false"], "muster.muster.oauth.mcpClient.enabled is off", "muster's OAuth client off"),
         (["--set", "workspaces.enabled=false"], "the credential provider is off", "the credential provider off"),
-        (["--set", "components.kagent.versionRange=>=1.23.0 <1.25.0"], "components.kagent.versionRange (>=1.23.0 <1.25.0) admits releases before 1.24.0", "the kagent floor"),
-        (["--set", "components.kagent-crds.versionRange=>=1.23.0 <1.25.0"], "components.kagent-crds.versionRange (>=1.23.0 <1.25.0) admits releases before 1.24.0", "the kagent-crds floor"),
+        (["--set", "components.kagent.versionRange=>=1.23.0 <1.25.0", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"], "components.kagent.versionRange (>=1.23.0 <1.25.0) admits releases before 1.24.0", "the kagent floor"),
+        (["--set", "components.kagent-crds.versionRange=>=1.23.0 <1.25.0", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"], "components.kagent-crds.versionRange (>=1.23.0 <1.25.0) admits releases before 1.24.0", "the kagent-crds floor"),
         (["--set", "components.muster.versionRange=>=5.50.0 <6.0.0"], "components.muster.versionRange (>=5.50.0 <6.0.0) admits releases before 5.52.5", "the muster floor"),
     ):
         err = meta(chart, [*ON, *flags], expect_fail=True)

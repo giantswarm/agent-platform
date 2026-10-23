@@ -58,6 +58,10 @@ FLEET_APIS = [
 # snapshot store set, the fleet's API groups served.
 VM = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", *FLEET_APIS]
 ENGINE_OFF = ["--set", "components.flux.enabled=false"]
+# The installation's Dex, a platform input every slice is layered over: the
+# runtime slice's kagent controller (the kagent-extensions binary) identifies
+# people by its tokens.
+PLATFORM = ["--set", "global.identity.issuerUrl=https://dex.ci.example.com"]
 FLUX_KINDS = {"OCIRepository", "HelmRelease"}
 # The hook identity and its policy (hooks/*.yaml), the only objects an engine-off
 # render may carry besides Flux documents (the serving teardown's, with the slice on).
@@ -174,7 +178,7 @@ def check_knob(meta: str) -> None:
             sys.exit(f"FAIL: the knob changed the render beyond the kubeConfig lines and the hooks: gone={sorted(gone)}")
         ok(f"every one of the {len(hrs)} HelmReleases carries the kubeConfig secretRef ({', '.join(f.split('.')[-1] for f in flags[1::2])}), nothing else changed")
     for f in ("test-target-values.yaml", "test-slice-serving-values.yaml", "test-slice-runtime-values.yaml"):
-        helm(meta, ["-f", f"{meta}/ci/{f}"])
+        helm(meta, [*PLATFORM, "-f", f"{meta}/ci/{f}"])
     ok("the target and slice fixtures each render alone")
 
 
@@ -359,7 +363,7 @@ def check_guards(meta: str) -> None:
 
 
 def check_hooks(meta: str) -> None:
-    runtime = ["-f", f"{meta}/ci/test-slice-runtime-values.yaml"]
+    runtime = [*PLATFORM, "-f", f"{meta}/ci/test-slice-runtime-values.yaml"]
     jobs = lambda m: sum(1 for kind, _ in documents(m) if kind == "Job")
     if jobs(helm(meta, runtime)):
         sys.exit("FAIL: the runtime shape (engine off) renders a hook Job; a cluster's own Flux gets no hook of the kagent line")
@@ -371,9 +375,9 @@ def check_hooks(meta: str) -> None:
 
 def check_slices(meta: str) -> None:
     ci = f"{meta}/ci"
-    serving = helm(meta, ["-f", f"{ci}/test-slice-serving-values.yaml"])
-    runtime = helm(meta, ["-f", f"{ci}/test-slice-runtime-values.yaml"])
-    both = helm(meta, ["-f", f"{ci}/test-slice-serving-values.yaml", "-f", f"{ci}/test-slice-runtime-values.yaml"])
+    serving = helm(meta, [*PLATFORM, "-f", f"{ci}/test-slice-serving-values.yaml"])
+    runtime = helm(meta, [*PLATFORM, "-f", f"{ci}/test-slice-runtime-values.yaml"])
+    both = helm(meta, [*PLATFORM, "-f", f"{ci}/test-slice-serving-values.yaml", "-f", f"{ci}/test-slice-runtime-values.yaml"])
     s, r, b = releases(serving), releases(runtime), releases(both)
     if not (s and r) or s & r != {"agent-platform-connectivity"} or b != s | r:
         sys.exit(f"FAIL: the combined release is not the union of the slices: serving={sorted(s)} runtime={sorted(r)} both={sorted(b)}")

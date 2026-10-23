@@ -3,6 +3,11 @@
 # installation's read-write-many class named, not rendered. Only the GitHub
 # instance has person sign-in, so muster's registration stays pinned to its
 # App; tests/fixtures/workspaces-provider-apps-values.yaml adds the second.
+# The installation's Dex: the kagent controller (the kagent-extensions binary)
+# identifies people by its tokens.
+global:
+  identity:
+    issuerUrl: https://dex.ci.example.com
 workspaces:
   enabled: true
   storage:

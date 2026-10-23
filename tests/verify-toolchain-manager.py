@@ -173,7 +173,7 @@ def main(meta: str, connectivity: str) -> int:
     ok("connectivity admits muster to the manager's pods (CiliumNetworkPolicy and NetworkPolicy)")
 
     # muster's login stands in for global.identity.
-    _, vals, _ = release(meta, [*ON, "--set", "muster.muster.oauth.server.dex.issuerUrl=https://login.ci.example.com",
+    _, vals, _ = release(meta, [*ON, "--set", "global.identity.issuerUrl=", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller", "--set", "muster.muster.oauth.server.dex.issuerUrl=https://login.ci.example.com",
                                 "--set", "muster.muster.oauth.server.dex.clientId=muster-client"])
     must_have(vals, ("    issuerURL: https://login.ci.example.com\n", "  trustedAudiences:\n  - muster-client\n"), "the release values from muster's login")
     _, vals, _ = release(meta, [*ON, *IDENTITY, "--set", "global.identity.ca.secretName=dex-ca"])
@@ -284,7 +284,7 @@ def main(meta: str, connectivity: str) -> int:
                                            "--set", "toolchain-manager.additionalSources[0].registry=registry.acme.example/toolchains"]))[("HelmRelease", "kagent")]),
               (REPOS + "  - registry.acme.example/toolchains\n",), "the kagent release values with additionalSources")
     must_lack(values(documents(helm(meta, [*IDENTITY, *KAGENT]))[("HelmRelease", "kagent")]), ("sessionToolImageRepositories",), "the kagent release values with the component off")
-    must_lack(values(documents(helm(meta, [*ON, *IDENTITY, *KAGENT, "--set", "components.kagent.versionRange=>=1.25.0 <1.26.0",
+    must_lack(values(documents(helm(meta, [*ON, *IDENTITY, *KAGENT, "--set", "components.kagent.versionRange=>=1.25.0 <1.26.0", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller",
                                            "--set", "components.kagent-crds.versionRange=>=1.25.0 <1.26.0"]))[("HelmRelease", "kagent")]),
               ("sessionToolImageRepositories",), "the kagent release values below the 1.26.0 floor")
     must_have(values(documents(helm(meta, [*ON, *IDENTITY, *KAGENT, "--set", "kagent.controller.sessionToolImageRepositories[0]=registry.own.example/tools"]))[("HelmRelease", "kagent")]),
@@ -333,7 +333,7 @@ def main(meta: str, connectivity: str) -> int:
 
     # --- guards --------------------------------------------------------------------
     for flags, needle, what in (
-        ([*ON], "needs the platform's login", "no issuer"),
+        ([*ON, "--set", "global.identity.issuerUrl=", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"], "needs the platform's login", "no issuer"),
         ([*ON, "--set", "global.identity.issuerUrl=https://dex.ci.example.com"], "needs the platform's OAuth client", "no OAuth client"),
         ([*ON, *IDENTITY, "--set", "toolchain-manager.additionalSources[0].repository=giantswarm/agent-toolchains",
           "--set", "toolchain-manager.additionalSources[0].registry=x"], "named twice", "a repository named twice"),

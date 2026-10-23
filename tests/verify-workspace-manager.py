@@ -130,7 +130,7 @@ IDENTITY = [
 PRE_GRANT = ["--set", "workspace-manager.oauth.enabled=false", "--set", "workspace-manager.grant.signingKey=null",
              "--set", "workspace-manager.muster.mcpServer.auth.authorizationServer=null",
              "--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents",
-             "--set", "kagent.controller.authorization.mode=noop"]
+             "--set", "kagent.controller.authorization.mode=noop", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"]
 WM_KAGENT = ["--set", "components.workspace-manager.versionRange=>=0.4.0 <1.0.0", *PRE_GRANT]
 NO_GITLAB = ["--set", "workspace-manager.providers[1].kind=github"]
 # The first workspace-manager release with the provider kind gitlab.
@@ -365,6 +365,13 @@ def main(meta: str, connectivity: str) -> int:
             if audience not in on or not peer.search(on):
                 fail(f"switching workspaces on did not derive the manager's token audience and its NetworkPolicy peer onto {key}")
             on = peer.sub("", on.replace(audience, "", 1), count=1)
+            # And the manager's ServiceAccount as the kagent-extensions binary's
+            # machine caller (tests/verify-kagent-extensions.py pins it).
+            caller = re.compile(r"^(\s+- name: KAGENT_EXTENSIONS_MACHINE_CALLER\n\s+value: )(\S+)$", re.M)
+            match = caller.search(on)
+            if not match or not match.group(2).endswith("/workspace-manager"):
+                fail(f"switching workspaces on did not make workspace-manager the binary's machine caller on {key}")
+            on = caller.sub(lambda m: m.group(1) + '""', on, count=1)
         if key == ("HelmRelease", "klaus-gateway"):
             # And the gateway's workspace tools prefix, derived from the
             # klaus-gateway floor 4.3.0 on (tests/verify-klausgateway-workspaces.py).

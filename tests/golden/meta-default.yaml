@@ -817,7 +817,7 @@ spec:
           usernamePrefix: ""
         env: []
         image:
-          repository: giantswarm/kagent/controller
+          repository: giantswarm/kagent/controller-extensions
         metrics:
           bindAddress: :8080
           enabled: true
