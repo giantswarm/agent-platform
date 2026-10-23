@@ -329,9 +329,8 @@ the models Gateway (#490). */ -}}
 {{- if $musterEnabled -}}
 {{- $_ := include "agent-platform.parentRefs" (dict "ctx" . "override" .Values.ingress.parentRefs "key" "ingress.parentRefs") -}}
 {{- end -}}
-{{- /* viaMuster only matters when the mcps sub-chart is installed; with no MCP
-servers there is nothing to route, so the consistency check is scoped to the
-agent-platform-mcps component. */ -}}
+{{- /* viaMuster is read by the agent-platform-mcps release, so the consistency
+check is scoped to that component. */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps")) -}}
 {{- $mcpsVals := index .Values "agent-platform-mcps" | default dict -}}
 {{- $viaMuster := dig "agentgateway" "viaMuster" false $mcpsVals -}}
@@ -345,6 +344,12 @@ agentgateway (the installation's own serves it) and on a workload cluster runs
 it (the target has no controller of its own). */ -}}
 {{- if and $musterEnabled (not (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway"))) -}}
 {{- fail "components.agentgateway.enabled must be true while muster is on: agentgateway in front of muster is the only ingress topology" -}}
+{{- end -}}
+{{- /* The public /mcp reaches the data plane, whose only route to muster is
+the agent-platform-mcps release's hostless HTTPRoute (viaMuster): without it
+/mcp reaches nothing. */ -}}
+{{- if and $musterEnabled (not (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps"))) -}}
+{{- fail "components.agent-platform-mcps.enabled must be true while muster is on: its HTTPRoute is the agentgateway data plane's only route to muster, so /mcp would reach nothing" -}}
 {{- end -}}
 {{- end -}}
 

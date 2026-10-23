@@ -590,7 +590,7 @@ spec:
       agent-platform-connectivity:
         enabled: true
       agent-platform-mcps:
-        enabled: false
+        enabled: true
       agent-sandbox:
         enabled: false
       agentgateway:
@@ -1737,6 +1737,46 @@ spec:
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
+  name: agent-platform-mcps
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: agent-platform-mcps
+  targetNamespace: default
+  serviceAccountName: agent-platform-flux
+  chartRef:
+    kind: OCIRepository
+    name: agent-platform-mcps
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+    - name: agentgateway
+  values:
+    agentgateway:
+      enabled: true
+      musterUrl: http://muster.agent-platform.svc.cluster.local:8090/mcp
+      viaMuster: true
+    mcpServers: []
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
   name: agentgateway
   namespace: default
   labels:
@@ -2313,6 +2353,29 @@ spec:
     operation: copy
   ref:
     semver: "1.1.35"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: agent-platform-mcps
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 1m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-mcps
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    semver: "0.12.x"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -5121,8 +5184,8 @@ spec:
               # The platform HelmReleases in reverse dependency order (a CRD chart's release
               # only after the releases whose objects are its CRs); kubectl waits for
               # helm-controller to uninstall a wave before the next one starts.
-              echo "wave 1: agent-platform-connectivity dicebear model-manager"
-              kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m agent-platform-connectivity dicebear model-manager
+              echo "wave 1: agent-platform-connectivity agent-platform-mcps dicebear model-manager"
+              kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m agent-platform-connectivity agent-platform-mcps dicebear model-manager
               echo "wave 2: agentgateway muster"
               kubectl delete helmreleases.helm.toolkit.fluxcd.io --namespace default --ignore-not-found --wait --timeout=5m agentgateway muster
               echo "wave 3: valkey"
