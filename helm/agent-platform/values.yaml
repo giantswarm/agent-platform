@@ -1208,8 +1208,9 @@ components:  # @schema additionalProperties: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off.
     dependsOn: [muster]
-    # The meta chart's own key, folded into sources (see the block).
-    omitKeys: [additionalSources]
+    # The meta chart's own keys: additionalSources folded into sources,
+    # registryPullSecret wired into agent-manager and Substrate (see the block).
+    omitKeys: [additionalSources, registryPullSecret]
     # The component's roster entry reaches the connectivity release only while
     # the component is on (see components.yaml, gatedRoster): with it off the
     # connectivity release's values are exactly those of a chart that
@@ -6142,6 +6143,13 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
 #     a person grants the App once for workspaces and toolchains: the App's
 #     issuer, GitHub's endpoints and the App's client credentials Secret;
 #   - sources: the block's sources followed by additionalSources;
+# and on the other side of a toolchain (agent-platform.toolchains.registries):
+#   - agent-manager.toolchains.repository, the first source's registry (an
+#     own value stands), and .registryConfig.secretName, registryPullSecret;
+#   - kagent.controller.sessionToolImageRepositories, every source's registry
+#     after the installation's own entries (kagent 1.26.0 and later);
+#   - substrate.atelet.imagePullSecrets, registryPullSecret after the
+#     installation's own entries (Substrate 1.18.0 and later);
 #   - klausGateway.url (klaus-gateway's Service) and klausGateway.audience
 #     (klausGateway.reviews.audience) while klaus-gateway is on with
 #     klausGateway.reviews.enabled, which then lists the manager's
@@ -6168,6 +6176,16 @@ toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
   # repository named twice fails the render. Not forwarded as such
   # (components.toolchain-manager.omitKeys).
   additionalSources: []
+  # The kubernetes.io/dockerconfigjson Secret, by name, with read credentials
+  # for the sources' private registries; it must exist in agent-manager's
+  # namespace and in Substrate's (components.substrate.targetNamespace).
+  # agent-manager reads a toolchain's image with it
+  # (agent-manager.toolchains.registryConfig.secretName, from agent-manager
+  # 2.16.0) and atelet pulls a Session's tool images with it
+  # (substrate.atelet.imagePullSecrets, from Substrate 1.18.0), both derived.
+  # Empty (the default): every registry is read and pulled anonymously. Not
+  # forwarded (components.toolchain-manager.omitKeys).
+  registryPullSecret: ""
   github:
     # Where a repository's owner installs the installation's agents GitHub
     # App, https://github.com/apps/<slug>/installations/new; add_source names

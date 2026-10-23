@@ -237,7 +237,14 @@ overwrite would hide a values file that still spells the old key.
     (agent-platform.toolchainManager.mcpBackend), and agent-manager
     muster.toolchainsToolsPrefix, x_<its MCPServer name>_ (from agent-manager
     agent-platform.agentManager.toolchainsFloor; an own value must agree),
-    while the component is on.
+    while the component is on. Then the toolchain sources' registries and
+    toolchain-manager.registryPullSecret (agent-platform.toolchains.registries)
+    on the other side of a toolchain: agent-manager toolchains.repository (the
+    first source's registry, an own value stands) and
+    toolchains.registryConfig.secretName (an own value must agree), kagent
+    controller.sessionToolImageRepositories and substrate
+    atelet.imagePullSecrets (each after the installation's own entries), each
+    from the floor of that component's line that takes the key.
   model-manager: kagent.disableWiring: true while components.kagent is off —
     on by default with no backend (giantswarm/agent-platform#329), the release
     must not wire ModelConfigs into a kagent the installation does not run;
@@ -341,6 +348,26 @@ takes the key (agent-platform.agentManager.toolchainsFloor). */ -}}
 {{- end -}}
 {{- end -}}
 {{- $_ := set $derived "muster" $musterValues -}}
+{{- /* The installation's toolchains, while the toolchain-manager is on:
+toolchains.repository the first source's registry (an own value stands), and
+toolchains.registryConfig.secretName toolchain-manager.registryPullSecret, the
+credentials a private source's images are read with, from the agent-manager
+floor that takes the key (agent-platform.agentManager.registryConfigFloor). */ -}}
+{{- with (include "agent-platform.toolchains.registries" .root | fromJson) -}}
+{{- $ownTc := dig "toolchains" dict (index $.root.Values "agent-manager" | default dict) | default dict -}}
+{{- $tc := dict -}}
+{{- if and .registries (not $ownTc.repository) -}}
+{{- $_ := set $tc "repository" (first .registries) -}}
+{{- end -}}
+{{- if and .pullSecret (include "agent-platform.componentFloorAtLeast" (dict "root" $.root "name" "agent-manager" "version" (include "agent-platform.agentManager.registryConfigFloor" $.root))) -}}
+{{- $ownSecret := dig "registryConfig" "secretName" "" $ownTc -}}
+{{- if and $ownSecret (ne $ownSecret .pullSecret) -}}
+{{- fail (printf "agent-manager.toolchains.registryConfig.secretName (%s) differs from toolchain-manager.registryPullSecret (%s): agent-manager reads a toolchain with the credentials Substrate's atelet pulls it with — set toolchain-manager.registryPullSecret and leave agent-manager.toolchains.registryConfig.secretName unset" $ownSecret .pullSecret) -}}
+{{- end -}}
+{{- $_ := set $tc "registryConfig" (dict "secretName" .pullSecret) -}}
+{{- end -}}
+{{- with $tc -}}{{- $_ := set $derived "toolchains" . -}}{{- end -}}
+{{- end -}}
 {{- $target := include "agent-platform.kagentControllerTarget" .root -}}
 {{- $ownTarget := dig "kagent" "controllerTarget" "" (index .root.Values "agent-manager" | default dict) -}}
 {{- if and $ownTarget (ne $ownTarget $target) -}}
@@ -661,6 +688,15 @@ it (agent-platform.kagent.extensions). */ -}}
 {{- with (include "agent-platform.kagent.extensions" .root | fromJson) -}}
 {{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .controller) -}}
 {{- end -}}
+{{- /* A Session's tool images come only from the toolchain sources'
+registries, while the toolchain-manager is on: the installation's own
+entries, then each source's registry, from the kagent floor that takes the key
+(agent-platform.kagent.sessionToolImagesFloor). */ -}}
+{{- $toolchains := include "agent-platform.toolchains.registries" .root | fromJson -}}
+{{- if and $toolchains.registries (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "kagent" "version" (include "agent-platform.kagent.sessionToolImagesFloor" .root))) -}}
+{{- $own := dig "controller" "sessionToolImageRepositories" list (.root.Values.kagent | default dict) -}}
+{{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) (dict "sessionToolImageRepositories" (uniq (concat $own $toolchains.registries)))) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "muster" -}}
 {{- /* The identity provider's private CA (global.identity.ca) is what muster's
@@ -792,6 +828,17 @@ left to the Substrate chart's default; an own false fails the render. */ -}}
 {{- fail "substrate.ateController.gvisorWorker.followRelease is false: the workers would run the WorkerPool's spec.workerImage (the floor of components.substrate.versionRange) while the atelet runs the release Flux resolves, so a Substrate patch would run a newer atelet beside an older worker — leave it unset; the chart sets it (giantswarm/agent-platform#822)" -}}
 {{- end -}}
 {{- $_ := set $derived "ateController" (dict "gvisorWorker" (dict "followRelease" true)) -}}
+{{- /* atelet pulls a Session's tool images with
+toolchain-manager.registryPullSecret, after the installation's own entries,
+while the toolchain-manager is on, from the Substrate floor that takes the key
+(agent-platform.substrate.ateletPullSecretsFloor). */ -}}
+{{- $pullSecret := (include "agent-platform.toolchains.registries" .root | fromJson).pullSecret -}}
+{{- if and $pullSecret (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "substrate" "version" (include "agent-platform.substrate.ateletPullSecretsFloor" .root))) -}}
+{{- $atelet := get $derived "atelet" | default dict -}}
+{{- $own := dig "atelet" "imagePullSecrets" list (.root.Values.substrate | default dict) -}}
+{{- $_ := set $atelet "imagePullSecrets" (uniq (concat $own (list (dict "name" $pullSecret)))) -}}
+{{- $_ := set $derived "atelet" $atelet -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq .name "substrate") (dig "organizations" "enabled" false (.root.Values.tenants | default dict)) -}}
 {{- /* A Substrate floor below 1.12.0 fails: its provider refuses the
@@ -1225,6 +1272,44 @@ takes the keys (agent-platform.toolchainManager.deprecateFloor). */ -}}
 {{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The registries the installation's toolchains are pulled from, while
+components.toolchain-manager is on: every source's registry, sources then
+additionalSources, each once (registries, the first the sources' own), and
+toolchain-manager.registryPullSecret (pullSecret), the one
+kubernetes.io/dockerconfigjson Secret with read credentials for the private
+ones. They wire the other side of a toolchain: agent-manager reads a
+toolchain's image with them, the kagent controller admits a Session's tool
+images from them and Substrate's atelet pulls them
+(agent-platform.componentDerivedValues). Emits JSON, {} while the component is
+off.
+Usage: include "agent-platform.toolchains.registries" $root | fromJson
+*/}}
+{{- define "agent-platform.toolchains.registries" -}}
+{{- $out := dict -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "toolchain-manager") -}}
+{{- $tm := index .Values "toolchain-manager" | default dict -}}
+{{- $registries := list -}}
+{{- range concat ($tm.sources | default list) ($tm.additionalSources | default list) -}}
+{{- with toString (.registry | default "") -}}{{- $registries = append $registries . -}}{{- end -}}
+{{- end -}}
+{{- with uniq $registries -}}{{- $_ := set $out "registries" . -}}{{- end -}}
+{{- with toString ($tm.registryPullSecret | default "") -}}{{- $_ := set $out "pullSecret" . -}}{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+Whether the floor of components.<name>.versionRange is at least version, a
+release candidate of it included: "true", else empty (a range without a floor
+too).
+Usage: include "agent-platform.componentFloorAtLeast" (dict "root" $root "name" "<component>" "version" "X.Y.Z")
+*/}}
+{{- define "agent-platform.componentFloorAtLeast" -}}
+{{- $floor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig .name "versionRange" "" .root.Values.components)) "" -}}
+{{- if and $floor (ge ((semver $floor).Compare (semver .version)) 0) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -4271,6 +4356,34 @@ while components.toolchain-manager is on (agent-platform.componentDerivedValues)
 One line, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.toolchainsFloor" -}}2.14.0{{- end -}}
+
+{{/*
+The first release of the agent-manager line whose chart takes
+toolchains.registryConfig.secretName (a toolchain read from a private
+registry with the credentials of a dockerconfigjson Secret); an earlier
+release's closed values schema refuses the key. From it on (a release
+candidate of it included) the chart derives it from
+toolchain-manager.registryPullSecret. One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.agentManager.registryConfigFloor" -}}2.16.0{{- end -}}
+
+{{/*
+The first release of the kagent line (giantswarm/kagent-upstream) whose chart
+takes controller.sessionToolImageRepositories (the repositories a Session's
+tool images may come from). From it on (a release candidate of it included)
+the chart derives it from the toolchain sources' registries while
+components.toolchain-manager is on. One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.kagent.sessionToolImagesFloor" -}}1.26.0{{- end -}}
+
+{{/*
+The first release of the Substrate line (giantswarm/substrate) whose chart
+takes atelet.imagePullSecrets (the credentials atelet pulls actor images
+with, a Session's tool images among them). From it on (a release candidate of
+it included) the chart derives it from toolchain-manager.registryPullSecret.
+One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.substrate.ateletPullSecretsFloor" -}}1.18.0{{- end -}}
 
 {{/*
 The first release of the toolchain-manager line (giantswarm/toolchain-manager)
