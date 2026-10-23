@@ -511,8 +511,8 @@ release's closed schema refuses a workspaces block. */ -}}
 {{- $_ := set $derived "workspaces" (dict "toolsPrefix" $prefix) -}}
 {{- end -}}
 {{- end -}}
-{{- /* The toolchain-manager posts its outdated notices and a major update's
-ask through the team-review endpoint as its own ServiceAccount
+{{- /* The toolchain-manager posts its outdated notices through the
+team-review endpoint as its own ServiceAccount
 (agent-platform.toolchainManager.reviews): the callers the block lists, else
 the klaus-gateway chart's default (Helm replaces a list, so the derived one
 carries it), and the manager. */ -}}
@@ -1245,8 +1245,8 @@ Usage: include "agent-platform.toolchainManager.mcpBackend" . | fromJson
 {{- end -}}
 
 {{/*
-Where the toolchain-manager posts its outdated notices and a major update's
-ask with its Approve button: klaus-gateway's team-review endpoint, while the
+Where the toolchain-manager posts its outdated notices: klaus-gateway's
+team-review endpoint, while the
 component and klaus-gateway are on, klausGateway.reviews.enabled is true and
 the floor of components.toolchain-manager.versionRange is at or above
 agent-platform.toolchainManager.reviewsFloor. url is the gateway's Service
@@ -4285,7 +4285,7 @@ define.
 {{/*
 The first release of the toolchain-manager line whose chart takes
 klausGateway (url, audience) and a source's team and slackChannel (the
-outdated notices and a major update's ask through klaus-gateway); an earlier
+outdated notices through klaus-gateway); an earlier
 release's closed values schema refuses them. From it on (a release candidate
 of it included) the chart derives klausGateway and lists the manager in
 klaus-gateway's reviews.allowedCallers (agent-platform.toolchainManager.reviews).

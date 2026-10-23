@@ -1191,19 +1191,18 @@ components:  # @schema additionalProperties: true
     # (tools appear as x_toolchain-manager_<tool>). Off by default: toolchains
     # are an installation's opt-in.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # 0.2.0 is the first release with create_toolchain and
-    # toolchain_build_status (giantswarm/toolchain-manager#12). The floor is
-    # 0.3.0: published[] per toolchain and deprecate_toolchain, which asks
-    # agent-manager through muster which agents and Sessions use a toolchain
-    # (muster.mcpUrl and muster.agentManagerToolsPrefix, derived). The floor is
-    # 0.4.0: update_toolchain, approve_update and the outdated mark, whose
-    # notices and major-update asks go to a source's team channel through
-    # klaus-gateway's team-review endpoint (klausGateway.url and .audience,
-    # derived while klausGateway.reviews.enabled, which then lists the
-    # manager's ServiceAccount in its allowedCallers). The ceiling is the next
-    # minor: a toolchain-manager minor rolls in with the chart release that
-    # renders its values.
-    versionRange: ">=0.4.0 <0.5.0"
+    # The floor is 0.5.0: create_toolchain, toolchain_build_status,
+    # published[] per toolchain, deprecate_toolchain, which asks agent-manager
+    # through muster which agents and Sessions use a toolchain (muster.mcpUrl
+    # and muster.agentManagerToolsPrefix, derived), and update_toolchain, whose
+    # update is a pull request reviewed like any other: no approve_update, no
+    # major-update ask. The outdated mark's notices go to a source's team
+    # channel through klaus-gateway's team-review endpoint (klausGateway.url
+    # and .audience, derived while klausGateway.reviews.enabled, which then
+    # lists the manager's ServiceAccount in its allowedCallers). The ceiling is
+    # the next minor: a toolchain-manager minor rolls in with the chart release
+    # that renders its values.
+    versionRange: ">=0.5.0 <0.6.0"
     valuesFrom: toolchain-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
@@ -6160,9 +6159,8 @@ toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
   # The toolchain sources every installation offers, approved by being named
   # here: a GitHub repository (owner/name) and the registry prefix its
   # toolchains publish under. Optional: the owning team's GitHub team slug
-  # (team), which approves a major update, and its Slack channel's ID
-  # (slackChannel, C0123ABCDE), where the outdated notices and a major
-  # update's ask go through klaus-gateway (klausGateway.reviews.enabled).
+  # (team) and its Slack channel's ID (slackChannel, C0123ABCDE), where the
+  # outdated notices go through klaus-gateway (klausGateway.reviews.enabled).
   sources:
     - repository: giantswarm/agent-toolchains
       registry: gsoci.azurecr.io/giantswarm/agent-toolchains
