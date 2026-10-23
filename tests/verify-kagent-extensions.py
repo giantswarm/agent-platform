@@ -154,7 +154,9 @@ def main() -> None:
     must_fail([*ON, "--set", f"{ka.AUTH}.mode=insecure"], "kagent.controller.auth.mode", "on in the insecure authentication mode")
     must_fail([*ON, "--set", f"components.kagent.versionRange=>={BELOW_FLOOR} <1.26.0"],
               "components.kagent.versionRange", f"on with a kagent range below {FLOOR}")
-    must_fail(SWITCH, "components.kagent.versionRange", "on with the default kagent range")
+    if "KAGENT_EXTENSIONS_OIDC_ISSUERS" not in env(controller(SWITCH)):
+        fail("on with the default kagent range, the binary's variables are missing")
+    ok("the default kagent range is at the floor: the switch alone runs the binary")
 
     hr = kagent_release([*ON, *WORKSPACES])
     tags = cc.registry_tags(ka.KAGENT_CHART)
