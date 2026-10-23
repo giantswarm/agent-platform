@@ -39,6 +39,7 @@ Declarative agents that each run in their own sandbox, are suspended to object s
 | [agent-manager](https://github.com/giantswarm/agent-manager) | Creates, updates and deletes agents as GitOps releases of the [agent chart](https://github.com/giantswarm/agent), over MCP and REST, as the calling person. |
 | [klaus-gateway](https://github.com/giantswarm/klaus-gateway) | Slack front door. A Slack thread becomes an agent session, and the agent acts as the Slack user. |
 | [workspace-manager](https://github.com/giantswarm/workspace-manager) | Workspaces: an Organization's repositories mirrored on a shared volume, with a working copy per agent session, served as MCP tools. |
+| [toolchain-manager](https://github.com/giantswarm/toolchain-manager) | Toolchains for coding agents: the sources an installation offers, package search, binaries and the Dockerfile a toolchain is built from, served as MCP tools. Opt-in. |
 | [agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) | The Kubernetes `Sandbox` API for isolated, stateful single-pod workloads. |
 
 ### Tool Access

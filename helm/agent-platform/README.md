@@ -559,6 +559,14 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.workspace-manager.omitEmptyKeys[7] | string | `"storage.sizing.factor"` |  |
 | components.workspace-manager.omitEmptyKeys[8] | string | `"storage.sizing.headroom"` |  |
 | components.workspace-manager.omitEmptyKeys[9] | string | `"storage.sizing.maxSize"` |  |
+| components.toolchain-manager.chart | string | `"toolchain-manager"` |  |
+| components.toolchain-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.toolchain-manager.versionRange | string | `">=0.2.0 <0.3.0"` |  |
+| components.toolchain-manager.valuesFrom | string | `"toolchain-manager"` |  |
+| components.toolchain-manager.enabled | bool | `false` |  |
+| components.toolchain-manager.dependsOn[0] | string | `"muster"` |  |
+| components.toolchain-manager.omitKeys[0] | string | `"additionalSources"` |  |
+| components.toolchain-manager.gatedRoster | bool | `true` |  |
 | components.backstage.chart | string | `"backstage"` |  |
 | components.backstage.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.backstage.versionRange | string | `">=2.68.0 <4.0.0"` |  |
@@ -640,7 +648,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.omitKeys[0] | string | `"flux-engine"` |  |
 | components.agent-platform-connectivity.omitKeys[1] | string | `"scheduling"` |  |
 | components.agent-platform-connectivity.omitKeys[2] | string | `"gpu-operator"` |  |
-| components.agent-platform-connectivity.omitKeys[3] | string | `"kserve-runtime-configs"` |  |
+| components.agent-platform-connectivity.omitKeys[3] | string | `"toolchain-manager"` |  |
+| components.agent-platform-connectivity.omitKeys[4] | string | `"kserve-runtime-configs"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -1508,6 +1517,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaceManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| toolchain-manager.owners.groups | list | `[]` |  |
+| toolchain-manager.owners.emails | list | `[]` |  |
+| toolchain-manager.sources[0].repository | string | `"giantswarm/agent-toolchains"` |  |
+| toolchain-manager.sources[0].registry | string | `"gsoci.azurecr.io/giantswarm/agent-toolchains"` |  |
+| toolchain-manager.additionalSources | list | `[]` |  |
+| toolchain-manager.github.appInstallURL | string | `""` |  |
 | backstage.observability.otel.endpoint | string | `"auto"` |  |
 | backstage.observability.otel.protocol | string | `"auto"` |  |
 | backstage.observability.otel.headers | string | `"auto"` |  |

@@ -1179,6 +1179,31 @@ components:  # @schema additionalProperties: true
     gatedRoster: true
     # An empty key takes the chart's own default instead of overriding it.
     omitEmptyKeys: [providers, oauth.baseURL, grant.signingKey, muster.mcpServer.auth.provider, muster.mcpServer.auth.authorizationServer, sync.cycle, sessions.cleanupAfter, storage.sizing.factor, storage.sizing.headroom, storage.sizing.maxSize]
+  toolchain-manager:  # @schema additionalProperties: true
+    chart: toolchain-manager
+    # The toolchain surface of the Agent Platform (giantswarm/toolchain-manager):
+    # the toolchain sources an installation offers, package search, binaries
+    # and the Dockerfile a toolchain is built from, MCP only through muster
+    # (tools appear as x_toolchain-manager_<tool>). Off by default: toolchains
+    # are an installation's opt-in.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # 0.2.0 is the first release with create_toolchain and
+    # toolchain_build_status (giantswarm/toolchain-manager#12). The ceiling is
+    # the next minor: a toolchain-manager minor rolls in with the chart release
+    # that renders its values.
+    versionRange: ">=0.2.0 <0.3.0"
+    valuesFrom: toolchain-manager
+    enabled: false
+    # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
+    # the reference is dropped at render time when the component is off.
+    dependsOn: [muster]
+    # The meta chart's own key, folded into sources (see the block).
+    omitKeys: [additionalSources]
+    # The component's roster entry reaches the connectivity release only while
+    # the component is on (see components.yaml, gatedRoster): with it off the
+    # connectivity release's values are exactly those of a chart that
+    # predates it.
+    gatedRoster: true
   # --- The standalone chart's extras -------------------------------------------
   # The components the agent-platform-standalone umbrella carried as Helm
   # dependencies on top of the fleet's roster: Backstage, mcp-kubernetes, the
@@ -1511,6 +1536,11 @@ components:  # @schema additionalProperties: true
       # wrapper's subchart key for its release); no wiring reads them, so the
       # connectivity chart never sees the block.
       - gpu-operator
+      # The toolchain-manager's values (components.toolchain-manager); its
+      # one wiring, muster's ingress to its pods, reaches the connectivity
+      # release derived (networkPolicy.mcpBackends.toolchain-manager), so the
+      # connectivity chart never sees the block.
+      - toolchain-manager
       # The well-known configs' values (components.kserve-runtime-configs); no
       # wiring reads them, so the connectivity chart never sees the block.
       - kserve-runtime-configs
@@ -6075,6 +6105,51 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
       # 0.0.0.0/0 minus networkPolicy.kubernetes.worldExcludedCIDRs; a list
       # here narrows the providers' egress to exactly these blocks.
       cidrs: []
+
+# === Toolchains (toolchain-manager) ===
+# Values forwarded verbatim to the toolchain-manager component release
+# (giantswarm/toolchain-manager), MCP only: tools appear as
+# x_toolchain-manager_<tool> through the chart's own MCPServer CR. Inert while
+# components.toolchain-manager.enabled is false. What the platform already
+# knows is derived (agent-platform.toolchainManager.derived), each own key
+# standing:
+#   - auth.dex.issuerURL and auth.trustedAudiences from the platform's login
+#     (global.identity, else muster.muster.oauth.server.dex), auth.dex.caSecret
+#     from global.identity.ca — the render fails without an issuer: the chart
+#     would serve its tools to anyone who reaches the Service;
+#   - muster.mcpServer.enabled while the muster component is on;
+#   - muster.mcpServer.authorizationServer, the pin of the registration to the
+#     installation's agents GitHub App, from the workspace-manager's pin to its
+#     github provider instance (agent-platform.workspaceManager.musterPin), so
+#     a person grants the App once for workspaces and toolchains: the App's
+#     issuer, GitHub's endpoints and the App's client credentials Secret;
+#   - sources: the block's sources followed by additionalSources.
+# The connectivity release admits muster to the manager's pods only
+# (networkPolicy.mcpBackends.toolchain-manager, derived while the component is
+# on).
+toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
+  # The installation's owners, who approve a source a person adds before its
+  # toolchains are offered: Dex groups and verified emails. Without any, an
+  # added source is never approved.
+  owners:
+    groups: []
+    emails: []
+  # The toolchain sources every installation offers, approved by being named
+  # here: a GitHub repository (owner/name) and the registry prefix its
+  # toolchains publish under (slackChannel, optional: the team that approves
+  # its updates).
+  sources:
+    - repository: giantswarm/agent-toolchains
+      registry: gsoci.azurecr.io/giantswarm/agent-toolchains
+  # The installation's own sources, offered after `sources` (same shape); a
+  # repository named twice fails the render. Not forwarded as such
+  # (components.toolchain-manager.omitKeys).
+  additionalSources: []
+  github:
+    # Where a repository's owner installs the installation's agents GitHub
+    # App, https://github.com/apps/<slug>/installations/new; add_source names
+    # it.
+    appInstallURL: ""
 
 # === The standalone chart's extras: values blocks ===
 # One block per component of the agent-platform-standalone umbrella that joined
