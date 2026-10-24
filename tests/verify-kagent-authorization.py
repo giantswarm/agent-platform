@@ -95,6 +95,9 @@ DEFAULT = {"mode": "kubernetes", "usernamePrefix": "", "groupsClaim": "groups", 
            "namespaceSelector": "giantswarm.io/organization", "includeNamespaces": ["kagent"]}
 ROLE = "agent-platform:workspace-manager-sessions"
 AUTH = "kagent.controller.auth"
+# The line's own controller: the insecure and noop modes, no issuer and a kagent
+# range below the kagent-extensions floor are its alone.
+OWN = ["--set", "kagent.controller.image.repository=giantswarm/kagent/controller"]
 DEX_KEYS = "http://dex.giantswarm.svc.cluster.local:5556/keys"
 AUTHENTICATION = {"mode": "trusted-proxy", "userIdClaim": "email", "issuer": "https://dex.ci.example.com",
                   "jwksURL": DEX_KEYS, "jwksAllowHTTP": True}
@@ -194,14 +197,14 @@ def check_authentication() -> None:
            ("https://dex.ci.example.com", "https://keys.example.com/jwks", False),
            "an own jwksURL stands and carries no derived jwksAllowHTTP")
     expect(controller(["--set", f"{AUTH}.jwksAllowHTTP=false"])["auth"].get("jwksAllowHTTP"), False, "an own jwksAllowHTTP stands")
-    expect(controller(["--set", f"{AUTH}.mode=insecure"])["auth"], {"mode": "insecure", "userIdClaim": "email"},
+    expect(controller([*OWN, "--set", f"{AUTH}.mode=insecure"])["auth"], {"mode": "insecure", "userIdClaim": "email"},
            "the insecure mode: nothing derived")
-    expect(controller(["--set", "global.identity.issuerUrl="])["auth"], {"mode": "trusted-proxy", "userIdClaim": "email"},
+    expect(controller([*OWN, "--set", "global.identity.issuerUrl="])["auth"], {"mode": "trusted-proxy", "userIdClaim": "email"},
            "without an issuer: nothing derived")
     floor = authentication_floor()
-    must_fail(["--set", "components.kagent.versionRange=>=1.0.0 <1.1.0"], f"admits a kagent release below {floor}",
+    must_fail([*OWN, "--set", "components.kagent.versionRange=>=1.0.0 <1.1.0"], f"admits a kagent release below {floor}",
               "a kagent floor below the first release that verifies people's tokens")
-    controller(["--set", f"components.kagent.versionRange=>={floor}-rc.1 <1.25.0-0"])
+    controller([*OWN, "--set", f"components.kagent.versionRange=>={floor}-rc.1 <1.25.0-0"])
     ok(f"a release candidate of {floor} passes the floor guard")
     must_fail(["--set", "kagent.controllerRoute.jwtAuthentication.jwks.tls.enabled=true",
                "--set", "kagent.controllerRoute.jwtAuthentication.jwks.tls.caSecretName=dex-ca"],
@@ -209,7 +212,7 @@ def check_authentication() -> None:
 
     egress = controller_egress([])
     expect(DEX_EGRESS in egress, True, "cilium: the controller's egress opens the in-cluster Dex on the JWKS port")
-    expect(DEX_EGRESS in controller_egress(["--set", f"{AUTH}.mode=insecure"]), False, "cilium: no Dex rule in the insecure mode")
+    expect(DEX_EGRESS in controller_egress([*OWN, "--set", f"{AUTH}.mode=insecure"]), False, "cilium: no Dex rule in the insecure mode")
     world = {"toEntities": ["world"], "toPorts": [{"ports": [{"port": "8443", "protocol": "TCP"}]}]}
     expect(world in controller_egress(["--set", f"{AUTH}.jwksURL=https://keys.example.com:8443/jwks"]), True,
            "cilium: an own external key set on 8443 is opened to the world on that port")
@@ -253,7 +256,7 @@ def main() -> None:
             "namespaceSelector": "tenant=yes", "includeNamespaces": ["shared"]},
            "an installation's own keys stand as written")
 
-    c = controller(["--set", f"{AUTHZ}.mode=noop"])
+    c = controller([*OWN, "--set", f"{AUTHZ}.mode=noop"])
     expect((c["authorization"]["mode"], c["authorization"]["includeNamespaces"], "networkPolicy" in c), ("noop", [], False),
            "mode noop: no NetworkPolicy and nothing derived")
 

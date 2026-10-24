@@ -99,7 +99,7 @@ ALLOW_HTTP_CHART = "1.11.5-rc.1"
 # A kagent range below agent-platform.kagent.authenticationFloor renders only
 # outside the trusted-proxy mode, in which the meta chart derives the
 # controller's verification of people's tokens.
-BELOW_AUTH_FLOOR = ["--set", "kagent.controller.auth.mode=insecure"]
+BELOW_AUTH_FLOOR = ["--set", "kagent.controller.auth.mode=insecure", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"]
 MUSTER_BASE_URL = ["--set", "muster.muster.oauth.server.baseUrl=https://muster.ci.example.com"]
 ACTOR_JWT_PROVIDERS = ("        actorJWTProviders:\n          muster:\n            audience: https://muster.ci.example.com\n"
                        f"            hostname: muster.{NAMESPACE}.svc.cluster.local\n")
@@ -398,7 +398,7 @@ def main(meta: str) -> int:
     # --- the guards ------------------------------------------------------------------------------
     for rng in (">=1.5.0 <1.6.0", "1.5.9"):
         ranges = ["--set", f"components.kagent.versionRange={rng}", "--set", f"components.kagent-crds.versionRange={rng}"]
-        must_fail(meta, [*base, *ranges], "admits a kagent release below 1.6.0", f"a kagent range {rng} with the admission derived")
+        must_fail(meta, [*base, *ranges, "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"], "admits a kagent release below 1.6.0", f"a kagent range {rng} with the admission derived")
         helm(meta, [*KAGENT, *IDENTITY, *ranges, *BELOW_AUTH_FLOOR])
     for rng in (">=1.6.0 <1.7.0", "1.6.0", ">=1.6.0-rc.1 <1.7.0"):
         kagent_release([*base, "--set", f"components.kagent.versionRange={rng}", "--set", f"components.kagent-crds.versionRange={rng}", *BELOW_AUTH_FLOOR], meta)

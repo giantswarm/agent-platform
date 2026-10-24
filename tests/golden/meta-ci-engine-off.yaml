@@ -45,7 +45,7 @@ spec:
       identity:
         clientId: ""
         existingSecret: ""
-        issuerUrl: ""
+        issuerUrl: https://dex.ci.example.com
       imagePullSecrets: []
       observability:
         metrics:
@@ -544,7 +544,7 @@ spec:
       identity:
         clientId: ""
         existingSecret: ""
-        issuerUrl: ""
+        issuerUrl: https://dex.ci.example.com
       imagePullSecrets: []
       observability:
         metrics:
@@ -603,9 +603,31 @@ spec:
           mode: kubernetes
           namespaceSelector: giantswarm.io/organization
           usernamePrefix: ""
-        env: []
+        env:
+        - name: KAGENT_EXTENSIONS_OIDC_ISSUERS
+          value: '[{"issuer":"https://dex.ci.example.com","jwksURL":"http://dex.giantswarm.svc.cluster.local:5556/keys"}]'
+        - name: KAGENT_EXTENSIONS_OIDC_USERNAME_CLAIM
+          value: email
+        - name: KAGENT_EXTENSIONS_OIDC_GROUPS_CLAIM
+          value: groups
+        - name: KAGENT_EXTENSIONS_OIDC_USERNAME_PREFIX
+          value: ""
+        - name: KAGENT_EXTENSIONS_OIDC_GROUPS_PREFIX
+          value: ""
+        - name: KAGENT_EXTENSIONS_AUTHORIZATION_MODE
+          value: kubernetes
+        - name: KAGENT_EXTENSIONS_NAMESPACE_SELECTOR
+          value: giantswarm.io/organization
+        - name: KAGENT_EXTENSIONS_INCLUDE_NAMESPACE
+          value: kagent
+        - name: KAGENT_EXTENSIONS_MACHINE_AUDIENCE
+          value: kagent
+        - name: KAGENT_EXTENSIONS_MACHINE_CALLER
+          value: ""
+        - name: KAGENT_EXTENSIONS_SESSION_READER
+          value: ""
         image:
-          repository: giantswarm/kagent/controller
+          repository: giantswarm/kagent/controller-extensions
         metrics:
           bindAddress: :8080
           enabled: true
@@ -1686,7 +1708,7 @@ spec:
       identity:
         clientId: ""
         existingSecret: ""
-        issuerUrl: ""
+        issuerUrl: https://dex.ci.example.com
       imagePullSecrets: []
       observability:
         metrics:
@@ -1867,6 +1889,9 @@ spec:
       agentImage:
         repository: giantswarm/kagent/golang-adk
       auth:
+        issuer: https://dex.ci.example.com
+        jwksAllowHTTP: true
+        jwksURL: http://dex.giantswarm.svc.cluster.local:5556/keys
         mode: trusted-proxy
         userIdClaim: email
       authorization:
@@ -1877,9 +1902,31 @@ spec:
         mode: kubernetes
         namespaceSelector: giantswarm.io/organization
         usernamePrefix: ""
-      env: []
+      env:
+      - name: KAGENT_EXTENSIONS_OIDC_ISSUERS
+        value: '[{"issuer":"https://dex.ci.example.com","jwksURL":"http://dex.giantswarm.svc.cluster.local:5556/keys"}]'
+      - name: KAGENT_EXTENSIONS_OIDC_USERNAME_CLAIM
+        value: email
+      - name: KAGENT_EXTENSIONS_OIDC_GROUPS_CLAIM
+        value: groups
+      - name: KAGENT_EXTENSIONS_OIDC_USERNAME_PREFIX
+        value: ""
+      - name: KAGENT_EXTENSIONS_OIDC_GROUPS_PREFIX
+        value: ""
+      - name: KAGENT_EXTENSIONS_AUTHORIZATION_MODE
+        value: kubernetes
+      - name: KAGENT_EXTENSIONS_NAMESPACE_SELECTOR
+        value: giantswarm.io/organization
+      - name: KAGENT_EXTENSIONS_INCLUDE_NAMESPACE
+        value: kagent
+      - name: KAGENT_EXTENSIONS_MACHINE_AUDIENCE
+        value: kagent
+      - name: KAGENT_EXTENSIONS_MACHINE_CALLER
+        value: ""
+      - name: KAGENT_EXTENSIONS_SESSION_READER
+        value: ""
       image:
-        repository: giantswarm/kagent/controller
+        repository: giantswarm/kagent/controller-extensions
       metrics:
         bindAddress: :8080
         enabled: true
@@ -1936,7 +1983,7 @@ spec:
       identity:
         clientId: ""
         existingSecret: ""
-        issuerUrl: ""
+        issuerUrl: https://dex.ci.example.com
       imagePullSecrets: []
       observability:
         metrics:
@@ -2168,7 +2215,7 @@ spec:
       identity:
         clientId: ""
         existingSecret: ""
-        issuerUrl: ""
+        issuerUrl: https://dex.ci.example.com
       imagePullSecrets: []
       observability:
         metrics:
@@ -2266,7 +2313,7 @@ spec:
       identity:
         clientId: ""
         existingSecret: ""
-        issuerUrl: ""
+        issuerUrl: https://dex.ci.example.com
       imagePullSecrets: []
       observability:
         metrics:
@@ -2383,7 +2430,7 @@ spec:
       identity:
         clientId: ""
         existingSecret: ""
-        issuerUrl: ""
+        issuerUrl: https://dex.ci.example.com
       imagePullSecrets: []
       observability:
         metrics:
@@ -2672,7 +2719,7 @@ spec:
       identity:
         clientId: ""
         existingSecret: ""
-        issuerUrl: ""
+        issuerUrl: https://dex.ci.example.com
       imagePullSecrets: []
       observability:
         metrics:
@@ -2786,7 +2833,7 @@ spec:
       identity:
         clientId: ""
         existingSecret: ""
-        issuerUrl: ""
+        issuerUrl: https://dex.ci.example.com
       imagePullSecrets: []
       observability:
         metrics:

@@ -65,6 +65,8 @@ BELOW = {"components": {
 # A kagent range below agent-platform.kagent.authenticationFloor renders only
 # outside the trusted-proxy mode, in which the meta chart derives the
 # controller's verification of people's tokens.
+# Below the kagent-extensions floor (1.26.2) the line's own controller runs.
+OWN_CONTROLLER = ["--set", "kagent.controller.image.repository=giantswarm/kagent/controller"]
 BELOW_AUTH_FLOOR = ["--set", "kagent.controller.auth.mode=insecure"]
 READER = f"{NAMESPACE}/klaus-gateway"
 PEER = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}},
@@ -105,7 +107,7 @@ def render(flags: list, floors: bool) -> list:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
         yaml.safe_dump(FLOORS if floors else BELOW, f)
         f.flush()
-        below = [] if floors else BELOW_AUTH_FLOOR
+        below = [*OWN_CONTROLLER, *([] if floors else BELOW_AUTH_FLOOR)]
         return [d for d in yaml.safe_load_all(helm(CHART, [*BASE, "-f", f.name, *below, *flags])) if d]
 
 
@@ -113,7 +115,7 @@ def must_fail(flags: list, floors: bool, needle: str, what: str) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
         yaml.safe_dump(FLOORS if floors else BELOW, f)
         f.flush()
-        below = [] if floors else BELOW_AUTH_FLOOR
+        below = [*OWN_CONTROLLER, *([] if floors else BELOW_AUTH_FLOOR)]
         err = helm(CHART, [*BASE, "-f", f.name, *below, *flags], expect_fail=True)
     if needle not in err:
         fail(f"{what} failed for another reason (expected {needle!r}):\n{err}")

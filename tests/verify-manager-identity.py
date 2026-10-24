@@ -32,7 +32,9 @@ def sets(*pairs: str) -> list[str]:
 
 
 # muster's login configured and nothing else: no global.identity, no manager oauth value.
+# Without an issuer the line's own controller runs, not the kagent-extensions binary.
 LOGIN = sets(
+    "kagent.controller.image.repository=giantswarm/kagent/controller",
     f"muster.muster.oauth.server.dex.issuerUrl={ISSUER}",
     f"muster.muster.oauth.server.dex.clientId={CLIENT}",
     f"muster.muster.oauth.server.existingSecret={SECRET}",
@@ -170,7 +172,8 @@ def main() -> None:
         print(f"ok: absent, {what}")
 
     print("--> no login named (muster's issuer unset): nothing filled, the guard stays silent")
-    rels = releases(meta, [*base, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri")])
+    rels = releases(meta, [*base, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
+                                        "kagent.controller.image.repository=giantswarm/kagent/controller")])
     expect("model-manager oauth.dex", oauth(rels, "model-manager").get("dex"), {"allowPrivateURLs": True})
     result = connectivity(conn, rels["agent-platform-connectivity"], base)
     if result.returncode != 0:
