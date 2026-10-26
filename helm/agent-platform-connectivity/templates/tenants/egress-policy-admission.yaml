@@ -68,6 +68,9 @@ the reference is renamed. It reads the three kinds untyped (apiVersions "*").
 The EgressPolicy policy reads the object untyped (apiVersions "*"): it admits
 every version of egresspolicies.api.kagent.dev, and matches nothing on a
 cluster that does not serve them.
+
+In the kagent namespace the same references are held by the requester's `get`
+on the Secret instead (platform-tenant-credential-refs.yaml).
 */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
