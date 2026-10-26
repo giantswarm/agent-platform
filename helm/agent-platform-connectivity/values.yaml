@@ -3085,7 +3085,11 @@ tenants:
         kind: Group
         name: system:authenticated
     # -- The platform's operators: agent-platform:editor in the kagent
-    # namespace.
+    # namespace. Bind only groups that already hold cluster-admin on the
+    # installation: an editor's HelmRelease there can run as `kagent-flux`
+    # (cluster-admin in the namespace) or as `kagent-controller`, whose
+    # ClusterRole reads every Secret of the cluster, so the role is
+    # cluster-admin in effect (giantswarm/agent-manager#167).
     editors:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
       - apiGroup: rbac.authorization.k8s.io
         kind: Group
@@ -3095,7 +3099,9 @@ tenants:
         name: giantswarm-github:giantswarm:giantswarm-admins
   # -- The customer's platform team: agent-platform:editor in the kagent
   # namespace beside platform.editors (the meta chart also adds it to muster's
-  # editor bindings).
+  # editor bindings). Name only a group that already holds cluster-admin on
+  # the installation: an editor of the kagent namespace is cluster-admin in
+  # effect (see platform.editors).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
   organizations:
     # -- The worker pods of the namespaces labelled
