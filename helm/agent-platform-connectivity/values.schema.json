@@ -2039,7 +2039,7 @@
                     "properties": {
                         "editors": {
                             "type": "array",
-                            "description": "The platform's operators: agent-platform:editor in the kagent namespace.",
+                            "description": "The platform's operators: agent-platform:editor in the kagent namespace. Bind only groups that already hold cluster-admin on the installation: an editor's HelmRelease there can run as `kagent-flux` (cluster-admin in the namespace) or as `kagent-controller`, whose ClusterRole reads every Secret of the cluster, so the role is cluster-admin in effect (giantswarm/agent-manager#167).",
                             "items": {
                                 "type": "object",
                                 "required": [
@@ -2093,7 +2093,7 @@
                 },
                 "platformTeam": {
                     "type": "array",
-                    "description": "The customer's platform team: agent-platform:editor in the kagent namespace beside platform.editors (the meta chart also adds it to muster's editor bindings).",
+                    "description": "The customer's platform team: agent-platform:editor in the kagent namespace beside platform.editors (the meta chart also adds it to muster's editor bindings). Name only a group that already holds cluster-admin on the installation: an editor of the kagent namespace is cluster-admin in effect (see platform.editors).",
                     "items": {
                         "type": "object",
                         "required": [

@@ -2990,7 +2990,7 @@
                     "properties": {
                         "editors": {
                             "type": "array",
-                            "description": "The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects.",
+                            "description": "The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects. Bind only groups that already hold cluster-admin on the installation: an editor writes HelmReleases in the kagent namespace, and one can run as `kagent-flux` (cluster-admin there) or as `kagent-controller`, whose ClusterRole reads every Secret of the cluster, so the role is cluster-admin in effect (giantswarm/agent-manager#167).",
                             "items": {
                                 "type": "object",
                                 "required": [
@@ -3044,7 +3044,7 @@
                 },
                 "platformTeam": {
                     "type": "array",
-                    "description": "The customer's platform team, per installation: RBAC subjects bound to agent-platform:editor in the kagent namespace beside `platform.editors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation).",
+                    "description": "The customer's platform team, per installation: RBAC subjects bound to agent-platform:editor in the kagent namespace beside `platform.editors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation). Name only a group that already holds cluster-admin on the installation, on a Giant Swarm management cluster the customer's admin group (rbac-operator binds it to cluster-admin cluster-wide): an editor of the kagent namespace is cluster-admin in effect (see `platform.editors`), so a narrower team named here gains every Secret of the cluster.",
                     "items": {
                         "type": "object",
                         "required": [
