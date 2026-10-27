@@ -2,9 +2,9 @@
 The cut-over of one installation's agents to the api.kagent.dev line
 (giantswarm/agent-platform#346 for the shape; bumblebee-plans#51 D11,
 expand–contract): `agent-manager migrate`, run once per pod template, in the
-kagent namespace, as the tenant identity of the agents' Flux HelmReleases
-(kagent.fluxServiceAccountName — never the literal; verify-identity forbids
-it). The 2.x range of agent-manager.agentChart.semver picks the 1.x -> 2.x
+kagent namespace, as the ServiceAccount of the migration's own name
+(migrate-rbac.yaml), never the agents' Flux identity. The 2.x range of
+agent-manager.agentChart.semver picks the 1.x -> 2.x
 path: the command validates every Generic-chart release against the chart
 2.x schema, rewrites the portal-created ones (sub-agent bindings `agent` ->
 `subAgent`, the 1.x Harness admission label -> agent.harness) and moves the
@@ -36,11 +36,11 @@ upgrade until the Job's TTL removed it (giantswarm/agent-platform#378). So:
    hand re-run's (`kubectl create job --from=cronjob/…`, UPGRADE.md).
 2. The post-install / post-upgrade hook agent-manager-migrate-start
    (templates/_hooks.tpl) creates the run from it once the release's
-   manifests — the migration's network policy, the tenant identity and its
-   namespace admin among them — are applied: the run's pod starts under its
-   egress. The hook runs as the tenant identity in the kagent namespace under
-   the migration's component label, so it needs no right and no policy of its
-   own. The hook only creates; it ends before the run does, so the run's
+   manifests — the migration's network policy, its identity and that
+   identity's Role among them — are applied: the run's pod starts under its
+   egress. The hook runs as the migration's identity in the kagent namespace
+   under the migration's component label, so it needs no policy of its own.
+   The hook only creates; it ends before the run does, so the run's
    outcome never reaches the release. A Failed run is reported where a
    successful one is: its Job (owned by the CronJob), its log and the report
    ConfigMap.
@@ -76,10 +76,7 @@ this note retire in a later 4.x release once the last installation is cut
 over.
 */ -}}
 {{- if (include "agent-platform.kagent.migration" .) }}
-{{- $sa := include "agent-platform.kagent.fluxServiceAccountName" . }}
-{{- if not $sa }}
-{{- fail "agentManager.migration.enabled is true but kagent.fluxServiceAccountName is empty: the agent-manager migrate Job runs as the tenant identity of the agents' HelmReleases and has no other identity. Set kagent.fluxServiceAccountName (the tenant ServiceAccount the fleet's agent HelmReleases run as), or set agentManager.migration.enabled: false" }}
-{{- end }}
+{{- $sa := include "agent-platform.kagent.migration.name" . }}
 {{- $m := .Values.agentManager.migration }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $am := include "agent-platform.agentManager.chartValues" . | fromJson }}

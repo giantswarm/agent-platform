@@ -528,7 +528,7 @@ The `gpu-operator:` block supports two configurations:
 
 ### Tenant identity
 
-Agents are Flux `HelmRelease`s in the kagent namespace. Under a Flux multi-tenancy lockdown, a `HelmRelease` runs as the ServiceAccount it names. Whenever kagent is on, the connectivity chart renders that ServiceAccount: `kagent-flux`, bound to `cluster-admin` by a RoleBinding, so it has full rights in the kagent namespace only.
+Agents are Flux `HelmRelease`s in the kagent namespace. Under a Flux multi-tenancy lockdown, a `HelmRelease` runs as the ServiceAccount it names. Whenever kagent is on, the connectivity chart renders that ServiceAccount: `kagent-flux`, bound to the Role `kagent-flux-agent-releases` in the kagent namespace: the Generic agent chart's Agents and RemoteMCPServers and the Secret verbs of Helm's release storage, nothing else. A HelmRelease that installs another chart as `kagent-flux` fails; it needs a ServiceAccount and Role of its own.
 
 `kagent.fluxServiceAccountName` (default `kagent-flux`) is the single name. The meta chart derives agent-manager's `flux.helmReleaseServiceAccount` and the portal's setting from it. A different value set in the `agent-manager:` block fails the render. `make verify-identity` asserts this.
 

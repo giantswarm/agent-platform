@@ -61,7 +61,7 @@ Usage of the Job include (a dict):
             hook that acts with an identity of the release instead of the
             hook identity, in that identity's namespace, under the network
             policy that selects that component label (the agent-manager
-            migrate start: the tenant identity in the kagent namespace,
+            migrate start: the migration's identity in the kagent namespace,
             templates/kagent/migrate-cronjob.yaml)
 */}}
 
