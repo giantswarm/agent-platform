@@ -101,14 +101,20 @@ spec:
       expression: >-
         size(variables.route) == 2 && variables.route[0] in variables.spec &&
         'baseUrl' in variables.spec[variables.route[0]] ? string(variables.spec[variables.route[0]].baseUrl) : ''
-  # An object already being deleted is admitted, so its controllers can
-  # release their finalizers.
+    # A write to an object already being deleted that leaves its spec as it
+    # is passes, so its controllers can release their finalizers. A spec
+    # change does not: a finalizer the writer sets holds it there
+    # indefinitely.
+    - name: releasing
+      expression: >-
+        has(object.metadata.deletionTimestamp) && request.operation == 'UPDATE' &&
+        variables.spec == (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
   validations:
-    - expression: "has(object.metadata.deletionTimestamp) || size(variables.route) == 2"
+    - expression: "variables.releasing || size(variables.route) == 2"
       reason: Forbidden
       messageExpression: >-
         {{ printf "'in an Organization namespace a ModelConfig goes through the platform\\'s LLM listener, which meters every model call; it serves the providers %s, and provider ' + (variables.provider == '' ? '<none>' : variables.provider) + ' is not one of them (a Bedrock ModelConfig has no baseUrl and would bypass the listener). Use a served provider (its spec.<provider>.baseUrl is the listener, filled in when you leave it out), or ask the platform team to add the provider to llmRouting.models. Refused for ' + request.userInfo.username + ': ' + request.name" (join ", " $providers) }}
-    - expression: "has(object.metadata.deletionTimestamp) || size(variables.route) != 2 || variables.baseUrl == variables.route[1]"
+    - expression: "variables.releasing || size(variables.route) != 2 || variables.baseUrl == variables.route[1]"
       reason: Forbidden
       messageExpression: >-
         'in an Organization namespace a ModelConfig goes through the platform\'s LLM listener, which meters every model call and passes your own key through untouched: set spec.' +
