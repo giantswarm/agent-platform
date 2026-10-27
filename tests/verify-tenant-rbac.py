@@ -28,7 +28,7 @@ Each case pins one property of the render:
   without the prefix, but on an object being deleted;
 - agent-platform-platform-tenant-credential-refs (Fail, Deny) selects the
   kagent namespace only, matches the five kinds of every version on create and
-  update, but an update that leaves the spec as it is and an object being
+  update, but an update that leaves the spec as it is, also on an object being
   deleted, and asks the authorizer for `get` on each referenced Secret for
   every requester; with kagent off it does not render; kagent.namespaceOverride
   moves it;
@@ -280,9 +280,11 @@ def check_platform_tenant_refs(docs: list, namespace: str) -> None:
     if spec["matchConstraints"].get("resourceRules") != want_rules:
         fail(f"{name} matches {spec['matchConstraints'].get('resourceRules')}, want {want_rules}")
     cond = " ".join(c["expression"] for c in spec.get("matchConditions", []))
-    for want in ("request.operation == 'CREATE'", "!= (has(oldObject.spec)", "!has(object.metadata.deletionTimestamp)"):
+    for want in ("request.operation == 'CREATE'", "!= (has(oldObject.spec)"):
         if want not in cond:
             fail(f"{name} does not condition on {want}: {cond}")
+    if "deletionTimestamp" in cond:
+        fail(f"{name} admits a spec change to an object being deleted: {cond}")
     cel = " ".join(v["expression"] for v in spec.get("variables", []) + spec["validations"])
     for want in ("credentialRef", "h.valueFrom.type == 'Secret'", "d.authentication.secretKeyRef", "apiKeySecret",
                  "authorizer.group('').resource('secrets').namespace(request.namespace).name(n).check('get').allowed()"):

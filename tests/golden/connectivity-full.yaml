@@ -15591,8 +15591,6 @@ spec:
       expression: >-
         request.operation == 'CREATE' ||
         (has(object.spec) ? dyn(object.spec) : dyn({})) != (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
-    - name: not-deleting
-      expression: "!has(object.metadata.deletionTimestamp)"
   # The objects read untyped: the policy matches five kinds of every served
   # version.
   variables:
