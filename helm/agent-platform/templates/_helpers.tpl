@@ -650,13 +650,13 @@ own value stands per key. Guarded first: the kagent floor that takes the
 block, an issuer, the email claim, an own block set in part. */ -}}
 {{- include "agent-platform.validateSessionAdmission" .root -}}
 {{- include "agent-platform.validateChatGPTPersonalLogin" .root -}}
+{{- $session := dict -}}
 {{- with (include "agent-platform.kagent.sessionAdmission" .root | fromJson) -}}
-{{- $controller := get $derived "controller" | default dict -}}
-{{- $session := dict "admission" (dict "jwt" .) -}}
-{{- /* The credential provider a Session's provider hosts resolve through:
-muster's authority, which muster answers with the person's token
-(muster.credentialProvider); an own value stands. */ -}}
-{{- $_ := set $session "credentialAuthority" (dig "controller" "session" "credentialAuthority" (dig "muster" "credentialProvider" "authority" "muster.giantswarm.io" ($.root.Values.muster | default dict)) ($.root.Values.kagent | default dict)) -}}
+{{- $_ := set $session "admission" (dict "jwt" .) -}}
+{{- end -}}
+{{- /* The actor-JWT providers follow muster and the ChatGPT login alone, not the
+admission: a Session without a workspace whose creator binds its actor
+(agent-manager's start_session) lists them too. */ -}}
 {{- $providers := dict -}}
 {{- with (include "agent-platform.kagent.musterActorJWTProvider" $.root | fromJson) -}}
 {{- $_ := set $providers "muster" . -}}
@@ -669,6 +669,12 @@ muster's authority, which muster answers with the person's token
 {{- with $providers -}}
 {{- $_ := set $session "actorJWTProviders" . -}}
 {{- end -}}
+{{- with $session -}}
+{{- /* The credential provider a Session's provider hosts resolve through:
+muster's authority, which muster answers with the person's token
+(muster.credentialProvider); an own value stands. */ -}}
+{{- $_ := set $session "credentialAuthority" (dig "controller" "session" "credentialAuthority" (dig "muster" "credentialProvider" "authority" "muster.giantswarm.io" ($.root.Values.muster | default dict)) ($.root.Values.kagent | default dict)) -}}
+{{- $controller := get $derived "controller" | default dict -}}
 {{- $_ := set $controller "session" $session -}}
 {{- $_ := set $derived "controller" $controller -}}
 {{- end -}}
