@@ -46,7 +46,7 @@ namespaces), and nothing else the guard could mistake for an engine.
 
 import logging
 import time
-from typing import Any, Dict, Iterator, List, Set
+from typing import Any, Dict, Iterator, List, Optional, Set
 
 import pytest
 import requests
@@ -120,6 +120,10 @@ AGENT = "ats-flux-agent"
 # timeout (INSTALL_TIMEOUT), so a hang is this test's failure with a dump, not
 # helm-controller's retry.
 UNINSTALL_THROUGH_FLUX_TIMEOUT_S = 600
+# The bound for every component HelmRelease to settle (Ready at its current
+# generation, no Helm action in flight) before the flip's "touches nothing"
+# assertions; a release unsettled after it fails the test by name.
+COMPONENTS_SETTLED_TIMEOUT_S = 600
 
 
 class State:
@@ -185,6 +189,37 @@ def assert_no_engine(kube: Kube, crds_untouched: bool = True) -> None:
         if extra:
             logger.warning("finding: helm-controller applied the chart's crds/ before the render failed — the Flux CRDs gained the manager %s (content unchanged); "
                            "a HelmRelease that installs this chart on a cluster with its own Flux can set upgrade.crds: Skip to avoid even that", sorted(extra))
+
+
+def helmrelease_settled(hr: Optional[Dict[str, Any]]) -> bool:
+    """Ready at the HelmRelease's current generation with no Helm action in
+    flight: helm-controller observed the latest spec, its Ready condition was
+    computed for that generation and it is not Reconciling."""
+    if not hr:
+        return False
+    generation = hr["metadata"].get("generation")
+    ready = condition(hr)
+    return (ready.get("status") == "True" and ready.get("observedGeneration") == generation
+            and hr.get("status", {}).get("observedGeneration") == generation
+            and condition(hr, "Reconciling").get("status") != "True")
+
+
+def wait_for_components_settled(kube: Kube, timeout: float) -> None:
+    """Every component HelmRelease settled (helmrelease_settled), all within
+    one shared timeout; a timeout names the release and its conditions."""
+    deadline = time.monotonic() + timeout
+    for name in COMPONENTS:
+        def settled(name: str = name) -> Any:
+            hr = kube.get("helmreleases.helm.toolkit.fluxcd.io", name, namespace=NAMESPACE)
+            if helmrelease_settled(hr):
+                return True
+            if not hr:
+                raise RuntimeError("not found")
+            conditions = hr.get("status", {}).get("conditions", [])
+            raise RuntimeError(f"generation={hr['metadata'].get('generation')} observedGeneration={hr.get('status', {}).get('observedGeneration')}: {conditions}")
+
+        wait_for(f"HelmRelease {NAMESPACE}/{name} Ready at its current generation with no Helm action in flight",
+                 settled, max(deadline - time.monotonic(), 0), interval=3)
 
 
 def platform_values() -> Dict[str, Any]:
@@ -397,8 +432,9 @@ def test_flipping_the_engine_on_fails_the_render_and_touches_nothing(kube: Kube,
         messages = wait_for("the HelmRelease failing with the render guard's message", guard_fired, 300, interval=3)
         TIMINGS.record("render guard: HelmRelease reports the refusal after the flip", time.monotonic() - started)
         assert_no_engine(kube, crds_untouched=False)
+        wait_for_components_settled(kube, COMPONENTS_SETTLED_TIMEOUT_S)
         hrs = {hr["metadata"]["name"]: hr for hr in kube.items("helmreleases.helm.toolkit.fluxcd.io", namespace=NAMESPACE)}
-        assert set(hrs) == set(COMPONENTS) and all(is_ready(hr) for hr in hrs.values()), {n: condition(h) for n, h in hrs.items()}
+        assert set(hrs) == set(COMPONENTS), sorted(hrs)
         assert all("serviceAccountName" not in hr["spec"] for hr in hrs.values()), "the failed upgrade changed the platform HelmReleases"
         assert agent_ready(kube.get("agents.api.kagent.dev", AGENT, namespace=KAGENT_NAMESPACE)), "the agent is no longer Ready on the Harness"
         logger.info("guard fired: %s", messages[:300])
