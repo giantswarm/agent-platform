@@ -41,8 +41,8 @@ components:
   agentgateway:                  { versionRange: "2.8.0" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "1.26.2" }
-  kagent-crds:                   { versionRange: "1.26.2" }
+  kagent:                        { versionRange: "1.27.0" }
+  kagent-crds:                   { versionRange: "1.27.0" }
   substrate:                     { versionRange: "1.17.5" }
   substrate-crds:                { versionRange: "1.17.5" }
   google-access-token-credential-provider: { versionRange: "0.2.0" }

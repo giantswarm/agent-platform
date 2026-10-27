@@ -6,9 +6,9 @@
 # it (the chart's muster range already does).
 components:
   kagent:
-    versionRange: ">=1.26.2-0 <1.27.0"
+    versionRange: ">=1.27.0-0 <1.28.0"
   kagent-crds:
-    versionRange: ">=1.26.2-0 <1.27.0"
+    versionRange: ">=1.27.0-0 <1.28.0"
 muster:
   muster:
     oauth:
