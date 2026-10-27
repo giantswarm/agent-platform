@@ -129,7 +129,12 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # render does not. Both sides render with
 # llmRouting.modelConfigPolicy.enabled=false, and
 # verify-llm-routing-modelconfigs asserts the hook with and without the API.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false --set llmRouting.modelConfigPolicy.enabled=false
+# The thirteenth (every agentgateway bump): the data plane's image tag on the
+# AgentgatewayParameters, which the default render carries since agentgateway
+# fronts muster. Both sides render with agentgateway.proxy.image.tag=golden;
+# the committed renders under tests/golden/ show the tag a bump moves, and
+# verify-model-catalog asserts both charts' gateway tags agree.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false --set llmRouting.modelConfigPolicy.enabled=false --set agentgateway.proxy.image.tag=golden
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 # GOLDEN_REF defaults to the merge-base of HEAD and GOLDEN_BASE: a branch is held
@@ -165,8 +170,10 @@ define drop_dashboards
 endef
 # muster-valkey's budget is maxUnavailable: 1 here (giantswarm/agent-platform#697)
 # and minAvailable: 1 on a golden from before; both sides render it the same.
-# Drop the valkey pair once GOLDEN_REF carries #697.
-WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valkey.podDisruptionBudget.minAvailable=null --set valkey.podDisruptionBudget.maxUnavailable=1
+# Drop the valkey pair once GOLDEN_REF carries #697. The data plane's image tag
+# moves on every agentgateway bump; both sides render it as golden, as in
+# KYVERNO_GOLDEN.
+WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valkey.podDisruptionBudget.minAvailable=null --set valkey.podDisruptionBudget.maxUnavailable=1 --set agentgateway.proxy.image.tag=golden
 # Keys this side's schema declares and a golden from before refuses (held null,
 # which renders nothing): the golden's render tries them first and falls back to
 # a render without them where its schema refuses them, so the hold is applied on
