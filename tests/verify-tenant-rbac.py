@@ -25,9 +25,10 @@ Each case pins one property of the render:
   agent-manager's ServiceAccount; agent-platform-tenant-credential-refs
   (Fail, Deny) there refuses, for every requester, an Agent's or
   AgentTemplate's git credentialRef or a RemoteMCPServer's headersFrom Secret
-  without the prefix, but on an object being deleted;
+  without the prefix, but a write that leaves the spec of an object being
+  deleted as it is;
 - agent-platform-platform-tenant-credential-refs (Fail, Deny) selects the
-  kagent namespace only, matches the five kinds of every version on create and
+  kagent namespace only, matches the six kinds of every version on create and
   update, but an update that leaves the spec as it is, also on an object being
   deleted, and asks the authorizer for `get` on each referenced Secret for
   every requester; with kagent off it does not render; kagent.namespaceOverride
@@ -254,7 +255,7 @@ def check_egress_admission(docs: list) -> None:
         fail(f"{name} matches {spec['matchConstraints'].get('resourceRules')}, want Agent, AgentTemplate and RemoteMCPServer creates and updates")
     cel = " ".join(v["expression"] for v in spec.get("variables", []) + spec["validations"])
     for want in ("credentialRef", "headersFrom", "h.valueFrom.type == 'Secret'", "!n.startsWith('tenant-credential-')",
-                 "has(object.metadata.deletionTimestamp)"):
+                 "variables.releasing ||", "variables.spec == (has(oldObject.spec)"):
         if want not in cel:
             fail(f"{name} does not hold {want}: {cel}")
     if "userInfo.username ==" in cel:
@@ -276,7 +277,8 @@ def check_platform_tenant_refs(docs: list, namespace: str) -> None:
     if spec["matchConstraints"].get("namespaceSelector") != {"matchLabels": {"kubernetes.io/metadata.name": namespace}}:
         fail(f"{name} selects {spec['matchConstraints'].get('namespaceSelector')}, want the {namespace} namespace only")
     want_rules = [{"apiGroups": ["api.kagent.dev"], "apiVersions": ["*"], "operations": ["CREATE", "UPDATE"],
-                   "resources": ["agents", "agenttemplates", "remotemcpservers", "egresspolicies", "modelconfigs"]}]
+                   "resources": ["agents", "agenttemplates", "remotemcpservers", "egresspolicies", "modelconfigs",
+                                 "modelproviderconfigs"]}]
     if spec["matchConstraints"].get("resourceRules") != want_rules:
         fail(f"{name} matches {spec['matchConstraints'].get('resourceRules')}, want {want_rules}")
     cond = " ".join(c["expression"] for c in spec.get("matchConditions", []))
@@ -286,7 +288,7 @@ def check_platform_tenant_refs(docs: list, namespace: str) -> None:
     if "deletionTimestamp" in cond:
         fail(f"{name} admits a spec change to an object being deleted: {cond}")
     cel = " ".join(v["expression"] for v in spec.get("variables", []) + spec["validations"])
-    for want in ("credentialRef", "h.valueFrom.type == 'Secret'", "d.authentication.secretKeyRef", "apiKeySecret",
+    for want in ("credentialRef", "h.valueFrom.type == 'Secret'", "d.authentication.secretKeyRef", "apiKeySecret", "variables.spec.secretRef.name",
                  "authorizer.group('').resource('secrets').namespace(request.namespace).name(n).check('get').allowed()"):
         if want not in cel:
             fail(f"{name} does not hold {want}: {cel}")
