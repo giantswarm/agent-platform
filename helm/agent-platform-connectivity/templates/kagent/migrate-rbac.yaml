@@ -1,34 +1,109 @@
 {{- /*
-The migration-only rights of the cut-over Job (migrate-cronjob.yaml), on top of the
-namespace admin the tenant identity already holds in the kagent namespace
-(flux-service-account.yaml: HelmReleases, OCIRepositories, the Agents and
-AgentTemplates of both kagent groups, the report ConfigMap). On this line the
-Job moves Generic chart 1.x releases to 2.x and deletes no CRD, so it holds no
-cluster-scoped right. Plain objects of the release, like the Job (a hook's
-lifetime would not cover the Job's re-runs), rendered while the migration is
-on and retired with it in a later 4.x release: a Role + RoleBinding per
-namespace in agentManager.migration.gitopsNamespaces (the fleet:
+The identity of the cut-over (migrate-cronjob.yaml): the ServiceAccount of the
+migration's name in the kagent namespace, which the run and its start hook run
+as, and nothing else does. Its Role there holds what the run and the hook call:
+read and update the Generic-chart HelmReleases and their OCIRepositories, read
+the Agents and AgentTemplates of both kagent groups and delete the leftover
+kagent.dev AgentTemplates, list Events for an Agent's status, write the report
+ConfigMap agent-manager-migrate-report, read the installation's skills
+credential by name, and create the run's Job from the CronJob. Plain objects of
+the release, rendered while the migration is on and retired with it in a later
+4.x release. On this line the Job moves Generic chart 1.x releases to 2.x and
+deletes no CRD, so it holds no cluster-scoped right but the tenants' below.
+
+Per namespace in agentManager.migration.gitopsNamespaces (the fleet:
 flux-giantswarm, where the GitOps-owned agents' HelmReleases and
-OCIRepositories live with targetNamespace: kagent), get and list on those two
-kinds, so the Job can emit their rewrite as a diff. Never write.
+OCIRepositories live with targetNamespace: kagent), a Role + RoleBinding with
+get and list on those two kinds, so the Job can emit their rewrite as a diff.
+Never write.
 
 With tenants.organizations on, the run also covers the Organization namespaces
 (AGENT_MANAGER_MULTI_TENANT, migrate-cronjob.yaml). RBAC cannot select
-namespaces by label, so the ClusterRole <name>-tenants grants the tenant
+namespaces by label, so the ClusterRole <name>-tenants grants the migration's
 identity get, list on namespaces (to find the labelled ones) and get, list,
-update, patch on HelmReleases — never create or delete. The tenant identity is
-also the one helm-controller impersonates for every agent release in the kagent
-namespace, so the ValidatingAdmissionPolicy of the same name holds every
-HelmRelease write of that identity outside the kagent namespace to what the
-run does: an update, in a namespace labelled giantswarm.io/organization, from
-a pod of the run (the pod-name claim of the pod's ServiceAccount token, which
-an impersonated request does not carry), that changes spec.values and nothing
-else of the spec (the chart, the identity it runs as, its sources stay).
+update, patch on HelmReleases — never create or delete. The
+ValidatingAdmissionPolicy of the same name holds every HelmRelease write of that
+identity outside the kagent namespace to what the run does: an update, in a
+namespace labelled giantswarm.io/organization, from a pod of the run (the
+pod-name claim of the pod's ServiceAccount token), that changes spec.values and
+nothing else of the spec (the chart, the identity it runs as, its sources stay).
 */ -}}
 {{- if (include "agent-platform.kagent.migration" .) }}
-{{- $sa := include "agent-platform.kagent.fluxServiceAccountName" . }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $name := include "agent-platform.kagent.migration.name" . }}
+{{- $sa := $name }}
+{{- $skillsAuth := include "agent-platform.agentManager.skillsGitAuth" . | fromJson }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.kagent.migration.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.kagent.migration.labels" . | nindent 4 }}
+rules:
+  # The run covers the namespaces where it may create a HelmRelease (a
+  # SelfSubjectAccessReview per namespace); it creates none.
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "create", "update"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["ocirepositories"]
+    verbs: ["get", "list", "update"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "agenttemplates"]
+    verbs: ["get", "list"]
+  - apiGroups: ["kagent.dev"]
+    resources: ["agenttemplates"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+  # RBAC cannot name the object of a create.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["agent-manager-migrate-report"]
+    verbs: ["get", "update"]
+  {{- with $skillsAuth.current }}
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ . | quote }}]
+    verbs: ["get"]
+  {{- end }}
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    resourceNames: [{{ $name | quote }}]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.kagent.migration.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $kagentNs }}
 {{- range .Values.agentManager.migration.gitopsNamespaces }}
 {{- if not . }}
 {{- fail "agentManager.migration.gitopsNamespaces: every entry is a non-empty namespace name" }}

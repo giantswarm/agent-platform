@@ -1,8 +1,8 @@
 {{/* vim: set filetype=mustache: */}}
 {{/*
 Helpers of the per-installation cut-over Job (templates/kagent/migrate-*.yaml):
-`agent-manager migrate` run once per installation as the tenant identity of the
-agents' HelmReleases (giantswarm/agent-platform#346, bumblebee-plans#51 D11).
+`agent-manager migrate` run once per installation as an identity of its own
+(giantswarm/agent-platform#346, bumblebee-plans#51 D11).
 */}}
 
 {{/*
@@ -53,7 +53,7 @@ The run's pod template, rendered once: migrate-cronjob.yaml hashes it into
 the name of the run the start hook creates (a changed template starts a new
 run, an unchanged one finds its run started) and emits it under the CronJob's
 jobTemplate. Takes a dict: root (the chart context),
-serviceAccountName (the tenant identity), image, args (list), env (list).
+serviceAccountName (the migration's identity), image, args (list), env (list).
 */}}
 {{- define "agent-platform.kagent.migration.podTemplate" -}}
 metadata:
