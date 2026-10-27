@@ -170,8 +170,10 @@ define drop_dashboards
 endef
 # muster-valkey's budget is maxUnavailable: 1 here (giantswarm/agent-platform#697)
 # and minAvailable: 1 on a golden from before; both sides render it the same.
-# Drop the valkey pair once GOLDEN_REF carries #697.
-WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valkey.podDisruptionBudget.minAvailable=null --set valkey.podDisruptionBudget.maxUnavailable=1
+# Drop the valkey pair once GOLDEN_REF carries #697. The data plane's image tag
+# moves on every agentgateway bump; both sides render it as golden, as in
+# KYVERNO_GOLDEN.
+WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valkey.podDisruptionBudget.minAvailable=null --set valkey.podDisruptionBudget.maxUnavailable=1 --set agentgateway.proxy.image.tag=golden
 # Keys this side's schema declares and a golden from before refuses (held null,
 # which renders nothing): the golden's render tries them first and falls back to
 # a render without them where its schema refuses them, so the hold is applied on
