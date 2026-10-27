@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the agents' Flux identity holds a Role in place of `cluster-admin`)
+
+The ServiceAccount `kagent.fluxServiceAccountName` (`kagent-flux`) is bound to the Role `kagent-flux-agent-releases` in the kagent namespace: the Generic agent chart 2.x kinds (`api.kagent.dev` Agents and RemoteMCPServers) and the Secret verbs of Helm's release storage. The RoleBinding `kagent-flux` to `cluster-admin` is removed by the upgrade. The agent-manager migrate run and its start hook run as `agent-platform-connectivity-agent-manager-migrate`.
+
+### Operator action
+
+- **None** for an installation whose kagent-namespace HelmReleases with `serviceAccountName: kagent-flux` all install the Generic agent chart (every agent the portal or agent-manager creates).
+- **A HelmRelease in kagent that installs another chart as `kagent-flux`**: give it a ServiceAccount and Role of its own for the kinds that chart renders, and name that ServiceAccount in the HelmRelease, before the upgrade.
+- **A management cluster that applies its own copy of the RoleBinding `kagent-flux`** (outside this chart): remove that copy, or it binds `cluster-admin` again.
+
 ## \<current\> → \<next\> (`ingress.mode: muster-direct` is removed)
 
 giantswarm/agent-platform#252: agentgateway in front of muster is the only ingress topology. Both charts' schemas accept `ingress.mode` only as `agentgateway-muster`; `muster-direct` fails the render. With muster on, `components.agentgateway.enabled` and `agent-platform-mcps.agentgateway.viaMuster` must stay `true` (their defaults).

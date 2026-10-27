@@ -3503,8 +3503,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # --- Tenant identity (read by the connectivity chart, not passed to the kagent chart) ---
   # -- The ServiceAccount the agents' Flux `HelmRelease`s execute as. The
   # connectivity chart renders it in the kagent namespace whenever kagent is
-  # on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control
-  # of the kagent namespace, nothing outside it); this chart derives
+  # on, bound to the Role `<name>-agent-releases` there (the Generic agent
+  # chart's Agents and RemoteMCPServers and Helm's release Secrets, nothing
+  # outside the kagent namespace); this chart derives
   # agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's
   # `agentPlatform.fluxServiceAccountName` is rendered from the same value —
   # ONE value, three consumers, so they cannot disagree. Under a Flux
@@ -4503,7 +4504,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.6.7"
+      tag: "2.6.10"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -4537,7 +4538,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.6.7"
+      tag: "2.6.10"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:

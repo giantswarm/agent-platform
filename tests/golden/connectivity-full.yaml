@@ -13226,6 +13226,34 @@ subjects:
   name: agentgateway-controller
   namespace: default
 ---
+# Source: agent-platform-connectivity/templates/kagent/flux-service-account.yaml
+# helm-controller impersonates this identity for every agent HelmRelease of the
+# kagent namespace, and the HelmRelease's writer picks the chart. So it holds
+# what the Generic agent chart 2.x installs there and nothing else: the two
+# kinds the chart renders, an Agent and its RemoteMCPServer, and Helm's release
+# Secrets (the Secret storage driver calls get, list, create, update and delete
+# in the release's storage namespace, the HelmRelease's).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kagent-flux-agent-releases
+  namespace: kagent
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "remotemcpservers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
 # Source: agent-platform-connectivity/templates/tenants/muster-mcpservers.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -13246,16 +13274,12 @@ rules:
     verbs: ["get", "list", "watch"]
 ---
 # Source: agent-platform-connectivity/templates/kagent/flux-service-account.yaml
-# Namespace-scoped admin: a RoleBinding to the built-in cluster-admin ClusterRole
-# grants full control of every resource (custom resources included) within the
-# kagent namespace only — an agent HelmRelease installs its Agent, the shared
-# OCIRepository and the Helm release Secret there and nothing anywhere else. The
-# built-in `admin` role would not do: it covers only the CRDs that aggregate
-# into it, and the kagent.dev kinds do not.
+# A RoleBinding's roleRef is immutable, so this binding is named apart from the
+# ServiceAccount.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kagent-flux
+  name: kagent-flux-agent-releases
   namespace: kagent
   labels:
     app: "agent-platform-connectivity"
@@ -13267,8 +13291,8 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-admin
+  kind: Role
+  name: kagent-flux-agent-releases
 subjects:
   - kind: ServiceAccount
     name: kagent-flux
@@ -13364,7 +13388,7 @@ spec:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/agentgateway-upstream/agentgateway
-    tag: 2.6.7
+    tag: 2.6.10
   service:
     spec:
       type: ClusterIP

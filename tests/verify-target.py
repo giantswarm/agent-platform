@@ -335,8 +335,12 @@ def check_toggles(meta: str, connectivity: str) -> None:
             sys.exit(f"FAIL: connectivity still renders {marker!r} with components.muster.enabled=false")
     # Without muster there is no ingress topology (#252): the data plane in front
     # of it goes with the /mcp route. The Role that
-    # lists muster's MCPServers to every signed-in person (#706) goes too.
-    kinds = {kind for kind, _ in documents(on)} - {kind for kind, _ in documents(off)}
+    # lists muster's MCPServers to every signed-in person (#706) goes too; the
+    # Role of the agents' Flux identity stays with kagent, so Roles count by name.
+    on_docs, off_docs = documents(on), documents(off)
+    kinds = {kind for kind, _ in on_docs} - {kind for kind, _ in off_docs}
+    if any(kind == "Role" and (kind, name) not in off_docs for kind, name in on_docs):
+        kinds.add("Role")
     if kinds != {"HTTPRoute", "Gateway", "AgentgatewayParameters", "AgentgatewayPolicy", "Role"}:
         sys.exit(f"FAIL: muster off dropped {sorted(kinds)} from the connectivity render; expected the /mcp HTTPRoute, the data plane in front of muster and the MCPServer viewer Role")
     ok("connectivity with muster off: no /mcp route, no data plane, no muster egress policy, no rule selecting muster pods")

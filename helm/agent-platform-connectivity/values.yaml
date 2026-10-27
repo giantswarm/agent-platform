@@ -1670,9 +1670,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
 
   # --- Tenant identity (read by umbrella templates/kagent/flux-service-account.yaml, not passed to subchart) ---
   # -- The ServiceAccount the agents' Flux `HelmRelease`s execute as. Rendered in
-  # the kagent namespace whenever kagent is on, bound to `cluster-admin` by a
-  # namespace-scoped RoleBinding (full control of the kagent namespace, nothing
-  # outside it), and named from this ONE value into agent-manager
+  # the kagent namespace whenever kagent is on, bound to the Role
+  # `<name>-agent-releases` there (the Generic agent chart's Agents and
+  # RemoteMCPServers and Helm's release Secrets, nothing outside the kagent
+  # namespace), and named from this ONE value into agent-manager
   # (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the
   # portal's `agentPlatform.fluxServiceAccountName` (through the
   # `agent-platform.kagent.fluxServiceAccountName` helper), so the three cannot
@@ -2359,12 +2360,12 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.6.7"
+      tag: "2.6.10"
   proxy:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.6.7"
+      tag: "2.6.10"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:

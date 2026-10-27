@@ -129,7 +129,12 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # render does not. Both sides render with
 # llmRouting.modelConfigPolicy.enabled=false, and
 # verify-llm-routing-modelconfigs asserts the hook with and without the API.
-KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false --set llmRouting.modelConfigPolicy.enabled=false
+# The thirteenth (every agentgateway bump): the data plane's image tag on the
+# AgentgatewayParameters, which the default render carries since agentgateway
+# fronts muster. Both sides render with agentgateway.proxy.image.tag=golden;
+# the committed renders under tests/golden/ show the tag a bump moves, and
+# verify-model-catalog asserts both charts' gateway tags agree.
+KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false --set llmRouting.modelConfigPolicy.enabled=false --set agentgateway.proxy.image.tag=golden
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 # GOLDEN_REF defaults to the merge-base of HEAD and GOLDEN_BASE: a branch is held
@@ -165,8 +170,10 @@ define drop_dashboards
 endef
 # muster-valkey's budget is maxUnavailable: 1 here (giantswarm/agent-platform#697)
 # and minAvailable: 1 on a golden from before; both sides render it the same.
-# Drop the valkey pair once GOLDEN_REF carries #697.
-WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valkey.podDisruptionBudget.minAvailable=null --set valkey.podDisruptionBudget.maxUnavailable=1
+# Drop the valkey pair once GOLDEN_REF carries #697. The data plane's image tag
+# moves on every agentgateway bump; both sides render it as golden, as in
+# KYVERNO_GOLDEN.
+WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valkey.podDisruptionBudget.minAvailable=null --set valkey.podDisruptionBudget.maxUnavailable=1 --set agentgateway.proxy.image.tag=golden
 # Keys this side's schema declares and a golden from before refuses (held null,
 # which renders nothing): the golden's render tries them first and falls back to
 # a render without them where its schema refuses them, so the hold is applied on
@@ -2663,19 +2670,19 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 IDENTITY_ON := $(VM) --set components.kagent.enabled=true
 MCPS_ONE := --set components.agent-platform-mcps.enabled=true --set agent-platform-mcps.mcpServers[0].cluster=ci --set agent-platform-mcps.mcpServers[0].group=kubernetes --set agent-platform-mcps.mcpServers[0].url=https://mcp.ci.example.com/mcp
 .PHONY: verify-identity
-verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAccount, RoleBinding, agent-manager, the portal helper) and the fixes that retired the standalone's template patches.
+verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAccount, Role and RoleBinding holding the agent chart's rights only, agent-manager, the portal helper) and the fixes that retired the standalone's template patches.
 	@echo "====> $@ ($(CONNECTIVITY_DIR), $(CHART_DIR))"
-	@echo "--> kagent on: ServiceAccount + RoleBinding kagent-flux in the kagent namespace, bound to cluster-admin"
+	@echo "--> kagent on: ServiceAccount, Role and RoleBinding kagent-flux-agent-releases in the kagent namespace: Helm's release Secrets and the agent chart's kinds, no ClusterRole"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) >$(VERIFY_TMP)/vid-on.out 2>&1 || { cat $(VERIFY_TMP)/vid-on.out; exit 1; }
 	@awk '/^kind: ServiceAccount$$/,/^---/' $(VERIFY_TMP)/vid-on.out >$(VERIFY_TMP)/vid-sa.out; grep -q '^  name: kagent-flux$$' $(VERIFY_TMP)/vid-sa.out || { echo "FAIL: no ServiceAccount kagent-flux"; exit 1; }
 	@grep -q '^  namespace: kagent$$' $(VERIFY_TMP)/vid-sa.out || { echo "FAIL: the ServiceAccount is not in the kagent namespace"; exit 1; }
 	@grep -q 'application.giantswarm.io/team: "bumblebee"' $(VERIFY_TMP)/vid-sa.out || { echo "FAIL: the ServiceAccount lost the team label the fleet's hand-written copy carries"; exit 1; }
-	@awk '/^kind: RoleBinding$$/,/^---/' $(VERIFY_TMP)/vid-on.out >$(VERIFY_TMP)/vid-rb.out; grep -q '^  name: kagent-flux$$' $(VERIFY_TMP)/vid-rb.out || { echo "FAIL: no RoleBinding kagent-flux"; exit 1; }
-	@grep -q '^  namespace: kagent$$' $(VERIFY_TMP)/vid-rb.out || { echo "FAIL: the RoleBinding is not in the kagent namespace"; exit 1; }
-	@grep -A3 '^roleRef:' $(VERIFY_TMP)/vid-rb.out | grep -q 'kind: ClusterRole' || { echo "FAIL: the RoleBinding roleRef is not a ClusterRole"; exit 1; }
-	@grep -A3 '^roleRef:' $(VERIFY_TMP)/vid-rb.out | grep -q 'name: cluster-admin' || { echo "FAIL: the RoleBinding does not bind cluster-admin (namespace-scoped admin; the fleet object's immutable roleRef)"; exit 1; }
-	@grep -A3 '^subjects:' $(VERIFY_TMP)/vid-rb.out | grep -q 'name: kagent-flux' || { echo "FAIL: the RoleBinding subject is not kagent-flux"; exit 1; }
-	@grep -A3 '^subjects:' $(VERIFY_TMP)/vid-rb.out | grep -q 'namespace: kagent' || { echo "FAIL: the RoleBinding subject is not in the kagent namespace"; exit 1; }
+	@python3 tests/verify-flux-identity.py $(VERIFY_TMP)/vid-on.out kagent-flux kagent
+	@$(PICK) $(VERIFY_TMP)/vid-on.out RoleBinding kagent-flux-agent-releases >/dev/null || { echo "FAIL: no RoleBinding kagent-flux-agent-releases (a RoleBinding's roleRef is immutable, so the Role's binding has a name of its own)"; exit 1; }
+	@if $(PICK) $(VERIFY_TMP)/vid-on.out RoleBinding kagent-flux >/dev/null 2>&1; then echo "FAIL: the RoleBinding kagent-flux renders; its roleRef cannot move from cluster-admin to the Role"; exit 1; fi
+	@echo "--> with the migration and the Organization namespaces on, kagent-flux still holds only the agent chart's rights; the migrate run and its start hook run as their own identity"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) $(MIGRATION_TENANTS) --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' >$(VERIFY_TMP)/vid-mig.out 2>&1 || { cat $(VERIFY_TMP)/vid-mig.out; exit 1; }
+	@python3 tests/verify-flux-identity.py $(VERIFY_TMP)/vid-mig.out kagent-flux kagent --migration
 	@$(GOLDEN_DROP) $(VERIFY_TMP)/vid-on.out "$(DATAPLANE_RBAC)"
 	@if grep -q '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vid-on.out; then echo "FAIL: the identity must be namespace-scoped, no ClusterRoleBinding"; exit 1; fi
 	@echo "ok: identity rendered"
@@ -2688,7 +2695,8 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@echo "ok: kagent Namespace follows the component"
 	@echo "--> ONE value renames all three consumers: the ServiceAccount, the RoleBinding subject, agent-manager's flux.helmReleaseServiceAccount"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName=tenant-x >$(VERIFY_TMP)/vid-x.out 2>&1 || { cat $(VERIFY_TMP)/vid-x.out; exit 1; }
-	@[ "$$(grep -c '^  name: tenant-x$$' $(VERIFY_TMP)/vid-x.out)" = "2" ] || { echo "FAIL: renaming kagent.fluxServiceAccountName did not rename ServiceAccount and RoleBinding"; exit 1; }
+	@[ "$$(grep -c '^  name: tenant-x$$' $(VERIFY_TMP)/vid-x.out)" = "1" ] && [ "$$(grep -c '^  name: tenant-x-agent-releases$$' $(VERIFY_TMP)/vid-x.out)" = "3" ] || { echo "FAIL: renaming kagent.fluxServiceAccountName did not rename ServiceAccount, Role and RoleBinding"; exit 1; }
+	@python3 tests/verify-flux-identity.py $(VERIFY_TMP)/vid-x.out tenant-x kagent
 	@grep -A3 '^subjects:' $(VERIFY_TMP)/vid-x.out | grep -q 'name: tenant-x' || { echo "FAIL: the RoleBinding subject did not follow the value"; exit 1; }
 	@if grep -q 'kagent-flux' $(VERIFY_TMP)/vid-x.out; then echo "FAIL: the old name survives in the connectivity render"; grep -n kagent-flux $(VERIFY_TMP)/vid-x.out; exit 1; fi
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.fluxServiceAccountName=tenant-x >$(VERIFY_TMP)/vid-meta-x.out 2>&1 || { cat $(VERIFY_TMP)/vid-meta-x.out; exit 1; }
@@ -3831,7 +3839,7 @@ verify-identity-migration: ## Assert the migration holds no cluster-scoped right
 	@grep -A2 'apiGroups: \["helm.toolkit.fluxcd.io"\]' $(VERIFY_TMP)/vim-ten-cr.out | tr -d '\n' | grep -qF 'resources: ["helmreleases"]    verbs: ["get", "list", "update", "patch"]' || { echo "FAIL: the ClusterRole does not grant exactly get, list, update, patch on helmreleases"; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vim-ten.out ClusterRoleBinding $(MIGRATION_JOB)-tenants >$(VERIFY_TMP)/vim-ten-crb.out || { echo "FAIL: no ClusterRoleBinding $(MIGRATION_JOB)-tenants"; exit 1; }
 	@grep -A3 '^roleRef:' $(VERIFY_TMP)/vim-ten-crb.out | grep -q 'name: $(MIGRATION_JOB)-tenants$$' || { echo "FAIL: the ClusterRoleBinding does not bind the ClusterRole -tenants"; exit 1; }
-	@[ "$$(grep -c '^  - kind:' $(VERIFY_TMP)/vim-ten-crb.out)" = "1" ] && grep -A2 '^  - kind: ServiceAccount$$' $(VERIFY_TMP)/vim-ten-crb.out | tr -d '\n' | grep -q 'name: kagent-flux    namespace: kagent' || { echo "FAIL: the ClusterRoleBinding binds more or other than the tenant identity"; exit 1; }
+	@[ "$$(grep -c '^  - kind:' $(VERIFY_TMP)/vim-ten-crb.out)" = "1" ] && grep -A2 '^  - kind: ServiceAccount$$' $(VERIFY_TMP)/vim-ten-crb.out | tr -d '\n' | grep -q 'name: $(MIGRATION_JOB)    namespace: kagent' || { echo "FAIL: the ClusterRoleBinding binds more or other than the migration's identity"; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vim-ten.out ValidatingAdmissionPolicy $(MIGRATION_JOB)-tenants >$(VERIFY_TMP)/vim-ten-vap.out || { echo "FAIL: no ValidatingAdmissionPolicy $(MIGRATION_JOB)-tenants"; exit 1; }
 	@grep -q 'failurePolicy: Fail' $(VERIFY_TMP)/vim-ten-vap.out || { echo "FAIL: the policy fails open"; exit 1; }
 	@grep -qF "'giantswarm.io/organization' in namespaceObject.metadata.labels" $(VERIFY_TMP)/vim-ten-vap.out || { echo "FAIL: the policy does not hold the writes to the Organization namespaces"; exit 1; }
@@ -3841,18 +3849,18 @@ verify-identity-migration: ## Assert the migration holds no cluster-scoped right
 	@if grep -qE 'object\.spec\.values([^F]|$$)' $(VERIFY_TMP)/vim-ten-vap.out; then echo "FAIL: the policy holds spec.values, the one field the run rewrites"; exit 1; fi
 	@grep -A2 'key: kubernetes.io/metadata.name' $(VERIFY_TMP)/vim-ten-vap.out | grep -q 'values: \["kagent"\]' || { echo "FAIL: the policy does not spare the kagent namespace"; exit 1; }
 	@grep -q 'operations: \["CREATE", "UPDATE", "DELETE"\]' $(VERIFY_TMP)/vim-ten-vap.out && grep -q 'resources: \["helmreleases"\]' $(VERIFY_TMP)/vim-ten-vap.out || { echo "FAIL: the policy does not hold every HelmRelease write"; exit 1; }
-	@grep -q "request.userInfo.username == 'system:serviceaccount:kagent:kagent-flux'" $(VERIFY_TMP)/vim-ten-vap.out || { echo "FAIL: the policy does not match the tenant identity"; exit 1; }
+	@grep -q "request.userInfo.username == 'system:serviceaccount:kagent:$(MIGRATION_JOB)'" $(VERIFY_TMP)/vim-ten-vap.out || { echo "FAIL: the policy does not match the migration's identity"; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vim-ten.out ValidatingAdmissionPolicyBinding $(MIGRATION_JOB)-tenants | grep -q 'validationActions: \[Deny\]' || { echo "FAIL: the policy binding does not deny"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) $(MIGRATION_TENANTS) --set kagent.fluxServiceAccountName=tenant-x >$(VERIFY_TMP)/vim-ten-x.out 2>&1 || { cat $(VERIFY_TMP)/vim-ten-x.out; exit 1; }
-	@if grep -q 'kagent-flux' $(VERIFY_TMP)/vim-ten-x.out; then echo "FAIL: the tenant-namespace rights keep the old identity name"; grep -n kagent-flux $(VERIFY_TMP)/vim-ten-x.out; exit 1; fi
+	@if $(PICK) $(VERIFY_TMP)/vim-ten-x.out ClusterRoleBinding $(MIGRATION_JOB)-tenants | grep -q 'name: tenant-x'; then echo "FAIL: the tenant-namespace rights bind the agents' Flux identity"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) $(MIGRATION_TENANTS) --set agentManager.migration.enabled=false >$(VERIFY_TMP)/vim-ten-off.out 2>&1 || { cat $(VERIFY_TMP)/vim-ten-off.out; exit 1; }
 	@if grep -q '$(MIGRATION_JOB)-tenants' $(VERIFY_TMP)/vim-ten-off.out; then echo "FAIL: the tenant-namespace rights outlive the migration"; exit 1; fi
 	@$(PICK) $(VERIFY_TMP)/vim-ten.out ValidatingAdmissionPolicy agent-platform-tenant-credential-refs | grep -q "Fix: rename each to a tenant-credential-\* Secret of this namespace or remove it" || { echo "FAIL: the credential-refs refusal does not name the fix"; exit 1; }
 	@echo "ok: Organization namespaces"
-	@echo "--> a renamed identity: the GitOps-namespace RoleBinding follows kagent.fluxServiceAccountName"
+	@echo "--> a renamed Flux identity: the GitOps-namespace RoleBinding keeps the migration's identity"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName=tenant-x --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' >$(VERIFY_TMP)/vim-x.out 2>&1 || { cat $(VERIFY_TMP)/vim-x.out; exit 1; }
-	@$(PICK) $(VERIFY_TMP)/vim-x.out RoleBinding $(MIGRATION_JOB) flux-giantswarm | grep -A3 '^subjects:' | grep -q 'name: tenant-x' || { echo "FAIL: the subject did not follow the renamed identity"; exit 1; }
-	@if grep -q 'kagent-flux' $(VERIFY_TMP)/vim-x.out; then echo "FAIL: the old name survives with a renamed identity"; grep -n kagent-flux $(VERIFY_TMP)/vim-x.out; exit 1; fi
+	@$(PICK) $(VERIFY_TMP)/vim-x.out RoleBinding $(MIGRATION_JOB) flux-giantswarm | grep -A3 '^subjects:' | grep -q 'name: $(MIGRATION_JOB)$$' || { echo "FAIL: the GitOps-namespace subject is not the migration's identity"; exit 1; }
+	@if $(PICK) $(VERIFY_TMP)/vim-x.out RoleBinding $(MIGRATION_JOB) flux-giantswarm | grep -q 'tenant-x'; then echo "FAIL: the GitOps-namespace RoleBinding binds the agents' Flux identity"; exit 1; fi
 	@echo "ok: renamed identity"
 	@echo "--> off: no ClusterRoleBinding with the migration off, with agent-manager off (verify-identity's own kagent-only case), with kagent off"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.enabled=false >$(VERIFY_TMP)/vim-off.out 2>&1 || { cat $(VERIFY_TMP)/vim-off.out; exit 1; }
@@ -3914,11 +3922,10 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@grep -q 'ttlSecondsAfterFinished: 86400' $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the finished Job is not kept a day"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set agentManager.migration.image.tag=9.9.9 >$(VERIFY_TMP)/vmig-hash.out 2>&1 || { cat $(VERIFY_TMP)/vmig-hash.out; exit 1; }
 	@[ "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-hash.out)" != "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-on.out)" ] || { echo "FAIL: a changed image did not change the Job's name (Job.spec.template is immutable)"; exit 1; }
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName=tenant-x >$(VERIFY_TMP)/vmig-hash-sa.out 2>&1 || { cat $(VERIFY_TMP)/vmig-hash-sa.out; exit 1; }
-	@[ "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-hash-sa.out)" != "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-on.out)" ] || { echo "FAIL: a changed identity did not change the Job's name (the name hashes the whole pod template)"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vmig-again.out 2>&1 || { cat $(VERIFY_TMP)/vmig-again.out; exit 1; }
 	@[ "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-again.out)" = "$$(grep -oE '$(MIGRATION_RUN)' $(VERIFY_TMP)/vmig-on.out)" ] || { echo "FAIL: the Job's name is not stable across identical renders"; exit 1; }
-	@grep -q 'serviceAccountName: kagent-flux' $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the Job does not run as the tenant identity"; exit 1; }
+	@grep -q 'serviceAccountName: $(MIGRATION_JOB)$$' $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the Job does not run as the migration's identity"; exit 1; }
+	@if grep -q 'fluxServiceAccountName' $(CONNECTIVITY_DIR)/templates/kagent/migrate-cronjob.yaml $(CONNECTIVITY_DIR)/templates/kagent/migrate-rbac.yaml; then echo "FAIL: a migration template reads the agents' Flux identity; the migration runs as its own"; exit 1; fi
 	@if grep -q 'kagent-flux' $(CONNECTIVITY_DIR)/templates/kagent/migrate-cronjob.yaml $(CONNECTIVITY_DIR)/templates/kagent/migrate-rbac.yaml $(CONNECTIVITY_DIR)/templates/kagent/_migrate.tpl; then echo "FAIL: a migration template carries the literal kagent-flux; the identity comes from the helper"; exit 1; fi
 	@pin=$$($(MIGRATION_PIN)); grep -q "image: \"gsoci.azurecr.io/giantswarm/agent-manager:$$pin\"" $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the image is not agent-manager at the BOM pin $$pin (agentManager.migration.image.tag)"; grep image: $(VERIFY_TMP)/vmig-job.out; exit 1; }
 	@grep -q '^                - migrate$$' $(VERIFY_TMP)/vmig-job.out || { echo "FAIL: the Job does not run \`migrate\`"; exit 1; }
@@ -3945,7 +3952,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 		$(PICK) $$out CronJob $(MIGRATION_JOB) kagent | grep -q '^  suspend: true$$' || { echo "FAIL ($$flavor): no suspended CronJob $(MIGRATION_JOB) — the run's template, never scheduled"; exit 1; }; \
 		$(PICK) $$out Job t-agent-manager-migrate-start kagent >$(VERIFY_TMP)/vmig-start.out || { echo "FAIL ($$flavor): no start hook t-agent-manager-migrate-start in the kagent namespace"; exit 1; }; \
 		grep -q 'helm.sh/hook: post-install,post-upgrade$$' $(VERIFY_TMP)/vmig-start.out || { echo "FAIL ($$flavor): the start hook does not run after the release's manifests are applied (post-install,post-upgrade)"; exit 1; }; \
-		grep -q 'serviceAccountName: kagent-flux$$' $(VERIFY_TMP)/vmig-start.out || { echo "FAIL ($$flavor): the start hook does not run as the tenant identity"; exit 1; }; \
+		grep -q 'serviceAccountName: $(MIGRATION_JOB)$$' $(VERIFY_TMP)/vmig-start.out || { echo "FAIL ($$flavor): the start hook does not run as the migration's identity"; exit 1; }; \
 		[ "$$(grep -c 'app.kubernetes.io/component: agent-manager-migrate$$' $(VERIFY_TMP)/vmig-start.out)" = "2" ] || { echo "FAIL ($$flavor): the start hook's pod is not under the run's policy (component agent-manager-migrate)"; exit 1; }; \
 		grep -qE 'kubectl -n kagent $(MIGRATION_RUN)$$' $(VERIFY_TMP)/vmig-start.out || { echo "FAIL ($$flavor): the start hook does not create the run from the CronJob"; exit 1; }; \
 		grep -qE 'existing=.*kubectl -n kagent get job $(MIGRATION_JOB)-[0-9a-f]{8} --ignore-not-found' $(VERIFY_TMP)/vmig-start.out || { echo "FAIL ($$flavor): the start hook does not skip a started run"; exit 1; }; \
@@ -3980,7 +3987,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@grep -q -- '- --dry-run' $(VERIFY_TMP)/vmig-vals-job.out || { echo "FAIL: dryRun does not render --dry-run"; exit 1; }
 	@if grep -q 'GITHUB_TOKEN' $(VERIFY_TMP)/vmig-vals-job.out; then echo "FAIL: a left-over githubToken value still renders GITHUB_TOKEN"; exit 1; fi
 	@grep -A1 'name: AGENT_MANAGER_MANAGED_NAMESPACES' $(VERIFY_TMP)/vmig-vals-job.out | grep -q 'value: team-a,team-b' || { echo "FAIL: the additional namespaces do not reach the Job"; exit 1; }
-	@grep -q 'serviceAccountName: tenant-x' $(VERIFY_TMP)/vmig-vals-job.out || { echo "FAIL: the Job's ServiceAccount did not follow the renamed identity"; exit 1; }
+	@grep -q 'serviceAccountName: $(MIGRATION_JOB)$$' $(VERIFY_TMP)/vmig-vals-job.out || { echo "FAIL: the Job's ServiceAccount followed the agents' renamed Flux identity"; exit 1; }
 	@if grep -q 'AGENT_MANAGER_SKILLS_GIT_AUTH' $(VERIFY_TMP)/vmig-vals-job.out; then echo "FAIL: a skills credential reaches the Job although agent-manager has none"; exit 1; fi
 	@echo "ok: values"
 	@echo "--> the skills credential: minted, the run moves agents from tenant-credential-<fullname>-skills-token to <fullname>-skills-token, the installation's own name; provisioned, from the listed earlier names"
@@ -3994,14 +4001,17 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@grep -A1 'name: AGENT_MANAGER_SKILLS_GIT_AUTH_PREVIOUS_SECRET_NAMES' $(VERIFY_TMP)/vmig-prov-job.out | grep -q 'value: kagent-skills-token$$' || { echo "FAIL: the provisioned credential's earlier name does not reach the Job"; exit 1; }
 	@echo "ok: skills credential"
 	@echo "--> RBAC: nothing cluster-scoped (verify-identity-migration) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
-	@if $(PICK) $(VERIFY_TMP)/vmig-on.out Role $(MIGRATION_JOB) >/dev/null 2>&1; then echo "FAIL: a GitOps-namespace Role renders with an empty gitopsNamespaces"; exit 1; fi
+	@python3 -c 'import sys,yaml; sys.exit("FAIL: a GitOps-namespace Role renders with an empty gitopsNamespaces" if [d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d["kind"]=="Role" and d["metadata"]["name"]==sys.argv[2] and d["metadata"].get("namespace")!="kagent"] else 0)' $(VERIFY_TMP)/vmig-on.out $(MIGRATION_JOB)
+	@$(PICK) $(VERIFY_TMP)/vmig-on.out Role $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-role-kagent.out || { echo "FAIL: no Role of the migration's identity in the kagent namespace"; exit 1; }
+	@grep -A2 'apiGroups: \["helm.toolkit.fluxcd.io"\]' $(VERIFY_TMP)/vmig-role-kagent.out | grep -qF 'verbs: ["get", "list", "create", "update"]' || { echo "FAIL: the migration's identity may not create a HelmRelease in kagent, so the run's access review leaves the namespace out"; exit 1; }
+	@if grep -qE '"\*"|escalate|bind|impersonate' $(VERIFY_TMP)/vmig-role-kagent.out; then echo "FAIL: the migration's Role holds a wildcard, escalate, bind or impersonate"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set 'agentManager.migration.gitopsNamespaces[0]=flux-giantswarm' --set 'agentManager.migration.gitopsNamespaces[1]=flux-team' >$(VERIFY_TMP)/vmig-gitops.out 2>&1 || { cat $(VERIFY_TMP)/vmig-gitops.out; exit 1; }
 	@for ns in flux-giantswarm flux-team; do \
 		$(PICK) $(VERIFY_TMP)/vmig-gitops.out Role $(MIGRATION_JOB) $$ns >$(VERIFY_TMP)/vmig-role-$$ns.out || { echo "FAIL: no Role in $$ns"; exit 1; }; \
 		grep -q 'resources: \["helmreleases"\]' $(VERIFY_TMP)/vmig-role-$$ns.out || { echo "FAIL: the Role in $$ns does not read helmreleases"; exit 1; }; \
 		grep -q 'resources: \["ocirepositories"\]' $(VERIFY_TMP)/vmig-role-$$ns.out || { echo "FAIL: the Role in $$ns does not read ocirepositories"; exit 1; }; \
 		[ "$$(grep -c 'verbs: \["get", "list"\]' $(VERIFY_TMP)/vmig-role-$$ns.out)" = "2" ] || { echo "FAIL: the Role in $$ns grants more than get, list"; exit 1; }; \
-		$(PICK) $(VERIFY_TMP)/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: kagent-flux' || { echo "FAIL: the RoleBinding in $$ns does not bind the tenant identity"; exit 1; }; \
+		$(PICK) $(VERIFY_TMP)/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: $(MIGRATION_JOB)$$' || { echo "FAIL: the RoleBinding in $$ns does not bind the migration's identity"; exit 1; }; \
 	done
 	@$(GOLDEN_DROP) $(VERIFY_TMP)/vmig-gitops.out "$(TENANT_RBAC) $(DATAPLANE_RBAC)"
 	@if grep -q '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vmig-gitops.out; then echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; fi
@@ -4044,10 +4054,9 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@if $(PICK) $(VERIFY_TMP)/vmig-par-k8s.out NetworkPolicy $(MIGRATION_JOB) kagent | grep -q 'except:'; then echo "FAIL: agentManager.networkPolicy.egress.cidrs did not narrow the Job's kubernetes egress; it still opens every public destination"; exit 1; fi
 	@if grep -qE 'api\.github\.com|azurecr|blob\.core' $(CONNECTIVITY_DIR)/templates/kagent/migrate-networkpolicy-cilium.yaml $(CONNECTIVITY_DIR)/templates/kagent/migrate-networkpolicy-kubernetes.yaml $(CONNECTIVITY_DIR)/templates/agent-manager/netpol.yaml; then echo "FAIL: a policy template names a chart destination of its own; the set comes from agent-platform.agentManager.chartSourcesEgress.<flavor> and agentManager.networkPolicy.egress"; exit 1; fi
 	@echo "ok: one chart egress for agent-manager and the Job"
-	@echo "--> guards: an empty tenant identity fails naming kagent.fluxServiceAccountName; an empty GitOps namespace fails"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName= >$(VERIFY_TMP)/vmig-g1.out 2>&1; then echo "FAIL: the migration rendered without a tenant identity"; exit 1; \
-	elif ! grep -q 'kagent.fluxServiceAccountName is empty' $(VERIFY_TMP)/vmig-g1.out; then echo "FAIL: the identity guard failed for the wrong reason"; cat $(VERIFY_TMP)/vmig-g1.out; exit 1; else echo "ok: identity guard"; fi
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName= --set agentManager.migration.enabled=false >/dev/null 2>&1 || { echo "FAIL: an empty identity with the migration off must render"; exit 1; }
+	@echo "--> guards: an empty Flux identity leaves the migration on its own identity; an empty GitOps namespace fails"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set kagent.fluxServiceAccountName= >$(VERIFY_TMP)/vmig-g1.out 2>&1 || { echo "FAIL: the migration does not render without the agents' Flux identity"; cat $(VERIFY_TMP)/vmig-g1.out; exit 1; }
+	@$(PICK) $(VERIFY_TMP)/vmig-g1.out ServiceAccount $(MIGRATION_JOB) kagent >/dev/null || { echo "FAIL: no migration identity without the agents' Flux identity"; exit 1; }
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) --set 'agentManager.migration.gitopsNamespaces[0]=' >$(VERIFY_TMP)/vmig-g2.out 2>&1; then echo "FAIL: an empty GitOps namespace rendered"; exit 1; \
 	elif ! grep -q 'non-empty namespace name' $(VERIFY_TMP)/vmig-g2.out; then echo "FAIL: the namespace guard failed for the wrong reason"; cat $(VERIFY_TMP)/vmig-g2.out; exit 1; else echo "ok: namespace guard"; fi
 	@echo "--> the meta chart declares and forwards agentManager.migration (the BOM tag) to the connectivity release"
