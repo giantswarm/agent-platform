@@ -60,14 +60,18 @@ same namespaces. The installation's skills credential (agent-manager's
 skills.gitAuthSecretName, or the Secret it mints, and their earlier names) is
 the installation's, never a tenant's: it is refused there under each of its
 names, prefixed or not; the platform's own agents name it in the kagent
-namespace. An object already being
-deleted is admitted, so its controllers can release their finalizers; any
-other change of an object that still names another Secret is refused until
+namespace. A write to an object already
+being deleted that leaves its spec as it is is admitted, so its controllers
+can release their finalizers; any other change of an object that still names
+another Secret, a spec change of a deleting one included, is refused until
 the reference is renamed. It reads the three kinds untyped (apiVersions "*").
 
 The EgressPolicy policy reads the object untyped (apiVersions "*"): it admits
 every version of egresspolicies.api.kagent.dev, and matches nothing on a
 cluster that does not serve them.
+
+In the kagent namespace the same references are held by the requester's `get`
+on the Secret instead (platform-tenant-credential-refs.yaml).
 */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
@@ -267,8 +271,14 @@ spec:
         .map(h, has(h.valueFrom.name) ? string(h.valueFrom.name) : '') : dyn([]))
     - name: foreign
       expression: {{ printf "variables.refs.filter(n, !n.startsWith('%s')%s)" $prefix (ternary (printf " || n in [%s]" (join ", " $installationCredentials)) "" (gt (len $installationCredentials) 0)) | quote }}
+    # A finalizer the writer sets holds an object in deletion indefinitely,
+    # so only a write that leaves the spec as it is passes there.
+    - name: releasing
+      expression: >-
+        has(object.metadata.deletionTimestamp) && request.operation == 'UPDATE' &&
+        variables.spec == (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
   validations:
-    - expression: "has(object.metadata.deletionTimestamp) || size(variables.foreign) == 0"
+    - expression: "variables.releasing || size(variables.foreign) == 0"
       reason: Forbidden
       messageExpression: >-
         {{ printf "'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named %s*%s, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ') + '. Fix: rename each to a %s* Secret of this namespace or remove it (UPGRADE.md: the migrate run removes the installation skills credential from the platform agents)'" $prefix (ternary " other than the skills credential of the installation" "" (gt (len $installationCredentials) 0)) $prefix }}
