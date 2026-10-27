@@ -52,8 +52,9 @@ below pins one property:
 - kagent's actor-JWT provider muster (giantswarm/giantswarm#38607): while muster trusts
   the actor JWT the kagent release carries controller.session.actorJWTProviders.muster,
   the host of the agents' in-cluster MCP URL and muster's audience (its own
-  actorBearer.audience, else oauth.server.baseUrl); an own key stands; nothing with the
-  actor bearer off or without an audience; the kagent chart at the range's floor renders
+  actorBearer.audience, else oauth.server.baseUrl), with or without the Session admission
+  (no grant key); an own key stands; nothing with the actor bearer off or without an
+  audience; the kagent chart at the range's floor renders
   KAGENT_SESSION_ACTOR_JWT_PROVIDERS from it.
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
@@ -351,8 +352,12 @@ def main(meta: str) -> int:
                         ([*NO_OWN, "--set", "workspaceManager.grantKey.create=false"], "with grantKey.create false")):
         if admission(kagent_release([*base, *flags], meta)) is not None:
             fail(f"the kagent release carries a Session admission {what}: the manager signs no grant then")
+        if releasable[-1] in flags and actor_jwt_of([*flags, *MUSTER_BASE_URL]) != ACTOR_JWT_PROVIDERS:
+            fail(f"{what} the kagent release does not name muster as its actor-JWT provider while muster trusts the actor JWT: "
+                 f"a Session start_session binds without a workspace would reach muster as nobody:\n{actor_jwt_of([*flags, *MUSTER_BASE_URL])}")
     must_fail(meta, [*ON, *IDENTITY, "--set", "components.kagent.enabled=false"], "workspaces need the agents", "workspaces on with kagent off")
-    ok("nothing without a grant key (no providers, oauth off, grantKey.create false); workspaces with kagent off fail the render")
+    ok("no Session admission without a grant key (no providers, oauth off, grantKey.create false), while muster's actor-JWT "
+       "provider stays; workspaces with kagent off fail the render")
 
     # --- what the derivation follows -------------------------------------------------------------
     moved = admission(kagent_release([*base, "--set", f"{NAME}.fullnameOverride=wm", "--set", f"{NAME}.service.port=9090",
