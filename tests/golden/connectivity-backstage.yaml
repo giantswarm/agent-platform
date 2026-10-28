@@ -11887,7 +11887,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.1"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.2"
           command: ["kubectl"]
           args:
             - set
