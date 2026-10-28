@@ -5755,7 +5755,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/envoy
-          tag: v1.40.1
+          tag: v1.40.2
         # The listener's port in the pod; the Service (service.port) fronts it.
         port: 10000
         clientIdentity: spiffe://cluster.local/ns/ate-system/sa/ate-api-server
