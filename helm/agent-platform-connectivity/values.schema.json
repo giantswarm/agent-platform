@@ -395,6 +395,9 @@
             "type": "object",
             "additionalProperties": true
         },
+        "externalDNSIP": {
+            "type": "string"
+        },
         "extraObjects": {
             "type": "array"
         },
@@ -847,7 +850,8 @@
         },
         "global": {
             "type": "object",
-            "additionalProperties": false,
+            "description": "Global values shared between all subcharts and the platform.",
+            "additionalProperties": true,
             "properties": {
                 "domain": {
                     "type": "string"
@@ -962,12 +966,20 @@
                         }
                     }
                 },
+                "podSecurityStandards": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
                 "registry": {
                     "type": "string"
                 }
             }
         },
         "google-access-token-credential-provider": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "helm": {
             "type": "object",
             "additionalProperties": true
         },
@@ -1356,6 +1368,9 @@
                     "maxItems": 16
                 }
             }
+        },
+        "managementCluster": {
+            "type": "string"
         },
         "mcp-kubernetes": {
             "type": "object",
