@@ -31,6 +31,8 @@ CASES = {
     "default": [],
     "examples/own-gateway.yaml": ["-f", f"{META}/examples/own-gateway.yaml"],
     "examples/managed-cloud.yaml": ["-f", f"{META}/examples/managed-cloud.yaml"],
+    # A null switch is no switch: the component follows muster.
+    "enabled: null": ["--set", "components.agent-platform-mcps.enabled=null"],
 }
 SLICES = ["examples/runtime-slice.yaml", "examples/serving-slice.yaml"]
 GUARD = "components.agent-platform-mcps.enabled must be true while muster is on"

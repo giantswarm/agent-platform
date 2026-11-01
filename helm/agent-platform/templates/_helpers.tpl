@@ -82,7 +82,9 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- $c := index $root.Values.components .name -}}
 {{- if $c -}}
 {{- $on := true -}}
-{{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}
+{{- /* An `enabled: null` is no switch: Helm keeps a null only for a key the
+       chart's values do not default, the entries below that follow another. */ -}}
+{{- if and (hasKey $c "enabled") (not (kindIs "invalid" $c.enabled)) }}{{- $on = $c.enabled }}
 {{- else if has .name (list "kagent-crds" "substrate" "substrate-crds" "google-access-token-credential-provider") }}
 {{- /* The kagent line ships its CRDs as their own chart and has no runtime
        without Agent Substrate; without an explicit switch these follow
