@@ -193,7 +193,7 @@ gitops:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/kubectl
-      tag: v1.37.1
+      tag: v1.37.2
     helmImage:
       registry: gsoci.azurecr.io
       repository: giantswarm/alpine-k8s
@@ -647,8 +647,12 @@ components:  # @schema additionalProperties: true
     # controller.sessionToolImageRepositories (derived from the
     # toolchain-manager's sources, agent-platform.kagent.sessionToolImages) and
     # their origins from controller.sessionToolImageEgressOrigins
-    # (giantswarm/kagent-upstream#879).
-    versionRange: ">=1.26.0 <1.27.0"
+    # (giantswarm/kagent-upstream#879). From 1.27.0 the runtimes relay an MCP
+    # server's URL elicitation (muster's sign-in link) as an input-required
+    # task with the HITL extension's url_elicitation_request
+    # (giantswarm/kagent-upstream#911, #916), and the codex Harness speaks
+    # MCP 2026-07-28 (Codex's mcp_2026_07_28 feature).
+    versionRange: ">=1.27.0 <1.28.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -762,7 +766,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.26.0 <1.27.0"
+    versionRange: ">=1.27.0 <1.28.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -2880,14 +2884,16 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # must stay allowed.
   controller:  # @schema additionalProperties: true
     image:
-      # giantswarm/kagent/controller-extensions runs the controller as the
-      # kagent-extensions binary (giantswarm/kagent-extensions), which the
-      # kagent line publishes with each release: it identifies a caller from
-      # the bearer token alone and authorizes every call with a
-      # SubjectAccessReview. The chart then sets its settings in env, from
-      # auth and authorization (agent-platform.kagent.extensions); it needs
-      # components.kagent.versionRange at 1.25.2 or later.
-      repository: giantswarm/kagent/controller
+      # The kagent-extensions binary (giantswarm/kagent-extensions), which the
+      # kagent line publishes with each release beside its own controller: it
+      # identifies a caller from the bearer token alone and authorizes every
+      # call with a SubjectAccessReview. The chart sets its settings in env,
+      # from auth and authorization (agent-platform.kagent.extensions); it
+      # needs the kubernetes authorization mode, the trusted-proxy
+      # authentication mode, the people's issuer and its key set, and
+      # components.kagent.versionRange at 1.26.2 or later.
+      # giantswarm/kagent/controller runs the line's own controller.
+      repository: giantswarm/kagent/controller-extensions
     # The Go ADK image the chart requires for the controller's ConfigMap
     # (IMAGE_REGISTRY / IMAGE_TAG). On kagent API v2 the image an agent runs on
     # is the platform Harness's digest (kagent.harness.image, the same image);
@@ -3502,8 +3508,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # --- Tenant identity (read by the connectivity chart, not passed to the kagent chart) ---
   # -- The ServiceAccount the agents' Flux `HelmRelease`s execute as. The
   # connectivity chart renders it in the kagent namespace whenever kagent is
-  # on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control
-  # of the kagent namespace, nothing outside it); this chart derives
+  # on, bound to the Role `<name>-agent-releases` there (the Generic agent
+  # chart's Agents and RemoteMCPServers and Helm's release Secrets, nothing
+  # outside the kagent namespace); this chart derives
   # agent-manager's `flux.helmReleaseServiceAccount` from it and the portal's
   # `agentPlatform.fluxServiceAccountName` is rendered from the same value —
   # ONE value, three consumers, so they cannot disagree. Under a Flux
@@ -4502,7 +4509,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.6.7"
+      tag: "2.6.10"
     # Two controller pods. Leader election is on: the controller's manager sets
     # LeaderElection: !DisableLeaderElection, and that setting defaults to false
     # (agentgateway controller/api/settings/settings.go), so two replicas do NOT
@@ -4536,7 +4543,7 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.6.7"
+      tag: "2.6.10"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -5201,7 +5208,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.17.1
+      tag: 2.17.25
     dryRun: false
     gitopsNamespaces: []
 
@@ -5753,7 +5760,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/envoy
-          tag: v1.40.0
+          tag: v1.40.2
         # The listener's port in the pod; the Service (service.port) fronts it.
         port: 10000
         clientIdentity: spiffe://cluster.local/ns/ate-system/sa/ate-api-server
@@ -6320,7 +6327,7 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
       registry: gsoci.azurecr.io
       name: giantswarm/kubectl
       # registry: gsoci.azurecr.io/giantswarm/kubectl
-      version: "v1.37.1"
+      version: "v1.37.2"
   # --- The backstage chart's own values (forwarded verbatim) ---
   ingress:
     enabled: false

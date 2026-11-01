@@ -1,0 +1,40 @@
+{{- /*
+klaus-gateway's egress refusal notices read the Session of each refused actor
+by ID (GetSession), deleted ones included, as its own ServiceAccount with a
+projected token of kagent's audience: the session reader the meta chart names
+in kagent.controller.authorization.sessionReaderServiceAccount. The
+kagent-extensions controller admits that ServiceAccount to `get` one Session
+and nothing else, and reviews the read as `get` on sessions.api.kagent.dev,
+the Session's name, no namespace; a Session is not a Kubernetes object, so
+this rule is the grant. Rendered under the meta chart's condition for the
+reader (agent-platform.klausGateway.refusalsOn); the line's own controller
+asks nothing and the binding is inert.
+*/ -}}
+{{- if include "agent-platform.klausGateway.refusalsOn" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:klaus-gateway-sessions
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+rules:
+  - apiGroups: [api.kagent.dev]
+    resources: [sessions]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-platform:klaus-gateway-sessions
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-platform:klaus-gateway-sessions
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "agent-platform.klausGateway.fullname" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

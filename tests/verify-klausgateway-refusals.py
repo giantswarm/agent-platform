@@ -20,7 +20,8 @@ Each case pins one property:
   and klaus-gateway's pods to its API port; the connectivity release opens the
   gateway's egress to atenet-egress's stats port and the controller's API
   port, and the store-egress policy (its kube-apiserver rule), in both
-  flavours;
+  flavours, and grants the gateway's ServiceAccount `get` on
+  sessions.api.kagent.dev, the session reader's review;
 - enabled false, or Slack off, keeps it off with the floors raised;
 - enabled true below the floors, an own egressService that differs and an own
   session reader that differs fail the render naming the key.
@@ -55,8 +56,8 @@ BASE = [
 ]
 FLOORS = {"components": {
     "klaus-gateway": {"versionRange": ">=4.11.0 <5.0.0"},
-    "kagent": {"versionRange": ">=1.24.1 <1.25.0"},
-    "kagent-crds": {"versionRange": ">=1.24.1 <1.25.0"},
+    "kagent": {"versionRange": ">=1.27.0 <1.28.0"},
+    "kagent-crds": {"versionRange": ">=1.27.0 <1.28.0"},
 }}
 BELOW = {"components": {
     "kagent": {"versionRange": ">=1.19.0 <1.20.0"},
@@ -65,11 +66,14 @@ BELOW = {"components": {
 # A kagent range below agent-platform.kagent.authenticationFloor renders only
 # outside the trusted-proxy mode, in which the meta chart derives the
 # controller's verification of people's tokens.
+# Below the kagent-extensions floor (1.26.2) the line's own controller runs.
+OWN_CONTROLLER = ["--set", "kagent.controller.image.repository=giantswarm/kagent/controller"]
 BELOW_AUTH_FLOOR = ["--set", "kagent.controller.auth.mode=insecure"]
 READER = f"{NAMESPACE}/klaus-gateway"
 PEER = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}},
         "podSelector": {"matchLabels": {"app.kubernetes.io/name": "klaus-gateway"}}}
 POLICY = "agent-platform-connectivity-klausgateway-refusals-egress"
+SESSIONS_ROLE = "agent-platform:klaus-gateway-sessions"
 
 
 def fail(msg: str) -> None:
@@ -105,7 +109,7 @@ def render(flags: list, floors: bool) -> list:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
         yaml.safe_dump(FLOORS if floors else BELOW, f)
         f.flush()
-        below = [] if floors else BELOW_AUTH_FLOOR
+        below = [*OWN_CONTROLLER, *([] if floors else BELOW_AUTH_FLOOR)]
         return [d for d in yaml.safe_load_all(helm(CHART, [*BASE, "-f", f.name, *below, *flags])) if d]
 
 
@@ -113,7 +117,7 @@ def must_fail(flags: list, floors: bool, needle: str, what: str) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
         yaml.safe_dump(FLOORS if floors else BELOW, f)
         f.flush()
-        below = [] if floors else BELOW_AUTH_FLOOR
+        below = [*OWN_CONTROLLER, *([] if floors else BELOW_AUTH_FLOOR)]
         err = helm(CHART, [*BASE, "-f", f.name, *below, *flags], expect_fail=True)
     if needle not in err:
         fail(f"{what} failed for another reason (expected {needle!r}):\n{err}")
@@ -150,6 +154,12 @@ def egress_ports(policy: dict, flavor: str) -> set:
     return out
 
 
+def session_reader_grant(docs: list) -> tuple:
+    """The rules of the session reader's ClusterRole and its binding's subjects; None for each one missing."""
+    role, binding = find(docs, "ClusterRole", SESSIONS_ROLE), find(docs, "ClusterRoleBinding", SESSIONS_ROLE)
+    return (role["rules"] if role else None, binding["subjects"] if binding else None)
+
+
 def state(docs: list) -> tuple:
     kg = values(docs, "klaus-gateway").get("refusals")
     authz = values(docs, "kagent")["controller"].get("authorization", {})
@@ -165,9 +175,13 @@ def main() -> None:
     expect(state(default)[0].get("enabled"), True, "default ranges: the klaus-gateway release runs the notices")
     docs = render([], floors=False)
     expect(state(docs), off, "kagent 1.19: no refusals block, no session reader, no peer, connectivity off")
-    if find(connectivity(docs), "CiliumNetworkPolicy", POLICY):
+    cdocs = connectivity(docs)
+    if find(cdocs, "CiliumNetworkPolicy", POLICY):
         fail(f"kagent 1.19: {POLICY} renders")
     ok(f"kagent 1.19: no {POLICY}")
+    if find(cdocs, "ClusterRole", SESSIONS_ROLE) or find(cdocs, "ClusterRoleBinding", SESSIONS_ROLE):
+        fail(f"kagent 1.19: {SESSIONS_ROLE} renders")
+    ok(f"kagent 1.19: no {SESSIONS_ROLE}")
     expect(state(render(["--set", "klausGateway.refusals.agentURLTemplate=https://p/{name}"], floors=False))[0], None,
            "below the floors an own agentURLTemplate is not forwarded either")
 
@@ -193,8 +207,13 @@ def main() -> None:
         if store is None:
             fail(f"floors raised, {flavor}: no store-egress policy (the gateway's kube-apiserver egress)")
         ok(f"floors raised, {flavor}: the store-egress policy renders (the gateway's kube-apiserver egress)")
+        expect(session_reader_grant(cdocs), ([{"apiGroups": ["api.kagent.dev"], "resources": ["sessions"], "verbs": ["get"]}],
+                                             [{"kind": "ServiceAccount", "name": "klaus-gateway", "namespace": NAMESPACE}]),
+               f"floors raised, {flavor}: {SESSIONS_ROLE} grants the session reader get on sessions.api.kagent.dev")
 
-    expect(state(render(["--set", "klausGateway.refusals.enabled=false"], floors=True)), off, "enabled false: off")
+    disabled = render(["--set", "klausGateway.refusals.enabled=false"], floors=True)
+    expect(state(disabled), off, "enabled false: off")
+    expect(session_reader_grant(connectivity(disabled)), (None, None), f"enabled false: no {SESSIONS_ROLE}")
     expect(state(render(["--set", "klausGateway.slack.enabled=false"], floors=True))[1:], (None, False, False),
            "Slack off: off")
 

@@ -37,8 +37,10 @@ EXAMPLES = {
     "chart-owned-edge.yaml": ["--api-versions", "gateway.networking.k8s.io/v1"],
     "managed-cloud.yaml": ["--api-versions", "gateway.networking.k8s.io/v1"],
     # A workload cluster of the fleet: Kyverno (the Substrate PolicyExceptions)
-    # and Cilium (the network policies of the Substrate hops).
-    "runtime-slice.yaml": ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2"],
+    # and Cilium (the network policies of the Substrate hops), layered over the
+    # installation's Dex as the example says.
+    "runtime-slice.yaml": ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2",
+                           "--set", "global.identity.issuerUrl=https://dex.ci.example.com"],
 }
 # Examples with a check of their own: the BOM (verify-components-charts) and the
 # serving slice (verify-serving-slice).

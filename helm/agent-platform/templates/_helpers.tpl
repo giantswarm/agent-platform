@@ -656,13 +656,13 @@ own value stands per key. Guarded first: the kagent floor that takes the
 block, an issuer, the email claim, an own block set in part. */ -}}
 {{- include "agent-platform.validateSessionAdmission" .root -}}
 {{- include "agent-platform.validateChatGPTPersonalLogin" .root -}}
+{{- $session := dict -}}
 {{- with (include "agent-platform.kagent.sessionAdmission" .root | fromJson) -}}
-{{- $controller := get $derived "controller" | default dict -}}
-{{- $session := dict "admission" (dict "jwt" .) -}}
-{{- /* The credential provider a Session's provider hosts resolve through:
-muster's authority, which muster answers with the person's token
-(muster.credentialProvider); an own value stands. */ -}}
-{{- $_ := set $session "credentialAuthority" (dig "controller" "session" "credentialAuthority" (dig "muster" "credentialProvider" "authority" "muster.giantswarm.io" ($.root.Values.muster | default dict)) ($.root.Values.kagent | default dict)) -}}
+{{- $_ := set $session "admission" (dict "jwt" .) -}}
+{{- end -}}
+{{- /* The actor-JWT providers follow muster and the ChatGPT login alone, not the
+admission: a Session without a workspace whose creator binds its actor
+(agent-manager's start_session) lists them too. */ -}}
 {{- $providers := dict -}}
 {{- with (include "agent-platform.kagent.musterActorJWTProvider" $.root | fromJson) -}}
 {{- $_ := set $providers "muster" . -}}
@@ -675,6 +675,12 @@ muster's authority, which muster answers with the person's token
 {{- with $providers -}}
 {{- $_ := set $session "actorJWTProviders" . -}}
 {{- end -}}
+{{- with $session -}}
+{{- /* The credential provider a Session's provider hosts resolve through:
+muster's authority, which muster answers with the person's token
+(muster.credentialProvider); an own value stands. */ -}}
+{{- $_ := set $session "credentialAuthority" (dig "controller" "session" "credentialAuthority" (dig "muster" "credentialProvider" "authority" "muster.giantswarm.io" ($.root.Values.muster | default dict)) ($.root.Values.kagent | default dict)) -}}
+{{- $controller := get $derived "controller" | default dict -}}
 {{- $_ := set $controller "session" $session -}}
 {{- $_ := set $derived "controller" $controller -}}
 {{- end -}}
@@ -689,11 +695,6 @@ that takes the keys. */ -}}
 {{- include "agent-platform.validateKagentAuthentication" .root -}}
 {{- with (include "agent-platform.kagent.authentication" .root | fromJson) -}}
 {{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .) -}}
-{{- end -}}
-{{- /* The kagent-extensions binary's settings, while the controller runs
-it (agent-platform.kagent.extensions). */ -}}
-{{- with (include "agent-platform.kagent.extensions" .root | fromJson) -}}
-{{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .controller) -}}
 {{- end -}}
 {{- /* The repositories a Session's tool images may come from: the toolchain
 sources' registries (agent-platform.kagent.sessionToolImages). */ -}}
@@ -2479,12 +2480,13 @@ Usage: include "agent-platform.substrate.egressStoragePatch" $root | fromJson
 {{/*
 The first release of the kagent line whose controller-extensions image runs the
 line's own migrations and accepts a person's token of any client of the issuer
-(giantswarm/kagent-upstream#872). An earlier image migrates the database without
-the line's tables, so with the controller on controller-extensions the render
-fails under that floor (agent-platform.kagent.extensions). One line, no comment
+(giantswarm/kagent-upstream#872, giantswarm/kagent-upstream#884). An earlier image
+migrates the database without the line's tables or refuses every person's token
+until an audience is listed, so with the controller on controller-extensions the
+render fails under that floor (agent-platform.kagent.extensions). One line, no comment
 inside the define.
 */}}
-{{- define "agent-platform.kagent.extensionsFloor" -}}1.25.2{{- end -}}
+{{- define "agent-platform.kagent.extensionsFloor" -}}1.26.2{{- end -}}
 
 {{/*
 The first release of the kagent line whose controller mounts the tool images a
@@ -2531,8 +2533,9 @@ Usage: include "agent-platform.kagent.sessionToolImages" $root | fromJson
 The settings of the kagent-extensions binary, while the kagent release's
 controller runs it (kagent.controller.image.repository
 giantswarm/kagent/controller-extensions, which the kagent line publishes with
-each release), as the release's controller values ({controller: {env}}, or {}
-otherwise).
+each release), as JSON ({env: [the binary's variables]}, or {} otherwise):
+agent-platform.shape.apply adds them to kagent.controller.env after the
+cluster shape has resolved its own entries.
 
 The binary identifies callers from their bearer token alone and authorizes them
 with SubjectAccessReviews (giantswarm/kagent-extensions). Its settings are the
@@ -2549,8 +2552,7 @@ one), set as its KAGENT_EXTENSIONS_* variables:
   on, with the audience of its token (serviceAccountTokenAudience), and the
   session reader, klaus-gateway's ServiceAccount while refusal notices are on.
 The release keeps the kubernetes authorization mode, so the kagent chart still
-grants the controller its reviews and renders its NetworkPolicy. An own entry of
-kagent.controller.env stands, and keeps its place before the derived ones.
+grants the controller its reviews and renders its NetworkPolicy.
 
 Fails the render, naming the key: another authorization mode than kubernetes,
 another authentication mode than trusted-proxy, no issuer or key set, a
@@ -2567,18 +2569,18 @@ Usage: include "agent-platform.kagent.extensions" $root | fromJson
 {{- $range := dig "kagent" "versionRange" "" .Values.components -}}
 {{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
 {{- if lt ((semver $have).Compare (semver $floor)) 0 -}}
-{{- fail (printf "kagent.controller.image.repository %s needs components.kagent.versionRange at %s or later (it is %q): an earlier controller-extensions image migrates the database without the kagent line's own migrations" $repository $floor $range) -}}
+{{- fail (printf "kagent.controller.image.repository %s needs components.kagent.versionRange at %s or later (it is %q): an earlier controller-extensions image migrates the database without the kagent line's own migrations: or run the line's own controller, kagent.controller.image.repository giantswarm/kagent/controller" $repository $floor $range) -}}
 {{- end -}}
 {{- $authz := merge (deepCopy (dig "controller" "authorization" dict $kagent | default dict)) ((include "agent-platform.kagent.authorization" . | fromJson).authorization | default dict) -}}
 {{- $auth := merge (deepCopy (dig "controller" "auth" dict $kagent | default dict)) ((include "agent-platform.kagent.authentication" . | fromJson).auth | default dict) -}}
 {{- if ne (toString (dig "mode" "" $authz)) "kubernetes" -}}
-{{- fail (printf "kagent.controller.image.repository %s needs kagent.controller.authorization.mode kubernetes (it is %q): the kagent chart grants the controller its TokenReviews and SubjectAccessReviews and renders its NetworkPolicy only in that mode" $repository (toString (dig "mode" "" $authz))) -}}
+{{- fail (printf "kagent.controller.image.repository %s needs kagent.controller.authorization.mode kubernetes (it is %q): the kagent chart grants the controller its TokenReviews and SubjectAccessReviews and renders its NetworkPolicy only in that mode: or run the line's own controller, kagent.controller.image.repository giantswarm/kagent/controller" $repository (toString (dig "mode" "" $authz))) -}}
 {{- end -}}
 {{- if ne (toString (dig "mode" "" $auth)) "trusted-proxy" -}}
-{{- fail (printf "kagent.controller.image.repository %s needs kagent.controller.auth.mode trusted-proxy (it is %q): the chart takes the binary's issuer and key set from that mode's controller.auth.issuer and jwksURL" $repository (toString (dig "mode" "" $auth))) -}}
+{{- fail (printf "kagent.controller.image.repository %s needs kagent.controller.auth.mode trusted-proxy (it is %q): the chart takes the binary's issuer and key set from that mode's controller.auth.issuer and jwksURL: or run the line's own controller, kagent.controller.image.repository giantswarm/kagent/controller" $repository (toString (dig "mode" "" $auth))) -}}
 {{- end -}}
 {{- if not (and $auth.issuer $auth.jwksURL) -}}
-{{- fail (printf "kagent.controller.image.repository %s needs the people's issuer and key set: set global.identity.issuerUrl and kagent.controllerRoute.jwtAuthentication.jwks, or kagent.controller.auth.issuer and jwksURL" $repository) -}}
+{{- fail (printf "kagent.controller.image.repository %s needs the people's issuer and key set: set global.identity.issuerUrl and kagent.controllerRoute.jwtAuthentication.jwks, or kagent.controller.auth.issuer and jwksURL: or run the line's own controller, kagent.controller.image.repository giantswarm/kagent/controller" $repository) -}}
 {{- end -}}
 {{- $callers := list -}}
 {{- if and (dig "enabled" false (.Values.workspaces | default dict)) (include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager")) -}}
@@ -2600,13 +2602,7 @@ Usage: include "agent-platform.kagent.extensions" $root | fromJson
   (dict "name" "KAGENT_EXTENSIONS_MACHINE_AUDIENCE" "value" (include "agent-platform.kagent.tokenAudience" .))
   (dict "name" "KAGENT_EXTENSIONS_MACHINE_CALLER" "value" (join "," $callers))
   (dict "name" "KAGENT_EXTENSIONS_SESSION_READER" "value" (toString (dig "sessionReaderServiceAccount" "" $authz))) -}}
-{{- $env := dig "controller" "env" list $kagent | default list -}}
-{{- $named := list -}}
-{{- range $env -}}{{- $named = append $named (toString .name) -}}{{- end -}}
-{{- range $settings -}}
-{{- if not (has .name $named) -}}{{- $env = append $env . -}}{{- end -}}
-{{- end -}}
-{{- dict "controller" (dict "env" $env) | toJson -}}
+{{- dict "env" $settings | toJson -}}
 {{- end -}}
 {{- end -}}
 
@@ -3751,6 +3747,19 @@ release opens the gateway's refusal egress exactly while the notices run. */ -}}
 {{- end -}}
 {{- include "agent-platform.shape.dropEnv" (dict "owner" (index $kagent "controller") "names" $drop) -}}
 {{- include "agent-platform.shape.dropEnv" (dict "owner" (index $kagent "harness") "names" $drop) -}}
+{{- end -}}
+{{- /* The kagent-extensions binary's settings join the controller's env once
+the shape has resolved its own entries (agent-platform.kagent.extensions); an
+own entry of the same name stands and keeps its place. */ -}}
+{{- with (include "agent-platform.kagent.extensions" $root | fromJson).env -}}
+{{- $controller := index $v "kagent" "controller" -}}
+{{- $env := index $controller "env" | default list -}}
+{{- $named := list -}}
+{{- range $env -}}{{- $named = append $named (toString .name) -}}{{- end -}}
+{{- range . -}}
+{{- if not (has .name $named) -}}{{- $env = append $env . -}}{{- end -}}
+{{- end -}}
+{{- $_ := set $controller "env" $env -}}
 {{- end -}}
 {{- /* klaus-gateway's trace export follows the same answer: the knob resolved
 from auto, and the endpoint and headers the klaus-gateway chart reads emptied

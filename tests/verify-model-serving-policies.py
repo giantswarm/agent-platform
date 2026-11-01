@@ -299,11 +299,13 @@ def render(chart: str, flags: list[str], base: list[str] = BASE) -> list[dict]:
 
 def forwarded_values(meta: str, apis: list[str], extra: list[str] = ()) -> dict:
     """The values an installation's connectivity release receives: the meta chart's defaults with the model serving switch
-    on (BASE) and the one input every render needs (global.domain — the CI values would trip the wiring's ingress-mode
-    guards, as tests/verify-components.py notes), rendered with the engine off; the connectivity HelmRelease's spec.values.
+    on (BASE) and the two inputs every render needs (global.domain — the CI values would trip the wiring's ingress-mode
+    guards, as tests/verify-components.py notes — and the people's issuer, which the kagent-extensions binary identifies
+    people by), rendered with the engine off; the connectivity HelmRelease's spec.values.
     The meta chart resolves the cluster-shape knobs from the API groups before it forwards (the child never sees `auto`),
     so the tree carries the flavour of the `apis` it was rendered with: with CILIUM the cilium one, without it kubernetes."""
-    docs = render(meta, ["--set", "components.flux.enabled=false", "--set", "global.domain=example.com", *apis, *extra])
+    docs = render(meta, ["--set", "components.flux.enabled=false", "--set", "global.domain=example.com",
+                         "--set", "global.identity.issuerUrl=https://dex.example.com", *apis, *extra])
     releases = [d for d in docs if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "agent-platform-connectivity"]
     if len(releases) != 1:
         fail(f"the meta chart rendered {len(releases)} connectivity HelmReleases; expected exactly one")

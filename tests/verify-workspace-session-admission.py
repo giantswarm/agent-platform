@@ -52,8 +52,9 @@ below pins one property:
 - kagent's actor-JWT provider muster (giantswarm/giantswarm#38607): while muster trusts
   the actor JWT the kagent release carries controller.session.actorJWTProviders.muster,
   the host of the agents' in-cluster MCP URL and muster's audience (its own
-  actorBearer.audience, else oauth.server.baseUrl); an own key stands; nothing with the
-  actor bearer off or without an audience; the kagent chart at the range's floor renders
+  actorBearer.audience, else oauth.server.baseUrl), with or without the Session admission
+  (no grant key); an own key stands; nothing with the actor bearer off or without an
+  audience; the kagent chart at the range's floor renders
   KAGENT_SESSION_ACTOR_JWT_PROVIDERS from it.
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
@@ -99,7 +100,7 @@ ALLOW_HTTP_CHART = "1.11.5-rc.1"
 # A kagent range below agent-platform.kagent.authenticationFloor renders only
 # outside the trusted-proxy mode, in which the meta chart derives the
 # controller's verification of people's tokens.
-BELOW_AUTH_FLOOR = ["--set", "kagent.controller.auth.mode=insecure"]
+BELOW_AUTH_FLOOR = ["--set", "kagent.controller.auth.mode=insecure", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"]
 MUSTER_BASE_URL = ["--set", "muster.muster.oauth.server.baseUrl=https://muster.ci.example.com"]
 ACTOR_JWT_PROVIDERS = ("        actorJWTProviders:\n          muster:\n            audience: https://muster.ci.example.com\n"
                        f"            hostname: muster.{NAMESPACE}.svc.cluster.local\n")
@@ -351,8 +352,12 @@ def main(meta: str) -> int:
                         ([*NO_OWN, "--set", "workspaceManager.grantKey.create=false"], "with grantKey.create false")):
         if admission(kagent_release([*base, *flags], meta)) is not None:
             fail(f"the kagent release carries a Session admission {what}: the manager signs no grant then")
+        if releasable[-1] in flags and actor_jwt_of([*flags, *MUSTER_BASE_URL]) != ACTOR_JWT_PROVIDERS:
+            fail(f"{what} the kagent release does not name muster as its actor-JWT provider while muster trusts the actor JWT: "
+                 f"a Session start_session binds without a workspace would reach muster as nobody:\n{actor_jwt_of([*flags, *MUSTER_BASE_URL])}")
     must_fail(meta, [*ON, *IDENTITY, "--set", "components.kagent.enabled=false"], "workspaces need the agents", "workspaces on with kagent off")
-    ok("nothing without a grant key (no providers, oauth off, grantKey.create false); workspaces with kagent off fail the render")
+    ok("no Session admission without a grant key (no providers, oauth off, grantKey.create false), while muster's actor-JWT "
+       "provider stays; workspaces with kagent off fail the render")
 
     # --- what the derivation follows -------------------------------------------------------------
     moved = admission(kagent_release([*base, "--set", f"{NAME}.fullnameOverride=wm", "--set", f"{NAME}.service.port=9090",
@@ -398,7 +403,7 @@ def main(meta: str) -> int:
     # --- the guards ------------------------------------------------------------------------------
     for rng in (">=1.5.0 <1.6.0", "1.5.9"):
         ranges = ["--set", f"components.kagent.versionRange={rng}", "--set", f"components.kagent-crds.versionRange={rng}"]
-        must_fail(meta, [*base, *ranges], "admits a kagent release below 1.6.0", f"a kagent range {rng} with the admission derived")
+        must_fail(meta, [*base, *ranges, "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"], "admits a kagent release below 1.6.0", f"a kagent range {rng} with the admission derived")
         helm(meta, [*KAGENT, *IDENTITY, *ranges, *BELOW_AUTH_FLOOR])
     for rng in (">=1.6.0 <1.7.0", "1.6.0", ">=1.6.0-rc.1 <1.7.0"):
         kagent_release([*base, "--set", f"components.kagent.versionRange={rng}", "--set", f"components.kagent-crds.versionRange={rng}", *BELOW_AUTH_FLOOR], meta)

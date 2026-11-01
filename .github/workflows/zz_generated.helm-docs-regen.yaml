@@ -2,7 +2,7 @@
 #
 #    devctl
 #
-#    https://github.com/giantswarm/devctl/blob/0cc103490e0438858949bc6fe67d9cc67f9b967a/pkg/gen/input/workflows/internal/file/helm-docs-regen.yaml.template
+#    https://github.com/giantswarm/devctl/blob/c370873410de970a09ddbfb5ee72adf11259d8f4/pkg/gen/input/workflows/internal/file/helm-docs-regen.yaml.template
 #
 # Regenerates the files the generated pre-commit hooks derive from a chart's
 # values.yaml -- the helm-docs README and values.schema.json -- on Renovate and
@@ -54,7 +54,7 @@ jobs:
     name: Find the generated hooks
     # Only dependency-bot branches: on a human's PR the author owns the README.
     if: startsWith(github.head_ref, 'renovate/') || startsWith(github.head_ref, 'dependabot/')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     outputs:
@@ -115,7 +115,7 @@ jobs:
     name: Regenerate and push
     needs: preflight
     if: needs.preflight.outputs.token-available == 'true' && needs.preflight.outputs.hooks != ''
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     steps:

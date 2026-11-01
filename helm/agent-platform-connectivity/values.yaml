@@ -1673,9 +1673,10 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
 
   # --- Tenant identity (read by umbrella templates/kagent/flux-service-account.yaml, not passed to subchart) ---
   # -- The ServiceAccount the agents' Flux `HelmRelease`s execute as. Rendered in
-  # the kagent namespace whenever kagent is on, bound to `cluster-admin` by a
-  # namespace-scoped RoleBinding (full control of the kagent namespace, nothing
-  # outside it), and named from this ONE value into agent-manager
+  # the kagent namespace whenever kagent is on, bound to the Role
+  # `<name>-agent-releases` there (the Generic agent chart's Agents and
+  # RemoteMCPServers and Helm's release Secrets, nothing outside the kagent
+  # namespace), and named from this ONE value into agent-manager
   # (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the
   # portal's `agentPlatform.fluxServiceAccountName` (through the
   # `agent-platform.kagent.fluxServiceAccountName` helper), so the three cannot
@@ -2362,12 +2363,12 @@ agentgateway:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/controller
-      tag: "2.6.7"
+      tag: "2.6.10"
   proxy:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agentgateway-upstream/agentgateway
-      tag: "2.6.7"
+      tag: "2.6.10"
   podAnnotations:
     application.giantswarm.io/team: bumblebee
   podSecurityContext:
@@ -2911,7 +2912,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.17.1
+      tag: 2.17.25
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
@@ -3215,7 +3216,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/envoy
-          tag: v1.40.0
+          tag: v1.40.2
         port: 10000
         clientIdentity: spiffe://cluster.local/ns/ate-system/sa/ate-api-server
         resources:  # @schema additionalProperties: true
@@ -3490,7 +3491,7 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
       # The registry tags this image `v1.33.5`, `v1.37.0`, ...: the `v` is part
       # of the tag, Renovate bumps the digits after it.
       # registry: gsoci.azurecr.io/giantswarm/kubectl
-      version: "v1.37.1"
+      version: "v1.37.2"
 
 # === Kubernetes MCP server (mcp-kubernetes) ===
 # The mcp-kubernetes chart's own values are forwarded verbatim by the meta

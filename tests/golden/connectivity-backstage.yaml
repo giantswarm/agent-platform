@@ -10892,7 +10892,7 @@ spec:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/agentgateway-upstream/agentgateway
-    tag: 2.6.7
+    tag: 2.6.10
   service:
     spec:
       type: ClusterIP
@@ -11887,7 +11887,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.1"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.2"
           command: ["kubectl"]
           args:
             - set

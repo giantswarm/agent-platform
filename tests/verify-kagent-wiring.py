@@ -227,7 +227,9 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
         fail("kagent.registry is not gsoci.azurecr.io (the line's release images are copied under their upstream path, "
              "gsoci.azurecr.io/giantswarm/kagent/<image>, giantswarm/retagger#1229; giantswarm/agent-platform#580)")
     controller = values.get("controller", [])
-    for key, repo in (("image", "controller"), ("agentImage", "golang-adk")):
+    # The controller is the kagent-extensions binary the line publishes beside
+    # its own controller, from the same build.
+    for key, repo in (("image", "controller-extensions"), ("agentImage", "golang-adk")):
         if f"repository: {LINE_IMAGES}/{repo}" not in controller:
             fail(f"kagent.controller.{key}.repository is not {LINE_IMAGES}/{repo} (the line's image)")
     if f"repository: {LINE_IMAGES}/ui" not in values.get("ui", []):
