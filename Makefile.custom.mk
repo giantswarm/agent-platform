@@ -358,6 +358,11 @@ GLOBAL_VM := --set global.domain=ci.example.com --set 'global.gatewayApi.parentR
 # A valid edge-mode config: the chart-owned Gateway is the public edge.
 EDGE_VM := --set global.domain=ci.example.com --set gatewayApi.gateway.create=true --set gatewayApi.gateway.tls.secretName=wildcard-tls $(FLEET_APIS)
 
+.PHONY: verify-muster-route
+verify-muster-route: ## Assert the agentgateway data plane's route to muster (giantswarm/agent-platform#1185): the default values, examples/own-gateway.yaml and examples/managed-cloud.yaml render the agent-platform-mcps release, whose published chart renders with those values a hostless HTTPRoute on the data-plane Gateway sending /mcp to an AgentgatewayBackend whose one target is muster's /mcp; both charts refuse muster on with that release off; a slice without muster renders none. Needs PyYAML; pulls the chart. HELM selects the binary.
+	@echo "====> $@"
+	@HELM=$(HELM) python3 tests/verify-muster-route.py $(CHART_DIR) $(CONNECTIVITY_DIR) $(VERIFY_TMP)
+
 .PHONY: verify-global
 verify-global: ## Assert the global.* contract behaviors (derived hostnames, gateway fallback, observability gates, edge mode) and their guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"

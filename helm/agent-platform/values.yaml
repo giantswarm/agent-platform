@@ -554,7 +554,11 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: "0.12.x"
     valuesFrom: agent-platform-mcps
-    enabled: false
+    # It renders the agentgateway data plane's one route to muster (the
+    # hostless HTTPRoute behind the public /mcp, viaMuster), so it follows
+    # components.muster: no `enabled` here means "on whenever muster is on"; an
+    # explicit `enabled: false` with muster on fails the render
+    # (agent-platform.validateMusterRoute), as /mcp would reach nothing.
     injectGlobal: false              # strict values.schema.json
     # Creates muster.giantswarm.io/MCPServer CRs (CRD owned by the muster app) and,
     # when agentgateway is enabled, agentgateway.dev CRs (CRDs owned by the
@@ -2805,8 +2809,9 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
 #                            per-target AgentgatewayPolicy CRs (default false)
 # The CRDs these CRs consume are app-owned: muster.giantswarm.io ships with the
 # muster app chart, agentgateway.dev with the agentgateway app chart — this
-# sub-chart ships no CRDs. Even when enabled it renders nothing until
-# `agent-platform-mcps.mcpServers` is populated.
+# sub-chart ships no CRDs. With an empty `agent-platform-mcps.mcpServers` it
+# still renders the data plane's route to muster (viaMuster: the hostless
+# HTTPRoute, its AgentgatewayBackend and timeouts), the route behind /mcp.
 # Full value reference: https://github.com/giantswarm/agent-platform-mcps
 #
 # Values passed through to the agent-platform-mcps sub-chart. Only keys it

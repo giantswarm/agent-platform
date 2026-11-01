@@ -25,6 +25,16 @@ The ServiceAccount `kagent.fluxServiceAccountName` (`kagent-flux`) is bound to t
 - **A HelmRelease in kagent that installs another chart as `kagent-flux`**: give it a ServiceAccount and Role of its own for the kinds that chart renders, and name that ServiceAccount in the HelmRelease, before the upgrade.
 - **A management cluster that applies its own copy of the RoleBinding `kagent-flux`** (outside this chart): remove that copy, or it binds `cluster-admin` again.
 
+## \<current\> → \<next\> (agent-platform-mcps follows muster)
+
+giantswarm/agent-platform#1185: the agent-platform-mcps release carries the agentgateway data plane's only route to muster, the route behind `/mcp`. `components.agent-platform-mcps` now has no `enabled` default and is on whenever muster is on; with muster on, an explicit `enabled: false` fails the render.
+
+### Operator action
+
+- **An installation that sets `components.agent-platform-mcps.enabled: true`**: none; the key can be dropped.
+- **An installation that sets it to `false` with muster on**: drop the key. Its `/mcp` reached nothing; after the upgrade the agent-platform-mcps release renders the route.
+- **An installation that leaves it unset**: none. The upgrade installs the agent-platform-mcps release, and `/mcp` reaches muster.
+
 ## \<current\> → \<next\> (`ingress.mode: muster-direct` is removed)
 
 giantswarm/agent-platform#252: agentgateway in front of muster is the only ingress topology. Both charts' schemas accept `ingress.mode` only as `agentgateway-muster`; `muster-direct` fails the render. With muster on, `components.agentgateway.enabled` and `agent-platform-mcps.agentgateway.viaMuster` must stay `true` (their defaults).
