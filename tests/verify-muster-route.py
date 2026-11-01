@@ -127,7 +127,10 @@ def main() -> None:
     assert_guard(META, BASE)
     assert_guard(CONNECTIVITY, ["--set", "ingress.parentRefs[0].name=x"])
     for s in SLICES:
-        meta = docs(helm("template", "t", META, *BASE, "-f", f"{META}/{s}").stdout)
+        # A slice is layered over its installation's identity provider, as the
+        # examples say (the kagent controller needs the people's issuer).
+        meta = docs(helm("template", "t", META, *BASE, "-f", f"{META}/{s}",
+                         "--set", "global.identity.issuerUrl=https://dex.ci.example.com").stdout)
         if find(meta, "HelmRelease", "agent-platform-mcps"):
             fail(f"{s}: a slice without muster renders an agent-platform-mcps release (it dependsOn muster)")
         print(f"ok: {s}: no muster, no agent-platform-mcps release")
