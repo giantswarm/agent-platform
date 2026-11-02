@@ -82,7 +82,9 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- $c := index $root.Values.components .name -}}
 {{- if $c -}}
 {{- $on := true -}}
-{{- if hasKey $c "enabled" }}{{- $on = $c.enabled }}
+{{- /* An `enabled: null` is no switch: Helm keeps a null only for a key the
+       chart's values do not default, the entries below that follow another. */ -}}
+{{- if and (hasKey $c "enabled") (not (kindIs "invalid" $c.enabled)) }}{{- $on = $c.enabled }}
 {{- else if has .name (list "kagent-crds" "substrate" "substrate-crds" "google-access-token-credential-provider") }}
 {{- /* The kagent line ships its CRDs as their own chart and has no runtime
        without Agent Substrate; without an explicit switch these follow
@@ -91,6 +93,10 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
        explicit false on the first three with kagent on is refused by
        agent-platform.validateKagentCrds / agent-platform.validateSubstrate). */ -}}
 {{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true" }}
+{{- else if eq .name "agent-platform-mcps" }}
+{{- /* The data plane's route to muster: on whenever muster is on
+       (agent-platform.validateMusterRoute refuses an explicit false then). */ -}}
+{{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "muster")) "true" }}
 {{- else if eq .name "workspace-manager" }}
 {{- /* The workspace-manager follows the one switch workspaces.enabled
        (agent-platform.validateWorkspaces refuses an explicit value that
@@ -2721,6 +2727,19 @@ would install a controller without its CRDs and fail every kagent CR the
 connectivity release renders at apply time ("no matches for kind"); refuse it
 at render time instead.
 */}}
+{{/*
+In the one ingress topology the public /mcp reaches the agentgateway data
+plane, whose only route to muster is the hostless HTTPRoute the
+agent-platform-mcps release renders (viaMuster). muster on with that release
+off would install a /mcp that reaches nothing; refuse it at render time.
+*/}}
+{{- define "agent-platform.validateMusterRoute" -}}
+{{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) "true")
+           (ne (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps")) "true") -}}
+{{- fail "components.agent-platform-mcps.enabled must be true while muster is on: its HTTPRoute is the agentgateway data plane's only route to muster, so /mcp would reach nothing" -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "agent-platform.validateKagentCrds" -}}
 {{- if and (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) "true")
            (ne (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent-crds")) "true") -}}

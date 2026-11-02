@@ -1160,7 +1160,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | components.muster.enabled | bool | `true` |  |
 | components.dicebear.enabled | bool | `true` |  |
 | components.agentgateway.enabled | bool | `true` |  |
-| components.agent-platform-mcps.enabled | bool | `false` |  |
+| components.agent-platform-mcps.enabled | bool | `true` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
 | components.agent-sandbox.enabled | bool | `false` |  |

@@ -431,7 +431,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agent-platform-mcps.versionRange | string | `"0.12.x"` |  |
 | components.agent-platform-mcps.valuesFrom | string | `"agent-platform-mcps"` |  |
-| components.agent-platform-mcps.enabled | bool | `false` |  |
 | components.agent-platform-mcps.injectGlobal | bool | `false` |  |
 | components.agent-platform-mcps.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
