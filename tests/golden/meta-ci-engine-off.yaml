@@ -565,7 +565,7 @@ spec:
       kubectlImage:
         registry: gsoci.azurecr.io
         repository: giantswarm/alpine-k8s
-        tag: 1.37.1
+        tag: 1.37.2
       opensslImage:
         registry: gsoci.azurecr.io
         repository: giantswarm/alpine-openssl

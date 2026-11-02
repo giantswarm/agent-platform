@@ -777,7 +777,7 @@ spec:
       kubectlImage:
         registry: gsoci.azurecr.io
         repository: giantswarm/alpine-k8s
-        tag: 1.37.1
+        tag: 1.37.2
       opensslImage:
         registry: gsoci.azurecr.io
         repository: giantswarm/alpine-openssl
@@ -5108,7 +5108,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sh
-          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.1"
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.2"
           command: ["/bin/sh", "-eu", "-c"]
           args:
             - |
@@ -5208,7 +5208,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sh
-          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.1"
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.2"
           command: ["/bin/sh", "-eu", "-c"]
           args:
             - |
@@ -5271,7 +5271,7 @@ spec:
                         type: RuntimeDefault
                     containers:
                       - name: sh
-                        image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.1"
+                        image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.2"
                         command: ["/bin/sh", "-eu", "-c"]
                         args:
                           - |
@@ -5415,7 +5415,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sh
-          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.1"
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.2"
           command: ["/bin/sh", "-eu", "-c"]
           args:
             - |

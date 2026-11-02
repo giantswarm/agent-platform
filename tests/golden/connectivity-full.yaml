@@ -15941,7 +15941,7 @@ spec:
               mountPath: /work
       containers:
         - name: sh
-          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.1"
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.2"
           command: ["/bin/sh", "-eu", "-c"]
           args:
             - |
