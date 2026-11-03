@@ -3885,6 +3885,13 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # reference as written. Published in the discovery ConfigMap as
     # spec.modelImages.registry.
     registry: ""
+  runtimeImages:
+    # The registry host (host or host:port; no scheme, no path) every preset's
+    # runtime image (spec.template's containers, the vLLM server) is published
+    # with: the host of each image is replaced by this value, the path, tag or
+    # digest kept. Empty leaves every image as written. The meta chart sets it
+    # from gitops.mirror.registry.
+    registry: ""
   # Hugging Face model cache: one PVC in the serving namespace with one
   # subdirectory per served model, so a model downloads once and every
   # restart finds it (hours to seconds). The claim is applied by a

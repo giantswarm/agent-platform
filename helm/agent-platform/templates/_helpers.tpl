@@ -5111,7 +5111,7 @@ The helm-and-shell image the hooks that need helm run (gitops.hooks.helmImage).
 */}}
 {{- define "agent-platform.hooks.helmImage" -}}
 {{- $i := .Values.gitops.hooks.helmImage -}}
-{{- printf "%s/%s:%s" $i.registry $i.repository $i.tag -}}
+{{- include "agent-platform.mirror.ref" (dict "ref" (printf "%s/%s:%s" $i.registry $i.repository $i.tag) "mirror" (include "agent-platform.mirror.registry" .)) -}}
 {{- end -}}
 
 {{/*
@@ -5143,5 +5143,94 @@ Usage: include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list 
     - {{ . }}
     - autogen-{{ . }}
   {{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
+=== The mirror (gitops.mirror, giantswarm/agent-platform#1259) ===
+
+An air-gapped installation pulls every chart and image from one registry of its
+own. gitops.mirror.registry names its host (host or host:port, no scheme, no
+path); every source this chart renders on gsoci.azurecr.io moves there, the
+path, tag and digest kept: the component and self-management OCIRepositories,
+every string of the values forwarded to a component release (registries,
+repositories, image references, oci:// chart URLs), the hook images. Empty
+renders every source as written.
+*/}}
+{{- define "agent-platform.mirror.source" -}}gsoci.azurecr.io{{- end -}}
+
+{{/*
+The mirror host, validated; empty when unset.
+Usage: include "agent-platform.mirror.registry" $root
+*/}}
+{{- define "agent-platform.mirror.registry" -}}
+{{- $registry := toString (dig "mirror" "registry" "" .Values.gitops) -}}
+{{- if and $registry (not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$" $registry)) -}}
+{{- fail (printf "gitops.mirror.registry %q must be a registry host — host or host:port, no scheme, no path; it replaces gsoci.azurecr.io in every chart and image source, the path stays" $registry) -}}
+{{- end -}}
+{{- $registry -}}
+{{- end -}}
+
+{{/*
+A source reference on the mirror: the source host, alone or followed by a path,
+with or without oci://, is replaced by the mirror host; any other string is
+returned as written.
+Usage: include "agent-platform.mirror.ref" (dict "ref" $s "mirror" $registry)
+*/}}
+{{- define "agent-platform.mirror.ref" -}}
+{{- $ref := toString .ref -}}
+{{- $source := include "agent-platform.mirror.source" . -}}
+{{- $scheme := "" -}}
+{{- if hasPrefix "oci://" $ref -}}{{- $scheme = "oci://" -}}{{- $ref = trimPrefix "oci://" $ref -}}{{- end -}}
+{{- if and .mirror (or (eq $ref $source) (hasPrefix (printf "%s/" $source) $ref)) -}}
+{{- printf "%s%s%s" $scheme .mirror (trimPrefix $source $ref) -}}
+{{- else -}}
+{{- printf "%s%s" $scheme $ref -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Move every source reference of a values tree onto the mirror, in place: maps
+and lists are walked, each string is passed through agent-platform.mirror.ref.
+Numbers and booleans stay untouched (no JSON round trip).
+Usage: include "agent-platform.mirror.values" (dict "values" $vals "mirror" $registry)
+*/}}
+{{- define "agent-platform.mirror.values" -}}
+{{- $mirror := .mirror -}}
+{{- $v := .values -}}
+{{- range $k, $x := $v -}}
+{{- if kindIs "string" $x -}}
+{{- $_ := set $v $k (include "agent-platform.mirror.ref" (dict "ref" $x "mirror" $mirror)) -}}
+{{- else if kindIs "map" $x -}}
+{{- include "agent-platform.mirror.values" (dict "values" $x "mirror" $mirror) -}}
+{{- else if kindIs "slice" $x -}}
+{{- $list := list -}}
+{{- range $x -}}
+{{- if kindIs "string" . -}}
+{{- $list = append $list (include "agent-platform.mirror.ref" (dict "ref" . "mirror" $mirror)) -}}
+{{- else -}}
+{{- if kindIs "map" . -}}{{- include "agent-platform.mirror.values" (dict "values" . "mirror" $mirror) -}}{{- end -}}
+{{- $list = append $list . -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $v $k $list -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The mirror's credentials and CA on an OCIRepository spec: secretRef and
+certSecretRef from gitops.mirror, each only when set (indent 2 under spec).
+Usage: include "agent-platform.mirror.sourceAuth" $root
+*/}}
+{{- define "agent-platform.mirror.sourceAuth" -}}
+{{- $m := .Values.gitops.mirror | default dict -}}
+{{- with $m.secretRef }}
+secretRef:
+  name: {{ . }}
+{{- end }}
+{{- with $m.certSecretRef }}
+certSecretRef:
+  name: {{ . }}
 {{- end }}
 {{- end -}}

@@ -251,6 +251,32 @@ gitops:
     # gitops.sourceInterval. A values Secret change is picked up at once
     # (watch label).
     interval: 10m
+  # The air-gapped install (README "Air-gapped install from a mirror"): one
+  # switch that moves every chart and image source from gsoci.azurecr.io to a
+  # registry of the installation's own, which holds the same paths (an OCM
+  # transfer of the agent-platform component by value, or a mirror of gsoci's
+  # paths). Set, it replaces the host gsoci.azurecr.io in every component's and
+  # the self-management OCIRepository, in every string of the values forwarded
+  # to a component release (registries, repositories, image references, oci://
+  # chart URLs), in the hook images, and in the connectivity chart's
+  # model-serving presets (modelServing.runtimeImages.registry and, unless set,
+  # modelServing.modelImages.registry); the path, tag and digest stay. A
+  # per-source key set to another registry is left as written. The bundled
+  # engine's images are flux-engine's own values.
+  mirror:
+    # The mirror's host: host or host:port, no scheme, no path. Empty (default)
+    # renders every source as written.
+    registry: ""
+    # Secret in the namespace of the OCIRepositories with the mirror's
+    # credentials (OCIRepository.spec.secretRef: a kubernetes.io/dockerconfigjson
+    # Secret, or one with username and password). Set on every component's and
+    # the self-management OCIRepository; empty renders none.
+    secretRef: ""
+    # Secret with the CA bundle the mirror's TLS certificate chains to
+    # (OCIRepository.spec.certSecretRef: key ca.crt). Set on every
+    # OCIRepository; empty renders none. The images are pulled by the nodes:
+    # their container runtime trusts the CA and holds the credentials.
+    certSecretRef: ""
   # install/upgrade remediation retries for every child HelmRelease. Lets the
   # children self-heal transient/ordering failures (e.g. a component installs
   # before another has created its namespace) instead of stalling after one

@@ -1986,6 +1986,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.shippedPresets.enabled | bool | `true` |  |
 | modelServing.shippedPresets.exclude | list | `[]` |  |
 | modelServing.modelImages.registry | string | `""` |  |
+| modelServing.runtimeImages.registry | string | `""` |  |
 | modelServing.cache.enabled | bool | `true` |  |
 | modelServing.cache.pvc.name | string | `"hf-cache"` |  |
 | modelServing.cache.pvc.existingClaim | string | `""` |  |

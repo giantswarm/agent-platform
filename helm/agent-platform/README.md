@@ -25,6 +25,43 @@ README.
 |------------|------|---------|
 |  | flux-engine | 0.1.0 |
 
+## Air-gapped install from a mirror
+
+An installation without Internet access pulls every chart and image from a
+registry of its own: a copy of gsoci.azurecr.io's paths, such as the
+`giantswarm.io/agent-platform` OCM component transferred by value with
+`--recursive`, or any mirror that keeps the paths. One switch moves every
+source there:
+
+```yaml
+gitops:
+  mirror:
+    registry: registry.example.internal:5000   # host or host:port, no scheme, no path
+    secretRef: mirror-pull                      # registry credentials, every OCIRepository
+    certSecretRef: mirror-ca                    # the registry's CA (key ca.crt), every OCIRepository
+```
+
+With `gitops.mirror.registry` set, the host `gsoci.azurecr.io` is replaced,
+the path, tag and digest kept, in:
+
+- every component's OCIRepository and the self-management one
+  (`gitops.self.repository`);
+- every string of the values forwarded to a component release: registries,
+  repositories, full image references and `oci://` chart URLs (kagent's
+  runtime images, Substrate's worker and third-party images, the agent chart
+  agent-manager installs, ...);
+- the hook images (`gitops.hooks.image`, `gitops.hooks.helmImage`);
+- the connectivity chart's model-serving presets: their runtime images
+  (`modelServing.runtimeImages.registry`) and OCI model images
+  (`modelServing.modelImages.registry`; an own value stands).
+
+A per-source key set to another registry is left as written. The bundled
+engine's images are `flux-engine.operator.image.registry` and
+`flux-engine.instance.distribution.registry`. The OCIRepositories pull with
+`secretRef` and trust `certSecretRef`; the images are pulled by the nodes,
+whose container runtime trusts the CA and holds the credentials. `make
+verify-mirror` renders the chart with the switch and finds no gsoci reference.
+
 ## One release per target cluster
 
 The serving slice ([#326](https://github.com/giantswarm/agent-platform/issues/326)) and the runtime slice
@@ -400,6 +437,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gitops.self.versionRange | string | `""` |  |
 | gitops.self.semverFilter | string | `""` |  |
 | gitops.self.interval | string | `"10m"` |  |
+| gitops.mirror.registry | string | `""` |  |
+| gitops.mirror.secretRef | string | `""` |  |
+| gitops.mirror.certSecretRef | string | `""` |  |
 | gitops.retries | int | `5` |  |
 | gitops.forbidInlineSecrets | bool | `false` |  |
 | gitops.forbidPinnedLoginConnector | bool | `false` |  |

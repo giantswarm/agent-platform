@@ -529,8 +529,35 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- if $scheduling -}}
 {{- $_ := set $spec "scheduling" $scheduling -}}
 {{- end -}}
+{{- /* The runtime image of every container of spec.template on the host of
+       modelServing.runtimeImages.registry, the path and tag or digest as
+       written (an installation that serves the images from a mirror). */ -}}
+{{- $runtimeRegistry := include "agent-platform.modelServing.runtimeImages.registry" $root -}}
+{{- $template := get $spec "template" -}}
+{{- if and $runtimeRegistry (kindIs "map" $template) -}}
+{{- range $field := list "containers" "initContainers" -}}
+{{- range (get $template $field | default list) -}}
+{{- if and (kindIs "map" .) (contains "/" (toString (get . "image"))) -}}
+{{- $_ := set . "image" (printf "%s/%s" $runtimeRegistry (rest (splitList "/" (toString (get . "image"))) | join "/")) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $_ := set $doc "spec" $spec -}}
 {{- dict "preset" $doc "chatTemplate" $render | toJson -}}
+{{- end -}}
+
+{{/*
+The registry host of modelServing.runtimeImages.registry, validated like
+modelServing.modelImages.registry: a host with an optional port, no scheme, no
+path. Empty when unset: every preset's runtime image is published as written.
+*/}}
+{{- define "agent-platform.modelServing.runtimeImages.registry" -}}
+{{- $registry := toString (dig "runtimeImages" "registry" "" .Values.modelServing) -}}
+{{- if and $registry (not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$" $registry)) -}}
+{{- fail (printf "modelServing.runtimeImages.registry %q must be a registry host — host or host:port, no scheme, no path; it replaces the host of every preset's runtime image, the path stays" $registry) -}}
+{{- end -}}
+{{- $registry -}}
 {{- end -}}
 
 {{/*
