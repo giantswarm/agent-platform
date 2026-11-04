@@ -2514,6 +2514,39 @@
                 }
             }
         },
+        "organizationErasure": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "description": "Grant agent-platform-operator's ServiceAccount the erasure's access."
+                },
+                "operatorPodLabels": {
+                    "type": "object",
+                    "description": "The labels of agent-platform-operator's pods: the kagent controller's API port admits them (with networkPolicy.enabled, both flavors).",
+                    "additionalProperties": true,
+                    "properties": {
+                        "app.kubernetes.io/name": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "operatorServiceAccount": {
+                    "type": "object",
+                    "description": "agent-platform-operator's ServiceAccount. An empty namespace is the connectivity release's namespace.",
+                    "additionalProperties": false,
+                    "properties": {
+                        "name": {
+                            "type": "string"
+                        },
+                        "namespace": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "postgres": {
             "type": "object",
             "additionalProperties": false,

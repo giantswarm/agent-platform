@@ -1,0 +1,64 @@
+{{- /*
+Ingress to kagent's controller API from agent-platform-operator (additive to
+the controller's own ingress policy: the gateway and the UI): the erasure of a
+deleted organization lists and deletes its Sessions there, directly, as the
+operator's ServiceAccount (the route's JWT policy takes people's tokens only).
+*/ -}}
+{{- if and (dig "enabled" false (.Values.organizationErasure | default dict)) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.networkPolicy.enabled }}
+{{- $e := .Values.organizationErasure }}
+{{- $sa := include "agent-platform.organizationErasure.serviceAccount" . | fromJson }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- /* The kagent controller's API port, as the controller's own policies name it. */ -}}
+{{- $controllerPort := "8083" }}
+{{- $pods := required "organizationErasure.operatorPodLabels must name the operator's pod labels" $e.operatorPodLabels }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-operator-to-kagent-controller
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/name: kagent
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            {{- toYaml $pods | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ $sa.namespace }}
+      toPorts:
+        - ports:
+            - port: {{ $controllerPort | quote }}
+              protocol: TCP
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-operator-to-kagent-controller
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/name: kagent
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $sa.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $pods | nindent 14 }}
+      ports:
+        - port: {{ $controllerPort | int }}
+          protocol: TCP
+{{- end }}
+{{- end }}

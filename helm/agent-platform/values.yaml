@@ -6265,6 +6265,36 @@ toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
     # it.
     appInstallURL: ""
 
+# === The erasure of deleted organizations (giantswarm/giantswarm#38988) ===
+# agent-platform-operator erases a deleted AgentPlatformOrganization: it lists
+# and deletes every creator's kagent sessions of the organization, and deletes
+# its worker snapshots under s3://<bucket>/<uid>. On, the kagent controller
+# admits its ServiceAccount as a machine caller, and the connectivity release
+# grants it what the erasure needs: the controller's API port, the ClusterRole
+# agent-platform:organization-erasure (cluster-wide list and delete on
+# sessions.api.kagent.dev, which kagent reviews with SubjectAccessReviews) with
+# kagent on, and, with the Crossplane snapshot store on AWS
+# (kagent.harness.snapshotStore.crossplane), the IRSA role
+# <the store's role name>-operator beside Substrate's, which lists and deletes
+# only under the organizations' prefixes: keys that start with a UID. The
+# operator's chart takes that role's ARN in serviceAccount.annotations. Off,
+# the default, nothing renders. kagent deletes another creator's session for
+# the operator only once giantswarm/kagent-extensions#27 ships in the kagent
+# line: until then the erasure of an organization with a person's session
+# stops at its Sessions step.
+organizationErasure:
+  # -- Grant agent-platform-operator's ServiceAccount the erasure's access.
+  enabled: false
+  # -- agent-platform-operator's ServiceAccount. An empty namespace is the
+  # connectivity release's namespace.
+  operatorServiceAccount:
+    name: agent-platform-operator
+    namespace: ""
+  # -- The labels of agent-platform-operator's pods: the kagent controller's
+  # API port admits them (with networkPolicy.enabled, both flavors).
+  operatorPodLabels:  # @schema additionalProperties: true
+    app.kubernetes.io/name: agent-platform-operator
+
 # === The standalone chart's extras: values blocks ===
 # One block per component of the agent-platform-standalone umbrella that joined
 # the roster above (components.backstage, .mcp-kubernetes, .cloudnative-pg,
