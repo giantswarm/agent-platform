@@ -105,8 +105,8 @@ the release before any boot. The evidence: `workflow_agent-status` and the
 A full review with findings and a score is the `agent-platform-skill-review` skill.
 
 - Frontmatter: only the six fields; `name` = directory; the description is a trigger under 1024
-  characters. `python3 scripts/validate_skills.py` in the skills repository (giantswarm/agent-platform carries it) checks this and
-  runs on every pull request — run it before opening one.
+  characters. In giantswarm/agent-platform, `make verify-skills` checks the layout and that `name`
+  is the directory, on every pull request — run it before opening one.
 - Does any line state something the agent could fetch? Replace it with the recipe.
 - Does any section belong to another skill? Replace it with that skill's name.
 - The body loads in one read and names which reference answers what.

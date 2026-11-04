@@ -1,25 +1,19 @@
 #!/usr/bin/env python3
-"""Validate every skill in this repository against what the Agent Platform's runtime accepts.
+"""Check the layout of the skills this repository ships (make verify-skills).
 
-A skill is a directory of skills/ with a SKILL.md whose YAML frontmatter the kagent Go runtime
-parses with the agentskills.io fields (https://agentskills.io/specification#frontmatter). A
-SKILL.md that does not parse, or an unknown frontmatter field on an older runtime, fails the boot
-of every agent that mounts the skill — so this check runs on every pull request (make verify-skills).
+- A skill is skills/<name>/SKILL.md. A SKILL.md anywhere else fails: a skill
+  source listed without a path is scanned whole and would offer it.
+- Its YAML frontmatter parses to a mapping whose `name` is the directory name,
+  the name the Agent Manager's values pin it by (agents/agent-manager/values.yaml).
 
-A SKILL.md anywhere else in the repository fails too: a skill source listed without a path
-(the plain-URL form of a skill repository) is scanned whole, and would offer it as a skill.
+What the agent runtime accepts beyond that (fields, lengths) is the runtime's
+own check; this script does not copy it.
 """
 
 import pathlib
-import re
 import sys
 
 import yaml
-
-KNOWN_FIELDS = {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
-NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-MAX_NAME = 64
-MAX_DESCRIPTION = 1024
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SKILLS = ROOT / "skills"
@@ -38,47 +32,21 @@ def frontmatter(text: str):
     return data
 
 
-def check_skill(directory: pathlib.Path):
-    problems = []
+def check_skill(directory: pathlib.Path) -> list[str]:
     skill_md = directory / "SKILL.md"
     try:
         fm = frontmatter(skill_md.read_text(encoding="utf-8"))
     except (ValueError, yaml.YAMLError) as exc:
         return [f"{skill_md}: {exc}"]
-
-    unknown = set(fm) - KNOWN_FIELDS
-    if unknown:
-        problems.append(
-            f"{skill_md}: unknown frontmatter field(s) {sorted(unknown)} -- only {sorted(KNOWN_FIELDS)} are read; "
-            "a kagent line before 0.11.0-gs.11 fails the agent's boot on them"
-        )
-    name = fm.get("name")
-    if not isinstance(name, str) or not name:
-        problems.append(f"{skill_md}: 'name' is required")
-    else:
-        if name != directory.name:
-            # The agent's release mounts a skill under the name of its skills entry, so a
-            # differing directory name works; it is still confusing for the wizard and readers.
-            print(f"warning: {skill_md}: name {name!r} differs from the directory name {directory.name!r}", file=sys.stderr)
-        if len(name) > MAX_NAME or not NAME_RE.match(name):
-            problems.append(f"{skill_md}: name {name!r} must be lowercase letters, digits and single hyphens, at most {MAX_NAME} characters")
-    description = fm.get("description")
-    if not isinstance(description, str) or not description.strip():
-        problems.append(f"{skill_md}: 'description' is required")
-    elif len(description) > MAX_DESCRIPTION:
-        problems.append(f"{skill_md}: description is {len(description)} characters, the limit is {MAX_DESCRIPTION}")
-    metadata = fm.get("metadata")
-    if metadata is not None and (
-        not isinstance(metadata, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in metadata.items())
-    ):
-        problems.append(f"{skill_md}: 'metadata' must be a mapping of strings to strings")
-    return problems
+    if fm.get("name") != directory.name:
+        return [f"{skill_md}: name {fm.get('name')!r} is not the directory name {directory.name!r}"]
+    return []
 
 
 def main() -> int:
     skills = sorted(p.parent for p in SKILLS.glob("*/SKILL.md"))
     if not skills:
-        print("no skills found", file=sys.stderr)
+        print("no skills found under skills/", file=sys.stderr)
         return 1
     problems = [
         f"{p}: a SKILL.md outside skills/<name>/ -- a scan of the whole repository would offer it as a skill"

@@ -104,8 +104,9 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- $on = ($root.Values.workspaces | default dict).enabled | default false }}
 {{- end }}
 {{- if and $on (eq .name "agent-manager-assistant") }}
-{{- /* An agent: only where kagent runs it and muster serves its tools. */ -}}
-{{- $on = and (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true") (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "muster")) "true") }}
+{{- /* An agent: only where kagent runs it, muster serves its tools and
+       agent-manager, whose tools it calls, is on. */ -}}
+{{- $on = and (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true") (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "muster")) "true") (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "agent-manager")) "true") }}
 {{- end }}
 {{- if $on }}true{{- end -}}
 {{- else -}}
@@ -3134,7 +3135,7 @@ Usage: include "agent-platform.muster.awaitsSubstrate" (dict "root" $root "value
 {{- if dig "muster" "credentialProvider" "enabled" false .values -}}
 {{- $ready := false -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" .root "name" "substrate")) (not (include "agent-platform.targetSecretName" .root)) -}}
-{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" (.root.Values.gitops.namespace | default .root.Release.Namespace) (include "agent-platform.childName" (dict "root" .root "name" (index .root.Values.components "substrate" "chart"))) -}}
+{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" (.root.Values.gitops.namespace | default .root.Release.Namespace) (include "agent-platform.childName" (dict "root" .root "name" "substrate")) -}}
 {{- range (dig "status" "conditions" list ($release | default dict)) -}}
 {{- if and (eq .type "Ready") (eq .status "True") -}}{{- $ready = true -}}{{- end -}}
 {{- end -}}
@@ -3167,7 +3168,7 @@ Usage: include "agent-platform.muster.awaitsSubstrate" (dict "root" $root "value
 {{- range $pod.containers }}{{ $mounts = concat $mounts (.volumeMounts | default list) }}{{ end -}}
 {{- $old := include "agent-platform.kagent.databaseSecret" (dict "urlFile" $urlFile "volumes" ($pod.volumes | default list) "mounts" $mounts) -}}
 {{- $new := include "agent-platform.kagent.databaseSecret" (dict "urlFile" $urlFile "volumes" (dig "controller" "volumes" list $kagent) "mounts" (dig "controller" "volumeMounts" list $kagent)) -}}
-{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" ($.Values.gitops.namespace | default $.Release.Namespace) (include "agent-platform.childName" (dict "root" $ "name" (index $.Values.components "kagent" "chart"))) -}}
+{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" ($.Values.gitops.namespace | default $.Release.Namespace) (include "agent-platform.childName" (dict "root" $ "name" "kagent")) -}}
 {{- $oldUrl := dig "spec" "values" "database" "postgres" "url" "" ($release | default dict) -}}
 {{- $newUrl := dig "database" "postgres" "url" "" $kagent -}}
 {{- if and (eq $old $new) (eq $oldUrl $newUrl) -}}
@@ -4445,41 +4446,77 @@ toolchain-manager.registryPullSecret. One line, no comment inside the define.
 
 {{/*
 The first releases of agent-manager and of the portal (backstage) that take a
-skill repository as {url, ref, path, readOnly}; below them a consumer gets the
-URLs alone, which it scans whole at the default branch. Set each to the release
-that ships the object form (giantswarm/giantswarm#38970) before raising the
-component's floor to it. One line each, no comment inside the define.
+skill repository as {url, ref, path, readOnly}; below them a consumer gets
+URLs alone and no platform source. Set each to the release that ships the
+object form (giantswarm/giantswarm#38970) before raising the component's floor
+to it. One line each, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.skillSourcesFloor" -}}2.19.0{{- end -}}
 {{- define "agent-platform.backstage.skillSourcesFloor" -}}3.31.0{{- end -}}
 
 {{/*
+The platform's own skill source: skills/ of this repository, read-only, at
+this chart's release tag; a pre-release (a branch build, a candidate) has no
+such tag and names no ref (the default branch).
+Usage: include "agent-platform.skills.platformSource" $ | fromJson
+*/}}
+{{- define "agent-platform.skills.platformSource" -}}
+{{- $source := dict "url" "https://github.com/giantswarm/agent-platform" "path" "skills" "readOnly" true -}}
+{{- if not (semver .Chart.Version).Prerelease -}}
+{{- $_ := set $source "ref" (printf "v%s" (include "agent-platform.chartVersion" .)) -}}
+{{- end -}}
+{{- $source | toJson -}}
+{{- end -}}
+
+{{/*
+A skill source's identity, url + ref + path, the URL without a trailing `/` or
+`.git`. Usage: include "agent-platform.skills.sourceKey" $entry
+*/}}
+{{- define "agent-platform.skills.sourceKey" -}}
+{{- $e := ternary . (dict "url" .) (kindIs "map" .) -}}
+{{- $url := trimSuffix "/" (toString $e.url) | trimSuffix ".git" | trimSuffix "/" -}}
+{{- printf "%s|%s|%s" $url (toString ($e.ref | default "")) (trimSuffix "/" (toString ($e.path | default ""))) -}}
+{{- end -}}
+
+{{/*
 The skill repositories one consumer (agent-manager: skills.repositories,
-backstage: skillsRepositories) offers, as JSON {"list": [...]}: the platform's
-own skills/ at this chart's release tag first, then skills.repositories, then
-what an installation still sets in the two deprecated lists
-(agent-manager.skills.repositories, backstage.skillsRepositories) — both
-lists to both consumers, so the portal and agent-manager offer the same
-sources. One entry per URL, the first wins. Objects only from the consumer's
-skillSourcesFloor on; below it each entry is its URL.
+backstage: skillsRepositories) offers, as JSON {"list": [...]}:
+- the platform's source first (skills.platformSource.enabled), and only from
+  the consumer's skillSourcesFloor on: below it the source would be a bare,
+  writable URL scanned whole;
+- the installation's sources: the consumer's own deprecated list
+  (agent-manager.skills.repositories, backstage.skillsRepositories) when set,
+  which replaces skills.repositories for that consumer; else
+  skills.repositories. Objects from the floor on, URLs below it.
+One entry per url + ref + path. An installation entry for the platform's
+repository while its source is on fails the render.
 Usage: include "agent-platform.skills.repositories" (dict "root" $ "consumer" "agent-manager") | fromJson
 */}}
 {{- define "agent-platform.skills.repositories" -}}
 {{- $v := .root.Values -}}
-{{- $entries := list (dict "url" "https://github.com/giantswarm/agent-platform" "ref" (printf "v%s" (include "agent-platform.chartVersion" .root)) "path" "skills" "readOnly" true) -}}
-{{- $entries = concat $entries (dig "repositories" list ($v.skills | default dict) | default list) -}}
-{{- $entries = concat $entries (dig "skills" "repositories" list (index $v "agent-manager" | default dict) | default list) -}}
-{{- $entries = concat $entries (dig "skillsRepositories" list ($v.backstage | default dict) | default list) -}}
+{{- $platform := include "agent-platform.skills.platformSource" .root | fromJson -}}
+{{- $platformOn := ne (toString (dig "platformSource" "enabled" true ($v.skills | default dict))) "false" -}}
+{{- $own := ternary (dig "skills" "repositories" list (index $v "agent-manager" | default dict)) (dig "skillsRepositories" list ($v.backstage | default dict)) (eq .consumer "agent-manager") | default list -}}
+{{- $installation := $own | default (dig "repositories" list ($v.skills | default dict)) | default list -}}
 {{- $floor := ternary (include "agent-platform.agentManager.skillSourcesFloor" .root) (include "agent-platform.backstage.skillSourcesFloor" .root) (eq .consumer "agent-manager") -}}
 {{- $objects := eq (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" .consumer "version" $floor)) "true" -}}
+{{- $platformKey := include "agent-platform.skills.sourceKey" (dict "url" $platform.url) | splitList "|" | first -}}
 {{- $seen := dict -}}
 {{- $out := list -}}
-{{- range $entries -}}
-{{- $url := . -}}
-{{- if kindIs "map" . }}{{ $url = .url }}{{ end -}}
-{{- if not (hasKey $seen $url) -}}
-{{- $_ := set $seen $url true -}}
-{{- $out = append $out (ternary . $url (and $objects (kindIs "map" .))) -}}
+{{- if and $platformOn $objects -}}
+{{- $out = append $out $platform -}}
+{{- $_ := set $seen (include "agent-platform.skills.sourceKey" $platform) true -}}
+{{- end -}}
+{{- range $installation -}}
+{{- $key := include "agent-platform.skills.sourceKey" . -}}
+{{- if and $platformOn (eq (first (splitList "|" $key)) $platformKey) -}}
+{{- fail (printf "the skill source %v names the platform's own repository, which the chart already offers read-only at its release (skills.platformSource); remove the entry, or set skills.platformSource.enabled=false to list the repository yourself" .) -}}
+{{- end -}}
+{{- if not (hasKey $seen $key) -}}
+{{- $_ := set $seen $key true -}}
+{{- $entry := . -}}
+{{- if and (kindIs "map" .) (not $objects) }}{{ $entry = .url }}{{ end -}}
+{{- $out = append $out $entry -}}
 {{- end -}}
 {{- end -}}
 {{- dict "list" $out | toJson -}}
@@ -4488,9 +4525,11 @@ Usage: include "agent-platform.skills.repositories" (dict "root" $ "consumer" "a
 {{/*
 The values the Agent Manager's release (components.agent-manager-assistant)
 takes from the platform, merged over agents/agent-manager/values.yaml: the
-muster URL every agent targets, its avatar from the DiceBear route's first
-hostname (none without one), the agent-platform toolset preset, and
-agentManagerAssistant.modelConfig (empty: the agent chart's default).
+muster URL every agent targets, its avatar on the DiceBear host (the route's
+first hostname, else avatars.<global.domain>; none without either), the
+agent-platform toolset preset, the managed-by label on the Agent (agent-manager
+lists it read-only), and agentManagerAssistant.modelConfig (empty: the agent
+chart's default).
 Usage: include "agent-platform.agentManagerAssistant.derived" $ | fromJson
 */}}
 {{- define "agent-platform.agentManagerAssistant.derived" -}}
@@ -4498,11 +4537,12 @@ Usage: include "agent-platform.agentManagerAssistant.derived" $ | fromJson
 {{- $host := "" -}}
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "dicebear") -}}
 {{- $host = first (dig "route" "hostnames" list (.Values.dicebear | default dict) | default (list "")) -}}
+{{- with .Values.global.domain -}}{{- $host = $host | default (printf "avatars.%s" .) -}}{{- end -}}
 {{- end -}}
 {{- with $host -}}
 {{- $_ := set $agent "iconUrl" (printf "https://%s/v1/agent-manager-assistant.png" .) -}}
 {{- end -}}
-{{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:agent-platform") -}}
+{{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:agent-platform") "labels" (dict "agent-platform.giantswarm.io/managed-by" "agent-platform") -}}
 {{- with $agent }}{{- $_ := set $out "agent" . -}}{{- end -}}
 {{- with dig "modelConfig" "" (.Values.agentManagerAssistant | default dict) -}}
 {{- $_ := set $out "modelConfig" (dict "name" .) -}}
@@ -4512,10 +4552,11 @@ Usage: include "agent-platform.agentManagerAssistant.derived" $ | fromJson
 
 {{/*
 A component's values file (components.<name>.valuesFile, a path in this chart),
-as JSON. A skills[] entry whose git.commit is not a full commit id is dropped:
-the release pipeline stamps the tag's commit over the placeholder
-(hack/stamp-release-commit.sh), so an unstamped build (a branch) renders the
-agent without the skills it cannot pin.
+as JSON. The release pipeline stamps the tag's commit over the `[[ .SHA ]]`
+placeholder (hack/stamp-release-commit.sh). A skills[] entry still carrying it
+is dropped where the chart is no published release (a pre-release, or the
+working tree, whose appVersion is not its version), and fails the render of a
+published release: such a chart was packaged without the stamp.
 Usage: include "agent-platform.componentValuesFile" (dict "root" $ "path" $c.valuesFile) | fromJson
 */}}
 {{- define "agent-platform.componentValuesFile" -}}
@@ -4523,10 +4564,15 @@ Usage: include "agent-platform.componentValuesFile" (dict "root" $ "path" $c.val
 {{- if not $vals -}}
 {{- fail (printf "%s is missing from the chart or empty" .path) -}}
 {{- end -}}
+{{- $released := and (not (semver .root.Chart.Version).Prerelease) (eq (toString .root.Chart.AppVersion) .root.Chart.Version) -}}
 {{- if hasKey $vals "skills" -}}
 {{- $pinned := list -}}
 {{- range $vals.skills -}}
-{{- if or (not (kindIs "map" (dig "git" nil .))) (regexMatch "^([0-9a-f]{40}|[0-9a-f]{64})$" (toString (dig "git" "commit" "" .))) -}}
+{{- if eq (toString (dig "git" "commit" "" (ternary . dict (kindIs "map" .)))) "[[ .SHA ]]" -}}
+{{- if $released -}}
+{{- fail (printf "%s: skill %s still carries the [[ .SHA ]] placeholder in release %s: the chart was published without hack/stamp-release-commit.sh" $.path .name $.root.Chart.Version) -}}
+{{- end -}}
+{{- else -}}
 {{- $pinned = append $pinned . -}}
 {{- end -}}
 {{- end -}}
@@ -4822,7 +4868,7 @@ under `helm template`, where this guard is therefore silent.
 {{- with (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" .) -}}
 {{- $owner := dig "metadata" "labels" "helm.toolkit.fluxcd.io/name" "" . -}}
 {{- $ownerNs := dig "metadata" "labels" "helm.toolkit.fluxcd.io/namespace" "" . -}}
-{{- if and $owner (or (ne $owner $c.chart) (ne $ownerNs $ns)) -}}
+{{- if and $owner (or (ne $owner $key) (ne $ownerNs $ns)) -}}
 {{- $foreign = append $foreign (printf "%s (components.%s) belongs to HelmRelease %s/%s" .metadata.name $key $ownerNs $owner) -}}
 {{- end -}}
 {{- end -}}
@@ -4858,7 +4904,7 @@ show it (README, "The GPU operator").
 {{- $c := index .Values.components "gpu-operator" | default dict -}}
 {{- if and $c (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "gpu-operator")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
 {{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
-{{- $release := $c.chart -}}
+{{- $release := "gpu-operator" -}}
 {{- $releaseNs := $c.targetNamespace | default (include "agent-platform.targetNamespace" .) -}}
 {{- $foreign := list -}}
 {{- if .Capabilities.APIVersions.Has "nvidia.com/v1" -}}

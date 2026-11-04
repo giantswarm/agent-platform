@@ -265,15 +265,18 @@ The OAuth issuer, client, secret and base URL come from the block, else from `gl
 
 ### Agent Manager and skills
 
-The Agent Manager is the platform's meta agent, `kagent/agent-manager-assistant`. Its prompt is in [`agents/agent-manager/values.yaml`](../agents/agent-manager/values.yaml) and its skills are in [`skills/`](../skills).
+The Agent Manager is the platform's meta agent, `agent-manager-assistant` in the kagent namespace. Its prompt is in [`agents/agent-manager/values.yaml`](../agents/agent-manager/values.yaml) and its skills are in [`skills/`](../skills).
 
 | Value | Default | Effect |
 |---|---|---|
-| `components.agent-manager-assistant.enabled` | `true` | Deploys the agent while kagent and muster are on. The portal's meta-agent features use it. |
+| `components.agent-manager-assistant.enabled` | `true` | Deploys the agent while kagent, muster and agent-manager are on. The portal's meta-agent features use it. |
 | `agentManagerAssistant.modelConfig` | `""` | The `ModelConfig` it runs on. Empty uses `default-model-config`. |
-| `skills.repositories` | `[giantswarm/agent-skills]` | Skill sources for agent-manager and the portal, as URLs or `{url, ref, path, readOnly}`. The platform's `skills/` at the release tag comes first. |
+| `skills.repositories` | `[giantswarm/agent-skills]` | Skill sources for agent-manager and the portal, as URLs or `{url, ref, path, readOnly}`. |
+| `skills.platformSource.enabled` | `true` | Lists the platform's `skills/` first, read-only, at the release tag. Set `false` where GitHub is unreachable. |
+| `agent-manager.skills.repositories`, `backstage.skillsRepositories` | `[]` | Deprecated. When set, replaces `skills.repositories` for that consumer. |
 
-A release pins the skills to the tag's commit. A branch build deploys the agent without skills.
+- A release pins the skills to the tag's commit. A branch build deploys the agent without skills.
+- agent-manager and the portal get the platform source and object entries only from the floors in `_helpers.tpl` (`skillSourcesFloor`). Below them they get URLs only.
 
 ### Cluster manager
 

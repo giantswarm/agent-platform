@@ -1107,8 +1107,9 @@ components:  # @schema additionalProperties: true
     # The Agent Manager, the platform's meta agent: one release of the Generic
     # agent chart in kagent with the values of agents/agent-manager/values.yaml
     # and the platform's skills (skills/) pinned to the release's commit. Its
-    # muster.url, agent.iconUrl, toolset and modelConfig.name are derived
-    # (agentManagerAssistant). On while kagent is on; false leaves it out.
+    # muster.url, agent.iconUrl, toolset, labels and modelConfig.name are
+    # derived (agentManagerAssistant). On while kagent, muster and agent-manager
+    # are on; false leaves it out.
     chart: agent
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # The agent chart line, moved with agent-manager.agentChart.semver
@@ -1116,7 +1117,9 @@ components:  # @schema additionalProperties: true
     versionRange: ">=2.0.0 <3.0.0"
     valuesFile: agents/agent-manager/values.yaml
     injectGlobal: false
-    targetNamespace: kagent
+    # Installs where the agents live: the kagent component's namespace
+    # (kagent.namespaceOverride).
+    inKagentNamespace: true
     # agent-manager lists it read-only.
     labels:
       agent-platform.giantswarm.io/managed-by: agent-platform
@@ -1124,7 +1127,7 @@ components:  # @schema additionalProperties: true
     # portal's meta-agent features to it.
     gatedRoster: true
     enabled: true
-    dependsOn: [muster, kagent]
+    dependsOn: [muster, kagent, agent-manager]
   vm-manager:  # @schema additionalProperties: true
     chart: vm-manager
     # VM provisioning for the Agent Platform (giantswarm/vm-manager): KVM
@@ -5081,7 +5084,7 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # of the line reach the agents on their own; the major is the API boundary
     # and moves only with this chart. The floor moves with components.kagent.
     semver: ">=2.0.0 <3.0.0"
-  # Deprecated: set skills.repositories. Entries here are appended to it.
+  # Deprecated: set skills.repositories. When set, replaces it for this consumer.
   skills:
     repositories: []
   mcp:
@@ -5240,15 +5243,20 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     gitopsNamespaces: []
 
 # === Skill repositories ===
-# The skill sources agent-manager (list_skills) and the portal offer. The
-# platform's own, {url: https://github.com/giantswarm/agent-platform, ref:
-# v<chart version>, path: skills, readOnly: true}, always comes first; these
-# follow. An entry is a URL or {url, ref, path, readOnly}; while the
-# agent-manager or backstage range floor predates the object form
+# The skill sources agent-manager (list_skills) and the portal offer: the
+# platform's own first, then these. An entry is a URL or {url, ref, path,
+# readOnly}. A consumer whose range floor predates the object form
 # (agentManager.skillSourcesFloor, backstage.skillSourcesFloor in
-# _helpers.tpl) that consumer gets the URLs.
+# _helpers.tpl) gets the URLs and no platform source.
+# agent-manager.skills.repositories or backstage.skillsRepositories, when set,
+# replace these for that consumer.
 skills:
-  repositories:  # @schema type: array; itemRef: files/skill-repository.schema.json
+  # {url: https://github.com/giantswarm/agent-platform, ref: v<chart version>,
+  # path: skills, readOnly: true}; a pre-release names no ref. false leaves it
+  # out (an air-gapped installation).
+  platformSource:
+    enabled: true
+  repositories:  # @schema type: array; item: [string, object]; itemRef: files/skill-repository.schema.json
     - https://github.com/giantswarm/agent-skills
 
 # === Agent Manager (components.agent-manager-assistant) ===
@@ -6359,7 +6367,7 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
     - api:ai-chat/service
     - api:ai-chat/drawer
     - app-root-element:ai-chat/drawer
-  # Deprecated: set skills.repositories. Entries here are appended to it.
+  # Deprecated: set skills.repositories. When set, replaces it for this consumer.
   skillsRepositories: []
   # Roll the Backstage pod when the app-config ConfigMap changes: a
   # post-install/post-upgrade hook Job of the connectivity release stamps the

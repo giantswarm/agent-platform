@@ -528,12 +528,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager-assistant.versionRange | string | `">=2.0.0 <3.0.0"` |  |
 | components.agent-manager-assistant.valuesFile | string | `"agents/agent-manager/values.yaml"` |  |
 | components.agent-manager-assistant.injectGlobal | bool | `false` |  |
-| components.agent-manager-assistant.targetNamespace | string | `"kagent"` |  |
+| components.agent-manager-assistant.inKagentNamespace | bool | `true` |  |
 | components.agent-manager-assistant.labels."agent-platform.giantswarm.io/managed-by" | string | `"agent-platform"` |  |
 | components.agent-manager-assistant.gatedRoster | bool | `true` |  |
 | components.agent-manager-assistant.enabled | bool | `true` |  |
 | components.agent-manager-assistant.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager-assistant.dependsOn[1] | string | `"kagent"` |  |
+| components.agent-manager-assistant.dependsOn[2] | string | `"agent-manager"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.vm-manager.versionRange | string | `">=0.24.0 <0.25.0"` |  |
@@ -1400,6 +1401,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.image.tag | string | `"2.17.31"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
+| skills.platformSource.enabled | bool | `true` |  |
 | skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
 | agentManagerAssistant.modelConfig | string | `""` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |

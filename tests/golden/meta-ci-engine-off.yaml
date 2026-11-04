@@ -97,7 +97,6 @@ spec:
         observability.giantswarm.io/tenant: giantswarm
     skills:
       repositories:
-      - https://github.com/giantswarm/agent-platform
       - https://github.com/giantswarm/agent-skills
 ---
 # Source: agent-platform/templates/components.yaml
@@ -134,6 +133,7 @@ spec:
   dependsOn:
     - name: muster
     - name: kagent
+    - name: agent-manager
   values:
     agent:
       description: Creates, changes, inspects and removes agents, wires them to models
@@ -227,6 +227,8 @@ spec:
         the tool's schema); `x_kubernetes_list` selects with `resourceType`
         (not `kind`); pod logs use `podName` and `tailLines`. Prefer a
         `workflow_<name>` tool for a whole question when one exists.
+    labels:
+      agent-platform.giantswarm.io/managed-by: agent-platform
     muster:
       url: http://muster.default.svc.cluster.local:8090/mcp
     skills: []
@@ -500,7 +502,6 @@ spec:
         verticalPodAutoscaler:
           enabled: false
       skillsRepositories:
-      - https://github.com/giantswarm/agent-platform
       - https://github.com/giantswarm/agent-skills
       startUrlSearchParams: {}
     cloudnative-pg:

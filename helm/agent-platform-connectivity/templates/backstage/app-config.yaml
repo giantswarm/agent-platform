@@ -168,8 +168,8 @@ data:
     muster.installations entry above; giantswarm/backstage#2294), and its
     backend has no model-manager client to configure. */}}
     {{- $metaAgent := "" }}
-    {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager-assistant") }}
-    {{- $metaAgent = printf "%s/kagent/agent-manager-assistant" $installation }}
+    {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager-assistant")) (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) }}
+    {{- $metaAgent = printf "%s/%s/agent-manager-assistant" $installation (.Values.kagent.namespaceOverride | default .Release.Namespace) }}
     {{- end }}
     {{- if or $fluxSa $backstage.skillsRepositories $kagentRoute $metaAgent }}
     agentPlatform:

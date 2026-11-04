@@ -17,13 +17,15 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## \<current\> → \<next\> (the Agent Manager and `skills.repositories`)
 
-giantswarm/giantswarm#38970: the chart deploys the Agent Manager (`kagent/agent-manager-assistant`) wherever kagent and muster are on, and the skill sources come from `skills.repositories`.
+giantswarm/giantswarm#38970: the chart deploys the Agent Manager (`agent-manager-assistant` in the kagent namespace) wherever kagent, muster and agent-manager are on. agent-manager and the portal take their skill sources from `skills.repositories`, with the platform's own `skills/` first once their floors take the object form. Platform HelmReleases are named after their `components` key, which is the chart name for every existing component, so no release is renamed.
 
 ### Operator action
 
 - **An installation that deploys its own Agent Manager or `swarm-operator`**: remove it, or set `components.agent-manager-assistant.enabled: false`.
 - **An installation whose `default-model-config` does not resolve**: set `agentManagerAssistant.modelConfig`.
-- **An installation that sets `agent-manager.skills.repositories` or `backstage.skillsRepositories`**: none; the entries are still offered. Move them to `skills.repositories`.
+- **An installation that sets `agent-manager.skills.repositories` or `backstage.skillsRepositories`**: these keys now default to `[]`. A list you set still replaces the installation sources (`giantswarm/agent-skills` by default) for that consumer, as before, and the platform source is added before it. Move the list to `skills.repositories` so both consumers offer the same sources.
+- **An installation that lists `https://github.com/giantswarm/agent-platform` itself**: the render fails. Remove the entry, or set `skills.platformSource.enabled: false`.
+- **An air-gapped installation**: set `skills.platformSource.enabled: false`.
 
 ## \<current\> → \<next\> (the agents' Flux identity holds a Role in place of `cluster-admin`)
 
