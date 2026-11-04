@@ -5566,7 +5566,7 @@ agentPlatformOrganizations:
   # -- The installation's Kubernetes API hostnames: an EgressPolicy in an
   # organization namespace may not name them, nor a wildcard origin that
   # covers one, beside the cluster-internal and host-local names it never
-  # names.
+  # names. Required with enabled: the render fails while it is empty.
   apiHostnames: []  # @schema item: string
 
 # === Workspaces (workspaces, workspace-manager) ===

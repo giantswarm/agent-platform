@@ -136,6 +136,10 @@ def check_render(chart):
     if r.returncode == 0 or "agentPlatformOrganizations.enabled needs kagent" not in r.stderr:
         fail(f"agentPlatformOrganizations.enabled with kagent off renders, or fails for another reason:\n{r.stderr}")
     print("ok:  on with kagent off, the render fails naming kagent")
+    r = render(chart, *ON[:4])
+    if r.returncode == 0 or "agentPlatformOrganizations.apiHostnames must name" not in r.stderr:
+        fail(f"agentPlatformOrganizations.enabled without apiHostnames renders, or fails for another reason:\n{r.stderr}")
+    print("ok:  on without apiHostnames, the render fails naming the key")
     no_substrate = {d["metadata"]["name"] for d in organization_objects(docs(render(chart, *ON)))}
     if {"agent-platform-organization-workers", "agent-platform-organization-workerpool-copy"} & no_substrate:
         fail("the organization workers' policies render with Substrate off")
@@ -286,7 +290,8 @@ def kustomization(name, namespace, uid=True):
     if uid:
         meta["labels"] = {"agent-platform.giantswarm.io/organization-uid": UID}
     return {"apiVersion": "kustomize.toolkit.fluxcd.io/v1", "kind": "Kustomization", "metadata": meta,
-            "spec": {"interval": "10m", "prune": True, "path": "./agents", "sourceRef": {"kind": "GitRepository", "name": "installation"}}}
+            "spec": {"interval": "10m", "prune": True, "path": "./agents", "serviceAccountName": "agents-payments",
+                     "sourceRef": {"kind": "GitRepository", "name": "installation"}}}
 
 
 def sa(name, namespace, uid=True):
@@ -366,6 +371,8 @@ def install(roles, policies):
         if ready and rc != 0 and "agent-platform-organization-workerpool-copy" in out:
             break
         time.sleep(0.5)
+    else:
+        fail("the API server did not apply the policies within 60s")
 
 
 def prove_roles():
@@ -386,6 +393,15 @@ def prove_roles():
     case("organizations-admin deletes no RoleBinding outside organization namespaces", delete("rolebinding", "carol-organizations-admin", PARENT, as_=ALICE, groups=()),
          "agent-platform-organizations-admin-rolebindings")
     case("a cluster-admin writes a RoleBinding in a parent (not held)", create(rb("devs", PARENT), as_=PERSON))
+    # The built-in admin role is aggregated by the controller manager, which
+    # does not run here: a Role with its RBAC rules stands in for it.
+    must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "namespace-admin", "namespace": PLAIN},
+                 "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["roles", "rolebindings"], "verbs": ["*"]}]}, dry=False),
+         "create the namespace admin Role of team-a")
+    must(create(rb("alice-admin", PLAIN, role="namespace-admin", kind="Role",
+                   subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": ALICE}]), dry=False), "bind alice as admin of team-a")
+    case("organizations-admin who may create Roles in a namespace (its admin) writes RoleBindings there (not held)",
+         create(rb("devs", PLAIN, role="namespace-admin", kind="Role"), as_=ALICE, groups=()))
     case("organizations-admin by RoleBinding in a parent writes no RoleBinding there", create(rb("devs", PARENT), as_=CAROL, groups=()),
          "agent-platform-organizations-admin-rolebindings")
     must(create(rb("carol-organizations-admin", ORG, role="agent-platform:organizations-admin",
@@ -417,6 +433,10 @@ def prove_operator():
     case("the operator creates its labelled Kustomization in the Flux namespace", create(kustomization("agents-billing", FLUX_NS), as_=OP))
     case("the operator creates no unlabelled Kustomization", create(kustomization("other", FLUX_NS, uid=False), as_=OP),
          "agent-platform-organization-operator-objects")
+    nosa = kustomization("agents-billing", FLUX_NS)
+    del nosa["spec"]["serviceAccountName"]
+    case("the operator creates no Kustomization that Flux applies with its own identity (no serviceAccountName)", create(nosa, as_=OP),
+         "agent-platform-organization-operator-objects")
     case("the operator creates no Kustomization outside the Flux namespace", create(kustomization("agents-billing", PLAIN), as_=OP),
          "agent-platform-organization-operator-objects")
     case("the operator deletes its labelled Kustomization", delete("kustomization", "agents-payments", FLUX_NS, as_=OP))
@@ -430,6 +450,15 @@ def prove_operator():
          "agent-platform-organization-operator-objects")
     case("the operator creates a ServiceAccount in an organization namespace", create(sa("kagent-flux", ORG, uid=False), as_=OP))
     case("the operator creates no ServiceAccount elsewhere", create(sa("x", PLAIN), as_=OP), "agent-platform-organization-operator-objects")
+    case("the operator mirrors no system: group", create(rb("mirror", ORG, role="agent-platform:organizations-admin",
+         subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "system:authenticated"}]), as_=OP),
+         "agent-platform-organization-rolebinding-subjects")
+    case("the operator binds no ServiceAccount of a namespace other than the Flux namespace",
+         create(rb("x", ORG, subjects=[{"kind": "ServiceAccount", "name": "kagent-controller", "namespace": "kagent"}]), as_=OP),
+         "agent-platform-organization-rolebinding-subjects")
+    case("a cluster-admin binds no ServiceAccount of the Flux namespace",
+         create(rb("x", ORG, subjects=[{"kind": "ServiceAccount", "name": "agents-payments", "namespace": FLUX_NS}]), as_=PERSON),
+         "agent-platform-organization-rolebinding-subjects")
     case("the operator binds the organization's Flux ServiceAccount in its namespace",
          create(rb("agents-payments-flux", ORG, role="admin", subjects=[{"kind": "ServiceAccount", "name": "agents-payments", "namespace": FLUX_NS}]), as_=OP))
 
@@ -553,6 +582,12 @@ def prove_copies():
 
 
 def prove_sandbox():
+    """No Kyverno runs on this API server, so the PolicyException below
+    changes nothing here: what it proves is that the refusals come from the
+    ValidatingAdmissionPolicies (named in each refusal), which check_render
+    shows are admissionregistration.k8s.io objects. A Kyverno
+    PolicyException excepts from Kyverno's own policies only; it has no
+    field that names a ValidatingAdmissionPolicy."""
     must(create({"apiVersion": "kyverno.io/v2", "kind": "PolicyException", "metadata": {"name": "agents-everything", "namespace": "kagent"},
                  "spec": {"exceptions": [{"policyName": "*", "ruleNames": ["*"]}],
                           "match": {"any": [{"resources": {"namespaces": ["agents-*"], "kinds": ["*"]}}]}}}, dry=False),

@@ -18,7 +18,9 @@ these.
     writes RoleBindings only in organization namespaces, ServiceAccounts only
     there or in agentPlatformOrganizations.fluxNamespace, and Kustomizations
     only in fluxNamespace; there only objects labelled
-    agent-platform.giantswarm.io/organization-uid, before and after the write.
+    agent-platform.giantswarm.io/organization-uid, before and after the write,
+    and a Kustomization names a spec.serviceAccountName for Flux to
+    impersonate.
   * agent-platform-organization-labels: only the operator's ServiceAccount
     sets, changes or removes the three organization labels of a namespace, on
     CREATE and UPDATE. kagent's authorization, Substrate's credential grants
@@ -26,8 +28,8 @@ these.
   * agent-platform-organizations-admin-rolebindings: a requester who may
     create AgentPlatformOrganizations in a namespace that is no organization
     namespace (agent-platform:organizations-admin's own right) and may not
-    escalate Roles there (a cluster-admin, or a namespace's admin) writes no
-    RoleBinding there.
+    create Roles there (as a cluster-admin or the namespace's built-in admin
+    may) writes no RoleBinding there.
   * agent-platform-organization-admins-binding: the RoleBinding
     organization-admins of an organization namespace binds agent-platform:admin
     to at least one subject; it is not deleted or emptied while the namespace
@@ -35,8 +37,9 @@ these.
     this one name is held; a lockout is a cluster-admin's to fix.
   * agent-platform-organization-rolebinding-subjects: a RoleBinding in an
     organization namespace binds no system:* group or user and no
-    ServiceAccount of another namespace (the operator's own bindings aside: it
-    binds the organization's Flux ServiceAccount, which lives in fluxNamespace).
+    ServiceAccount of another namespace, whoever writes it; only the operator
+    binds a ServiceAccount of fluxNamespace (the organization's Flux
+    ServiceAccount).
   * agent-platform-organization-helmreleases: for every requester but the
     operator, an organization's Flux ServiceAccount included, a HelmRelease in
     an organization namespace installs the agent chart from the namespace's
@@ -83,6 +86,9 @@ controllers) is the same pair of policies as a tenant's
 {{- $helmSA := required "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: an organization's HelmReleases run as it" (include "agent-platform.kagent.fluxServiceAccountName" .) }}
 {{- $chartSource := include "agent-platform.organizations.chartSource" . }}
 {{- $collectors := "['system:serviceaccount:kube-system:namespace-controller', 'system:serviceaccount:kube-system:generic-garbage-collector']" }}
+{{- if not $values.apiHostnames }}
+{{- fail "agentPlatformOrganizations.apiHostnames must name the installation's Kubernetes API hostnames: an organization's EgressPolicy may not name them" }}
+{{- end }}
 {{- $apiHosts := list }}
 {{- range ($values.apiHostnames | default list) }}{{ $apiHosts = append $apiHosts (squote (lower .)) }}{{ end }}
 ---
@@ -174,6 +180,13 @@ spec:
     - expression: "request.resource.resource != 'kustomizations' || variables.organizationObject"
       reason: Forbidden
       messageExpression: {{ printf "'the agent-platform-operator writes %s; refused: ' + request.namespace + '/' + request.name" (ternary (printf "only Kustomizations labelled %s in %s" $uidLabel $fluxNs) "no Kustomization (agentPlatformOrganizations.fluxNamespace is empty)" (ne $fluxNs "")) | quote }}
+    # Flux impersonates spec.serviceAccountName; without one,
+    # kustomize-controller applies with its own identity.
+    - expression: >-
+        request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
+        (has(object.spec) && has(object.spec.serviceAccountName) && object.spec.serviceAccountName != '')
+      reason: Forbidden
+      messageExpression: "'a Kustomization of the agent-platform-operator names the organization Flux ServiceAccount in spec.serviceAccountName; refused: ' + request.namespace + '/' + request.name"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -246,12 +259,13 @@ spec:
         resources: ["rolebindings"]
   matchConditions:
     # agent-platform:organizations-admin's own right, in this namespace, by a
-    # ClusterRoleBinding or a RoleBinding here; a cluster-admin, or an admin
-    # of this namespace, may escalate Roles here and is not held.
+    # ClusterRoleBinding or a RoleBinding here; a requester who may create
+    # Roles here (a cluster-admin, the built-in admin of this namespace) is
+    # not held.
     - name: organizations-admin
       expression: >-
         authorizer.group('agent-platform.giantswarm.io').resource('agentplatformorganizations').namespace(request.namespace).check('create').allowed() &&
-        !authorizer.group('rbac.authorization.k8s.io').resource('roles').namespace(request.namespace).check('escalate').allowed()
+        !authorizer.group('rbac.authorization.k8s.io').resource('roles').namespace(request.namespace).check('create').allowed()
   validations:
     - expression: "false"
       reason: Forbidden
@@ -324,16 +338,16 @@ spec:
         apiVersions: ["v1"]
         operations: ["CREATE", "UPDATE"]
         resources: ["rolebindings"]
-  matchConditions:
-    - name: not-operator
-      expression: {{ printf "request.userInfo.username != '%s'" $operator | quote }}
   variables:
     # A system: identity (a group or a user) other than a ServiceAccount of
-    # this namespace, or a ServiceAccount of another namespace.
+    # this namespace, or a ServiceAccount of another namespace: for the
+    # operator, but one of the Flux namespace, the organization's Flux
+    # ServiceAccount.
     - name: refused
       expression: >-
         (has(object.subjects) ? object.subjects : []).filter(s,
-        (s.kind == 'ServiceAccount' && has(s.namespace) && s.namespace != request.namespace) ||
+        (s.kind == 'ServiceAccount' && has(s.namespace) && s.namespace != request.namespace{{ if $fluxNs }} &&
+        !(request.userInfo.username == {{ squote $operator }} && s.namespace == {{ squote $fluxNs }}){{ end }}) ||
         (s.kind != 'ServiceAccount' && s.name.startsWith('system:') &&
         !(s.kind == 'User' && s.name.startsWith('system:serviceaccount:' + request.namespace + ':'))))
   validations:
