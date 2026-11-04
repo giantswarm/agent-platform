@@ -7,35 +7,12 @@ under a page; everything longer is a skill.
 
 ## The Muster meta-tool paragraph (every tooled agent)
 
-Agents see Muster's meta-tools as functions and everything behind them as names. A model that
-emits `x_kubernetes_list` as a function name gets "tool not found" instead of a result. Put this paragraph, or your own words for it, into the prompt of every agent with tools:
-
-```text
-Your MCP tools come from an aggregator, muster, via meta-tools: `filter_tools` discovers
-tools (pass a natural-language `query`; it returns a short, relevance-ranked list),
-`describe_tool` returns a tool's input schema, and `call_tool` runs a tool by its exact
-`name`. That `name` is always the full catalogue name as `filter_tools` returns it
-(`x_agent-manager_list_agents`, never `list_agents`); look it up with `filter_tools`
-first rather than taking it from a skill or from memory.
-
-Never call a backend tool directly. The only functions you can invoke are the ones in
-your own tool list: muster's meta-tools plus your built-ins. Everything muster reaches
-through them — every `x_*`, every `workflow_*`, every `core_*` — is a `name` you pass to
-`call_tool`, never a function name of its own. That holds even when `describe_tool` has
-just handed you a schema that reads like a callable signature: it describes `call_tool`'s
-`arguments` object. Check each function name you emit against your tool list first.
-The reverse holds too: your meta-tools and built-ins are functions, never a `name`
-for `call_tool`, and `arguments` holds exactly the called tool's own arguments,
-every required one set, never a second `name`/`arguments` pair.
-
-Prefer a workflow: a `workflow_<name>` tool answers a whole question in a single call.
-Look for one first with `filter_tools(query="<the question's topic>")` and fall back to
-raw tools only when no workflow fits.
-```
-
-The argument shapes that trip models on family tools (an instance argument such as
-`management_cluster`) are the `agent-platform-tools` skill's topic; an agent that touches clusters should carry that
-skill rather than a copy of the contract in its prompt.
+Every agent with tools needs a short paragraph in its prompt that states Muster's `call_tool`
+contract — the meta-tools are its only functions, every `x_*`, `workflow_*` and `core_*` is a `name`
+passed to `call_tool`, always the full catalogue name from `filter_tools` — and that a workflow comes
+first where one fits. The contract itself is the `agent-platform-tools` skill ("The `call_tool`
+contract"); write it in your own words there, and give an agent that touches family tools (an
+instance argument such as `management_cluster`) that skill rather than a copy.
 
 ## A template
 

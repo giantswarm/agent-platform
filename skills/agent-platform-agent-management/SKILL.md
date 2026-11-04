@@ -1,6 +1,6 @@
 ---
 name: agent-platform-agent-management
-description: Use when asked to create, change, inspect, troubleshoot, re-pin the skills of or delete an agent, to choose its model, skills, toolset, egress or Harness, or to read or evaluate one of its sessions, on the Agent Platform — through agent-manager's tools (x_agent-manager_* via call_tool), the Dev Portal, or a GitOps HelmRelease of the agent chart. Covers the agent unit, how each agent is managed (helmrelease, gitops, platform, none), the working shape from validate to ready, the rules for name, model, toolset, skills, egress and system prompt, the status verdict, and reading a whole session.
+description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
 metadata:
   version: "3.0.0"
 ---
@@ -73,8 +73,8 @@ never assume an argument. The order:
   config never boots. No suitable model: `agent-platform-tools` (model-manager).
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only
   on an explicit request.
-- **Skills**: always pinned (the tools pin at write time). A private repository needs a credential:
-  `gitAuthSecretName`, else the installation's (`get_info`). Details: `agent-platform-skill-authoring`.
+- **Skills**: always pinned (the tools pin at write time); pins and private repositories:
+  `agent-platform-skill-authoring`.
 - **Egress**: none unless the job needs an origin; a named `EgressPolicy` where one fits, raw origins otherwise.
   Tenant admins write policies; a change to one reaches its agents from their next session.
 - **System prompt**: role, voice and rules; knowledge goes into skills. Every agent with tools carries
@@ -105,7 +105,7 @@ its prompt, skills or toolset. agent-manager reads sessions as the person:
   `get_session_turn` for one turn, or with `toolCall` for one call's arguments and full response.
 - **The whole session, for an evaluation**: `get_session` with `detail: full` and a large `maxBytes`
   (the schema gives the range) answers every turn verbatim — far more than a context window holds.
-  Write it to a file:
+  Write it to a file from a laptop with the `muster` CLI (not from inside an agent):
   `muster call x_agent-manager_get_session --json '{"sessionId": "…", "detail": "full", "maxBytes": …}' --output json > session.json`
   after `muster auth login`. `omittedTurns` in the answer means it is not whole.
 - The answer is everything the agent saw, unredacted: customer data. Keep it out of chats, tickets
