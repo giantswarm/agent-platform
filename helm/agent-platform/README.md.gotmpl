@@ -37,11 +37,20 @@ the path, tag and digest kept, in:
   runtime images, Substrate's worker and third-party images, the agent chart
   agent-manager installs, ...);
 - the hook images (`gitops.hooks.image`, `gitops.hooks.helmImage`);
-- the connectivity chart's model-serving presets: their runtime images
-  (`modelServing.runtimeImages.registry`) and OCI model images
-  (`modelServing.modelImages.registry`; an own value stands).
+- the connectivity chart's model-serving presets: their runtime images on
+  gsoci.azurecr.io (`modelServing.runtimeImages.registry`; an image an own
+  preset names on another registry, or a Docker Hub short name, stays as
+  written) and OCI model images (`modelServing.modelImages.registry`; an own
+  value stands);
+- model-manager's registry egress (`modelManager.networkPolicy.registry`, the
+  kserve backend's fit checks) while it names gsoci.azurecr.io: the mirror's
+  host, without the port, as the one FQDN, and its port as `ports` (443 when
+  it names none). An own list without gsoci stands; under the kubernetes
+  flavor, `registry.cidrs` with the mirror's blocks narrows the egress to its
+  port.
 
-A per-source key set to another registry is left as written. The bundled
+A per-source key set to another registry is left as written, and so are DNS
+names (`fqdns`, `matchName`, `matchPattern`): a host:port is no FQDN. The bundled
 engine's images are `flux-engine.operator.image.registry` and
 `flux-engine.instance.distribution.registry`. The OCIRepositories pull with
 `secretRef` and trust `certSecretRef`; the images are pulled by the nodes,

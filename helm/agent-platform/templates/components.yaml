@@ -357,6 +357,24 @@ mirror (an own modelImages.registry stands). */ -}}
 {{- $_ := set $vals.modelServing "modelImages" (mergeOverwrite (dig "modelImages" dict $vals.modelServing) (dict "registry" $mirror)) }}
 {{- end }}
 {{- end }}
+{{- /* model-manager's registry egress (the kserve backend's fit checks) follows
+the mirror while it still names gsoci.azurecr.io (the default): the mirror's
+host, without its port, as the one FQDN, and its port (443 when it names
+none). An installation's own list, without gsoci, stands. */ -}}
+{{- if eq $key "agent-platform-connectivity" }}
+{{- $reg := dig "modelManager" "networkPolicy" "registry" dict $vals }}
+{{- $onSource := false }}
+{{- range (get $reg "fqdns" | default list) }}
+{{- if and (kindIs "map" .) (eq (toString (get . "matchName")) (include "agent-platform.mirror.source" $root)) }}{{- $onSource = true }}{{- end }}
+{{- end }}
+{{- if $onSource }}
+{{- $hostPort := splitList ":" $mirror }}
+{{- $port := 443 }}
+{{- if gt (len $hostPort) 1 }}{{- $port = last $hostPort | int }}{{- end }}
+{{- $_ := set $reg "fqdns" (list (dict "matchName" (first $hostPort))) }}
+{{- $_ := set $reg "ports" (list $port) }}
+{{- end }}
+{{- end }}
 {{- include "agent-platform.mirror.values" (dict "values" $vals "mirror" $mirror) }}
 {{- end }}
 {{- /* Drop dependsOn references to components that are toggled off, so an

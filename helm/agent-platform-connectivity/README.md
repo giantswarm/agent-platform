@@ -1729,6 +1729,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelManager.networkPolicy.registry.fqdns[0].matchName | string | `"gsoci.azurecr.io"` |  |
 | modelManager.networkPolicy.registry.fqdns[1].matchPattern | string | `"*.blob.core.windows.net"` |  |
 | modelManager.networkPolicy.registry.cidrs | list | `[]` |  |
+| modelManager.networkPolicy.registry.ports[0] | int | `443` |  |
 | modelManager.networkPolicy.workloadClusters | object | `{}` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |

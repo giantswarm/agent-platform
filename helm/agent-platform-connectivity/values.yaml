@@ -2575,6 +2575,11 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # huggingFace.cidrs; a list narrows the registry egress to these blocks.
       # The cilium flavor adds them next to the names.
       cidrs: []
+      # The registry's ports, for the names and the blocks above (the
+      # kubernetes flavor's every-public-destination default stays 443). The
+      # meta chart's mirror (gitops.mirror.registry host:port) sets its port
+      # here and its host, without the port, as the one matchName.
+      ports: [443]
     # The workload clusters' API servers the kserve backend calls as the caller:
     # a backend cluster-manager registers targets a workload cluster's apiserver
     # (list_backends, loads and fits all go there). Same shape as

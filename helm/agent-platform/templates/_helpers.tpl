@@ -5192,14 +5192,18 @@ Usage: include "agent-platform.mirror.ref" (dict "ref" $s "mirror" $registry)
 {{/*
 Move every source reference of a values tree onto the mirror, in place: maps
 and lists are walked, each string is passed through agent-platform.mirror.ref.
-Numbers and booleans stay untouched (no JSON round trip).
+Numbers and booleans stay untouched (no JSON round trip). Keys that name DNS
+names rather than sources (Cilium FQDN selectors: fqdns, matchName,
+matchPattern) are left as written: a host:port is no FQDN. A list nested
+directly in a list is kept as written too; no values carry one.
 Usage: include "agent-platform.mirror.values" (dict "values" $vals "mirror" $registry)
 */}}
 {{- define "agent-platform.mirror.values" -}}
 {{- $mirror := .mirror -}}
 {{- $v := .values -}}
 {{- range $k, $x := $v -}}
-{{- if kindIs "string" $x -}}
+{{- if has $k (list "fqdns" "matchName" "matchPattern") -}}
+{{- else if kindIs "string" $x -}}
 {{- $_ := set $v $k (include "agent-platform.mirror.ref" (dict "ref" $x "mirror" $mirror)) -}}
 {{- else if kindIs "map" $x -}}
 {{- include "agent-platform.mirror.values" (dict "values" $x "mirror" $mirror) -}}
