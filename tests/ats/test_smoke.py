@@ -732,7 +732,7 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     # Manager is a platform release (components.agent-manager-assistant).
     assert agents_before == sorted((DECLARATIVE_AGENT, MANAGED_AGENT, ASSISTANT_AGENT)), agents_before
     assert not kube.items("agenttemplates.api.kagent.dev", namespace=KAGENT_NAMESPACE), "an AgentTemplate exists although every agent of the smoke carries its template inline"
-    assert servers_before == sorted((MANAGED_AGENT, KAGENT_API_SERVER)), servers_before
+    assert servers_before == sorted((MANAGED_AGENT, KAGENT_API_SERVER, ASSISTANT_AGENT)), servers_before
     try:
         elapsed = helm.uninstall()
     except AssertionError:
