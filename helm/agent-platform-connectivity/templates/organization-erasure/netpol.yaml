@@ -1,17 +1,76 @@
 {{- /*
-Ingress to kagent's controller API from agent-platform-operator (additive to
-the controller's own ingress policy: the gateway and the UI): the erasure of a
-deleted organization lists and deletes its Sessions there, directly, as the
-operator's ServiceAccount (the route's JWT policy takes people's tokens only).
+agent-platform-operator's network (agentPlatformOrganizations.enabled, with
+networkPolicy.enabled; both flavors). The operator's pods carry the operator
+chart's selector label (agent-platform.organizations.operatorPodLabels) in
+this release's namespace.
+
+  * <name>-operator-egress: what the operator's pods reach, and nothing else:
+    the cluster DNS, the API server, the kagent controller's API port (8083:
+    the erasure lists and deletes a deleted organization's Sessions there,
+    directly, as the operator's ServiceAccount; the route's JWT policy takes
+    people's tokens only), Substrate's ate-api-server on 443 (the erasure asks
+    it until a deleted organization has no actor left) and, with the AWS
+    snapshot store, the world on 443 (S3, where it deletes the organization's
+    snapshots, and STS, where it exchanges its IRSA token).
+  * <name>-operator-to-kagent-controller: the controller's side of that call
+    (additive to the controller's own ingress policy: the gateway and the UI).
+  * <name>-operator-to-ate-api: ate-api-server's side (additive to
+    substrate-ate-api-server, which admits Substrate's components and the
+    kagent controller).
 */ -}}
-{{- if and (dig "enabled" false (.Values.organizationErasure | default dict)) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.networkPolicy.enabled }}
-{{- $e := .Values.organizationErasure }}
-{{- $sa := include "agent-platform.organizationErasure.serviceAccount" . | fromJson }}
+{{- if and (include "agent-platform.organizations.enabled" .) .Values.networkPolicy.enabled }}
+{{- $sa := include "agent-platform.organizations.operatorServiceAccount" . | fromJson }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- /* The kagent controller's API port, as the controller's own policies name it. */ -}}
 {{- $controllerPort := "8083" }}
-{{- $pods := required "organizationErasure.operatorPodLabels must name the operator's pod labels" $e.operatorPodLabels }}
+{{- $pods := include "agent-platform.organizations.operatorPodLabels" . | fromYaml }}
+{{- $substrate := include "agent-platform.substrate.enabled" . }}
+{{- $substrateNs := include "agent-platform.substrate.namespace" . }}
+{{- $s3 := eq (include "agent-platform.substrateStore.crossplane" .) "aws" }}
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-operator-egress
+  namespace: {{ $sa.namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- toYaml $pods | nindent 6 }}
+  egress:
+    {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    - toEntities:
+        - kube-apiserver
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/component: controller
+            app.kubernetes.io/name: kagent
+            io.kubernetes.pod.namespace: {{ $kagentNs }}
+      toPorts:
+        - ports:
+            - port: {{ $controllerPort | quote }}
+              protocol: TCP
+    {{- if $substrate }}
+    - toEndpoints:
+        - matchLabels:
+            app: ate-api-server
+            io.kubernetes.pod.namespace: {{ $substrateNs }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
+    {{- if $s3 }}
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -34,7 +93,85 @@ spec:
         - ports:
             - port: {{ $controllerPort | quote }}
               protocol: TCP
+{{- if $substrate }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-operator-to-ate-api
+  namespace: {{ $substrateNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: ate-api-server
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            {{- toYaml $pods | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ $sa.namespace }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+{{- end }}
 {{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-operator-egress
+  namespace: {{ $sa.namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $pods | nindent 6 }}
+  policyTypes: [Egress]
+  egress:
+    {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.kubernetes.apiServerCIDR | quote }}
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $kagentNs }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: controller
+              app.kubernetes.io/name: kagent
+      ports:
+        - port: {{ $controllerPort | int }}
+          protocol: TCP
+    {{- if $substrate }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $substrateNs }}
+          podSelector:
+            matchLabels:
+              app: ate-api-server
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
+    {{- if $s3 }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: {{ toYaml .Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+      ports:
+        - port: 443
+          protocol: TCP
+    {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -60,5 +197,31 @@ spec:
       ports:
         - port: {{ $controllerPort | int }}
           protocol: TCP
+{{- if $substrate }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-operator-to-ate-api
+  namespace: {{ $substrateNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: ate-api-server
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $sa.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $pods | nindent 14 }}
+      ports:
+        - port: 443
+          protocol: TCP
+{{- end }}
 {{- end }}
 {{- end }}

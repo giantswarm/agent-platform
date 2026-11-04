@@ -231,10 +231,6 @@ spec:
       apiHostnames: []
       enabled: false
       fluxNamespace: ""
-      operator:
-        serviceAccount:
-          name: agent-platform-operator
-          namespace: ""
     agentSandbox:
       podSecurity:
         containerSecurityContext:
@@ -609,7 +605,7 @@ spec:
           groupsPrefix: ""
           includeNamespaces: []
           mode: kubernetes
-          namespaceSelector: giantswarm.io/organization
+          namespaceSelector: ""
           usernamePrefix: ""
         env:
         - name: KAGENT_EXTENSIONS_OIDC_ISSUERS
@@ -625,7 +621,7 @@ spec:
         - name: KAGENT_EXTENSIONS_AUTHORIZATION_MODE
           value: kubernetes
         - name: KAGENT_EXTENSIONS_NAMESPACE_SELECTOR
-          value: giantswarm.io/organization
+          value: agent-platform.giantswarm.io/organization
         - name: KAGENT_EXTENSIONS_INCLUDE_NAMESPACE
           value: kagent
         - name: KAGENT_EXTENSIONS_MACHINE_AUDIENCE
@@ -1249,13 +1245,6 @@ spec:
       substrate:
         credentialProvider:
           egressFQDNs: []
-    organizationErasure:
-      enabled: false
-      operatorPodLabels:
-        app.kubernetes.io/name: agent-platform-operator
-      operatorServiceAccount:
-        name: agent-platform-operator
-        namespace: ""
     postgres:
       affinity: {}
       applicationDatabase:
@@ -1915,7 +1904,7 @@ spec:
         includeNamespaces:
         - kagent
         mode: kubernetes
-        namespaceSelector: giantswarm.io/organization
+        namespaceSelector: agent-platform.giantswarm.io/organization
         usernamePrefix: ""
       env:
       - name: KAGENT_EXTENSIONS_OIDC_ISSUERS
@@ -1931,7 +1920,7 @@ spec:
       - name: KAGENT_EXTENSIONS_AUTHORIZATION_MODE
         value: kubernetes
       - name: KAGENT_EXTENSIONS_NAMESPACE_SELECTOR
-        value: giantswarm.io/organization
+        value: agent-platform.giantswarm.io/organization
       - name: KAGENT_EXTENSIONS_INCLUDE_NAMESPACE
         value: kagent
       - name: KAGENT_EXTENSIONS_MACHINE_AUDIENCE

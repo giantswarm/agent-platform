@@ -72,7 +72,7 @@ their WorkerPools: agent-manager's tenant reconciler in the tenants'
 namespaces, agent-platform-operator in the Agent Platform organizations'. */}}
 {{- $sets := list }}
 {{- if include "agent-platform.tenants.organizations" . }}
-{{- $sets = append $sets (dict "prefix" "agent-platform-tenant" "where" "an Organization namespace" "writerName" "agent-manager" "writer" (include "agent-platform.agentManager.serviceAccountUser" .) "namespaces" (dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists") (dict "key" "kubernetes.io/metadata.name" "operator" "NotIn" "values" (list $kagentNs))))) }}
+{{- $sets = append $sets (dict "prefix" "agent-platform-tenant" "where" "an Organization namespace" "writerName" "agent-manager" "writer" (include "agent-platform.agentManager.serviceAccountUser" .) "namespaces" (include "agent-platform.orgNamespaces.selector" . | fromYaml)) }}
 {{- end }}
 {{- if include "agent-platform.organizations.enabled" . }}
 {{- $sets = append $sets (dict "prefix" "agent-platform-organization" "where" "an organization namespace" "writerName" "agent-platform-operator" "writer" (include "agent-platform.organizations.operatorUser" .) "namespaces" (include "agent-platform.organizations.namespaces" . | fromYaml)) }}

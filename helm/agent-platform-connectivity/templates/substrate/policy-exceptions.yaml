@@ -35,8 +35,10 @@ renders for a WorkerPool) and holds the lists to them:
     the Substrate line from 1.1.0): non-root user, drops ALL,
     allowPrivilegeEscalation false, read-only root — but no seccompProfile.
 
-With tenants.organizations.enabled a second exception, substrate-workers-tenants,
-matches the same workers in every namespace labelled giantswarm.io/organization,
+With tenants.organizations.enabled or agentPlatformOrganizations.enabled a
+second exception, substrate-workers-tenants, matches the same workers in every
+organization namespace (labelled giantswarm.io/organization in the tenants
+mode, agent-platform.giantswarm.io/organization in the organizations mode),
 by a namespaceSelector, and only when Substrate's controller chain writes them
 (agent-platform#1036; the comment at it says why).
 
@@ -103,9 +105,11 @@ spec:
           matchExpressions:
           - key: ate.dev/worker-pool
             operator: Exists
-{{- if include "agent-platform.tenants.organizations" . }}
-{{- /* The same workers in the Organizations' namespaces
-(tenants.organizations.enabled): selected by the namespace's label, never
+{{- if include "agent-platform.orgNamespaces.enabled" . }}
+{{- /* The same workers in the organizations' namespaces
+(tenants.organizations.enabled or agentPlatformOrganizations.enabled): selected
+by the namespace's label of the mode that is on
+(agent-platform.orgNamespaces.label), never
 listed (Kyverno matches an exception's namespaceSelector from 1.15.2,
 kyverno/kyverno#13975). An Organization's admins may write pods there, so a
 matching label is no proof that Substrate made the pod: each kind is excepted
@@ -138,7 +142,7 @@ spec:
         - {{ $kind }}
         namespaceSelector:
           matchExpressions:
-          - key: giantswarm.io/organization
+          - key: {{ include "agent-platform.orgNamespaces.label" $ }}
             operator: Exists
         selector:
           matchExpressions:

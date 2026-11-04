@@ -233,6 +233,7 @@ knowledge:
 {{- include "agent-platform.validateKagentCrds" . -}}
 {{- include "agent-platform.validateKagentSubcharts" . -}}
 {{- include "agent-platform.validateWorkspaces" . -}}
+{{- include "agent-platform.validateOrganizations" . -}}
 {{- include "agent-platform.validateWorkspaceAuth" . -}}
 {{- include "agent-platform.validateKagentLineCrossing" . -}}
 {{- include "agent-platform.validateKagentDatabase" . -}}

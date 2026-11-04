@@ -198,9 +198,9 @@ spec:
     - name: pods
       expression: "has(request.userInfo.extra) && 'authentication.kubernetes.io/pod-name' in request.userInfo.extra ? request.userInfo.extra['authentication.kubernetes.io/pod-name'] : []"
   validations:
-    - expression: "has(namespaceObject.metadata.labels) && 'giantswarm.io/organization' in namespaceObject.metadata.labels"
+    - expression: {{ printf "has(namespaceObject.metadata.labels) && '%s' in namespaceObject.metadata.labels" (include "agent-platform.orgNamespaces.label" .) | quote }}
       reason: Forbidden
-      messageExpression: {{ printf "'%s writes HelmReleases only in the Organization namespaces (giantswarm.io/organization) and %s; refused in ' + request.namespace" $sa $kagentNs | quote }}
+      messageExpression: {{ printf "'%s writes HelmReleases only in the Organization namespaces (%s) and %s; refused in ' + request.namespace" $sa (include "agent-platform.orgNamespaces.label" .) $kagentNs | quote }}
     - expression: "request.operation == 'UPDATE'"
       reason: Forbidden
       messageExpression: {{ printf "'%s only updates HelmReleases in an Organization namespace; refused: ' + request.operation" $sa | quote }}

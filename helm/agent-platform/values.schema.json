@@ -146,6 +146,10 @@
             "type": "object",
             "additionalProperties": true
         },
+        "agent-platform-operator": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "agentManager": {
             "type": "object",
             "additionalProperties": true
@@ -156,37 +160,18 @@
             "properties": {
                 "apiHostnames": {
                     "type": "array",
-                    "description": "The installation's Kubernetes API hostnames: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. Required with enabled: the render fails while it is empty.",
+                    "description": "The installation's Kubernetes API hostnames beside api.<global.domain>, which is derived while global.domain is set: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. The render fails while both are empty.",
                     "items": {
                         "type": "string"
                     }
                 },
                 "enabled": {
                     "type": "boolean",
-                    "description": "Render the organizations' role and admission policies. Needs kagent (components.kagent.enabled) and kagent.fluxServiceAccountName: the render fails without them."
+                    "description": "Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate and kagent.fluxServiceAccountName: the render fails without them, and with tenants.organizations.enabled on."
                 },
                 "fluxNamespace": {
                     "type": "string",
-                    "description": "The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode). Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces."
-                },
-                "operator": {
-                    "type": "object",
-                    "description": "The agent-platform-operator's ServiceAccount: the only writer of the organization labels on a namespace and of the operator's copies (labelled agent-platform.giantswarm.io/organization-object), and itself held to agents-* namespaces carrying the labels, RoleBindings there, and in fluxNamespace Kustomizations and ServiceAccounts it labels agent-platform.giantswarm.io/organization-uid. An empty namespace is the release namespace.",
-                    "additionalProperties": false,
-                    "properties": {
-                        "serviceAccount": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "properties": {
-                                "name": {
-                                    "type": "string"
-                                },
-                                "namespace": {
-                                    "type": "string"
-                                }
-                            }
-                        }
-                    }
+                    "description": "The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), and the operator's erasure.fluxNamespace (derived). Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces."
                 }
             }
         },
@@ -333,6 +318,42 @@
                         },
                         "injectGlobal": {
                             "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "agent-platform-operator": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "crds": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
+                        },
+                        "ownedCrds": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         },
                         "repository": {
                             "type": "string"
@@ -2509,39 +2530,6 @@
                                     }
                                 }
                             }
-                        }
-                    }
-                }
-            }
-        },
-        "organizationErasure": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "enabled": {
-                    "type": "boolean",
-                    "description": "Grant agent-platform-operator's ServiceAccount the erasure's access."
-                },
-                "operatorPodLabels": {
-                    "type": "object",
-                    "description": "The labels of agent-platform-operator's pods: the kagent controller's API port admits them (with networkPolicy.enabled, both flavors).",
-                    "additionalProperties": true,
-                    "properties": {
-                        "app.kubernetes.io/name": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "operatorServiceAccount": {
-                    "type": "object",
-                    "description": "agent-platform-operator's ServiceAccount. An empty namespace is the connectivity release's namespace.",
-                    "additionalProperties": false,
-                    "properties": {
-                        "name": {
-                            "type": "string"
-                        },
-                        "namespace": {
-                            "type": "string"
                         }
                     }
                 }

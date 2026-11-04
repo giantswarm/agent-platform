@@ -14469,9 +14469,11 @@ spec:
 # gateway of kagent's exporters (the actors' traces and logs), the world on
 # every TCP port (the origins the actors' egress policies declare, on whatever
 # port they name: the policy is the control, this rule does not second-guess
-# it), and cluster:443/10443 (muster's OAuth endpoints on the public hostname
-# resolve to an internal LB VIP; 10443 is the Envoy listener after an Azure LB
-# DNAT).
+# it), and the pods of muster's public Gateway on 443/10443 (muster's OAuth
+# endpoints on the public hostname resolve to an internal LB VIP, which Cilium
+# translates to those pods; 10443 is the Envoy listener after an Azure LB
+# DNAT), selected by endpoint: no other in-cluster endpoint, and no
+# kube-apiserver.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -14531,8 +14533,9 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
-    - toEntities:
-        - kube-apiserver
+    # No kube-apiserver rule: the egress gateway runs without cluster access
+    # (it reads its policies from ate-api over gRPC), so such a rule would only
+    # serve the actors' traffic.
     - toEndpoints:
         - matchLabels:
             app: ate-api-server
@@ -14598,8 +14601,13 @@ spec:
         - ports:
             - port: "0"
               protocol: TCP
-    - toEntities:
-        - cluster
+    # muster's public hostname, inside the cluster: the pods of the Gateway its
+    # route attaches to, on 443 and 10443 (agent-platform.substrate.egressEdge),
+    # and no other in-cluster endpoint on those ports.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: envoy
+            io.kubernetes.pod.namespace: default
       toPorts:
         - ports:
             - port: "443"
@@ -15425,7 +15433,7 @@ spec:
   matchConstraints:
     namespaceSelector:
       matchExpressions:
-        - key: giantswarm.io/organization
+        - key: agent-platform.giantswarm.io/organization
           operator: Exists
         - key: kubernetes.io/metadata.name
           operator: NotIn
@@ -15471,7 +15479,7 @@ spec:
   matchConstraints:
     namespaceSelector:
       matchExpressions:
-        - key: giantswarm.io/organization
+        - key: agent-platform.giantswarm.io/organization
           operator: Exists
         - key: kubernetes.io/metadata.name
           operator: NotIn
@@ -15510,7 +15518,7 @@ spec:
   matchConstraints:
     namespaceSelector:
       matchExpressions:
-        - key: giantswarm.io/organization
+        - key: agent-platform.giantswarm.io/organization
           operator: Exists
         - key: kubernetes.io/metadata.name
           operator: NotIn
@@ -15547,7 +15555,7 @@ spec:
   matchConstraints:
     namespaceSelector:
       matchExpressions:
-        - key: giantswarm.io/organization
+        - key: agent-platform.giantswarm.io/organization
           operator: Exists
         - key: kubernetes.io/metadata.name
           operator: NotIn

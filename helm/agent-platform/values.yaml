@@ -1248,6 +1248,42 @@ components:  # @schema additionalProperties: true
     # connectivity release's values are exactly those of a chart that
     # predates it.
     gatedRoster: true
+  agent-platform-operator:  # @schema additionalProperties: true
+    chart: agent-platform-operator
+    # The Agent Platform organizations' operator
+    # (giantswarm/agent-platform-operator, giantswarm/giantswarm#38891): it
+    # reconciles each AgentPlatformOrganization (agent-platform.giantswarm.io)
+    # into its organization namespace, with the curated copies, and erases a
+    # deleted organization behind a finalizer. No `enabled` here: the
+    # component follows the one switch agentPlatformOrganizations.enabled
+    # (below), and an explicit value that disagrees with it fails the render
+    # (agent-platform.validateOrganizations). It installs into the connectivity
+    # release's namespace: the policies there name its ServiceAccount
+    # (agent-platform-operator, its chart's name), and another targetNamespace
+    # fails the render.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # The 0.1 line, release candidates included until 0.1.0 is promoted: the
+    # floor 0.1.0-rc.4 carries the CRD, the curated copies and the erasure
+    # (agent-platform-operator#2, #3, #7), and the `-0` ceiling keeps the
+    # candidates of the next minor out (a bare <0.2.0 admits 0.2.0-rc.N).
+    versionRange: ">=0.1.0-rc.4 <0.2.0-0"
+    valuesFrom: agent-platform-operator
+    # App-owned CRD: the chart ships agentplatformorganizations in its crds/
+    # dir. CreateReplace makes Flux upgrade it with the app on every release
+    # (Helm never upgrades crds/-dir CRDs on its own). It owns its version, so
+    # no CRD dependsOn.
+    crds: CreateReplace
+    ownedCrds:
+      - agentplatformorganizations.agent-platform.giantswarm.io
+    # The connectivity release first: the admission policies that hold the
+    # operator, its kagent machine-caller binding, its network policies, and
+    # the ConfigMap with ate-api-server's serving roots that its pod mounts
+    # (written by the substrate bootstrap hook). Connectivity orders nothing
+    # after this release, so no cycle.
+    dependsOn: [agent-platform-connectivity]
+    # The roster entry reaches the connectivity release only while the
+    # component is on (see components.yaml, gatedRoster).
+    gatedRoster: true
   # --- The standalone chart's extras -------------------------------------------
   # The components the agent-platform-standalone umbrella carried as Helm
   # dependencies on top of the fleet's roster: Backstage, mcp-kubernetes, the
@@ -1588,6 +1624,10 @@ components:  # @schema additionalProperties: true
       # The well-known configs' values (components.kserve-runtime-configs); no
       # wiring reads them, so the connectivity chart never sees the block.
       - kserve-runtime-configs
+      # agent-platform-operator's values (components.agent-platform-operator);
+      # the connectivity chart reads agentPlatformOrganizations, never this
+      # block.
+      - agent-platform-operator
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -2939,6 +2979,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     # mode this chart derives onto the kagent release:
     #   - includeNamespaces, while it is empty: the kagent namespace, the
     #     platform tenant, which carries no organization label;
+    #   - namespaceSelector: the label of the organizations' namespaces;
     #   - serviceAccountTokenAudience, with workspaces on: the audience of the
     #     projected token workspace-manager calls the controller with
     #     (workspace-manager.kagent.tokenAudience, kagent unless set); an own
@@ -2964,9 +3005,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # Empty: Giant Swarm installations bind groups with no prefix; a lab
       # whose API server sets one (agentlab: oidc:) sets it here.
       groupsPrefix: ""
-      # The tenants a person's agent list ranges over: every Organization
-      # namespace, and includeNamespaces beside them.
-      namespaceSelector: giantswarm.io/organization
+      # The tenants a person's agent list ranges over: every organization
+      # namespace, and includeNamespaces beside them. Derived: the label of
+      # the organizations' namespaces, giantswarm.io/organization with
+      # tenants.organizations.enabled, else
+      # agent-platform.giantswarm.io/organization (agentPlatformOrganizations);
+      # an own value that differs fails the render.
+      namespaceSelector: ""
       includeNamespaces: []
     # kagent's jwt Session admission (controller.session.admission.jwt:
     # jwksURL, issuer, audience; the kagent chart from 1.6.0) is not set here:
@@ -5537,37 +5582,88 @@ tenants:
 # agent-platform-operator's) in a parent namespace owns an organization
 # namespace, agents-<name>-<random>, labelled
 # agent-platform.giantswarm.io/organization, /parent and /organization-uid.
-# On (with kagent on), the connectivity chart renders the ClusterRole
-# agent-platform:organizations-admin, bound to nobody, and the
-# ValidatingAdmissionPolicies that keep every writer of an organization in its
-# lane, the operator included (giantswarm/agent-platform#1267). Off, the
-# default, none of them renders.
+# Off, the default, nothing of it renders. On (with kagent and Agent Substrate
+# on), the meta chart installs agent-platform-operator
+# (components.agent-platform-operator, which follows this switch) into the
+# connectivity release's namespace, and the connectivity chart renders:
+#   - the ClusterRole agent-platform:organizations-admin, bound to nobody, and
+#     the ValidatingAdmissionPolicies that keep every writer of an
+#     organization in its lane, the operator included
+#     (giantswarm/agent-platform#1267);
+#   - the organization namespaces' share of the platform's policies, selected
+#     by the label agent-platform.giantswarm.io/organization: Substrate's
+#     credential provider reads each one's Secrets for its own atespace (and
+#     ate-golden's), the workers' Kyverno PolicyException and admission
+#     policies, the egress, credential and ModelConfig admission policies, the
+#     llm listener's base-URL policy, the workers' network peers, and kagent's
+#     authorizer lists a person's agents there
+#     (kagent.controller.authorization.namespaceSelector);
+#   - the operator's access for the erasure of a deleted organization
+#     (giantswarm/giantswarm#38988): the kagent controller admits its
+#     ServiceAccount as a machine caller that lists and deletes every
+#     creator's Sessions; its network policies (the cluster DNS, the API
+#     server, the kagent controller's API port, ate-api-server and, with the
+#     AWS snapshot store, S3 and STS); with the Crossplane AWS snapshot store
+#     the IAM role <store role>-operator, which deletes keys under an
+#     organization's UID prefix of the bucket only, named on the operator's
+#     ServiceAccount (IRSA). The capz and s3proxy stores give the operator no
+#     snapshot access yet: there the erasure stops at the snapshots' step;
+#   - the ConfigMap agent-platform-operator-ate-api-ca (the substrate bootstrap
+#     hook), ate-api-server's serving roots, which the operator verifies it
+#     with.
+# The operator's own values are the agent-platform-operator block below.
+# One mode at a time: with tenants.organizations.enabled on as well the render
+# fails, since kagent's authorizer and every policy select one namespace
+# label. agent-manager's tenant reconciler stays off while this is on.
+# Before you turn this on in an installation: the kagent line must carry
+# giantswarm/kagent-extensions#27 (kagent reviews a delete of another
+# creator's Session as a cluster-wide `delete`); until it does, the erasure of
+# an organization that holds a person's Session stops at the Sessions' step,
+# with the reason, and erases nothing after it.
 agentPlatformOrganizations:
-  # -- Render the organizations' role and admission policies. Needs kagent
-  # (components.kagent.enabled) and kagent.fluxServiceAccountName: the
-  # render fails without them.
+  # -- Install agent-platform-operator and render the organizations' role,
+  # admission policies and access. Needs kagent (components.kagent.enabled),
+  # Agent Substrate and kagent.fluxServiceAccountName: the render fails
+  # without them, and with tenants.organizations.enabled on.
   enabled: false
-  # -- The agent-platform-operator's ServiceAccount: the only writer of the
-  # organization labels on a namespace and of the operator's copies
-  # (labelled agent-platform.giantswarm.io/organization-object), and itself
-  # held to agents-* namespaces carrying the labels, RoleBindings there, and
-  # in fluxNamespace Kustomizations and ServiceAccounts it labels
-  # agent-platform.giantswarm.io/organization-uid. An empty namespace is the
-  # release namespace.
-  operator:
-    serviceAccount:
-      name: agent-platform-operator
-      namespace: ""
   # -- The namespace of the installation's Flux source, where the operator
   # keeps an organization's Kustomization and Flux ServiceAccount (commit
-  # mode). Empty: the operator writes no Kustomization and no ServiceAccount
-  # outside the organization namespaces.
+  # mode), and the operator's erasure.fluxNamespace (derived). Empty: the
+  # operator writes no Kustomization and no ServiceAccount outside the
+  # organization namespaces.
   fluxNamespace: ""
-  # -- The installation's Kubernetes API hostnames: an EgressPolicy in an
+  # -- The installation's Kubernetes API hostnames beside api.<global.domain>,
+  # which is derived while global.domain is set: an EgressPolicy in an
   # organization namespace may not name them, nor a wildcard origin that
   # covers one, beside the cluster-internal and host-local names it never
-  # names. Required with enabled: the render fails while it is empty.
+  # names. The render fails while both are empty.
   apiHostnames: []  # @schema item: string
+
+# === agent-platform-operator (components.agent-platform-operator) ===
+# Values forwarded to the agent-platform-operator release (see its chart's
+# values.yaml), while agentPlatformOrganizations.enabled is on. The meta chart
+# derives the wiring onto it, and an own value of one of these keys that
+# differs fails the render: platformNamespace (the kagent namespace);
+# networkPolicy.flavor and .names (the workers' policies it copies into every
+# organization namespace: substrate-workers with Cilium,
+# substrate-workers-ingress and substrate-workers-egress with Kubernetes
+# network policies, none with networkPolicy.enabled off);
+# helmReleaseServiceAccount (kagent.fluxServiceAccountName); agentChart.ociUrl,
+# .semver and .semverFilter (agent-manager.agentChart, widened by
+# gitops.prereleases as agent-manager's is); curated.enabled (true) and
+# curated.workerPool (kagent.substrateWorkerPool.name); snapshots.bucket (the
+# bucket or container of the Harness snapshot location,
+# kagent.harness.snapshotLocation) and snapshots.region (the Crossplane AWS
+# store's region); erasure.fluxNamespace (agentPlatformOrganizations.fluxNamespace);
+# erasure.kagent.target and .audience (the kagent controller's API Service and
+# the controller's machine audience); erasure.substrate.target, .audience and
+# .caConfigMap (ate-api-server's Service, the audience its authentication
+# config accepts, and the ConfigMap with its serving roots); and, with the
+# Crossplane AWS snapshot store, serviceAccount.annotations
+# eks.amazonaws.com/role-arn (the role <store role>-operator). Everything
+# else (erasure.snapshotDelay, objectQuota, syncPeriod, resources, image) is
+# yours.
+agent-platform-operator: {}  # @schema skipProperties: true; additionalProperties: true
 
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories
@@ -6264,36 +6360,6 @@ toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
     # App, https://github.com/apps/<slug>/installations/new; add_source names
     # it.
     appInstallURL: ""
-
-# === The erasure of deleted organizations (giantswarm/giantswarm#38988) ===
-# agent-platform-operator erases a deleted AgentPlatformOrganization: it lists
-# and deletes every creator's kagent sessions of the organization, and deletes
-# its worker snapshots under s3://<bucket>/<uid>. On, the kagent controller
-# admits its ServiceAccount as a machine caller, and the connectivity release
-# grants it what the erasure needs: the controller's API port, the ClusterRole
-# agent-platform:organization-erasure (cluster-wide list and delete on
-# sessions.api.kagent.dev, which kagent reviews with SubjectAccessReviews) with
-# kagent on, and, with the Crossplane snapshot store on AWS
-# (kagent.harness.snapshotStore.crossplane), the IRSA role
-# <the store's role name>-operator beside Substrate's, which lists and deletes
-# only under the organizations' prefixes: keys that start with a UID. The
-# operator's chart takes that role's ARN in serviceAccount.annotations. Off,
-# the default, nothing renders. kagent deletes another creator's session for
-# the operator only once giantswarm/kagent-extensions#27 ships in the kagent
-# line: until then the erasure of an organization with a person's session
-# stops at its Sessions step.
-organizationErasure:
-  # -- Grant agent-platform-operator's ServiceAccount the erasure's access.
-  enabled: false
-  # -- agent-platform-operator's ServiceAccount. An empty namespace is the
-  # connectivity release's namespace.
-  operatorServiceAccount:
-    name: agent-platform-operator
-    namespace: ""
-  # -- The labels of agent-platform-operator's pods: the kagent controller's
-  # API port admits them (with networkPolicy.enabled, both flavors).
-  operatorPodLabels:  # @schema additionalProperties: true
-    app.kubernetes.io/name: agent-platform-operator
 
 # === The standalone chart's extras: values blocks ===
 # One block per component of the agent-platform-standalone umbrella that joined

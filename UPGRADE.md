@@ -15,6 +15,17 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the organization label, and the egress gateway reaches only muster's Gateway in the cluster)
+
+giantswarm/agent-platform#1268: outside `tenants.organizations.enabled`, every policy of the organizations' namespaces and kagent's authorizer select `agent-platform.giantswarm.io/organization`, and the egress gateway `atenet-egress` loses its `kube-apiserver` rule and its rule to every in-cluster endpoint on 443 and 10443, which now names the pods of the Gateway muster's route attaches to.
+
+### Operator action
+
+- **None** for an installation with `tenants.organizations.enabled` on: its policies keep selecting `giantswarm.io/organization`.
+- **An installation that sets `kagent.controller.authorization.namespaceSelector`**: remove the key; it is derived, and an own value that differs fails the render.
+- **An agent that reaches an in-cluster endpoint on 443 or 10443 other than muster's Gateway, or the API server, through the egress gateway**: give it the endpoint's public name behind the Gateway, or reach it outside the agent. A server-side render that fails naming a pod on host networking: run the Gateway's proxy on pod networking, or point `ingress.parentRefs` at a Gateway that does.
+- **An installation that moves from the tenants mode to the organizations mode**: turn `tenants.organizations.enabled` off in the same change that turns `agentPlatformOrganizations.enabled` on (the render fails with both), with the installation's AgentPlatformOrganizations committed; the move job (giantswarm/giantswarm#38990) then moves the agents from `org-<name>`.
+
 ## \<current\> → \<next\> (editors no longer write the agent chart's OCIRepository)
 
 giantswarm/agent-platform#1267: `agent-platform:editor` and `agent-platform:admin` keep `get`, `list` and `watch` on `ocirepositories.source.toolkit.fluxcd.io` and lose `create`, `update`, `patch` and `delete`. agent-manager creates a namespace's `agent` OCIRepository as the caller when the first agent of that namespace is created, so in a namespace without one that first create is refused for a caller who holds no other right on OCIRepositories.

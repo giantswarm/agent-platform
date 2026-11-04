@@ -92,12 +92,12 @@ default-model-config
 
 {{/*
 "true" when a tenant's own ModelConfigs are admitted under the platform's
-rules (kagent on and tenants.organizations.enabled;
+rules (kagent on and either mode of agent-platform.orgNamespaces.enabled;
 giantswarm/agent-platform#759, templates/tenants/modelconfig-admission.yaml),
 else empty.
 */}}
 {{- define "agent-platform.tenants.modelConfigs" -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.tenants.organizations" .) }}true{{ end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.orgNamespaces.enabled" .) }}true{{ end -}}
 {{- end -}}
 
 {{/*
@@ -119,23 +119,74 @@ Usage: include "agent-platform.tenants.subjects" (list .Values.tenants.platform.
 {{- end -}}
 
 {{/*
-The worker pods of every namespace labelled giantswarm.io/organization, as one
-peer of a policy rule: a Cilium endpoint selector (Cilium carries a
-namespace's labels on its pods as io.cilium.k8s.namespace.labels.<key>), or a
-NetworkPolicy peer. The namespaces are selected by the label, never listed.
-Usage: include "agent-platform.tenants.organizationWorkers" "cilium"
+The organizations' namespaces, by mode. Two modes select them, never both at
+once (the render fails, agent-platform.organizations.enabled): the tenants
+mode (tenants.organizations.enabled, agent-manager's tenant reconciler over the
+Giant Swarm Organizations' org-<name> namespaces, labelled
+giantswarm.io/organization) and the organizations mode
+(agentPlatformOrganizations.enabled, agent-platform-operator's organization
+namespaces, labelled agent-platform.giantswarm.io/organization). Every policy
+that holds or admits an organization's namespace selects it by the label of
+the mode that is on; with neither on, by the organizations mode's label, so
+nothing selects giantswarm.io/organization outside the tenants mode.
+*/}}
+
+{{/* "true" when either mode is on, else empty. */}}
+{{- define "agent-platform.orgNamespaces.enabled" -}}
+{{- if or (include "agent-platform.tenants.organizations" .) (include "agent-platform.organizations.enabled" .) }}true{{ end -}}
+{{- end -}}
+
+{{/* The label of the organizations' namespaces (see above). */}}
+{{- define "agent-platform.orgNamespaces.label" -}}
+{{- if include "agent-platform.tenants.organizations" . -}}
+giantswarm.io/organization
+{{- else -}}
+{{- include "agent-platform.organizations.label" . -}}
+{{- end -}}
+{{- end -}}
+
+{{/* The switch of the mode that is on, for the render's messages. */}}
+{{- define "agent-platform.orgNamespaces.switch" -}}
+{{- if include "agent-platform.tenants.organizations" . -}}
+tenants.organizations.enabled
+{{- else -}}
+agentPlatformOrganizations.enabled
+{{- end -}}
+{{- end -}}
+
+{{/*
+The organizations' namespaces but the kagent namespace (the platform tenant),
+as a namespaceSelector in YAML.
+*/}}
+{{- define "agent-platform.orgNamespaces.selector" -}}
+matchExpressions:
+  - key: {{ include "agent-platform.orgNamespaces.label" . }}
+    operator: Exists
+  - key: kubernetes.io/metadata.name
+    operator: NotIn
+    values: [{{ .Values.kagent.namespaceOverride | default .Release.Namespace | quote }}]
+{{- end -}}
+
+{{/*
+The worker pods of every organization namespace, as one peer of a policy
+rule: a Cilium endpoint selector (Cilium carries a namespace's labels on its
+pods as io.cilium.k8s.namespace.labels.<key>), or a NetworkPolicy peer. The
+namespaces are selected by the label (agent-platform.orgNamespaces.label),
+never listed.
+Usage: include "agent-platform.tenants.organizationWorkers" (dict "root" $ "flavor" "cilium")
 */}}
 {{- define "agent-platform.tenants.organizationWorkers" -}}
-{{- if eq . "cilium" -}}
+{{- $label := include "agent-platform.orgNamespaces.label" .root -}}
+{{- if eq .flavor "cilium" -}}
 - matchExpressions:
     - key: ate.dev/worker-pool
       operator: Exists
-    - key: io.cilium.k8s.namespace.labels.giantswarm.io/organization
+    - key: io.cilium.k8s.namespace.labels.{{ $label }}
       operator: Exists
 {{- else -}}
 - namespaceSelector:
     matchExpressions:
-      - key: giantswarm.io/organization
+      - key: {{ $label }}
         operator: Exists
   podSelector:
     matchExpressions:

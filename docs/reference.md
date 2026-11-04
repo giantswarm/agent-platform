@@ -536,7 +536,7 @@ The platform's own component `HelmRelease`s need no tenant identity in an exempt
 
 ### A tenant's own model
 
-Each Organization namespace (labelled `giantswarm.io/organization`) that holds an agent gets a copy of the platform's `default-model-config` and its key Secret from agent-manager. A tenant that pays for its own model usage adds its own ModelConfig and key Secret in its namespace, and its agents select it by name. Another tenant's agents cannot, because a template names only ModelConfigs of its own namespace.
+In the tenants mode, each Organization namespace (labelled `giantswarm.io/organization`) that holds an agent gets a copy of the platform's `default-model-config` and its key Secret from agent-manager. A tenant that pays for its own model usage adds its own ModelConfig and key Secret in its namespace, and its agents select it by name. Another tenant's agents cannot, because a template names only ModelConfigs of its own namespace.
 
 This comes with `tenants.organizations.enabled` (and kagent). It needs `llmRouting.enabled`, a default provider the LLM listener serves, and `llmRouting.modelConfigPolicy.enabled`; the render fails otherwise. In every Organization namespace:
 
@@ -583,6 +583,15 @@ The chart cannot do these steps. Do them before you turn the switch on:
 - **Dex.** Dex must let muster's client (`muster.muster.oauth.server.dex.clientId`) ask for the audience of `mcp-kubernetes.kubernetesAudience`: the Dex client of that audience lists muster's client in its `trustedPeers`.
 - **The callbacks.** Each OAuth app of an MCP server in an Organization's namespace registers `<muster's public URL>/oauth/ns/<namespace>/callback`. The chart's NOTES print this URL.
 - **The client Secrets.** muster gets no read of an Organization's Secrets. For each MCP server there that names a client Secret (`clientCredentialsSecretRef`), whoever declares the server also declares a Role in that namespace that gives muster's ServiceAccount `get` on that Secret alone (`resourceNames`), and its RoleBinding. Without them, a sign-in to that server answers that it is not ready and names the Secret and the Role.
+
+### Agent Platform organizations
+
+`agentPlatformOrganizations.enabled` (off by default; [giantswarm/giantswarm#38891](https://github.com/giantswarm/giantswarm/issues/38891)) installs [agent-platform-operator](https://github.com/giantswarm/agent-platform-operator) (`components.agent-platform-operator`, which follows the switch) into the connectivity release's namespace. The operator reconciles each `AgentPlatformOrganization` (`agent-platform.giantswarm.io/v1alpha1`, its CRD under `crds: CreateReplace`) in a parent namespace into an organization namespace `agents-<name>-<random>`, labelled `agent-platform.giantswarm.io/organization`, with read-only copies of the curated objects of the kagent namespace, and erases a deleted organization behind a finalizer.
+
+- **The label.** Every policy of the organizations' namespaces and kagent's authorizer select `agent-platform.giantswarm.io/organization`: Substrate's credential-provider grants, the workers' PolicyException, admission policies and network peers, the egress, credential and ModelConfig admission policies, the `llm` listener's base-URL policy, and the namespaces a person's agent list ranges over (`kagent.controller.authorization.namespaceSelector`, derived). Only `tenants.organizations.enabled` selects `giantswarm.io/organization` instead; the render fails with both switches on, and agent-manager's tenant reconciler is off while the operator runs.
+- **The wiring.** The chart derives the operator's values from the platform's (the `agent-platform-operator` block in `values.yaml` lists them; an own value that differs fails the render): the curated copies, the workers' policies of the network flavour, the agent chart line, the snapshot bucket, the erasure's kagent and ate-api targets with their audiences and the ConfigMap `agent-platform-operator-ate-api-ca` (ate-api-server's serving roots, published by the substrate bootstrap hook), `agentPlatformOrganizations.fluxNamespace`, and with the Crossplane AWS snapshot store the IRSA role `<store role>-operator`. The capz and s3proxy stores give the operator no snapshot access yet.
+- **The API hostnames.** An organization's EgressPolicy may not name `api.<global.domain>` or an entry of `agentPlatformOrganizations.apiHostnames`.
+- **Before you turn it on:** kagent, Agent Substrate, `llmRouting.enabled` and `kagent.fluxServiceAccountName`; and the kagent line must carry [giantswarm/kagent-extensions#27](https://github.com/giantswarm/kagent-extensions/issues/27), or the erasure of an organization that holds a person's Session stops at the Sessions' step and erases nothing after it.
 
 ### OAuth secrets
 
