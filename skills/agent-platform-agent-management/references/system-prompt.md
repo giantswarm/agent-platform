@@ -8,14 +8,15 @@ under a page; everything longer is a skill.
 ## The Muster meta-tool paragraph (every tooled agent)
 
 Agents see Muster's meta-tools as functions and everything behind them as names. A model that
-emits `x_kubernetes_list` as a function name gets `Tool 'x_kubernetes_list' not found` and loses the
-turn. Put this paragraph, or your own words for it, into the prompt of every agent with tools:
+emits `x_kubernetes_list` as a function name gets "tool not found" instead of a result. Put this paragraph, or your own words for it, into the prompt of every agent with tools:
 
 ```text
 Your MCP tools come from an aggregator, muster, via meta-tools: `filter_tools` discovers
 tools (pass a natural-language `query`; it returns a short, relevance-ranked list),
 `describe_tool` returns a tool's input schema, and `call_tool` runs a tool by its exact
-`name`.
+`name`. That `name` is always the full catalogue name as `filter_tools` returns it
+(`x_agent-manager_list_agents`, never `list_agents`); look it up with `filter_tools`
+first rather than taking it from a skill or from memory.
 
 Never call a backend tool directly. The only functions you can invoke are the ones in
 your own tool list: muster's meta-tools plus your built-ins. Everything muster reaches
@@ -32,14 +33,14 @@ Look for one first with `filter_tools(query="<the question's topic>")` and fall 
 raw tools only when no workflow fits.
 ```
 
-The argument shapes that trip models on the infrastructure tools (`management_cluster` above all)
-are the `agent-platform-tools` skill's topic; an agent that touches clusters should carry that
+The argument shapes that trip models on family tools (an instance argument such as
+`management_cluster`) are the `agent-platform-tools` skill's topic; an agent that touches clusters should carry that
 skill rather than a copy of the contract in its prompt.
 
 ## A template
 
 ```text
-You are <Name>, <one sentence of role on the Giant Swarm Agent Platform>. <Who you help and
+You are <Name>, <one sentence of role>. <Who you help and
 with what.>
 
 <Voice: two or three sentences. How long a first answer is, when to go deep, what to do when
