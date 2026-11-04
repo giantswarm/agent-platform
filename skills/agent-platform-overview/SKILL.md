@@ -1,6 +1,6 @@
 ---
 name: agent-platform-overview
-description: Use when someone asks what the Agent Platform is, how it is built or how it works — its components, the groups of MCP servers (connectors), how people reach agents (Dev Portal, Slack, IDE, CLI), how identity flows, how an agent runs, what the Agent Manager is, how to look at the live platform, or how you yourself run on it. Not for discovering tools and toolsets (agent-platform-tools), creating or changing agents and their building blocks (agent-platform-agent-management) or writing skills (agent-platform-skill-authoring).
+description: Use when someone asks what the Agent Platform is, how it is built or works — components, connectors, how people reach agents (Dev Portal, Slack, IDE), identity, how an agent runs, what the Agent Manager is, or how to look at the live platform or yourself.
 metadata:
   version: "3.0.0"
 ---
@@ -28,33 +28,19 @@ its own; it acts with the identity of the person it works for.
 ## The components
 
 One Helm chart, `agent-platform`, renders one Flux `HelmRelease` per component; which components run
-is installation configuration. The ones to know by name:
-
-- **Muster** — the MCP gateway: one OAuth-protected `/mcp` endpoint, toolsets, workflows.
-- **agentgateway** — the data plane in front of Muster and the runtime.
-- **kagent on Agent Substrate** — the agent runtime.
-- **agent-manager** — creates, inspects, changes and deletes agents as the caller.
-- **model-manager** — model-serving backends and the `ModelConfig`s agents run on.
-- **Dev Portal** (Backstage) — the browser front end; **klaus-gateway** — the Slack front door.
-- **The Agent Manager** — the platform's own agent (below).
-
-What runs on this installation, with resolved versions: `x_kubernetes_list` with
+is installation configuration — Muster and agentgateway (the tool path), kagent on Agent Substrate
+(the runtime), agent-manager and model-manager (agents and models), the Dev Portal and klaus-gateway
+(the browser and Slack front doors). What runs here, with resolved versions: `x_kubernetes_list` with
 `resourceType: helmreleases`, `apiGroup: helm.toolkit.fluxcd.io`, `allNamespaces: true` where
 mcp-kubernetes is available; the release named `agent-platform` is the chart, its neighbours the
 components. Otherwise `x_agent-manager_get_info` names the service version, chart and namespaces.
 
-## Groups of MCP servers
+## Connectors
 
-The Dev Portal calls MCP servers **connectors**. Every server the platform ships carries the label
-`agent-platform.giantswarm.io/tool-group`, and the presets of the same names select by it:
-
-- **agent-platform** — the platform's own management surface (agent-manager, model-manager and the
-  other managers the installation runs) plus Muster's `core_*` tools.
-- **infrastructure** — servers for the clusters underneath (mcp-kubernetes and its peers), where the
-  installation runs them.
-- **Unlabelled** — everything an installation or a person registers.
-
-The live list with descriptions: `filter_tools {"include_presets": true}`.
+The Dev Portal calls MCP servers **connectors**; the platform's own are grouped into the
+`agent-platform` and `infrastructure` presets, everything else is registered by the installation or
+a person. Groups, states and sign-in: the `agent-platform-tools` skill; the live presets:
+`filter_tools {"include_presets": true}`.
 
 ## How people reach agents
 
@@ -104,7 +90,7 @@ function of its own (contract: the `agent-platform-tools` skill). Read each sche
 - **The agents**: `x_agent-manager_list_agents` — model, Harness, toolset, readiness and `managed`.
 - **One agent's readiness**: `x_agent-manager_get_agent_status`.
 - **The connectors**: `core_mcpserver_list` — every MCP server with its state.
-- **The models**: `x_agent-manager_list_model_configs`; serving backends through `x_model-manager_*`.
+- **The models**: `x_agent-manager_list_model_configs`; serving: the `agent-platform-tools` skill.
 - **Skill sources and capabilities**: `x_agent-manager_get_info`.
 - **Workflows** the installation offers for whole questions: `filter_tools {"pattern": "workflow_*"}`.
 - **Yourself**: `x_agent-manager_get_agent` with your **technical** name — the release name, not the
