@@ -8,7 +8,10 @@ resolved at reconcile time) — never from a Chart.yaml pin.
 
 Each entry is fully self-describing; this template has no per-component
 knowledge:
-  chart/repository/versionRange — where to pull and which versions. An entry
+  chart/repository/versionRange — where to pull and which versions. The
+      release, its HelmRelease and OCIRepository are named after the entry's
+      key, the chart's name except for a second release of a chart
+      (agent-manager-assistant, a release of the agent chart). An entry
       WITHOUT a chart key is a feature switch (components.flux, the condition of
       the flux-engine subchart): it is part of the roster forwarded to
       connectivity and of the enabled/disabled logic like every other entry, but
@@ -48,6 +51,11 @@ knowledge:
       side by side (substrate: the WorkerPool's worker image).
   valuesFrom    — name of the TOP-LEVEL values block passed straight through to
       this release's values. Omit for components that take no values.
+  valuesFile    — a values file of this chart (.Files) taken as the release's
+      values instead of a block (agent-platform.componentValuesFile: a skills[]
+      entry not pinned to a full commit is dropped, the unstamped release
+      commit). Derived values win over it.
+  labels        — extra labels on the child HelmRelease.
   valuesKey     — when set, the valuesFrom block is NESTED under this key before
       being forwarded (valuesKey: foo → {foo: {…block…}}). For a chart that
       vendors an upstream chart as a SUBCHART of the same name: Helm only passes
@@ -307,7 +315,7 @@ connectivity chart's migrate Job read the same range and filter. */ -}}
 {{- range $key, $c := .Values.components }}
 {{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
 {{- if and (index $roster $key).enabled (hasKey $c "chart") }}
-{{- $name := $c.chart }}
+{{- $name := $key }}
 {{- $child := include "agent-platform.childName" (dict "root" $root "name" $name) }}
 {{- /* passthrough values */ -}}
 {{- $vals := dict }}
@@ -329,6 +337,7 @@ connectivity chart's migrate Job read the same range and filter. */ -}}
 {{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
+{{- with $c.valuesFile }}{{- $vals = include "agent-platform.componentValuesFile" (dict "root" $root "path" .) | fromJson }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the
 optional nesting so the list addresses the block's own keys. */ -}}
 {{- range $c.omitKeys }}{{- $vals = include "agent-platform.omitPath" (dict "vals" $vals "path" .) | fromJson }}{{- end }}
@@ -408,6 +417,9 @@ metadata:
   namespace: {{ $ns }}
   labels:
     {{- include "labels.common" $root | nindent 4 }}
+    {{- with $c.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
   interval: {{ $g.interval }}
   {{- with $c.timeout }}

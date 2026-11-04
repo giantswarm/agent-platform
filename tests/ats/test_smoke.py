@@ -148,8 +148,9 @@ logger = logging.getLogger(__name__)
 # kagent with its CRD chart, Agent Substrate with its CRD chart and the Google
 # access-token credential provider (all follow components.kagent), the CloudNativePG operator for kagent's and Substrate's
 # database, agent-manager, and model-manager — on by default with no backend
-# (giantswarm/agent-platform#329), nothing in the smoke values names it.
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "agentgateway", "agent-platform-mcps", "kagent", "kagent-crds", "substrate", "substrate-crds", "google-access-token-credential-provider", "cloudnative-pg", "agent-manager", "model-manager")
+# (giantswarm/agent-platform#329), nothing in the smoke values names it — and
+# the Agent Manager, which follows kagent and muster (giantswarm/giantswarm#38970).
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "agentgateway", "agent-platform-mcps", "kagent", "kagent-crds", "substrate", "substrate-crds", "google-access-token-credential-provider", "cloudnative-pg", "agent-manager", "model-manager", "agent-manager-assistant")
 # The platform's CloudNativePG Cluster, kagent's and Substrate's database: the
 # connectivity release renders it with helm.sh/resource-policy: keep, so the
 # conversations outlive an uninstall.

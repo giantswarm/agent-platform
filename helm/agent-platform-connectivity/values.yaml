@@ -109,6 +109,10 @@ components:  # @schema additionalProperties: true
     enabled: true
   agent-manager:  # @schema additionalProperties: true
     enabled: false
+  # The Agent Manager (kagent/agent-manager-assistant), the portal's meta agent.
+  # The meta chart forwards the entry only while it is on.
+  agent-manager-assistant:  # @schema additionalProperties: true
+    enabled: false
   vm-manager:  # @schema additionalProperties: true
     enabled: false
   cluster-manager:  # @schema additionalProperties: true

@@ -263,6 +263,18 @@ The OAuth issuer, client, secret and base URL come from the block, else from `gl
 
 `make verify-managers` covers the wiring and the guards.
 
+### Agent Manager and skills
+
+The Agent Manager is the platform's meta agent, `kagent/agent-manager-assistant`. Its prompt is in [`agents/agent-manager/values.yaml`](../agents/agent-manager/values.yaml) and its skills are in [`skills/`](../skills).
+
+| Value | Default | Effect |
+|---|---|---|
+| `components.agent-manager-assistant.enabled` | `true` | Deploys the agent while kagent and muster are on. The portal's meta-agent features use it. |
+| `agentManagerAssistant.modelConfig` | `""` | The `ModelConfig` it runs on. Empty uses `default-model-config`. |
+| `skills.repositories` | `[giantswarm/agent-skills]` | Skill sources for agent-manager and the portal, as URLs or `{url, ref, path, readOnly}`. The platform's `skills/` at the release tag comes first. |
+
+A release pins the skills to the tag's commit. A branch build deploys the agent without skills.
+
 ### Cluster manager
 
 **[cluster-manager](https://github.com/giantswarm/cluster-manager)** is the cluster write surface. It lists clusters and node pools, creates and deletes GPU node pools, and switches model serving on a cluster.

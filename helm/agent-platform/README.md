@@ -523,6 +523,17 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
+| components.agent-manager-assistant.chart | string | `"agent"` |  |
+| components.agent-manager-assistant.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.agent-manager-assistant.versionRange | string | `">=2.0.0 <3.0.0"` |  |
+| components.agent-manager-assistant.valuesFile | string | `"agents/agent-manager/values.yaml"` |  |
+| components.agent-manager-assistant.injectGlobal | bool | `false` |  |
+| components.agent-manager-assistant.targetNamespace | string | `"kagent"` |  |
+| components.agent-manager-assistant.labels."agent-platform.giantswarm.io/managed-by" | string | `"agent-platform"` |  |
+| components.agent-manager-assistant.gatedRoster | bool | `true` |  |
+| components.agent-manager-assistant.enabled | bool | `true` |  |
+| components.agent-manager-assistant.dependsOn[0] | string | `"muster"` |  |
+| components.agent-manager-assistant.dependsOn[1] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.vm-manager.versionRange | string | `">=0.24.0 <0.25.0"` |  |
@@ -651,6 +662,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.omitKeys[2] | string | `"gpu-operator"` |  |
 | components.agent-platform-connectivity.omitKeys[3] | string | `"toolchain-manager"` |  |
 | components.agent-platform-connectivity.omitKeys[4] | string | `"kserve-runtime-configs"` |  |
+| components.agent-platform-connectivity.omitKeys[5] | string | `"skills"` |  |
+| components.agent-platform-connectivity.omitKeys[6] | string | `"agentManagerAssistant"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -1345,7 +1358,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.harness.egress | object | `{}` | The origins a coding agent reaches, by the name of its Harness ({claude: [https://github.com, …], codex: […], omp: […]}): the installation's forge and git hosts plus the toolchain's registries; the model host is not listed (kagent adds the ModelConfig's destination). agent-manager writes the list into the Agent's spec.egress and the Substrate egress gate refuses any other origin with a 403; agent-manager refuses an agent on a coding Harness without an entry. Empty (the default) is not forwarded and the agent-manager chart's own list applies: GitHub for claude (and codex from agent-manager 2.2.0) plus the Go and npm registries for claude-go and claude-node. Each kagent.harnesses entry an installation adds gets its entry here; an installation whose forge is not GitHub sets every Harness it serves: Helm merges the map into the chart's, so a Harness left out keeps the GitHub list. Needs agent-manager 1.11.0 or later. |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
 | agent-manager.agentChart.semver | string | `">=2.0.0 <3.0.0"` |  |
-| agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| agent-manager.skills.repositories | list | `[]` |  |
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |
 | agent-manager.oauth.provider | string | `"dex"` |  |
@@ -1387,6 +1400,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.image.tag | string | `"2.17.31"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
+| skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| agentManagerAssistant.modelConfig | string | `""` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
 | cluster-manager.observability.otel.endpoint | string | `"auto"` |  |
 | cluster-manager.observability.otel.protocol | string | `"auto"` |  |
@@ -1547,7 +1562,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | backstage.disabledExtensions[9] | string | `"api:ai-chat/service"` |  |
 | backstage.disabledExtensions[10] | string | `"api:ai-chat/drawer"` |  |
 | backstage.disabledExtensions[11] | string | `"app-root-element:ai-chat/drawer"` |  |
-| backstage.skillsRepositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| backstage.skillsRepositories | list | `[]` |  |
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |

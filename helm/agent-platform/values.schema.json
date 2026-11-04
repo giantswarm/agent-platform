@@ -133,6 +133,38 @@
                     ]
                 }
             ]
+        },
+        "skill-repository.schema.json": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$comment": "One entry of skills.repositories: a repository URL, or {url, ref, path, readOnly}.",
+            "anyOf": [
+                {
+                    "type": "string",
+                    "pattern": "^https?://\\S+$"
+                },
+                {
+                    "type": "object",
+                    "required": [
+                        "url"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "path": {
+                            "type": "string"
+                        },
+                        "readOnly": {
+                            "type": "boolean"
+                        },
+                        "ref": {
+                            "type": "string"
+                        },
+                        "url": {
+                            "type": "string",
+                            "pattern": "^https?://\\S+$"
+                        }
+                    }
+                }
+            ]
         }
     },
     "type": "object",
@@ -149,6 +181,15 @@
         "agentManager": {
             "type": "object",
             "additionalProperties": true
+        },
+        "agentManagerAssistant": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "modelConfig": {
+                    "type": "string"
+                }
+            }
         },
         "agentSandbox": {
             "type": "object",
@@ -235,6 +276,51 @@
                             "type": "string"
                         },
                         "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "agent-manager-assistant": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "labels": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "agent-platform.giantswarm.io/managed-by": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "targetNamespace": {
+                            "type": "string"
+                        },
+                        "valuesFile": {
                             "type": "string"
                         },
                         "versionRange": {
@@ -2967,6 +3053,19 @@
                             "type": "array",
                             "description": "Tolerations appended to the four singletons' own, for a dedicated, tainted on-demand pool. The fleet's NodePools carry no taint."
                         }
+                    }
+                }
+            }
+        },
+        "skills": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "repositories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/skill-repository.schema.json",
+                        "type": "string"
                     }
                 }
             }

@@ -218,6 +218,15 @@
                         }
                     }
                 },
+                "agent-manager-assistant": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "agent-platform-mcps": {
                     "type": "object",
                     "additionalProperties": true,

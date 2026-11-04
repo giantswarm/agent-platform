@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the Agent Manager and `skills.repositories`)
+
+giantswarm/giantswarm#38970: the chart deploys the Agent Manager (`kagent/agent-manager-assistant`) wherever kagent and muster are on, and the skill sources come from `skills.repositories`.
+
+### Operator action
+
+- **An installation that deploys its own Agent Manager or `swarm-operator`**: remove it, or set `components.agent-manager-assistant.enabled: false`.
+- **An installation whose `default-model-config` does not resolve**: set `agentManagerAssistant.modelConfig`.
+- **An installation that sets `agent-manager.skills.repositories` or `backstage.skillsRepositories`**: none; the entries are still offered. Move them to `skills.repositories`.
+
 ## \<current\> → \<next\> (the agents' Flux identity holds a Role in place of `cluster-admin`)
 
 The ServiceAccount `kagent.fluxServiceAccountName` (`kagent-flux`) is bound to the Role `kagent-flux-agent-releases` in the kagent namespace: the Generic agent chart 2.x kinds (`api.kagent.dev` Agents and RemoteMCPServers) and the Secret verbs of Helm's release storage. The RoleBinding `kagent-flux` to `cluster-admin` is removed by the upgrade. The agent-manager migrate run and its start hook run as `agent-platform-connectivity-agent-manager-migrate`.

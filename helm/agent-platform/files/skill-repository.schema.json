@@ -1,0 +1,32 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$comment": "One entry of skills.repositories: a repository URL, or {url, ref, path, readOnly}.",
+    "anyOf": [
+        {
+            "type": "string",
+            "pattern": "^https?://\\S+$"
+        },
+        {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "url"
+            ],
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "pattern": "^https?://\\S+$"
+                },
+                "ref": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "readOnly": {
+                    "type": "boolean"
+                }
+            }
+        }
+    ]
+}

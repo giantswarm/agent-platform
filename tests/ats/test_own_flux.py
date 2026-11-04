@@ -106,8 +106,9 @@ GUARD_MESSAGE = "this cluster runs Flux; set components.flux.enabled=false or in
 # The component HelmReleases the smoke's base + kagent values turn on (no
 # agent-manager here: it belongs to the round-trips values of the smoke).
 # model-manager is on by default with no backend (giantswarm/agent-platform#329).
-# agentgateway and agent-platform-mcps are the ingress of the base values.
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "agentgateway", "agent-platform-mcps", "kagent", "kagent-crds", "substrate", "substrate-crds", "google-access-token-credential-provider", "cloudnative-pg", "model-manager")
+# agentgateway and agent-platform-mcps are the ingress of the base values. The
+# Agent Manager follows kagent and muster (giantswarm/giantswarm#38970).
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "agentgateway", "agent-platform-mcps", "kagent", "kagent-crds", "substrate", "substrate-crds", "google-access-token-credential-provider", "cloudnative-pg", "model-manager", "agent-manager-assistant")
 # The platform's CloudNativePG Cluster, kagent's and Substrate's database: the
 # connectivity release renders it with helm.sh/resource-policy: keep, so the
 # conversations outlive an uninstall.

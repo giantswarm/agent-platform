@@ -103,6 +103,10 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
        disagrees with it). */ -}}
 {{- $on = ($root.Values.workspaces | default dict).enabled | default false }}
 {{- end }}
+{{- if and $on (eq .name "agent-manager-assistant") }}
+{{- /* An agent: only where kagent runs it and muster serves its tools. */ -}}
+{{- $on = and (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true") (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "muster")) "true") }}
+{{- end }}
 {{- if $on }}true{{- end -}}
 {{- else -}}
 true
@@ -384,6 +388,11 @@ floor that takes the key (agent-platform.agentManager.registryConfigFloor). */ -
 {{- with (include "agent-platform.agentManager.tenants" .root | fromJson) -}}
 {{- $_ := set $derived "tenants" . -}}
 {{- end -}}
+{{- /* The skill sources list_skills offers (agent-platform.skills.repositories). */ -}}
+{{- $_ := set $derived "skills" (dict "repositories" (include "agent-platform.skills.repositories" (dict "root" .root "consumer" "agent-manager") | fromJson).list) -}}
+{{- end -}}
+{{- if eq .name "agent-manager-assistant" -}}
+{{- $derived = include "agent-platform.agentManagerAssistant.derived" .root | fromJson -}}
 {{- end -}}
 {{- if eq .name "agent-platform-connectivity" -}}
 {{- /* The namespace the workspace-manager release installs into, when it is
@@ -408,6 +417,8 @@ renders (networkPolicy.mcpBackends). */ -}}
 {{- with (include "agent-platform.toolchainManager.mcpBackend" .root | fromJson) -}}
 {{- $_ := set $derived "networkPolicy" (dict "mcpBackends" (dict "toolchain-manager" .)) -}}
 {{- end -}}
+{{- /* The skill sources the portal offers (agent-platform.skills.repositories). */ -}}
+{{- $_ := set $derived "backstage" (dict "skillsRepositories" (include "agent-platform.skills.repositories" (dict "root" .root "consumer" "backstage") | fromJson).list) -}}
 {{- end -}}
 {{- if eq .name "toolchain-manager" -}}
 {{- $derived = include "agent-platform.toolchainManager.derived" .root | fromJson -}}
@@ -4433,6 +4444,98 @@ toolchain-manager.registryPullSecret. One line, no comment inside the define.
 {{- define "agent-platform.agentManager.registryConfigFloor" -}}2.16.0{{- end -}}
 
 {{/*
+The first releases of agent-manager and of the portal (backstage) that take a
+skill repository as {url, ref, path, readOnly}; below them a consumer gets the
+URLs alone, which it scans whole at the default branch. Set each to the release
+that ships the object form (giantswarm/giantswarm#38970) before raising the
+component's floor to it. One line each, no comment inside the define.
+*/}}
+{{- define "agent-platform.agentManager.skillSourcesFloor" -}}2.19.0{{- end -}}
+{{- define "agent-platform.backstage.skillSourcesFloor" -}}3.31.0{{- end -}}
+
+{{/*
+The skill repositories one consumer (agent-manager: skills.repositories,
+backstage: skillsRepositories) offers, as JSON {"list": [...]}: the platform's
+own skills/ at this chart's release tag first, then skills.repositories, then
+what an installation still sets in the two deprecated lists
+(agent-manager.skills.repositories, backstage.skillsRepositories) — both
+lists to both consumers, so the portal and agent-manager offer the same
+sources. One entry per URL, the first wins. Objects only from the consumer's
+skillSourcesFloor on; below it each entry is its URL.
+Usage: include "agent-platform.skills.repositories" (dict "root" $ "consumer" "agent-manager") | fromJson
+*/}}
+{{- define "agent-platform.skills.repositories" -}}
+{{- $v := .root.Values -}}
+{{- $entries := list (dict "url" "https://github.com/giantswarm/agent-platform" "ref" (printf "v%s" (include "agent-platform.chartVersion" .root)) "path" "skills" "readOnly" true) -}}
+{{- $entries = concat $entries (dig "repositories" list ($v.skills | default dict) | default list) -}}
+{{- $entries = concat $entries (dig "skills" "repositories" list (index $v "agent-manager" | default dict) | default list) -}}
+{{- $entries = concat $entries (dig "skillsRepositories" list ($v.backstage | default dict) | default list) -}}
+{{- $floor := ternary (include "agent-platform.agentManager.skillSourcesFloor" .root) (include "agent-platform.backstage.skillSourcesFloor" .root) (eq .consumer "agent-manager") -}}
+{{- $objects := eq (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" .consumer "version" $floor)) "true" -}}
+{{- $seen := dict -}}
+{{- $out := list -}}
+{{- range $entries -}}
+{{- $url := . -}}
+{{- if kindIs "map" . }}{{ $url = .url }}{{ end -}}
+{{- if not (hasKey $seen $url) -}}
+{{- $_ := set $seen $url true -}}
+{{- $out = append $out (ternary . $url (and $objects (kindIs "map" .))) -}}
+{{- end -}}
+{{- end -}}
+{{- dict "list" $out | toJson -}}
+{{- end -}}
+
+{{/*
+The values the Agent Manager's release (components.agent-manager-assistant)
+takes from the platform, merged over agents/agent-manager/values.yaml: the
+muster URL every agent targets, its avatar from the DiceBear route's first
+hostname (none without one), the agent-platform toolset preset, and
+agentManagerAssistant.modelConfig (empty: the agent chart's default).
+Usage: include "agent-platform.agentManagerAssistant.derived" $ | fromJson
+*/}}
+{{- define "agent-platform.agentManagerAssistant.derived" -}}
+{{- $agent := dict -}}
+{{- $host := "" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "dicebear") -}}
+{{- $host = first (dig "route" "hostnames" list (.Values.dicebear | default dict) | default (list "")) -}}
+{{- end -}}
+{{- with $host -}}
+{{- $_ := set $agent "iconUrl" (printf "https://%s/v1/agent-manager-assistant.png" .) -}}
+{{- end -}}
+{{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:agent-platform") -}}
+{{- with $agent }}{{- $_ := set $out "agent" . -}}{{- end -}}
+{{- with dig "modelConfig" "" (.Values.agentManagerAssistant | default dict) -}}
+{{- $_ := set $out "modelConfig" (dict "name" .) -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+A component's values file (components.<name>.valuesFile, a path in this chart),
+as JSON. A skills[] entry whose git.commit is not a full commit id is dropped:
+the release pipeline stamps the tag's commit over the placeholder
+(hack/stamp-release-commit.sh), so an unstamped build (a branch) renders the
+agent without the skills it cannot pin.
+Usage: include "agent-platform.componentValuesFile" (dict "root" $ "path" $c.valuesFile) | fromJson
+*/}}
+{{- define "agent-platform.componentValuesFile" -}}
+{{- $vals := .root.Files.Get .path | fromYaml -}}
+{{- if not $vals -}}
+{{- fail (printf "%s is missing from the chart or empty" .path) -}}
+{{- end -}}
+{{- if hasKey $vals "skills" -}}
+{{- $pinned := list -}}
+{{- range $vals.skills -}}
+{{- if or (not (kindIs "map" (dig "git" nil .))) (regexMatch "^([0-9a-f]{40}|[0-9a-f]{64})$" (toString (dig "git" "commit" "" .))) -}}
+{{- $pinned = append $pinned . -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $vals "skills" $pinned -}}
+{{- end -}}
+{{- $vals | toJson -}}
+{{- end -}}
+
+{{/*
 The first release of the Substrate line (giantswarm/substrate) whose chart
 takes atelet.imagePullSecrets (the credentials atelet pulls actor images
 with, a Session's tool images among them). From it on (a release candidate of
@@ -4801,14 +4904,14 @@ show it (README, "The GPU operator").
 
 {{/*
 Names of the platform HelmReleases this chart renders (every enabled roster
-entry with a chart), in roster order. The teardown hook deletes exactly these.
+entry with a chart, by its key), in roster order. The teardown hook deletes exactly these.
 Usage: include "agent-platform.platformReleaseNames" . | fromYamlArray
 */}}
 {{- define "agent-platform.platformReleaseNames" -}}
 {{- $names := list -}}
 {{- range $key, $c := .Values.components -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" $key)) (hasKey $c "chart") -}}
-{{- $names = append $names $c.chart -}}
+{{- $names = append $names $key -}}
 {{- end -}}
 {{- end -}}
 {{- toYaml $names -}}
@@ -4835,10 +4938,10 @@ Usage: include "agent-platform.teardownWaves" . | fromYamlArray  (a list of list
 {{- $on := list -}}
 {{- range ($c.dependsOn | default list) -}}
 {{- if and (hasKey $root.Values.components .) (include "agent-platform.componentEnabled" (dict "root" $root "name" .)) (hasKey (index $root.Values.components .) "chart") -}}
-{{- $on = append $on (index $root.Values.components .).chart -}}
+{{- $on = append $on . -}}
 {{- end -}}
 {{- end -}}
-{{- $_ := set $deps $c.chart $on -}}
+{{- $_ := set $deps $key $on -}}
 {{- end -}}
 {{- end -}}
 {{- $waves := list -}}

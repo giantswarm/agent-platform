@@ -743,10 +743,11 @@ def main(meta: str) -> int:
         coding = docs(coding_render.result())
     renders = {shape: (next(manifests), next(manifests)) for shape in SHAPES}
     wide, pinned = next(iter(renders.values()))
-    # The HelmRelease is named after the entry's chart, and its chartRef names the
-    # OCIRepository (the chart's name; with the chart's version for one released
+    # The HelmRelease is named after the entry (its chart's name but for a second
+    # release of a chart, agent-manager-assistant), and its chartRef names the
+    # OCIRepository (the same name; with the chart's version for one released
     # with it, agent-platform.sourceName).
-    charts = {n: c["chart"] for n, c in components.items()}
+    charts = {n: n for n in components}
     for shape, (w, _) in renders.items():
         rendered = {n for kind, n in w if kind == "OCIRepository" and n != RELEASE}
         refs = {c: chart_ref(w, c) for c in charts.values()}
@@ -825,7 +826,7 @@ def main(meta: str) -> int:
             if version not in pulled:
                 flux_layer(name, url, version, oci(wide, chart))
                 pulled[version] = pull(url, version, chart_dir)
-            render_component(name, f"{chart_dir}/{chart}", values, f"{name} {pulled[version]} ({where(forwarded)})", tmp)
+            render_component(name, f"{chart_dir}/{components[name]['chart']}", values, f"{name} {pulled[version]} ({where(forwarded)})", tmp)
 
     sys.stdout = Lines(sys.stdout)
     try:

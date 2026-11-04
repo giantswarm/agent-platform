@@ -389,8 +389,7 @@ spec:
         labels:
           observability.giantswarm.io/tenant: giantswarm
       skills:
-        repositories:
-        - https://github.com/giantswarm/agent-skills
+        repositories: []
     agent-platform-mcps:
       agentgateway:
         enabled: true
@@ -579,6 +578,7 @@ spec:
         verticalPodAutoscaler:
           enabled: false
       skillsRepositories:
+      - https://github.com/giantswarm/agent-platform
       - https://github.com/giantswarm/agent-skills
       startUrlSearchParams: {}
     cloudnative-pg:
