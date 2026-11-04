@@ -130,6 +130,7 @@ if not hr or not oci:
 spec, v = hr["spec"], hr["spec"]["values"]
 checks = {
     "releaseName": (spec["releaseName"], NAME),
+    "install/upgrade disableWait": ((spec["install"].get("disableWait"), spec["upgrade"].get("disableWait")), (True, True)),
     "targetNamespace": (spec["targetNamespace"], "kagent"),
     "HelmRelease managed-by label": (hr["metadata"]["labels"].get("agent-platform.giantswarm.io/managed-by"), "agent-platform"),
     "Agent labels": (v.get("labels"), LABEL),

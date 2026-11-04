@@ -529,6 +529,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager-assistant.valuesFile | string | `"agents/agent-manager/values.yaml"` |  |
 | components.agent-manager-assistant.injectGlobal | bool | `false` |  |
 | components.agent-manager-assistant.inKagentNamespace | bool | `true` |  |
+| components.agent-manager-assistant.disableWait | bool | `true` |  |
 | components.agent-manager-assistant.labels."agent-platform.giantswarm.io/managed-by" | string | `"agent-platform"` |  |
 | components.agent-manager-assistant.gatedRoster | bool | `true` |  |
 | components.agent-manager-assistant.enabled | bool | `true` |  |

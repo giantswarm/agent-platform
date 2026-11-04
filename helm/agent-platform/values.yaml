@@ -1120,6 +1120,9 @@ components:  # @schema additionalProperties: true
     # Installs where the agents live: the kagent component's namespace
     # (kagent.namespaceOverride).
     inKagentNamespace: true
+    # The Agent's readiness (its model, its skills) is reported on the Agent,
+    # never a reason to hold the platform's install or upgrade.
+    disableWait: true
     # agent-manager lists it read-only.
     labels:
       agent-platform.giantswarm.io/managed-by: agent-platform

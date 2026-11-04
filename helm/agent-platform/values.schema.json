@@ -296,6 +296,9 @@
                                 "type": "string"
                             }
                         },
+                        "disableWait": {
+                            "type": "boolean"
+                        },
                         "enabled": {
                             "type": "boolean"
                         },

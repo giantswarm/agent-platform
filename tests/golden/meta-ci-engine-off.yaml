@@ -125,9 +125,11 @@ spec:
     namespace: default
   install:
     createNamespace: true
+    disableWait: true
     remediation:
       retries: 5
   upgrade:
+    disableWait: true
     remediation:
       retries: 5
   dependsOn:

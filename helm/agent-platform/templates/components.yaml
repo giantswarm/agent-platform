@@ -192,6 +192,10 @@ knowledge:
       pod certificates and the substrate release, behind it, is not Ready yet —
       a fresh install and an in-place switch of workspaces and Substrate alike
       (giantswarm/agent-platform#1107). Once Substrate is Ready both wait again.
+  disableWait   — render `disableWait: true` on install and upgrade: the release
+      is Ready once its objects are applied. For a release whose object's own
+      readiness is no condition of the platform's (the Agent Manager's Agent,
+      Ready only once its model answers; its status says why).
   disableWaitForJobs — render `disableWaitForJobs: true` on the child
       HelmRelease's install and upgrade: helm-controller then does not wait for
       the release's plain Jobs to complete (hooks are unaffected). It does not
@@ -361,7 +365,8 @@ never rendered. With app-owned CRDs a consumer dependsOn the opt-in component
 that ships the CRD it needs; when that component is off it renders no CR for
 that CRD either, so the dependency is moot. */ -}}
 {{- $awaitsSubstrate := and (eq $key "muster") (include "agent-platform.muster.awaitsSubstrate" (dict "root" $root "values" $vals)) }}
-{{- $installDisableWait := or $c.installDisableWait $awaitsSubstrate }}
+{{- $installDisableWait := or $c.installDisableWait $awaitsSubstrate $c.disableWait }}
+{{- $upgradeDisableWait := or $awaitsSubstrate $c.disableWait }}
 {{- $deps := list }}
 {{- range ($c.dependsOn | default list) }}
 {{- if include "agent-platform.componentEnabled" (dict "root" $root "name" .) }}
@@ -469,7 +474,7 @@ spec:
     {{- with $c.crds }}
     crds: {{ . }}
     {{- end }}
-    {{- if $awaitsSubstrate }}
+    {{- if $upgradeDisableWait }}
     disableWait: true
     {{- end }}
     {{- if $c.disableWaitForJobs }}
