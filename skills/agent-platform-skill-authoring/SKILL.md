@@ -1,6 +1,6 @@
 ---
 name: agent-platform-skill-authoring
-description: Use when asked to write, fix or explain a skill for an agent on the Agent Platform — the SKILL.md frontmatter (agentskills.io fields), the folder layout, where skills come from (skill sources, read-only ones), how the runtime loads a skill (load_skill, the skills/ directory), what a pin is and why a new commit changes nothing until an agent is re-pinned, private repositories, the writing rules (fetch live, never copy; one topic; short) and what in a skill breaks an agent's boot. A full scored review is agent-platform-skill-review.
+description: Use when asked to write, fix or explain a skill for an Agent Platform agent — SKILL.md frontmatter and layout, where skills come from, how the runtime loads them, what a pin is, private skill repositories, or what in a skill breaks an agent's boot.
 metadata:
   version: "3.0.0"
 ---
@@ -18,8 +18,9 @@ An installation offers skills from its **skill sources**: `x_agent-manager_get_i
 `skillsSources` (`url`, `ref`, `path`, `readOnly`), `x_agent-manager_list_skills` lists their skills
 with the commit each source's ref resolves to. The platform's own skills come from
 `giantswarm/agent-platform` (`skills/`), pinned to the platform release, as a **read-only** source:
-the portal proposes no change to it and a fix goes upstream. Any other public git repository or an
-OCI image works by reference; it is only not offered. A new skill goes into a writable source,
+the portal proposes no change to it and a fix goes upstream. A skill outside every source — any other
+git repository or an OCI image — can still be pinned on an agent by its URL and path; it just does
+not appear in `list_skills`. A new skill goes into a writable source,
 below its `path`.
 
 ## The format
@@ -95,7 +96,7 @@ agent never boots.
 ## What breaks an agent's boot
 
 A `SKILL.md` that does not parse (frontmatter not YAML, `name` or `description` missing), an unknown
-frontmatter field on an older runtime, or a private repository without a credential: the golden
+frontmatter field on an older runtime, or a private repository without a credential (above): the golden
 snapshot never compiles and the agent stays `Ready=False`. A pin the chart refuses fails the release
 before any boot. The evidence: `x_agent-manager_get_agent_status` and the
 `agent-platform-agent-management` skill.
