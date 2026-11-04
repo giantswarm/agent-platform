@@ -1907,6 +1907,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspaceManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| organizationErasure.enabled | bool | `false` | Grant agent-platform-operator's ServiceAccount the erasure's access. |
+| organizationErasure.operatorServiceAccount | object | `{"name":"agent-platform-operator","namespace":""}` | agent-platform-operator's ServiceAccount. An empty namespace is the release namespace. |
 | backstage.hostname | string | `""` |  |
 | backstage.parentRefs | list | `[]` |  |
 | backstage.installationName | string | `"agent-platform"` |  |

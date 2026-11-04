@@ -1430,6 +1430,11 @@ spec:
       substrate:
         credentialProvider:
           egressFQDNs: []
+    organizationErasure:
+      enabled: false
+      operatorServiceAccount:
+        name: agent-platform-operator
+        namespace: ""
     postgres:
       affinity: {}
       applicationDatabase:

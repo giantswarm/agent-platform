@@ -3384,6 +3384,28 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
       # here narrows the providers' egress to exactly these blocks.
       cidrs: []
 
+# === The erasure of deleted organizations (giantswarm/giantswarm#38988) ===
+# agent-platform-operator erases a deleted AgentPlatformOrganization: it lists
+# and deletes every creator's kagent sessions of the organization, and deletes
+# its worker snapshots under s3://<bucket>/<uid>. On, this chart grants its
+# ServiceAccount what that needs: the ClusterRole
+# agent-platform:organization-erasure (cluster-wide list and delete on
+# sessions.api.kagent.dev, which kagent reviews with SubjectAccessReviews) with
+# kagent on, and, with the Crossplane snapshot store on AWS
+# (kagent.harness.snapshotStore.crossplane), the IRSA role
+# <the store's role name>-operator beside Substrate's, which lists and deletes
+# only under the organizations' prefixes: keys that start with a UID. The
+# operator's chart takes that role's ARN in serviceAccount.annotations. Off,
+# the default, nothing renders.
+organizationErasure:
+  # -- Grant agent-platform-operator's ServiceAccount the erasure's access.
+  enabled: false
+  # -- agent-platform-operator's ServiceAccount. An empty namespace is the
+  # release namespace.
+  operatorServiceAccount:
+    name: agent-platform-operator
+    namespace: ""
+
 # === The standalone chart's extras: component chart values and their wiring ===
 # Values of the backstage, mcp-kubernetes, cloudnative-pg and kserve component
 # charts. Consumed by those charts and forwarded here via forwardAllValues (the

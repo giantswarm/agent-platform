@@ -3534,6 +3534,13 @@ MIGRATION_RUN := create job $(MIGRATION_JOB)-[0-9a-f]{8} --from=cronjob/$(MIGRAT
 EGRESS_NAMES := grep -E '^ *-? ?(matchName|matchPattern): |^ *- [0-9]+(\.[0-9]+){3}/[0-9]+$$' | sed -E "s/^ *-? ?//; s/['\"]//g" | sort
 EGRESS_BLOCKS := grep -E '^ *cidr: ' | sed -E "s/^ *//; s/['\"]//g" | sort
 
+.PHONY: verify-organization-erasure
+verify-organization-erasure: ## Assert agent-platform-operator's access for the erasure of deleted organizations (organizationErasure, giantswarm/giantswarm#38988) in the connectivity chart: off by default nothing renders; on with kagent the ClusterRole agent-platform:organization-erasure holds exactly list and delete on sessions.api.kagent.dev, bound to the operator's ServiceAccount (release namespace, or operatorServiceAccount.namespace); on with the Crossplane snapshot store on AWS the IAM role <store role>-operator beside Substrate's, trusted for that ServiceAccount only, allows s3:ListBucket only with an s3:prefix that starts with a UID segment and s3:DeleteObject only under one, evaluated with IAM's wildcards against an organization's keys (pass) and the platform Harness's prefix, other first segments, other buckets and other actions (refused); the store off renders no IAM role, kagent off nothing. Needs PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-organization-erasure.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-substrate-store
 SUBSTRATE_STORE_CI := $(CONNECTIVITY_DIR)/ci/test-substrate-store-aws-values.yaml
 # The account id apart: Helm applies --set-string after --set, so the numeric-id guard below builds on the base.

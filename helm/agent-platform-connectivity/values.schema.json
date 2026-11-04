@@ -1547,6 +1547,29 @@
                 }
             }
         },
+        "organizationErasure": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "description": "Grant agent-platform-operator's ServiceAccount the erasure's access."
+                },
+                "operatorServiceAccount": {
+                    "type": "object",
+                    "description": "agent-platform-operator's ServiceAccount. An empty namespace is the release namespace.",
+                    "additionalProperties": false,
+                    "properties": {
+                        "name": {
+                            "type": "string"
+                        },
+                        "namespace": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "postgres": {
             "type": "object",
             "additionalProperties": false,
