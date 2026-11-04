@@ -227,6 +227,14 @@ spec:
           name: giantswarm-default
           namespace: envoy-gateway-system
         pathPrefix: /agent-manager
+    agentPlatformOrganizations:
+      apiHostnames: []
+      enabled: false
+      fluxNamespace: ""
+      operator:
+        serviceAccount:
+          name: agent-platform-operator
+          namespace: ""
     agentSandbox:
       podSecurity:
         containerSecurityContext:

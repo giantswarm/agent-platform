@@ -1,0 +1,35 @@
+{{- /*
+agent-platform:organizations-admin (giantswarm/agent-platform#1267): manages
+AgentPlatformOrganizations and their members. It creates, changes and deletes
+AgentPlatformOrganizations in the namespaces it is bound in, and writes
+RoleBindings that bind agent-platform:user, editor or admin. Nothing else of
+an organization: it reads agents, sessions or credentials only after binding
+itself, which shows in the organization's members.
+
+RBAC cannot keep the RoleBinding writes in the organization namespaces, so
+the policy agent-platform-organizations-admin-rolebindings refuses them
+everywhere else (admission.yaml). The chart binds it to nobody: platform staff
+get it by a ClusterRoleBinding, a customer's platform team by a RoleBinding in
+its parent namespace, which agent-platform-operator mirrors into that parent's
+organization namespaces. A cluster-admin already holds every right it grants.
+*/ -}}
+{{- if include "agent-platform.organizations.enabled" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:organizations-admin
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+rules:
+  - apiGroups: ["agent-platform.giantswarm.io"]
+    resources: ["agentplatformorganizations"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
+{{- end }}

@@ -13,9 +13,10 @@ The kagent line serves api.kagent.dev: an agent is an Agent that carries its
 AgentTemplate inline or by templateRef, and a conversation is a Session of an
 Agent, so `create` on sessions is what starting a conversation asks for. The
 editor's writes are the ones agent-manager performs as the caller
-(oauth.downstream): the agent's HelmRelease and the shared OCIRepository, the
-Agent and RemoteMCPServer it deletes when a release leaves them behind, and
-the reads it reports on (Harnesses, events). The admin also owns the
+(oauth.downstream): the agent's HelmRelease, the Agent and RemoteMCPServer it
+deletes when a release leaves them behind, and the reads it reports on
+(Harnesses, events, the namespace's agent chart OCIRepository, which the
+editor reads and never writes). The admin also owns the
 tenant's egress: it writes EgressPolicies and places the Secrets they name,
 which it may create, replace and delete but never read back (no get, list or
 watch on Secrets); admission lets a tenant's EgressPolicy name only its
