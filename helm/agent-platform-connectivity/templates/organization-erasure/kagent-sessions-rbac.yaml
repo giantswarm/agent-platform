@@ -9,8 +9,9 @@ every tenant. The `delete` is for kagent's review of a delete of another
 creator's session: kagent's session service deletes only the caller's own
 sessions for any caller but its control plane today, so the operator's
 erasure stops at that step until kagent reviews such a delete as a
-cluster-wide `delete` here (giantswarm/agent-platform-operator, the Sessions
-step).
+cluster-wide `delete` here: giantswarm/kagent-extensions#27. The erasure of
+an organization with a person's session works once that change ships in the
+kagent line.
 */ -}}
 {{- if and (dig "enabled" false (.Values.organizationErasure | default dict)) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
 {{- $sa := include "agent-platform.organizationErasure.serviceAccount" . | fromJson }}

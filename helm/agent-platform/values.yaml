@@ -6241,7 +6241,10 @@ toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
 # <the store's role name>-operator beside Substrate's, which lists and deletes
 # only under the organizations' prefixes: keys that start with a UID. The
 # operator's chart takes that role's ARN in serviceAccount.annotations. Off,
-# the default, nothing renders.
+# the default, nothing renders. kagent deletes another creator's session for
+# the operator only once giantswarm/kagent-extensions#27 ships in the kagent
+# line: until then the erasure of an organization with a person's session
+# stops at its Sessions step.
 organizationErasure:
   # -- Grant agent-platform-operator's ServiceAccount the erasure's access.
   enabled: false
