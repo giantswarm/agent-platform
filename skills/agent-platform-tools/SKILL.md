@@ -1,6 +1,6 @@
 ---
 name: agent-platform-tools
-description: Use when a question is about how tools work on the Agent Platform — how Muster's meta-tools and call_tool work, how to find or run any tool, what a toolset or preset resolves to for the caller, why a tool is missing or a call was refused, connectors (MCP servers), signing in to one, their state, workflows, or what model-manager can do. Carries the mechanics and the fetch recipes, never a list of tools, presets or connectors — those are read live.
+description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing or refused, connectors and signing in to one, workflows, or model-manager.
 metadata:
   version: "3.0.0"
 ---
@@ -73,11 +73,14 @@ https://docs.giantswarm.io/tutorials/agent-platform/toolset-presets/.
 
 The Dev Portal calls MCP servers **connectors** (Customize → Connectors). Each is an `MCPServer`
 resource (`muster.giantswarm.io`); `core_mcpserver_list` shows them with their state. A
-platform-shipped one carries the label `agent-platform.giantswarm.io/tool-group`; no label means an
-installation or a person registered it. States:
+platform-shipped one carries the label `agent-platform.giantswarm.io/tool-group` (`agent-platform`:
+the managers and Muster's `core_*` tools; `infrastructure`: the clusters underneath), and the presets
+of those names select by it; no label means an installation or a person registered it. States:
 
 - **`Auth Required`** is healthy: reachable, waiting for a person's sign-in.
-- **`Awaiting Session`**: used with each caller's own identity; there is no sign-in to run.
+- **`Awaiting Session`**: healthy, used with each caller's own identity; no sign-in to run. It turns
+  `Connected` when a session calls it with its own token; a call that still fails is the person's
+  token or access — sign in to the platform again, then check `status.conditions`.
 - **`Failed`** is the outage; `status.lastError` says why.
 
 Tools register live when a server connects. Adding connectors:
