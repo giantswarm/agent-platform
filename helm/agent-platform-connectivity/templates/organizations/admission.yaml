@@ -180,11 +180,14 @@ spec:
     - expression: "request.resource.resource != 'kustomizations' || variables.organizationObject"
       reason: Forbidden
       messageExpression: {{ printf "'the agent-platform-operator writes %s; refused: ' + request.namespace + '/' + request.name" (ternary (printf "only Kustomizations labelled %s in %s" $uidLabel $fluxNs) "no Kustomization (agentPlatformOrganizations.fluxNamespace is empty)" (ne $fluxNs "")) | quote }}
-    # Flux impersonates spec.serviceAccountName; without one,
-    # kustomize-controller applies with its own identity.
+    # Flux impersonates spec.serviceAccountName; without one, or with a Flux
+    # controller's own, kustomize-controller applies with a controller's
+    # identity.
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
-        (has(object.spec) && has(object.spec.serviceAccountName) && object.spec.serviceAccountName != '')
+        (has(object.spec) && has(object.spec.serviceAccountName) && object.spec.serviceAccountName != '' &&
+        !(object.spec.serviceAccountName in ['kustomize-controller', 'helm-controller', 'source-controller', 'notification-controller',
+        'image-reflector-controller', 'image-automation-controller', 'source-watcher']))
       reason: Forbidden
       messageExpression: "'a Kustomization of the agent-platform-operator names the organization Flux ServiceAccount in spec.serviceAccountName; refused: ' + request.namespace + '/' + request.name"
 ---

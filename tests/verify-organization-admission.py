@@ -396,7 +396,8 @@ def prove_roles():
     # The built-in admin role is aggregated by the controller manager, which
     # does not run here: a Role with its RBAC rules stands in for it.
     must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "namespace-admin", "namespace": PLAIN},
-                 "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["roles", "rolebindings"], "verbs": ["*"]}]}, dry=False),
+                 "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["roles", "rolebindings"],
+                           "verbs": ["create", "delete", "deletecollection", "get", "list", "patch", "update", "watch"]}]}, dry=False),
          "create the namespace admin Role of team-a")
     must(create(rb("alice-admin", PLAIN, role="namespace-admin", kind="Role",
                    subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": ALICE}]), dry=False), "bind alice as admin of team-a")
@@ -436,6 +437,10 @@ def prove_operator():
     nosa = kustomization("agents-billing", FLUX_NS)
     del nosa["spec"]["serviceAccountName"]
     case("the operator creates no Kustomization that Flux applies with its own identity (no serviceAccountName)", create(nosa, as_=OP),
+         "agent-platform-organization-operator-objects")
+    controller = kustomization("agents-billing", FLUX_NS)
+    controller["spec"]["serviceAccountName"] = "kustomize-controller"
+    case("the operator creates no Kustomization that runs as a Flux controller", create(controller, as_=OP),
          "agent-platform-organization-operator-objects")
     case("the operator creates no Kustomization outside the Flux namespace", create(kustomization("agents-billing", PLAIN), as_=OP),
          "agent-platform-organization-operator-objects")
