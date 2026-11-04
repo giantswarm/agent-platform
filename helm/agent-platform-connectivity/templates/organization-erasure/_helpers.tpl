@@ -10,9 +10,17 @@ giantswarm/giantswarm#38988).
 {{- dict "name" (required "organizationErasure.operatorServiceAccount.name must be set" $sa.name) "namespace" ($sa.namespace | default .Release.Namespace) | toJson -}}
 {{- end -}}
 
-{{/* The operator's IRSA role: the snapshot store's role name and -operator, at most 64 characters. */}}
+{{/*
+The operator's IRSA role: the snapshot store's role name and -operator. IAM
+takes 64 characters; a longer name fails the render rather than be cut, which
+could give it Substrate's role's name or one the operator's chart is not told.
+*/}}
 {{- define "agent-platform.organizationErasure.awsRoleName" -}}
-{{- printf "%s-operator" (include "agent-platform.substrateStore.awsRoleName" .) | trunc 64 | trimSuffix "-" -}}
+{{- $name := printf "%s-operator" (include "agent-platform.substrateStore.awsRoleName" .) -}}
+{{- if gt (len $name) 64 -}}
+{{- fail (printf "organizationErasure: the operator's IAM role %s is longer than 64 characters: set a shorter kagent.harness.snapshotStore.crossplane.aws.roleName (at most 55)" $name) -}}
+{{- end -}}
+{{- $name -}}
 {{- end -}}
 
 {{/*

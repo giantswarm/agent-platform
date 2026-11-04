@@ -1909,6 +1909,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | organizationErasure.enabled | bool | `false` | Grant agent-platform-operator's ServiceAccount the erasure's access. |
 | organizationErasure.operatorServiceAccount | object | `{"name":"agent-platform-operator","namespace":""}` | agent-platform-operator's ServiceAccount. An empty namespace is the release namespace. |
+| organizationErasure.operatorPodLabels | object | `{"app.kubernetes.io/name":"agent-platform-operator"}` | The labels of agent-platform-operator's pods: the kagent controller's API port admits them (with networkPolicy.enabled, both flavors). |
 | backstage.hostname | string | `""` |  |
 | backstage.parentRefs | list | `[]` |  |
 | backstage.installationName | string | `"agent-platform"` |  |

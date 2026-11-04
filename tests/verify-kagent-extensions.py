@@ -17,6 +17,8 @@ Each case pins one property:
   klaus-gateway's ServiceAccount as the session reader while refusal notices
   are on; an installation's own authorization keys stand;
 - an own entry of kagent.controller.env stands, first and once;
+- with organizationErasure on, agent-platform-operator's ServiceAccount is a
+  machine caller too (giantswarm/giantswarm#38988);
 - with the line's own controller (giantswarm/kagent/controller) no variable of
   the binary is set and none of its guards applies;
 - every variable the chart sets names a flag of the binary;
@@ -125,6 +127,17 @@ def main() -> None:
            "the machine caller follows workspace-manager's ServiceAccount and release namespace")
     expect(env(controller(ON))["KAGENT_EXTENSIONS_MACHINE_CALLER"], "", "without workspaces no machine caller")
     ok("the machine caller is workspace-manager's ServiceAccount while workspaces are on")
+
+    erasure = ["--set", "organizationErasure.enabled=true"]
+    expect(env(controller([*ON, *erasure]))["KAGENT_EXTENSIONS_MACHINE_CALLER"], f"{ka.NAMESPACE}/agent-platform-operator",
+           "with organizationErasure the machine caller is agent-platform-operator's ServiceAccount")
+    expect(env(controller([*ON, *WORKSPACES, *erasure]))["KAGENT_EXTENSIONS_MACHINE_CALLER"],
+           f"{ka.NAMESPACE}/workspace-manager,{ka.NAMESPACE}/agent-platform-operator",
+           "with workspaces and organizationErasure both are machine callers")
+    expect(env(controller([*ON, *erasure, "--set", "organizationErasure.operatorServiceAccount.namespace=apo",
+                           "--set", "organizationErasure.operatorServiceAccount.name=op"]))["KAGENT_EXTENSIONS_MACHINE_CALLER"],
+           "apo/op", "the operator's machine caller follows organizationErasure.operatorServiceAccount")
+    ok("agent-platform-operator's ServiceAccount is a machine caller while organizationErasure is on")
 
     got = env(controller([*ON, *REFUSALS]))
     expect(got["KAGENT_EXTENSIONS_SESSION_READER"], f"{ka.NAMESPACE}/klaus-gateway",

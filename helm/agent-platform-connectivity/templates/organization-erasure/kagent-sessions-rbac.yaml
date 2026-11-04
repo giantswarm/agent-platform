@@ -2,9 +2,9 @@
 agent-platform-operator erases a deleted organization's kagent sessions: it
 lists every creator's Sessions (ListSessions with all_creators) and deletes
 each (DeleteSession), as its own ServiceAccount with a projected token of
-kagent's machine audience. In the kubernetes authorization mode the kagent
-controller reviews the listing as `list` on sessions.api.kagent.dev with no
-namespace. No tenant role grants it: the list carries the Session names of
+kagent's machine audience, which the kagent-extensions controller admits as a
+machine caller (the meta chart's KAGENT_EXTENSIONS_MACHINE_CALLER) and reviews
+the listing of as `list` on sessions.api.kagent.dev with no namespace. No tenant role grants it: the list carries the Session names of
 every tenant. The `delete` is for kagent's review of a delete of another
 creator's session: kagent's session service deletes only the caller's own
 sessions for any caller but its control plane today, so the operator's

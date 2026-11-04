@@ -1555,6 +1555,16 @@
                     "type": "boolean",
                     "description": "Grant agent-platform-operator's ServiceAccount the erasure's access."
                 },
+                "operatorPodLabels": {
+                    "type": "object",
+                    "description": "The labels of agent-platform-operator's pods: the kagent controller's API port admits them (with networkPolicy.enabled, both flavors).",
+                    "additionalProperties": true,
+                    "properties": {
+                        "app.kubernetes.io/name": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "operatorServiceAccount": {
                     "type": "object",
                     "description": "agent-platform-operator's ServiceAccount. An empty namespace is the release namespace.",

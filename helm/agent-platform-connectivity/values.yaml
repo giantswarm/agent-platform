@@ -3387,8 +3387,9 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
 # === The erasure of deleted organizations (giantswarm/giantswarm#38988) ===
 # agent-platform-operator erases a deleted AgentPlatformOrganization: it lists
 # and deletes every creator's kagent sessions of the organization, and deletes
-# its worker snapshots under s3://<bucket>/<uid>. On, this chart grants its
-# ServiceAccount what that needs: the ClusterRole
+# its worker snapshots under s3://<bucket>/<uid>. On, the meta chart makes the
+# kagent controller admit its ServiceAccount as a machine caller, and this
+# chart grants it what the erasure needs: the controller's API port, the ClusterRole
 # agent-platform:organization-erasure (cluster-wide list and delete on
 # sessions.api.kagent.dev, which kagent reviews with SubjectAccessReviews) with
 # kagent on, and, with the Crossplane snapshot store on AWS
@@ -3405,6 +3406,10 @@ organizationErasure:
   operatorServiceAccount:
     name: agent-platform-operator
     namespace: ""
+  # -- The labels of agent-platform-operator's pods: the kagent controller's
+  # API port admits them (with networkPolicy.enabled, both flavors).
+  operatorPodLabels:  # @schema additionalProperties: true
+    app.kubernetes.io/name: agent-platform-operator
 
 # === The standalone chart's extras: component chart values and their wiring ===
 # Values of the backstage, mcp-kubernetes, cloudnative-pg and kserve component

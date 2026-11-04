@@ -1527,6 +1527,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | toolchain-manager.github.appInstallURL | string | `""` |  |
 | organizationErasure.enabled | bool | `false` | Grant agent-platform-operator's ServiceAccount the erasure's access. |
 | organizationErasure.operatorServiceAccount | object | `{"name":"agent-platform-operator","namespace":""}` | agent-platform-operator's ServiceAccount. An empty namespace is the connectivity release's namespace. |
+| organizationErasure.operatorPodLabels | object | `{"app.kubernetes.io/name":"agent-platform-operator"}` | The labels of agent-platform-operator's pods: the kagent controller's API port admits them (with networkPolicy.enabled, both flavors). |
 | backstage.observability.otel.endpoint | string | `"auto"` |  |
 | backstage.observability.otel.protocol | string | `"auto"` |  |
 | backstage.observability.otel.headers | string | `"auto"` |  |

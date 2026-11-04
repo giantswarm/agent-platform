@@ -18,7 +18,16 @@ Each case pins one property:
   organization's keys and the ListObjectsV2 prefix the operator sends
   (<uid>/) pass, and the platform Harness's prefix (kagent/), a shorter or
   longer first segment, and the bucket's other keys do not;
+- on, a store role name that leaves no room for -operator in IAM's 64
+  characters fails the render naming the key (never a cut name, which could
+  be Substrate's role's);
+- on, with network policies on: the kagent controller's API port (8083)
+  admits the operator's pods (operatorPodLabels) in the operator's namespace,
+  in both flavors; none with network policies off;
 - on, with the store off: no IAM role; with kagent off: no ClusterRole.
+
+The meta chart's half, the operator's ServiceAccount among the kagent
+controller's machine callers, is asserted by verify-kagent-extensions.
 
 Usage: verify-organization-erasure.py CONNECTIVITY_CHART
 """
@@ -156,6 +165,40 @@ def main():
         if allowed(statements, action, resource, prefix):
             fail(f"on: {IAM_ROLE} allows {action} {resource} prefix={prefix!r}")
     ok(f"on: {IAM_ROLE} lists and deletes under a UID prefix only, trusted for the operator only")
+
+    long_role = "r" * 56
+    out = subprocess.run([HELM, "template", "t", CHART, "-n", NAMESPACE, "-f", STORE, "--set", "organizationErasure.enabled=true",
+                          "--set", f"kagent.harness.snapshotStore.crossplane.aws.roleName={long_role}"], capture_output=True, text=True)
+    if out.returncode == 0 or "kagent.harness.snapshotStore.crossplane.aws.roleName" not in out.stderr:
+        fail(f"a store role name of 56 characters did not fail the render naming the key: {out.stderr}")
+    if not find(render("-f", STORE, "--set", "organizationErasure.enabled=true",
+                       "--set", f"kagent.harness.snapshotStore.crossplane.aws.roleName={'r' * 55}"), "Role", "r" * 55 + "-operator"):
+        fail("a store role name of 55 characters does not give <name>-operator")
+    ok("a store role name with no room for -operator fails the render; 55 characters fit")
+
+    policy = "agent-platform-connectivity-operator-to-kagent-controller"
+    pods = {"app.kubernetes.io/name": "agent-platform-operator"}
+    cilium = find(render("-f", STORE, "--set", "organizationErasure.enabled=true", "--set", "networkPolicy.enabled=true",
+                         "--set", "networkPolicy.flavor=cilium"), "CiliumNetworkPolicy", policy)
+    if not cilium:
+        fail(f"cilium: no {policy}")
+    want_from = [{"matchLabels": {**pods, "io.kubernetes.pod.namespace": NAMESPACE}}]
+    if cilium["metadata"]["namespace"] != "kagent" or cilium["spec"]["ingress"][0]["fromEndpoints"] != want_from \
+            or cilium["spec"]["ingress"][0]["toPorts"] != [{"ports": [{"port": "8083", "protocol": "TCP"}]}] \
+            or cilium["spec"]["endpointSelector"]["matchLabels"] != {"app.kubernetes.io/component": "controller", "app.kubernetes.io/name": "kagent"}:
+        fail(f"cilium: {policy} is {cilium['spec']} in {cilium['metadata']['namespace']}")
+    k8s = find(render("-f", STORE, "--set", "organizationErasure.enabled=true", "--set", "networkPolicy.enabled=true",
+                      "--set", "networkPolicy.flavor=kubernetes"), "NetworkPolicy", policy)
+    if not k8s:
+        fail(f"kubernetes: no {policy}")
+    want_peer = [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": NAMESPACE}}, "podSelector": {"matchLabels": pods}}]
+    if k8s["spec"]["ingress"] != [{"from": want_peer, "ports": [{"port": 8083, "protocol": "TCP"}]}]:
+        fail(f"kubernetes: {policy} admits {k8s['spec']['ingress']}")
+    if find(render("-f", STORE, "--set", "organizationErasure.enabled=true", "--set", "networkPolicy.enabled=false"), "NetworkPolicy", policy):
+        fail("network policies off: the operator's policy renders")
+    if find(off, "CiliumNetworkPolicy", policy) or find(off, "NetworkPolicy", policy):
+        fail("off by default: the operator's policy renders")
+    ok("the kagent controller's API port admits the operator's pods, both flavors; none with network policies off")
 
     nostore = render("-f", f"{CHART}/ci/test-substrate-values.yaml", "--set", "organizationErasure.enabled=true")
     if find(nostore, "Role", IAM_ROLE) or any(d.get("kind") == "Role" and d["apiVersion"].startswith("iam.aws") and d["metadata"]["name"].endswith("-operator") for d in nostore):
