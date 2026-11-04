@@ -592,7 +592,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.omitKeys[5] | string | `"enabledExtensions"` |  |
 | components.backstage.omitKeys[6] | string | `"disabledExtensions"` |  |
 | components.backstage.omitKeys[7] | string | `"skillsRepositories"` |  |
-| components.backstage.omitKeys[8] | string | `"configReload"` |  |
+| components.backstage.omitKeys[8] | string | `"metaAgents"` |  |
+| components.backstage.omitKeys[9] | string | `"configReload"` |  |
 | components.backstage.enabled | bool | `false` |  |
 | components.backstage.dependsOn[0] | string | `"cloudnative-pg"` |  |
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
@@ -1565,6 +1566,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | backstage.disabledExtensions[10] | string | `"api:ai-chat/drawer"` |  |
 | backstage.disabledExtensions[11] | string | `"app-root-element:ai-chat/drawer"` |  |
 | backstage.skillsRepositories | list | `[]` |  |
+| backstage.metaAgents | object | `{}` |  |
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |

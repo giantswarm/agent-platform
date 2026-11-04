@@ -167,11 +167,21 @@ data:
     signed-in person through muster (the x_model-manager_* tools of the
     muster.installations entry above; giantswarm/backstage#2294), and its
     backend has no model-manager client to configure. */}}
-    {{- $metaAgent := "" }}
+    {{- /* The agent behind each of the portal's platform roles: the Agent
+    Manager the meta chart installs (components.agent-manager-assistant) for
+    every role while it is on; backstage.metaAgents.<role> points a role
+    elsewhere. backstage >= 3.0.0; an earlier portal ignores the key. */}}
+    {{- $metaAgents := dict }}
     {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager-assistant")) (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) }}
-    {{- $metaAgent = printf "%s/%s/agent-manager-assistant" $installation (.Values.kagent.namespaceOverride | default .Release.Namespace) }}
+    {{- $assistant := printf "%s/%s/agent-manager-assistant" $installation (.Values.kagent.namespaceOverride | default .Release.Namespace) }}
+    {{- range list "generalInformation" "agentManagement" "workflowManagement" "platformOperations" "skillEvaluation" "skillCreation" }}
+    {{- $_ := set $metaAgents . $assistant }}
     {{- end }}
-    {{- if or $fluxSa $backstage.skillsRepositories $kagentRoute $metaAgent }}
+    {{- end }}
+    {{- range $role, $agent := ($backstage.metaAgents | default dict) }}
+    {{- if $agent }}{{ $_ := set $metaAgents $role $agent }}{{ end }}
+    {{- end }}
+    {{- if or $fluxSa $backstage.skillsRepositories $kagentRoute $metaAgents }}
     agentPlatform:
       {{- with $fluxSa }}
       {{- /* The tenant identity of the agents' HelmReleases: the ONE value
@@ -190,15 +200,9 @@ data:
         repositories:
           {{- toYaml . | nindent 10 }}
       {{- end }}
-      {{- with $metaAgent }}
-      {{- /* The agent behind each of the portal's platform roles: the Agent
-      Manager the meta chart installs (components.agent-manager-assistant).
-      backstage >= 3.0.0; an earlier portal ignores the key. */}}
+      {{- with $metaAgents }}
       metaAgents:
-        agentManagement: {{ . }}
-        skillEvaluation: {{ . }}
-        skillCreation: {{ . }}
-        workflowManagement: {{ . }}
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- if $kagentRoute }}
       {{- /* The kagent controller of this installation, as the portal backend

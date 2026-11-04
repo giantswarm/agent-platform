@@ -222,7 +222,9 @@ if jsonschema and not list(jsonschema.Draft202012Validator(schema).iter_errors({
 print(f"ok: skills.repositories feeds both consumers; the platform source, the deprecated lists, dedup and the schema ({'draft 2020-12 checked' if jsonschema else 'helm only, jsonschema missing'})")
 
 
-# The portal's meta agents.
+# The portal's meta agents: every role the portal reads
+# (giantswarm/backstage plugins/agent-platform/config.d.ts, agentPlatform.metaAgents).
+ROLES = ("generalInformation", "agentManagement", "workflowManagement", "platformOperations", "skillEvaluation", "skillCreation")
 def app_config(docs: list[dict]) -> dict:
     vals = find(docs, "HelmRelease", "agent-platform-connectivity")["spec"]["values"]
     with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
@@ -235,8 +237,14 @@ def app_config(docs: list[dict]) -> dict:
 for ns, args in {"kagent": [], "agents": ["--set", "kagent.namespaceOverride=agents", "--set", "model-manager.kagent.namespace=agents", "--set", "agent-manager.kagent.namespace=agents", "--set", "postgres.namespace=agents"]}.items():
     ref = f"agent-platform/{ns}/{NAME}"
     meta = app_config(render(META, *ON, *PORTAL, *args)).get("metaAgents")
-    if meta != {k: ref for k in ("agentManagement", "skillEvaluation", "skillCreation", "workflowManagement")}:
+    if meta != {k: ref for k in ROLES}:
         fail(f"agentPlatform.metaAgents is {meta!r}, want every role on {ref}")
+meta = app_config(render(META, *ON, *PORTAL, "--set", "backstage.metaAgents.generalInformation=agent-platform/kagent/swarmgeist")).get("metaAgents")
+if meta != {**{k: f"agent-platform/kagent/{NAME}" for k in ROLES}, "generalInformation": "agent-platform/kagent/swarmgeist"}:
+    fail(f"backstage.metaAgents.generalInformation does not point that role elsewhere: {meta!r}")
+meta = app_config(render(META, *ON, *PORTAL, "--set", f"components.{NAME}.enabled=false", "--set", "backstage.metaAgents.skillCreation=agent-platform/kagent/writer")).get("metaAgents")
+if meta != {"skillCreation": "agent-platform/kagent/writer"}:
+    fail(f"with the Agent Manager off, an installation's role does not render alone: {meta!r}")
 if "metaAgents" in app_config(render(META, *ON, *PORTAL, "--set", f"components.{NAME}.enabled=false")):
     fail(f"agentPlatform.metaAgents renders with components.{NAME} off")
 if "metaAgents" in app_config(render(META, "--set", "components.kagent.enabled=true", *PORTAL)):

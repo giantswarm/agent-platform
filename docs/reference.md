@@ -265,12 +265,13 @@ The OAuth issuer, client, secret and base URL come from the block, else from `gl
 
 ### Agent Manager and skills
 
-The Agent Manager is the platform's meta agent, `agent-manager-assistant` in the kagent namespace. Its prompt is in [`agents/agent-manager/values.yaml`](../agents/agent-manager/values.yaml) and its skills are in [`skills/`](../skills).
+The Agent Manager is the platform's meta agent, `agent-manager-assistant` in the kagent namespace. It creates and manages agents and their building blocks: skills, connectors, models and toolsets. Its prompt is in [`agents/agent-manager/values.yaml`](../agents/agent-manager/values.yaml) and its skills are in [`skills/`](../skills).
 
 | Value | Default | Effect |
 |---|---|---|
 | `components.agent-manager-assistant.enabled` | `true` | Deploys the agent while kagent, muster and agent-manager are on. The portal's meta-agent features use it. |
 | `agentManagerAssistant.modelConfig` | `""` | The `ModelConfig` it runs on. Empty uses `default-model-config`. |
+| `backstage.metaAgents.<role>` | unset | The agent behind a portal role, as `<installation>/<namespace>/<name>`. Roles: `generalInformation`, `agentManagement`, `workflowManagement`, `platformOperations`, `skillEvaluation`, `skillCreation`. Unset roles use the Agent Manager while it is on. |
 | `skills.repositories` | `[giantswarm/agent-skills]` | Skill sources for agent-manager and the portal, as URLs or `{url, ref, path, readOnly}`. |
 | `skills.platformSource.enabled` | `true` | Lists the platform's `skills/` first, read-only, at the release tag. Set `false` where GitHub is unreachable. |
 | `agent-manager.skills.repositories`, `backstage.skillsRepositories` | `[]` | Deprecated. When set, replaces `skills.repositories` for that consumer. |
@@ -510,7 +511,7 @@ You need:
 
 | Toggle | What the connectivity chart renders | Inputs |
 |---|---|---|
-| `components.backstage.enabled` | The app-config ConfigMap `agent-platform-backstage-app-config`, the `HTTPRoute` `backstage.<domain>`, and a config-reload hook that rolls the Deployment when the config changes. | `backstage.{hostname, parentRefs, installationName, extraScopes, startUrlSearchParams, enabledExtensions, disabledExtensions, skillsRepositories, configReload}`, dropped before the backstage chart (`components.backstage.omitKeys`). |
+| `components.backstage.enabled` | The app-config ConfigMap `agent-platform-backstage-app-config`, the `HTTPRoute` `backstage.<domain>`, and a config-reload hook that rolls the Deployment when the config changes. | `backstage.{hostname, parentRefs, installationName, extraScopes, startUrlSearchParams, enabledExtensions, disabledExtensions, skillsRepositories, metaAgents, configReload}`, dropped before the backstage chart (`components.backstage.omitKeys`). |
 | `components.mcp-kubernetes.enabled` | The `MCPServer` registering the server with muster, with the user's token forwarded and the label `agent-platform.giantswarm.io/tool-group: infrastructure`. Needs muster. `mcp-kubernetes.mcpServer.managementCluster: <name>` makes it a member of muster's `kubernetes` family; `enabled: false` renders no CR. | `mcp-kubernetes.kubernetesAudience` (default `dex-k8s-authenticator`, `""` for Google), `mcp-kubernetes.mcpServer`. |
 | `components.modelServing.enabled` (with the three kserve components) | The serving presets and the discovery ConfigMap `agent-platform-model-serving`, the serving `Namespace`, the cache claim, the Kyverno cache policies (`modelServing.policies.enabled: auto`) and the serving namespace's network policies. Fails without the kserve components or the `serving.kserve.io` API (`modelServing.kserve.requireApi`). | `modelServing.*` |
 | `components.kserve-llmisvc-resources.enabled` | The llm-d controller's network policy, and guards: `kserve.controller.deploymentMode: Standard`, `kserve.createSharedResources: true`. The removed `components.kserve-crd` / `components.kserve-resources` are refused. | the component's own block |

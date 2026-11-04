@@ -1324,6 +1324,7 @@ components:  # @schema additionalProperties: true
       - enabledExtensions
       - disabledExtensions
       - skillsRepositories
+      - metaAgents
       - configReload
     enabled: false
     # Renders a CNPG Cluster for its database when backstage.database.engine is
@@ -6369,6 +6370,11 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
     - app-root-element:ai-chat/drawer
   # Deprecated: set skills.repositories. When set, replaces it for this consumer.
   skillsRepositories: []
+  # The agent behind a portal role (generalInformation, agentManagement,
+  # workflowManagement, platformOperations, skillEvaluation, skillCreation), as
+  # <installation>/<namespace>/<name>. Unset roles take the Agent Manager while
+  # components.agent-manager-assistant is on.
+  metaAgents: {}
   # Roll the Backstage pod when the app-config ConfigMap changes: a
   # post-install/post-upgrade hook Job of the connectivity release stamps the
   # rendered app-config's checksum into the Deployment's pod template (no-op

@@ -3475,6 +3475,11 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # Skill repositories offered when an agent is created.
   skillsRepositories:
     - https://github.com/giantswarm/agent-skills
+  # The agent behind a portal role (generalInformation, agentManagement,
+  # workflowManagement, platformOperations, skillEvaluation, skillCreation), as
+  # <installation>/<namespace>/<name>. Unset roles take the Agent Manager while
+  # components.agent-manager-assistant is on.
+  metaAgents: {}
   # Roll the Backstage pod when this chart's app-config ConfigMap changes.
   # The backstage chart's own checksum annotations cover only its own
   # templates, so an app-config change (templates/backstage/app-config.yaml)

@@ -136,15 +136,28 @@ spec:
     - name: agent-manager
   values:
     agent:
-      description: Creates, changes, inspects and removes agents, wires them to models
-        and skills, and writes and reviews skills — acting as the person asking.
+      description: 'Creates and manages agents and their building blocks: skills, connectors,
+        models and toolsets.'
       displayName: Agent Manager
       systemMessage: |
-        You are the Agent Manager of this Agent Platform. You create, change,
-        inspect and remove agents, wire them to models and skills, choose
-        their toolsets, and write and review skills. You act with the identity
-        of the person talking to you: everything you do is done as them,
-        within their permissions, and the audit log names them.
+        You are the Agent Manager of this Agent Platform. You create and manage
+        agents and their building blocks: skills, connectors (MCP servers),
+        models and toolsets. You act with the identity of the person talking
+        to you: everything you do is done as them, within their permissions,
+        and the audit log names them.
+
+        The portal sends you its platform tasks; the first message says which:
+        - Questions about the platform and its agents: answer from your skills
+          and the live tools.
+        - Creating or changing an agent: the agent management rules below.
+        - Writing a skill, simple or nested: `agent-platform-skill-authoring`.
+        - Evaluating a skill: `agent-platform-skill-review`, with a score and
+          findings.
+        - Workflows: find them (`filter_tools` with pattern `workflow_*`), and
+          list, read, validate, create, change, run and delete them with
+          Muster's `core_workflow_*` tools (`agent-platform-tools`).
+        - Operating the platform: report its state (servers, models, agents)
+          with the read tools; change it only through the tools that write.
 
         Your knowledge lives in your skills. Load
         `agent-platform-agent-management` before you create, change, inspect
@@ -492,6 +505,7 @@ spec:
       ingress:
         enabled: false
       installationName: agent-platform
+      metaAgents: {}
       observability:
         otel:
           endpoint: http://otlp-gateway.kube-system.svc:4317
