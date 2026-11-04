@@ -14,7 +14,7 @@
   packaged unstamped fails its render.
 - skills.repositories feeds agent-manager.skills.repositories and
   backstage.skillsRepositories: the platform's source first, only at a
-  consumer floor that takes objects, without a ref on a pre-release, off with
+  consumer floor that takes objects, without a ref unless the chart is a published release, off with
   skills.platformSource.enabled=false; a consumer's own deprecated list
   replaces skills.repositories; one entry per url + ref + path; an entry for
   the platform's repository fails the render. The schema takes URLs and objects.
@@ -186,7 +186,8 @@ with tempfile.TemporaryDirectory() as tmp:
 print(f"ok: a stamped release pins the {len(skills)} skills of skills/ to its commit, an unstamped release fails, a pre-release carries none")
 
 # One skill-repository value, both consumers.
-own = {"url": PLATFORM, "ref": f"v{yaml.safe_load(open(f'{META}/Chart.yaml'))['version']}", "path": "skills", "readOnly": True}
+# The working tree is no published release (appVersion is not its version): no ref, as on a pre-release.
+own = {"url": PLATFORM, "path": "skills", "readOnly": True}
 am, conn = repos(render(META, *ON, *PORTAL))
 if am != installation or conn != installation:
     fail(f"below the object-form floors: agent-manager {am!r}, portal {conn!r}; want skills.repositories as URLs and no platform source")

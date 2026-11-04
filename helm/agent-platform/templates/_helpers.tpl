@@ -4455,14 +4455,25 @@ to it. One line each, no comment inside the define.
 {{- define "agent-platform.backstage.skillSourcesFloor" -}}3.31.0{{- end -}}
 
 {{/*
+"true" when this chart is a published release: a version without a
+pre-release, packaged with appVersion = version (the pipeline stamps both). A
+pre-release (a branch build, a candidate) and the working tree (appVersion
+0.1.0) are not; they have no release tag and no stamped commit.
+Usage: include "agent-platform.publishedRelease" $
+*/}}
+{{- define "agent-platform.publishedRelease" -}}
+{{- if and (not (semver .Chart.Version).Prerelease) (eq (toString .Chart.AppVersion) .Chart.Version) }}true{{ end -}}
+{{- end -}}
+
+{{/*
 The platform's own skill source: skills/ of this repository, read-only, at
-this chart's release tag; a pre-release (a branch build, a candidate) has no
-such tag and names no ref (the default branch).
+this chart's release tag; a chart that is no published release
+(agent-platform.publishedRelease) names no ref (the default branch).
 Usage: include "agent-platform.skills.platformSource" $ | fromJson
 */}}
 {{- define "agent-platform.skills.platformSource" -}}
 {{- $source := dict "url" "https://github.com/giantswarm/agent-platform" "path" "skills" "readOnly" true -}}
-{{- if not (semver .Chart.Version).Prerelease -}}
+{{- if include "agent-platform.publishedRelease" . -}}
 {{- $_ := set $source "ref" (printf "v%s" (include "agent-platform.chartVersion" .)) -}}
 {{- end -}}
 {{- $source | toJson -}}
@@ -4554,9 +4565,9 @@ Usage: include "agent-platform.agentManagerAssistant.derived" $ | fromJson
 A component's values file (components.<name>.valuesFile, a path in this chart),
 as JSON. The release pipeline stamps the tag's commit over the `[[ .SHA ]]`
 placeholder (hack/stamp-release-commit.sh). A skills[] entry still carrying it
-is dropped where the chart is no published release (a pre-release, or the
-working tree, whose appVersion is not its version), and fails the render of a
-published release: such a chart was packaged without the stamp.
+is dropped where the chart is no published release
+(agent-platform.publishedRelease), and fails the render of a published
+release: such a chart was packaged without the stamp.
 Usage: include "agent-platform.componentValuesFile" (dict "root" $ "path" $c.valuesFile) | fromJson
 */}}
 {{- define "agent-platform.componentValuesFile" -}}
@@ -4564,7 +4575,7 @@ Usage: include "agent-platform.componentValuesFile" (dict "root" $ "path" $c.val
 {{- if not $vals -}}
 {{- fail (printf "%s is missing from the chart or empty" .path) -}}
 {{- end -}}
-{{- $released := and (not (semver .root.Chart.Version).Prerelease) (eq (toString .root.Chart.AppVersion) .root.Chart.Version) -}}
+{{- $released := include "agent-platform.publishedRelease" .root -}}
 {{- if hasKey $vals "skills" -}}
 {{- $pinned := list -}}
 {{- range $vals.skills -}}
