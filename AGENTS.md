@@ -24,3 +24,8 @@ placement* section, kept in its internal plans repository.
   golden flags, with a comment saying why, and asserted by a `verify-*` target of its own.
 - A change that moves the committed renders under `tests/golden/` on purpose runs
   `make golden-update` and commits the diff, which is what a reviewer reads.
+
+## Platform skills
+
+- A change that alters what an agent or a person can do, see or configure on the platform updates
+  the affected skills in `skills/` in the same pull request; `make verify-skills` checks their layout.

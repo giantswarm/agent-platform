@@ -131,6 +131,7 @@ Each component is developed in its own repository, linked above. This repository
 
 - **[`helm/agent-platform`](helm/agent-platform)** is the chart you install. It holds the component roster with version ranges, the bundled Flux engine, self-management, and the install and upgrade hooks.
 - **[`helm/agent-platform-connectivity`](helm/agent-platform-connectivity)** wires the components together: routes and gateways, network policies for Cilium and plain Kubernetes, Kyverno exceptions, the kagent model catalog, [serving presets](docs/serving-presets.md) and Grafana dashboards.
+- **[`skills`](skills)** holds the platform's own agent skills, pinned to each release. They follow the platform: a change to it updates them in the same pull request.
 - **[`tests`](tests)** holds the render assertions behind `make verify-*` and an end-to-end install on kind ([tests/ats](tests/ats/README.md)).
 
 ```bash
