@@ -8,7 +8,8 @@ Each case pins one property of the render:
   each role holds every rule of the one before it; the user reads agents,
   templates, RemoteMCPServers, ModelConfigs, EgressPolicies and muster
   MCPServers and creates Sessions, and writes nothing; the editor writes
-  HelmReleases, OCIRepositories, Agents, AgentTemplates and RemoteMCPServers;
+  HelmReleases, Agents, AgentTemplates and RemoteMCPServers and reads the
+  agent chart's OCIRepository without writing it (giantswarm/agent-platform#1267);
   the admin also writes ModelConfigs, EgressPolicies and RoleBindings, places
   Secrets (create, update, patch, delete) and reads none, may `bind` the
   three roles only, and no role carries `escalate` or reads a Secret;
@@ -155,15 +156,18 @@ def check_roles(docs: list) -> None:
     if user_writes:
         fail(f"agent-platform:user writes {sorted(user_writes)}")
     ok("agent-platform:user reads the tenant's agents and servers, starts a Session, writes nothing")
-    for g, res in (("helm.toolkit.fluxcd.io", "helmreleases"), ("source.toolkit.fluxcd.io", "ocirepositories"),
+    for g, res in (("helm.toolkit.fluxcd.io", "helmreleases"),
                    ("api.kagent.dev", "agents"), ("api.kagent.dev", "agenttemplates"), ("api.kagent.dev", "remotemcpservers")):
         for v in WRITES:
             if (g, res, v, None) not in editor:
                 fail(f"agent-platform:editor cannot {v} {res}.{g}")
     for t in editor:
-        if t[1] in ("modelconfigs", "egresspolicies", "secrets", "rolebindings", "clusterroles") and t[2] in WRITES | {"bind"}:
+        if t[1] in ("modelconfigs", "egresspolicies", "secrets", "rolebindings", "clusterroles", "ocirepositories") and t[2] in WRITES | {"bind"}:
             fail(f"agent-platform:editor holds {t}")
-    ok("agent-platform:editor writes what agent-manager writes as the caller, and no ModelConfig, EgressPolicy, Secret or RoleBinding")
+    for v in ("get", "list", "watch"):
+        if ("source.toolkit.fluxcd.io", "ocirepositories", v, None) not in editor:
+            fail(f"agent-platform:editor cannot {v} ocirepositories.source.toolkit.fluxcd.io")
+    ok("agent-platform:editor writes what agent-manager writes as the caller, reads the agent chart's OCIRepository, and writes no OCIRepository, ModelConfig, EgressPolicy, Secret or RoleBinding")
     for g, res in (("api.kagent.dev", "modelconfigs"), ("api.kagent.dev", "egresspolicies"), ("", "secrets"),
                    ("rbac.authorization.k8s.io", "rolebindings")):
         for v in WRITES:

@@ -37,13 +37,23 @@ kagent namespace, the platform tenant whose workers the platform writes:
     choosing what runs on a node. Without the platform WorkerPool every
     WorkerPool write there is refused.
 
+The Agent Platform organizations' namespaces (agentPlatformOrganizations.enabled,
+giantswarm/agent-platform#1267), every namespace labelled
+agent-platform.giantswarm.io/organization, get the same pair,
+agent-platform-organization-workers and
+agent-platform-organization-workerpool-copy, with agent-platform-operator's
+ServiceAccount as the one writer of their WorkerPools. That is the sandbox
+shape of an organization: the WorkerPool's runtime class (sandboxClass), its
+worker template and the ServiceAccount the template names are the platform
+pool's.
+
 Admission runs every validating policy and webhook on a request: Kyverno and
-these policies each refuse on their own.
+these policies each refuse on their own. A Kyverno PolicyException lifts only
+Kyverno's own policies, never these.
 */ -}}
-{{- if and (include "agent-platform.substrate.enabled" .) (include "agent-platform.tenants.organizations" .) }}
+{{- if and (include "agent-platform.substrate.enabled" .) (or (include "agent-platform.tenants.organizations" .) (include "agent-platform.organizations.enabled" .)) }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
-{{- $reconciler := include "agent-platform.agentManager.serviceAccountUser" . }}
-{{- $pool := required "kagent.substrateWorkerPool.name must be set with tenants.organizations.enabled: a tenant's WorkerPool is a copy of this pool" .Values.kagent.substrateWorkerPool.name }}
+{{- $pool := required "kagent.substrateWorkerPool.name must be set with tenants.organizations.enabled or agentPlatformOrganizations.enabled: a tenant's or an organization's WorkerPool is a copy of this pool" .Values.kagent.substrateWorkerPool.name }}
 {{- /* A worker pod is <pool>-<ReplicaSet hash>-<id>, and the API server cuts a
 generateName to 58 characters: a longer pool name would leave the pods
 without the <pool>- prefix the exec rule matches. */}}
@@ -57,19 +67,29 @@ without the <pool>- prefix the exec rule matches. */}}
 {{- range $subjects }}{{ $users = append $users (printf "'system:serviceaccount:%s:%s'" .namespace .name) }}{{ end }}
 {{- $writers = append $writers (printf "'%ss': [%s]" (lower $kind) (join ", " $users)) }}
 {{- end }}
-{{- $namespaces := dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists") (dict "key" "kubernetes.io/metadata.name" "operator" "NotIn" "values" (list $kagentNs))) }}
+{{- /* Each set of namespaces the two policies hold, with the one writer of
+their WorkerPools: agent-manager's tenant reconciler in the tenants'
+namespaces, agent-platform-operator in the Agent Platform organizations'. */}}
+{{- $sets := list }}
+{{- if include "agent-platform.tenants.organizations" . }}
+{{- $sets = append $sets (dict "prefix" "agent-platform-tenant" "where" "an Organization namespace" "writerName" "agent-manager" "writer" (include "agent-platform.agentManager.serviceAccountUser" .) "namespaces" (dict "matchExpressions" (list (dict "key" "giantswarm.io/organization" "operator" "Exists") (dict "key" "kubernetes.io/metadata.name" "operator" "NotIn" "values" (list $kagentNs))))) }}
+{{- end }}
+{{- if include "agent-platform.organizations.enabled" . }}
+{{- $sets = append $sets (dict "prefix" "agent-platform-organization" "where" "an organization namespace" "writerName" "agent-platform-operator" "writer" (include "agent-platform.organizations.operatorUser" .) "namespaces" (include "agent-platform.organizations.namespaces" . | fromYaml)) }}
+{{- end }}
+{{- range $set := $sets }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: agent-platform-tenant-workers
+  name: {{ $set.prefix }}-workers
   labels:
-    {{- include "labels.common" . | nindent 4 }}
+    {{- include "labels.common" $ | nindent 4 }}
 spec:
   failurePolicy: Fail
   matchConstraints:
     namespaceSelector:
-      {{- toYaml $namespaces | nindent 6 }}
+      {{- toYaml $set.namespaces | nindent 6 }}
     resourceRules:
       - apiGroups: ["ate.dev"]
         apiVersions: ["*"]
@@ -106,42 +126,42 @@ spec:
         has(o.spec.template.metadata.labels) && 'ate.dev/worker-pool' in o.spec.template.metadata.labels)))
   validations:
     - expression: >-
-        request.resource.resource != 'workerpools' || variables.writer == {{ squote $reconciler }} ||
+        request.resource.resource != 'workerpools' || variables.writer == {{ squote $set.writer }} ||
         (request.operation == 'DELETE' && variables.writer in
         ['system:serviceaccount:kube-system:namespace-controller', 'system:serviceaccount:kube-system:generic-garbage-collector'])
       reason: Forbidden
-      messageExpression: {{ printf "'in an Organization namespace only agent-manager (%s) writes WorkerPools, not ' + variables.writer" $reconciler | quote }}
+      messageExpression: {{ printf "'in %s only %s (%s) writes WorkerPools, not ' + variables.writer" $set.where $set.writerName $set.writer | quote }}
     - expression: >-
         request.resource.resource == 'workerpools' || request.operation == 'CONNECT' || !variables.worker ||
         (variables.subresource == '' && (variables.writer in variables.writers[request.resource.resource] ||
         (request.operation == 'UPDATE' && variables.writer == 'system:serviceaccount:kube-system:generic-garbage-collector')))
       reason: Forbidden
       messageExpression: >-
-        'in an Organization namespace only Substrate controllers write ' + request.resource.resource +
+        'in {{ $set.where }} only Substrate controllers write ' + request.resource.resource +
         (variables.subresource == '' ? '' : '/' + variables.subresource) +
         ' labelled ate.dev/worker-pool, not ' + variables.writer
     # A CONNECT request carries no pod, only its name: the workers are the
     # pods of the one WorkerPool a tenant may hold, named after it.
     - expression: {{ printf "request.operation != 'CONNECT' || !request.name.startsWith('%s-')" $pool | quote }}
       reason: Forbidden
-      messageExpression: {{ printf "'in an Organization namespace no one execs into or attaches to a Substrate worker (%s-*), not ' + variables.writer" $pool | quote }}
+      messageExpression: {{ printf "'in %s no one execs into or attaches to a Substrate worker (%s-*), not ' + variables.writer" $set.where $pool | quote }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: agent-platform-tenant-workers
+  name: {{ $set.prefix }}-workers
   labels:
-    {{- include "labels.common" . | nindent 4 }}
+    {{- include "labels.common" $ | nindent 4 }}
 spec:
-  policyName: agent-platform-tenant-workers
+  policyName: {{ $set.prefix }}-workers
   validationActions: [Deny]
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: agent-platform-tenant-workerpool-copy
+  name: {{ $set.prefix }}-workerpool-copy
   labels:
-    {{- include "labels.common" . | nindent 4 }}
+    {{- include "labels.common" $ | nindent 4 }}
 spec:
   failurePolicy: Fail
   paramKind:
@@ -149,7 +169,7 @@ spec:
     kind: WorkerPool
   matchConstraints:
     namespaceSelector:
-      {{- toYaml $namespaces | nindent 6 }}
+      {{- toYaml $set.namespaces | nindent 6 }}
     resourceRules:
       - apiGroups: ["ate.dev"]
         apiVersions: ["v1alpha1"]
@@ -164,20 +184,21 @@ spec:
         dyn(object.spec).all(k, k == 'replicas' || k in dyn(params.spec))
       reason: Forbidden
       message: >-
-        a WorkerPool in an Organization namespace is a copy of the WorkerPool {{ $kagentNs }}/{{ $pool }}:
+        a WorkerPool in {{ $set.where }} is a copy of the WorkerPool {{ $kagentNs }}/{{ $pool }}:
         the same name and spec (workerImage, template, sandboxClass), only replicas may differ
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: agent-platform-tenant-workerpool-copy
+  name: {{ $set.prefix }}-workerpool-copy
   labels:
-    {{- include "labels.common" . | nindent 4 }}
+    {{- include "labels.common" $ | nindent 4 }}
 spec:
-  policyName: agent-platform-tenant-workerpool-copy
+  policyName: {{ $set.prefix }}-workerpool-copy
   paramRef:
     name: {{ $pool }}
     namespace: {{ $kagentNs }}
     parameterNotFoundAction: Deny
   validationActions: [Deny]
+{{- end }}
 {{- end }}
