@@ -616,7 +616,7 @@ The chart ships two presets, `infrastructure` and `agent-platform`, under `muste
 - `method: plugin` (default) uses the Barman Cloud plugin, which you install next to the operator. It gives continuous WAL archiving and a daily `ScheduledBackup` to `postgres.backup.objectStore`.
 - `method: volumeSnapshot` takes CSI snapshots and keeps no WAL archive.
 - `postgres.backup.crossplane.*` provisions the object store on AWS or Azure.
-- To restore, bootstrap a second Cluster named `<clusterName>-restore` from the same store. The network policy and the AWS role expect that name.
+- To restore, bootstrap a second Cluster named `<clusterName>-restore` from the same store. The network policies, the AWS role and the ImageVolume PolicyException expect that name.
 
 `make verify-postgres` asserts this.
 
