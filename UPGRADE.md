@@ -44,7 +44,7 @@ giantswarm/giantswarm-platform-manager#789: `kagent.providers`, `kagent.defaultM
 
   An entry's `promptCaching`, `cacheTTL`, `maxTokens`, `apiFormat`, `credentialType` and `baseUrl` go under the provider's block (`anthropic`, `openAI`, ...); an Anthropic entry inherited `kagent.providers.anthropic.config` before, so carry those keys over. Leave `baseUrl` out to ride the LLM listener with `llmRouting.enabled`. A ModelConfig of the same name that the connectivity release rendered is deleted by the upgrade; give the declared one another name, or let Flux recreate it on its next reconcile.
 - **Remove** `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` from the values. A Secret the kagent chart created from `kagent.providers.<name>.apiKey` goes with the upgrade too: pre-create the Secret the ModelConfig names.
-- **A person's own ChatGPT login**: replace the `kagent.modelConfigs[]` entry with `credentialType: chatgptOAuth` and no `apiKeySecret` by `chatgptPersonalLogin.enabled: true` and its ModelConfig ([docs/chatgpt-login.md](docs/chatgpt-login.md)).
+- **A person's own ChatGPT login**: replace the `kagent.modelConfigs[]` entry with `credentialType: chatgptOAuth` and no `apiKeySecret` by the same ModelConfig declared with the agents; the chart wires the login wherever its prerequisites are on ([docs/chatgpt-login.md](docs/chatgpt-login.md)).
 
 ## \<current\> → \<next\> (the credential providers read Secrets only where bound)
 

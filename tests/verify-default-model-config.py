@@ -6,7 +6,7 @@ Render, meta chart:
 - the kagent release carries providers: false on every render (not null, which
   Helm's upgrade patch drops, and not {}, which merges the kagent chart's
   defaults back in), so the kagent chart renders no default-model-config;
-- no meta-only key (defaultModelConfig, modelConfigs, chatgptPersonalLogin)
+- no meta-only key (defaultModelConfig, modelConfigs)
   reaches the kagent or the connectivity release;
 - kagent.providers, kagent.defaultModelConfig and kagent.modelConfigs each fail
   the render, naming the key and the replacement.
@@ -83,12 +83,10 @@ def check_meta(chart):
     if "providers" not in kagent or kagent["providers"] is not False:
         fail(f"the kagent release's providers is {kagent.get('providers')!r}, want false")
     ok("the kagent release carries providers: false")
-    for key in ("defaultModelConfig", "modelConfigs", "chatgptPersonalLogin"):
+    for key in ("defaultModelConfig", "modelConfigs"):
         if key in kagent:
             fail(f"the kagent release carries the meta-only key {key}")
     conn = release_values(objs, "agent-platform-connectivity")
-    if "chatgptPersonalLogin" in conn:
-        fail("the connectivity release carries the meta-only key chatgptPersonalLogin")
     for key in ("providers", "defaultModelConfig", "modelConfigs"):
         if key in (conn.get("kagent") or {}):
             fail(f"the connectivity release carries kagent.{key}")

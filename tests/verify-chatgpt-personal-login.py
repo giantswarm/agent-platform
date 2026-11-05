@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """Assert the wiring of a person's own ChatGPT login (giantswarm/giantswarm#38731,
-agent-platform.chatgpt.personalLogin): with chatgptPersonalLogin.enabled, the
+agent-platform.chatgpt.personalLogin): wherever the platform carries it, the
 codex turns of a ModelConfig with credentialType chatgptOAuth and no
-apiKeySecret run on the subscription the Session's person connected in muster.
+apiKeySecret run on the subscription the Session's person connected in muster;
+the ModelConfig is the only switch.
 
 - the meta chart (tests/fixtures/chatgpt-personal-login-values.yaml over the
   workspaces fixtures, Substrate on): the muster release keeps the provider App
   chatgpt (flow chatgptDeviceCode) after the workspace provider Apps; the kagent
   release carries the installation provider chatgpt (host chatgpt.com, path
   prefix /backend-api/codex/, scheme Bearer); an own key of that entry and an
-  own muster App named chatgpt stand; with the switch off nothing of it
-  renders; the component charts at the floors take the forwarded values
+  own muster App named chatgpt stand; the component charts at the floors take the forwarded values
   (muster 5.52.5 keeps the App, kagent 1.24.0's controller lists the provider);
-- the meta chart's guards name the switch: muster's token encryption off, its
-  OAuth client off, the credential provider off (workspaces off), the kagent,
-  kagent-crds and muster floors below 1.24.0, 1.24.0 and 5.52.5;
+- without any of its prerequisites nothing of it renders: muster's token
+  encryption off, its OAuth client off, the credential provider off (workspaces
+  off), the kagent-crds and muster floors below 1.24.0 and 5.52.5 (the kagent
+  floor sits below the chart's own kagent floor, so no render reaches it);
 - the muster chart at its floor refuses the App without the encryption key.
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
@@ -118,7 +119,7 @@ def main(chart: str) -> int:
         fail(f"the kagent release lacks the chatgpt provider:\n{values(on, 'kagent')}")
     if "chatgpt" in block(values(on, "agent-platform-connectivity"), "kagent", 4):
         fail("the connectivity release carries the chatgpt provider; nothing there reads it")
-    ok("chatgptPersonalLogin.enabled derives muster's App chatgpt and kagent's provider chatgpt for the kagent release")
+    ok("the platform's prerequisites derive muster's App chatgpt and kagent's provider chatgpt for the kagent release")
 
     own = meta(chart, [*ON, "--set", "kagent.controller.session.actorJWTProviders.chatgpt.pathPrefix=/backend-api/",
                        "--set", "muster.muster.providerApps[0].name=chatgpt",
@@ -131,11 +132,6 @@ def main(chart: str) -> int:
         fail(f"an own muster App chatgpt does not stand in place of the derived one:\n{apps}")
     ok("an own key of the provider entry and an own muster App chatgpt stand")
 
-    off = meta(chart, [*ON, "--set", "chatgptPersonalLogin.enabled=false"])
-    if "chatgptDeviceCode" in off or "/backend-api/codex/" in off:
-        fail("chatgptPersonalLogin.enabled=false derives the person's App or provider")
-    ok("with the switch off nothing is derived")
-
     config = component_render(release(on, "muster"), MUSTER_CHART)
     if not re.search(r"providerApps:\n\s+- flow: chatgptDeviceCode\n\s+name: chatgpt", config):
         fail(f"the muster chart {MUSTER_CHART[1]} does not keep the chatgpt App:\n{config}")
@@ -144,20 +140,18 @@ def main(chart: str) -> int:
         fail(f"the kagent chart {KAGENT_CHART[1]} does not list the chatgpt provider in KAGENT_SESSION_ACTOR_JWT_PROVIDERS")
     ok(f"the muster chart {MUSTER_CHART[1]} keeps the App; the kagent chart {KAGENT_CHART[1]} lists the provider")
 
-    # --- the meta chart's guards ----------------------------------------------------------
-    what = "chatgptPersonalLogin.enabled (a person's own ChatGPT login)"
-    for flags, needle, case in (
-        (["--set", "muster.muster.oauth.server.encryptionKey=false"], "muster.muster.oauth.server.encryptionKey is off", "token encryption off"),
-        (["--set", "muster.muster.oauth.mcpClient.enabled=false"], "muster.muster.oauth.mcpClient.enabled is off", "muster's OAuth client off"),
-        (["--set", "workspaces.enabled=false"], "the credential provider is off", "the credential provider off"),
-        (["--set", "components.kagent.versionRange=>=1.23.0 <1.25.0", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"], "components.kagent.versionRange (>=1.23.0 <1.25.0) admits releases before 1.24.0", "the kagent floor"),
-        (["--set", "components.kagent-crds.versionRange=>=1.23.0 <1.25.0", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"], "components.kagent-crds.versionRange (>=1.23.0 <1.25.0) admits releases before 1.24.0", "the kagent-crds floor"),
-        (["--set", "components.muster.versionRange=>=5.50.0 <6.0.0"], "components.muster.versionRange (>=5.50.0 <6.0.0) admits releases before 5.52.5", "the muster floor"),
+    # --- without a prerequisite nothing is derived -------------------------------------
+    for flags, case in (
+        (["--set", "muster.muster.oauth.server.encryptionKey=false"], "token encryption off"),
+        (["--set", "muster.muster.oauth.mcpClient.enabled=false"], "muster's OAuth client off"),
+        (["--set", "workspaces.enabled=false"], "the credential provider off"),
+        (["--set", "components.kagent-crds.versionRange=>=1.23.0 <1.25.0", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"], "the kagent-crds floor"),
+        (["--set", "components.muster.versionRange=>=5.50.0 <6.0.0"], "the muster floor"),
     ):
-        err = meta(chart, [*ON, *flags], expect_fail=True)
-        must_fail(err, what, case)
-        must_fail(err, needle, case)
-    ok("the guards: token encryption, muster's OAuth client, the credential provider, the kagent, kagent-crds and muster floors")
+        off = meta(chart, [*ON, *flags])
+        if "chatgptDeviceCode" in off or "/backend-api/codex/" in off:
+            fail(f"{case}: the person's App or provider is still derived")
+    ok("without token encryption, muster's OAuth client, the credential provider or the kagent-crds and muster floors nothing is derived")
 
     # --- the muster chart refuses the App without the key ---------------------------------
     with tempfile.TemporaryDirectory() as tmp:

@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** **A person's own ChatGPT login is switched on by `chatgptPersonalLogin.enabled`** (default `false`, giantswarm/giantswarm#38731). It derives muster's provider App `chatgpt` and kagent's installation provider `chatgpt`, as a `kagent.modelConfigs[]` entry with `credentialType: chatgptOAuth` and no `apiKeySecret` did, with the same guards; the ModelConfig is declared with the agents. The connectivity release no longer carries `kagent.controller.session.actorJWTProviders.chatgpt`.
+- **Breaking:** **A person's own ChatGPT login is switched on by its ModelConfig alone** (giantswarm/giantswarm#38731). The meta chart derives muster's provider App `chatgpt` and kagent's installation provider `chatgpt` wherever kagent, muster, workspaces with Substrate, muster's token encryption and OAuth client role are on and the kagent and muster ranges admit 1.24.0 and 5.52.5 or later; when one is missing it derives nothing. A ModelConfig with `openAI.credentialType: chatgptOAuth` and no `apiKeySecret`, declared with the agents, is the model. The connectivity release no longer carries `kagent.controller.session.actorJWTProviders.chatgpt`.
 
 ### Security
 

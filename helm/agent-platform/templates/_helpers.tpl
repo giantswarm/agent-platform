@@ -742,7 +742,6 @@ the manager signs grants (agent-platform.kagent.sessionAdmission); the block's
 own value stands per key. Guarded first: the kagent floor that takes the
 block, an issuer, the email claim, an own block set in part. */ -}}
 {{- include "agent-platform.validateSessionAdmission" .root -}}
-{{- include "agent-platform.validateChatGPTPersonalLogin" .root -}}
 {{- $session := dict -}}
 {{- with (include "agent-platform.kagent.sessionAdmission" .root | fromJson) -}}
 {{- $_ := set $session "admission" (dict "jwt" .) -}}
@@ -816,7 +815,6 @@ has failed the render. */ -}}
 {{- /* A person's own ChatGPT login: the App chatgpt after them, unless the
 installation keeps its own (agent-platform.chatgpt.personalLogin). */ -}}
 {{- with (include "agent-platform.chatgpt.personalLogin" .root | fromJson).app -}}
-{{- include "agent-platform.validateChatGPTPersonalLogin" $.root -}}
 {{- $app := . -}}
 {{- $all := $apps | default (dig "muster" "providerApps" list ($.root.Values.muster | default dict)) -}}
 {{- $named := false -}}
@@ -1655,11 +1653,11 @@ Usage: include "agent-platform.kagent.musterActorJWTProvider" . | fromJson
 
 
 {{/*
-A person's own ChatGPT login (giantswarm/giantswarm#38687,
-chatgptPersonalLogin.enabled): a ModelConfig with credentialType chatgptOAuth
-and no apiKeySecret, declared with the agents, is the model "ChatGPT (your
-subscription)", whose codex turns run on the ChatGPT subscription the Session's
-person connected in muster. From the switch this chart derives:
+A person's own ChatGPT login (giantswarm/giantswarm#38687): a ModelConfig with
+credentialType chatgptOAuth and no apiKeySecret, declared with the agents, is
+the model "ChatGPT (your subscription)", whose codex turns run on the ChatGPT
+subscription the Session's person connected in muster. The ModelConfig is the
+only switch: wherever the platform carries the login, this chart derives:
 - muster's provider App `chatgpt` (muster.providerApps, flow
   chatgptDeviceCode: OpenAI's device-code sign-in, the Codex CLI's public
   client), which keeps each person's login as their grant, refreshes it as its
@@ -1670,63 +1668,45 @@ person connected in muster. From the switch this chart derives:
   scheme Bearer), which every bound Session is admitted with and the egress
   gateway resolves by credential URI at muster's authority.
 An own key of the kagent block's chatgpt entry stands; an own muster App named
-chatgpt stands in place of the derived one. Emits JSON {app, provider}, or {}
-with the switch or kagent off.
+chatgpt stands in place of the derived one.
+The platform carries the login when all of these hold, and the chart derives
+nothing otherwise (a chatgptOAuth ModelConfig there finds no login at run time):
+- kagent and muster are on;
+- muster's credential provider is on (workspaces.enabled with Substrate on,
+  agent-platform.muster.credentialProvider) and kagent's Session admission is
+  derived (a grant signing key, agent-platform.kagent.sessionAdmission), which
+  carries the credential authority the provider resolves at;
+- muster keeps tokens encrypted (muster.muster.oauth.server.encryptionKey): a
+  person's ChatGPT login is never stored unencrypted;
+- muster's OAuth client role is on (muster.muster.oauth.mcpClient.enabled),
+  which the muster chart needs for any provider App;
+- components.kagent.versionRange and components.kagent-crds.versionRange admit
+  no release before agent-platform.kagent.chatgptPersonalLoginFloor (a
+  ModelConfig without apiKeySecret, the credential-URI Session provider), and
+  components.muster.versionRange none before agent-platform.muster.chatgptAppFloor
+  (the device-code App).
+Emits JSON {app, provider}, or {}.
 Usage: include "agent-platform.chatgpt.personalLogin" . | fromJson
 */}}
 {{- define "agent-platform.chatgpt.personalLogin" -}}
-{{- if and (dig "enabled" false (.Values.chatgptPersonalLogin | default dict)) (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
+{{- $on := and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
+{{- if $on -}}
+{{- $on = and ((.Values.workspaces | default dict).enabled) ((include "agent-platform.muster.credentialProvider" . | fromJson).enabled) (include "agent-platform.kagent.sessionAdmission" . | fromJson) -}}
+{{- end -}}
+{{- $muster := dig "muster" dict (.Values.muster | default dict) | default dict -}}
+{{- $on = and $on (dig "oauth" "server" "encryptionKey" false $muster) (dig "oauth" "mcpClient" "enabled" false $muster) -}}
+{{- if $on -}}
+{{- range $c, $floor := dict "kagent" (include "agent-platform.kagent.chatgptPersonalLoginFloor" $) "kagent-crds" (include "agent-platform.kagent.chatgptPersonalLoginFloor" $) "muster" (include "agent-platform.muster.chatgptAppFloor" $) -}}
+{{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig $c "versionRange" "" $.Values.components) | default "0.0.0") "" -}}
+{{- if lt ((semver $have).Compare (semver $floor)) 0 -}}{{- $on = false -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $on -}}
 {{- $own := dig "controller" "session" "actorJWTProviders" "chatgpt" dict (.Values.kagent | default dict) | default dict -}}
 {{- $provider := mergeOverwrite (dict "hostname" "chatgpt.com" "pathPrefix" "/backend-api/codex/" "scheme" "Bearer") $own -}}
 {{- dict "app" (dict "name" "chatgpt" "flow" "chatgptDeviceCode") "provider" $provider | toJson -}}
 {{- else -}}
 {}
-{{- end -}}
-{{- end -}}
-
-{{/*
-The guards of a person's own ChatGPT login (agent-platform.chatgpt.personalLogin),
-run while the kagent and muster components render:
-- muster's credential provider is on (workspaces.enabled with Substrate on,
-  agent-platform.muster.credentialProvider) and kagent's Session admission is
-  derived (a grant signing key, agent-platform.kagent.sessionAdmission), which
-  carries the credential authority the provider resolves at: without them no
-  Session is bound to a person and no turn finds a login;
-- muster keeps tokens encrypted (muster.muster.oauth.server.encryptionKey): a
-  person's ChatGPT login is never stored unencrypted, and the muster chart
-  refuses the App without it;
-- muster's OAuth client role is on (muster.muster.oauth.mcpClient.enabled),
-  which the muster chart needs for any provider App;
-- the floors of components.kagent.versionRange and
-  components.kagent-crds.versionRange at agent-platform.kagent.chatgptPersonalLoginFloor
-  (a ModelConfig without apiKeySecret, the credential-URI Session provider) and
-  of components.muster.versionRange at agent-platform.muster.chatgptAppFloor
-  (the device-code App).
-Emits nothing; fails naming the key and the fix.
-*/}}
-{{- define "agent-platform.validateChatGPTPersonalLogin" -}}
-{{- with (include "agent-platform.chatgpt.personalLogin" . | fromJson) -}}
-{{- $what := "chatgptPersonalLogin.enabled (a person's own ChatGPT login)" -}}
-{{- if not (and ($.Values.workspaces | default dict).enabled (include "agent-platform.muster.credentialProvider" $ | fromJson).enabled) -}}
-{{- fail (printf "%s, which muster releases to the egress gateway through its credential provider for a Session bound to the person, but the credential provider is off: set workspaces.enabled with components.substrate.enabled, or turn chatgptPersonalLogin off" $what) -}}
-{{- end -}}
-{{- if not (include "agent-platform.kagent.sessionAdmission" $ | fromJson) -}}
-{{- fail (printf "%s, which kagent binds through the Session admission this chart derives with a grant signing key, but none is derived: set workspace-manager.grant.signingKey" $what) -}}
-{{- end -}}
-{{- $muster := dig "muster" dict ($.Values.muster | default dict) | default dict -}}
-{{- if not (dig "oauth" "server" "encryptionKey" false $muster) -}}
-{{- fail (printf "%s, kept by muster as the person's grant, but muster.muster.oauth.server.encryptionKey is off: a person's ChatGPT tokens are never stored unencrypted — set it, with the key oauth-encryption-key in muster's OAuth Secret" $what) -}}
-{{- end -}}
-{{- if not (dig "oauth" "mcpClient" "enabled" false $muster) -}}
-{{- fail (printf "%s, connected through muster's provider App chatgpt, but muster.muster.oauth.mcpClient.enabled is off: the muster chart refuses its provider Apps without it — set it, with muster.muster.oauth.mcpClient.publicUrl" $what) -}}
-{{- end -}}
-{{- range $c, $floor := dict "kagent" (include "agent-platform.kagent.chatgptPersonalLoginFloor" $) "kagent-crds" (include "agent-platform.kagent.chatgptPersonalLoginFloor" $) "muster" (include "agent-platform.muster.chatgptAppFloor" $) -}}
-{{- $range := dig $c "versionRange" "" $.Values.components -}}
-{{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
-{{- if lt ((semver $have).Compare (semver $floor)) 0 -}}
-{{- fail (printf "%s, but components.%s.versionRange (%s) admits releases before %s, the first that serves it: raise the floor to %s" $what $c $range $floor $floor) -}}
-{{- end -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 

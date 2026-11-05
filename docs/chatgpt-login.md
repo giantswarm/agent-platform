@@ -14,12 +14,7 @@ In a Slack thread someone else started, every turn runs on the subscription of t
 
 ## What an installation enables
 
-The switch `chatgptPersonalLogin.enabled: true` in the meta chart's values, and a ModelConfig declared next to the agents with `openAI.credentialType: chatgptOAuth` and **no** `apiKeySecret`:
-
-```yaml
-chatgptPersonalLogin:
-  enabled: true
-```
+A ModelConfig declared next to the agents with `openAI.credentialType: chatgptOAuth` and **no** `apiKeySecret`. It is the only switch: the meta chart wires muster's provider App `chatgpt` and kagent's installation provider `chatgpt` wherever the platform carries the login (kagent and muster on, workspaces with Substrate, muster's token encryption and OAuth client role, kagent 1.24.0 and muster 5.52.5 or later), and wires nothing otherwise.
 
 ```yaml
 apiVersion: api.kagent.dev/v1alpha3

@@ -1430,7 +1430,7 @@ verify-toolchain-manager: ## Assert the toolchain-manager component (giantswarm/
 	@python3 tests/verify-toolchain-manager.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "toolchain-manager component verified."
 .PHONY: verify-chatgpt-personal-login
-verify-chatgpt-personal-login: ## Assert the wiring of a person's own ChatGPT login (giantswarm/giantswarm#38731): chatgptPersonalLogin.enabled derives muster's provider App chatgpt (flow chatgptDeviceCode) and kagent's installation provider chatgpt (chatgpt.com, /backend-api/codex/, Bearer) for the kagent release, own values stand, the switch off derives nothing, and muster 5.52.5 and kagent 1.24.0 take the values; the guards (muster's token encryption, its OAuth client, the credential provider, the kagent, kagent-crds and muster floors); the muster chart refuses the App without its encryption key. Network: gsoci.azurecr.io (the component charts). HELM selects the binary.
+verify-chatgpt-personal-login: ## Assert the wiring of a person's own ChatGPT login (giantswarm/giantswarm#38731): the platform's prerequisites derive muster's provider App chatgpt (flow chatgptDeviceCode) and kagent's installation provider chatgpt (chatgpt.com, /backend-api/codex/, Bearer) for the kagent release, own values stand, muster 5.52.5 and kagent 1.24.0 take the values, and without a prerequisite (muster's token encryption, its OAuth client, the credential provider, the kagent-crds and muster floors) nothing is derived; the muster chart refuses the App without its encryption key. Network: gsoci.azurecr.io (the component charts). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-chatgpt-personal-login.py $(CHART_DIR)
 	@echo "ChatGPT personal login verified."
