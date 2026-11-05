@@ -9,9 +9,10 @@ this release's namespace.
     the erasure lists and deletes a deleted organization's Sessions there,
     directly, as the operator's ServiceAccount; the route's JWT policy takes
     people's tokens only), Substrate's ate-api-server on 443 (the erasure asks
-    it until a deleted organization has no actor left) and, with the AWS
-    snapshot store, the world on 443 (S3, where it deletes the organization's
-    snapshots, and STS, where it exchanges its IRSA token).
+    it until a deleted organization has no actor left) and, with an S3
+    snapshot location (the Crossplane AWS store or an existing bucket), the
+    world on 443 (S3, where it deletes the organization's snapshots, and STS,
+    where it exchanges its IRSA token).
   * <name>-operator-to-kagent-controller: the controller's side of that call
     (additive to the controller's own ingress policy: the gateway and the UI).
   * <name>-operator-to-ate-api: ate-api-server's side (additive to
@@ -26,7 +27,13 @@ this release's namespace.
 {{- $pods := include "agent-platform.organizations.operatorPodLabels" . | fromYaml }}
 {{- $substrate := include "agent-platform.substrate.enabled" . }}
 {{- $substrateNs := include "agent-platform.substrate.namespace" . }}
-{{- $s3 := eq (include "agent-platform.substrateStore.crossplane" .) "aws" }}
+{{- /* S3 (and STS for IRSA) whenever the snapshot location is an S3 bucket
+outside the cluster, whoever provisioned it: the Crossplane AWS store, or an
+existing bucket named in kagent.harness.snapshotLocation. The s3proxy façade
+(capz, or s3proxy alone) is in the cluster and gives the operator no access. */ -}}
+{{- $location := dig "harness" "snapshotLocation" "" (.Values.kagent | default dict) }}
+{{- if include "agent-platform.substrateStore.mode" . }}{{ $location = include "agent-platform.substrateStore.location" . }}{{ end }}
+{{- $s3 := and (hasPrefix "s3://" $location) (not (include "agent-platform.substrateStore.s3proxy" .)) }}
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
 apiVersion: cilium.io/v2

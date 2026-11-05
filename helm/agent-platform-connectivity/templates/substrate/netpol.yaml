@@ -575,14 +575,19 @@ spec:
         - ports:
             - port: {{ $controllerPort | quote }}
               protocol: TCP
-    {{- with include "agent-platform.kagent.otlpEgress" . }}
-    # The actors' telemetry: the OTLP gateway kagent.otel names, the same
-    # destination the controller's egress policy opens for its own spans.
-    # The Go ADK flushes a turn's spans before the A2A response closes
-    # (KAGENT_PRE_RESPONSE_TRACE_FLUSH, a checkpoint runtime has no later
-    # window); without this rule the flush ran into its deadline on every turn
-    # and the stream closed 3 s after the task had completed (agent-platform#456).
-    {{- . | nindent 4 }}
+    {{- /* The actors' telemetry: the OTLP gateway kagent.otel names, the same
+    destination the controller's egress policy opens for its own spans. The Go
+    ADK flushes a turn's spans before the A2A response closes
+    (KAGENT_PRE_RESPONSE_TRACE_FLUSH, a checkpoint runtime has no later
+    window); without this rule the flush ran into its deadline on every turn
+    and the stream closed 3 s after the task had completed (agent-platform#456).
+    An in-cluster collector only, by its namespace: an external one is the
+    world rule's, and the cluster entity would open every pod on its port. */}}
+    {{- range include "agent-platform.kagent.otlpTargets" . | fromJsonArray }}
+    {{- if .namespace }}
+    # The actors' telemetry (agent-platform#456).
+    {{- include "agent-platform.otlpEgressRule" (dict "target" . "who" "kagent's exporters send to") | nindent 4 }}
+    {{- end }}
     {{- end }}
     {{- end }}
     {{- if (include "agent-platform.llmRouting" .) }}
@@ -599,12 +604,16 @@ spec:
               protocol: TCP
     {{- end }}
     {{- /* A host model server may sit on a node of the cluster (the host or
-           remote-node entity) or behind a name that resolves into it, where
+           remote-node entity) or behind a name that resolves to a node, where
            the world rule below does not reach it: an actor whose ModelConfig points at an
            Ollama, a Lemonade Server or an LM Studio on the host needs that
            address and port opened. model-manager's own policy opens the
            endpoint it manages models through; this is the inference path, at
-           the address the ModelConfigs carry. */ -}}
+           the address the ModelConfigs carry. Never the cluster entity: it
+           would open every in-cluster pod on the port, and on 443 or 10443 it
+           would undo the rule that keeps the gateway's in-cluster HTTPS to
+           muster's Gateway pods. An in-cluster model server is reached by its
+           own policy (model-serving/netpol.yaml). */ -}}
     {{- range $server := $modelServers }}
     {{- if $server.isIP }}
     # The {{ $server.backend }} host model server the actors dial, an IP endpoint.
@@ -622,14 +631,18 @@ spec:
         - ports:
             - port: {{ $server.port | quote }}
               protocol: TCP
-    # The same name may resolve to an in-cluster Service, which toFQDNs alone
-    # does not admit.
+    {{- if not (has (toString $server.port) (list "443" "10443")) }}
+    # The same name may resolve to a node of the cluster, which toFQDNs alone
+    # does not admit: the nodes on the server's port, never the pods. On 443
+    # and 10443 the in-cluster destinations stay muster's Gateway pods.
     - toEntities:
-        - cluster
+        - host
+        - remote-node
       toPorts:
         - ports:
             - port: {{ $server.port | quote }}
               protocol: TCP
+    {{- end }}
     {{- end }}
     {{- end }}
     # Every TCP port (port 0 is Cilium's wildcard): the actors' egress policy

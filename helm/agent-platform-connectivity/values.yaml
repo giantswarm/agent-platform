@@ -3150,7 +3150,7 @@ tenants:
 #     ServiceAccount as a machine caller that lists and deletes every
 #     creator's Sessions; its network policies (the cluster DNS, the API
 #     server, the kagent controller's API port, ate-api-server and, with the
-#     AWS snapshot store, S3 and STS); with the Crossplane AWS snapshot store
+#     an S3 snapshot location, S3 and STS); with the Crossplane AWS snapshot store
 #     the IAM role <store role>-operator, which deletes keys under an
 #     organization's UID prefix of the bucket only, named on the operator's
 #     ServiceAccount (IRSA). The capz and s3proxy stores give the operator no

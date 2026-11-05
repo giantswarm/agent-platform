@@ -14603,12 +14603,7 @@ spec:
         - ports:
             - port: "8083"
               protocol: TCP
-    # The actors' telemetry: the OTLP gateway kagent.otel names, the same
-    # destination the controller's egress policy opens for its own spans.
-    # The Go ADK flushes a turn's spans before the A2A response closes
-    # (KAGENT_PRE_RESPONSE_TRACE_FLUSH, a checkpoint runtime has no later
-    # window); without this rule the flush ran into its deadline on every turn
-    # and the stream closed 3 s after the task had completed (agent-platform#456).
+    # The actors' telemetry (agent-platform#456).
     # The OTLP gateway kagent's exporters send to (http://otlp-gateway.kube-system.svc:4317).
     - toEndpoints:
         - matchLabels:

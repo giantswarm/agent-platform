@@ -314,6 +314,49 @@ def check_egress(chart):
     r = connectivity(chart, "kubernetes", "--set", "networkPolicy.kubernetes.ipv6.enabled=true")
     expect(r.returncode != 0 and "networkPolicy.kubernetes.ipv6.enabled needs networkPolicy.kubernetes.ipv6.excludedCIDRs" in r.stderr,
            "networkPolicy.kubernetes.ipv6 without the cluster's IPv6 CIDRs fails the render")
+    # No rule of the egress gateway names the cluster entity: a host model
+    # server named by hostname reaches the nodes on its port (never on 443 or
+    # 10443), and an external OTLP collector is the world rule's.
+    mm = ["--set", "components.model-manager.enabled=true", "--set", "model-manager.backend=ollama",
+          "--set", "global.identity.issuerUrl=https://dex.ci.example.com", "--set", "global.identity.clientId=platform",
+          "--set", "global.identity.existingSecret=platform-oauth"]
+    for endpoint, port in (("https://models.example.com", "443"), ("https://models.example.com:10443", "10443"), ("http://ollama.lan:11434", "11434")):
+        egress = find(docs(connectivity(chart, "cilium", *mm, "--set", f"model-manager.ollama.endpoint={endpoint}")),
+                      "CiliumNetworkPolicy", "substrate-atenet-egress")["spec"]["egress"]
+        entity_rules = [r for r in egress if "toEntities" in r and r["toEntities"] != ["world"]]
+        expect(not any("cluster" in r["toEntities"] for r in entity_rules),
+               f"a host model server at {endpoint} opens no cluster entity on the egress gateway")
+        nodes = [r for r in entity_rules if r["toEntities"] == ["host", "remote-node"]]
+        if port in ("443", "10443"):
+            expect(not nodes, f"a host model server at {endpoint} opens no node on {port}: in the cluster 443/10443 stay muster's Gateway pods")
+        else:
+            expect(len(nodes) == 1 and nodes[0]["toPorts"] == [{"ports": [{"port": port, "protocol": "TCP"}]}],
+                   f"a host model server at {endpoint} reaches the nodes on {port}, never the pods")
+        fqdn = [r for r in egress if "toFQDNs" in r]
+        expect(any(r["toFQDNs"] == [{"matchName": endpoint.split("//")[1].split(":")[0]}] and
+                   r["toPorts"] == [{"ports": [{"port": port, "protocol": "TCP"}]}] for r in fqdn),
+               f"a host model server at {endpoint} is reached by name on {port}")
+    otlp = ["--set", "kagent.otel.traces.enabled=true", "--set", "kagent.otel.traces.endpoint=https://otlp.example.com"]
+    egress = find(docs(connectivity(chart, "cilium", *otlp)), "CiliumNetworkPolicy", "substrate-atenet-egress")["spec"]["egress"]
+    expect(not any("cluster" in r.get("toEntities", []) for r in egress),
+           "an external OTLP collector opens no cluster entity on the egress gateway (the world rule reaches it)")
+    # The operator's S3 and STS egress follows the storage backend, whoever provisioned it.
+    def operator_world(flavor, *extra):
+        objs = docs(connectivity(chart, flavor, *extra))
+        if flavor == "cilium":
+            pol = find(objs, "CiliumNetworkPolicy", "agent-platform-connectivity-operator-egress")
+            return any(r.get("toEntities") == ["world"] and r["toPorts"] == [{"ports": [{"port": "443", "protocol": "TCP"}]}] for r in pol["spec"]["egress"])
+        pol = find(objs, "NetworkPolicy", "agent-platform-connectivity-operator-egress")
+        # The world rule leaves worldExcludedCIDRs out; the API server rule
+        # (networkPolicy.kubernetes.apiServerCIDR, 0.0.0.0/0 here) has no except.
+        return any(t.get("ipBlock", {}).get("cidr") == "0.0.0.0/0" and t["ipBlock"].get("except")
+                   for r in pol["spec"]["egress"] for t in r.get("to", []))
+    for flavor in ("cilium", "kubernetes"):
+        expect(operator_world(flavor), f"with an existing S3 bucket (kagent.harness.snapshotLocation, no Crossplane), the operator reaches S3 and STS ({flavor})")
+        expect(operator_world(flavor, "-f", f"{chart}/ci/test-substrate-store-aws-values.yaml", "--set", "kagent.harness.snapshotLocation="),
+               f"with the Crossplane AWS store, the operator reaches S3 and STS ({flavor})")
+        expect(not operator_world(flavor, "-f", f"{chart}/ci/test-substrate-store-capz-values.yaml", "--set", "kagent.harness.snapshotLocation="),
+               f"behind the in-cluster s3proxy façade, the operator gets no world egress ({flavor})")
     serving = docs(connectivity(chart, "kubernetes", "-f", f"{chart}/ci/test-model-serving-oci-values.yaml"))
     to_model = [d for d in serving if d["kind"] == "NetworkPolicy" and d["metadata"]["name"].endswith("-kagent-agents-to-model-serving")]
     ingress = [d for d in serving if d["kind"] == "NetworkPolicy" and "-model-serving-" in d["metadata"]["name"] and d["metadata"]["name"].endswith("-ingress")]
