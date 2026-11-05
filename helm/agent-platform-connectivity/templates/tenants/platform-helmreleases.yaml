@@ -20,7 +20,8 @@ the agent chart names, values.skillsGitAuthSecretRef.name (every git skill's
 and plugin's credentialRef) and a git credentialRef of a skill or plugin of
 values.extraAgentSpec (merged over the Agent's template), are each the
 installation's skills credential (current or earlier name), or a Secret the
-requester may `get`.
+requester may `get`, at most two distinct Secrets of the latter (the
+authorizer checks one expression may run).
 An update that leaves the spec as it is (a finalizer, a reconcile request)
 passes. The organization namespaces hold the same fields
 (organizations/admission.yaml). Rendered whenever
@@ -78,13 +79,23 @@ spec:
     # An empty name asks for every Secret of the namespace.
     - name: credentials
       expression: >-
-        ('skillsGitAuthSecretRef' in variables.values && 'name' in variables.values.skillsGitAuthSecretRef &&
+        (('skillsGitAuthSecretRef' in variables.values && 'name' in variables.values.skillsGitAuthSecretRef &&
         string(variables.values.skillsGitAuthSecretRef.name) != '' ?
         [string(variables.values.skillsGitAuthSecretRef.name)] : dyn([])) +
         (('skills' in variables.extraAgentSpec ? dyn(variables.extraAgentSpec.skills) : dyn([])) +
         ('plugins' in variables.extraAgentSpec ? dyn(variables.extraAgentSpec.plugins) : dyn([])))
         .filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
-        .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '')
+        .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '')).distinct()
+    # The credentials the authorizer is asked about, each distinct name once:
+    # its cost allows two checks per expression (k8s.io/apiserver
+    # pkg/cel/library/cost.go).
+    - name: checked
+      expression: >-
+        {{- if $installationCredentials }}
+        variables.credentials.filter(n, !(n in [{{ join ", " $installationCredentials }}]))
+        {{- else }}
+        variables.credentials
+        {{- end }}
   validations:
     - expression: "size(variables.forbidden) == 0"
       reason: Forbidden
@@ -101,11 +112,14 @@ spec:
         'serviceAccountName' in variables.spec && variables.spec.serviceAccountName == {{ squote $helmSA }}
       reason: Forbidden
       messageExpression: {{ printf "'in the kagent namespace, a HelmRelease runs as the ServiceAccount %s (spec.serviceAccountName); refused for ' + request.userInfo.username + ': ' + request.name" $helmSA | quote }}
+    - expression: "size(variables.checked) <= 2"
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, a HelmRelease names as a git credential (values.skillsGitAuthSecretRef.name,
+        values.extraAgentSpec skills and plugins) at most two distinct Secrets besides the installation skills credential;
+        refused for ' + request.userInfo.username + ': ' + variables.checked.map(n, n == '' ? '<no name>' : n).join(', ')
     - expression: >-
-        variables.credentials.all(n,
-        {{- if $installationCredentials }}
-        n in [{{ join ", " $installationCredentials }}] ||
-        {{- end }}
+        size(variables.checked) > 2 || variables.checked.all(n,
         authorizer.group('').resource('secrets').namespace(request.namespace).name(n).check('get').allowed())
       reason: Forbidden
       messageExpression: >-

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **An agent with three or more skills behind one credential can be changed again** (giantswarm/giantswarm#38827). `agent-platform-platform-tenant-credential-refs` asks the authorizer once per distinct Secret name instead of once per reference, and `agent-platform-platform-helmreleases` does the same for the Secrets it does not take as the installation skills credential. The API server allows two authorizer checks per CEL expression, so an Agent or AgentTemplate whose skills named `agent-manager-skills-token` three or more times was refused with `actual cost limit exceeded` on every spec change. Both policies now refuse, with their own message and for every requester, an object that names more than two distinct such Secrets.
+
 ### Security
 
 - **The connectivity hooks read only the Secrets they write** (giantswarm/agent-platform#1269). The hook ServiceAccount's ClusterRole no longer carries `secrets` or `configmaps`. Each hook gets a Role, at its own events, in each namespace it writes, on the names it reads or writes; only the Substrate bootstrap's `create` is unnamed. The bootstrap's Roles are in `ate-system` and `podcertificate-controller-system`, which the new pre-install / pre-upgrade hook Job `<release>-substrate-namespaces` (weight -4) creates when they are missing. With `agentPlatformOrganizations.enabled` the bootstrap also gets `create` and `patch` on the ConfigMap `agent-platform-operator-ate-api-ca` in the release namespace. The databases hook's Roles are in `postgres.namespace` and every `secretNamespaces` entry, and the sign-in keys cleanup's Role is in the release namespace.

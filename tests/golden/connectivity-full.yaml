@@ -15664,13 +15664,19 @@ spec:
     # An empty name asks for every Secret of the namespace.
     - name: credentials
       expression: >-
-        ('skillsGitAuthSecretRef' in variables.values && 'name' in variables.values.skillsGitAuthSecretRef &&
+        (('skillsGitAuthSecretRef' in variables.values && 'name' in variables.values.skillsGitAuthSecretRef &&
         string(variables.values.skillsGitAuthSecretRef.name) != '' ?
         [string(variables.values.skillsGitAuthSecretRef.name)] : dyn([])) +
         (('skills' in variables.extraAgentSpec ? dyn(variables.extraAgentSpec.skills) : dyn([])) +
         ('plugins' in variables.extraAgentSpec ? dyn(variables.extraAgentSpec.plugins) : dyn([])))
         .filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
-        .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '')
+        .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '')).distinct()
+    # The credentials the authorizer is asked about, each distinct name once:
+    # its cost allows two checks per expression (k8s.io/apiserver
+    # pkg/cel/library/cost.go).
+    - name: checked
+      expression: >-
+        variables.credentials
   validations:
     - expression: "size(variables.forbidden) == 0"
       reason: Forbidden
@@ -15687,8 +15693,14 @@ spec:
         'serviceAccountName' in variables.spec && variables.spec.serviceAccountName == 'kagent-flux'
       reason: Forbidden
       messageExpression: "'in the kagent namespace, a HelmRelease runs as the ServiceAccount kagent-flux (spec.serviceAccountName); refused for ' + request.userInfo.username + ': ' + request.name"
+    - expression: "size(variables.checked) <= 2"
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, a HelmRelease names as a git credential (values.skillsGitAuthSecretRef.name,
+        values.extraAgentSpec skills and plugins) at most two distinct Secrets besides the installation skills credential;
+        refused for ' + request.userInfo.username + ': ' + variables.checked.map(n, n == '' ? '<no name>' : n).join(', ')
     - expression: >-
-        variables.credentials.all(n,
+        size(variables.checked) > 2 || variables.checked.all(n,
         authorizer.group('').resource('secrets').namespace(request.namespace).name(n).check('get').allowed())
       reason: Forbidden
       messageExpression: >-
@@ -15741,9 +15753,11 @@ spec:
         request.resource.resource in ['agents', 'agenttemplates'] ?
         ('skills' in variables.template ? dyn(variables.template.skills) : dyn([])) +
         ('plugins' in variables.template ? dyn(variables.template.plugins) : dyn([])) : dyn([])
+    # Each distinct name once: the authorizer's cost allows two checks per
+    # expression (k8s.io/apiserver pkg/cel/library/cost.go).
     - name: refs
       expression: >-
-        variables.sources.filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
+        (variables.sources.filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
         .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '') +
         (request.resource.resource == 'remotemcpservers' && 'headersFrom' in variables.spec ?
         dyn(variables.spec.headersFrom).filter(h, has(h.valueFrom) && has(h.valueFrom.type) && h.valueFrom.type == 'Secret')
@@ -15754,13 +15768,19 @@ spec:
         (request.resource.resource == 'modelconfigs' && 'apiKeySecret' in variables.spec ?
         [string(variables.spec.apiKeySecret)] : dyn([])) +
         (request.resource.resource == 'modelproviderconfigs' && 'secretRef' in variables.spec ?
-        [has(variables.spec.secretRef.name) ? string(variables.spec.secretRef.name) : ''] : dyn([]))
+        [has(variables.spec.secretRef.name) ? string(variables.spec.secretRef.name) : ''] : dyn([]))).distinct()
   # The authorizer is not available to a messageExpression, so the refusal
   # names every referenced Secret. An empty name asks for every Secret of the
   # namespace.
   validations:
+    - expression: "size(variables.refs) <= 2"
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, ' + request.kind.kind + ' ' + request.name + ' names at most two distinct Secrets,
+        as a git credentialRef, a headersFrom Secret, a secretKeyRef, an apiKeySecret or a secretRef. Refused for ' +
+        request.userInfo.username + ': ' + variables.refs.map(n, n == '' ? '<no name>' : n).join(', ')
     - expression: >-
-        variables.refs.all(n,
+        size(variables.refs) > 2 || variables.refs.all(n,
         authorizer.group('').resource('secrets').namespace(request.namespace).name(n).check('get').allowed())
       reason: Forbidden
       messageExpression: >-
