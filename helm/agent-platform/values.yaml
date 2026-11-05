@@ -319,7 +319,8 @@ gitops:
 #       within the line the forwarded values were proven against: a 0.x range
 #       ends at the next minor (0.N.x, <0.N.0), a range from 1.0.0 at the next
 #       major at most, and the release that renders values for the next line
-#       raises the ceiling (tests/verify-range-ceilings.py). Pin exactly for a
+#       raises the ceiling (tests/verify-range-ceilings.py, whose UNCAPPED
+#       components take every release above their floor). Pin exactly for a
 #       customer BOM.
 #   valuesFrom   — top-level values block forwarded to this release's values.
 #   forwardAllValues — forward the whole values tree (connectivity reads many
@@ -1189,7 +1190,12 @@ components:  # @schema additionalProperties: true
     # export global.observability.traces.otlp derives, and serviceMonitor
     # with observability.metrics, the metrics port its ServiceMonitor scrapes
     # (giantswarm/cluster-manager#138, giantswarm/giantswarm#36711).
-    versionRange: ">=0.22.0 <0.35.0"
+    # No ceiling: the keys this chart derives for cluster-manager (identity,
+    # observability, modelManager.namespace) do not depend on its version, so
+    # each new cluster-manager line rolls in without a release of this chart. A
+    # cluster-manager release that renames one of them must not ship until this
+    # chart follows (UNCAPPED in tests/verify-range-ceilings.py).
+    versionRange: ">=0.22.0"
     valuesFrom: cluster-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
