@@ -5138,11 +5138,10 @@ role name and -operator (organization-erasure/crossplane-aws.yaml). */ -}}
       "substrate" (dict "target" (printf "grpcs://api.%s.svc:443" $ateNs) "audience" (printf "api.%s.svc" $ateNs) "caClusterTrustBundle" (dict "signerName" "servicedns.podcert.ate.dev/identity" "matchLabels" (dict "podcert.ate.dev/canarying" "live"))) -}}
 {{- $_ := set $derived "erasure" $erasure -}}
 {{- $own := index .Values "agent-platform-operator" | default dict -}}
-{{- /* Commit mode needs the ClusterRole agent-platform:organization-flux and
-the Flux-namespace policy pins that the operator's commit mode writes against;
-this chart wires neither yet. */ -}}
+{{- /* The chart derives no commit mode for the operator (its source, path and
+installation Kustomization), so an own one is refused. */ -}}
 {{- if hasKey $own "commitMode" -}}
-{{- fail "agent-platform-operator.commitMode is set: commit mode is not wired by this chart yet (the operator would bind agent-platform:organization-flux, which this chart does not render); remove agent-platform-operator.commitMode" -}}
+{{- fail "agent-platform-operator.commitMode is set: this chart does not derive the operator's commit mode yet; remove agent-platform-operator.commitMode" -}}
 {{- end -}}
 {{- include "agent-platform.operator.checkOwn" (dict "own" $own "derived" $derived "path" "agent-platform-operator") -}}
 {{- $derived | toJson -}}
