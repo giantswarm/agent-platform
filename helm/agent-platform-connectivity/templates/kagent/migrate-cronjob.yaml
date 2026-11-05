@@ -116,6 +116,16 @@ to the current one. */ -}}
 {{- with $skillsAuth.previous }}
 {{- $env = append $env (dict "name" "AGENT_MANAGER_SKILLS_GIT_AUTH_PREVIOUS_SECRET_NAMES" "value" (join "," .)) }}
 {{- end }}
+{{- /* The skill-manager, which the run pins skills through while
+agent-manager does (the meta chart derives agentManager.skillManager), with
+the platform's service token as its bearer
+(templates/agent-manager/skill-manager-token.yaml). */ -}}
+{{- with dig "skillManager" dict (.Values.agentManager | default dict) }}
+{{- $env = append $env (dict "name" "AGENT_MANAGER_SKILL_MANAGER_URL" "value" .url) }}
+{{- with .serviceTokenSecret }}
+{{- $env = append $env (dict "name" "SKILL_MANAGER_TOKEN" "valueFrom" (dict "secretKeyRef" (dict "name" . "key" "token"))) }}
+{{- end }}
+{{- end }}
 {{- /* The platform Harness every migrated Agent names. agent-manager's own
 default and the Harness the kagent chart renders are both `kagent`, so it is
 written here, not read from kagent.harness. */ -}}

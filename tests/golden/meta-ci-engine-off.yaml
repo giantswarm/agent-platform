@@ -2763,6 +2763,8 @@ spec:
           requiredAudiences:
           - dex-k8s-authenticator
         enabled: true
+    networkPolicy:
+      ingressNamespaces: []
     oauth:
       dex:
         allowPrivateURLs: true

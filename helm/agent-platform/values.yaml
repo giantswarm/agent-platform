@@ -5329,16 +5329,22 @@ skillManager:
     - https://github.com/giantswarm/agent-skills
 
 # Values forwarded verbatim to the skill-manager component release
-# (giantswarm/skill-manager). sources is NOT set here: the chart derives it
-# from skills.platformSource and skillManager.sources (a list set here fails
-# the render). Identity as for model-manager: an OAuth 2.1 resource server
-# validating the session's token muster forwards (its MCPServer CR, labelled
-# for the agent-platform tool group) and the one agent-manager forwards on its
-# REST calls, acting as the person; the issuer, client, secret and CA fall back
-# to global.identity inside the chart. GitHub is read with the App or token
-# Secret under github (empty: anonymous, public repositories only). The
-# connectivity chart admits muster and agent-manager to its pods
-# (networkPolicy.mcpBackends.skill-manager, derived).
+# (giantswarm/skill-manager). Derived, not set here: sources (from
+# skills.platformSource and skillManager.sources; a list set here fails the
+# render), networkPolicy.ingressNamespaces (its callers' namespaces: muster's,
+# the portal's, agent-manager's and the kagent namespace of agent-manager's
+# migrate run, after the block's own) and serviceToken.secretName (the
+# platform's bearer for that run, a Secret the connectivity release generates,
+# while agent-manager pins through the skill-manager). Identity as for
+# model-manager: an OAuth 2.1 resource server validating the session's token
+# muster forwards (its MCPServer CR, labelled for the agent-platform tool
+# group) and the one agent-manager forwards on its REST calls, acting as the
+# person; the issuer, client, secret and CA fall back to global.identity
+# inside the chart. GitHub is read with the App (github.app.secretName) or
+# token Secret (github.tokenSecret.name) set here; empty: anonymous, public
+# repositories only. The connectivity chart registers it as muster's MCP
+# backend (networkPolicy.mcpBackends.skill-manager, derived) and opens
+# agent-manager's egress to it.
 skill-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: skill-manager
   # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,

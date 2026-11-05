@@ -302,6 +302,42 @@ if smv != {"url": "http://skills.skills.svc.cluster.local:9090"}:
     fail(f"agent-manager's skillManager.url does not follow the skill-manager's name, port and namespace: {smv!r}")
 refused(META, "move the list to skillManager.sources", *ON, *FLOORS, "--set", "agent-manager.skills.repositories[0]=https://github.com/acme/own")
 
+# The skill-manager's callers and the platform's bearer for agent-manager's migrate run.
+def sm_values(docs: list[dict]) -> dict:
+    return find(docs, "HelmRelease", "skill-manager")["spec"]["values"]
+
+
+v = sm_values(render(META, *ON))
+if v["networkPolicy"].get("ingressNamespaces") != [] or "serviceToken" in v:
+    fail(f"skill-manager below agent-manager's floor, all in one namespace: ingressNamespaces {v['networkPolicy'].get('ingressNamespaces')!r}, serviceToken {v.get('serviceToken')!r}; want [] and none")
+docs = render(META, *ON, *FLOORS, *PORTAL, "--set", "components.backstage.targetNamespace=portal", "--set", "skill-manager.networkPolicy.ingressNamespaces[0]=monitoring")
+v = sm_values(docs)
+if v["networkPolicy"]["ingressNamespaces"] != ["monitoring", "portal", "kagent"] or v.get("serviceToken") != {"secretName": "skill-manager-service-token"}:
+    fail(f"skill-manager at agent-manager's floor: ingressNamespaces {v['networkPolicy']['ingressNamespaces']!r}, serviceToken {v.get('serviceToken')!r}; want the own entry, the portal's and kagent, and the generated Secret")
+refused(META, "skill-manager.serviceToken.secretName", *ON, *FLOORS, "--set", "skill-manager.serviceToken.secretName=own")
+v = sm_values(render(META, *ON, *FLOORS, "--set", "skill-manager.oauth.enabled=false"))
+if "serviceToken" in v:
+    fail(f"skill-manager without OAuth gets a service token: {v['serviceToken']!r}")
+conn = find(docs, "HelmRelease", "agent-platform-connectivity")["spec"]["values"]
+if conn["agentManager"].get("skillManager") != {"url": SM_URL, "namespace": "agent-platform", "serviceTokenSecret": "skill-manager-service-token"}:
+    fail(f"the connectivity release's agentManager.skillManager is {conn['agentManager'].get('skillManager')!r}")
+with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
+    yaml.safe_dump(conn, f)
+    f.flush()
+    cdocs = render(CONN, "-f", f.name)
+secrets = sorted((d["metadata"]["namespace"], d["metadata"]["name"]) for d in cdocs if d["kind"] == "Secret" and d["metadata"]["name"] == "skill-manager-service-token")
+if secrets != [("agent-platform", "skill-manager-service-token"), ("kagent", "skill-manager-service-token")]:
+    fail(f"the service token Secrets are {secrets!r}, want one in the skill-manager's and one in the kagent namespace")
+tokens = {d["data"]["token"] for d in cdocs if d["kind"] == "Secret" and d["metadata"]["name"] == "skill-manager-service-token"}
+if len(tokens) != 1:
+    fail("the two service token Secrets carry different tokens")
+cron = find(cdocs, "CronJob", "agent-platform-connectivity-agent-manager-migrate") or next((d for d in cdocs if d["kind"] == "CronJob" and "migrate" in d["metadata"]["name"]), None)
+env = cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["env"] if cron else []
+if {"name": "AGENT_MANAGER_SKILL_MANAGER_URL", "value": SM_URL} not in env or \
+        {"name": "SKILL_MANAGER_TOKEN", "valueFrom": {"secretKeyRef": {"name": "skill-manager-service-token", "key": "token"}}} not in env:
+    fail(f"agent-manager's migrate run does not call the skill-manager with the service token: {env!r}")
+print("ok: the skill-manager admits its callers' namespaces; agent-manager's migrate run calls it with the generated service token")
+
 schema = json.load(open(f"{META}/values.schema.json"))
 try:
     import jsonschema

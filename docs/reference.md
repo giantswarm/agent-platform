@@ -286,9 +286,10 @@ The Agent Manager is the platform's meta agent, `agent-manager-assistant` in the
 
 - `components.skill-manager` follows `components.agent-manager`. `enabled: false` leaves it out. `dependsOn: [muster]`; agent-manager depends on it.
 - Its `sources` are derived: the platform source, then `skillManager.sources`. An own `skill-manager.sources` fails the render.
-- GitHub access goes in `skill-manager.github` (`app.secretName` or `tokenSecret`). Empty reads public repositories anonymously.
+- GitHub access goes in `skill-manager.github` (`app.secretName` or `tokenSecret.name`). Empty reads public repositories anonymously.
 - agent-manager gets `skillManager.url`, the skill-manager's Service, from `agent-platform.agentManager.skillManagerFloor` on. Below it, or with the skill-manager off, agent-manager gets `skills.repositories` as URLs, without the platform source. `agent-manager.skills.repositories` set while agent-manager uses the skill-manager fails the render.
-- The connectivity chart admits muster and agent-manager to its pods (`networkPolicy.mcpBackends.skill-manager`, derived) and opens agent-manager's egress to it.
+- Its NetworkPolicy admits its callers' namespaces (`networkPolicy.ingressNamespaces`, derived: muster's, the portal's, agent-manager's, the kagent namespace). The connectivity chart registers it as muster's MCP backend and opens agent-manager's and its migrate run's egress to it.
+- agent-manager's migrate run calls it with a service token: the connectivity chart generates the Secret `skill-manager-service-token` (skill-manager's and the kagent namespace) and the chart sets `skill-manager.serviceToken.secretName`.
 
 `make verify-agent-manager-assistant` covers it.
 
