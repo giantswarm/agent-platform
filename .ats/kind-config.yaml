@@ -18,3 +18,10 @@ featureGates:
   PodCertificateRequest: true
 runtimeConfig:
   "certificates.k8s.io/v1beta1": "true"
+# Trial: overlap cold image pulls without unbounded disk/network concurrency
+# on the four-vCPU CI executor. The installed charts and their probes stay intact.
+kubeadmConfigPatches:
+  - |
+    kind: KubeletConfiguration
+    serializeImagePulls: false
+    maxParallelImagePulls: 2

@@ -851,6 +851,12 @@ def log_pod_timeline(kube: Kube, since: str) -> None:
             logger.warning("Pod timeline unavailable (kubectl exit %s)", result.returncode)
             return
         pods = json.loads(result.stdout)["items"]
+        for node in sorted({pod["spec"]["nodeName"] for pod in pods if pod["spec"].get("nodeName")}):
+            config_result = kube.cmd(["get", "--raw", f"/api/v1/nodes/{node}/proxy/configz"], check=False, timeout=10)
+            if config_result.returncode == 0:
+                config = json.loads(config_result.stdout)["kubeletconfig"]
+                logger.info("KUBELET %s serializeImagePulls=%s maxParallelImagePulls=%s", node,
+                            config.get("serializeImagePulls"), config.get("maxParallelImagePulls"))
         for pod in sorted(pods, key=lambda p: p["metadata"]["creationTimestamp"]):
             meta, status = pod["metadata"], pod.get("status", {})
             created = meta["creationTimestamp"]
