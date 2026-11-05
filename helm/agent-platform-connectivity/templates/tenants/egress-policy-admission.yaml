@@ -6,7 +6,7 @@ spec.destinations[].authentication.secretKeyRef at the egress gateway. The
 namespace is the boundary: the reference names a Secret of the policy's own
 namespace, and anyone who may select a policy there uses its grant. A tenant
 namespace may hold Secrets its people may not read, so a policy naming
-one would send the platform's credential to any origin the tenant chooses.
+one would send that Secret to any origin the tenant chooses.
 
 agent-platform-tenant-egress-credentials refuses, in every organization
 namespace (labelled agent-platform.giantswarm.io/organization; selected by the

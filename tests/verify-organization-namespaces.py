@@ -28,7 +28,10 @@ provider's grants, the workers' PolicyException, the model routing bindings
 and the admission policies, and gets the worker admission, the model routing
 (the listener admitted, another base URL and an unserved provider refused),
 the Secret-creation check and the tenant credential's type, and the egress
-credential admission; one labelled only
+credential admission; no one execs into, attaches to or adds an ephemeral
+container to a worker there (a Pending pod is enough: admission runs before
+the node lookup); the operator writes its namespaced kinds only in
+organization namespaces (agent-platform-organization-operator-scope); one labelled only
 giantswarm.io/organization gets none of them. Each refusal names its policy
 and has an admitted twin.
 
@@ -311,7 +314,7 @@ def case(name, rc_out, by=None):
 def crds(meta_chart):
     values = yaml.safe_load(open(os.path.join(meta_chart, "values.yaml")))
     out = []
-    for name, keep in (("kagent-crds", ("egresspolicies.api.kagent.dev", "modelconfigs.api.kagent.dev")),
+    for name, keep in (("kagent-crds", ("egresspolicies.api.kagent.dev", "modelconfigs.api.kagent.dev", "agents.api.kagent.dev")),
                        ("substrate-crds", ("workerpools.ate.dev",))):
         component = values["components"][name]
         floor = re.match(r"^>=\s*(\S+)", component["versionRange"]).group(1)
@@ -415,6 +418,39 @@ def prove_operator_scope():
             case(f"the operator writes {what} in {ns}", create(obj(ns), as_=op), "agent-platform-organization-operator-scope")
     case("the operator writes a WorkerPool in the kagent namespace", create(workerpool("kagent"), as_=op), "agent-platform-organization-operator-scope")
     case("a person's NetworkPolicy in kube-system is not the operator's policy's business", create(netpol("kube-system"), as_=PERSON))
+    agent = lambda ns: {"apiVersion": "api.kagent.dev/v1alpha3", "kind": "Agent", "metadata": {"name": "probe", "namespace": ns},
+                        "spec": {"templateRef": {"name": "t"}, "harnessRef": {"name": "kagent"}}}
+    must(create(agent("kagent"), dry=False), "create a platform Agent")
+    case("the operator deletes a platform Agent in the kagent namespace",
+         kubectl(["delete", "agent", "probe", "-n", "kagent", "--dry-run=server", "--wait=false"], None, op), "agent-platform-organization-operator-scope")
+    must(create(agent(ORG_NS), dry=False), "create an organization's Agent")
+    case("the operator deletes an organization's Agent", kubectl(["delete", "agent", "probe", "-n", ORG_NS, "--dry-run=server", "--wait=false"], None, op))
+
+
+def prove_worker_access():
+    """CONNECT and the ephemeralcontainers subresource are admitted before the
+    API server looks for the pod's node, so a Pending pod is enough."""
+    def pod(ns, name, labels=None):
+        return {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": name, "namespace": ns, "labels": labels or {}},
+                "spec": {"containers": [{"name": "c", "image": "registry.k8s.io/pause:3.10"}]}}
+    must(create(pod(ORG_NS, f"{POOL}-abc-x"), dry=False), "create a pod named after the platform WorkerPool")
+    must(create(pod(ORG_NS, "other-abc-x"), dry=False), "create another pod")
+    for sub in ("exec", "attach"):
+        q = "command=true&stdout=true" if sub == "exec" else "stdout=true"
+        case(f"{sub} into a worker of an organization namespace",
+             kubectl(["create", "--raw", f"/api/v1/namespaces/{ORG_NS}/pods/{POOL}-abc-x/{sub}?{q}", "-f", "-"], ""),
+             "agent-platform-organization-workers")
+        rc, out = kubectl(["create", "--raw", f"/api/v1/namespaces/{ORG_NS}/pods/other-abc-x/{sub}?{q}", "-f", "-"], "")
+        case(f"{sub} into another pod of an organization namespace passes admission (and fails later, at the node)",
+             (0 if "agent-platform-organization-workers" not in out else 1, out.strip().splitlines()[-1] if out.strip() else ""))
+    # A worker carries ate.dev/worker-pool; the ReplicaSet controller, one of
+    # the workers' writers, creates it.
+    must(create(pod(ORG_NS, f"{POOL}-abc-w", {"ate.dev/worker-pool": POOL}), as_="system:serviceaccount:kube-system:replicaset-controller", dry=False),
+         "create a worker pod as the ReplicaSet controller")
+    patch = '{"spec": {"ephemeralContainers": [{"name": "debug", "image": "busybox", "targetContainerName": "c"}]}}'
+    case("an ephemeral container in a worker of an organization namespace",
+         kubectl(["patch", "pod", f"{POOL}-abc-w", "-n", ORG_NS, "--subresource=ephemeralcontainers", "--type=strategic", "-p", patch, "--dry-run=server"]),
+         "agent-platform-organization-workers")
 
 
 def prove_netpol(k8s):
@@ -475,6 +511,7 @@ def main():
         prove_label(meta_chart, k8s)
         prove_netpol(k8s)
         prove_operator_scope()
+        prove_worker_access()
         prove_render_check(chart)
     finally:
         API.stop()
