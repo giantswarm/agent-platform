@@ -1,0 +1,35 @@
+{{- /*
+agent-platform-tenant-flux in the organizations mode: what an organization's
+agents' HelmReleases run as (helm-controller impersonates the organization's
+Helm ServiceAccount, kagent.fluxServiceAccountName, which agent-platform-operator
+binds to this ClusterRole in the organization namespace only). The rules are
+those of the kagent namespace's Role <kagent.fluxServiceAccountName>-agent-releases
+(kagent/flux-service-account.yaml): the two kinds the Generic agent chart 2.x
+renders and Helm's release Secrets.
+
+Exactly one chart renders it. In the tenants mode (tenants.organizations.enabled)
+agent-manager's chart does, under its tenants.enabled. In the organizations
+mode the meta chart turns agent-manager's tenants.enabled off (the agent-manager
+range ends before giantswarm/agent-manager#294, which gives tenants.enabled a
+new meaning), so this chart renders it. The two modes are never on at once
+(agent-platform.organizations.enabled).
+*/ -}}
+{{- if include "agent-platform.organizations.enabled" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform-tenant-flux
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+rules:
+  # Helm's Secret storage driver calls get, list, create, update and delete in
+  # the release's storage namespace. RBAC cannot narrow a list, so this
+  # identity reads every Secret of an organization namespace it is bound in.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "remotemcpservers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+{{- end }}

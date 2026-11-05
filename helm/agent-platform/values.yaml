@@ -1091,7 +1091,13 @@ components:  # @schema additionalProperties: true
     # without defaultToolchains with the github toolchain, so gh stays in its
     # Sessions once the Harness images carry none; it is the floor before any
     # kagent line without gh in its Harness images (giantswarm/agent-manager#252).
-    versionRange: ">=2.16.0 <3.0.0"
+    # The ceiling 2.19.0 holds the line before giantswarm/agent-manager#294,
+    # which retires the tenant reconciler: its chart refuses the
+    # tenants.modelConfig, .workerPoolReplicas, .networkPolicy and .interval
+    # values the tenants mode forwards, and its tenants.enabled serves the
+    # organizations instead (with devPortal.url). The range moves past it with
+    # the change that stops forwarding them (giantswarm/agent-platform#1268).
+    versionRange: ">=2.16.0 <2.19.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the

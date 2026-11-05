@@ -150,6 +150,10 @@ def check_meta(chart):
     expect(e["substrate"] == {"target": "grpcs://api.ate-system.svc:443", "audience": "api.ate-system.svc",
                               "caConfigMap": {"name": "agent-platform-operator-ate-api-ca", "key": "ca.crt"}},
            "the erasure reaches ate-api with the audience its authentication config accepts and the CA the bootstrap hook publishes")
+    roles = [d for d in on if d["kind"] == "ClusterRole" and d["metadata"]["name"] == "agent-platform-tenant-flux"]
+    conn_objs = docs(connectivity(f"{chart}/../agent-platform-connectivity"))
+    expect(not roles and find(conn_objs, "ClusterRole", "agent-platform-tenant-flux") is not None,
+           "on, the connectivity chart renders agent-platform-tenant-flux, which the operator binds and agent-manager no longer renders")
     am = release(on, "agent-manager")["values"]
     expect(am.get("tenants") == {"enabled": False}, "agent-manager's tenant reconciler is off while the operator runs")
     kagent = release(on, "kagent")["values"]["controller"]
