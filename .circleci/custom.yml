@@ -32,6 +32,10 @@
 # build/test/publish here.
 version: 2.1
 
+# Trial only: measure architect-orb#1068 without changing the stable CI PR.
+orbs:
+  architect: giantswarm/architect@dev:e62ba9b9aa12b199998683589e765810d62cd67a
+
 jobs:
   test-ingress-modes:
     # Separate containers/checkouts: fixed-name render files and local tool
