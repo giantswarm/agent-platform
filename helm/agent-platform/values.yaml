@@ -679,8 +679,10 @@ components:  # @schema additionalProperties: true
     # (giantswarm/kagent-upstream#911, #916), and the codex Harness speaks
     # MCP 2026-07-28 (Codex's mcp_2026_07_28 feature). From 1.29.0 the omp
     # Harness relays them too, through its MCP bridge
-    # (giantswarm/kagent-upstream#927).
-    versionRange: ">=1.29.0 <1.30.0"
+    # (giantswarm/kagent-upstream#927). From 1.31.0 ListSessions filters by
+    # the Agent's namespace (giantswarm/kagent-upstream#958), which the
+    # operator's erasure asks for.
+    versionRange: ">=1.31.0 <1.32.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -795,7 +797,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.29.0 <1.30.0"
+    versionRange: ">=1.31.0 <1.32.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
