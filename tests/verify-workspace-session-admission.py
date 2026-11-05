@@ -32,7 +32,7 @@ below pins one property:
   unless the block opts in);
 - without the derivation an own block reaches the release as written, and one set in
   part fails the render naming the keys (the kagent chart needs all three);
-- muster's credentialProvider with workspaces and Substrate on: without a provider pin
+- muster's credentialProvider with workspaces and Substrate on (with workspaces off, the actor bearer alone): without a provider pin
   (no providers, oauth off) it releases nothing and the render fails naming
   muster.muster.credentialProvider.releasable (giantswarm/agent-platform#1103); an own
   releasable alone turns it on;
@@ -316,8 +316,9 @@ def main(meta: str) -> int:
     if "uriAuthority: muster.giantswarm.io" not in substrate or "host: muster.agent-platform.svc:50051" not in substrate:
         fail(f"the substrate release's credentialProvider.additionalProviders lacks muster's FetchSecret:\n{substrate}")
     off = documents(helm(meta, [*KAGENT, *IDENTITY, "--set", "components.substrate.enabled=true"]))
-    if "credentialProvider:" in block(off.get(("HelmRelease", "muster"), ""), "muster", 4):
-        fail("the muster release carries a credentialProvider with workspaces off")
+    off_provider = block(block(off.get(("HelmRelease", "muster"), ""), "muster", 4), "credentialProvider", 6)
+    if "actorBearer:" not in off_provider or "releasable:" in off_provider or "gitUsers:" in off_provider:
+        fail(f"with workspaces off the muster release's credentialProvider is not the actor bearer alone (tests/verify-actor-bearer.py):\n{off_provider}")
     # muster's pods mount Substrate's pod certificates and trust bundles, which the
     # connectivity release's hook publishes and the substrate release issues, both after
     # muster: until the substrate release is Ready its install and upgrade do not wait
@@ -326,12 +327,12 @@ def main(meta: str) -> int:
     for action in ("install", "upgrade"):
         if "    disableWait: true\n" not in block(release, action, 2):
             fail(f"with a credentialProvider and Substrate not Ready the muster release's {action} waits for pods that mount Substrate's certificates, issued only after muster (giantswarm/agent-platform#1107):\n{block(release, action, 2)}")
-        if "disableWait" in block(off.get(("HelmRelease", "muster"), ""), action, 2):
-            fail(f"the muster release's {action} does not wait with workspaces off")
+        if "    disableWait: true\n" not in block(off.get(("HelmRelease", "muster"), ""), action, 2):
+            fail(f"with workspaces off and Substrate not Ready the muster release's {action} waits for pods that mount Substrate's certificates (giantswarm/agent-platform#1107)")
     ok("with the switch on the kagent release names muster.giantswarm.io as its credentialAuthority (an own value stands), "
        "the muster release serves FetchSecret to the egress gateway's identity with Substrate on and releases the pinned provider instance github's grants under its own or derived issuer (an own entry stands beside it), "
        "and Substrate routes the authority to muster; until Substrate is Ready its install and upgrade do not wait for the pods that mount Substrate's certificates; "
-       "with workspaces off muster gets no credentialProvider")
+       "with workspaces off muster's credentialProvider serves the actor bearer alone and releases nothing, its install and upgrade not waiting either")
     sub = ["--set", "components.substrate.enabled=true"]
     unpinned = (([*NO_OWN, "--set", f"{NAME}.providers=null", "--set", "workspaceManager.route.enabled=false"], "without providers"),
                 ([*NO_OWN, "--set", f"{NAME}.oauth.enabled=false"], "with oauth off"))

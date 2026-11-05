@@ -1117,10 +1117,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.harness.snapshotStore.s3proxy.azure.container | string | `""` |  |
 | kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name | string | `""` |  |
 | kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key | string | `""` |  |
-| kagent.harness.env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
-| kagent.harness.env[0].value | string | `"true"` |  |
-| kagent.harness.env[1].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
-| kagent.harness.env[1].value | string | `"auto"` |  |
+| kagent.harness.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
+| kagent.harness.env[0].value | string | `"auto"` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
