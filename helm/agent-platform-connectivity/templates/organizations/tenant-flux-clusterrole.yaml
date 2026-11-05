@@ -7,10 +7,11 @@ those of the kagent namespace's Role <kagent.fluxServiceAccountName>-agent-relea
 (kagent/flux-service-account.yaml): the two kinds the Generic agent chart 2.x
 renders and Helm's release Secrets.
 
-Exactly one chart renders it: this one, while the meta chart keeps
-agent-manager's tenants.enabled off (agent-manager's chart renders it under
-that key). Rendered whenever kagent is on, so an organization's binding never
-names a missing role.
+Exactly one chart renders it: this one, whenever kagent is on, so an
+organization's binding never names a missing role and turning the organizations
+on hands it to no other release. agent-manager's chart (2.20.0 and later)
+renders none; the meta chart refuses agentPlatformOrganizations.enabled with an
+earlier agent-manager floor.
 */ -}}
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") }}
 ---

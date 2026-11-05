@@ -264,8 +264,9 @@ overwrite would hide a values file that still spells the old key.
     block's own subjects with tenants.platformTeam appended (each subject
     once), while that list is not empty.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
-                 tenants.enabled false: the tenant reconciler is gone
-                 (agent-platform.agentManager.tenants);
+                 tenants.enabled from agentPlatformOrganizations.enabled and,
+                 with it on and components.backstage on, devPortal.url from
+                 the portal's hostname (agent-platform.agentManager.organizations);
                  muster.url from the muster Service (agent-platform.musterMcpUrl);
                  kagent.controllerTarget, the kagent controller its session
                  tools call, from the agentgateway data plane
@@ -471,8 +472,10 @@ floor that takes the key (agent-platform.agentManager.registryConfigFloor). */ -
 {{- fail (printf "agent-manager.kagent.controllerTarget (%s) differs from the platform's kagent controller target (%q): agent-manager's session tools reach the controller through the agentgateway data plane this chart installs, on kagent.controllerRoute; the target follows gateway.name and gateway.listeners[0].port; leave agent-manager.kagent.controllerTarget unset" $ownTarget $target) -}}
 {{- end -}}
 {{- $_ := set $derived "kagent" (dict "controllerTarget" $target) -}}
-{{- with (include "agent-platform.agentManager.tenants" .root | fromJson) -}}
-{{- $_ := set $derived "tenants" . -}}
+{{- $orgs := include "agent-platform.agentManager.organizations" .root | fromJson -}}
+{{- $_ := set $derived "tenants" $orgs.tenants -}}
+{{- with $orgs.devPortal -}}
+{{- $_ := set $derived "devPortal" . -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "agent-platform-connectivity" -}}
@@ -4278,22 +4281,59 @@ the controller's kubernetes authorization mode needs (agent-platform.kagent.auth
 {{- define "agent-platform.workspaceManager.tokenFloor" -}}0.10.0{{- end -}}
 
 {{/*
-agent-manager's tenants block, as JSON: {"enabled": false}. The tenant
-reconciler is gone (giantswarm/agent-platform#1268): agent-platform-operator
-keeps the organization namespaces, and the connectivity chart renders the
-ClusterRole agent-platform-tenant-flux. components.agent-manager.versionRange
-ends before the release with giantswarm/agent-manager#294, whose tenants.enabled
-serves the organizations instead; it moves with the change that turns it on.
-An own agent-manager.tenants.enabled true fails the render.
+agent-manager's organization values, as JSON: {"tenants": {"enabled": <bool>},
+"devPortal": {"url": <url>}}. tenants.enabled follows
+agentPlatformOrganizations.enabled: agent-manager then serves the organization
+tools. The switch needs the agent-manager floor
+agent-platform.agentManager.organizationsFloor, whose chart leaves the ClusterRole
+agent-platform-tenant-flux to the connectivity chart: an earlier chart renders
+it too, and the two releases' upgrades, in either order, end without it.
+devPortal.url, with the switch
+on and components.backstage on, is https://<backstage.hostname, else
+backstage.<global.domain>>: the organization tools link a missing credential
+to its form there. With components.backstage off an own devPortal.url (a Dev
+Portal installed apart) travels unchanged. The agent-manager line's tenants
+block takes `enabled` only: any other own tenants key, an own tenants.enabled
+or devPortal.url that disagrees, or the switch on without
+oauth.downstream.enabled (the tools run as the caller) fails the render.
 Called from agent-platform.componentDerivedValues, i.e. only while
 components.agent-manager is on.
-Usage: include "agent-platform.agentManager.tenants" $root | fromJson
+Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 */}}
-{{- define "agent-platform.agentManager.tenants" -}}
-{{- if dig "tenants" "enabled" false (index .Values "agent-manager" | default dict) -}}
-{{- fail "agent-manager.tenants.enabled is true: agent-manager's tenant reconciler is gone, agent-platform-operator keeps the organization namespaces (agentPlatformOrganizations.enabled); leave agent-manager.tenants.enabled unset" -}}
+{{- define "agent-platform.agentManager.organizations" -}}
+{{- $am := index .Values "agent-manager" | default dict -}}
+{{- $on := eq (include "agent-platform.organizations.on" .) "true" -}}
+{{- $own := dig "tenants" dict $am | default dict -}}
+{{- range $k, $_ := $own -}}
+{{- if ne $k "enabled" -}}
+{{- fail (printf "agent-manager.tenants.%s is set: agent-manager's tenants block takes enabled only, which this chart derives from agentPlatformOrganizations.enabled — remove agent-manager.tenants.%s" $k $k) -}}
 {{- end -}}
-{{- dict "enabled" false | toJson -}}
+{{- end -}}
+{{- if and (hasKey $own "enabled") (ne (toString $own.enabled) (toString $on)) -}}
+{{- fail (printf "agent-manager.tenants.enabled (%v) differs from agentPlatformOrganizations.enabled (%v): agent-manager serves the organization tools exactly while the operator keeps the organization namespaces — set agentPlatformOrganizations.enabled and leave agent-manager.tenants.enabled unset" $own.enabled $on) -}}
+{{- end -}}
+{{- $out := dict "tenants" (dict "enabled" $on) -}}
+{{- if $on -}}
+{{- $floor := include "agent-platform.agentManager.organizationsFloor" . -}}
+{{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" $floor)) -}}
+{{- fail (printf "agentPlatformOrganizations.enabled needs agent-manager %s or later: components.agent-manager.versionRange (%s) admits a chart that renders the ClusterRole agent-platform-tenant-flux beside the connectivity chart's, and the two releases' upgrades end without it — raise the range's floor to %s" $floor (dig "agent-manager" "versionRange" "" .Values.components) $floor) -}}
+{{- end -}}
+{{- if not (and (dig "oauth" "enabled" false $am) (dig "oauth" "downstream" "enabled" false $am)) -}}
+{{- fail "agentPlatformOrganizations.enabled needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled: the organization tools run as the caller, whose RoleBindings in the organization namespace grant the writes" -}}
+{{- end -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "backstage") -}}
+{{- $host := (.Values.backstage | default dict).hostname | default (and .Values.global.domain (printf "backstage.%s" .Values.global.domain)) -}}
+{{- if $host -}}
+{{- $url := printf "https://%s" $host -}}
+{{- $ownUrl := dig "devPortal" "url" "" $am -}}
+{{- if and $ownUrl (ne (trimSuffix "/" $ownUrl) $url) -}}
+{{- fail (printf "agent-manager.devPortal.url (%s) differs from the Dev Portal this chart installs (%s, from backstage.hostname or global.domain): the organization tools link a credential to its form there — leave agent-manager.devPortal.url unset" $ownUrl $url) -}}
+{{- end -}}
+{{- $_ := set $out "devPortal" (dict "url" $url) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
 {{- end -}}
 
 {{/*
@@ -4396,6 +4436,14 @@ candidate of it included) the chart derives it from
 toolchain-manager.registryPullSecret. One line, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.registryConfigFloor" -}}2.16.0{{- end -}}
+
+{{/*
+The first agent-manager release whose tenants.enabled leaves the ClusterRole
+agent-platform-tenant-flux to the connectivity chart
+(giantswarm/agent-manager#305), the floor agentPlatformOrganizations.enabled
+needs (agent-platform.agentManager.organizations).
+*/}}
+{{- define "agent-platform.agentManager.organizationsFloor" -}}2.20.0{{- end -}}
 
 {{/*
 The first release of the Substrate line (giantswarm/substrate) whose chart

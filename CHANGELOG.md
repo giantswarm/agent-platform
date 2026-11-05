@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`agentPlatformOrganizations.enabled` turns on agent-manager's organization tools** (giantswarm/giantswarm#38891). With the switch and `components.agent-manager` on, the meta chart sets agent-manager's `tenants.enabled: true`, and with `components.backstage` on its `devPortal.url` to `https://<backstage.hostname>` (else `backstage.<global.domain>`), the portal the tools link a missing credential's form to. With `components.backstage` off, an own `agent-manager.devPortal.url` is forwarded unchanged. The switch needs an agent-manager floor of 2.20.0, whose chart leaves the ClusterRole `agent-platform-tenant-flux` to the connectivity chart (giantswarm/agent-manager#305): an earlier chart renders it too, and the two releases' upgrades end without it. The render fails on an earlier floor, on an own `agent-manager.tenants.enabled` that differs from the switch, on any other own `agent-manager.tenants` key (agent-manager 2.19 refuses it), on an own `devPortal.url` other than the installed portal's, and with the switch on while `agent-manager.oauth.downstream.enabled` is off.
+
 ### Fixed
 
 - **An agent with three or more skills behind one credential can be changed again** (giantswarm/giantswarm#38827). `agent-platform-platform-tenant-credential-refs` asks the authorizer once per distinct Secret name instead of once per reference, and `agent-platform-platform-helmreleases` does the same for the Secrets it does not take as the installation skills credential. The API server allows two authorizer checks per CEL expression, so an Agent or AgentTemplate whose skills named `agent-manager-skills-token` three or more times was refused with `actual cost limit exceeded` on every spec change. Both policies now refuse, with their own message and for every requester, an object that names more than two distinct such Secrets.
