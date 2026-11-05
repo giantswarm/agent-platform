@@ -51,10 +51,46 @@ agent-platform.giantswarm.io/organization-object
 agent-platform.giantswarm.io/copied-from
 {{- end -}}
 
+{{/*
+agent-platform-operator's ServiceAccount, as JSON {name, namespace}: the
+component the meta chart installs (components.agent-platform-operator), whose
+chart names its ServiceAccount after itself, in this release's namespace (the
+meta chart refuses another targetNamespace for the operator, so the two
+cannot disagree). Every policy, binding and role here names it from this one
+place.
+*/}}
+{{- define "agent-platform.organizations.operatorServiceAccount" -}}
+{{- dict "name" "agent-platform-operator" "namespace" .Release.Namespace | toJson -}}
+{{- end -}}
+
+{{/* The labels of agent-platform-operator's pods (the operator chart's selector labels). */}}
+{{- define "agent-platform.organizations.operatorPodLabels" -}}
+app.kubernetes.io/name: agent-platform-operator
+{{- end -}}
+
 {{/* The operator's ServiceAccount, as a username. */}}
 {{- define "agent-platform.organizations.operatorUser" -}}
-{{- $sa := dig "operator" "serviceAccount" dict (.Values.agentPlatformOrganizations | default dict) -}}
-{{- printf "system:serviceaccount:%s:%s" ($sa.namespace | default .Release.Namespace) (required "agentPlatformOrganizations.operator.serviceAccount.name must be set" $sa.name) -}}
+{{- $sa := include "agent-platform.organizations.operatorServiceAccount" . | fromJson -}}
+{{- printf "system:serviceaccount:%s:%s" $sa.namespace $sa.name -}}
+{{- end -}}
+
+{{/*
+The installation's Kubernetes API hostnames an organization's EgressPolicy
+may not name, as a JSON list in lower case: api.<global.domain> (the Giant
+Swarm installation's API hostname beside the platform's own <prefix>.<domain>
+hostnames) while global.domain is set, then agentPlatformOrganizations.apiHostnames,
+each once. Fails the render while the list is empty.
+*/}}
+{{- define "agent-platform.organizations.apiHostnames" -}}
+{{- $hosts := list -}}
+{{- with .Values.global.domain -}}{{- $hosts = append $hosts (printf "api.%s" . | lower) -}}{{- end -}}
+{{- range (dig "apiHostnames" list (.Values.agentPlatformOrganizations | default dict)) -}}
+{{- if not (has (lower .) $hosts) -}}{{- $hosts = append $hosts (lower .) -}}{{- end -}}
+{{- end -}}
+{{- if not $hosts -}}
+{{- fail "agentPlatformOrganizations.enabled needs the installation's Kubernetes API hostnames: set global.domain (api.<global.domain> is derived) or agentPlatformOrganizations.apiHostnames; an organization's EgressPolicy may not name them" -}}
+{{- end -}}
+{{- $hosts | toJson -}}
 {{- end -}}
 
 {{/*
@@ -75,4 +111,14 @@ never a list of names.
 matchExpressions:
   - key: {{ include "agent-platform.organizations.label" . }}
     operator: Exists
+{{- end -}}
+
+{{/*
+The ConfigMap agent-platform-operator reads ate-api-server's serving roots
+from, as JSON {name, namespace}: the substrate bootstrap hook writes it
+(substrate/bootstrap.yaml), the meta chart names it in the operator's
+erasure.substrate.caConfigMap.
+*/}}
+{{- define "agent-platform.organizations.ateApiCa" -}}
+{{- dict "name" "agent-platform-operator-ate-api-ca" "namespace" .Release.Namespace | toJson -}}
 {{- end -}}

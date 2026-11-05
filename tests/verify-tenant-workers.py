@@ -1,39 +1,37 @@
 #!/usr/bin/env python3
-"""Assert the workers of the Organizations' namespaces are admitted (giantswarm/agent-platform#1036).
+"""Assert the workers of the organizations' namespaces are admitted (giantswarm/agent-platform#1036, #1268).
 
-agent-manager's tenant reconciler puts a WorkerPool in each namespace labelled
-giantswarm.io/organization that holds an agent. Its worker pods need what the
-kagent namespace's workers get from this chart: the atenet router's egress to
-them (cilium), the egress gateway's and the actors' dns's ingress from them
+agent-platform-operator puts a WorkerPool in each organization namespace,
+labelled agent-platform.giantswarm.io/organization. Its worker pods need what
+the kagent namespace's workers get from this chart: the atenet router's egress
+to them (cilium), the egress gateway's and the actors' dns's ingress from them
 (both flavors), and the workers' Kyverno PolicyException.
 
-With tenants.organizations.enabled, in both flavors:
+With agentPlatformOrganizations.enabled, in both flavors:
 - every rule that admits the kagent namespace's workers also admits the worker
   pods (ate.dev/worker-pool exists) of every namespace that carries the label
   (exists), on the same ports: the namespaces are selected by the label, never
   listed, and only worker pods are selected;
 - substrate-workers stays as it is off; the PolicyException
   substrate-workers-tenants (background false: Kyverno refuses subjects
-  otherwise; verify-policyexception-userinfo holds it) matches the same pods in those namespaces by a
-  namespaceSelector, excepts the same rules, and only when
-  Substrate's controller chain writes them: ate-controller the Deployment, the
-  deployment controller the ReplicaSet, the ReplicaSet controller the Pods (an
-  Organization's admins may write pods there; a labelled pod they write is
-  judged like any other);
+  otherwise; verify-policyexception-userinfo holds it) matches the same pods in
+  those namespaces by a namespaceSelector, excepts the same rules, and only
+  when Substrate's controller chain writes them: ate-controller the
+  Deployment, the deployment controller the ReplicaSet, the ReplicaSet
+  controller the Pods;
 - two ValidatingAdmissionPolicies hold the writes there, in every labelled
-  namespace but the kagent one: only agent-manager's ServiceAccount writes a
+  namespace: only agent-platform-operator's ServiceAccount writes a
   WorkerPool, and only as a copy of the platform WorkerPool (the policy's
   parameter, refused without it); only the writers the PolicyException
   excepts write a labelled Deployment, ReplicaSet or Pod, and no one adds an
-  ephemeral container, execs or attaches to a worker (an Organization's admins
-  hold cluster-admin there, and ate-controller builds the workers from the
-  WorkerPool);
-- with the value on, no other object selects the label but the tenants'
-  egress credential admission (verify-tenant-rbac asserts it).
-Off (the default), no Substrate object selects the label. What the policies' CEL decides
-is proven on a real API server by tests/prove-tenant-workers.py
-(make prove-tenant-workers). Needs PyYAML. HELM selects the
-binary.
+  ephemeral container, execs or attaches to a worker;
+- with the value on, no other object of this chart selects the label but the
+  egress credential and ModelConfig admission (verify-tenant-rbac and
+  verify-tenant-modelconfigs) and the organizations' own policies
+  (verify-organization-admission).
+Off (the default), no Substrate object selects the label. What the policies'
+CEL decides is proven on a local API server by
+tests/verify-organization-admission.py. Needs PyYAML. HELM selects the binary.
 
 Usage: verify-tenant-workers.py CONNECTIVITY_CHART
 """
@@ -45,7 +43,7 @@ import sys
 import yaml
 
 HELM = os.environ.get("HELM", "helm")
-ORG = "giantswarm.io/organization"
+ORG = "agent-platform.giantswarm.io/organization"
 WORKERS = {"key": "ate.dev/worker-pool", "operator": "Exists"}
 TENANT_EXCEPTION = "substrate-workers-tenants"
 CILIUM_ORG_PEER = {"matchExpressions": [WORKERS, {"key": f"io.cilium.k8s.namespace.labels.{ORG}", "operator": "Exists"}]}
@@ -64,9 +62,10 @@ BASE = [
     "--api-versions", "kyverno.io/v1",
     "--api-versions", "cilium.io/v2",
 ]
-# tenants.organizations.enabled needs the llm listener and its routing policy
+# agentPlatformOrganizations.enabled needs the llm listener and its routing policy
 # (giantswarm/agent-platform#759).
-ON = ["--set", "tenants.organizations.enabled=true", "--set", "llmRouting.enabled=true", "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
+ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "kagent.fluxServiceAccountName=kagent-flux", "--set", "global.domain=ci.example.com",
+      "--set", "llmRouting.enabled=true", "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
 # (kind, name, direction, port): the rules of each flavor that admit the
 # kagent namespace's workers.
 HOPS = {
@@ -130,14 +129,14 @@ def check_hops(flavor, docs):
             if not org_peers:
                 continue
             if not any(is_kagent_worker_peer(flavor, p) for p in peers):
-                fail(f"{name}: the Organizations' workers are admitted by a rule that does not admit the kagent namespace's workers")
+                fail(f"{name}: the organizations' workers are admitted by a rule that does not admit the kagent namespace's workers")
             if org_peers != [expected]:
-                fail(f"{name}: the Organizations' workers peer is {org_peers}, not the worker pods of every labelled namespace {expected}")
+                fail(f"{name}: the organizations' workers peer is {org_peers}, not the worker pods of every labelled namespace {expected}")
             if ports != want_ports:
-                fail(f"{name}: the Organizations' workers get ports {sorted(ports)}, not the kagent workers' {sorted(want_ports)}")
+                fail(f"{name}: the organizations' workers get ports {sorted(ports)}, not the kagent workers' {sorted(want_ports)}")
             found = True
         if not found:
-            fail(f"{name} ({flavor}): the Organizations' workers are not admitted; a tenant's first agent never turns Ready")
+            fail(f"{name} ({flavor}): the organizations' workers are not admitted; a tenant's first agent never turns Ready")
 
 
 # The writers of the workers in an Organization's namespace, per kind: an
@@ -157,9 +156,9 @@ def check_exception(on, off):
     workers_on = find(on, "PolicyException", "substrate-workers")["spec"]
     workers_off = find(off, "PolicyException", "substrate-workers")["spec"]
     if workers_on != workers_off:
-        fail("substrate-workers changed with tenants.organizations on: the kagent namespace's workers keep their exception as it is")
+        fail("substrate-workers changed with agentPlatformOrganizations on: the kagent namespace's workers keep their exception as it is")
     if any(d["kind"] == "PolicyException" and d["metadata"]["name"] == TENANT_EXCEPTION for d in off):
-        fail(f"tenants.organizations off: {TENANT_EXCEPTION} renders")
+        fail(f"agentPlatformOrganizations off: {TENANT_EXCEPTION} renders")
     # Its background: false, which Kyverno requires beside subjects, is held by
     # verify-policyexception-userinfo with every other exception of the charts.
     polex = find(on, "PolicyException", TENANT_EXCEPTION)["spec"]
@@ -180,18 +179,15 @@ def check_exception(on, off):
                 fail(f"{TENANT_EXCEPTION}: {kind} matched twice in the Organizations' namespaces")
             got[kind] = entry["subjects"]
     if got != WRITERS:
-        fail(f"{TENANT_EXCEPTION}: the Organizations' workers are excepted for writers {got}, not Substrate's controller chain {WRITERS}; anyone who writes a labelled pod there would get the workers' exception")
+        fail(f"{TENANT_EXCEPTION}: the organizations' workers are excepted for writers {got}, not Substrate's controller chain {WRITERS}; anyone who writes a labelled pod there would get the workers' exception")
 
 
-# The policies' namespaces: every labelled namespace but the kagent one, whose
-# workers the platform writes.
-POLICY_NAMESPACES = {"matchExpressions": [
-    {"key": ORG, "operator": "Exists"},
-    {"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": ["kagent"]},
-]}
-RECONCILER = "system:serviceaccount:agent-platform:agent-manager"
-WORKERS_POLICY = "agent-platform-tenant-workers"
-COPY_POLICY = "agent-platform-tenant-workerpool-copy"
+# The policies' namespaces: every labelled namespace (the kagent namespace
+# carries no organization label; only the operator sets it).
+POLICY_NAMESPACES = {"matchExpressions": [{"key": ORG, "operator": "Exists"}]}
+RECONCILER = "system:serviceaccount:agent-platform:agent-platform-operator"
+WORKERS_POLICY = "agent-platform-organization-workers"
+COPY_POLICY = "agent-platform-organization-workerpool-copy"
 WORKERS_RULES = [
     (["ate.dev"], ["CREATE", "UPDATE", "DELETE"], ["workerpools"]),
     (["apps"], ["CREATE", "UPDATE"], ["deployments", "replicasets"]),
@@ -239,14 +235,13 @@ def check_admission(docs, pool="kagent-default"):
         fail(f"{COPY_POLICY}: matches {rules}, not the WorkerPools' creates and updates")
 
 
-# The tenants' credential admission (giantswarm/agent-platform#1040) selects
-# the label with kagent on, whatever tenants.organizations says (the platform
-# Secrets' policy also needs agent-manager on, which this render leaves off;
-# verify-tenant-rbac asserts it).
+# The organizations' credential admission (giantswarm/agent-platform#1040)
+# selects the label with kagent on, whatever agentPlatformOrganizations says
+# (verify-tenant-rbac asserts it).
 EGRESS_POLICIES = ("agent-platform-tenant-egress-credentials", "agent-platform-tenant-model-credentials",
                    "agent-platform-tenant-credentials", "agent-platform-tenant-credential-refs")
 # A tenant's own ModelConfig (giantswarm/agent-platform#759) selects the label
-# with kagent and tenants.organizations on; verify-tenant-modelconfigs asserts it.
+# with kagent and agentPlatformOrganizations on; verify-tenant-modelconfigs asserts it.
 MODEL_POLICIES = {("ValidatingAdmissionPolicy", "agent-platform-tenant-model-routing"),
                   ("ValidatingAdmissionPolicy", "agent-platform-tenant-secret-creation"),
                   ("MutatingAdmissionPolicyBinding", "agent-platform-connectivity-modelconfig-llm-routing-organizations")}
@@ -258,16 +253,19 @@ def main():
         args = ["--set", f"networkPolicy.flavor={flavor}"]
         off = render(chart, args)
         if any(ORG in yaml.safe_dump(d) for d in off if d["metadata"]["name"].startswith("substrate-")):
-            fail(f"tenants.organizations off ({flavor}): a Substrate policy or exception selects {ORG}")
+            fail(f"agentPlatformOrganizations off ({flavor}): a Substrate policy or exception selects {ORG}")
         if any(d["metadata"]["name"] in (WORKERS_POLICY, COPY_POLICY) for d in off):
-            fail(f"tenants.organizations off ({flavor}): the admission policies render")
+            fail(f"agentPlatformOrganizations off ({flavor}): the admission policies render")
         on = render(chart, args + ON)
-        selecting = {(d["kind"], d["metadata"]["name"]) for d in on if ORG in yaml.safe_dump(d)}
+        # The organizations' own role and policies are verify-organization-admission's.
+        selecting = {(d["kind"], d["metadata"]["name"]) for d in on if ORG in yaml.safe_dump(d)
+                     and (d["metadata"]["name"] in (WORKERS_POLICY, COPY_POLICY) or not d["metadata"]["name"].startswith(
+                         ("agent-platform-organization-", "agent-platform-organizations-", "agent-platform:organization")))}
         want = {(kind, name) for kind, name, _, _ in HOPS[flavor]} | {("PolicyException", TENANT_EXCEPTION)} | {
             ("ValidatingAdmissionPolicy", WORKERS_POLICY), ("ValidatingAdmissionPolicy", COPY_POLICY)} | {
             ("ValidatingAdmissionPolicy", n) for n in EGRESS_POLICIES} | MODEL_POLICIES
         if selecting != want:
-            fail(f"tenants.organizations on ({flavor}): {sorted(selecting)} select {ORG}, not exactly {sorted(want)}")
+            fail(f"agentPlatformOrganizations on ({flavor}): {sorted(selecting)} select {ORG}, not exactly {sorted(want)}")
         check_hops(flavor, on)
         check_exception(on, off)
         check_admission(on)
@@ -280,7 +278,7 @@ def main():
         if r.returncode == 0 or "longer than 57 characters" not in r.stderr:
             fail(f"a 58-character kagent.substrateWorkerPool.name renders ({flavor}): the exec rule would match no worker")
         check_admission(render(chart, args + ON + ["--set", f"kagent.substrateWorkerPool.name={long[:57]}"]), pool=long[:57])
-        print(f"ok: the Organizations' workers admitted on the router, the egress gateway, the dns and the PolicyException, written only by Substrate's controllers from agent-manager's copy of the platform WorkerPool, nothing off ({flavor})")
+        print(f"ok: the organizations' workers admitted on the router, the egress gateway, the dns and the PolicyException, written only by Substrate's controllers from agent-platform-operator's copy of the platform WorkerPool, nothing off ({flavor})")
 
 
 if __name__ == "__main__":

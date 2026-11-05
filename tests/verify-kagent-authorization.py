@@ -92,7 +92,7 @@ MANAGER = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": 
 UI = {"podSelector": {"matchLabels": {"app.kubernetes.io/component": "ui", "app.kubernetes.io/instance": "kagent",
                                       "app.kubernetes.io/name": "kagent"}}}
 DEFAULT = {"mode": "kubernetes", "usernamePrefix": "", "groupsClaim": "groups", "groupsPrefix": "",
-           "namespaceSelector": "giantswarm.io/organization", "includeNamespaces": ["kagent"]}
+           "namespaceSelector": "agent-platform.giantswarm.io/organization", "includeNamespaces": ["kagent"]}
 ROLE = "agent-platform:workspace-manager-sessions"
 AUTH = "kagent.controller.auth"
 # The line's own controller: the insecure and noop modes, no issuer and a kagent
@@ -249,12 +249,11 @@ def main() -> None:
            "the data-plane peer follows gateway.name")
 
     own = ["--set", f"{AUTHZ}.groupsPrefix=oidc:", "--set", f"{AUTHZ}.usernamePrefix=oidc:",
-           "--set", f"{AUTHZ}.groupsClaim=grp", "--set", f"{AUTHZ}.namespaceSelector=tenant=yes",
-           "--set", f"{AUTHZ}.includeNamespaces[0]=shared"]
+           "--set", f"{AUTHZ}.groupsClaim=grp", "--set", f"{AUTHZ}.includeNamespaces[0]=shared"]
     expect(controller(own)["authorization"],
            {"mode": "kubernetes", "usernamePrefix": "oidc:", "groupsClaim": "grp", "groupsPrefix": "oidc:",
-            "namespaceSelector": "tenant=yes", "includeNamespaces": ["shared"]},
-           "an installation's own keys stand as written")
+            "namespaceSelector": "agent-platform.giantswarm.io/organization", "includeNamespaces": ["shared"]},
+           "an installation's own keys stand as written; the namespace selector is the organizations' label")
 
     c = controller([*OWN, "--set", f"{AUTHZ}.mode=noop"])
     expect((c["authorization"]["mode"], c["authorization"]["includeNamespaces"], "networkPolicy" in c), ("noop", [], False),
@@ -311,7 +310,7 @@ def main() -> None:
     expect({k: v for k, v in cm["data"].items() if k.startswith("KAGENT_AUTHORIZATION_")},
            {"KAGENT_AUTHORIZATION_MODE": "kubernetes", "KAGENT_AUTHORIZATION_USERNAME_PREFIX": "",
             "KAGENT_AUTHORIZATION_GROUPS_CLAIM": "groups", "KAGENT_AUTHORIZATION_GROUPS_PREFIX": "",
-            "KAGENT_AUTHORIZATION_NAMESPACE_SELECTOR": "giantswarm.io/organization",
+            "KAGENT_AUTHORIZATION_NAMESPACE_SELECTOR": "agent-platform.giantswarm.io/organization",
             "KAGENT_AUTHORIZATION_INCLUDE_NAMESPACES": "kagent",
             "KAGENT_AUTHORIZATION_SERVICE_ACCOUNT_TOKEN_AUDIENCE": "kagent",
             # From 1.20.0 the chart renders the session reader, empty without one.

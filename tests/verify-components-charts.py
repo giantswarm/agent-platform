@@ -270,13 +270,18 @@ ALL_ON_INPUTS = [
     # oauth.enabled) or names it, and the meta chart refuses the switch
     # without (giantswarm/agent-platform#1103).
     "--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents",
+    # agentPlatformOrganizations (agent-platform-operator's switch) routes an
+    # organization's ModelConfigs through the llm listener, whose base-URL
+    # policy is a MutatingAdmissionPolicy (giantswarm/agent-platform#1268).
+    "--set", "llmRouting.enabled=true",
 ]
 
 # Components without a toggle of their own: each follows its switch, and a
 # toggle set beside it is refused by the meta chart's guard.
-SWITCHED = {"workspace-manager": "workspaces.enabled"}
+SWITCHED = {"workspace-manager": "workspaces.enabled", "agent-platform-operator": "agentPlatformOrganizations.enabled"}
 
 API_VERSIONS = [
+    "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy",
     "--api-versions", "cilium.io/v2",
     "--api-versions", "monitoring.coreos.com/v1",
     "--api-versions", "cert-manager.io/v1",

@@ -168,9 +168,8 @@ spec:
 ---
 # {{ $shape.kind }} pods: ingress on the workload port from the callers of the
 # OpenAI-compatible API. The kubelet's probes are not subject to
-# NetworkPolicy; the kagent agents' own egress is unrestricted in this flavor
-# (the chart renders no egress policy for agent pods), so no agent-side rule
-# is needed.
+# NetworkPolicy; the agents' calls leave from Substrate's egress gateway, whose
+# side is the policy below.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -208,6 +207,35 @@ spec:
       ports:
         - port: {{ $port }}
           protocol: TCP
+{{- if and $kagentOn (include "agent-platform.substrate.enabled" $) }}
+---
+# The egress gateway's side of the agents' calls to the model pods, on the
+# workload port: its own egress is restricted in this flavor too
+# (substrate-atenet-egress-egress).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}-kagent-agents-to-model-serving
+  namespace: {{ include "agent-platform.substrate.namespace" $ }}
+  labels:
+    {{- include "agent-platform.modelServing.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: atenet-egress
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchExpressions:
+              {{- toYaml $shape.matchExpressions | nindent 14 }}
+      ports:
+        - port: {{ $port }}
+          protocol: TCP
+{{- end }}
 ---
 # {{ $shape.kind }} pods: egress to DNS and the model download endpoints (the
 # storage-initializer's download and the runtime's own Hub lookups).
