@@ -15619,6 +15619,75 @@ spec:
       messageExpression: >-
         'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named tenant-credential-*, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ') + '. Fix: rename each to a tenant-credential-* Secret of this namespace or remove it (UPGRADE.md: the migrate run removes the installation skills credential from the platform agents)'
 ---
+# Source: agent-platform-connectivity/templates/tenants/platform-helmreleases.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-platform-helmreleases
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: "kagent"
+    resourceRules:
+      - apiGroups: ["helm.toolkit.fluxcd.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["helmreleases"]
+  matchConditions:
+    - name: spec-written
+      expression: >-
+        request.operation == 'CREATE' ||
+        (has(object.spec) ? dyn(object.spec) : dyn({})) != (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
+  # Read untyped: the policy admits every served version.
+  variables:
+    - name: spec
+      expression: "has(object.spec) ? dyn(object.spec) : dyn({})"
+    - name: forbidden
+      expression: >-
+        ['chart', 'valuesFrom', 'postRenderers', 'kubeConfig', 'targetNamespace', 'storageNamespace'].filter(f, f in variables.spec)
+    - name: chartRef
+      expression: "'chartRef' in variables.spec ? dyn(variables.spec.chartRef) : dyn({})"
+    - name: values
+      expression: "'values' in variables.spec ? dyn(variables.spec.values) : dyn({})"
+    - name: skillsCredential
+      expression: >-
+        'skillsGitAuthSecretRef' in variables.values && 'name' in variables.values.skillsGitAuthSecretRef ?
+        string(variables.values.skillsGitAuthSecretRef.name) : ''
+  validations:
+    - expression: "size(variables.forbidden) == 0"
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, a HelmRelease sets none of spec.chart, valuesFrom, postRenderers, kubeConfig,
+        targetNamespace and storageNamespace; refused for ' + request.userInfo.username + ': ' + variables.forbidden.join(', ')
+    - expression: >-
+        'kind' in variables.chartRef && variables.chartRef.kind == 'OCIRepository' &&
+        'name' in variables.chartRef && variables.chartRef.name == 'agent' &&
+        (!('namespace' in variables.chartRef) || variables.chartRef.namespace == request.namespace)
+      reason: Forbidden
+      messageExpression: "'in the kagent namespace, a HelmRelease installs the agent chart from the namespace OCIRepository agent (spec.chartRef); refused for ' + request.userInfo.username + ': ' + request.name"
+    - expression: >-
+        'serviceAccountName' in variables.spec && variables.spec.serviceAccountName == 'kagent-flux'
+      reason: Forbidden
+      messageExpression: "'in the kagent namespace, a HelmRelease runs as the ServiceAccount kagent-flux (spec.serviceAccountName); refused for ' + request.userInfo.username + ': ' + request.name"
+    - expression: >-
+        variables.skillsCredential == '' ||
+        authorizer.group('').resource('secrets').namespace(request.namespace).name(variables.skillsCredential).check('get').allowed()
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, a HelmRelease names as values.skillsGitAuthSecretRef.name the installation skills
+        credential or a Secret its writer may get; refused for ' + request.userInfo.username + ', who may not get ' +
+        variables.skillsCredential
+---
 # Source: agent-platform-connectivity/templates/tenants/platform-tenant-credential-refs.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -15757,6 +15826,23 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 spec:
   policyName: agent-platform-tenant-credential-refs
+  validationActions: [Deny]
+---
+# Source: agent-platform-connectivity/templates/tenants/platform-helmreleases.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-platform-helmreleases
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-platform-helmreleases
   validationActions: [Deny]
 ---
 # Source: agent-platform-connectivity/templates/tenants/platform-tenant-credential-refs.yaml
