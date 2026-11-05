@@ -60,15 +60,14 @@ from apiserver import APIServer  # noqa: E402
 HELM = os.environ.get("HELM", "helm")
 # The first releases whose charts bind the readers by namespace
 # (giantswarm/substrate#553 and #554, giantswarm/substrate-credential-providers#33).
-NARROWED = "1.18.0-rc.8"
-NARROWED_PLUGIN = "0.3.0-rc.1"
+NARROWED = "1.18.0"
+NARROWED_PLUGIN = "0.3.0"
 OPERATOR = "0.1.0"
 # The control: a Substrate whose ate-controller and credential provider read
 # every Secret, rendered beside the narrowed one in a namespace of its own.
 BEFORE = "1.17.5"
 BEFORE_NS = "ate-old"
 SUBSTRATE_CHART = "oci://gsoci.azurecr.io/giantswarm/substrate/helm/substrate"
-SUBSTRATE_SOURCE = "https://github.com/giantswarm/substrate.git"
 PLUGIN = "google-access-token-credential-provider"
 PLUGIN_CHART = f"oci://gsoci.azurecr.io/charts/giantswarm/{PLUGIN}"
 ATE = "ate-system"
@@ -178,33 +177,21 @@ def render_checks(meta, tmp):
     return on
 
 
-def pull(chart, version, release, tmp, source=None):
-    """The chart directory: pulled, or, while the release's chart is not
-    published (its tag pipeline stopped before the charts job) and source names
-    the repository, the chart from the release tag's tree."""
+def pull(chart, version, release, tmp):
+    """The pulled chart directory."""
     dest = os.path.join(tmp, release)
-    name = os.path.basename(chart)
     r = helm("pull", chart, "--version", version, "--untar", "--untardir", dest)
-    if r.returncode == 0:
-        return os.path.join(dest, name)
-    if not source or "not found" not in r.stderr:
+    if r.returncode != 0:
         fail(f"helm pull {chart} {version}:\n{r.stderr}")
-    print(f"NOTE: {chart} {version} is not published; rendering charts/{name} of {source} v{version}")
-    clone = os.path.join(tmp, f"{release}-src")
-    for cmd in (["git", "clone", "--quiet", "--depth", "1", "--branch", f"v{version}", "--filter=blob:none", "--sparse", source, clone],
-                ["git", "-C", clone, "sparse-checkout", "set", f"charts/{name}"]):
-        r = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if r.returncode != 0:
-            fail(f"{' '.join(cmd)}:\n{r.stderr}")
-    return os.path.join(clone, "charts", name)
+    return os.path.join(dest, os.path.basename(chart))
 
 
-def rbac(chart, version, release, values, tmp, source=None, namespace=ATE):
+def rbac(chart, version, release, values, tmp, namespace=ATE):
     path = os.path.join(tmp, f"{release}-values.yaml")
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(values, f)
     name = os.path.basename(chart)
-    r = helm("template", release, pull(chart, version, release, tmp, source), "-n", namespace, "-f", path)
+    r = helm("template", release, pull(chart, version, release, tmp), "-n", namespace, "-f", path)
     if r.returncode != 0:
         fail(f"the {name} chart {version} rejects the forwarded values\n{r.stderr}")
     objs = [d for d in yaml.safe_load_all(r.stdout) if d and d.get("kind") in ("ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding")]
@@ -223,7 +210,7 @@ def main():
         # reviews must be answered yes there, or they prove nothing.
         before = [d for d in rbac(SUBSTRATE_CHART, BEFORE, "old", on["substrate"], tmp, namespace=BEFORE_NS)
                   if d["metadata"]["name"].startswith(("old-ate-controller", "old-k8s-credential-provider"))]
-        objs = before + rbac(SUBSTRATE_CHART, NARROWED, "substrate", on["substrate"], tmp, SUBSTRATE_SOURCE) + rbac(PLUGIN_CHART, NARROWED_PLUGIN, PLUGIN, on[PLUGIN], tmp)
+        objs = before + rbac(SUBSTRATE_CHART, NARROWED, "substrate", on["substrate"], tmp) + rbac(PLUGIN_CHART, NARROWED_PLUGIN, PLUGIN, on[PLUGIN], tmp)
         api = APIServer()
         try:
             def kubectl(args, stdin=None, as_=None, groups=("system:masters",)):
