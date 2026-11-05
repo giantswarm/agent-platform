@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assert Substrate's credential provider follows tenants.organizations.enabled (giantswarm/agent-platform#1041).
+"""Assert Substrate's credential provider follows agentPlatformOrganizations.enabled (giantswarm/agent-platform#1041).
 
 The meta chart derives the substrate release's credentialProvider.namespacePolicies
 (agent-platform.componentDerivedValues) from the switch that admits the
@@ -7,7 +7,7 @@ Organizations' workers (giantswarm/agent-platform#1036):
 - off (the default): the policies are the chart's two static entries, and the
   substrate release's values are those of the render with the switch on but for
   the policies — the switch changes nothing else;
-- on: an ownNamespaceSelector entry on the label giantswarm.io/organization
+- on: an ownNamespaceSelector entry on the label agent-platform.giantswarm.io/organization
   (each Organization's namespace is read by the atespace of its own name only)
   and the same selector as allowedNamespaceSelector on the ate-golden entry
   (every template's golden actor boots there);
@@ -58,9 +58,10 @@ BASE = [
     "--set", "postgres.enabled=true",
     "--set", "components.kagent.enabled=true",
 ]
-ON = ["--set", "tenants.organizations.enabled=true"]
+ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "kagent.fluxServiceAccountName=kagent-flux",
+      "--set", "llmRouting.enabled=true", "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
 
-ORGS = {"matchExpressions": [{"key": "giantswarm.io/organization", "operator": "Exists"}]}
+ORGS = {"matchExpressions": [{"key": "agent-platform.giantswarm.io/organization", "operator": "Exists"}]}
 STATIC = [
     {"atespace": "kagent", "allowedNamespaces": ["kagent"]},
     {"atespace": "ate-golden", "allowedNamespaces": ["kagent"]},
@@ -157,7 +158,7 @@ def main() -> None:
         if "substrate.credentialProvider.namespacePolicies[0] (ate-golden) has an allowedNamespaceSelector" not in r.stderr:
             fail(f"an ate-golden allowedNamespaceSelector other than the Organizations' failed without naming the key\n{r.stderr}")
         r = helm("template", "t", meta, *BASE, *ON, "--set", "components.substrate.versionRange=>=1.11.4 <1.12.0")
-        if r.returncode == 0 or "tenants.organizations.enabled needs Substrate 1.12.0 or later" not in r.stderr:
+        if r.returncode == 0 or "agentPlatformOrganizations.enabled needs Substrate 1.12.0 or later" not in r.stderr:
             fail(f"a Substrate floor below 1.12.0 with the switch on is not refused naming the floor\n{r.stderr}")
         print("ok: refused")
 

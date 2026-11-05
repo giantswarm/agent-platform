@@ -35,11 +35,9 @@ renders for a WorkerPool) and holds the lists to them:
     the Substrate line from 1.1.0): non-root user, drops ALL,
     allowPrivilegeEscalation false, read-only root — but no seccompProfile.
 
-With tenants.organizations.enabled or agentPlatformOrganizations.enabled a
-second exception, substrate-workers-tenants, matches the same workers in every
-organization namespace (labelled giantswarm.io/organization in the tenants
-mode, agent-platform.giantswarm.io/organization in the organizations mode),
-by a namespaceSelector, and only when Substrate's controller chain writes them
+With agentPlatformOrganizations.enabled a second exception,
+substrate-workers-tenants, matches the same workers in every organization
+namespace (labelled agent-platform.giantswarm.io/organization), by a namespaceSelector, and only when Substrate's controller chain writes them
 (agent-platform#1036; the comment at it says why).
 
 Kinds: the Pod and the controller kind of each workload (Kyverno evaluates the
@@ -107,15 +105,15 @@ spec:
             operator: Exists
 {{- if include "agent-platform.orgNamespaces.enabled" . }}
 {{- /* The same workers in the organizations' namespaces
-(tenants.organizations.enabled or agentPlatformOrganizations.enabled): selected
-by the namespace's label of the mode that is on
+(agentPlatformOrganizations.enabled): selected
+by the namespace's label
 (agent-platform.orgNamespaces.label), never
 listed (Kyverno matches an exception's namespaceSelector from 1.15.2,
 kyverno/kyverno#13975). An Organization's admins may write pods there, so a
 matching label is no proof that Substrate made the pod: each kind is excepted
 only when its writer is the controller chain that makes the workers
 (agent-platform.tenants.workerWriters). The admission policy
-agent-platform-tenant-workers refuses a labelled Deployment, ReplicaSet or Pod
+agent-platform-organization-workers refuses a labelled Deployment, ReplicaSet or Pod
 there from any other writer (tenant-workers-admission.yaml). An exception of
 its own, with background false: Kyverno refuses subjects in an exception that
 background scans apply, since a scan has no writer to match. Those scans

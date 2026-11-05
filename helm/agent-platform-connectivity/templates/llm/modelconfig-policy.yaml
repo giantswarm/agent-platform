@@ -16,12 +16,11 @@ turning routing off removes these policies and the listener, and the reconcile
 hook (modelconfig-routing-hook.yaml) takes exactly the marked baseUrls off
 again, which Helm cannot: it never owned them.
 
-With tenants.organizations.enabled or agentPlatformOrganizations.enabled
-(agent-platform.tenants.modelConfigs) the policies also fill in the listener in
-every organization namespace (agent-platform.orgNamespaces.label: a second
-binding each; the reconcile hook still reads the kagent namespace only): an
-organization's ModelConfig, and in the tenants mode agent-manager's copy of
-the default one, may omit baseUrl. There an explicit baseUrl that is
+With agentPlatformOrganizations.enabled (agent-platform.tenants.modelConfigs)
+the policies also fill in the listener in every organization namespace
+(agent-platform.orgNamespaces.label: a second binding each; the reconcile hook
+still reads the kagent namespace only): an organization's ModelConfig may omit
+baseUrl. There an explicit baseUrl that is
 not the listener is refused by agent-platform-tenant-model-routing
 (templates/tenants/modelconfig-admission.yaml), and so is an empty one when
 this policy fails: Ignore here fails closed there. */ -}}

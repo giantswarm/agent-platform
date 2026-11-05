@@ -5,7 +5,7 @@
 The meta chart's render:
 - agentPlatformOrganizations.enabled off: no operator release, and kagent's
   authorizer lists a person's agents over agent-platform.giantswarm.io/organization
-  (nothing selects giantswarm.io/organization outside the tenants mode);
+  (nothing selects giantswarm.io/organization);
 - on: the agent-platform-operator HelmRelease, in the connectivity release's
   namespace, after it, with its CRD under CreateReplace on install and
   upgrade, with the wiring derived onto it (the
@@ -15,7 +15,8 @@ The meta chart's render:
   connectivity chart renders); agent-manager's tenant reconciler off;
   Substrate's credential provider reading
   the organization namespaces by the new label;
-- the render fails with tenants.organizations.enabled on as well, with an
+- tenants.organizations is refused by the schema (the tenants mode is gone);
+- the render fails with an
   explicit components.agent-platform-operator.enabled or targetNamespace that
   disagrees, with an own derived operator value or kagent namespaceSelector
   that differs.
@@ -25,7 +26,9 @@ admission policies of the organizations mode applied: a namespace labelled
 agent-platform.giantswarm.io/organization is selected by the credential
 provider's grants, the workers' PolicyException, the model routing bindings
 and the admission policies, and gets the worker admission, the model routing
-and the egress credential admission; one labelled only
+(the listener admitted, another base URL and an unserved provider refused),
+the Secret-creation check and the tenant credential's type, and the egress
+credential admission; one labelled only
 giantswarm.io/organization gets none of them. Each refusal names its policy
 and has an admitted twin.
 
@@ -150,10 +153,13 @@ def check_meta(chart):
     expect(e["substrate"] == {"target": "grpcs://api.ate-system.svc:443", "audience": "api.ate-system.svc",
                               "caConfigMap": {"name": "agent-platform-operator-ate-api-ca", "key": "ca.crt"}},
            "the erasure reaches ate-api with the audience its authentication config accepts and the CA the bootstrap hook publishes")
-    roles = [d for d in on if d["kind"] == "ClusterRole" and d["metadata"]["name"] == "agent-platform-tenant-flux"]
-    conn_objs = docs(connectivity(f"{chart}/../agent-platform-connectivity"))
-    expect(not roles and find(conn_objs, "ClusterRole", "agent-platform-tenant-flux") is not None,
-           "on, the connectivity chart renders agent-platform-tenant-flux, which the operator binds and agent-manager no longer renders")
+    hook = [d for d in docs(connectivity(f"{chart}/../agent-platform-connectivity")) if d["kind"] == "Job" and "substrate-bootstrap" in d["metadata"]["name"]]
+    script = yaml.safe_dump(hook)
+    expect(hook and f"create configmap \"{e['substrate']['caConfigMap']['name']}\" --from-file={e['substrate']['caConfigMap']['key']}=" in script.replace("\\\"", "\"")
+           and f"-n \"{op['targetNamespace']}\"" in script.replace("\\\"", "\""),
+           "the bootstrap hook writes the CA ConfigMap and key the operator mounts, in the operator's namespace")
+    expect(find(docs(connectivity(f"{chart}/../agent-platform-connectivity")), "ClusterRole", "agent-platform-tenant-flux") is not None,
+           "on, the connectivity chart renders agent-platform-tenant-flux, which the operator binds")
     am = release(on, "agent-manager")["values"]
     expect(am.get("tenants") == {"enabled": False}, "agent-manager's tenant reconciler is off while the operator runs")
     kagent = release(on, "kagent")["values"]["controller"]
@@ -186,12 +192,22 @@ def check_meta(chart):
     expect(release(aws, "agent-platform-operator")["values"]["snapshots"] == {"bucket": "giantswarm-ci-substrate", "region": "eu-west-1"},
            "with the AWS store the operator gets the bucket and its region")
 
+    r = meta(chart, "--set", "tenants.organizations.enabled=true")
+    expect(r.returncode != 0 and "additional properties 'organizations' not allowed" in r.stderr,
+           "tenants.organizations is refused by the meta chart, naming the key: the tenants mode is gone")
+    r = run([HELM, "template", "t", f"{chart}/../agent-platform-connectivity", "--set", "tenants.organizations.enabled=true"])
+    expect(r.returncode != 0 and "additional properties 'organizations' not allowed" in r.stderr,
+           "tenants.organizations is refused by the connectivity chart, naming the key")
+    r = meta(chart, "--set", "agent-manager.tenants.enabled=true")
+    expect(r.returncode != 0 and "agent-manager.tenants.enabled is true" in r.stderr,
+           "an own agent-manager.tenants.enabled true fails the render: the old reconciler stays off")
     for what, extra, needle in (
-            ("tenants.organizations.enabled on as well", ["--set", "tenants.organizations.enabled=true"], "are both on"),
             ("components.agent-platform-operator.enabled false", ["--set", "components.agent-platform-operator.enabled=false"],
              "components.agent-platform-operator.enabled is false but agentPlatformOrganizations.enabled is true"),
             ("another targetNamespace", ["--set", "components.agent-platform-operator.targetNamespace=elsewhere"],
              "components.agent-platform-operator.targetNamespace (elsewhere) differs"),
+            ("an own commitMode", ["--set", "agent-platform-operator.commitMode.sourceRef.name=flux"],
+             "agent-platform-operator.commitMode is set"),
             ("an own derived operator value", ["--set", "agent-platform-operator.platformNamespace=other"],
              "agent-platform-operator.platformNamespace (\"other\") differs from what the chart derives"),
             ("llmRouting off", ["--set", "llmRouting.enabled=false"], "needs llmRouting.enabled"),
@@ -220,7 +236,9 @@ def check_default(chart):
     keys = {e["key"] for d in objs if d["kind"] == "ValidatingAdmissionPolicy" and d["metadata"]["name"].startswith("agent-platform-tenant-")
             for e in d["spec"]["matchConstraints"]["namespaceSelector"].get("matchExpressions", [])}
     expect(NEW in keys and OLD not in keys,
-           f"with neither mode on, the organizations' egress and credential policies select {NEW}, never {OLD}")
+           f"with the switch off, the organizations' egress and credential policies select {NEW}, never {OLD}")
+    expect(find(objs, "ClusterRole", "agent-platform-tenant-flux") is not None,
+           "with kagent on, the connectivity chart renders agent-platform-tenant-flux, whatever the switch says")
 
 
 def check_egress(chart):
@@ -361,11 +379,42 @@ def prove_label(meta_chart, k8s):
     # Admission, organization namespace against Giant Swarm Organization namespace.
     for ns, by in ((ORG_NS, "agent-platform-tenant-model-routing"), (TENANT_NS, None)):
         case(f"a ModelConfig whose baseUrl is not the llm listener in {ns}", create(mc("direct", ns, "https://api.openai.com/v1")), by)
+    case(f"a ModelConfig whose baseUrl is the llm listener in {ORG_NS}", create(mc("routed", ORG_NS, f"{LISTENER}/v1")))
+    bedrock = {"apiVersion": "api.kagent.dev/v1alpha3", "kind": "ModelConfig", "metadata": {"name": "bedrock", "namespace": ORG_NS},
+               "spec": {"provider": "Bedrock", "model": "m", "bedrock": {"region": "eu-west-1"}}}
+    case(f"a Bedrock ModelConfig in {ORG_NS} (no listener serves it)", create(bedrock), "agent-platform-tenant-model-routing")
+    secret = lambda name, type_="Opaque": {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": name, "namespace": ORG_NS},
+                                           "type": type_, "stringData": {"k": "v"}}
+    must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "secret-writer", "namespace": ORG_NS},
+                 "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["create"]}]}, dry=False), "create the Role secret-writer")
+    must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": {"name": "secret-writer", "namespace": ORG_NS},
+                 "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "secret-writer"},
+                 "subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": "writer"}]}, dry=False), "bind writer")
+    case("a requester who may only create Secrets writes a Secret outside tenant-credential-*",
+         kubectl(["create", "-f", "-", "--dry-run=server"], yaml.safe_dump(secret("platform-key")), "writer", ()), "agent-platform-tenant-secret-creation")
+    case("a requester who may only create Secrets writes a tenant credential",
+         kubectl(["create", "-f", "-", "--dry-run=server"], yaml.safe_dump(secret("tenant-credential-key")), "writer", ()))
+    case("a requester who may read Secrets writes a Secret outside tenant-credential-*", create(secret("helm-release")))
+    case("a tenant credential of type kubernetes.io/basic-auth", create(secret("tenant-credential-basic", "kubernetes.io/basic-auth") | {"stringData": {"username": "u", "password": "p"}}),
+         "agent-platform-tenant-credentials")
     for ns, by in ((ORG_NS, "agent-platform-tenant-egress-credentials"), (TENANT_NS, None)):
         case(f"an EgressPolicy naming a Secret outside tenant-credential-* in {ns}", create(egress_policy(ns, "platform-key")), by)
     case(f"an EgressPolicy naming a tenant credential in {ORG_NS}", create(egress_policy(ORG_NS, "tenant-credential-key")))
     for ns, by in ((ORG_NS, "agent-platform-organization-workers"), (TENANT_NS, None)):
         case(f"a person writes a WorkerPool in {ns}", create(workerpool(ns), as_=PERSON), by)
+
+
+def prove_operator_scope():
+    op = f"system:serviceaccount:{RELEASE_NS}:agent-platform-operator"
+    quota = lambda ns: {"apiVersion": "v1", "kind": "ResourceQuota", "metadata": {"name": "q", "namespace": ns}, "spec": {"hard": {"secrets": "10"}}}
+    netpol = lambda ns: {"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": {"name": "probe", "namespace": ns},
+                         "spec": {"podSelector": {}, "policyTypes": ["Ingress"]}}
+    for what, obj in (("a NetworkPolicy", netpol), ("a ResourceQuota", quota)):
+        case(f"the operator writes {what} in an organization namespace", create(obj(ORG_NS), as_=op))
+        for ns in ("kube-system", "ate-system", TENANT_NS):
+            case(f"the operator writes {what} in {ns}", create(obj(ns), as_=op), "agent-platform-organization-operator-scope")
+    case("the operator writes a WorkerPool in the kagent namespace", create(workerpool("kagent"), as_=op), "agent-platform-organization-operator-scope")
+    case("a person's NetworkPolicy in kube-system is not the operator's policy's business", create(netpol("kube-system"), as_=PERSON))
 
 
 def prove_netpol(k8s):
@@ -425,6 +474,7 @@ def main():
             fail("the API server did not apply the policies within 60s")
         prove_label(meta_chart, k8s)
         prove_netpol(k8s)
+        prove_operator_scope()
         prove_render_check(chart)
     finally:
         API.stop()

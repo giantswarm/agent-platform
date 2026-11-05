@@ -18,9 +18,6 @@ HelmRelease lock names kagent.fluxServiceAccountName.
 {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
 {{- fail "agentPlatformOrganizations.enabled needs kagent (components.kagent.enabled): the organizations-admin role binds agent-platform:user, editor and admin, which render with kagent" -}}
 {{- end -}}
-{{- if include "agent-platform.tenants.organizations" . -}}
-{{- fail "agentPlatformOrganizations.enabled and tenants.organizations.enabled are both on: kagent's authorizer and every policy of the organizations' namespaces select one namespace label (agent-platform.giantswarm.io/organization or giantswarm.io/organization), so one mode is on at a time. Turn tenants.organizations.enabled off in the same change that turns agentPlatformOrganizations.enabled on (UPGRADE.md)" -}}
-{{- end -}}
 true
 {{- end -}}
 {{- end -}}

@@ -38,7 +38,7 @@ origins and the Secrets they authenticate with; its editors read them.
 The rules agent-platform:editor adds: the writes and reads agent-manager
 performs as the caller. The agent chart's OCIRepository is read only: its
 writer is the namespace's keeper (agent-platform-operator in an organization
-namespace, agent-manager's tenant reconciler in a tenant namespace), never an
+namespace), never an
 editor (giantswarm/agent-platform#1267).
 */}}
 {{- define "agent-platform.tenants.editorRules" -}}
@@ -70,29 +70,8 @@ tenant-credential-
 {{- end -}}
 
 {{/*
-The key Secret of the default ModelConfig, kagent.providers.<default>.apiKeySecretRef:
-the platform Secret agent-manager's tenant reconciler copies into a tenant
-namespace that holds an agent (the meta chart derives the reconciler's
-tenants.modelConfig.apiKeySecretName from the same key). Empty when unset.
-*/}}
-{{- define "agent-platform.tenants.modelSecretName" -}}
-{{- $providers := dig "providers" dict (.Values.kagent | default dict) | default dict -}}
-{{- dig (toString (dig "default" "" $providers)) "apiKeySecretRef" "" $providers -}}
-{{- end -}}
-
-{{/*
-The name of the default ModelConfig agent-manager's tenant reconciler copies
-into a tenant namespace that holds an agent: the ModelConfig the kagent chart
-renders from kagent.providers (the meta chart derives the reconciler's
-tenants.modelConfig.name with the same name).
-*/}}
-{{- define "agent-platform.tenants.modelConfigName" -}}
-default-model-config
-{{- end -}}
-
-{{/*
 "true" when a tenant's own ModelConfigs are admitted under the platform's
-rules (kagent on and either mode of agent-platform.orgNamespaces.enabled;
+rules (kagent on and agentPlatformOrganizations.enabled;
 giantswarm/agent-platform#759, templates/tenants/modelconfig-admission.yaml),
 else empty.
 */}}
@@ -111,47 +90,22 @@ Usage: include "agent-platform.tenants.subjects" (list .Values.tenants.platform.
 {{- end -}}
 
 {{/*
-"true" when the worker pods of the Organizations' namespaces are admitted
-(tenants.organizations.enabled; giantswarm/agent-platform#1036), else empty.
-*/}}
-{{- define "agent-platform.tenants.organizations" -}}
-{{- if dig "organizations" "enabled" false (.Values.tenants | default dict) }}true{{ end -}}
-{{- end -}}
-
-{{/*
-The organizations' namespaces, by mode. Two modes select them, never both at
-once (the render fails, agent-platform.organizations.enabled): the tenants
-mode (tenants.organizations.enabled, agent-manager's tenant reconciler over the
-Giant Swarm Organizations' org-<name> namespaces, labelled
-giantswarm.io/organization) and the organizations mode
-(agentPlatformOrganizations.enabled, agent-platform-operator's organization
-namespaces, labelled agent-platform.giantswarm.io/organization). Every policy
-that holds or admits an organization's namespace selects it by the label of
-the mode that is on; with neither on, by the organizations mode's label, so
-nothing selects giantswarm.io/organization outside the tenants mode.
+The organizations' namespaces: agent-platform-operator's organization
+namespaces, labelled agent-platform.giantswarm.io/organization, while
+agentPlatformOrganizations.enabled is on. Every policy that holds or admits an
+organization's namespace selects it by that label, never by a list of names.
 */}}
 
-{{/* "true" when either mode is on, else empty. */}}
+{{/* "true" while agentPlatformOrganizations.enabled is on, else empty. The
+policies of the organizations' namespaces (substrate/, tenants/, llm/) name
+these two helpers, so the namespaces they hold have one definition here. */}}
 {{- define "agent-platform.orgNamespaces.enabled" -}}
-{{- if or (include "agent-platform.tenants.organizations" .) (include "agent-platform.organizations.enabled" .) }}true{{ end -}}
+{{- include "agent-platform.organizations.enabled" . -}}
 {{- end -}}
 
-{{/* The label of the organizations' namespaces (see above). */}}
+{{/* The label of the organizations' namespaces. */}}
 {{- define "agent-platform.orgNamespaces.label" -}}
-{{- if include "agent-platform.tenants.organizations" . -}}
-giantswarm.io/organization
-{{- else -}}
 {{- include "agent-platform.organizations.label" . -}}
-{{- end -}}
-{{- end -}}
-
-{{/* The switch of the mode that is on, for the render's messages. */}}
-{{- define "agent-platform.orgNamespaces.switch" -}}
-{{- if include "agent-platform.tenants.organizations" . -}}
-tenants.organizations.enabled
-{{- else -}}
-agentPlatformOrganizations.enabled
-{{- end -}}
 {{- end -}}
 
 {{/*
@@ -196,13 +150,13 @@ Usage: include "agent-platform.tenants.organizationWorkers" (dict "root" $ "flav
 {{- end -}}
 
 {{/*
-The writers of the Substrate workers in the Organizations' namespaces
-(tenants.organizations.enabled), by kind, as JSON {kind: [ServiceAccount
+The writers of the Substrate workers in the organizations' namespaces
+(agentPlatformOrganizations.enabled), by kind, as JSON {kind: [ServiceAccount
 subject]}: Substrate's controller chain. ate-controller writes the Deployment
 (and marks the busy workers' pods), the deployment controller the ReplicaSet
 (and the Deployment's revision), the ReplicaSet controller the Pods. The
 substrate-workers PolicyException excepts only these writers there, and the
-admission policy agent-platform-tenant-workers lets no one else write a worker
+admission policy agent-platform-organization-workers lets no one else write a worker
 there.
 */}}
 {{- define "agent-platform.tenants.workerWriters" -}}

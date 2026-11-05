@@ -15,16 +15,38 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
-## \<current\> → \<next\> (the organization label, and the egress gateway reaches only muster's Gateway in the cluster)
+## \<current\> → \<next\> (the tenants mode is removed)
 
-giantswarm/agent-platform#1268: outside `tenants.organizations.enabled`, every policy of the organizations' namespaces and kagent's authorizer select `agent-platform.giantswarm.io/organization`, and the egress gateway `atenet-egress` loses its `kube-apiserver` rule and its rule to every in-cluster endpoint on 443 and 10443, which now names the pods of the Gateway muster's route attaches to.
+giantswarm/agent-platform#1268: `tenants.organizations` is refused by both charts' schemas. agent-manager's tenant reconciler no longer keeps the `org-<name>` namespaces, muster no longer serves their MCP servers, and no policy of the platform selects `giantswarm.io/organization`. Organizations are AgentPlatformOrganizations (`agentPlatformOrganizations.enabled`), each with an organization namespace `agents-<name>-<random>`.
 
 ### Operator action
 
-- **None** for an installation with `tenants.organizations.enabled` on: its policies keep selecting `giantswarm.io/organization`.
+- **None** for an installation without `tenants.organizations.enabled`.
+- **An installation with `tenants.organizations.enabled: true`** (graveler), in this order:
+  1. Before the upgrade, hand the ClusterRole `agent-platform-tenant-flux` from the agent-manager release to the connectivity release. The connectivity release renders it now, and it upgrades before agent-manager (agent-manager waits for kagent, kagent for connectivity), so without this step its upgrade fails on the object's Helm ownership and never gets past it. `<release>` and `<namespace>` are those of the connectivity HelmRelease's Helm release (`kubectl get helmrelease -A | grep connectivity`, its `spec.releaseName` and `spec.targetNamespace`):
+
+     ```sh
+     kubectl annotate clusterrole agent-platform-tenant-flux --overwrite \
+       helm.sh/resource-policy=keep \
+       meta.helm.sh/release-name=<release> \
+       meta.helm.sh/release-namespace=<namespace>
+     ```
+
+     The connectivity release adopts it, and the agent-manager release keeps it when it drops it from its manifest. Then remove `tenants.organizations` and any `agent-manager.tenants` and `muster.muster.mcpServersInAllNamespaces` from the installation's values.
+  2. Turn `agentPlatformOrganizations.enabled` on with its prerequisites: kagent and Agent Substrate on, `kagent.fluxServiceAccountName`, `llmRouting.enabled` with a model whose provider the listener serves and `llmRouting.modelConfigPolicy.enabled` on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, `global.domain` (or `agentPlatformOrganizations.apiHostnames`), and the kagent line with giantswarm/kagent-extensions#27 for the erasure.
+  3. Create each organization through agent-manager's organization tools (`create_organization` in the parent `org-<name>`, then its members and its model). Two steps decide when they answer:
+     - With this release, `components.agent-manager.versionRange` is `>=2.16.0 <2.19.0` and agent-manager gets `tenants.enabled: false`: an agent-manager 2.18 with `tenants.enabled` would run the old tenant reconciler over every `giantswarm.io/organization` namespace. Its organization tools do not exist yet.
+     - The next agent-platform release whose CHANGELOG moves `components.agent-manager.versionRange` to the release with giantswarm/agent-manager#294 turns agent-manager's `tenants.enabled` on with `agentPlatformOrganizations.enabled` (and sets `devPortal.url`); without it the organization tools answer `unsupported`. That release also hands `agent-platform-tenant-flux` back: the connectivity chart drops it and agent-manager's chart renders it again. Its UPGRADE.md entry gives the same annotation step in the other direction (the agent-manager release's name and namespace), so the role is never missing. Upgrade graveler to that release before this step.
+  4. Delete the old tenant agent objects in each `org-<name>` namespace: the agents' HelmReleases and the `agent` OCIRepository, the copies the reconciler kept (the Harness, the WorkerPool and its ServiceAccount, `default-model-config` and its key Secret, the workers' network policies, all labelled `agent-manager.giantswarm.io/tenant-object`), and the RoleBinding of the agents' Flux ServiceAccount. Their sessions do not move.
+
+## \<current\> → \<next\> (the organization label, and the egress gateway reaches only muster's Gateway in the cluster)
+
+giantswarm/agent-platform#1268: every policy of the organizations' namespaces and kagent's authorizer select `agent-platform.giantswarm.io/organization`, and the egress gateway `atenet-egress` loses its `kube-apiserver` rule and its rule to every in-cluster endpoint on 443 and 10443, which now names the pods of the Gateway muster's route attaches to.
+
+### Operator action
+
 - **An installation that sets `kagent.controller.authorization.namespaceSelector`**: remove the key; it is derived, and an own value that differs fails the render.
 - **An agent that reaches an in-cluster endpoint on 443 or 10443 other than muster's Gateway, or the API server, through the egress gateway**: give it the endpoint's public name behind the Gateway, or reach it outside the agent. A server-side render that fails naming a pod on host networking: run the Gateway's proxy on pod networking, or point `ingress.parentRefs` at a Gateway that does.
-- **An installation that moves from the tenants mode to the organizations mode**: turn `tenants.organizations.enabled` off in the same change that turns `agentPlatformOrganizations.enabled` on (the render fails with both), with the installation's AgentPlatformOrganizations committed; the move job (giantswarm/giantswarm#38990) then moves the agents from `org-<name>`.
 
 ## \<current\> → \<next\> (editors no longer write the agent chart's OCIRepository)
 

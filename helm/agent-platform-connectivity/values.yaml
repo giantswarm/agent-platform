@@ -681,10 +681,10 @@ llmRouting:
   # agent-platform.giantswarm.io/llm-routing-base-url), and the hook
   # <release>-llm-routing-modelconfigs takes a marked baseUrl back off once
   # routing is off or its provider is no longer served (giantswarm/agent-platform#1057).
-  # It acts in the kagent namespace and, with tenants.organizations.enabled, in
-  # every namespace labelled giantswarm.io/organization too (a second binding),
-  # where agent-platform-tenant-model-routing refuses a baseUrl that is not the
-  # listener; tenants.organizations.enabled fails the render without this
+  # It acts in the kagent namespace and, with agentPlatformOrganizations.enabled,
+  # in every organization namespace too (a second binding), where
+  # agent-platform-tenant-model-routing refuses a baseUrl that is not the
+  # listener; agentPlatformOrganizations.enabled fails the render without this
   # policy. The hook reads the kagent namespace only.
   #
   # Rendered only where the API server serves
@@ -3101,39 +3101,6 @@ tenants:
   # namespace beside platform.editors (the meta chart also adds it to muster's
   # editor bindings).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
-  organizations:
-    # -- The worker pods of the namespaces labelled
-    # `giantswarm.io/organization` (agent-manager's tenants, its
-    # `tenants.enabled`; it copies the workers' own policy into them,
-    # `substrate-workers` in the cilium flavor, `substrate-workers-ingress` in
-    # the kubernetes flavor): with Agent Substrate on, the router, the egress
-    # gateway and the actors' dns admit them as they admit the kagent
-    # namespace's workers, and the workers' Kyverno PolicyException covers
-    # them when Substrate's controllers write them (Kyverno 1.15.2 or later;
-    # an older Kyverno never applies the exception and the workers are
-    # refused). Two ValidatingAdmissionPolicies hold the workers there for
-    # every requester: only agent-manager's ServiceAccount writes a
-    # WorkerPool, as a copy of kagent.substrateWorkerPool.name in the kagent
-    # namespace (only replicas may differ), and only Substrate's controllers
-    # write a Deployment, ReplicaSet or Pod labelled `ate.dev/worker-pool`; no
-    # one adds an ephemeral container to a worker, execs into one or
-    # attaches to one (Kubernetes 1.30 or later). With kagent on, a tenant
-    # also brings its own ModelConfig and model key, metered on the `llm`
-    # listener (giantswarm/agent-platform#759): the modelconfig-llm-routing
-    # policies fill in the listener as the baseUrl of a ModelConfig there
-    # that has none, and two more ValidatingAdmissionPolicies hold every
-    # such namespace but kagent: a ModelConfig names a provider the listener
-    # serves and the listener as its baseUrl (any other provider, Bedrock
-    # included, and any other baseUrl are refused), and only a requester who
-    # may read a namespace's Secrets creates one there without the
-    # tenant-credential- prefix; only agent-manager's copy of the default ModelConfig names the
-    # platform's key. It needs llmRouting.enabled, a default ModelConfig
-    # provider the listener serves, and the modelconfig-llm-routing policy
-    # (llmRouting.modelConfigPolicy.enabled, served
-    # MutatingAdmissionPolicy); the render fails otherwise. A namespace
-    # without the label gets nothing. Off, the render is that of a chart
-    # without the key.
-    enabled: false
 
 # === Agent Platform organizations (giantswarm/giantswarm#38891) ===
 # An AgentPlatformOrganization (agent-platform.giantswarm.io/v1alpha1, the
@@ -3170,9 +3137,14 @@ tenants:
 #     hook), ate-api-server's serving roots, which the operator verifies it
 #     with.
 # The operator's own values are the agent-platform-operator block below.
-# One mode at a time: with tenants.organizations.enabled on as well the render
-# fails, since kagent's authorizer and every policy select one namespace
-# label. agent-manager's tenant reconciler stays off while this is on.
+# agent-manager's chart keeps its tenants.enabled off: its tenant reconciler is
+# gone (tenants.organizations, the namespaces labelled giantswarm.io/organization,
+# is removed; giantswarm/agent-platform#1268), and the connectivity chart renders
+# the ClusterRole agent-platform-tenant-flux the operator binds.
+# The switch is the rollout gate, off by default for now: it turns on by default
+# once the capz and s3proxy snapshot stores give the operator access, the kagent
+# line carries giantswarm/kagent-extensions#27, and an operator release with
+# giantswarm/agent-platform-operator#10 (commit mode) is the range's floor.
 # Before you turn this on in an installation: the kagent line must carry
 # giantswarm/kagent-extensions#27 (kagent reviews a delete of another
 # creator's Session as a cluster-wide `delete`); until it does, the erasure of
@@ -3185,8 +3157,8 @@ agentPlatformOrganizations:
   # model whose provider the listener serves (Anthropic, Mistral or OpenAI)
   # and llmRouting.modelConfigPolicy.enabled on an API server that serves
   # admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain
-  # or apiHostnames: the render fails without them, and with
-  # tenants.organizations.enabled on.
+  # or apiHostnames: the render fails without them. The rollout gate: off by
+  # default for now (see above).
   enabled: false
   # -- The namespace of the installation's Flux source, where the operator
   # keeps an organization's Kustomization and Flux ServiceAccount (commit

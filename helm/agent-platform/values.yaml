@@ -422,7 +422,7 @@ components:  # @schema additionalProperties: true
     # objects that made them, so an Organization's namespace created again
     # under a deleted one's name starts with none, and a tenant server whose
     # client Secret muster may not read says so at sign-in
-    # (giantswarm/muster#1603); tenants.organizations.enabled needs it.
+    # (giantswarm/muster#1603).
     # Floor 5.49.0: a Session binding carries the agent's toolset, and every
     # request of the Session's sandbox resolves within it (binding ∩ header,
     # giantswarm/muster#1618); agent-manager from 2.9.0 sends it, which an
@@ -917,7 +917,7 @@ components:  # @schema additionalProperties: true
     # class to it through substrate.credentialProvider.additionalProviders
     # below; a Substrate release before 1.14.0 refuses that entry, its bundled
     # provider serving the name itself. The floor is 0.2.0, the first plugin
-    # that reads the selector grants tenants.organizations.enabled derives; an
+    # that reads the selector grants agentPlatformOrganizations.enabled derives; an
     # older plugin refuses its policy file at start.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: ">=0.2.0 <0.3.0"
@@ -1091,12 +1091,10 @@ components:  # @schema additionalProperties: true
     # without defaultToolchains with the github toolchain, so gh stays in its
     # Sessions once the Harness images carry none; it is the floor before any
     # kagent line without gh in its Harness images (giantswarm/agent-manager#252).
-    # The ceiling 2.19.0 holds the line before giantswarm/agent-manager#294,
-    # which retires the tenant reconciler: its chart refuses the
-    # tenants.modelConfig, .workerPoolReplicas, .networkPolicy and .interval
-    # values the tenants mode forwards, and its tenants.enabled serves the
-    # organizations instead (with devPortal.url). The range moves past it with
-    # the change that stops forwarding them (giantswarm/agent-platform#1268).
+    # The ceiling 2.19.0 keeps agent-manager on the line whose tenants.enabled
+    # is the old tenant reconciler, which this chart keeps off: from 2.19.0
+    # tenants.enabled serves the organizations (with devPortal.url), and the
+    # range moves past it together with the values that turn it on.
     versionRange: ">=2.16.0 <2.19.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
@@ -1268,11 +1266,12 @@ components:  # @schema additionalProperties: true
     # (agent-platform-operator, its chart's name), and another targetNamespace
     # fails the render.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The 0.1 line, release candidates included until 0.1.0 is promoted: the
-    # floor 0.1.0-rc.4 carries the CRD, the curated copies and the erasure
-    # (agent-platform-operator#2, #3, #7), and the `-0` ceiling keeps the
-    # candidates of the next minor out (a bare <0.2.0 admits 0.2.0-rc.N).
-    versionRange: ">=0.1.0-rc.4 <0.2.0-0"
+    # Pinned exactly, not a range: the operator's image and its CRD (CreateReplace)
+    # move only with a change here, and a release that needs more wiring
+    # (commit mode, agent-platform-operator#10) never rolls in before the
+    # wiring does. 0.1.0-rc.5 carries the CRD, the curated copies and the
+    # erasure (agent-platform-operator#2, #3, #7).
+    versionRange: "0.1.0-rc.5"
     valuesFrom: agent-platform-operator
     # App-owned CRD: the chart ships agentplatformorganizations in its crds/
     # dir. CreateReplace makes Flux upgrade it with the app on every release
@@ -3013,10 +3012,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       groupsPrefix: ""
       # The tenants a person's agent list ranges over: every organization
       # namespace, and includeNamespaces beside them. Derived: the label of
-      # the organizations' namespaces, giantswarm.io/organization with
-      # tenants.organizations.enabled, else
-      # agent-platform.giantswarm.io/organization (agentPlatformOrganizations);
-      # an own value that differs fails the render.
+      # the organizations' namespaces, agent-platform.giantswarm.io/organization
+      # (agentPlatformOrganizations); an own value that differs fails the
+      # render.
       namespaceSelector: ""
       includeNamespaces: []
     # kagent's jwt Session admission (controller.session.admission.jwt:
@@ -5435,8 +5433,9 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # === Agent tenants (giantswarm/agent-platform#706) ===
 # Who sees, runs and writes agents, by Kubernetes RBAC. A tenant is a
 # namespace: the kagent namespace (the platform tenant, the agents for
-# everyone) and every namespace labelled giantswarm.io/organization (an
-# Organization's, whose objects agent-manager's tenant reconciler keeps). With
+# everyone) and every organization namespace, labelled
+# agent-platform.giantswarm.io/organization (agentPlatformOrganizations, whose
+# objects agent-platform-operator keeps). With
 # kagent on, the connectivity release renders the three ClusterRoles a tenant's
 # RoleBindings refer to:
 #   - agent-platform:user: see the tenant's agents, templates, RemoteMCPServers,
@@ -5493,95 +5492,6 @@ tenants:
   # release's values). Empty by default. A group is written as the API server
   # sees it (with the OIDC groups prefix of the installation).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
-  organizations:
-    # -- Admit the agent workers of the Organizations' namespaces and turn on
-    # agent-manager's tenant reconciler. With components.agent-manager on,
-    # the agent-manager release gets `tenants.enabled` (agent-manager 2.1.0
-    # or later), which puts a WorkerPool in each namespace labelled
-    # `giantswarm.io/organization` that holds an agent, with copies of the
-    # kagent namespace's default ModelConfig (`default-model-config`, its
-    # key Secret kagent.providers.<default>.apiKeySecretRef, which must be
-    # set in these values: the kagent chart's own provider defaults are not
-    # read) and of the workers' own policy (the CiliumNetworkPolicy
-    # `substrate-workers` in the cilium flavor, which needs cilium.io/v2
-    # served or agent-manager does not start; the NetworkPolicy
-    # `substrate-workers-ingress` in the kubernetes flavor; none with
-    # networkPolicy.enabled off). Each tenant that holds an agent keeps 1
-    # warm worker unless agent-manager.tenants.workerPoolReplicas sets
-    # another count. The render fails, naming the key, below agent-manager
-    # 2.1.0, with kagent off, with agent-manager's OAuth or downstream OAuth
-    # off, without kagent.fluxServiceAccountName or without that key Secret.
-    # agent-manager.tenants.workerPoolReplicas and .interval are yours; any
-    # other agent-manager.tenants key is derived and must be unset or equal.
-    # On, with Agent Substrate on, the connectivity release lets the worker pods
-    # of every such namespace reach the atenet router's tunnel, the egress
-    # gateway and the actors' dns, as the kagent namespace's workers do (both
-    # flavors), and the workers' Kyverno PolicyException covers them there
-    # when Substrate's controllers write them (ate-controller, the
-    # Deployment and ReplicaSet controllers); a labelled pod a person writes
-    # there is judged like any other. It needs Kyverno 1.15.2 or later: an
-    # older Kyverno matches the exception's namespaceSelector against no
-    # labels, so the exception never applies and the workers are refused. The
-    # namespaces are selected by the label, never listed; a namespace without
-    # the label gets nothing. Two ValidatingAdmissionPolicies hold the
-    # workers there for every requester, cluster-admin included: only
-    # agent-manager's ServiceAccount writes a WorkerPool, as a copy of the
-    # platform WorkerPool (kagent.substrateWorkerPool.name; only replicas may
-    # differ), and only Substrate's controllers write a Deployment,
-    # ReplicaSet or Pod labelled ate.dev/worker-pool; no one adds an
-    # ephemeral container to a worker, execs into one or attaches to one
-    # (docs/substrate-security.md). On, Substrate's
-    # credential provider also reads each such namespace's Secrets for the
-    # atespace of the same name, and for ate-golden, where every template's
-    # golden actor boots (substrate.credentialProvider.namespacePolicies).
-    # That ate-golden grant crosses tenants: while components.substrate.versionRange
-    # is below the release that carries agent-substrate/substrate#2543 (golden
-    # actors in their template's atespace), one atespace reads every
-    # Organization's Secrets, held back only by kagent naming the template's
-    # own namespace in its egress policy. Keep this off on customer
-    # installations and keep the switch itself until that floor moves; the
-    # re-pin that moves it also drops the ate-golden entry.
-    # On, a tenant also brings its own model key (giantswarm/agent-platform#759;
-    # README, "A tenant's own model"), and every model call of an
-    # Organization's namespace still goes through the `llm` listener, so the
-    # gateway meters it under the tenant. The connectivity release's
-    # modelconfig-llm-routing policies fill in the listener as the
-    # `spec.<provider>.baseUrl` of a ModelConfig there that has none, and two
-    # more ValidatingAdmissionPolicies hold every such namespace but kagent,
-    # for every requester: `agent-platform-tenant-model-routing` admits a
-    # ModelConfig only when the listener serves its provider
-    # (llmRouting.models) and its baseUrl is the listener (a Bedrock
-    # ModelConfig, any provider the listener does not serve, and a baseUrl
-    # that is not the listener are refused);
-    # `agent-platform-tenant-secret-creation` admits the creation of a Secret
-    # without the `tenant-credential-` prefix only for a requester who may
-    # already read that Secret (Helm, GitOps and the cluster's controllers
-    # keep writing as today). Only agent-manager's copy of
-    # `default-model-config` names the platform's key there. The render
-    # fails without llmRouting.enabled, with a default ModelConfig provider
-    # (kagent.providers.<default>.provider) the listener does not serve, and
-    # without the modelconfig-llm-routing policy
-    # (llmRouting.modelConfigPolicy.enabled). Point every
-    # ModelConfig already in an Organization namespace at the listener, or
-    # delete it, before you turn this on: later updates of one that is not
-    # are refused. On, with components.muster on, the muster release gets
-    # `muster.mcpServersInAllNamespaces: true` (giantswarm/muster#1601): muster
-    # serves the MCPServers of the namespaces named `org-…` next to its own,
-    # and lists them with the person's Dex token, so a person sees a server
-    # only where Kubernetes RBAC lets them list `mcpservers` (muster's
-    # namespace through tenants.platform.users). An own
-    # muster.muster.mcpServersInAllNamespaces against this switch fails the
-    # render. The render fails, naming the key, below muster 5.48.0, with
-    # muster's OAuth server off or not on the dex provider, and with
-    # tenants.platform.users empty. muster's
-    # muster.writesAsCaller.kubernetesAudience follows
-    # mcp-kubernetes.kubernetesAudience, the audience the API server trusts;
-    # an own value that differs fails the render. Before you turn this on:
-    # Dex lets muster's client ask for that audience, and each OAuth app of an
-    # Organization's MCP server registers
-    # `<muster's public URL>/oauth/ns/<namespace>/callback` (UPGRADE.md). Off,
-    # the default, nothing changes.
-    enabled: false
 
 # === Agent Platform organizations (giantswarm/giantswarm#38891) ===
 # An AgentPlatformOrganization (agent-platform.giantswarm.io/v1alpha1, the
@@ -5618,9 +5528,14 @@ tenants:
 #     hook), ate-api-server's serving roots, which the operator verifies it
 #     with.
 # The operator's own values are the agent-platform-operator block below.
-# One mode at a time: with tenants.organizations.enabled on as well the render
-# fails, since kagent's authorizer and every policy select one namespace
-# label. agent-manager's tenant reconciler stays off while this is on.
+# agent-manager's chart keeps its tenants.enabled off: its tenant reconciler is
+# gone (tenants.organizations, the namespaces labelled giantswarm.io/organization,
+# is removed; giantswarm/agent-platform#1268), and the connectivity chart renders
+# the ClusterRole agent-platform-tenant-flux the operator binds.
+# The switch is the rollout gate, off by default for now: it turns on by default
+# once the capz and s3proxy snapshot stores give the operator access, the kagent
+# line carries giantswarm/kagent-extensions#27, and an operator release with
+# giantswarm/agent-platform-operator#10 (commit mode) is the range's floor.
 # Before you turn this on in an installation: the kagent line must carry
 # giantswarm/kagent-extensions#27 (kagent reviews a delete of another
 # creator's Session as a cluster-wide `delete`); until it does, the erasure of
@@ -5633,8 +5548,8 @@ agentPlatformOrganizations:
   # model whose provider the listener serves (Anthropic, Mistral or OpenAI)
   # and llmRouting.modelConfigPolicy.enabled on an API server that serves
   # admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain
-  # or apiHostnames: the render fails without them, and with
-  # tenants.organizations.enabled on.
+  # or apiHostnames: the render fails without them. The rollout gate: off by
+  # default for now (see above).
   enabled: false
   # -- The namespace of the installation's Flux source, where the operator
   # keeps an organization's Kustomization and Flux ServiceAccount (commit
@@ -6672,8 +6587,9 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # ate-golden and fetches the template's git skills with the same
   # credentials, so ate-golden needs every one of those namespaces too. The
   # default covers the kagent namespace, where the agent charts install.
-  # With tenants.organizations.enabled the meta chart adds the Organizations'
-  # namespaces by their label giantswarm.io/organization (the Substrate line
+  # With agentPlatformOrganizations.enabled the meta chart adds the
+  # organizations' namespaces by their label
+  # agent-platform.giantswarm.io/organization (the Substrate line
   # from 1.12.0): an ownNamespaceSelector entry, so each is read by the
   # atespace of its own name only, and the same selector as
   # allowedNamespaceSelector on the ate-golden entry (a secretSelector there
@@ -6903,7 +6819,7 @@ substrate-crds: {}  # @schema skipProperties: true; additionalProperties: true
 # The Google access-token credential provider (components.google-access-token
 # -credential-provider), forwarded verbatim. namespacePolicies is derived from
 # substrate.credentialProvider.namespacePolicies with the entries
-# tenants.organizations.enabled adds (the two providers grant the same
+# agentPlatformOrganizations.enabled adds (the two providers grant the same
 # atespaces the same namespaces); a copy set here must equal the installation's
 # own substrate.credentialProvider.namespacePolicies.
 google-access-token-credential-provider:  # @schema skipProperties: true; additionalProperties: true

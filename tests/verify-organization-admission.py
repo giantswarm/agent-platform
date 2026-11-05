@@ -184,7 +184,7 @@ def crds(meta, tmp):
     """The CRDs, as one multi-document YAML."""
     out = []
     values = yaml.safe_load(open(os.path.join(meta, "values.yaml")))
-    operator = re.match(r"^>=\s*(\S+)", values["components"]["agent-platform-operator"]["versionRange"]).group(1)
+    operator = re.match(r"^(?:>=\s*)?(\S+)", values["components"]["agent-platform-operator"]["versionRange"]).group(1)
     r = run([HELM, "pull", OPERATOR_CHART, "--version", operator, "--untar", "--untardir", tmp])
     if r.returncode != 0:
         fail(f"helm pull {OPERATOR_CHART} {operator}:\n{r.stderr}")

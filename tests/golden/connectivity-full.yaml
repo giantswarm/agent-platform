@@ -13053,6 +13053,30 @@ rules:
   - patch
   - update
 ---
+# Source: agent-platform-connectivity/templates/organizations/tenant-flux-clusterrole.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform-tenant-flux
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+rules:
+  # Helm's Secret storage driver calls get, list, create, update and delete in
+  # the release's storage namespace. RBAC cannot narrow a list, so this
+  # identity reads every Secret of an organization namespace it is bound in.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "delete"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "remotemcpservers"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
 # Source: agent-platform-connectivity/templates/tenants/clusterroles.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

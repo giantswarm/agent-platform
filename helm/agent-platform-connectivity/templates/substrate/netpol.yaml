@@ -90,14 +90,13 @@ the render.
 {{- $s3proxy := include "agent-platform.substrateStore.s3proxy" . }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
 {{- $musterOn := and .Values.muster.enabled (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
-{{- /* The workers of the organizations' namespaces, selected by the label of
-the mode that is on (agent-platform.orgNamespaces.label): agent-manager's
-tenant reconciler (tenants.organizations.enabled, agent-platform#1036) or
-agent-platform-operator (agentPlatformOrganizations.enabled) puts a WorkerPool
-in each labelled namespace, with a copy of the workers' own policies
-(substrate-workers in the cilium flavor; substrate-workers-ingress and
-substrate-workers-egress in the kubernetes one). The policies here admit them
-wherever they admit the kagent namespace's workers. */}}
+{{- /* The workers of the organizations' namespaces, selected by their label
+(agent-platform.orgNamespaces.label): agent-platform-operator
+(agentPlatformOrganizations.enabled) puts a WorkerPool in each organization
+namespace, with a copy of the workers' own policies (substrate-workers in the
+cilium flavor; substrate-workers-ingress and substrate-workers-egress in the
+kubernetes one). The policies here admit them wherever they admit the kagent
+namespace's workers. */}}
 {{- $orgs := include "agent-platform.orgNamespaces.enabled" . }}
 {{- /* The pods behind muster's public hostname, the actors' one in-cluster
 destination on 443/10443 (agent-platform.substrate.egressEdge; it fails the
@@ -1101,9 +1100,13 @@ spec:
 # kube-apiserver, no other in-cluster endpoint on 443/10443 than muster's
 # Gateway pods): the destinations every actor's connection leaves for. A
 # NetworkPolicy names no host, so a host model server named by hostname is
-# reached only where the world rule covers its address; the instance metadata
-# services (169.254.0.0/16 in worldExcludedCIDRs) and Azure's WireServer stay
-# outside the world rule.
+# reached only where the world rule covers its address. Unlike Cilium's world
+# entity, an ipBlock cannot tell the cluster's addresses from other private
+# ones, so the world rule leaves worldExcludedCIDRs out (RFC 1918 by default)
+# and a private destination outside the cluster is named in
+# networkPolicy.additionalEgressCIDRs; IPv6 is the world but the unique-local
+# and link-local ranges. The instance metadata services (169.254.0.0/16 in
+# worldExcludedCIDRs) and Azure's WireServer stay outside the world rule.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -1215,6 +1218,22 @@ spec:
               {{- if not (has "168.63.129.16/32" .Values.networkPolicy.kubernetes.worldExcludedCIDRs) }}
               - 168.63.129.16/32
               {{- end }}
+        - ipBlock:
+            cidr: ::/0
+            except:
+              - fc00::/7
+              - fe80::/10
+    {{- with .Values.networkPolicy.additionalEgressCIDRs }}
+    # Private destinations outside the cluster (a VPC-peered or on-premises
+    # origin, a load balancer address): a NetworkPolicy cannot tell them from
+    # the cluster's own addresses, which worldExcludedCIDRs keeps out, so the
+    # installation names them, on every port.
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+    {{- end }}
     {{- with $edge }}
     # muster's public hostname, inside the cluster: the pods of the Gateway its
     # route attaches to (agent-platform.substrate.egressEdge).
@@ -1431,8 +1450,8 @@ spec:
 ---
 # The worker pods' egress, the Cilium substrate-workers rules in this flavour:
 # the cluster DNS, the atenet dns and the egress gateway, nothing else. The
-# organizations' namespaces get a copy (agent-manager's tenant reconciler or
-# agent-platform-operator copy it by name beside substrate-workers-ingress).
+# organizations' namespaces get a copy (agent-platform-operator copies it by
+# name beside substrate-workers-ingress).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

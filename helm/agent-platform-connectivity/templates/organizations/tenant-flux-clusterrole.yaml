@@ -1,5 +1,5 @@
 {{- /*
-agent-platform-tenant-flux in the organizations mode: what an organization's
+agent-platform-tenant-flux: what an organization's
 agents' HelmReleases run as (helm-controller impersonates the organization's
 Helm ServiceAccount, kagent.fluxServiceAccountName, which agent-platform-operator
 binds to this ClusterRole in the organization namespace only). The rules are
@@ -7,14 +7,12 @@ those of the kagent namespace's Role <kagent.fluxServiceAccountName>-agent-relea
 (kagent/flux-service-account.yaml): the two kinds the Generic agent chart 2.x
 renders and Helm's release Secrets.
 
-Exactly one chart renders it. In the tenants mode (tenants.organizations.enabled)
-agent-manager's chart does, under its tenants.enabled. In the organizations
-mode the meta chart turns agent-manager's tenants.enabled off (the agent-manager
-range ends before giantswarm/agent-manager#294, which gives tenants.enabled a
-new meaning), so this chart renders it. The two modes are never on at once
-(agent-platform.organizations.enabled).
+Exactly one chart renders it: this one, while the meta chart keeps
+agent-manager's tenants.enabled off (agent-manager's chart renders it under
+that key). Rendered whenever kagent is on, so an organization's binding never
+names a missing role.
 */ -}}
-{{- if include "agent-platform.organizations.enabled" . }}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
