@@ -33,3 +33,45 @@ rules:
     verbs: ["bind"]
     resourceNames: ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
 {{- end }}
+{{- /*
+agent-platform:organization-flux (giantswarm/giantswarm#38989): what an
+organization's Flux ServiceAccount applies from the organization's path in
+git (commit mode). agent-platform-operator keeps one ServiceAccount per
+organization in agentPlatformOrganizations.fluxNamespace and binds it to this
+role by the RoleBinding organization-flux in the organization namespace only;
+the organization's Kustomization names it in spec.serviceAccountName, which
+kustomize-controller impersonates. So a merged file writes the organization's
+kinds in its own namespace and nothing else: its agents' HelmReleases (the
+HelmRelease field lock holds for this identity too), Agents, AgentTemplates,
+ModelConfigs, RemoteMCPServers, EgressPolicies, Secrets, and its members'
+RoleBindings, which bind agent-platform:user, editor or admin and no other
+role (`bind` on those three, no `escalate`). get, list and watch are what
+kustomize-controller reads before it applies and while it waits. Rendered
+with fluxNamespace, the only case in which the operator binds it.
+*/ -}}
+{{- if and (include "agent-platform.organizations.enabled" .) .Values.agentPlatformOrganizations.fluxNamespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:organization-flux
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+rules:
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "agenttemplates", "modelconfigs", "remotemcpservers", "egresspolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
+{{- end }}

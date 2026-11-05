@@ -167,7 +167,7 @@
                 },
                 "fluxNamespace": {
                     "type": "string",
-                    "description": "The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode). Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces."
+                    "description": "The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace; set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces."
                 },
                 "operator": {
                     "type": "object",

@@ -24,7 +24,13 @@ policy holds:
 - the operator's ServiceAccount creates only agents-<organization>-*
   namespaces with the labels, deletes only labelled ones, writes RoleBindings
   only in organization namespaces, and Kustomizations and ServiceAccounts in
-  the Flux namespace only when labelled with the organization's UID;
+  the Flux namespace only when labelled with the organization's UID; a
+  Kustomization there runs as the ServiceAccount of its own name and applies
+  into the namespace of its own name, and the operator binds a Flux-namespace
+  ServiceAccount only in the namespace of its name;
+- agent-platform:organization-flux, bound there, lets the organization's Flux
+  ServiceAccount write the organization's kinds in its namespace only, and
+  bind no role but user, editor and admin;
 - only the operator sets, changes or removes the organization labels;
 - organization-admins is not deleted or emptied while its namespace lives;
 - a RoleBinding there binds no system: identity and no ServiceAccount of
@@ -71,7 +77,7 @@ FLUX_NS = "flux-giantswarm"
 API_HOST = "api.acme.example.io"
 POOL = "kagent-default"
 OP = f"system:serviceaccount:{RELEASE_NS}:agent-platform-operator"
-FLUX_SA = f"system:serviceaccount:{FLUX_NS}:agents-payments"
+FLUX_SA = f"system:serviceaccount:{FLUX_NS}:agents-payments-x7k2q"  # named after ORG, as the operator names it
 SOURCE_CONTROLLER = f"system:serviceaccount:{FLUX_NS}:source-controller"
 NS_CONTROLLER = "system:serviceaccount:kube-system:namespace-controller"
 PERSON = "jose"  # with system:masters: a cluster-admin
@@ -124,7 +130,7 @@ def docs(r):
 
 def organization_objects(objs):
     return [d for d in objs if d["metadata"]["name"].startswith(("agent-platform-organization", "agent-platform-organizations-admin"))
-            or d["metadata"]["name"] == "agent-platform:organizations-admin"]
+            or d["metadata"]["name"] in ("agent-platform:organizations-admin", "agent-platform:organization-flux")]
 
 
 def check_render(chart):
@@ -146,7 +152,14 @@ def check_render(chart):
     print("ok:  on with Substrate off, no workers policy renders")
     objs = docs(render(chart, *ON, *SUBSTRATE))
     roles = [d for d in objs if d["kind"] == "ClusterRole" and d["metadata"]["name"] in
-             ("agent-platform:user", "agent-platform:editor", "agent-platform:admin", "agent-platform:organizations-admin")]
+             ("agent-platform:user", "agent-platform:editor", "agent-platform:admin", "agent-platform:organizations-admin",
+              "agent-platform:organization-flux")]
+    if "agent-platform:organization-flux" not in {d["metadata"]["name"] for d in roles}:
+        fail("on with fluxNamespace, agent-platform:organization-flux does not render")
+    no_flux = docs(render(chart, *ON[:2], *ON[4:]))
+    if any(d["metadata"]["name"] == "agent-platform:organization-flux" for d in no_flux):
+        fail("agent-platform:organization-flux renders without fluxNamespace")
+    print("ok:  agent-platform:organization-flux renders with fluxNamespace only")
     policies = [d for d in organization_objects(objs) if d["kind"] != "ClusterRole"]
     # The sandbox shape is admission's own object, not Kyverno's: a
     # PolicyException excepts from Kyverno policies only.
@@ -235,9 +248,10 @@ def can_i(verb, resource, ns, as_):
     return "yes" if rc == 0 else "no"
 
 
-def case(name, rc_out, by=None):
-    """by=None: admitted. by=<policy>: refused by that ValidatingAdmissionPolicy.
-    by='RBAC:<text>': refused by the authorizer with that text."""
+def case(name, rc_out, by=None, msg=None):
+    """by=None: admitted. by=<policy>: refused by that ValidatingAdmissionPolicy,
+    with msg in its message when given. by='RBAC:<text>': refused by the
+    authorizer with that text."""
     rc, out = rc_out
     last = out.strip().splitlines()[-1] if out.strip() else ""
     if by is None:
@@ -249,7 +263,7 @@ def case(name, rc_out, by=None):
         # that fails to evaluate refuses too (failurePolicy Fail), naming
         # the policy, and would read as the refusal under test.
         ok = (rc != 0 and f"ValidatingAdmissionPolicy '{by}'" in out and "denied request" in out
-              and "resulted in error" not in out and "failed expression" not in out)
+              and "resulted in error" not in out and "failed expression" not in out and (msg is None or msg in out))
     results.append((ok, name))
     print(("ok:  " if ok else "FAIL:"), name, "|", last)
 
@@ -286,11 +300,14 @@ def helmrelease(name, namespace, **spec_extra):
 
 
 def kustomization(name, namespace, uid=True):
+    """An organization's Kustomization as the operator writes it: named after
+    the organization namespace, running as the Flux ServiceAccount of that
+    name and applying into that namespace."""
     meta = {"name": name, "namespace": namespace}
     if uid:
         meta["labels"] = {"agent-platform.giantswarm.io/organization-uid": UID}
     return {"apiVersion": "kustomize.toolkit.fluxcd.io/v1", "kind": "Kustomization", "metadata": meta,
-            "spec": {"interval": "10m", "prune": True, "path": "./agents", "serviceAccountName": "agents-payments",
+            "spec": {"interval": "10m", "prune": True, "path": "./agents", "serviceAccountName": name, "targetNamespace": name,
                      "sourceRef": {"kind": "GitRepository", "name": "installation"}}}
 
 
@@ -346,7 +363,7 @@ def fixtures():
         {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {"name": "workers", "namespace": ORG,
          "labels": {OBJECT_LABEL: "curated"}, "annotations": {"agent-platform.giantswarm.io/copied-from": "kagent/workers"}},
          "automountServiceAccountToken": False},
-        kustomization("agents-payments", FLUX_NS), kustomization("installation", FLUX_NS, uid=False),
+        kustomization(ORG, FLUX_NS), kustomization("installation", FLUX_NS, uid=False),
     ]
     for o in objects:
         must(create(o, dry=False), f"create {o['kind']} {o['metadata'].get('namespace', '')}/{o['metadata']['name']}")
@@ -431,26 +448,47 @@ def prove_operator():
          "agent-platform-organization-operator-namespaces")
     case("the operator writes a RoleBinding in an organization namespace", create(rb("op", ORG), as_=OP))
     case("the operator writes no RoleBinding in a parent", create(rb("op", PARENT), as_=OP), "agent-platform-organization-operator-objects")
-    case("the operator creates its labelled Kustomization in the Flux namespace", create(kustomization("agents-billing", FLUX_NS), as_=OP))
-    case("the operator creates no unlabelled Kustomization", create(kustomization("other", FLUX_NS, uid=False), as_=OP),
+    case("the operator creates its labelled Kustomization in the Flux namespace", create(kustomization(ORG2, FLUX_NS), as_=OP))
+    case("the operator creates no unlabelled Kustomization", create(kustomization(ORG2, FLUX_NS, uid=False), as_=OP),
+         "agent-platform-organization-operator-objects", "only Kustomizations labelled")
+    pinned = "agent-platform-organization-operator-objects"
+    as_sa = "runs as the organization Flux ServiceAccount, spec.serviceAccountName " + ORG2
+    into = "applies into the organization namespace, spec.targetNamespace " + ORG2
+
+    def changed(**spec):
+        k = kustomization(ORG2, FLUX_NS)
+        for key, value in spec.items():
+            if value is None:
+                del k["spec"][key]
+            else:
+                k["spec"][key] = value
+        return k
+    case("the operator creates no Kustomization that Flux applies with its own identity (no serviceAccountName)",
+         create(changed(serviceAccountName=None), as_=OP), pinned, as_sa + "; refused: " + FLUX_NS + "/" + ORG2 + " with none")
+    case("the operator creates no Kustomization that runs as a Flux controller",
+         create(changed(serviceAccountName="kustomize-controller"), as_=OP), pinned, as_sa)
+    case("the operator creates no Kustomization that runs as another organization's Flux ServiceAccount",
+         create(changed(serviceAccountName=ORG), as_=OP), pinned, as_sa + "; refused: " + FLUX_NS + "/" + ORG2 + " with " + ORG)
+    case("the operator creates no Kustomization that applies into another organization's namespace",
+         create(changed(targetNamespace=ORG), as_=OP), pinned, into + "; refused: " + FLUX_NS + "/" + ORG2 + " with " + ORG)
+    case("the operator creates no Kustomization without a targetNamespace (its files' own namespaces)",
+         create(changed(targetNamespace=None), as_=OP), pinned, into + "; refused: " + FLUX_NS + "/" + ORG2 + " with none")
+    other = kustomization("kube-system", FLUX_NS)
+    case("the operator creates no Kustomization outside the agents-* names, its ServiceAccount and target of the same name",
+         create(other, as_=OP), pinned, "is an organization Kustomization, named agents-<organization>-*")
+    case("the operator moves no Kustomization into another organization's namespace",
+         patch("kustomization", ORG, FLUX_NS, {"spec": {"targetNamespace": ORG2}}, as_=OP), pinned, "spec.targetNamespace " + ORG + "; refused")
+    case("the operator updates its Kustomization within the pins",
+         patch("kustomization", ORG, FLUX_NS, {"spec": {"path": "./agent-platform/organizations/org-acme/payments"}}, as_=OP))
+    case("the operator creates no Kustomization outside the Flux namespace", create(kustomization(ORG2, PLAIN), as_=OP),
          "agent-platform-organization-operator-objects")
-    nosa = kustomization("agents-billing", FLUX_NS)
-    del nosa["spec"]["serviceAccountName"]
-    case("the operator creates no Kustomization that Flux applies with its own identity (no serviceAccountName)", create(nosa, as_=OP),
-         "agent-platform-organization-operator-objects")
-    controller = kustomization("agents-billing", FLUX_NS)
-    controller["spec"]["serviceAccountName"] = "kustomize-controller"
-    case("the operator creates no Kustomization that runs as a Flux controller", create(controller, as_=OP),
-         "agent-platform-organization-operator-objects")
-    case("the operator creates no Kustomization outside the Flux namespace", create(kustomization("agents-billing", PLAIN), as_=OP),
-         "agent-platform-organization-operator-objects")
-    case("the operator deletes its labelled Kustomization", delete("kustomization", "agents-payments", FLUX_NS, as_=OP))
+    case("the operator deletes its labelled Kustomization", delete("kustomization", ORG, FLUX_NS, as_=OP))
     case("the operator deletes no Kustomization it does not label", delete("kustomization", "installation", FLUX_NS, as_=OP),
          "agent-platform-organization-operator-objects")
     case("the operator removes no UID label from a Kustomization",
-         patch("kustomization", "agents-payments", FLUX_NS, {"metadata": {"labels": {"agent-platform.giantswarm.io/organization-uid": None}}}, as_=OP),
+         patch("kustomization", ORG, FLUX_NS, {"metadata": {"labels": {"agent-platform.giantswarm.io/organization-uid": None}}}, as_=OP),
          "agent-platform-organization-operator-objects")
-    case("the operator creates its labelled ServiceAccount in the Flux namespace", create(sa("agents-payments", FLUX_NS), as_=OP))
+    case("the operator creates its labelled ServiceAccount in the Flux namespace", create(sa(ORG, FLUX_NS), as_=OP))
     case("the operator creates no unlabelled ServiceAccount in the Flux namespace", create(sa("x", FLUX_NS, uid=False), as_=OP),
          "agent-platform-organization-operator-objects")
     case("the operator creates a ServiceAccount in an organization namespace", create(sa("kagent-flux", ORG, uid=False), as_=OP))
@@ -462,10 +500,40 @@ def prove_operator():
          create(rb("x", ORG, subjects=[{"kind": "ServiceAccount", "name": "kagent-controller", "namespace": "kagent"}]), as_=OP),
          "agent-platform-organization-rolebinding-subjects")
     case("a cluster-admin binds no ServiceAccount of the Flux namespace",
-         create(rb("x", ORG, subjects=[{"kind": "ServiceAccount", "name": "agents-payments", "namespace": FLUX_NS}]), as_=PERSON),
+         create(rb("x", ORG, subjects=[{"kind": "ServiceAccount", "name": ORG, "namespace": FLUX_NS}]), as_=PERSON),
          "agent-platform-organization-rolebinding-subjects")
     case("the operator binds the organization's Flux ServiceAccount in its namespace",
-         create(rb("agents-payments-flux", ORG, role="admin", subjects=[{"kind": "ServiceAccount", "name": "agents-payments", "namespace": FLUX_NS}]), as_=OP))
+         create(rb("organization-flux", ORG, role="agent-platform:organization-flux", subjects=[{"kind": "ServiceAccount", "name": ORG, "namespace": FLUX_NS}]), as_=OP))
+    case("the operator binds no other organization's Flux ServiceAccount",
+         create(rb("organization-flux", ORG2, role="agent-platform:organization-flux", subjects=[{"kind": "ServiceAccount", "name": ORG, "namespace": FLUX_NS}]), as_=OP),
+         "agent-platform-organization-rolebinding-subjects", f"ServiceAccount {FLUX_NS}/{ORG}")
+
+
+def prove_flux_role():
+    """agent-platform:organization-flux as the operator binds it: the
+    organization's Flux ServiceAccount, with no group (what kustomize-controller
+    impersonates), applies the organization's kinds into its namespace only."""
+    must(create(rb("organization-flux", ORG, role="agent-platform:organization-flux",
+                   subjects=[{"kind": "ServiceAccount", "name": ORG, "namespace": FLUX_NS}]), as_=OP, dry=False),
+         "bind the organization's Flux ServiceAccount")
+    # Of kagent's kinds this API server serves EgressPolicy only (kubectl
+    # resolves the others to nothing); the role grants the five in one rule.
+    want = {(v, r, n): "yes" if n == ORG else "no" for v, r in (("create", "secrets"), ("create", "helmreleases.helm.toolkit.fluxcd.io"),
+            ("create", "egresspolicies.api.kagent.dev"), ("create", "rolebindings")) for n in (ORG, ORG2, FLUX_NS, "kagent")}
+    for v, r in (("create", "kustomizations.kustomize.toolkit.fluxcd.io"), ("create", "ocirepositories.source.toolkit.fluxcd.io"),
+                 ("create", "workerpools.ate.dev"), ("create", "namespaces")):
+        want[(v, r, ORG)] = "no"
+    wrong = {f"{v} {r} in {n}": a for (v, r, n), w in want.items() if (a := can_i(v, r, n, FLUX_SA)) != w}
+    case("the organization's Flux ServiceAccount writes the organization's kinds in its namespace and nowhere else", (1 if wrong else 0, json.dumps(wrong)))
+    case("a merged Secret lands in the organization namespace", create({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "tenant-credential-a", "namespace": ORG}},
+         as_=FLUX_SA, groups=()))
+    case("a merged Secret is refused in another organization's namespace",
+         create({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "tenant-credential-a", "namespace": ORG2}}, as_=FLUX_SA, groups=()),
+         "RBAC:cannot create resource \"secrets\"")
+    for role in ("agent-platform:user", "agent-platform:editor", "agent-platform:admin"):
+        case(f"a merged RoleBinding binds {role}", create(rb("members-git", ORG, role=role), as_=FLUX_SA, groups=()))
+    case("a merged RoleBinding binds no other role", create(rb("members-git", ORG, role="cluster-admin"), as_=FLUX_SA, groups=()),
+         "RBAC:attempting to grant RBAC permissions not currently held")
 
 
 def prove_labels():
@@ -623,7 +691,7 @@ def main():
             must(kubectl(["wait", "--for=condition=Established", "crd", "--all", "--timeout=60s"]), "wait for the CRDs")
             fixtures()
             install(roles, policies)
-            for prove in (prove_roles, prove_operator, prove_labels, prove_admins_binding, prove_subjects, prove_helmreleases,
+            for prove in (prove_roles, prove_operator, prove_flux_role, prove_labels, prove_admins_binding, prove_subjects, prove_helmreleases,
                           prove_delete_intent, prove_egress_floor, prove_copies, prove_sandbox):
                 prove()
         finally:

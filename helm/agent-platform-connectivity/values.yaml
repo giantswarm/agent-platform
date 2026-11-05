@@ -3163,8 +3163,11 @@ agentPlatformOrganizations:
       namespace: ""
   # -- The namespace of the installation's Flux source, where the operator
   # keeps an organization's Kustomization and Flux ServiceAccount (commit
-  # mode). Empty: the operator writes no Kustomization and no ServiceAccount
-  # outside the organization namespaces.
+  # mode), both named after the organization namespace, the Kustomization
+  # running as that ServiceAccount into that namespace; set, the ClusterRole
+  # agent-platform:organization-flux renders for the ServiceAccount. Empty:
+  # the operator writes no Kustomization and no ServiceAccount outside the
+  # organization namespaces.
   fluxNamespace: ""
   # -- The installation's Kubernetes API hostnames: an EgressPolicy in an
   # organization namespace may not name them, nor a wildcard origin that

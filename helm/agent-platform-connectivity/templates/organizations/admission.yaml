@@ -18,9 +18,13 @@ these.
     writes RoleBindings only in organization namespaces, ServiceAccounts only
     there or in agentPlatformOrganizations.fluxNamespace, and Kustomizations
     only in fluxNamespace; there only objects labelled
-    agent-platform.giantswarm.io/organization-uid, before and after the write,
-    and a Kustomization names a spec.serviceAccountName for Flux to
-    impersonate.
+    agent-platform.giantswarm.io/organization-uid, before and after the write.
+    A Kustomization there is the organization's own (giantswarm/giantswarm#38989):
+    named agents-*, it names its own name in spec.serviceAccountName (the
+    organization's Flux ServiceAccount, which Flux impersonates) and in
+    spec.targetNamespace (the organization namespace). The operator names
+    both after the organization namespace; a policy cannot read another
+    namespace's labels, so the pin is that name.
   * agent-platform-organization-labels: only the operator's ServiceAccount
     sets, changes or removes the three organization labels of a namespace, on
     CREATE and UPDATE. kagent's authorization, Substrate's credential grants
@@ -38,8 +42,8 @@ these.
   * agent-platform-organization-rolebinding-subjects: a RoleBinding in an
     organization namespace binds no system:* group or user and no
     ServiceAccount of another namespace, whoever writes it; only the operator
-    binds a ServiceAccount of fluxNamespace (the organization's Flux
-    ServiceAccount).
+    binds a ServiceAccount of fluxNamespace, and only the one named after the
+    binding's namespace (the organization's Flux ServiceAccount).
   * agent-platform-organization-helmreleases: for every requester but the
     operator, an organization's Flux ServiceAccount included, a HelmRelease in
     an organization namespace installs the agent chart from the namespace's
@@ -182,14 +186,30 @@ spec:
       messageExpression: {{ printf "'the agent-platform-operator writes %s; refused: ' + request.namespace + '/' + request.name" (ternary (printf "only Kustomizations labelled %s in %s" $uidLabel $fluxNs) "no Kustomization (agentPlatformOrganizations.fluxNamespace is empty)" (ne $fluxNs "")) | quote }}
     # Flux impersonates spec.serviceAccountName; without one, or with a Flux
     # controller's own, kustomize-controller applies with a controller's
-    # identity.
+    # identity. The organization's Flux ServiceAccount and namespace carry
+    # the Kustomization's name, agents-<organization>-*: a Flux controller's
+    # name is never one.
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
-        (has(object.spec) && has(object.spec.serviceAccountName) && object.spec.serviceAccountName != '' &&
-        !(object.spec.serviceAccountName in ['kustomize-controller', 'helm-controller', 'source-controller', 'notification-controller',
-        'image-reflector-controller', 'image-automation-controller', 'source-watcher']))
+        object.metadata.name.startsWith('agents-')
       reason: Forbidden
-      messageExpression: "'a Kustomization of the agent-platform-operator names the organization Flux ServiceAccount in spec.serviceAccountName; refused: ' + request.namespace + '/' + request.name"
+      messageExpression: "'a Kustomization of the agent-platform-operator is an organization Kustomization, named agents-<organization>-*; refused: ' + request.namespace + '/' + object.metadata.name"
+    - expression: >-
+        request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
+        (has(object.spec.serviceAccountName) && object.spec.serviceAccountName == object.metadata.name)
+      reason: Forbidden
+      messageExpression: >-
+        'a Kustomization of the agent-platform-operator runs as the organization Flux ServiceAccount, spec.serviceAccountName ' +
+        object.metadata.name + '; refused: ' + request.namespace + '/' + object.metadata.name +
+        ' with ' + (has(object.spec.serviceAccountName) ? object.spec.serviceAccountName : 'none')
+    - expression: >-
+        request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
+        (has(object.spec.targetNamespace) && object.spec.targetNamespace == object.metadata.name)
+      reason: Forbidden
+      messageExpression: >-
+        'a Kustomization of the agent-platform-operator applies into the organization namespace, spec.targetNamespace ' +
+        object.metadata.name + '; refused: ' + request.namespace + '/' + object.metadata.name +
+        ' with ' + (has(object.spec.targetNamespace) ? object.spec.targetNamespace : 'none')
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -344,13 +364,13 @@ spec:
   variables:
     # A system: identity (a group or a user) other than a ServiceAccount of
     # this namespace, or a ServiceAccount of another namespace: for the
-    # operator, but one of the Flux namespace, the organization's Flux
-    # ServiceAccount.
+    # operator, but the one of the Flux namespace named after this
+    # namespace, the organization's Flux ServiceAccount.
     - name: refused
       expression: >-
         (has(object.subjects) ? object.subjects : []).filter(s,
         (s.kind == 'ServiceAccount' && has(s.namespace) && s.namespace != request.namespace{{ if $fluxNs }} &&
-        !(request.userInfo.username == {{ squote $operator }} && s.namespace == {{ squote $fluxNs }}){{ end }}) ||
+        !(request.userInfo.username == {{ squote $operator }} && s.namespace == {{ squote $fluxNs }} && s.name == request.namespace){{ end }}) ||
         (s.kind != 'ServiceAccount' && s.name.startsWith('system:') &&
         !(s.kind == 'User' && s.name.startsWith('system:serviceaccount:' + request.namespace + ':'))))
   validations:
