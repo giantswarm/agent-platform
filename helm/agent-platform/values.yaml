@@ -751,6 +751,7 @@ components:  # @schema additionalProperties: true
       # The store block is this chart's and the connectivity chart's: the kagent
       # chart gets the derived harness.snapshotLocation, never the block.
       - harness.snapshotStore
+      - defaultModelConfig
       - modelConfigs
       - oauth2ProxyIngress
       - remoteMcpServers
@@ -3464,6 +3465,16 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         promptCaching: true
         cacheTTL: "5m"
 
+  # The kagent chart's own default ModelConfig (default-model-config, rendered
+  # from providers). false writes providers: false to the kagent release, so the
+  # kagent chart renders no default ModelConfig and deletes the one it rendered:
+  # an Agent or agent HelmRelease that names default-model-config no longer
+  # resolves its model. Before turning it off, mark a kagent.modelConfigs entry
+  # `default: true` and point the agents at it. providers.anthropic.config stays
+  # what the connectivity chart's Anthropic modelConfigs entries inherit.
+  defaultModelConfig:
+    enabled: true
+
   # OTel — traces and logs to the collector global.observability.traces.otlp
   # names, in the kagent chart's SDK-spec shape: the controller exports with
   # these settings and compiles them into every actor (OTEL_EXPORTER_OTLP_*,
@@ -3957,10 +3968,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Additional ModelConfig CRs — the model catalog beyond the
   # default-model-config the kagent chart creates from providers.anthropic.
   # An AgentTemplate references a ModelConfig by name (spec.modelConfig).
-  # The apiKeySecret must be pre-created in the kagent namespace.
+  # The apiKeySecret must be pre-created in the kagent namespace. `default: true`
+  # annotates the entry agent-platform.giantswarm.io/is-default-model-config:
+  # "true", the namespace's default model; at most one entry may set it.
   modelConfigs: []
   # - name: anthropic-sonnet
   #   displayName: Anthropic Sonnet 4.6
+  #   default: true
   #   provider: Anthropic
   #   model: claude-sonnet-4-6
   #   apiKeySecret: kagent-anthropic

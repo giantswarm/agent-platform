@@ -92,6 +92,8 @@ from conftest import (
     KAGENT_NAMESPACE,
     KEPT_CRDS,
     Kube,
+    DEFAULT_MODEL_ANNOTATION,
+    KAGENT_DEFAULT_MODEL_CONFIG,
     MODEL_CONFIG,
     MUSTER_BASE_URL,
     MUSTER_BASE_URL_SETS,
@@ -470,10 +472,21 @@ def test_substrate_runs_a_worker_for_the_platform_harness(kube: Kube, substrate:
 
 
 @pytest.mark.smoke
+def test_the_default_model_config_is_marked(kube: Kube, kagent_controller: None) -> None:
+    """The smoke's ModelConfig carries the default annotation, and kagent's own
+    default-model-config is not rendered (kagent.defaultModelConfig.enabled
+    false)."""
+    model = kube.get("modelconfigs.api.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE)
+    assert (model["metadata"].get("annotations") or {}).get(DEFAULT_MODEL_ANNOTATION) == "true", model["metadata"]
+    assert kube.get("modelconfigs.api.kagent.dev", KAGENT_DEFAULT_MODEL_CONFIG, namespace=KAGENT_NAMESPACE) is None, \
+        f"the kagent chart rendered {KAGENT_DEFAULT_MODEL_CONFIG} with kagent.defaultModelConfig.enabled false"
+
+
+@pytest.mark.smoke
 def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None, substrate: Dict[str, Any]) -> None:
     """A minimal declarative Agent on the platform Harness (spec.harnessRef)
-    with its template inline, against the chart's default ModelConfig (a
-    placeholder provider key): Ready means the controller compiled the template
+    with its template inline, against the smoke's ModelConfig (a placeholder
+    provider key): Ready means the controller compiled the template
     for the Harness and Substrate booted the actor's golden snapshot on the
     WorkerPool — not that a model call succeeded."""
     started = time.monotonic()

@@ -900,6 +900,8 @@ spec:
         postgres:
           vectorEnabled: true
           vectorSchema: public
+      defaultModelConfig:
+        enabled: true
       fluxServiceAccountName: kagent-flux
       fullnameOverride: kagent
       grafana-mcp:

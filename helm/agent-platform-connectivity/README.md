@@ -244,6 +244,17 @@ On the installation, after the cutover:
   chart rendered one of its own, selecting by gateway name; it is gone, because
   two monitors of the same pods double every data-plane series.
 
+## The default ModelConfig
+
+A namespace's default model is the ModelConfig annotated
+`agent-platform.giantswarm.io/is-default-model-config: "true"`.
+`kagent.modelConfigs[].default: true` sets the annotation on that entry; the
+render fails when two entries set it. Nothing enforces one per namespace at
+admission: the writers (the portal, agent-manager) keep it unique, and a
+namespace with more than one marked ModelConfig has no default. kagent's own
+`default-model-config` is switched off in the meta chart with
+`kagent.defaultModelConfig.enabled: false`.
+
 ## Metric labels
 
 The data plane puts custom Prometheus labels on every metric it emits — the

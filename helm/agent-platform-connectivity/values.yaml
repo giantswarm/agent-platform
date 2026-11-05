@@ -1860,6 +1860,11 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   modelConfigs: []
   # - name: anthropic-sonnet
   #   displayName: Anthropic Sonnet 4.6
+  #   # Optional. true annotates the ModelConfig
+  #   # agent-platform.giantswarm.io/is-default-model-config: "true", the
+  #   # namespace's default model. At most one entry sets it (the render
+  #   # fails otherwise).
+  #   default: true
   #   # One of the ModelConfig CRD's providers, in its spelling: Anthropic,
   #   # OpenAI, AzureOpenAI, Ollama, Gemini, GeminiVertexAI, AnthropicVertexAI,
   #   # Bedrock, SAPAICore, Foundry, Mistral. Any other value fails the render.

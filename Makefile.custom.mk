@@ -4605,6 +4605,13 @@ verify-tenant-modelconfigs: ## Assert the render of an organization's own ModelC
 	@HELM="$(HELM)" python3 tests/verify-tenant-modelconfigs.py $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-default-model-config
+verify-default-model-config: ## Assert the default ModelConfig marker (giantswarm/agent-platform#1274): the meta chart forwards providers to the kagent release by default and providers: false with kagent.defaultModelConfig.enabled=false, changing nothing else of that release, and kagent.defaultModelConfig never reaches it; the connectivity chart annotates the kagent.modelConfigs entry with default: true (a string "false" marks nothing) agent-platform.giantswarm.io/is-default-model-config: "true", fails the render naming two such entries, and Anthropic entries keep inheriting kagent.providers.anthropic.config with kagent.defaultModelConfig.enabled=false. Needs PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-default-model-config.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-kagent-login-public-paths
 verify-kagent-login-public-paths: ## Assert kagent's oauth2-proxy serves the sign-in page without a session and nothing else (giantswarm/agent-platform#989): the skip-auth arguments the kagent HelmRelease carries, the same in the connectivity chart's values, admit /login, /env-config.js, /favicon.svg and the Vite bundle under /assets/, and refuse the app's pages, /api and anything deeper under /assets/. Needs PyYAML.
 	@echo "====> $@ ($(CHART_DIR))"

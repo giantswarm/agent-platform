@@ -45,6 +45,18 @@ postgres:
       cpu: 50m
       memory: 256Mi
 kagent:
+  # The smoke's model: the catalog entry marked default (the namespace's
+  # default ModelConfig), with kagent's own default ModelConfig off. The
+  # placeholder key Secret is the smoke's (conftest.apply_placeholder_provider_secret).
+  defaultModelConfig:
+    enabled: false
+  modelConfigs:
+    - name: ats-model
+      provider: Anthropic
+      model: claude-sonnet-4-6
+      apiKeySecret: kagent-anthropic
+      apiKeySecretKey: ANTHROPIC_API_KEY
+      default: true
   controller:
     # The kind cluster runs no identity provider for kagent, so the line's own
     # controller runs: the kagent-extensions binary needs the people's issuer

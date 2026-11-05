@@ -2,6 +2,12 @@
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $routed := include "agent-platform.llmRouting" $ }}
 {{- $listenerProviders := include "agent-platform.llmRouting.providers" $ | fromJsonArray }}
+{{- $defaultAnnotation := include "agent-platform.defaultModelConfigAnnotation" $ }}
+{{- $marked := list }}
+{{- range .Values.kagent.modelConfigs }}{{ if eq (toString .default) "true" }}{{ $marked = append $marked (toString .name) }}{{ end }}{{ end }}
+{{- if gt (len $marked) 1 }}
+{{- fail (printf "kagent.modelConfigs[] marks more than one entry default (%s): a namespace has at most one default ModelConfig" (join ", " $marked)) }}
+{{- end }}
 {{- range .Values.kagent.modelConfigs }}
 {{- $name := required "kagent.modelConfigs[].name is required" .name }}
 {{- /* The CRD's enum, checked at render time: the API server refuses any other
@@ -64,9 +70,16 @@ kind: ModelConfig
 metadata:
   name: {{ $name | quote }}
   namespace: {{ $ns }}
-  {{- with .displayName | default (ternary "ChatGPT (your subscription)" "" $personal) }}
+  {{- $isDefault := eq (toString .default) "true" }}
+  {{- $displayName := .displayName | default (ternary "ChatGPT (your subscription)" "" $personal) }}
+  {{- if or $isDefault $displayName }}
   annotations:
+    {{- if $isDefault }}
+    {{ $defaultAnnotation }}: "true"
+    {{- end }}
+    {{- with $displayName }}
     ui.giantswarm.io/display-name: {{ . | quote }}
+    {{- end }}
   {{- end }}
 spec:
   provider: {{ $provider | quote }}
@@ -88,7 +101,8 @@ spec:
   entry's own promptCaching / cacheTTL win, `false` included; an Anthropic entry
   that sets neither inherits the platform's default from
   kagent.providers.anthropic.config — the block the kagent chart renders into
-  the default ModelConfig — so the catalog's Anthropic models are cached the way
+  its default ModelConfig, which this release reads whether or not the kagent
+  release renders that ModelConfig — so the catalog's Anthropic models are cached the way
   the default model is, without a value per entry. Bedrock takes the entry's own
   keys only. Any other provider has neither field in ModelConfigSpec: the API
   server would prune them and the model would stay uncached in silence, so the
