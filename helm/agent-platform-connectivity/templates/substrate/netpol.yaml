@@ -5,7 +5,7 @@ what (the substrate chart's arguments and Service definitions):
   actors ── (atunnel, CONNECT) ──▶ atenet-egress :8443 ──▶ the actors' destinations:
         muster (tool calls), the kagent controller :8083 (A2A, task and session
         state), the LLM provider (world, or the agentgateway LLM listener),
-        the built-in tool server when it is on, cluster:443/10443 (a public
+        the built-in tool server when it is on, muster's Gateway pods on 443/10443 (a public
         hostname behind an internal LB), the OTLP gateway kagent's exporters
         send to (the actors' traces and logs, kagent.otel — the pods of the
         endpoint's namespace on its port, agent-platform.kagent.otlpEgress);
@@ -69,8 +69,10 @@ address the ModelConfigs carry. The instance metadata services and Azure's WireS
 whatever a policy declares. docs/substrate-security.md ("What an actor can
 reach, and how a refusal looks") carries the table.
 
-The kubernetes flavour renders the ingress policies only — the chart's
-kubernetes flavour restricts what reaches a workload and leaves egress open,
+The kubernetes flavour renders the ingress policies, and the egress of the
+egress gateway and of the worker pods (substrate-atenet-egress-egress,
+substrate-workers-egress: the Cilium rules of those two, as far as a
+NetworkPolicy can say them); the other Substrate components' egress stays open,
 as it does for kagent. The kagent controller's ingress from atenet-egress is
 its own policy here (the controller's ingress policy in templates/kagent admits
 the gateway and the UI); Cilium and Kubernetes union the policies that select a
@@ -88,13 +90,20 @@ the render.
 {{- $s3proxy := include "agent-platform.substrateStore.s3proxy" . }}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent") }}
 {{- $musterOn := and .Values.muster.enabled (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
-{{- /* The workers of the Organizations' namespaces (tenants.organizations.enabled,
-agent-platform#1036): agent-manager's tenant reconciler puts a WorkerPool in
-each labelled namespace that holds an agent, with a copy of the workers' own
-policy (its tenants.networkPolicy.names: substrate-workers in the cilium
-flavor, substrate-workers-ingress in the kubernetes one). The policies here
-admit them wherever they admit the kagent namespace's workers. */}}
-{{- $orgs := include "agent-platform.tenants.organizations" . }}
+{{- /* The workers of the organizations' namespaces, selected by their label
+(agent-platform.orgNamespaces.label): agent-platform-operator
+(agentPlatformOrganizations.enabled) puts a WorkerPool in each organization
+namespace, with a copy of the workers' own policies (substrate-workers in the
+cilium flavor; substrate-workers-ingress and substrate-workers-egress in the
+kubernetes one). The policies here admit them wherever they admit the kagent
+namespace's workers. */}}
+{{- $orgs := include "agent-platform.orgNamespaces.enabled" . }}
+{{- /* The pods behind muster's public hostname, the actors' one in-cluster
+destination on 443/10443 (agent-platform.substrate.egressEdge; it fails the
+render when one of them runs on host networking). */}}
+{{- $edge := include "agent-platform.substrate.egressEdge" . | fromJsonArray }}
+{{- include "agent-platform.substrate.validatePrivateCIDRs" . }}
+{{- include "agent-platform.substrate.validateIPv6CIDRs" . }}
 {{- /* The host model servers an actor may dial for inference: the address
 model-manager writes into the ModelConfigs (agentHost, falling back to the
 endpoint it dials itself), split for the policy. Empty unless a model-manager
@@ -439,7 +448,7 @@ spec:
               values:
                 - {{ $kagentNs }}
         {{- if $orgs }}
-        {{- include "agent-platform.tenants.organizationWorkers" "cilium" | nindent 8 }}
+        {{- include "agent-platform.tenants.organizationWorkers" (dict "root" $ "flavor" "cilium") | nindent 8 }}
         {{- end }}
       toPorts:
         - ports:
@@ -460,9 +469,11 @@ spec:
 # gateway of kagent's exporters (the actors' traces and logs), the world on
 # every TCP port (the origins the actors' egress policies declare, on whatever
 # port they name: the policy is the control, this rule does not second-guess
-# it), and cluster:443/10443 (muster's OAuth endpoints on the public hostname
-# resolve to an internal LB VIP; 10443 is the Envoy listener after an Azure LB
-# DNAT).
+# it), and the pods of muster's public Gateway on 443/10443 (muster's OAuth
+# endpoints on the public hostname resolve to an internal LB VIP, which Cilium
+# translates to those pods; 10443 is the Envoy listener after an Azure LB
+# DNAT), selected by endpoint: no other in-cluster endpoint, and no
+# kube-apiserver.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -484,7 +495,7 @@ spec:
               values:
                 - {{ $kagentNs }}
         {{- if $orgs }}
-        {{- include "agent-platform.tenants.organizationWorkers" "cilium" | nindent 8 }}
+        {{- include "agent-platform.tenants.organizationWorkers" (dict "root" $ "flavor" "cilium") | nindent 8 }}
         {{- end }}
       toPorts:
         - ports:
@@ -504,8 +515,9 @@ spec:
     {{- else }}
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
     {{- end }}
-    - toEntities:
-        - kube-apiserver
+    # No kube-apiserver rule: the egress gateway runs without cluster access
+    # (it reads its policies from ate-api over gRPC), so such a rule would only
+    # serve the actors' traffic.
     - toEndpoints:
         - matchLabels:
             app: ate-api-server
@@ -563,14 +575,19 @@ spec:
         - ports:
             - port: {{ $controllerPort | quote }}
               protocol: TCP
-    {{- with include "agent-platform.kagent.otlpEgress" . }}
-    # The actors' telemetry: the OTLP gateway kagent.otel names, the same
-    # destination the controller's egress policy opens for its own spans.
-    # The Go ADK flushes a turn's spans before the A2A response closes
-    # (KAGENT_PRE_RESPONSE_TRACE_FLUSH, a checkpoint runtime has no later
-    # window); without this rule the flush ran into its deadline on every turn
-    # and the stream closed 3 s after the task had completed (agent-platform#456).
-    {{- . | nindent 4 }}
+    {{- /* The actors' telemetry: the OTLP gateway kagent.otel names, the same
+    destination the controller's egress policy opens for its own spans. The Go
+    ADK flushes a turn's spans before the A2A response closes
+    (KAGENT_PRE_RESPONSE_TRACE_FLUSH, a checkpoint runtime has no later
+    window); without this rule the flush ran into its deadline on every turn
+    and the stream closed 3 s after the task had completed (agent-platform#456).
+    An in-cluster collector only, by its namespace: an external one is the
+    world rule's, and the cluster entity would open every pod on its port. */}}
+    {{- range include "agent-platform.kagent.otlpTargets" . | fromJsonArray }}
+    {{- if .namespace }}
+    # The actors' telemetry (agent-platform#456).
+    {{- include "agent-platform.otlpEgressRule" (dict "target" . "who" "kagent's exporters send to") | nindent 4 }}
+    {{- end }}
     {{- end }}
     {{- end }}
     {{- if (include "agent-platform.llmRouting" .) }}
@@ -587,12 +604,16 @@ spec:
               protocol: TCP
     {{- end }}
     {{- /* A host model server may sit on a node of the cluster (the host or
-           remote-node entity) or behind a name that resolves into it, where
+           remote-node entity) or behind a name that resolves to a node, where
            the world rule below does not reach it: an actor whose ModelConfig points at an
            Ollama, a Lemonade Server or an LM Studio on the host needs that
            address and port opened. model-manager's own policy opens the
            endpoint it manages models through; this is the inference path, at
-           the address the ModelConfigs carry. */ -}}
+           the address the ModelConfigs carry. Never the cluster entity: it
+           would open every in-cluster pod on the port, and on 443 or 10443 it
+           would undo the rule that keeps the gateway's in-cluster HTTPS to
+           muster's Gateway pods. An in-cluster model server is reached by its
+           own policy (model-serving/netpol.yaml). */ -}}
     {{- range $server := $modelServers }}
     {{- if $server.isIP }}
     # The {{ $server.backend }} host model server the actors dial, an IP endpoint.
@@ -610,14 +631,18 @@ spec:
         - ports:
             - port: {{ $server.port | quote }}
               protocol: TCP
-    # The same name may resolve to an in-cluster Service, which toFQDNs alone
-    # does not admit.
+    {{- if not (has (toString $server.port) (list "443" "10443")) }}
+    # The same name may resolve to a node of the cluster, which toFQDNs alone
+    # does not admit: the nodes on the server's port, never the pods. On 443
+    # and 10443 the in-cluster destinations stay muster's Gateway pods.
     - toEntities:
-        - cluster
+        - host
+        - remote-node
       toPorts:
         - ports:
             - port: {{ $server.port | quote }}
               protocol: TCP
+    {{- end }}
     {{- end }}
     {{- end }}
     # Every TCP port (port 0 is Cilium's wildcard): the actors' egress policy
@@ -628,14 +653,23 @@ spec:
         - ports:
             - port: "0"
               protocol: TCP
-    - toEntities:
-        - cluster
+    {{- with $edge }}
+    # muster's public hostname, inside the cluster: the pods of the Gateway its
+    # route attaches to, on 443 and 10443 (agent-platform.substrate.egressEdge),
+    # and no other in-cluster endpoint on those ports.
+    - toEndpoints:
+        {{- range . }}
+        - matchLabels:
+            {{- toYaml .matchLabels | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .namespace }}
+        {{- end }}
       toPorts:
         - ports:
             - port: "443"
               protocol: TCP
             - port: "10443"
               protocol: TCP
+    {{- end }}
   # The node's cloud identity stays out of reach whatever an egress policy
   # declares: the instance metadata services (link-local, AWS's IPv6 endpoint)
   # and Azure's WireServer serve plaintext on ports the world rule above now
@@ -669,7 +703,7 @@ spec:
               values:
                 - {{ $kagentNs }}
         {{- if $orgs }}
-        {{- include "agent-platform.tenants.organizationWorkers" "cilium" | nindent 8 }}
+        {{- include "agent-platform.tenants.organizationWorkers" (dict "root" $ "flavor" "cilium") | nindent 8 }}
         {{- end }}
       toPorts:
         - ports:
@@ -1066,7 +1100,7 @@ spec:
               - key: ate.dev/worker-pool
                 operator: Exists
         {{- if $orgs }}
-        {{- include "agent-platform.tenants.organizationWorkers" "kubernetes" | nindent 8 }}
+        {{- include "agent-platform.tenants.organizationWorkers" (dict "root" $ "flavor" "kubernetes") | nindent 8 }}
         {{- end }}
       ports:
         - port: 8443
@@ -1076,6 +1110,173 @@ spec:
           protocol: TCP
         - port: 15020
           protocol: TCP
+---
+# atenet-egress's egress, the Cilium policy's rules in this flavour (no
+# kube-apiserver, no other in-cluster endpoint on 443/10443 than muster's
+# Gateway pods): the destinations every actor's connection leaves for. A
+# NetworkPolicy names no host, so a host model server named by hostname is
+# reached only where the world rule covers its address. Unlike Cilium's world
+# entity, an ipBlock cannot tell the cluster's addresses from other private
+# ones, so the world rule leaves worldExcludedCIDRs out (RFC 1918 by default)
+# and a private destination outside the cluster is named in
+# networkPolicy.substrate.egressGateway.privateCIDRs; IPv6 only with
+# networkPolicy.kubernetes.ipv6 (the cluster's own IPv6 CIDRs left out). The instance metadata services (169.254.0.0/16 in
+# worldExcludedCIDRs) and Azure's WireServer stay outside the world rule.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-atenet-egress-egress
+  namespace: {{ $ns }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: atenet-egress
+  policyTypes: [Egress]
+  egress:
+    {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app: ate-api-server
+      ports:
+        - port: 443
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: k8s-credential-provider
+        {{- if and $kagentOn (include "agent-platform.componentEnabled" (dict "root" . "name" "google-access-token-credential-provider")) }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: google-access-token-credential-provider
+        {{- end }}
+      ports:
+        - port: 50051
+          protocol: TCP
+    {{- if and $kagentOn $musterOn }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: muster
+      ports:
+        - port: {{ include "agent-platform.musterServicePort" . | int }}
+          protocol: TCP
+        {{- if include "agent-platform.workspaces.enabled" . }}
+        - port: 50051
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- if $kagentOn }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $kagentNs }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: controller
+              app.kubernetes.io/name: kagent
+      ports:
+        - port: {{ $controllerPort | int }}
+          protocol: TCP
+    {{- range include "agent-platform.kagent.otlpTargets" . | fromJsonArray }}
+    # The OTLP gateway kagent's exporters send to ({{ .endpoint }}).
+    - to:
+        {{- if .namespace }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace }}
+        {{- else }}
+        - namespaceSelector: {}
+        {{- end }}
+      ports:
+        - port: {{ .port | int }}
+          protocol: TCP
+    {{- end }}
+    {{- end }}
+    {{- if (include "agent-platform.llmRouting" .) }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+      ports:
+        - port: {{ .Values.llmRouting.listener.port | int }}
+          protocol: TCP
+    {{- end }}
+    {{- range $server := $modelServers }}
+    {{- if $server.isIP }}
+    # The {{ $server.backend }} host model server the actors dial, an IP endpoint.
+    - to:
+        - ipBlock:
+            cidr: {{ $server.host }}/32
+      ports:
+        - port: {{ $server.port | int }}
+          protocol: TCP
+    {{- end }}
+    {{- end }}
+    # Every port of the world: the actors' egress policy decides which origin,
+    # on which port, an actor reaches.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- range .Values.networkPolicy.kubernetes.worldExcludedCIDRs }}
+              - {{ . }}
+              {{- end }}
+              {{- if not (has "168.63.129.16/32" .Values.networkPolicy.kubernetes.worldExcludedCIDRs) }}
+              - 168.63.129.16/32
+              {{- end }}
+        {{- with .Values.networkPolicy.kubernetes.ipv6 }}
+        {{- if .enabled }}
+        {{- if not .excludedCIDRs }}
+        {{- fail "networkPolicy.kubernetes.ipv6.enabled needs networkPolicy.kubernetes.ipv6.excludedCIDRs: name the cluster's own IPv6 pod and Service CIDRs, or the actors' egress gateway reaches in-cluster pods and the API server over IPv6" }}
+        {{- end }}
+        - ipBlock:
+            cidr: ::/0
+            except:
+              - fc00::/7
+              - fe80::/10
+              {{- range .excludedCIDRs }}
+              - {{ . }}
+              {{- end }}
+        {{- end }}
+        {{- end }}
+    {{- with dig "substrate" "egressGateway" "privateCIDRs" list .Values.networkPolicy }}
+    # Private destinations outside the cluster (a VPC-peered or on-premises
+    # origin): a NetworkPolicy cannot tell them from the cluster's own
+    # addresses, which worldExcludedCIDRs keeps out, so the installation names
+    # them (networkPolicy.substrate.egressGateway.privateCIDRs), on every port.
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+    {{- end }}
+    {{- with $edge }}
+    # muster's public hostname, inside the cluster: the pods of the Gateway its
+    # route attaches to (agent-platform.substrate.egressEdge).
+    - to:
+        {{- range . }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .matchLabels | nindent 14 }}
+        {{- end }}
+      ports:
+        - port: 443
+          protocol: TCP
+        - port: 10443
+          protocol: TCP
+    {{- end }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -1179,7 +1380,7 @@ spec:
               - key: ate.dev/worker-pool
                 operator: Exists
         {{- if $orgs }}
-        {{- include "agent-platform.tenants.organizationWorkers" "kubernetes" | nindent 8 }}
+        {{- include "agent-platform.tenants.organizationWorkers" (dict "root" $ "flavor" "kubernetes") | nindent 8 }}
         {{- end }}
       ports:
         - port: 53
@@ -1270,6 +1471,48 @@ spec:
           protocol: TCP
     - ports:
         - port: 8080
+          protocol: TCP
+---
+# The worker pods' egress, the Cilium substrate-workers rules in this flavour:
+# the cluster DNS, the atenet dns and the egress gateway, nothing else. The
+# organizations' namespaces get a copy (agent-platform-operator copies it by
+# name beside substrate-workers-ingress).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: substrate-workers-egress
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: ate.dev/worker-pool
+        operator: Exists
+  policyTypes: [Egress]
+  egress:
+    {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchLabels:
+              app: dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ns }}
+          podSelector:
+            matchLabels:
+              app: atenet-egress
+      ports:
+        - port: 8443
           protocol: TCP
 {{- if $kagentOn }}
 ---

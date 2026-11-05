@@ -192,9 +192,7 @@ system:serviceaccount:<release namespace>:<name>, the name as the component
 chart chooses it (agent-manager.serviceAccount.name, else
 agent-manager.fullnameOverride, or `default` when serviceAccount.create is
 false). The component runs in the release namespace, as its
-PodDisruptionBudget assumes. Its tenant reconciler is the only writer of
-WorkerPools in the Organizations' namespaces
-(templates/substrate/tenant-workers-admission.yaml).
+PodDisruptionBudget assumes.
 */}}
 {{- define "agent-platform.agentManager.serviceAccountUser" -}}
 {{- $chart := include "agent-platform.agentManager.chartValues" . | fromJson -}}

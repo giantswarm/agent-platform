@@ -13,8 +13,8 @@ cluster-wide `delete` here: giantswarm/kagent-extensions#27. The erasure of
 an organization with a person's session works once that change ships in the
 kagent line.
 */ -}}
-{{- if and (dig "enabled" false (.Values.organizationErasure | default dict)) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
-{{- $sa := include "agent-platform.organizationErasure.serviceAccount" . | fromJson }}
+{{- if include "agent-platform.organizations.enabled" . }}
+{{- $sa := include "agent-platform.organizations.operatorServiceAccount" . | fromJson }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

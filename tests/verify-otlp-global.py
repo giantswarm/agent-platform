@@ -329,7 +329,11 @@ def case_tls(meta: str, conn_chart: str, tmp: str) -> None:
     values, conn, _ = meta_and_conn(meta, conn_chart, ["--set", f"{OTLP}.endpoint=https://otlp.example.com"], tmp, "tls")
     expect("tls: kagent endpoint", get(values["kagent"], ["otel", "exporter", "otlp", "endpoint"]), "https://otlp.example.com")
     expect("tls: substrate signals left on", get(values["substrate"], ["otel", "traces", "enabled"]), None)
-    check_egress(conn, {}, {p: ("cluster", "443") for p in [*KAGENT_POLICIES, *SUBSTRATE_POLICIES, MUSTER_POLICY, KLAUS_POLICY, DATAPLANE_POLICY]}, "tls")
+    # The actors' egress gateway reaches an external collector through its world
+    # rule: no cluster entity there (giantswarm/agent-platform#1268).
+    want = {p: ("cluster", "443") for p in [*KAGENT_POLICIES, *SUBSTRATE_POLICIES, MUSTER_POLICY, KLAUS_POLICY, DATAPLANE_POLICY]}
+    want["substrate-atenet-egress"] = None
+    check_egress(conn, {}, want, "tls")
     mk = mcp_kubernetes(values)
     expect("tls: mcp-kubernetes endpoint (the scheme's port)", mk["otlpEndpoint"], "otlp.example.com:443")
     expect("tls: mcp-kubernetes insecure", mk["otlpInsecure"], "false")

@@ -38,7 +38,7 @@ origins and the Secrets they authenticate with; its editors read them.
 The rules agent-platform:editor adds: the writes and reads agent-manager
 performs as the caller. The agent chart's OCIRepository is read only: its
 writer is the namespace's keeper (agent-platform-operator in an organization
-namespace, agent-manager's tenant reconciler in a tenant namespace), never an
+namespace), never an
 editor (giantswarm/agent-platform#1267).
 */}}
 {{- define "agent-platform.tenants.editorRules" -}}
@@ -70,34 +70,13 @@ tenant-credential-
 {{- end -}}
 
 {{/*
-The key Secret of the default ModelConfig, kagent.providers.<default>.apiKeySecretRef:
-the platform Secret agent-manager's tenant reconciler copies into a tenant
-namespace that holds an agent (the meta chart derives the reconciler's
-tenants.modelConfig.apiKeySecretName from the same key). Empty when unset.
-*/}}
-{{- define "agent-platform.tenants.modelSecretName" -}}
-{{- $providers := dig "providers" dict (.Values.kagent | default dict) | default dict -}}
-{{- dig (toString (dig "default" "" $providers)) "apiKeySecretRef" "" $providers -}}
-{{- end -}}
-
-{{/*
-The name of the default ModelConfig agent-manager's tenant reconciler copies
-into a tenant namespace that holds an agent: the ModelConfig the kagent chart
-renders from kagent.providers (the meta chart derives the reconciler's
-tenants.modelConfig.name with the same name).
-*/}}
-{{- define "agent-platform.tenants.modelConfigName" -}}
-default-model-config
-{{- end -}}
-
-{{/*
 "true" when a tenant's own ModelConfigs are admitted under the platform's
-rules (kagent on and tenants.organizations.enabled;
+rules (kagent on and agentPlatformOrganizations.enabled;
 giantswarm/agent-platform#759, templates/tenants/modelconfig-admission.yaml),
 else empty.
 */}}
 {{- define "agent-platform.tenants.modelConfigs" -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.tenants.organizations" .) }}true{{ end -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.orgNamespaces.enabled" .) }}true{{ end -}}
 {{- end -}}
 
 {{/*
@@ -111,31 +90,57 @@ Usage: include "agent-platform.tenants.subjects" (list .Values.tenants.platform.
 {{- end -}}
 
 {{/*
-"true" when the worker pods of the Organizations' namespaces are admitted
-(tenants.organizations.enabled; giantswarm/agent-platform#1036), else empty.
+The organizations' namespaces: agent-platform-operator's organization
+namespaces, labelled agent-platform.giantswarm.io/organization, while
+agentPlatformOrganizations.enabled is on. Every policy that holds or admits an
+organization's namespace selects it by that label, never by a list of names.
 */}}
-{{- define "agent-platform.tenants.organizations" -}}
-{{- if dig "organizations" "enabled" false (.Values.tenants | default dict) }}true{{ end -}}
+
+{{/* "true" while agentPlatformOrganizations.enabled is on, else empty. The
+policies of the organizations' namespaces (substrate/, tenants/, llm/) name
+these two helpers, so the namespaces they hold have one definition here. */}}
+{{- define "agent-platform.orgNamespaces.enabled" -}}
+{{- include "agent-platform.organizations.enabled" . -}}
+{{- end -}}
+
+{{/* The label of the organizations' namespaces. */}}
+{{- define "agent-platform.orgNamespaces.label" -}}
+{{- include "agent-platform.organizations.label" . -}}
 {{- end -}}
 
 {{/*
-The worker pods of every namespace labelled giantswarm.io/organization, as one
-peer of a policy rule: a Cilium endpoint selector (Cilium carries a
-namespace's labels on its pods as io.cilium.k8s.namespace.labels.<key>), or a
-NetworkPolicy peer. The namespaces are selected by the label, never listed.
-Usage: include "agent-platform.tenants.organizationWorkers" "cilium"
+The organizations' namespaces but the kagent namespace (the platform tenant),
+as a namespaceSelector in YAML.
+*/}}
+{{- define "agent-platform.orgNamespaces.selector" -}}
+matchExpressions:
+  - key: {{ include "agent-platform.orgNamespaces.label" . }}
+    operator: Exists
+  - key: kubernetes.io/metadata.name
+    operator: NotIn
+    values: [{{ .Values.kagent.namespaceOverride | default .Release.Namespace | quote }}]
+{{- end -}}
+
+{{/*
+The worker pods of every organization namespace, as one peer of a policy
+rule: a Cilium endpoint selector (Cilium carries a namespace's labels on its
+pods as io.cilium.k8s.namespace.labels.<key>), or a NetworkPolicy peer. The
+namespaces are selected by the label (agent-platform.orgNamespaces.label),
+never listed.
+Usage: include "agent-platform.tenants.organizationWorkers" (dict "root" $ "flavor" "cilium")
 */}}
 {{- define "agent-platform.tenants.organizationWorkers" -}}
-{{- if eq . "cilium" -}}
+{{- $label := include "agent-platform.orgNamespaces.label" .root -}}
+{{- if eq .flavor "cilium" -}}
 - matchExpressions:
     - key: ate.dev/worker-pool
       operator: Exists
-    - key: io.cilium.k8s.namespace.labels.giantswarm.io/organization
+    - key: io.cilium.k8s.namespace.labels.{{ $label }}
       operator: Exists
 {{- else -}}
 - namespaceSelector:
     matchExpressions:
-      - key: giantswarm.io/organization
+      - key: {{ $label }}
         operator: Exists
   podSelector:
     matchExpressions:
@@ -145,13 +150,13 @@ Usage: include "agent-platform.tenants.organizationWorkers" "cilium"
 {{- end -}}
 
 {{/*
-The writers of the Substrate workers in the Organizations' namespaces
-(tenants.organizations.enabled), by kind, as JSON {kind: [ServiceAccount
+The writers of the Substrate workers in the organizations' namespaces
+(agentPlatformOrganizations.enabled), by kind, as JSON {kind: [ServiceAccount
 subject]}: Substrate's controller chain. ate-controller writes the Deployment
 (and marks the busy workers' pods), the deployment controller the ReplicaSet
 (and the Deployment's revision), the ReplicaSet controller the Pods. The
 substrate-workers PolicyException excepts only these writers there, and the
-admission policy agent-platform-tenant-workers lets no one else write a worker
+admission policy agent-platform-organization-workers lets no one else write a worker
 there.
 */}}
 {{- define "agent-platform.tenants.workerWriters" -}}

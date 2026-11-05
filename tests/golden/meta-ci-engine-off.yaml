@@ -99,6 +99,8 @@ spec:
     skills:
       repositories:
       - https://github.com/giantswarm/agent-skills
+    tenants:
+      enabled: false
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: helm.toolkit.fluxcd.io/v2
@@ -382,10 +384,6 @@ spec:
       apiHostnames: []
       enabled: false
       fluxNamespace: ""
-      operator:
-        serviceAccount:
-          name: agent-platform-operator
-          namespace: ""
     agentSandbox:
       podSecurity:
         containerSecurityContext:
@@ -765,7 +763,7 @@ spec:
           groupsPrefix: ""
           includeNamespaces: []
           mode: kubernetes
-          namespaceSelector: giantswarm.io/organization
+          namespaceSelector: ""
           usernamePrefix: ""
         env:
         - name: KAGENT_EXTENSIONS_OIDC_ISSUERS
@@ -781,7 +779,7 @@ spec:
         - name: KAGENT_EXTENSIONS_AUTHORIZATION_MODE
           value: kubernetes
         - name: KAGENT_EXTENSIONS_NAMESPACE_SELECTOR
-          value: giantswarm.io/organization
+          value: agent-platform.giantswarm.io/organization
         - name: KAGENT_EXTENSIONS_INCLUDE_NAMESPACE
           value: kagent
         - name: KAGENT_EXTENSIONS_MACHINE_AUDIENCE
@@ -1389,6 +1387,9 @@ spec:
       flavor: kubernetes
       kubernetes:
         apiServerCIDR: 0.0.0.0/0
+        ipv6:
+          enabled: false
+          excludedCIDRs: []
         worldExcludedCIDRs:
         - 10.0.0.0/8
         - 172.16.0.0/12
@@ -1411,13 +1412,8 @@ spec:
       substrate:
         credentialProvider:
           egressFQDNs: []
-    organizationErasure:
-      enabled: false
-      operatorPodLabels:
-        app.kubernetes.io/name: agent-platform-operator
-      operatorServiceAccount:
-        name: agent-platform-operator
-        namespace: ""
+        egressGateway:
+          privateCIDRs: []
     postgres:
       affinity: {}
       applicationDatabase:
@@ -1631,8 +1627,6 @@ spec:
         enabled: false
     substrate-crds: {}
     tenants:
-      organizations:
-        enabled: false
       platform:
         editors:
         - apiGroup: rbac.authorization.k8s.io
@@ -2077,7 +2071,7 @@ spec:
         includeNamespaces:
         - kagent
         mode: kubernetes
-        namespaceSelector: giantswarm.io/organization
+        namespaceSelector: agent-platform.giantswarm.io/organization
         usernamePrefix: ""
       env:
       - name: KAGENT_EXTENSIONS_OIDC_ISSUERS
@@ -2093,7 +2087,7 @@ spec:
       - name: KAGENT_EXTENSIONS_AUTHORIZATION_MODE
         value: kubernetes
       - name: KAGENT_EXTENSIONS_NAMESPACE_SELECTOR
-        value: giantswarm.io/organization
+        value: agent-platform.giantswarm.io/organization
       - name: KAGENT_EXTENSIONS_INCLUDE_NAMESPACE
         value: kagent
       - name: KAGENT_EXTENSIONS_MACHINE_AUDIENCE
@@ -3156,7 +3150,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=2.16.0 <3.0.0"
+    semver: ">=2.16.0 <2.19.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
