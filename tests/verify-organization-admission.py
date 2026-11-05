@@ -89,6 +89,8 @@ BOB = "bob"  # agent-platform:editor in the organization namespace
 PARENT = "org-acme"
 ORG = "agents-payments-x7k2q"
 ORG2 = "agents-billing-b4n9d"
+ORG3 = "agents-treasury-c5p7e"  # commit mode: its first admins come from git
+FLUX_SA3 = f"system:serviceaccount:{FLUX_NS}:{ORG3}"
 OLD = "agents-old-aaaaa"  # terminating
 GONE = "org-gone"  # a terminating parent
 PLAIN = "team-a"
@@ -375,7 +377,8 @@ def fixtures():
     """What exists before the policies: the namespaces, the platform's pool,
     a HelmRelease written before the lock, the objects each case acts on."""
     for n, labels in ((PARENT, None), (GONE, None), (PLAIN, None), (FLUX_NS, None), ("kagent", None), (RELEASE_NS, None),
-                      (ORG, LABELS), (ORG2, {**LABELS, "agent-platform.giantswarm.io/organization": "billing"}), (OLD, LABELS)):
+                      (ORG, LABELS), (ORG2, {**LABELS, "agent-platform.giantswarm.io/organization": "billing"}), (OLD, LABELS),
+                      (ORG3, {**LABELS, "agent-platform.giantswarm.io/organization": "treasury"})):
         must(create(ns(n, labels), dry=False), f"create namespace {n}")
     objects = [
         workerpool("kagent", replicas=1),
@@ -646,6 +649,48 @@ def prove_flux_role():
          create(rb("platform-view", ORG, role="view"), as_=f"system:serviceaccount:{FLUX_NS}:kustomize-controller"))
 
 
+def prove_git_admins():
+    """Commit mode: ORG3's first admins are a file of its path, applied by its
+    Flux ServiceAccount (with no group, as kustomize-controller impersonates
+    it), which kustomize-controller labels with the Kustomization. The erasure
+    deletes that Kustomization first and waits for it: Flux must never try to
+    prune organization-admins, which is not deleted while the namespace
+    lives, so the binding carries prune: disabled and goes with the
+    namespace."""
+    must(create(rb("organization-flux", ORG3, role="agent-platform:organization-flux",
+                   subjects=[{"kind": "ServiceAccount", "name": ORG3, "namespace": FLUX_NS}]), as_=OP, dry=False),
+         "bind ORG3's Flux ServiceAccount")
+    admins = rb("organization-admins", ORG3, role="agent-platform:admin")
+    admins["metadata"]["labels"] = {"kustomize.toolkit.fluxcd.io/name": ORG3, "kustomize.toolkit.fluxcd.io/namespace": FLUX_NS}
+    policy = "agent-platform-organization-admins-binding"
+    keep = "applied from git carries kustomize.toolkit.fluxcd.io/prune: disabled, so the erasure of its organization never waits on its prune"
+    case("a first-admins file without prune: disabled is refused", create(admins, as_=FLUX_SA3, groups=()), policy,
+         keep + f"; refused: CREATE in {ORG3}")
+    admins["metadata"]["annotations"] = {"kustomize.toolkit.fluxcd.io/prune": "disabled"}
+    case("a first-admins file with prune: disabled is applied", create(admins, as_=FLUX_SA3, groups=(), dry=False))
+    case("a file in git that drops prune: disabled from organization-admins is refused",
+         patch("rolebinding", "organization-admins", ORG3, {"metadata": {"annotations": {"kustomize.toolkit.fluxcd.io/prune": None}}},
+               as_=FLUX_SA3, groups=()), policy, keep + f"; refused: UPDATE in {ORG3}")
+    case("a file in git changes the first admins and keeps prune: disabled",
+         patch("rolebinding", "organization-admins", ORG3,
+               {"subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "treasury-leads"}]}, as_=FLUX_SA3, groups=()))
+    # Flux skips an object annotated prune: disabled; were it to prune it
+    # while the namespace lives, the delete would be refused and the
+    # Kustomization would keep its finalizer: hence the annotation.
+    case("a prune of organization-admins while its namespace lives is refused", delete("rolebinding", "organization-admins", ORG3, as_=FLUX_SA3, groups=()),
+         policy, f"refused: DELETE in {ORG3}")
+    # The erasure's namespace step: the namespace controller removes it.
+    must(kubectl(["delete", "namespace", ORG3, "--wait=false"]), f"delete namespace {ORG3}")
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        rc, out = kubectl(["get", "namespace", ORG3, "-o", "jsonpath={.metadata.deletionTimestamp}"])
+        if rc == 0 and out.strip():
+            break
+        time.sleep(0.5)
+    case("the namespace controller deletes the git-applied organization-admins once its namespace terminates",
+         delete("rolebinding", "organization-admins", ORG3, as_=NS_CONTROLLER, groups=()))
+
+
 def prove_labels():
     case("a cluster-admin creates a namespace without the organization labels", create(ns("agents-mine-aaaaa"), as_=PERSON))
     case("a cluster-admin creates no namespace with them", create(ns("agents-mine-aaaaa", LABELS), as_=PERSON), "agent-platform-organization-labels")
@@ -802,7 +847,8 @@ def main():
             fixtures()
             install(roles, policies)
             for prove in (prove_roles, prove_operator, prove_flux_role, prove_labels, prove_admins_binding, prove_subjects, prove_helmreleases,
-                          prove_delete_intent, prove_egress_floor, prove_copies, prove_sandbox):
+                          prove_delete_intent, prove_egress_floor, prove_copies, prove_sandbox,
+                          prove_git_admins):  # last: it deletes ORG3
                 prove()
         finally:
             API.stop()

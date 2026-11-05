@@ -45,7 +45,10 @@ these.
     organization-admins of an organization namespace binds agent-platform:admin
     to at least one subject; it is not deleted or emptied while the namespace
     is not terminating. A policy cannot count the other admin bindings, so
-    this one name is held; a lockout is a cluster-admin's to fix.
+    this one name is held; a lockout is a cluster-admin's to fix. Applied
+    from git (labelled kustomize.toolkit.fluxcd.io/name), it carries
+    kustomize.toolkit.fluxcd.io/prune: disabled: Flux never prunes it, and the
+    namespace's deletion removes it.
   * agent-platform-organization-rolebinding-subjects: a RoleBinding in an
     organization namespace binds no system:* group or user and no
     ServiceAccount of another namespace, whoever writes it; only the operator
@@ -428,6 +431,21 @@ spec:
     - expression: "request.operation == 'DELETE' || (object.roleRef.kind == 'ClusterRole' && object.roleRef.name == 'agent-platform:admin')"
       reason: Forbidden
       messageExpression: "'the RoleBinding organization-admins of an organization namespace binds the ClusterRole agent-platform:admin, not ' + object.roleRef.kind + ' ' + object.roleRef.name"
+    # Applied from git (commit mode: the first admins are a file of the
+    # organization's path), it carries Flux's prune: disabled, on create and
+    # on every update. Flux then never prunes it, which the first rule would
+    # refuse while the namespace lives: the organization's Kustomization,
+    # which the erasure deletes first and waits for, would keep its finalizer
+    # for good. The namespace's deletion removes the binding.
+    - expression: >-
+        request.operation == 'DELETE' ||
+        !(has(object.metadata.labels) && 'kustomize.toolkit.fluxcd.io/name' in object.metadata.labels) ||
+        (has(object.metadata.annotations) && 'kustomize.toolkit.fluxcd.io/prune' in object.metadata.annotations &&
+        object.metadata.annotations['kustomize.toolkit.fluxcd.io/prune'] == 'disabled')
+      reason: Forbidden
+      messageExpression: >-
+        'the RoleBinding organization-admins applied from git carries kustomize.toolkit.fluxcd.io/prune: disabled, so the erasure of its organization never waits on its prune; refused: ' +
+        request.operation + ' in ' + request.namespace
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
