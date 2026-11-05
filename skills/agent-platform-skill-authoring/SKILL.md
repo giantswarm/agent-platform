@@ -14,14 +14,16 @@ a scored review is `agent-platform-skill-review`.
 
 ## Where skills come from
 
-An installation offers skills from its **skill sources**: `x_agent-manager_get_info` lists them as
-`skillsSources` (`url`, `ref`, `path`, `readOnly`), `x_agent-manager_list_skills` lists their skills
-with the commit each source's ref resolves to. The platform's own skills come from
-`giantswarm/agent-platform` (`skills/`), pinned to the platform release, as a **read-only** source:
-the portal proposes no change to it and a fix goes upstream. A skill outside every source — any other
-git repository or an OCI image — can still be pinned on an agent by its URL and path; it just does
-not appear in `list_skills`. A new skill goes into a writable source,
-below its `path`.
+An installation offers skills from its **skill sources**, which skill-manager serves (tools
+`x_skill-manager_*`, as you): `x_skill-manager_list_skill_sources` lists them (`url`, `ref`, `path`,
+`readOnly`, the commit the ref resolves to), `x_skill-manager_list_skills` their skills (name,
+description, path, tags; `source` reads any other GitHub repository, `refresh` bypasses the cache).
+The first source is the platform's own, `giantswarm/agent-platform` (`skills/`), pinned to the
+platform release and **read-only**: the portal proposes no change to it and a fix goes upstream; the
+installation configures the rest (`skillManager.sources`). A skill outside every source — any other
+git repository or an OCI image — can still be pinned on an agent by its URL and path; it just is not
+listed. A new skill goes into a writable source, below its `path`. `x_agent-manager_list_skills` is
+deprecated: where `get_info` reports `skillManager`, it only proxies skill-manager's.
 
 ## The format
 
@@ -61,15 +63,17 @@ files outside the skill and the session.
 
 An agent's release lists its skills **pinned**: `{name, path, git: {url, commit}}` with a full 40- or
 64-hex commit, or `{name, oci: <ref@sha256:…>}`; the chart refuses a branch, a tag, a short SHA or an
-OCI tag. agent-manager's tools take a ref — none means the configured source's ref, else the default
-branch — and pin it at write time. **A new commit of a skill repository changes nothing on any
+OCI tag. agent-manager's tools take a ref — none means the ref of the source holding the path, else
+the default branch — and pin it at write time through skill-manager as the person; it refuses a
+repository the person cannot read and a path missing at the commit. `x_skill-manager_resolve_skills`
+shows what a ref pins to, writing nothing. **A new commit of a skill repository changes nothing on any
 agent** until that agent is re-pinned — that makes an agent version reproducible, and is why a skill
 fix is not live when it merges. Re-pinning belongs to the
 `agent-platform-agent-management` skill; the platform's own skills move with a platform release.
 
-A **private** repository needs a credential Secret in the agent's namespace: the agent's
-`gitAuthSecretName`, else the installation's (`get_info`). Without one the skill fetch fails and the
-agent never boots.
+A **private** repository needs the person's read access to pin it, and a credential Secret in the
+agent's namespace to boot: the agent's `gitAuthSecretName`, else the installation's (`get_info`).
+Without the Secret the skill fetch fails and the agent never boots.
 
 ## Writing rules
 
