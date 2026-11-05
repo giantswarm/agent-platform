@@ -4,7 +4,7 @@
 {{- $listenerProviders := include "agent-platform.llmRouting.providers" $ | fromJsonArray }}
 {{- $defaultAnnotation := include "agent-platform.defaultModelConfigAnnotation" $ }}
 {{- $marked := list }}
-{{- range .Values.kagent.modelConfigs }}{{ if .default }}{{ $marked = append $marked (toString .name) }}{{ end }}{{ end }}
+{{- range .Values.kagent.modelConfigs }}{{ if eq (toString .default) "true" }}{{ $marked = append $marked (toString .name) }}{{ end }}{{ end }}
 {{- if gt (len $marked) 1 }}
 {{- fail (printf "kagent.modelConfigs[] marks more than one entry default (%s): a namespace has at most one default ModelConfig" (join ", " $marked)) }}
 {{- end }}
@@ -70,10 +70,11 @@ kind: ModelConfig
 metadata:
   name: {{ $name | quote }}
   namespace: {{ $ns }}
+  {{- $isDefault := eq (toString .default) "true" }}
   {{- $displayName := .displayName | default (ternary "ChatGPT (your subscription)" "" $personal) }}
-  {{- if or .default $displayName }}
+  {{- if or $isDefault $displayName }}
   annotations:
-    {{- if .default }}
+    {{- if $isDefault }}
     {{ $defaultAnnotation }}: "true"
     {{- end }}
     {{- with $displayName }}
@@ -98,10 +99,11 @@ spec:
   render. */}}
   {{- /* Prompt caching (the kagent line's carried patch kagent-dev/kagent#2788): an
   entry's own promptCaching / cacheTTL win, `false` included; an Anthropic entry
-  that sets neither inherits the platform's default, per key from
-  kagent.modelConfigDefaults.anthropic, else kagent.providers.anthropic.config,
-  so the catalog's Anthropic models are cached without a value per entry.
-  Bedrock takes the entry's own
+  that sets neither inherits the platform's default from
+  kagent.providers.anthropic.config — the block the kagent chart renders into
+  its default ModelConfig, which this release reads whether or not the kagent
+  release renders that ModelConfig — so the catalog's Anthropic models are cached the way
+  the default model is, without a value per entry. Bedrock takes the entry's own
   keys only. Any other provider has neither field in ModelConfigSpec: the API
   server would prune them and the model would stay uncached in silence, so the
   render refuses them naming the entry; cacheTTL is held to the CRD's enum here
@@ -109,11 +111,7 @@ spec:
   {{- $cacheKey := include "agent-platform.modelConfigCacheKey" $provider }}
   {{- $inherit := dict }}
   {{- if eq $cacheKey "anthropic" }}
-  {{- $legacy := dig "providers" "anthropic" "config" (dict) ($.Values.kagent | default dict) | default dict }}
-  {{- $defaults := dig "modelConfigDefaults" "anthropic" (dict) ($.Values.kagent | default dict) | default dict }}
-  {{- range $key := list "promptCaching" "cacheTTL" "maxTokens" }}
-  {{- if hasKey $defaults $key }}{{ $_ := set $inherit $key (get $defaults $key) }}{{ else if hasKey $legacy $key }}{{ $_ := set $inherit $key (get $legacy $key) }}{{ end }}
-  {{- end }}
+  {{- $inherit = dig "providers" "anthropic" "config" (dict) ($.Values.kagent | default dict) }}
   {{- end }}
   {{- if and (not $cacheKey) (or (not (kindIs "invalid" .promptCaching)) .cacheTTL) }}
   {{- fail (printf "kagent.modelConfigs[].promptCaching / cacheTTL is set on %q, whose provider %s has neither in ModelConfigSpec (Anthropic and Bedrock have them; the API server would prune the fields and the model would stay uncached)" .name $provider) }}
@@ -127,7 +125,8 @@ spec:
   {{- fail (printf "kagent.modelConfigs[].cacheTTL %q on %q is not one of the CRD's values 5m, 1h" (toString $cacheTTL) .name) }}
   {{- end }}
   {{- /* The output bound: an entry's own maxTokens wins; an Anthropic entry
-  without one inherits maxTokens from the same defaults as the cache keys,
+  without one inherits kagent.providers.anthropic.config.maxTokens like the
+  cache keys, so the catalog's models answer as long as the default model does
   instead of stopping at kagent's built-in 8192 (thinking included). A provider
   whose block has no maxTokens refuses it naming the entry. */}}
   {{- $maxTokensKey := include "agent-platform.modelConfigMaxTokensKey" $provider }}

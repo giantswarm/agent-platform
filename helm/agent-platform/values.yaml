@@ -752,7 +752,6 @@ components:  # @schema additionalProperties: true
       # chart gets the derived harness.snapshotLocation, never the block.
       - harness.snapshotStore
       - defaultModelConfig
-      - modelConfigDefaults
       - modelConfigs
       - oauth2ProxyIngress
       - remoteMcpServers
@@ -3468,17 +3467,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
 
   # The kagent chart's own default ModelConfig (default-model-config, rendered
   # from providers). false writes providers: false to the kagent release, so the
-  # kagent chart renders no default ModelConfig; mark a kagent.modelConfigs
-  # entry `default: true` instead.
+  # kagent chart renders no default ModelConfig and deletes the one it rendered:
+  # an Agent or agent HelmRelease that names default-model-config no longer
+  # resolves its model. Before turning it off, mark a kagent.modelConfigs entry
+  # `default: true` and point the agents at it. providers.anthropic.config stays
+  # what the connectivity chart's Anthropic modelConfigs entries inherit.
   defaultModelConfig:
     enabled: true
-
-  # Settings the connectivity chart's kagent.modelConfigs[] Anthropic entries
-  # inherit when they set none of their own, per key, before
-  # providers.anthropic.config: promptCaching, cacheTTL ("5m" or "1h") and
-  # maxTokens.
-  modelConfigDefaults:
-    anthropic: {}
 
   # OTel — traces and logs to the collector global.observability.traces.otlp
   # names, in the kagent chart's SDK-spec shape: the controller exports with

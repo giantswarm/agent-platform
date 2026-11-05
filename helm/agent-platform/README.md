@@ -499,13 +499,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.omitKeys[2] | string | `"fluxServiceAccountName"` |  |
 | components.kagent.omitKeys[3] | string | `"harness.snapshotStore"` |  |
 | components.kagent.omitKeys[4] | string | `"defaultModelConfig"` |  |
-| components.kagent.omitKeys[5] | string | `"modelConfigDefaults"` |  |
-| components.kagent.omitKeys[6] | string | `"modelConfigs"` |  |
-| components.kagent.omitKeys[7] | string | `"oauth2ProxyIngress"` |  |
-| components.kagent.omitKeys[8] | string | `"remoteMcpServers"` |  |
-| components.kagent.omitKeys[9] | string | `"uiRoute"` |  |
-| components.kagent.omitKeys[10] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
-| components.kagent.omitKeys[11] | string | `"substrateWorkerPool.priorityClass"` |  |
+| components.kagent.omitKeys[5] | string | `"modelConfigs"` |  |
+| components.kagent.omitKeys[6] | string | `"oauth2ProxyIngress"` |  |
+| components.kagent.omitKeys[7] | string | `"remoteMcpServers"` |  |
+| components.kagent.omitKeys[8] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[9] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
+| components.kagent.omitKeys[10] | string | `"substrateWorkerPool.priorityClass"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
@@ -1024,7 +1023,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
 | kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
 | kagent.defaultModelConfig.enabled | bool | `true` |  |
-| kagent.modelConfigDefaults.anthropic | object | `{}` |  |
 | kagent.otel.exporter.otlp.endpoint | string | `"auto"` |  |
 | kagent.otel.exporter.otlp.protocol | string | `"auto"` |  |
 | kagent.otel.exporter.otlp.timeout | string | `"500"` |  |

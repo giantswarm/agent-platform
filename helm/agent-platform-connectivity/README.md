@@ -1562,7 +1562,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.uiRoute.backendTrafficPolicy.timeout | string | `"60s"` |  |
 | kagent.uiRoute.backendTrafficPolicy.annotations | object | `{}` |  |
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
-| kagent.modelConfigDefaults.anthropic | object | `{}` |  |
 | kagent.modelConfigs | list | `[]` |  |
 | kagent.remoteMcpServers | list | `[]` |  |
 | postgres.enabled | bool | `false` |  |

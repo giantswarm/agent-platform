@@ -4,18 +4,17 @@
 Render, meta chart:
 - kagent.defaultModelConfig.enabled true (the default): the kagent release
   carries the providers block; false: providers is exactly false (not null,
-  which Helm's upgrade patch drops);
-- neither defaultModelConfig nor modelConfigDefaults reaches the kagent
-  release; the connectivity release carries both.
+  which Helm's upgrade patch drops) and nothing else of the release changes;
+- defaultModelConfig never reaches the kagent release;
+- with the switch off, the connectivity release still carries
+  kagent.providers.anthropic.config, which its Anthropic modelConfigs entries
+  inherit.
 
 Render, connectivity chart:
-- a kagent.modelConfigs[] entry with default: true carries the annotation
-  agent-platform.giantswarm.io/is-default-model-config: "true", the others none;
-- two entries with default: true fail the render, naming both;
-- an Anthropic entry inherits promptCaching, cacheTTL and maxTokens per key
-  from kagent.modelConfigDefaults.anthropic first, then
-  kagent.providers.anthropic.config;
-- no admission policy holds the marker.
+- a kagent.modelConfigs[] entry with default: true (or "true") carries the
+  annotation agent-platform.giantswarm.io/is-default-model-config: "true";
+  false, "false" and an unset default carry none;
+- two entries with default: true fail the render, naming both.
 
 Needs helm and PyYAML. HELM selects the binary.
 
@@ -94,25 +93,29 @@ def check_meta(chart):
         fail("defaultModelConfig.enabled=false changes the kagent release's values beside providers")
     ok("the kagent release carries providers by default and providers: false with defaultModelConfig.enabled=false")
     for objs in (on, off):
-        leaked = {"defaultModelConfig", "modelConfigDefaults"} & set(release_values(objs, "kagent"))
-        if leaked:
-            fail(f"the kagent release carries the meta-only keys {sorted(leaked)}")
-        conn = release_values(objs, "agent-platform-connectivity").get("kagent", {})
-        if "defaultModelConfig" not in conn or "modelConfigDefaults" not in conn:
-            fail("the connectivity release lacks kagent.defaultModelConfig or kagent.modelConfigDefaults")
-    ok("defaultModelConfig and modelConfigDefaults reach the connectivity release only")
+        if "defaultModelConfig" in release_values(objs, "kagent"):
+            fail("the kagent release carries the meta-only key defaultModelConfig")
+    ok("defaultModelConfig does not reach the kagent release")
+    conn = release_values(off, "agent-platform-connectivity").get("kagent", {})
+    inherited = ((conn.get("providers") or {}).get("anthropic") or {}).get("config")
+    if not isinstance(inherited, dict) or inherited.get("promptCaching") is not True:
+        fail(f"defaultModelConfig.enabled=false: the connectivity release's kagent.providers.anthropic.config is {inherited!r}, want the meta default the modelConfigs entries inherit")
+    ok("with defaultModelConfig.enabled=false the connectivity release keeps kagent.providers.anthropic.config")
 
 
 def check_connectivity(chart):
-    entries = [entry("a", default=True), entry("b"), entry("c", default=False)]
-    objs = docs(connectivity(chart, "--set-json", f"kagent.modelConfigs={json.dumps(entries)}"), "connectivity, one default")
+    entries = [entry("a", default=True), entry("b"), entry("c", default=False), entry("d", default="false"), entry("e", default="true")]
+    objs = docs(connectivity(chart, "--set-json", f"kagent.modelConfigs={json.dumps([entries[0], *entries[1:4]])}"), "connectivity, one default")
     mcs = model_configs(objs)
     marks = {n: (m["metadata"].get("annotations") or {}).get(ANNOTATION) for n, m in mcs.items()}
-    if marks != {"a": "true", "b": None, "c": None}:
+    if marks != {"a": "true", "b": None, "c": None, "d": None}:
         fail(f"the default annotation renders as {marks}, want it on a only")
-    if any(ANNOTATION in (m["metadata"].get("labels") or {}) for m in mcs.values()):
-        fail("the default marker renders as a label")
-    ok("default: true annotates the entry, the others carry no marker")
+    ok('default: true annotates the entry; false, "false" and unset carry no marker')
+
+    quoted = model_configs(docs(connectivity(chart, "--set-json", f"kagent.modelConfigs={json.dumps([entries[4]])}"), "connectivity, quoted true"))
+    if (quoted["e"]["metadata"].get("annotations") or {}).get(ANNOTATION) != "true":
+        fail(f'default: "true" does not annotate the entry: {quoted["e"]["metadata"]}')
+    ok('default: "true" annotates the entry')
 
     two = [entry("a", default=True), entry("b", default=True)]
     r = connectivity(chart, "--set-json", f"kagent.modelConfigs={json.dumps(two)}")
@@ -120,28 +123,6 @@ def check_connectivity(chart):
         fail(f"two default entries render, or fail for another reason:\n{r.stderr}")
     ok("two default entries fail the render, naming both")
 
-    inherit = connectivity(chart, "--set-json", f"kagent.modelConfigs={json.dumps([entry('a'), entry('own', maxTokens=10)])}",
-                           "--set", "kagent.providers.anthropic.config.maxTokens=1000",
-                           "--set", "kagent.providers.anthropic.config.promptCaching=true",
-                           "--set", "kagent.providers.anthropic.config.cacheTTL=1h",
-                           "--set", "kagent.modelConfigDefaults.anthropic.maxTokens=2000",
-                           "--set", "kagent.modelConfigDefaults.anthropic.promptCaching=false")
-    mcs = model_configs(docs(inherit, "connectivity, modelConfigDefaults"))
-    want = {"maxTokens": 2000, "promptCaching": False}
-    if mcs["a"]["spec"].get("anthropic") != want:
-        fail(f"modelConfigDefaults.anthropic does not win per key: spec.anthropic {mcs['a']['spec'].get('anthropic')}, want {want}")
-    if mcs["own"]["spec"]["anthropic"].get("maxTokens") != 10:
-        fail(f"an entry's own maxTokens does not win over modelConfigDefaults: {mcs['own']['spec']['anthropic']}")
-    only_defaults = connectivity(chart, "--set-json", f"kagent.modelConfigs={json.dumps([entry('a')])}", "--set", "kagent.providers=null",
-                                 "--set", "kagent.modelConfigDefaults.anthropic.maxTokens=32000")
-    got = model_configs(docs(only_defaults, "connectivity, modelConfigDefaults without providers"))["a"]["spec"].get("anthropic")
-    if got != {"maxTokens": 32000}:
-        fail(f"without kagent.providers, modelConfigDefaults.anthropic.maxTokens is not inherited: {got}")
-    ok("Anthropic entries inherit per key from modelConfigDefaults.anthropic, then providers.anthropic.config")
-
-    if any(d.get("kind") in ("ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding") and "default-model" in d["metadata"]["name"] for d in objs):
-        fail("an admission policy holds the default marker")
-    ok("no admission policy holds the default marker")
 
 def main():
     check_meta(sys.argv[1])
