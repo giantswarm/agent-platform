@@ -29,6 +29,7 @@ binaries). HELM selects the binary.
 Usage: verify-hooks-secrets.py CONNECTIVITY_CHART
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -117,7 +118,8 @@ class Cluster:
         tmp = os.path.join(self.work, "tmp")
         shutil.rmtree(tmp, ignore_errors=True)
         os.makedirs(tmp)
-        script = script.replace("/work", os.path.join(self.work, "work")).replace("/tmp/", tmp + "/")
+        script = re.sub(r"(?<![\w./-])/tmp/", tmp + "/", script)
+        script = re.sub(r"(?<![\w./-])/work\b", os.path.join(self.work, "work"), script)
         r = subprocess.run(["sh", "-eu", "-c", script], env=self.env, capture_output=True, text=True)
         if r.returncode != 0:
             fail(f"{label} failed as {SA}:\n{r.stdout}{r.stderr}")
