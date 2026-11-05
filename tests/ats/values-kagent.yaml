@@ -92,7 +92,7 @@ substrate:
 # The engine's helm-controller re-checks a HelmRelease's dependsOn on a fixed
 # timer (--requeue-dependency, 30 s upstream; Flux 2.9 watches no dependency),
 # so the roster's chain — CRDs and muster, then connectivity, Substrate, kagent,
-# then agent-manager — idles up to 30 s at every level. 5 s here: the install's
+# then agent-manager — idles up to 30 s at every level. Trial 1 s here: the install's
 # wall clock on the executor, not its order (dependsOn still gates every step).
 # Ten workers (--concurrent, 4 upstream): an install with --wait holds a worker
 # for as long as the release takes, and with four the roster's ten releases
@@ -109,7 +109,7 @@ flux-engine:
         patch: |
           - op: add
             path: /spec/template/spec/containers/0/args/-
-            value: --requeue-dependency=5s
+            value: --requeue-dependency=1s
           - op: add
             path: /spec/template/spec/containers/0/args/-
             value: --concurrent=10
