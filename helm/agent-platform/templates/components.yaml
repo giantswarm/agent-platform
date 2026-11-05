@@ -287,6 +287,9 @@ engine on, the multi-tenancy lockdown makes a HelmRelease without one run as the
 rights-less default account, so the engine's agent-platform-flux is the default;
 the fleet (engine off, exempt namespace) keeps the key empty and renders none. */ -}}
 {{- $sa := $g.serviceAccountName | default (include "agent-platform.tenantServiceAccountName" $root) -}}
+{{- /* The air-gapped mirror (gitops.mirror.registry): every source below moves
+onto it — see "The mirror" in _helpers.tpl. */ -}}
+{{- $mirror := include "agent-platform.mirror.registry" $root -}}
 {{- /* The component roster, stripped to enablement, for a chart that renders
 another component's wiring. It carries the same key path this chart reads
 (components.<name>.enabled), so the two can never spell the answer differently.
@@ -359,6 +362,38 @@ nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 render when the two disagree). */ -}}
 {{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
 {{- end }}
+{{- /* On the mirror, every source reference of the release's values moves there.
+The connectivity chart's model-serving presets name their runtime and model
+images in files of the chart, not in values: their registry keys take the
+mirror (an own modelImages.registry stands). */ -}}
+{{- if $mirror }}
+{{- $vals = deepCopy $vals }}
+{{- if and (eq $key "agent-platform-connectivity") (kindIs "map" $vals.modelServing) }}
+{{- $_ := set $vals.modelServing "runtimeImages" (dict "registry" $mirror) }}
+{{- if not (dig "modelImages" "registry" "" $vals.modelServing) }}
+{{- $_ := set $vals.modelServing "modelImages" (mergeOverwrite (dig "modelImages" dict $vals.modelServing) (dict "registry" $mirror)) }}
+{{- end }}
+{{- end }}
+{{- /* model-manager's registry egress (the kserve backend's fit checks) follows
+the mirror while it still names gsoci.azurecr.io (the default): the mirror's
+host, without its port, as the one FQDN, and its port (443 when it names
+none). An installation's own list, without gsoci, stands. */ -}}
+{{- if eq $key "agent-platform-connectivity" }}
+{{- $reg := dig "modelManager" "networkPolicy" "registry" dict $vals }}
+{{- $onSource := false }}
+{{- range (get $reg "fqdns" | default list) }}
+{{- if and (kindIs "map" .) (eq (toString (get . "matchName")) (include "agent-platform.mirror.source" $root)) }}{{- $onSource = true }}{{- end }}
+{{- end }}
+{{- if $onSource }}
+{{- $hostPort := splitList ":" $mirror }}
+{{- $port := 443 }}
+{{- if gt (len $hostPort) 1 }}{{- $port = last $hostPort | int }}{{- end }}
+{{- $_ := set $reg "fqdns" (list (dict "matchName" (first $hostPort))) }}
+{{- $_ := set $reg "ports" (list $port) }}
+{{- end }}
+{{- end }}
+{{- include "agent-platform.mirror.values" (dict "values" $vals "mirror" $mirror) }}
+{{- end }}
 {{- /* Drop dependsOn references to components that are toggled off, so an
 always-on consumer (e.g. connectivity) does not block on a HelmRelease that was
 never rendered. With app-owned CRDs a consumer dependsOn the opt-in component
@@ -408,10 +443,11 @@ metadata:
     {{- include "labels.common" $root | nindent 4 }}
 spec:
   interval: {{ $g.sourceInterval }}
-  url: {{ printf "%s/%s" (trimSuffix "/" $c.repository) $c.chart }}
+  url: {{ include "agent-platform.mirror.ref" (dict "ref" (printf "%s/%s" (trimSuffix "/" $c.repository) $c.chart) "mirror" $mirror) }}
   {{- if $c.insecure }}
   insecure: true
   {{- end }}
+  {{- with include "agent-platform.mirror.sourceAuth" $root }}{{ . | nindent 2 }}{{ end }}
   {{- include "agent-platform.chartLayerSelector" $root | nindent 2 }}
   ref:
     semver: {{ required (printf "components.%s.versionRange is required" $key) $semver | quote }}

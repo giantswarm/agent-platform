@@ -40,10 +40,11 @@ metadata:
     app.kubernetes.io/component: self-management
 spec:
   interval: {{ .Values.gitops.sourceInterval }}
-  url: {{ printf "%s/%s" (trimSuffix "/" .Values.gitops.self.repository) .Chart.Name }}
+  url: {{ include "agent-platform.mirror.ref" (dict "ref" (printf "%s/%s" (trimSuffix "/" .Values.gitops.self.repository) .Chart.Name) "mirror" (include "agent-platform.mirror.registry" .)) }}
   {{- if .Values.gitops.self.insecure }}
   insecure: true
   {{- end }}
+  {{- with include "agent-platform.mirror.sourceAuth" . }}{{ . | nindent 2 }}{{ end }}
   {{- include "agent-platform.chartLayerSelector" . | nindent 2 }}
   ref:
     semver: {{ include "agent-platform.self.versionRange" . | quote }}

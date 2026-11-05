@@ -1856,6 +1856,21 @@
                 "interval": {
                     "type": "string"
                 },
+                "mirror": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "certSecretRef": {
+                            "type": "string"
+                        },
+                        "registry": {
+                            "type": "string"
+                        },
+                        "secretRef": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "namespace": {
                     "type": "string"
                 },
