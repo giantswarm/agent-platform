@@ -11,7 +11,7 @@ Review one skill directory and report. The authoring rules this review enforces 
 `agent-platform-skill-authoring` skill — load it first; this skill does not repeat them. Never
 edit, commit, propose or pin the skill unless the user asks; the review only reports.
 
-A skill from a **read-only source** (`readOnly` in `x_agent-manager_list_skills`, such as the
+A skill from a **read-only source** (`readOnly` in `x_skill-manager_list_skills`, such as the
 platform's own skills) gets a report with suggested fixes only, no pull request: such a source is
 not changed from the installation, and a fix goes to its owners.
 
@@ -20,7 +20,7 @@ not changed from the installation, and a fix goes to its owners.
 - **Local path** (`skills/<name>` or `uploads/` in the session's scratch directory): read it with
   `read_file`.
 - **Git URL + path (+ commit)**: fetch every file under the path with the repository tool your
-  toolset offers (`filter_tools` to find it). `x_agent-manager_list_skills` shows the offered
+  toolset offers (`filter_tools` to find it). `x_skill-manager_list_skill_sources` shows the offered
   sources with their ref, the commit it resolves to, path and `readOnly`. With no repository tool, ask the user to upload the directory.
 - **Changed skill**: also fetch the previously pinned commit — the `commit` of the skill in the
   agent's `x_agent-manager_get_agent`, else ask the person — and review the diff, but run every
@@ -37,7 +37,7 @@ proposing; **medium** should be fixed; **low** is advice.
 | Check | Severity | What to look for |
 |---|---|---|
 | Frontmatter parses | blocker | Starts and closes with `---`; valid YAML mapping; `name` and `description` present and non-empty. |
-| Authoring rules | high / medium | Every rule of the authoring skill — frontmatter fields, `name`, `metadata`, description, fetch live, one topic, size: a breach of a format rule is high, of a writing rule medium. Also: `name` not already used by another offered skill (`x_agent-manager_list_skills`). |
+| Authoring rules | high / medium | Every rule of the authoring skill — frontmatter fields, `name`, `metadata`, description, fetch live, one topic, size: a breach of a format rule is high, of a writing rule medium. Also: `name` not already used by another offered skill (`x_skill-manager_list_skills`). |
 | Secrets | blocker | Tokens and keys (`ghp_`, `github_pat_`, `glpat-`, `xox[abp]-`, `sk-`, `AKIA`, `eyJ…` JWTs, `-----BEGIN … PRIVATE KEY-----`), kubeconfig `token:` / `client-key-data:`, passwords or connection strings with a literal value, also in examples and assets. |
 | Personal / customer data | high | Personal emails, phone numbers, home paths (`/Users/jane/`), real customer, person or internal host names in a public repository. Role addresses and obvious placeholders are fine. |
 | Hidden characters | blocker | Zero-width, bidi-control or tag characters — invisible when reading, so run the command below. |
