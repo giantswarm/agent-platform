@@ -269,7 +269,8 @@ def main(meta: str, connectivity: str) -> int:
     d = documents(helm(meta, [*IDENTITY, *AGENTS, *PRIVATE, *LINES]))
     must_lack(values(d[("HelmRelease", "agent-manager")]), ("registryConfig", "agent-toolchains"), "the agent-manager release values with the component off")
     must_lack(values(d[("HelmRelease", "substrate")]), ("toolchains-pull",), "the substrate release values with the component off")
-    d = documents(helm(meta, [*ON, *IDENTITY, *AGENTS, *PRIVATE, "--set", "components.agent-manager.versionRange=>=2.14.0 <3.0.0"]))
+    d = documents(helm(meta, [*ON, *IDENTITY, *AGENTS, *PRIVATE, "--set", "components.agent-manager.versionRange=>=2.14.0 <3.0.0",
+                              "--set", "components.substrate.versionRange=>=1.17.5 <1.18.0", "--set", "components.substrate-crds.versionRange=>=1.17.5 <1.18.0"]))
     must_lack(values(d[("HelmRelease", "agent-manager")]), ("registryConfig",), "the agent-manager release values below the 2.16.0 floor")
     must_lack(values(d[("HelmRelease", "substrate")]), ("toolchains-pull",), "the substrate release values below the 1.18.0 floor")
     if "differs from toolchain-manager.registryPullSecret" not in helm(meta, [*ON, *IDENTITY, *AGENTS, *PRIVATE, *LINES, "--set", "agent-manager.toolchains.registryConfig.secretName=other"], expect_fail=True):
