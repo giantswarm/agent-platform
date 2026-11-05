@@ -3011,6 +3011,12 @@ verify-presets: ## Assert the infrastructure / agent-platform toolset presets re
 	else echo "ok: built-in names refused"; fi
 	@echo "ok: presets reach muster's config"
 
+.PHONY: verify-mirror
+verify-mirror: ## Assert the air-gapped mirror (giantswarm/agent-platform#1259): unset, every source renders as written with no secretRef/certSecretRef; gitops.mirror.registry set, no gsoci.azurecr.io reference is left in the meta render but the bundled engine's two images (none with flux-engine's own keys set), every OCIRepository (components and self-management) on the mirror with its secretRef and certSecretRef, the hook images on it, the path kept, a per-source key on another registry left as written, numbers unchanged; a mirror with a scheme or a path fails naming the key; the serving slice's connectivity release receives modelServing.runtimeImages.registry and modelImages.registry (an own modelImages.registry stands), and the connectivity chart publishes every preset's runtime and OCI model image on that host; a malformed runtime registry fails naming the key. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@HELM=$(HELM) python3 tests/verify-mirror.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-auto
 verify-auto: ## Assert the cluster-shape knobs: `auto` resolves by served API group once, the fleet shape equals the explicit fleet values byte for byte, the vanilla shape has no Kyverno / Cilium / monitor / Envoy-only object, every component copy follows the one detection, explicit values win.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"

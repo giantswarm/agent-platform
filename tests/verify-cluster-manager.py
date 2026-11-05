@@ -283,12 +283,17 @@ def main(meta: str, connectivity: str) -> int:
         fail("model-manager's egress opens the model registry with neither a static kserve backend nor cluster-manager")
     mirror = documents(helm(connectivity, [*CONN, "--set", "networkPolicy.flavor=cilium",
                                            "--set", "modelManager.networkPolicy.registry.fqdns[0].matchName=registry.mirror.example",
-                                           "--set", "modelManager.networkPolicy.registry.cidrs[0]=203.0.113.0/24"], ci_values=False))
+                                           "--set", "modelManager.networkPolicy.registry.cidrs[0]=203.0.113.0/24",
+                                           "--set", "modelManager.networkPolicy.registry.ports={5000}"], ci_values=False))
     mm_mirror = mirror[("CiliumNetworkPolicy", "agent-platform-connectivity-model-manager-egress")]
     must_have(mm_mirror, ("matchName: registry.mirror.example\n", "- 203.0.113.0/24\n"), "model-manager's egress with a registry mirror")
+    # registry.ports: the mirror's own port on both the names and the blocks (gitops.mirror host:port).
+    reg_rules = re.findall(r"(?:matchName: registry\.mirror\.example|- 203\.0\.113\.0/24)\n(?:.*\n)*?\s+- port: \"(\d+)\"", mm_mirror)
+    if reg_rules != ["5000", "5000"]:
+        fail(f"modelManager.networkPolicy.registry.ports does not open the registry's names and blocks on its port: {reg_rules}")
     if "gsoci.azurecr.io" in mm_mirror or "blob.core.windows.net" in mm_mirror:
         fail("a modelManager.networkPolicy.registry.fqdns mirror does not replace the gsoci list")
-    ok("model-manager's egress: gsoci.azurecr.io and its blob storage by name on 443 with cluster-manager on, not without a kserve backend; a mirror replaces the list")
+    ok("model-manager's egress: gsoci.azurecr.io and its blob storage by name on 443 with cluster-manager on, not without a kserve backend; a mirror replaces the list, on registry.ports")
 
     # --- model-manager reaches the workload clusters' API servers its kserve backends target (#687) ---
     # Nothing set on model-manager: its egress follows clusterManager.networkPolicy.workloadClusters (the
