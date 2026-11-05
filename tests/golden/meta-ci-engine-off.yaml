@@ -67,6 +67,7 @@ spec:
     mcp:
       enabled: true
     muster:
+      actorBearer: true
       mcpServer:
         auth:
           forwardToken: true
@@ -2409,10 +2410,12 @@ spec:
   install:
     createNamespace: true
     crds: CreateReplace
+    disableWait: true
     remediation:
       retries: 5
   upgrade:
     crds: CreateReplace
+    disableWait: true
     remediation:
       retries: 5
   driftDetection:
@@ -2460,6 +2463,12 @@ spec:
     image:
       registry: gsoci.azurecr.io
     muster:
+      credentialProvider:
+        actorBearer:
+          enabled: true
+          issuer: https://idp.ate-system.svc
+        enabled: true
+        gatewayIdentity: spiffe://cluster.local/ns/ate-system/sa/atenet-egress
       oauth:
         server:
           baseUrl: ""

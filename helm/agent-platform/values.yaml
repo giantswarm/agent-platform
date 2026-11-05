@@ -1295,10 +1295,10 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # Pinned exactly, not a range: the operator's image and its CRD (CreateReplace)
     # move only with a change here, and a release that needs more wiring
-    # (commit mode, agent-platform-operator#10) never rolls in before the
-    # wiring does. 0.1.0-rc.5 carries the CRD, the curated copies and the
-    # erasure (agent-platform-operator#2, #3, #7).
-    versionRange: "0.1.0-rc.5"
+    # never rolls in before the wiring does. 0.1.0-rc.11 carries the CRD, the
+    # curated copies, the erasure and the ate-api CA projected from
+    # ClusterTrustBundles (agent-platform-operator#2, #3, #7, #21).
+    versionRange: "0.1.0-rc.11"
     valuesFrom: agent-platform-operator
     # App-owned CRD: the chart ships agentplatformorganizations in its crds/
     # dir. CreateReplace makes Flux upgrade it with the app on every release
@@ -5584,18 +5584,17 @@ tenants:
 #     organization's UID prefix of the bucket only, named on the operator's
 #     ServiceAccount (IRSA). The capz and s3proxy stores give the operator no
 #     snapshot access yet: there the erasure stops at the snapshots' step;
-#   - the ConfigMap agent-platform-operator-ate-api-ca (the substrate bootstrap
-#     hook), ate-api-server's serving roots, which the operator verifies it
-#     with.
+#   - ate-api-server's serving roots, which the operator verifies it with:
+#     the ClusterTrustBundles of servicedns.podcert.ate.dev/identity
+#     labelled podcert.ate.dev/canarying: live, projected into its pod.
 # The operator's own values are the agent-platform-operator block below.
 # agent-manager's chart keeps its tenants.enabled off: its tenant reconciler is
 # gone (tenants.organizations, the namespaces labelled giantswarm.io/organization,
 # is removed; giantswarm/agent-platform#1268), and the connectivity chart renders
 # the ClusterRole agent-platform-tenant-flux the operator binds.
 # The switch is the rollout gate, off by default for now: it turns on by default
-# once the capz and s3proxy snapshot stores give the operator access, the kagent
-# line carries giantswarm/kagent-extensions#27, and an operator release with
-# giantswarm/agent-platform-operator#10 (commit mode) is the range's floor.
+# once the capz and s3proxy snapshot stores give the operator access and the
+# kagent line carries giantswarm/kagent-extensions#27.
 # Before you turn this on in an installation: the kagent line must carry
 # giantswarm/kagent-extensions#27 (kagent reviews a delete of another
 # creator's Session as a cluster-wide `delete`); until it does, the erasure of
@@ -5665,8 +5664,9 @@ agentPlatformOrganizations:
 # store's region); erasure.fluxNamespace (agentPlatformOrganizations.fluxNamespace);
 # erasure.kagent.target and .audience (the kagent controller's API Service and
 # the controller's machine audience); erasure.substrate.target, .audience and
-# .caConfigMap (ate-api-server's Service, the audience its authentication
-# config accepts, and the ConfigMap with its serving roots); and, with the
+# .caClusterTrustBundle (ate-api-server's Service, the audience its
+# authentication config accepts, and the signer and labels of the
+# ClusterTrustBundles with its serving roots); and, with the
 # Crossplane AWS snapshot store, serviceAccount.annotations
 # eks.amazonaws.com/role-arn (the role <store role>-operator). Everything
 # else (erasure.snapshotDelay, objectQuota, syncPeriod, resources, image) is
