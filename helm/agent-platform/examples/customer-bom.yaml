@@ -41,8 +41,8 @@ components:
   agentgateway:                  { versionRange: "2.8.0" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "1.29.0" }
-  kagent-crds:                   { versionRange: "1.29.0" }
+  kagent:                        { versionRange: "1.31.0" }
+  kagent-crds:                   { versionRange: "1.31.0" }
   substrate:                     { versionRange: "1.17.5" }
   substrate-crds:                { versionRange: "1.17.5" }
   google-access-token-credential-provider: { versionRange: "0.2.0" }
@@ -50,7 +50,7 @@ components:
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "1.14.0" }
-  agent-manager:                 { versionRange: "2.16.0" }
+  agent-manager:                 { versionRange: "2.19.0" }
   vm-manager:                    { versionRange: "0.24.0" }
   # The cluster write surface (components.cluster-manager, off by default).
   cluster-manager:               { versionRange: "0.22.0" }
@@ -61,7 +61,7 @@ components:
   toolchain-manager:             { versionRange: "0.5.0" }
   # The organizations' operator (components.agent-platform-operator, follows
   # agentPlatformOrganizations.enabled, off by default).
-  agent-platform-operator:       { versionRange: "0.1.0-rc.11" }
+  agent-platform-operator:       { versionRange: "0.1.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08; the kserve charts move together (one

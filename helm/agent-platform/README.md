@@ -485,7 +485,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.29.0 <1.30.0"` |  |
+| components.kagent.versionRange | string | `">=1.31.0 <1.32.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -510,7 +510,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.29.0 <1.30.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.31.0 <1.32.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
@@ -567,7 +567,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `">=2.16.0 <2.19.0"` |  |
+| components.agent-manager.versionRange | string | `">=2.19.0 <3.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.omitEmptyKeys[0] | string | `"harness.egress"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
@@ -620,7 +620,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.toolchain-manager.gatedRoster | bool | `true` |  |
 | components.agent-platform-operator.chart | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-operator.versionRange | string | `"0.1.0-rc.11"` |  |
+| components.agent-platform-operator.versionRange | string | `">=0.1.0 <0.2.0"` |  |
 | components.agent-platform-operator.valuesFrom | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.crds | string | `"CreateReplace"` |  |
 | components.agent-platform-operator.ownedCrds[0] | string | `"agentplatformorganizations.agent-platform.giantswarm.io"` |  |
@@ -1445,7 +1445,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.17.31"` |  |
+| agentManager.migration.image.tag | string | `"2.19.0"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |

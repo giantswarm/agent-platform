@@ -2944,7 +2944,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.17.31
+      tag: 2.19.0
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false

@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the credential providers read Secrets only where bound)
+
+giantswarm/agent-platform#1269: once `components.substrate.versionRange` selects Substrate 1.18.0 or later and `components.google-access-token-credential-provider.versionRange` the plugin 0.3.0 or later, their Secret readers are bound in the namespaces the credential grants name (every `allowedNamespaces` entry of `substrate.credentialProvider.namespacePolicies`) and, with `agentPlatformOrganizations.enabled`, by agent-platform-operator in every organization namespace. The providers already refused an actor a Secret outside its grants in their own process; what changes is that their ServiceAccounts can no longer read any other Secret of the cluster, a workload cluster's kubeconfig on a management cluster among them. An own `substrate.credentialProvider.rbac.namespaces` that leaves out a granted namespace makes the egress gateway answer that namespace's credentials with `403` (`not permitted to read secret <namespace>/<name>`).
+
+### Operator action
+
+- **None** for an installation on the default `namespacePolicies` (the platform namespace) or with the organizations on.
+- **An installation whose own `namespacePolicies` name a namespace in `allowedNamespaces`**: the namespace must exist before the ranges move, since the Substrate and plugin releases create a RoleBinding in it; remove a grant of a namespace that is gone. An `agents-*` entry is left to agent-platform-operator while the organizations are on.
+- **An installation whose own `namespacePolicies` grant namespaces by a label other than the organizations'**: nothing; the readers stay bound cluster-wide. To narrow them, list the namespaces in `substrate.credentialProvider.rbac.namespaces` (and `google-access-token-credential-provider.rbac.namespaces`).
+
 ## \<current\> → \<next\> (no runtime forwards the person's token)
 
 giantswarm/giantswarm#38993: the platform Harness no longer sets `KAGENT_PROPAGATE_TOKEN`. A Session reaches muster with its Actor's JWT, which needs muster to trust the actor JWT and agent-manager to bind the Session (on whenever Agent Substrate is on, from the release that carries `make verify-actor-bearer`). A Session nobody bound (one created through the kagent UI or the controller API, not agent-manager) gets no muster tools.
