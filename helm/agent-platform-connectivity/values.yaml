@@ -752,6 +752,16 @@ networkPolicy:
   substrate:
     credentialProvider:
       egressFQDNs: []  # @schema item: object; itemProperties: {"matchName": {"type": "string", "minLength": 1}, "matchPattern": {"type": "string", "minLength": 1}}
+    # The actors' egress gateway (atenet-egress), kubernetes flavor: private
+    # destinations outside the cluster it reaches on every port, beside the
+    # world rule, which leaves kubernetes.worldExcludedCIDRs out (an ipBlock
+    # cannot tell the cluster's own addresses from other private ones). A
+    # VPC-peered or on-premises origin an actor's egress policy names goes
+    # here; never a cluster CIDR or an in-cluster VIP: in the cluster the
+    # gateway reaches muster's Gateway pods only. The cilium flavor's world
+    # entity covers them already and ignores this list.
+    egressGateway:
+      privateCIDRs: []  # @schema item: string
   # Extra in-cluster egress ports for muster -> MCP backends reached via a
   # ClusterIP whose pod listens on a non-80/443 port (e.g. the in-cluster
   # pro / runbooks MCP servers on 8080, or tunnelport RemoteApp tunnels whose
@@ -809,6 +819,16 @@ networkPolicy:
       - 172.16.0.0/12
       - 192.168.0.0/16
       - 169.254.0.0/16
+    # The IPv6 world of the actors' egress gateway (kubernetes flavor). Off,
+    # the default, the gateway reaches no IPv6 destination. On, it reaches ::/0
+    # but the unique-local (fc00::/7) and link-local (fe80::/10) ranges and
+    # excludedCIDRs, which must name the cluster's own global-unicast pod and
+    # Service CIDRs (an EKS IPv6 cluster's, for one): the render fails while
+    # the list is empty, since the gateway would reach in-cluster pods and
+    # the API server over IPv6.
+    ipv6:
+      enabled: false
+      excludedCIDRs: []  # @schema item: string
 
 # The chart's kyverno.io objects: the kagent seccomp PolicyException, the CNPG
 # ImageVolume PolicyException, and the agent-sandbox pod-security policy (the two

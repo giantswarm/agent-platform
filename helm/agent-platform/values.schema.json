@@ -2409,6 +2409,21 @@
                         "apiServerCIDR": {
                             "type": "string"
                         },
+                        "ipv6": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "excludedCIDRs": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        },
                         "worldExcludedCIDRs": {
                             "type": "array",
                             "items": {
@@ -2527,6 +2542,18 @@
                                                 "minLength": 1
                                             }
                                         }
+                                    }
+                                }
+                            }
+                        },
+                        "egressGateway": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "privateCIDRs": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
                                     }
                                 }
                             }

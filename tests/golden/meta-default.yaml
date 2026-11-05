@@ -1418,6 +1418,9 @@ spec:
       flavor: kubernetes
       kubernetes:
         apiServerCIDR: 0.0.0.0/0
+        ipv6:
+          enabled: false
+          excludedCIDRs: []
         worldExcludedCIDRs:
         - 10.0.0.0/8
         - 172.16.0.0/12
@@ -1434,6 +1437,8 @@ spec:
       substrate:
         credentialProvider:
           egressFQDNs: []
+        egressGateway:
+          privateCIDRs: []
     postgres:
       affinity: {}
       applicationDatabase:

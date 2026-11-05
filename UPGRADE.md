@@ -32,6 +32,13 @@ giantswarm/agent-platform#1268: `tenants.organizations` is refused by both chart
        meta.helm.sh/release-namespace=<namespace>
      ```
 
+     Helm adopts an object only when it also carries `app.kubernetes.io/managed-by: Helm`. agent-manager's chart (2.x) puts that label on the role; check it, and set it if it is missing:
+
+     ```sh
+     kubectl get clusterrole agent-platform-tenant-flux -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}'
+     kubectl label clusterrole agent-platform-tenant-flux --overwrite app.kubernetes.io/managed-by=Helm
+     ```
+
      The connectivity release adopts it, and the agent-manager release keeps it when it drops it from its manifest. Then remove `tenants.organizations` and any `agent-manager.tenants` and `muster.muster.mcpServersInAllNamespaces` from the installation's values.
   2. Turn `agentPlatformOrganizations.enabled` on with its prerequisites: kagent and Agent Substrate on, `kagent.fluxServiceAccountName`, `llmRouting.enabled` with a model whose provider the listener serves and `llmRouting.modelConfigPolicy.enabled` on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, `global.domain` (or `agentPlatformOrganizations.apiHostnames`), and the kagent line with giantswarm/kagent-extensions#27 for the erasure.
   3. Create each organization through agent-manager's organization tools (`create_organization` in the parent `org-<name>`, then its members and its model). Two steps decide when they answer:
@@ -54,7 +61,7 @@ giantswarm/agent-platform#1267: `agent-platform:editor` and `agent-platform:admi
 
 ### Operator action
 
-- **None** for a tenant namespace that agent-manager's tenant reconciler keeps (`tenants.organizations.enabled`): the reconciler writes the OCIRepository as its own ServiceAccount.
+- **None** for an organization namespace: agent-platform-operator writes the OCIRepository as its own ServiceAccount.
 - **A namespace bound to `agent-platform:editor` that has no `agent` OCIRepository yet** (the kagent namespace of a new installation, for one): create it once, as a cluster admin, before the first agent, or create the first agent as a person who holds OCIRepository writes there. `kubectl get ocirepository agent -n <namespace>` shows whether it exists.
 
 ## \<current\> → \<next\> (the agents' Flux identity holds a Role in place of `cluster-admin`)
@@ -94,22 +101,6 @@ giantswarm/giantswarm#38672: with two or more workspace provider instances with 
 
 - **None** for an installation with one instance with sign-in, or one that sets its own `auth.provider`.
 - **An installation that adds person sign-in to a second instance**: each provider's OAuth application registers muster's callback, `<muster's public URL>/oauth/proxy/callback`, and its Secret carries `client-id` beside `client-secret`. A GitLab application lists exactly the scopes muster asks for (`values.oauth.scopes`, default `api read_user read_repository write_repository`). `muster.muster.oauth.mcpClient.enabled` is on. A person grants each provider's App once in muster; the GitHub grant made under the pin stays valid, since its App keeps the pin's issuer.
-
-## \<current\> → \<next\> (`tenants.organizations.enabled` also turns on muster's MCP servers per tenant)
-
-giantswarm/muster#1601: with `tenants.organizations.enabled` and muster on, the muster release gets `muster.mcpServersInAllNamespaces: true` and `muster.writesAsCaller.kubernetesAudience` from `mcp-kubernetes.kubernetesAudience`. muster then serves the `MCPServer`s of the namespaces named `org-…` and lists them with the person's Dex token for that audience ([Reference: A tenant's own MCP servers](docs/reference.md#a-tenants-own-mcp-servers)). With the switch off (the default) nothing changes. Where the switch is already on (agentlab), muster gets the setting with this upgrade.
-
-### Operator action
-
-- **An installation that sets `muster.muster.mcpServersInAllNamespaces`**: remove it. A value against `tenants.organizations.enabled` fails the render.
-- **An installation with the switch on that sets `muster.muster.writesAsCaller.kubernetesAudience`**: set the same value in `mcp-kubernetes.kubernetesAudience` and remove muster's. A value that differs fails the render.
-- **Before you turn `tenants.organizations.enabled` on**, do these steps. The chart cannot do them:
-  - `mcp-kubernetes.kubernetesAudience` is an audience that your API server trusts. The default, `dex-k8s-authenticator`, is correct on Giant Swarm installations.
-  - Dex lets muster's client ask for that audience: the Dex client of that audience lists `muster.muster.oauth.server.dex.clientId` in its `trustedPeers`.
-  - Each OAuth app of an MCP server in an Organization's namespace registers `<muster's public URL>/oauth/ns/<namespace>/callback`. The chart's NOTES print this URL.
-  - `tenants.platform.users` holds every person who must see the MCP servers of muster's namespace (default `system:authenticated`). An empty list fails the render.
-  - For each MCP server in an Organization's namespace that names a client Secret (`clientCredentialsSecretRef`), a Role in that namespace gives muster's ServiceAccount `get` on that Secret alone (`resourceNames`), with its RoleBinding. muster gets no other read of an Organization's Secrets; without the Role, a sign-in to that server answers that it is not ready and names the Secret and the Role.
-- **`components.muster.versionRange` is `>=5.48.0 <6.0.0`** (was `>=5.47.0 <6.0.0`), and the switch needs 5.48.0 or later: muster 5.48.0 (giantswarm/muster#1603) files a tenant server's sign-ins under the MCPServer objects that made them, so an Organization's namespace that is created again under a deleted one's name starts with no sign-ins. muster rolls in place; no store or session format changes, and nobody signs in again in muster's namespace. Where the switch was already on (agentlab), the first registration of each tenant server after the upgrade forgets that namespace's earlier sign-ins once. An installation that pins the BOM moves `muster` to `5.48.0`.
 
 ## \<current\> → \<next\> (Substrate 1.17.0: `tcp` egress rules, the actor JWT mint as `MintActorJwt`, agentgateway 2.6.5)
 
@@ -175,25 +166,12 @@ kagent:
 
 ## \<current\> → \<next\> (Google access-token plugin 0.2.0: grants selected by label)
 
-giantswarm/giantswarm#38622: `components.google-access-token-credential-provider.versionRange` is `>=0.2.0 <0.3.0`. The plugin rolls in place; with `tenants.organizations.enabled` it gets the derived selector grants the substrate release gets and a ClusterRole with `list` and `watch` on namespaces. Without the switch its grants are unchanged.
+giantswarm/giantswarm#38622: `components.google-access-token-credential-provider.versionRange` is `>=0.2.0 <0.3.0`. The plugin rolls in place; with `agentPlatformOrganizations.enabled` it gets the derived selector grants the substrate release gets and a ClusterRole with `list` and `watch` on namespaces. Without the switch its grants are unchanged.
 
 ### Operator action
 
 - **None** for an installation that follows the chart's ranges.
 - **An installation that pins the BOM**: move `google-access-token-credential-provider` to `0.2.0`.
-
-## \<current\> → \<next\> (`tenants.organizations.enabled`: a tenant's own model, on the `llm` listener)
-
-giantswarm/agent-platform#759: with kagent and `tenants.organizations.enabled` on, every ModelConfig in a namespace labelled `giantswarm.io/organization` goes through the `llm` listener ([Reference: A tenant's own model](docs/reference.md#a-tenants-own-model)). The `modelconfig-llm-routing` MutatingAdmissionPolicies fill in a missing `baseUrl` there, and `agent-platform-tenant-model-routing` refuses any other `baseUrl` and any provider the listener does not serve.
-
-- **The connectivity render fails** with `tenants.organizations.enabled` on and `llmRouting.enabled` off (the default), with a default ModelConfig provider (`kagent.providers.<default>.provider`) the listener does not serve, or without the routing policy (`llmRouting.modelConfigPolicy.enabled` off). The connectivity HelmRelease then stops reconciling.
-- **A ModelConfig in an Organization namespace that is not on the listener** (a Bedrock one, a direct provider URL) can no longer be updated; only its deletion stays possible.
-
-### Operator action
-
-- **None** with `tenants.organizations.enabled` off.
-- **`tenants.organizations.enabled` on**: before the upgrade, set `llmRouting.enabled: true`, keep `llmRouting.modelConfigPolicy.enabled: true`, give the default ModelConfig a provider of `llmRouting.models` and leave `kagent.providers.<default>.config.baseUrl` empty or the listener URL (agent-manager copies it into each Organization namespace, where another `baseUrl` is refused). Then point every ModelConfig already in an Organization namespace at the listener (remove its `baseUrl`, or set the listener URL), or delete it.
-- **Turning routing off later**: turn `tenants.organizations.enabled` off first (the render needs it), then delete or repoint the Organization namespaces' ModelConfigs whose `baseUrl` carries the annotation `agent-platform.giantswarm.io/llm-routing-base-url`: the routing hook takes it off in the kagent namespace only.
 
 ## \<current\> → \<next\> (kagent 1.18: no caller bearer to muster on a workspace Session)
 

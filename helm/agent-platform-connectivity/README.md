@@ -1275,6 +1275,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
 | networkPolicy.substrate.credentialProvider.egressFQDNs | list | `[]` |  |
+| networkPolicy.substrate.egressGateway.privateCIDRs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
 | networkPolicy.musterInClusterMcpPorts[1] | int | `8443` |  |
 | networkPolicy.mcpBackends | object | `{}` |  |
@@ -1285,6 +1286,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.kubernetes.worldExcludedCIDRs[1] | string | `"172.16.0.0/12"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[2] | string | `"192.168.0.0/16"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[3] | string | `"169.254.0.0/16"` |  |
+| networkPolicy.kubernetes.ipv6.enabled | bool | `false` |  |
+| networkPolicy.kubernetes.ipv6.excludedCIDRs | list | `[]` |  |
 | kyvernoPolicies.enabled | string | `"auto"` | `auto` (default) renders the Kyverno objects when kyverno.io/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
 | kyvernoPolicies.rules.privileged-containers | string | `"disallow-privileged-containers"` |  |

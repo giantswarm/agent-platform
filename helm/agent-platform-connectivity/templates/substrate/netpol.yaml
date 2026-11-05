@@ -1104,8 +1104,8 @@ spec:
 # entity, an ipBlock cannot tell the cluster's addresses from other private
 # ones, so the world rule leaves worldExcludedCIDRs out (RFC 1918 by default)
 # and a private destination outside the cluster is named in
-# networkPolicy.additionalEgressCIDRs; IPv6 is the world but the unique-local
-# and link-local ranges. The instance metadata services (169.254.0.0/16 in
+# networkPolicy.substrate.egressGateway.privateCIDRs; IPv6 only with
+# networkPolicy.kubernetes.ipv6 (the cluster's own IPv6 CIDRs left out). The instance metadata services (169.254.0.0/16 in
 # worldExcludedCIDRs) and Azure's WireServer stay outside the world rule.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -1218,16 +1218,26 @@ spec:
               {{- if not (has "168.63.129.16/32" .Values.networkPolicy.kubernetes.worldExcludedCIDRs) }}
               - 168.63.129.16/32
               {{- end }}
+        {{- with .Values.networkPolicy.kubernetes.ipv6 }}
+        {{- if .enabled }}
+        {{- if not .excludedCIDRs }}
+        {{- fail "networkPolicy.kubernetes.ipv6.enabled needs networkPolicy.kubernetes.ipv6.excludedCIDRs: name the cluster's own IPv6 pod and Service CIDRs, or the actors' egress gateway reaches in-cluster pods and the API server over IPv6" }}
+        {{- end }}
         - ipBlock:
             cidr: ::/0
             except:
               - fc00::/7
               - fe80::/10
-    {{- with .Values.networkPolicy.additionalEgressCIDRs }}
+              {{- range .excludedCIDRs }}
+              - {{ . }}
+              {{- end }}
+        {{- end }}
+        {{- end }}
+    {{- with dig "substrate" "egressGateway" "privateCIDRs" list .Values.networkPolicy }}
     # Private destinations outside the cluster (a VPC-peered or on-premises
-    # origin, a load balancer address): a NetworkPolicy cannot tell them from
-    # the cluster's own addresses, which worldExcludedCIDRs keeps out, so the
-    # installation names them, on every port.
+    # origin): a NetworkPolicy cannot tell them from the cluster's own
+    # addresses, which worldExcludedCIDRs keeps out, so the installation names
+    # them (networkPolicy.substrate.egressGateway.privateCIDRs), on every port.
     - to:
         {{- range . }}
         - ipBlock:

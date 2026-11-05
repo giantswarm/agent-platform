@@ -284,6 +284,32 @@ def check_egress(chart):
     world = [r for r in gw["spec"]["egress"] if any(t.get("ipBlock", {}).get("cidr") == "0.0.0.0/0" for t in r["to"])]
     excepted = world[0]["to"][0]["ipBlock"]["except"] if world else []
     expect("169.254.0.0/16" in excepted and "168.63.129.16/32" in excepted, "the world rule leaves the metadata endpoints and WireServer out")
+    def gateway(*extra):
+        return find(docs(connectivity(chart, "kubernetes", *extra)), "NetworkPolicy", "substrate-atenet-egress-egress")["spec"]["egress"]
+
+    def blocks(rules):
+        return [(t["ipBlock"], r.get("ports")) for r in rules for t in r.get("to", []) if "ipBlock" in t]
+    default = blocks(gateway("--set", "networkPolicy.additionalEgressCIDRs[0]=10.10.0.5/32"))
+    expect(not any(b["cidr"] == "::/0" for b, _ in default), "by default the egress gateway reaches no IPv6 destination")
+    expect(not any(b["cidr"] == "10.10.0.5/32" for b, _ in default),
+           "networkPolicy.additionalEgressCIDRs (the components' in-cluster VIPs) never reaches the actors' egress gateway")
+    private = blocks(gateway("--set", "networkPolicy.substrate.egressGateway.privateCIDRs[0]=10.20.0.0/16"))
+    expect(({"cidr": "10.20.0.0/16"}, None) in private,
+           "networkPolicy.substrate.egressGateway.privateCIDRs opens a private destination outside the cluster to the gateway, on every port")
+    v6 = blocks(gateway("--set", "networkPolicy.kubernetes.ipv6.enabled=true", "--set", "networkPolicy.kubernetes.ipv6.excludedCIDRs[0]=2600:1f14::/56"))
+    expect(({"cidr": "::/0", "except": ["fc00::/7", "fe80::/10", "2600:1f14::/56"]}, None) in v6,
+           "with networkPolicy.kubernetes.ipv6 the gateway reaches the IPv6 world but the cluster's own IPv6 CIDRs, ULA and link-local")
+    r = connectivity(chart, "kubernetes", "--set", "networkPolicy.kubernetes.ipv6.enabled=true")
+    expect(r.returncode != 0 and "networkPolicy.kubernetes.ipv6.enabled needs networkPolicy.kubernetes.ipv6.excludedCIDRs" in r.stderr,
+           "networkPolicy.kubernetes.ipv6 without the cluster's IPv6 CIDRs fails the render")
+    serving = docs(connectivity(chart, "kubernetes", "-f", f"{chart}/ci/test-model-serving-oci-values.yaml"))
+    to_model = [d for d in serving if d["kind"] == "NetworkPolicy" and d["metadata"]["name"].endswith("-kagent-agents-to-model-serving")]
+    ingress = [d for d in serving if d["kind"] == "NetworkPolicy" and "-model-serving-" in d["metadata"]["name"] and d["metadata"]["name"].endswith("-ingress")]
+    ok_rule = bool(to_model and ingress) and to_model[0]["metadata"]["namespace"] == "ate-system" and to_model[0]["spec"]["egress"] == [{
+        "to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": ingress[0]["metadata"]["namespace"]}},
+                "podSelector": ingress[0]["spec"]["podSelector"]}],
+        "ports": ingress[0]["spec"]["ingress"][0]["ports"]}]
+    expect(ok_rule, "with model serving, the egress gateway reaches the model pods on the port their ingress policy admits it on")
     return k8s
 
 
