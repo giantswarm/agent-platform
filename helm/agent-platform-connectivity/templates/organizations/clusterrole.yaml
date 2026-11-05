@@ -52,14 +52,16 @@ ServiceAccount token Secret). get, list and watch are what
 kustomize-controller reads before it applies and while it waits. Rendered
 with fluxNamespace, the only case in which the operator binds it.
 
-A merge into an organization's path is reviewed by the platform team, never
-approved by that organization's admin alone: the members are files there,
-and a `kustomization.yaml` there could list another path's encrypted file,
-which the installation's key decrypts. The control is CODEOWNERS of the
-installation repository that an organization's admin cannot change
-(agent-manager's commit-mode layout, giantswarm/agent-manager#292); a source
-or a key per organization is giantswarm/agent-platform-operator#15, a CI check
-refusing `..` giantswarm/giantswarm#39013. A file never takes over a binding
+A `kustomization.yaml` in an organization's path can list another path's
+encrypted file, which the installation's key decrypts, and the members are
+files there. A Flux source or a SOPS key per organization, which closes
+this, is tracked in giantswarm/agent-platform-operator#15. Until then the
+control is platform review of every merge into an organization's path,
+through CODEOWNERS of the installation repository that an organization's
+admin cannot change, never that organization's admin alone:
+agent-manager#292 (slice 11, the repository layout) owns it. A CI check
+refusing `..` is giantswarm/giantswarm#39013. agent-platform-operator's
+README says the same. A file never takes over a binding
 people wrote (organization-admins among them), nor prunes one:
 agent-platform-organization-flux-writes. The path holds no ConfigMap (no configMapGenerator): the
 organization's kinds are its agents, models, connectors, egress and

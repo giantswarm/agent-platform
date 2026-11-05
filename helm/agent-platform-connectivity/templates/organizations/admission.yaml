@@ -24,8 +24,9 @@ these.
     organization's Flux ServiceAccount, which Flux impersonates) and in
     spec.targetNamespace (the organization namespace). The operator names
     both after the organization namespace; a policy cannot read another
-    namespace's labels, so the pin is that name. It applies a path under
-    fluxPathPrefix, without `..`, from the installation's source (fluxSource,
+    namespace's labels, so the pin is that name. It applies its own path,
+    fluxPathPrefix + <parent>/<organization> from the labels the operator
+    writes on it, from the installation's source (fluxSource,
     its name required with fluxNamespace) and decrypts with its key
     (fluxDecryptionSecret) only, and sets no kubeConfig, postBuild
     substituteFrom, patches or components: kustomize-controller acts on those
@@ -109,6 +110,12 @@ controllers) is the same pair of policies as a tenant's
 {{- $fluxSourceName = required "agentPlatformOrganizations.fluxSource.name is required with fluxNamespace: the operator's Kustomizations apply from that source only (agent-platform-operator's commitMode.sourceRef.name)" $fluxSource.name }}
 {{- end }}
 {{- $fluxPathPrefix := $values.fluxPathPrefix | default "" }}
+{{- if and $fluxNs (not (regexMatch "^\\./([^/.][^/]*/)+$" $fluxPathPrefix)) }}
+{{- fail (printf "agentPlatformOrganizations.fluxPathPrefix %q must be a path of the source that starts with ./ and ends with /, with no empty, . or .. segment: an organization's path is the prefix, its parent and its name" $fluxPathPrefix) }}
+{{- end }}
+{{- $orgLabel := include "agent-platform.organizations.label" . }}
+{{- $parentLabel := "agent-platform.giantswarm.io/parent" }}
+{{- $segment := "[a-z0-9]([-a-z0-9]*[a-z0-9])?" }}
 {{- $fluxKey := $values.fluxDecryptionSecret | default "" }}
 {{- $helmSA := required "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: an organization's HelmReleases run as it" (include "agent-platform.kagent.fluxServiceAccountName" .) }}
 {{- $chartSource := include "agent-platform.organizations.chartSource" . }}
@@ -249,6 +256,12 @@ spec:
     # impersonated one: a kubeConfig Secret and the postBuild substituteFrom
     # objects it reads, patches and components it builds in. None may bring
     # the Flux namespace's Secrets into an organization or apply elsewhere.
+    # What a path's kustomization.yaml loads is beyond these pins: a file of
+    # another path, which the installation's key decrypts
+    # (giantswarm/agent-platform-operator#15, a source or a key per
+    # organization; giantswarm/giantswarm#39013, a CI check refusing ..),
+    # and remote bases, which kustomize-controller fetches unless it runs with
+    # --no-remote-bases (giantswarm/flux-app#384).
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
         !has(object.spec) || (!has(object.spec.kubeConfig) && !(has(object.spec.postBuild) && has(object.spec.postBuild.substituteFrom)) &&
@@ -268,16 +281,20 @@ spec:
       messageExpression: >-
         {{ printf "'a Kustomization of the agent-platform-operator applies from the installation source %s %s/%s; refused: '" $fluxSourceKind $fluxNs $fluxSourceName }} +
         request.namespace + '/' + object.metadata.name
-    # The organizations' paths only, with no step out of them: one
-    # organization's Kustomization never applies another's path or the
+    # Its own organization's path only: the prefix, then the parent and the
+    # name the operator labels it with (two DNS labels, so no `.`, `..` or
+    # empty segment). One organization's Kustomization never applies the
+    # organizations' root, a whole parent, another organization's path or the
     # installation's.
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
-        (has(object.spec) && has(object.spec.path) && object.spec.path.startsWith({{ squote $fluxPathPrefix }}) &&
-        object.spec.path.size() > {{ len $fluxPathPrefix }} && !object.spec.path.contains('..'))
+        (has(object.spec) && has(object.spec.path) &&
+        object.spec.path.matches({{ printf "r'^%s%s/%s$'" (regexQuoteMeta $fluxPathPrefix) $segment $segment }}) &&
+        has(object.metadata.labels) && {{ squote $parentLabel }} in object.metadata.labels && {{ squote $orgLabel }} in object.metadata.labels &&
+        object.spec.path == {{ squote $fluxPathPrefix }} + object.metadata.labels[{{ squote $parentLabel }}] + '/' + object.metadata.labels[{{ squote $orgLabel }}])
       reason: Forbidden
       messageExpression: >-
-        {{ printf "'a Kustomization of the agent-platform-operator applies a path under %s, without ..; refused: '" $fluxPathPrefix }} +
+        {{ printf "'a Kustomization of the agent-platform-operator applies its organization path, %s<%s>/<%s>; refused: '" $fluxPathPrefix $parentLabel $orgLabel }} +
         request.namespace + '/' + object.metadata.name + ' with ' + (has(object.spec) && has(object.spec.path) ? object.spec.path : 'none')
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||

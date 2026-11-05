@@ -168,6 +168,11 @@ def check_render(chart):
     if r.returncode == 0 or "agentPlatformOrganizations.fluxSource.name is required with fluxNamespace" not in r.stderr:
         fail(f"fluxNamespace without fluxSource.name renders, or fails for another reason:\n{r.stderr}")
     print("ok:  fluxNamespace without fluxSource.name: the render fails naming the key")
+    for prefix in ("", "./agent-platform/organizations", "agent-platform/organizations/", "./agent-platform/../organizations/", "./agent-platform//organizations/"):
+        r = render(chart, *ON, "--set-string", f"agentPlatformOrganizations.fluxPathPrefix={prefix}")
+        if r.returncode == 0 or "agentPlatformOrganizations.fluxPathPrefix" not in r.stderr:
+            fail(f"fluxPathPrefix {prefix!r} renders, or fails for another reason:\n{r.stderr}")
+    print("ok:  a fluxPathPrefix that is not ./<segments>/ fails the render naming the key")
     policies = [d for d in organization_objects(objs) if d["kind"] != "ClusterRole"]
     # The sandbox shape is admission's own object, not Kyverno's: a
     # PolicyException excepts from Kyverno policies only.
@@ -317,13 +322,16 @@ def helmrelease(name, namespace, **spec_extra):
 
 def kustomization(name, namespace, uid=True):
     """An organization's Kustomization as the operator writes it: named after
-    the organization namespace, running as the Flux ServiceAccount of that
-    name and applying into that namespace."""
-    meta = {"name": name, "namespace": namespace}
+    the organization namespace (agents-<organization>-*), labelled with the
+    organization and its parent, running as the Flux ServiceAccount of that
+    name, applying the organization's path into that namespace."""
+    organization = name.split("-")[1] if name.startswith("agents-") else name
+    meta = {"name": name, "namespace": namespace,
+            "labels": {"agent-platform.giantswarm.io/parent": PARENT, "agent-platform.giantswarm.io/organization": organization}}
     if uid:
-        meta["labels"] = {"agent-platform.giantswarm.io/organization-uid": UID}
+        meta["labels"]["agent-platform.giantswarm.io/organization-uid"] = UID
     return {"apiVersion": "kustomize.toolkit.fluxcd.io/v1", "kind": "Kustomization", "metadata": meta,
-            "spec": {"interval": "10m", "prune": True, "path": f"{ORG_PATHS}{PARENT}/{name}", "serviceAccountName": name, "targetNamespace": name,
+            "spec": {"interval": "10m", "prune": True, "path": f"{ORG_PATHS}{PARENT}/{organization}", "serviceAccountName": name, "targetNamespace": name,
                      "sourceRef": {"kind": "GitRepository", "name": FLUX_SOURCE, "namespace": namespace},
                      "decryption": {"provider": "sops", "secretRef": {"name": SOPS_KEY}}}}
 
@@ -511,11 +519,18 @@ def prove_operator():
     case("the operator creates no Kustomization that decrypts as a ServiceAccount",
          create(changed(decryption={"provider": "sops", "secretRef": {"name": SOPS_KEY}, "serviceAccountName": "kustomize-controller"}), as_=OP), pinned, key)
     case("the operator creates a Kustomization that decrypts nothing", create(changed(decryption=None), as_=OP))
-    under = f"applies a path under {ORG_PATHS}, without ..; refused: {FLUX_NS}/{ORG2} with "
+    # ORG2 is billing in org-acme: its path is ORG_PATHS + org-acme/billing.
+    own = (f"applies its organization path, {ORG_PATHS}<agent-platform.giantswarm.io/parent>/<agent-platform.giantswarm.io/organization>; "
+           f"refused: {FLUX_NS}/{ORG2} with ")
     for what, path in (("outside the organizations' paths", "./management-clusters/acme"),
                        ("that steps out with ..", f"{ORG_PATHS}org-acme/billing/../../../management-clusters/acme"),
-                       ("of the prefix alone", ORG_PATHS)):
-        case(f"the operator creates no Kustomization with a path {what}", create(changed(path=path), as_=OP), pinned, under + path)
+                       ("of the prefix alone", ORG_PATHS),
+                       ("of the organizations' root (.)", ORG_PATHS + "."),
+                       ("with an empty segment (//)", ORG_PATHS + "/"),
+                       ("of a whole parent", ORG_PATHS + PARENT),
+                       ("of another organization", f"{ORG_PATHS}{PARENT}/payments")):
+        case(f"the operator creates no Kustomization with a path {what}", create(changed(path=path), as_=OP), pinned, own + path)
+    case("the operator creates its Kustomization with its organization's own path", create(changed(path=f"{ORG_PATHS}{PARENT}/billing"), as_=OP))
     case("the operator updates its Kustomization within the pins",
          patch("kustomization", ORG, FLUX_NS, {"spec": {"path": "./agent-platform/organizations/org-acme/payments"}}, as_=OP))
     case("the operator creates no Kustomization outside the Flux namespace", create(kustomization(ORG2, PLAIN), as_=OP),

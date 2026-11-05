@@ -3178,8 +3178,11 @@ agentPlatformOrganizations:
     kind: GitRepository
     name: ""
   # -- The start of every organization's path in the installation's source
-  # (the fixed part of agent-platform-operator's commitMode.path): an
-  # operator Kustomization applies a path under it, without `..`.
+  # (the fixed part of agent-platform-operator's commitMode.path, which must
+  # be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies
+  # exactly this prefix, its parent and its name, from the labels the
+  # operator writes on it. ./<segments>/ with no empty, . or .. segment; the
+  # render fails otherwise.
   fluxPathPrefix: ./agent-platform/organizations/
   # -- The installation's SOPS key Secret in fluxNamespace
   # (agent-platform-operator's commitMode.decryptionSecret): the only Secret
