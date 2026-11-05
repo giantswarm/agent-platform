@@ -835,6 +835,45 @@ def log_release_timeline(kube: Kube, flux_namespace: str, since: str, *namespace
         logger.info("RELEASE %-30s created %s  deps ready %s (%d waits)  install %s  ready %s  %s",
                     name, hr["metadata"]["creationTimestamp"][11:19], first("all dependencies are ready"), waits,
                     first("running 'install'"), condition(hr).get("lastTransitionTime", "")[11:19], condition(hr).get("reason", ""))
+    log_pod_timeline(kube, since)
+
+
+def log_pod_timeline(kube: Kube, since: str) -> None:
+    """A bounded, read-only snapshot after each install, including retained pods.
+
+    Pod timestamps separate scheduling/container startup from readiness waits.
+    These are the latest transitions, not a complete lifecycle trace. Diagnostic
+    failure must not change a test's result; no polling or readiness shortcuts.
+    """
+    try:
+        result = kube.cmd(["get", "pods", "-A", "-o", "json"], check=False, timeout=10)
+        if result.returncode:
+            logger.warning("Pod timeline unavailable (kubectl exit %s)", result.returncode)
+            return
+        pods = json.loads(result.stdout)["items"]
+        for pod in sorted(pods, key=lambda p: p["metadata"]["creationTimestamp"]):
+            meta, status = pod["metadata"], pod.get("status", {})
+            created = meta["creationTimestamp"]
+            logger.info("POD %s/%s created %s retained=%s scheduled %s initialized %s ready %s phase=%s",
+                        meta["namespace"], meta["name"], created, created[:19] < since[:19],
+                        condition(pod, "PodScheduled").get("lastTransitionTime", "-"),
+                        condition(pod, "Initialized").get("lastTransitionTime", "-"),
+                        condition(pod).get("lastTransitionTime", "-"), status.get("phase", "-"))
+            for group, spec_group in (("initContainerStatuses", "initContainers"), ("containerStatuses", "containers")):
+                specs = {c["name"]: c for c in pod["spec"].get(spec_group, [])}
+                for container in status.get(group, []):
+                    state = container.get("state", {})
+                    current = state.get("running") or state.get("terminated") or {}
+                    spec = specs.get(container["name"], {})
+                    probes = {kind: {key: value for key, value in spec[kind].items()
+                                     if key in ("initialDelaySeconds", "periodSeconds", "timeoutSeconds", "failureThreshold", "successThreshold")}
+                              for kind in ("startupProbe", "readinessProbe") if kind in spec}
+                    logger.info("CONTAINER %s/%s/%s init=%s started %s finished %s ready=%s restarts=%s image=%s probes=%s",
+                                meta["namespace"], meta["name"], container["name"], group == "initContainerStatuses",
+                                current.get("startedAt", "-"), current.get("finishedAt", "-"),
+                                container.get("ready", False), container.get("restartCount", 0), container.get("image", "-"), probes)
+    except (subprocess.TimeoutExpired, OSError, ValueError, KeyError, TypeError) as exc:
+        logger.warning("Pod timeline unavailable (%s)", type(exc).__name__)
 
 
 def log_controller_events(kube: Kube, namespace: str, deployment: str, since: str, *names: str,

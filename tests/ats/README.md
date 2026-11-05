@@ -157,6 +157,25 @@ on the same commit: 18.1 min; the median of the 144 green runs before it, 19.2).
 | the functional scenario (pytest) | 231 |
 | the whole `execute-chart-tests` job | 11:00 min |
 
+### Investigating Kubernetes test runtime
+
+Each install also logs a bounded snapshot of `POD` and `CONTAINER` timestamps
+across the cluster. Compare pod creation, scheduling, container start and the
+latest Ready transition with the `RELEASE` lines above. Init-container times,
+restart counts, image names and startup/readiness probe timing fields help
+separate startup work from readiness observation. Missing probe timing fields
+use Kubernetes defaults. These snapshots do not measure image-pull duration
+directly or preserve earlier transitions; a restart or a new Ready transition
+must be considered when interpreting them. Diagnostic failure only logs a
+warning, and the snapshot does not poll or change any readiness check.
+
+The two scenarios must stay sequential on the same cluster. The second tests
+reinstallation with retained Postgres, CRDs and CA pools; separate clusters or
+parallel scenarios would lose that coverage. Runtime changes must preserve
+both scenarios, all assertions, readiness predicates and failure deadlines.
+Measure the whole job as well as both installs on the same base revision, and
+check for retries and restarts before attributing a difference to an optimization.
+
 ## Render assertions (no cluster)
 
 The three shapes of the chart and the `auto` knobs are asserted offline, in CI
