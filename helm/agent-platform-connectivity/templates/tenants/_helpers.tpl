@@ -165,3 +165,15 @@ there.
 {{- $replicaSetController := dict "kind" "ServiceAccount" "name" "replicaset-controller" "namespace" "kube-system" -}}
 {{- dict "Deployment" (list $ateController $deploymentController) "ReplicaSet" (list $deploymentController) "Pod" (list $replicaSetController $ateController) | toJson -}}
 {{- end -}}
+
+{{/*
+The HelmRelease spec fields an agent release never sets, as a CEL list
+literal: through them helm-controller acts as itself (spec.chart's
+HelmChart, valuesFrom, postRenderers, kubeConfig) or moves the release out
+of its namespace (targetNamespace, storageNamespace). Held in the kagent
+namespace (platform-helmreleases.yaml) and in the organization namespaces
+(organizations/admission.yaml).
+*/}}
+{{- define "agent-platform.helmReleases.forbiddenFields" -}}
+['chart', 'valuesFrom', 'postRenderers', 'kubeConfig', 'targetNamespace', 'storageNamespace']
+{{- end -}}

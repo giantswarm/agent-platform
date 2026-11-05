@@ -24,6 +24,23 @@ giantswarm/giantswarm#38993: the platform Harness no longer sets `KAGENT_PROPAGA
 - **Upgrade to the release where muster trusts the actor JWT without workspaces first**, and confirm a Session started through agent-manager reaches muster as its Actor (muster logs `actor_bearer` accepted).
 - **An installation whose `kagent.harnesses[]` entries set `KAGENT_PROPAGATE_TOKEN`** (a claude or codex Harness): remove the variable from each entry's `env`. While it is set, that Harness's runtime still receives the person's token and forwards it to every MCP server of its agents.
 
+## \<current\> → \<next\> (a HelmRelease in the kagent namespace is an agent release)
+
+giantswarm/giantswarm#38840: the ValidatingAdmissionPolicy `agent-platform-platform-helmreleases` refuses, in the kagent namespace, a HelmRelease created or changed in its spec unless it installs the agent chart from the namespace's `agent` OCIRepository as `kagent.fluxServiceAccountName` (`kagent-flux`), sets none of `spec.chart`, `valuesFrom`, `postRenderers`, `kubeConfig`, `targetNamespace` and `storageNamespace`, and names as a git credential (`values.skillsGitAuthSecretRef.name`, or a `credentialRef` in `values.extraAgentSpec`) only the installation skills credential or a Secret its writer may `get`. A HelmRelease that already exists keeps running; only its next spec change is checked.
+
+### Operator action
+
+- **None** for an installation whose kagent HelmReleases all have agent-manager's shape. List the others with:
+
+  ```sh
+  kubectl get helmreleases -n kagent -o json | jq -r '.items[] | select(.spec.serviceAccountName != "kagent-flux"
+    or .spec.chartRef.name != "agent" or (.spec | has("valuesFrom") or has("postRenderers") or has("chart")
+    or has("kubeConfig") or has("targetNamespace") or has("storageNamespace"))) | .metadata.name'
+  ```
+
+- **An agent HelmRelease running as another ServiceAccount** (`kagent-controller`, say): set `spec.serviceAccountName: kagent-flux`. Helm upgrades the release in place, and the policy admits that change.
+- **A HelmRelease in kagent that installs another chart**: move it out of the kagent namespace, together with a ServiceAccount and Role of its own.
+
 ## \<current\> → \<next\> (the tenants mode is removed)
 
 giantswarm/agent-platform#1268: `tenants.organizations` is refused by both charts' schemas. agent-manager's tenant reconciler no longer keeps the `org-<name>` namespaces, muster no longer serves their MCP servers, and no policy of the platform selects `giantswarm.io/organization`. Organizations are AgentPlatformOrganizations (`agentPlatformOrganizations.enabled`), each with an organization namespace `agents-<name>-<random>`.
@@ -80,7 +97,7 @@ The ServiceAccount `kagent.fluxServiceAccountName` (`kagent-flux`) is bound to t
 ### Operator action
 
 - **None** for an installation whose kagent-namespace HelmReleases with `serviceAccountName: kagent-flux` all install the Generic agent chart (every agent the portal or agent-manager creates).
-- **A HelmRelease in kagent that installs another chart as `kagent-flux`**: give it a ServiceAccount and Role of its own for the kinds that chart renders, and name that ServiceAccount in the HelmRelease, before the upgrade.
+- **A HelmRelease in kagent that installs another chart as `kagent-flux`**: move it out of the kagent namespace with a ServiceAccount and Role of its own for the kinds that chart renders, before the upgrade (`agent-platform-platform-helmreleases` refuses any chart but the agent chart there).
 - **A management cluster that applies its own copy of the RoleBinding `kagent-flux`** (outside this chart): remove that copy, or it binds `cluster-admin` again.
 
 ## \<current\> → \<next\> (agent-platform-mcps follows muster)
