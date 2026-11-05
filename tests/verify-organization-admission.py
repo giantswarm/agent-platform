@@ -35,6 +35,10 @@ policy holds:
 - organization-admins is not deleted or emptied while its namespace lives;
 - a RoleBinding there binds no system: identity and no ServiceAccount of
   another namespace;
+- the operator binds each credential provider's ServiceAccount alone to its
+  own Secret reader, by a RoleBinding named after it, in organization
+  namespaces only, and a Secret reader to its provider only; a cluster-admin
+  binds no provider there (giantswarm/agent-platform#1269);
 - the HelmRelease field lock, also for the organization's Flux ServiceAccount;
 - an organization is deleted only with prune: enabled or while its parent
   terminates;
@@ -94,6 +98,10 @@ FLUX_SA3 = f"system:serviceaccount:{FLUX_NS}:{ORG3}"
 OLD = "agents-old-aaaaa"  # terminating
 GONE = "org-gone"  # a terminating parent
 PLAIN = "team-a"
+# The credential providers in Substrate's namespace and their Secret readers.
+SUBSTRATE_NS = "ate-system"
+PROVIDER, READER = "k8s-credential-provider", "k8s-credential-provider-secret-reader"
+PLUGIN, PLUGIN_READER = "google-access-token-credential-provider", "google-access-token-credential-provider-secret-reader"
 UID = "6c1f9a52-0d7e-4b3a-9a51-2f4f0e1a2b3c"
 LABELS = {"agent-platform.giantswarm.io/organization": "payments", "agent-platform.giantswarm.io/parent": PARENT,
           "agent-platform.giantswarm.io/organization-uid": UID}
@@ -573,6 +581,35 @@ def prove_operator():
     case("the operator binds no other organization's Flux ServiceAccount",
          create(rb("organization-flux", ORG2, role="agent-platform:organization-flux", subjects=[{"kind": "ServiceAccount", "name": ORG, "namespace": FLUX_NS}]), as_=OP),
          "agent-platform-organization-rolebinding-subjects", f"ServiceAccount {FLUX_NS}/{ORG}")
+    # The credential providers' Secret readers (giantswarm/agent-platform#1269):
+    # the operator binds each provider's ServiceAccount of Substrate's
+    # namespace alone to its own reader, named after it; nobody else binds it.
+    for role, provider in ((READER, PROVIDER), (PLUGIN_READER, PLUGIN)):
+        subject = [{"kind": "ServiceAccount", "name": provider, "namespace": SUBSTRATE_NS}]
+        case(f"the operator binds {provider} to {role} in an organization namespace",
+             create(rb(role, ORG, role=role, subjects=subject), as_=OP))
+        case(f"the operator binds {provider} in no namespace but an organization's",
+             create(rb(role, PLAIN, role=role, subjects=subject), as_=OP),
+             "agent-platform-organization-operator-objects", "RoleBindings only in organization namespaces")
+        case(f"a cluster-admin binds no {provider} in an organization namespace",
+             create(rb(role, ORG, role=role, subjects=subject), as_=PERSON),
+             "agent-platform-organization-rolebinding-subjects", f"ServiceAccount {SUBSTRATE_NS}/{provider}")
+    subject = [{"kind": "ServiceAccount", "name": PROVIDER, "namespace": SUBSTRATE_NS}]
+    case("the operator binds the credential provider to nothing but its Secret reader",
+         create(rb(READER, ORG, role="agent-platform:admin", subjects=subject), as_=OP),
+         "agent-platform-organization-operator-objects", f"alone to its own Secret reader, by a RoleBinding named after it; refused: {ORG}/{READER} to ClusterRole agent-platform:admin")
+    case("the operator binds the credential provider to the plugin's Secret reader not",
+         create(rb(PLUGIN_READER, ORG, role=PLUGIN_READER, subjects=subject), as_=OP),
+         "agent-platform-organization-operator-objects", "alone to its own Secret reader")
+    case("the operator binds the credential provider's Secret reader by no other name",
+         create(rb("reader", ORG, role=READER, subjects=subject), as_=OP),
+         "agent-platform-organization-operator-objects", f"refused: {ORG}/reader to ClusterRole {READER}")
+    case("the operator binds the credential provider with no other subject",
+         create(rb(READER, ORG, role=READER, subjects=[*subject, {"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "acme-devs"}]), as_=OP),
+         "agent-platform-organization-operator-objects", "alone to its own Secret reader")
+    case("the operator binds a Secret reader to no other subject",
+         create(rb(READER, ORG, role=READER), as_=OP),
+         "agent-platform-organization-operator-objects", f"to the ServiceAccount of its credential provider only; refused: {ORG}/{READER}")
 
 
 def prove_flux_role():

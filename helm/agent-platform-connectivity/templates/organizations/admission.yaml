@@ -31,7 +31,10 @@ these.
     (fluxDecryptionSecret) only, and sets no kubeConfig, postBuild
     substituteFrom, patches or components: kustomize-controller acts on those
     as itself. The operator binds a ServiceAccount of fluxNamespace to
-    agent-platform:organization-flux only.
+    agent-platform:organization-flux only, and a credential provider's
+    ServiceAccount (agent-platform.organizations.secretReaders) alone to its
+    own Secret reader, by a RoleBinding named after that ClusterRole; a Secret
+    reader it binds to its provider only.
   * agent-platform-organization-labels: only the operator's ServiceAccount
     sets, changes or removes the three organization labels of a namespace, on
     CREATE and UPDATE. kagent's authorization, Substrate's credential grants
@@ -53,7 +56,8 @@ these.
     organization namespace binds no system:* group or user and no
     ServiceAccount of another namespace, whoever writes it; only the operator
     binds a ServiceAccount of fluxNamespace, and only the one named after the
-    binding's namespace (the organization's Flux ServiceAccount).
+    binding's namespace (the organization's Flux ServiceAccount), and a
+    credential provider's ServiceAccount of Substrate's namespace.
   * agent-platform-organization-flux-writes: what an organization's Flux
     ServiceAccount (agents-* in fluxNamespace, not the operator) writes in an
     organization namespace: a RoleBinding binds the ClusterRole
@@ -107,6 +111,10 @@ controllers) is the same pair of policies as a tenant's
 {{- $uidLabel := include "agent-platform.organizations.uidLabel" . }}
 {{- $objectLabel := include "agent-platform.organizations.objectLabel" . }}
 {{- $copiedFrom := include "agent-platform.organizations.copiedFromAnnotation" . }}
+{{- $readers := include "agent-platform.organizations.secretReaders" . | fromJson }}
+{{- $readerEntries := list }}
+{{- range $sa, $role := $readers }}{{- $readerEntries = append $readerEntries (printf "'%s': '%s'" $sa $role) }}{{- end }}
+{{- $readerMap := printf "{%s}" (join ", " $readerEntries) }}
 {{- $fluxNs := $values.fluxNamespace | default "" }}
 {{- $fluxSource := $values.fluxSource | default dict }}
 {{- $fluxSourceKind := $fluxSource.kind | default "GitRepository" }}
@@ -199,6 +207,10 @@ spec:
   variables:
     - name: organizationNamespace
       expression: {{ printf "has(namespaceObject.metadata.labels) && '%s' in namespaceObject.metadata.labels" $label | quote }}
+    # The Secret readers of Substrate's credential providers:
+    # <namespace>/<ServiceAccount> -> the ClusterRole the operator binds it to.
+    - name: readers
+      expression: {{ $readerMap | quote }}
     # An organization's object in the Flux namespace: the UID label before and
     # after the write.
     - name: organizationObject
@@ -222,6 +234,30 @@ spec:
         {{ printf "'the agent-platform-operator binds a ServiceAccount of %s to the ClusterRole agent-platform:organization-flux only; refused: '" $fluxNs }} +
         request.namespace + '/' + object.metadata.name + ' to ' + object.roleRef.kind + ' ' + object.roleRef.name
     {{- end }}
+    # A credential provider's ServiceAccount is bound to its own Secret
+    # reader only, alone, by a RoleBinding named after that ClusterRole; and a
+    # Secret reader binds its provider only: the operator's `bind` on those
+    # roles grants no Secret reads to anyone else.
+    - expression: >-
+        request.resource.resource != 'rolebindings' || request.operation == 'DELETE' ||
+        !(has(object.subjects) ? object.subjects : []).exists(s, s.kind == 'ServiceAccount' && has(s.namespace) && (s.namespace + '/' + s.name) in variables.readers) ||
+        (size(object.subjects) == 1 && object.roleRef.kind == 'ClusterRole' &&
+        object.roleRef.name == variables.readers[object.subjects[0].namespace + '/' + object.subjects[0].name] &&
+        object.metadata.name == object.roleRef.name)
+      reason: Forbidden
+      messageExpression: >-
+        'the agent-platform-operator binds the ServiceAccount of a credential provider alone to its own Secret reader, by a RoleBinding named after it; refused: ' +
+        request.namespace + '/' + object.metadata.name + ' to ' + object.roleRef.kind + ' ' + object.roleRef.name
+    - expression: >-
+        request.resource.resource != 'rolebindings' || request.operation == 'DELETE' ||
+        !(object.roleRef.kind == 'ClusterRole' && variables.readers.exists(k, variables.readers[k] == object.roleRef.name)) ||
+        (has(object.subjects) && size(object.subjects) == 1 && object.subjects[0].kind == 'ServiceAccount' && has(object.subjects[0].namespace) &&
+        (object.subjects[0].namespace + '/' + object.subjects[0].name) in variables.readers &&
+        variables.readers[object.subjects[0].namespace + '/' + object.subjects[0].name] == object.roleRef.name)
+      reason: Forbidden
+      messageExpression: >-
+        'the agent-platform-operator binds a Secret reader ClusterRole to the ServiceAccount of its credential provider only; refused: ' +
+        request.namespace + '/' + object.metadata.name + ' to ' + object.roleRef.name
     - expression: "request.resource.resource != 'serviceaccounts' || variables.organizationNamespace || variables.organizationObject"
       reason: Forbidden
       messageExpression: {{ printf "'the agent-platform-operator writes ServiceAccounts only in organization namespaces%s; refused: ' + request.namespace + '/' + request.name" (ternary (printf " and, labelled %s, in %s" $uidLabel $fluxNs) "" (ne $fluxNs "")) | quote }}
@@ -482,7 +518,8 @@ spec:
       expression: >-
         (has(object.subjects) ? object.subjects : []).filter(s,
         (s.kind == 'ServiceAccount' && has(s.namespace) && s.namespace != request.namespace{{ if $fluxNs }} &&
-        !(request.userInfo.username == {{ squote $operator }} && s.namespace == {{ squote $fluxNs }} && s.name == request.namespace){{ end }}) ||
+        !(request.userInfo.username == {{ squote $operator }} && s.namespace == {{ squote $fluxNs }} && s.name == request.namespace){{ end }} &&
+        !(request.userInfo.username == {{ squote $operator }} && (s.namespace + '/' + s.name) in {{ $readerMap }})) ||
         (s.kind != 'ServiceAccount' && s.name.startsWith('system:') &&
         !(s.kind == 'User' && s.name.startsWith('system:serviceaccount:' + request.namespace + ':'))))
   validations:

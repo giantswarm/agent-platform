@@ -168,6 +168,81 @@ Usage: (include "agent-platform.credentialProvider.namespacePolicies" $root | fr
 {{- end -}}
 
 {{/*
+=== Secret readers where bound (giantswarm/agent-platform#1269) ===
+
+Substrate's credential provider and the Google access-token plugin each read
+the Secret an actor's credential names, after checking the actor's grant in
+their own process. From Substrate 1.18.0 (credentialProvider.rbac.namespaces)
+and the plugin 0.3.0 (rbac.namespaces) their Secret reader ClusterRole is
+bound by RoleBinding in listed namespaces only, not cluster-wide: on a
+management cluster every workload cluster's admin kubeconfig is a Secret.
+This chart lists the namespaces the grants name (allowedNamespaces of every
+namespacePolicies entry, the platform namespace among them), and with
+agentPlatformOrganizations.enabled agent-platform-operator binds both readers
+in every organization namespace (its serviceAccountBindings).
+*/}}
+
+{{/* The first agent-platform-operator release that keeps serviceAccountBindings (giantswarm/agent-platform-operator#23). */}}
+{{- define "agent-platform.operator.serviceAccountBindingsFloor" -}}0.1.0-rc.13{{- end -}}
+
+{{/*
+The Secret readers the operator binds in every organization namespace, as a
+JSON list of {clusterRole, serviceAccount: {namespace, name}}: Substrate's
+bundled provider (release substrate, so its names are bare) and, while its
+component is on, the Google access-token plugin. Empty while the
+organizations are off or the operator's floor predates serviceAccountBindings.
+The connectivity chart's admission policy names the same pairs
+(agent-platform.organizations.secretReaders there).
+Usage: include "agent-platform.operator.serviceAccountBindings" . | fromJsonArray
+*/}}
+{{- define "agent-platform.operator.serviceAccountBindings" -}}
+{{- $out := list -}}
+{{- $floor := include "agent-platform.semverRangeFloor" (dig "agent-platform-operator" "versionRange" "" .Values.components) -}}
+{{- if and (include "agent-platform.organizations.on" .) $floor (semverCompare (printf ">=%s" (include "agent-platform.operator.serviceAccountBindingsFloor" .)) $floor) -}}
+{{- $ns := dig "substrate" "targetNamespace" "ate-system" .Values.components -}}
+{{- $out = append $out (dict "clusterRole" "k8s-credential-provider-secret-reader" "serviceAccount" (dict "namespace" $ns "name" "k8s-credential-provider")) -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "google-access-token-credential-provider") -}}
+{{- $pns := dig "google-access-token-credential-provider" "targetNamespace" "ate-system" .Values.components -}}
+{{- $out = append $out (dict "clusterRole" "google-access-token-credential-provider-secret-reader" "serviceAccount" (dict "namespace" $pns "name" "google-access-token-credential-provider")) -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The namespaces the credential providers' Secret readers are bound in by their
+own releases, as JSON {"namespaces": [...]}, or {} to leave them bound
+cluster-wide: every allowedNamespaces entry of the namespacePolicies this
+chart derives (agent-platform.credentialProvider.namespacePolicies), each
+once. A grant by namespace label can be bound only by whoever creates the
+namespace: the organizations' label is (the operator binds both readers in
+every organization namespace), so with the organizations on the operator must
+keep serviceAccountBindings; a policy that selects other labelled namespaces
+leaves the readers cluster-wide.
+Usage: (include "agent-platform.credentialProvider.readerNamespaces" $root | fromJson).namespaces
+*/}}
+{{- define "agent-platform.credentialProvider.readerNamespaces" -}}
+{{- $sel := dict "matchExpressions" (list (dict "key" (include "agent-platform.orgNamespaces.label" .) "operator" "Exists")) -}}
+{{- $orgs := include "agent-platform.organizations.on" . -}}
+{{- $bound := true -}}
+{{- $namespaces := list -}}
+{{- range (include "agent-platform.credentialProvider.namespacePolicies" . | fromJson).policies -}}
+{{- range list .ownNamespaceSelector .allowedNamespaceSelector -}}
+{{- if and . (not (and $orgs (eq (toJson .) (toJson $sel)))) -}}{{- $bound = false -}}{{- end -}}
+{{- end -}}
+{{- range (.allowedNamespaces | default list) -}}
+{{- if not (has . $namespaces) -}}{{- $namespaces = append $namespaces . -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and $orgs (not (include "agent-platform.operator.serviceAccountBindings" . | fromJsonArray)) -}}{{- $bound = false -}}{{- end -}}
+{{- if and $bound $namespaces -}}
+{{- dict "namespaces" $namespaces | toJson -}}
+{{- else -}}
+{{- dict | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Values this chart derives for a component from a block another component owns,
 merged OVER the component's forwarded values (templates/components.yaml) so one
 value drives every consumer. Emits a JSON object; {} for a component with
@@ -312,6 +387,14 @@ plugin which egress gateway may call it. */ -}}
 {{- end -}}
 {{- $_ := set $derived "namespacePolicies" (include "agent-platform.credentialProvider.namespacePolicies" .root | fromJson).policies -}}
 {{- $_ := set $derived "substrate" (dict "releaseName" "substrate" "namespace" (dig "substrate" "targetNamespace" "ate-system" .root.Values.components)) -}}
+{{- /* From 0.3.0 the plugin's Secret reader is bound where the grants
+point (agent-platform.credentialProvider.readerNamespaces); an older plugin's
+schema refuses the key. An installation's own rbac.namespaces stays. */ -}}
+{{- $ownRbac := dig "rbac" "namespaces" list (index .root.Values "google-access-token-credential-provider" | default dict) -}}
+{{- $readers := (include "agent-platform.credentialProvider.readerNamespaces" .root | fromJson).namespaces -}}
+{{- if and (not $ownRbac) $readers (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "google-access-token-credential-provider" "version" "0.3.0")) -}}
+{{- $_ := set $derived "rbac" (dict "namespaces" $readers) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "agent-manager" -}}
 {{- $sa := include "agent-platform.kagent.fluxServiceAccountName" .root -}}
@@ -838,6 +921,19 @@ selectors agent-platform.credentialProvider.namespacePolicies derives. */ -}}
 {{- fail (printf "%s needs Substrate 1.12.0 or later, whose credential provider reads namespace policies by label: components.substrate.versionRange selects %s, whose provider refuses the policy file at start" "agentPlatformOrganizations.enabled" $pin) -}}
 {{- end -}}
 {{- $_ := set $derived "credentialProvider" (dict "namespacePolicies" (include "agent-platform.credentialProvider.namespacePolicies" .root | fromJson).policies) -}}
+{{- end -}}
+{{- if eq .name "substrate" -}}
+{{- /* From 1.18.0 the credential provider's Secret reader is bound where the
+grants point (agent-platform.credentialProvider.readerNamespaces); an older
+chart ignores the key and keeps it cluster-wide. An installation's own
+credentialProvider.rbac.namespaces stays. */ -}}
+{{- $ownRbac := dig "credentialProvider" "rbac" "namespaces" list (.root.Values.substrate | default dict) -}}
+{{- $readers := (include "agent-platform.credentialProvider.readerNamespaces" .root | fromJson).namespaces -}}
+{{- if and (not $ownRbac) $readers (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "substrate" "version" "1.18.0")) -}}
+{{- $cp := get $derived "credentialProvider" | default dict -}}
+{{- $_ := set $cp "rbac" (dict "namespaces" $readers) -}}
+{{- $_ := set $derived "credentialProvider" $cp -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq .name "kserve-llmisvc-resources") (include "agent-platform.componentEnabled" (dict "root" .root "name" "modelServing")) -}}
 {{- /* The models Gateway (modelServing.modelsGateway, rendered by the
@@ -5137,6 +5233,9 @@ role name and -operator (organization-erasure/crossplane-aws.yaml). */ -}}
       "kagent" (dict "target" (include "agent-platform.kagent.controllerAddress" .) "audience" (include "agent-platform.kagent.tokenAudience" .))
       "substrate" (dict "target" (printf "grpcs://api.%s.svc:443" $ateNs) "audience" (printf "api.%s.svc" $ateNs) "caConfigMap" (dict "name" "agent-platform-operator-ate-api-ca" "key" "ca.crt")) -}}
 {{- $_ := set $derived "erasure" $erasure -}}
+{{- with include "agent-platform.operator.serviceAccountBindings" . | fromJsonArray -}}
+{{- $_ := set $derived "serviceAccountBindings" . -}}
+{{- end -}}
 {{- $own := index .Values "agent-platform-operator" | default dict -}}
 {{- /* Commit mode needs the ClusterRole agent-platform:organization-flux and
 the Flux-namespace policy pins that the operator's commit mode writes against;
