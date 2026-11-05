@@ -98,6 +98,12 @@ def find(objs, kind, name):
     return None
 
 
+def refuses_key(stderr, key):
+    """A values-schema refusal of an extra key, in Helm 3's and Helm 4's words."""
+    low = stderr.lower()
+    return "additional propert" in low and key in low and "not allowed" in low
+
+
 def expect(cond, what):
     if not cond:
         fail(what)
@@ -196,10 +202,10 @@ def check_meta(chart):
            "with the AWS store the operator gets the bucket and its region")
 
     r = meta(chart, "--set", "tenants.organizations.enabled=true")
-    expect(r.returncode != 0 and "additional properties 'organizations' not allowed" in r.stderr,
+    expect(r.returncode != 0 and refuses_key(r.stderr, "organizations"),
            "tenants.organizations is refused by the meta chart, naming the key: the tenants mode is gone")
     r = run([HELM, "template", "t", f"{chart}/../agent-platform-connectivity", "--set", "tenants.organizations.enabled=true"])
-    expect(r.returncode != 0 and "additional properties 'organizations' not allowed" in r.stderr,
+    expect(r.returncode != 0 and refuses_key(r.stderr, "organizations"),
            "tenants.organizations is refused by the connectivity chart, naming the key")
     r = meta(chart, "--set", "agent-manager.tenants.enabled=true")
     expect(r.returncode != 0 and "agent-manager.tenants.enabled is true" in r.stderr,
