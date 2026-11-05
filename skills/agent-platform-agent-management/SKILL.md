@@ -28,9 +28,9 @@ policies.
 
 Where the reference lives — fetch it, never quote it from memory:
 
-- Managed namespaces, chart and version, the platform Harness, skill sources (`skillsSources`: url,
-  ref, path, readOnly), the skills credential, API versions and `capabilities`:
-  `x_agent-manager_get_info`.
+- Managed namespaces, chart and version, the platform Harness, skill-manager (`skillManager`), the
+  skills credential, API versions and `capabilities`: `x_agent-manager_get_info`. Skill sources and
+  their skills: `agent-platform-skill-authoring`.
 - The values schema and the manifests a set of values renders: `x_agent-manager_validate_agent` with
   the intended values returns the composed manifests and every violation, writing nothing. It is also
   how a GitOps `HelmRelease` is drafted: validate, copy.
@@ -54,7 +54,7 @@ them with `filter_tools` (`pattern`) and read each schema with `describe_tool` b
 never assume an argument. The order:
 
 1. `x_agent-manager_get_info`, then the choices from live lists: `x_agent-manager_list_model_configs`,
-   `x_agent-manager_list_skills` (per source: ref, the commit it resolves to, path, readOnly, and each
+   `x_skill-manager_list_skills` (per source: ref, the commit it resolves to, path, readOnly, and each
    skill's description — judge a skill from that listing; `load_skill` knows only your own skills),
    `x_agent-manager_list_egress_policies`, presets from `filter_tools {"include_presets": true}`.
 2. `x_agent-manager_validate_agent` → `x_agent-manager_create_agent` →
@@ -62,7 +62,8 @@ never assume an argument. The order:
    part) → a first turn as the person (`x_agent-manager_start_session`, where offered).
 3. `x_agent-manager_update_agent` for follow-ups: only the fields passed change; `skills`, `plugins`,
    `egress` and `toolset` replace their whole list. `refreshSkills: true` re-pins every git skill and
-   plugin to the head of its ref — the configured source's ref, else the default branch.
+   plugin to the head of its ref, as you: it fails when you cannot read one of the agent's
+   repositories.
 
 ## The rules the tools do not tell you
 
