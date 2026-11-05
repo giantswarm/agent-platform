@@ -92,6 +92,7 @@ def render(chart):
                         "--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true",
                         "--set", "postgres.enabled=true",
                         "--set", "agentPlatformOrganizations.enabled=true", "--set", "agentPlatformOrganizations.fluxNamespace=flux-system",
+                        "--set", "agentPlatformOrganizations.fluxSource.name=agent-platform-organizations",
                         "--set", "agentPlatformOrganizations.apiHostnames[0]=api.ci.example.com", "--set", "llmRouting.enabled=true",
                         "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"], capture_output=True, text=True)
     if r.returncode != 0:
