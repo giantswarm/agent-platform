@@ -3804,18 +3804,17 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           accountKeySecretRef:
             name: ""
             key: ""
-    # The Harness's environment. KAGENT_PROPAGATE_TOKEN makes the Go ADK re-emit
-    # the caller's bearer on its MCP calls, so muster sees the person, not the
-    # platform. OTEL_EXPORTER_OTLP_HEADERS is the tenant header of the OTLP
-    # gateway kagent.otel names: the controller compiles the rest of the
-    # actors' telemetry settings from kagent.otel and passes this one through
-    # from the Harness, like the controller's own copy (kagent.controller.env).
-    # The meta chart drops it when both exporters resolve off (auto: no
-    # observability platform). Nothing else today (a per-namespace skills
-    # credential is a later, separate decision).
+    # The Harness's environment. OTEL_EXPORTER_OTLP_HEADERS is the tenant
+    # header of the OTLP gateway kagent.otel names: the controller compiles the
+    # rest of the actors' telemetry settings from kagent.otel and passes this
+    # one through from the Harness, like the controller's own copy
+    # (kagent.controller.env). The meta chart drops it when both exporters
+    # resolve off (auto: no observability platform). No KAGENT_PROPAGATE_TOKEN:
+    # a runtime never re-emits the caller's token on its MCP calls, so the
+    # controller hands it none, and a Session reaches muster with its Actor's
+    # JWT, which the egress gateway injects on muster's host for every Session
+    # agent-manager starts and binds (muster.credentialProvider.actorBearer).
     env:
-      - name: KAGENT_PROPAGATE_TOKEN
-        value: "true"
       - name: OTEL_EXPORTER_OTLP_HEADERS
         value: auto
 
@@ -4035,15 +4034,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # - name: claude
   #   runtime: claude
   #   snapshotLocation: s3://<bucket>/claude
-  #   env:
-  #     - name: KAGENT_PROPAGATE_TOKEN          # tool calls to muster as the person
-  #       value: "true"
   # - name: codex
   #   runtime: codex
   #   snapshotLocation: s3://<bucket>/codex
-  #   env:
-  #     - name: KAGENT_PROPAGATE_TOKEN
-  #       value: "true"
   # - name: omp
   #   runtime: byo
   #   displayName: oh-my-pi

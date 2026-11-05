@@ -724,9 +724,7 @@ spec:
           eventRetentionSize: 4
           tokenThreshold: 600000
         create: true
-        env:
-        - name: KAGENT_PROPAGATE_TOKEN
-          value: "true"
+        env: []
         image: ""
         snapshotLocation: s3://ci-agent-snapshots/agents
         snapshotStore:
@@ -2021,9 +2019,7 @@ spec:
         eventRetentionSize: 4
         tokenThreshold: 600000
       create: true
-      env:
-      - name: KAGENT_PROPAGATE_TOKEN
-        value: "true"
+      env: []
       snapshotLocation: s3://ci-agent-snapshots/agents
     harnesses: []
     namespaceOverride: kagent

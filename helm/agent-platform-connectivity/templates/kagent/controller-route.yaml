@@ -19,9 +19,9 @@ spec:
     auth:
       # The gateway strips the JWT after validation; passthrough re-injects it
       # so the bearer reaches the controller: the controller re-derives the
-      # caller from it (trusted-proxy authenticator, the second layer) and
-      # forwards it to the actor unchanged (KAGENT_PROPAGATE_TOKEN — the person
-      # at muster).
+      # caller from it (trusted-proxy authenticator, the second layer). It is
+      # not forwarded to the actor: no runtime re-emits the caller's token, and
+      # a Session reaches muster with its Actor's JWT.
       passthrough: {}
     # No policies.http.version: agentgateway infers the backend protocol per
     # request — HTTP/2 (h2c) for gRPC, the original HTTP/1.1 for gRPC-Web —

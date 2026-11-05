@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (no runtime forwards the person's token)
+
+giantswarm/giantswarm#38993: the platform Harness no longer sets `KAGENT_PROPAGATE_TOKEN`. A Session reaches muster with its Actor's JWT, which needs muster to trust the actor JWT and agent-manager to bind the Session (on whenever Agent Substrate is on, from the release that carries `make verify-actor-bearer`). A Session nobody bound (one created through the kagent UI or the controller API, not agent-manager) gets no muster tools.
+
+### Operator action
+
+- **Upgrade to the release where muster trusts the actor JWT without workspaces first**, and confirm a Session started through agent-manager reaches muster as its Actor (muster logs `actor_bearer` accepted).
+- **An installation whose `kagent.harnesses[]` entries set `KAGENT_PROPAGATE_TOKEN`** (a claude or codex Harness): remove the variable from each entry's `env`. While it is set, that Harness's runtime still receives the person's token and forwards it to every MCP server of its agents.
+
 ## \<current\> → \<next\> (the tenants mode is removed)
 
 giantswarm/agent-platform#1268: `tenants.organizations` is refused by both charts' schemas. agent-manager's tenant reconciler no longer keeps the `org-<name>` namespaces, muster no longer serves their MCP servers, and no policy of the platform selects `giantswarm.io/organization`. Organizations are AgentPlatformOrganizations (`agentPlatformOrganizations.enabled`), each with an organization namespace `agents-<name>-<random>`.
