@@ -383,7 +383,12 @@ spec:
     agentPlatformOrganizations:
       apiHostnames: []
       enabled: false
+      fluxDecryptionSecret: sops-keys
       fluxNamespace: ""
+      fluxPathPrefix: ./agent-platform/organizations/
+      fluxSource:
+        kind: GitRepository
+        name: ""
     agentSandbox:
       podSecurity:
         containerSecurityContext:

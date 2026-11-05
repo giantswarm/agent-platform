@@ -165,9 +165,30 @@
                     "type": "boolean",
                     "description": "Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a model whose provider the listener serves (Anthropic, Mistral or OpenAI) and llmRouting.modelConfigPolicy.enabled on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain or apiHostnames: the render fails without them. The rollout gate: off by default for now (see above)."
                 },
+                "fluxDecryptionSecret": {
+                    "type": "string",
+                    "description": "The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption."
+                },
                 "fluxNamespace": {
                     "type": "string",
-                    "description": "The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), and the operator's erasure.fluxNamespace (derived). Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces."
+                    "description": "The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace, and the operator's erasure.fluxNamespace (derived); set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces."
+                },
+                "fluxPathPrefix": {
+                    "type": "string",
+                    "description": "The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies exactly this prefix, its parent and its name, from the labels the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise."
+                },
+                "fluxSource": {
+                    "type": "object",
+                    "description": "The installation's Flux source in fluxNamespace, which an organization's Kustomization applies from (agent-platform-operator's commitMode.sourceRef). The admission policy holds the operator's Kustomizations to this source. The name is required with fluxNamespace: the render fails without it.",
+                    "additionalProperties": false,
+                    "properties": {
+                        "kind": {
+                            "type": "string"
+                        },
+                        "name": {
+                            "type": "string"
+                        }
+                    }
                 }
             }
         },
