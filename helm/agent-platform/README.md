@@ -514,13 +514,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.17.5 <1.18.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.18.0 <1.19.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.17.5 <1.18.0"` |  |
+| components.substrate.versionRange | string | `">=1.18.0 <1.19.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -535,7 +535,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.upgradeRemediation.retries | int | `3` |  |
 | components.google-access-token-credential-provider.chart | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.google-access-token-credential-provider.versionRange | string | `">=0.2.0 <0.3.0"` |  |
+| components.google-access-token-credential-provider.versionRange | string | `">=0.3.0 <0.4.0"` |  |
 | components.google-access-token-credential-provider.valuesFrom | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.injectGlobal | bool | `false` |  |
 | components.google-access-token-credential-provider.targetNamespace | string | `"ate-system"` |  |
