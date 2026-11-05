@@ -13,8 +13,8 @@ STREAMABLE_HTTP, the toolset header X-Muster-Toolset in headersFrom and the
 discovery opt-out label kagent.dev/discovery=disabled while muster's OAuth is
 on — and binds it (docs/authentication.md, "Tool discovery by the kagent
 controller"). Nothing the platform renders for muster carries a static header:
-the caller token propagated by the Harness (KAGENT_PROPAGATE_TOKEN) is the only
-Authorization that reaches muster.
+the Session Actor's JWT, which the egress gateway injects on muster's host for a
+Session agent-manager bound, is the only Authorization that reaches muster.
 
 tokenSecret renders a static Authorization header for servers that need a
 credential of their own. The runtime applies static headersFrom values LAST, so

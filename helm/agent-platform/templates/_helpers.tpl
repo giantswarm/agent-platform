@@ -332,7 +332,7 @@ each session at its start (agent-manager 2.9.0, giantswarm/agent-manager#228). *
 {{- $bearer := (include "agent-platform.muster.credentialProvider" .root | fromJson).actorBearer | default dict -}}
 {{- $ownBearer := dig "muster" "actorBearer" nil (index .root.Values "agent-manager" | default dict) -}}
 {{- if and (not (kindIs "invalid" $ownBearer)) (ne (toString $ownBearer) (toString (and $bearer.enabled true))) -}}
-{{- fail (printf "agent-manager.muster.actorBearer (%v) differs from whether muster trusts the actor JWT (%v, muster.muster.credentialProvider.actorBearer.enabled with workspaces and Substrate on): agent-manager reports an agent's toolset as bound only where muster binds it; leave agent-manager.muster.actorBearer unset" $ownBearer (and $bearer.enabled true)) -}}
+{{- fail (printf "agent-manager.muster.actorBearer (%v) differs from whether muster trusts the actor JWT (%v, muster.muster.credentialProvider.actorBearer.enabled, on with Substrate): agent-manager reports an agent's toolset as bound only where muster binds it; leave agent-manager.muster.actorBearer unset" $ownBearer (and $bearer.enabled true)) -}}
 {{- end -}}
 {{- if $bearer.enabled -}}
 {{- include "agent-platform.validateToolsetBinding" .root -}}
@@ -715,11 +715,12 @@ and muster never turns Ready (giantswarm/agent-platform#309). */ -}}
 {{- $_ := set $muster "extraCaFile" (dict "secret" (dict "name" $ca.secretName "key" ($ca.key | default "ca.crt"))) -}}
 {{- $_ := set $derived "muster" $muster -}}
 {{- end -}}
-{{- /* muster's credential provider (agent-platform.muster.credentialProvider);
-without a releasable instance agent-platform.validateWorkspaceAuth has failed
-the render. */ -}}
+{{- /* muster's credential provider (agent-platform.muster.credentialProvider):
+the workspace instances it releases, or the actor bearer alone. With
+workspaces on and no releasable instance agent-platform.validateWorkspaceAuth
+has failed the render. */ -}}
 {{- $provider := include "agent-platform.muster.credentialProvider" .root | fromJson -}}
-{{- if $provider.releasable -}}
+{{- if or $provider.releasable (dig "actorBearer" "enabled" false $provider) -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $muster "credentialProvider" $provider -}}
 {{- $_ := set $derived "muster" $muster -}}
@@ -1453,10 +1454,14 @@ pin's own issuer and client Secret, so its grants stay filed where they are. */ 
 {{- end -}}
 
 {{/*
-muster's credential provider while workspaces and Substrate are on: muster
-answers the egress gateway's credential fetches for a workspace Session's
-provider hosts (ate-secret://muster.giantswarm.io/<provider instance>/<git|api>)
-and agent-manager's session bindings. muster serves FetchSecret on Substrate's
+muster's credential provider while Substrate and muster's OAuth server are on:
+muster answers agent-manager's session bindings and, with workspaces on, the
+egress gateway's credential fetches for a workspace Session's provider hosts
+(ate-secret://muster.giantswarm.io/<provider instance>/<git|api>). Without
+workspaces it releases nothing and serves the actor bearer alone, so every
+Session agent-manager starts calls muster with its Actor's JWT, never with the
+person's forwarded token; without the actor bearer there is nothing to serve
+and it emits {}. muster serves FetchSecret on Substrate's
 pod certificates, which only a cluster running Substrate issues, and answers
 the gateway's pod identity alone
 (spiffe://cluster.local/ns/<substrate targetNamespace>/sa/atenet-egress).
@@ -1474,18 +1479,22 @@ Service of the release `substrate`, https://idp.<substrate namespace>.svc), for
 muster's own audience (its oauth.server.baseUrl, the muster chart's default);
 only a binding that lists the reserved provider `muster` is served.
 muster.credentialProvider's own keys stand. muster refuses a credential
-provider that releases nothing, so an empty releasable fails the render
-(agent-platform.validateWorkspaceAuth). Emits JSON, {} with workspaces or
-Substrate off.
+provider that releases nothing, so with workspaces on an empty releasable
+fails the render (agent-platform.validateWorkspaceAuth). Emits JSON, {} with
+Substrate, muster or muster's OAuth server off, and without workspaces when
+the actor bearer is off.
 Usage: include "agent-platform.muster.credentialProvider" . | fromJson
 */}}
 {{- define "agent-platform.muster.credentialProvider" -}}
 {{- $provider := dict -}}
-{{- if and (.Values.workspaces | default dict).enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
+{{- $muster := dig "muster" dict (.Values.muster | default dict) | default dict -}}
+{{- $workspaces := (.Values.workspaces | default dict).enabled | default false -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) (or $workspaces (dig "oauth" "server" "enabled" false $muster)) -}}
 {{- $substrateNs := dig "substrate" "targetNamespace" "ate-system" (.Values.components | default dict) -}}
 {{- $own := dig "muster" "credentialProvider" dict (.Values.muster | default dict) | default dict -}}
 {{- $issuer := dig "ateApi" "actorJWTIssuer" "" (.Values.substrate | default dict) | default (printf "https://idp.%s.svc" $substrateNs) -}}
 {{- $provider = dict "enabled" true "gatewayIdentity" (printf "spiffe://cluster.local/ns/%s/sa/atenet-egress" $substrateNs) "actorBearer" (dict "enabled" true "issuer" $issuer) -}}
+{{- if $workspaces -}}
 {{- $releasable := dict -}}
 {{- $gitUsers := dict -}}
 {{- $pin := include "agent-platform.workspaceManager.musterPin" . | fromJson -}}
@@ -1498,11 +1507,15 @@ Usage: include "agent-platform.muster.credentialProvider" . | fromJson
 {{- end -}}
 {{- if $releasable -}}{{- $_ := set $provider "releasable" $releasable -}}{{- end -}}
 {{- if $gitUsers -}}{{- $_ := set $provider "gitUsers" $gitUsers -}}{{- end -}}
+{{- end -}}
 {{- $provider = mergeOverwrite $provider $own -}}
 {{- /* mergeOverwrite never lets a false win: an own actorBearer.enabled: false turns it off. */ -}}
 {{- $ownBearer := $own.actorBearer | default dict -}}
 {{- if and (kindIs "map" $ownBearer) (hasKey $ownBearer "enabled") -}}
 {{- $_ := set $provider.actorBearer "enabled" $ownBearer.enabled -}}
+{{- end -}}
+{{- if not (or $workspaces $provider.releasable $provider.actorBearer.enabled) -}}
+{{- $provider = dict -}}
 {{- end -}}
 {{- end -}}
 {{- $provider | toJson -}}
@@ -1604,7 +1617,7 @@ Emits nothing; fails naming the key and the fix.
 {{- define "agent-platform.validateChatGPTPersonalLogin" -}}
 {{- with (include "agent-platform.chatgpt.personalLogin" . | fromJson) -}}
 {{- $what := printf "kagent.modelConfigs %s (credentialType chatgptOAuth without apiKeySecret) is a person's own ChatGPT login" (join ", " .models) -}}
-{{- if not (include "agent-platform.muster.credentialProvider" $ | fromJson).enabled -}}
+{{- if not (and ($.Values.workspaces | default dict).enabled (include "agent-platform.muster.credentialProvider" $ | fromJson).enabled) -}}
 {{- fail (printf "%s, which muster releases to the egress gateway through its credential provider for a Session bound to the person, but the credential provider is off: set workspaces.enabled with components.substrate.enabled, or give the entry apiKeySecret (the installation's own login)" $what) -}}
 {{- end -}}
 {{- if not (include "agent-platform.kagent.sessionAdmission" $ | fromJson) -}}
@@ -1758,7 +1771,7 @@ must admit only releases that do. Emits nothing; fails naming the key and the fi
 {{- $range := dig $name "versionRange" "" $.Values.components -}}
 {{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
 {{- if lt ((semver $have).Compare (semver $floor)) 0 -}}
-{{- fail (printf "components.%s.versionRange %q admits a release below %s: while muster trusts the actor JWT (muster.muster.credentialProvider.actorBearer with workspaces and Substrate on), agent-manager 2.9.0 binds every Session with the agent's toolset and muster 5.49.0 stores it — an older agent-manager chart refuses muster.actorBearer, an older muster refuses the binding and the Session does not start; move the floor to %s or later" $name $range $floor $floor) -}}
+{{- fail (printf "components.%s.versionRange %q admits a release below %s: while muster trusts the actor JWT (muster.muster.credentialProvider.actorBearer, on with Substrate), agent-manager 2.9.0 binds every Session with the agent's toolset and muster 5.49.0 stores it — an older agent-manager chart refuses muster.actorBearer, an older muster refuses the binding and the Session does not start; move the floor to %s or later" $name $range $floor $floor) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -5122,14 +5135,13 @@ role name and -operator (organization-erasure/crossplane-aws.yaml). */ -}}
 {{- $erasure := dict
       "fluxNamespace" (dig "fluxNamespace" "" (.Values.agentPlatformOrganizations | default dict))
       "kagent" (dict "target" (include "agent-platform.kagent.controllerAddress" .) "audience" (include "agent-platform.kagent.tokenAudience" .))
-      "substrate" (dict "target" (printf "grpcs://api.%s.svc:443" $ateNs) "audience" (printf "api.%s.svc" $ateNs) "caConfigMap" (dict "name" "agent-platform-operator-ate-api-ca" "key" "ca.crt")) -}}
+      "substrate" (dict "target" (printf "grpcs://api.%s.svc:443" $ateNs) "audience" (printf "api.%s.svc" $ateNs) "caClusterTrustBundle" (dict "signerName" "servicedns.podcert.ate.dev/identity" "matchLabels" (dict "podcert.ate.dev/canarying" "live"))) -}}
 {{- $_ := set $derived "erasure" $erasure -}}
 {{- $own := index .Values "agent-platform-operator" | default dict -}}
-{{- /* Commit mode needs the ClusterRole agent-platform:organization-flux and
-the Flux-namespace policy pins that the operator's commit mode writes against;
-this chart wires neither yet. */ -}}
+{{- /* The chart derives no commit mode for the operator (its source, path and
+installation Kustomization), so an own one is refused. */ -}}
 {{- if hasKey $own "commitMode" -}}
-{{- fail "agent-platform-operator.commitMode is set: commit mode is not wired by this chart yet (the operator would bind agent-platform:organization-flux, which this chart does not render); remove agent-platform-operator.commitMode" -}}
+{{- fail "agent-platform-operator.commitMode is set: this chart does not derive the operator's commit mode yet; remove agent-platform-operator.commitMode" -}}
 {{- end -}}
 {{- include "agent-platform.operator.checkOwn" (dict "own" $own "derived" $derived "path" "agent-platform-operator") -}}
 {{- $derived | toJson -}}

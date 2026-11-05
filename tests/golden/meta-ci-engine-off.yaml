@@ -67,6 +67,7 @@ spec:
     mcp:
       enabled: true
     muster:
+      actorBearer: true
       mcpServer:
         auth:
           forwardToken: true
@@ -232,7 +233,12 @@ spec:
     agentPlatformOrganizations:
       apiHostnames: []
       enabled: false
+      fluxDecryptionSecret: sops-keys
       fluxNamespace: ""
+      fluxPathPrefix: ./agent-platform/organizations/
+      fluxSource:
+        kind: GitRepository
+        name: ""
     agentSandbox:
       podSecurity:
         containerSecurityContext:
@@ -708,6 +714,8 @@ spec:
           urlFile: /etc/kagent-db/uri
           vectorEnabled: true
           vectorSchema: public
+      defaultModelConfig:
+        enabled: true
       fluxServiceAccountName: kagent-flux
       fullnameOverride: kagent
       grafana-mcp:
@@ -717,9 +725,7 @@ spec:
           eventRetentionSize: 4
           tokenThreshold: 600000
         create: true
-        env:
-        - name: KAGENT_PROPAGATE_TOKEN
-          value: "true"
+        env: []
         image: ""
         snapshotLocation: s3://ci-agent-snapshots/agents
         snapshotStore:
@@ -2014,9 +2020,7 @@ spec:
         eventRetentionSize: 4
         tokenThreshold: 600000
       create: true
-      env:
-      - name: KAGENT_PROPAGATE_TOKEN
-        value: "true"
+      env: []
       snapshotLocation: s3://ci-agent-snapshots/agents
     harnesses: []
     namespaceOverride: kagent
@@ -2406,10 +2410,12 @@ spec:
   install:
     createNamespace: true
     crds: CreateReplace
+    disableWait: true
     remediation:
       retries: 5
   upgrade:
     crds: CreateReplace
+    disableWait: true
     remediation:
       retries: 5
   driftDetection:
@@ -2457,6 +2463,12 @@ spec:
     image:
       registry: gsoci.azurecr.io
     muster:
+      credentialProvider:
+        actorBearer:
+          enabled: true
+          issuer: https://idp.ate-system.svc
+        enabled: true
+        gatewayIdentity: spiffe://cluster.local/ns/ate-system/sa/atenet-egress
       oauth:
         server:
           baseUrl: ""

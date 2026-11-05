@@ -160,13 +160,14 @@ def check_meta(chart):
     expect(e["kagent"] == {"target": "grpc://kagent-controller.kagent.svc:8083", "audience": "kagent"},
            "the erasure reaches the kagent controller's API Service with kagent's machine audience")
     expect(e["substrate"] == {"target": "grpcs://api.ate-system.svc:443", "audience": "api.ate-system.svc",
-                              "caConfigMap": {"name": "agent-platform-operator-ate-api-ca", "key": "ca.crt"}},
-           "the erasure reaches ate-api with the audience its authentication config accepts and the CA the bootstrap hook publishes")
+                              "caClusterTrustBundle": {"signerName": "servicedns.podcert.ate.dev/identity",
+                                                       "matchLabels": {"podcert.ate.dev/canarying": "live"}}},
+           "the erasure reaches ate-api with the audience its authentication config accepts and trusts the ClusterTrustBundles its serving certificate's signer publishes")
     hook = [d for d in docs(connectivity(f"{chart}/../agent-platform-connectivity")) if d["kind"] == "Job" and "substrate-bootstrap" in d["metadata"]["name"]]
-    script = yaml.safe_dump(hook)
-    expect(hook and f"create configmap \"{e['substrate']['caConfigMap']['name']}\" --from-file={e['substrate']['caConfigMap']['key']}=" in script.replace("\\\"", "\"")
-           and f"-n \"{op['targetNamespace']}\"" in script.replace("\\\"", "\""),
-           "the bootstrap hook writes the CA ConfigMap and key the operator mounts, in the operator's namespace")
+    script = "\n".join(arg for d in hook for c in d["spec"]["template"]["spec"]["containers"] for arg in c.get("command", []) + c.get("args", []))
+    expect(hook and 'trust_bundle "$pc_ns" service-dns-ca-pool servicedns.podcert.ate.dev/identity' in script
+           and "agent-platform-operator-ate-api-ca" not in script,
+           "the bootstrap hook publishes the signer's ClusterTrustBundle the operator projects, and copies no CA ConfigMap")
     expect(find(docs(connectivity(f"{chart}/../agent-platform-connectivity")), "ClusterRole", "agent-platform-tenant-flux") is not None,
            "on, the connectivity chart renders agent-platform-tenant-flux, which the operator binds")
     am = release(on, "agent-manager")["values"]

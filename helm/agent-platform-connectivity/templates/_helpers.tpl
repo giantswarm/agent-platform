@@ -948,6 +948,14 @@ under the Gateway's own name.
 {{- end -}}
 
 {{/*
+The annotation that marks a namespace's default ModelConfig, value "true".
+More than one marked ModelConfig in a namespace means no default.
+*/}}
+{{- define "agent-platform.defaultModelConfigAnnotation" -}}
+agent-platform.giantswarm.io/is-default-model-config
+{{- end -}}
+
+{{/*
 The spec.provider of a kagent.modelConfigs[] entry, checked against the
 ModelConfig CRD's enum (api.kagent.dev/v1alpha3). The enum is case-sensitive and
 the API server refuses any other value at admission, after the render has said

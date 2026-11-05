@@ -107,11 +107,14 @@ KEPT_CRDS = KAGENT_CRDS | SUBSTRATE_CRDS
 # The cluster-scoped SandboxConfig the substrate chart renders — the CR whose
 # vanished kind failed the substrate uninstall before the CRDs were kept.
 SANDBOX_CONFIG = "gvisor-default"
-# The chart's default ModelConfig every agent of the smoke starts from, and the
-# provider Secret it references: a placeholder key is enough for a template to
-# reach Ready (Ready means the Harness booted the actor's golden snapshot, not
-# that a model answered).
-MODEL_CONFIG = "default-model-config"
+# The ModelConfig every agent of the smoke binds: values-kagent.yaml's
+# kagent.modelConfigs entry marked default, and the provider Secret it
+# references: a placeholder key is enough for a template to reach Ready (Ready
+# means the Harness booted the actor's golden snapshot, not that a model
+# answered). kagent's own default-model-config is off there.
+MODEL_CONFIG = "ats-model"
+KAGENT_DEFAULT_MODEL_CONFIG = "default-model-config"
+DEFAULT_MODEL_ANNOTATION = "agent-platform.giantswarm.io/is-default-model-config"
 PLACEHOLDER_PROVIDER_SECRET = {"name": "kagent-anthropic", "key": "ANTHROPIC_API_KEY"}
 # The Generic agent chart, 1.x = kagent API v2 (0.x rendered the retired Agent).
 AGENT_CHART_URL = "oci://gsoci.azurecr.io/charts/giantswarm/agent"
@@ -729,7 +732,7 @@ def wait_for_namespaces_settled(kube: Kube, *namespaces: str, timeout: float = 3
 
 
 def apply_placeholder_provider_secret(kube: Kube) -> None:
-    """The Secret the chart's default ModelConfig references, with a placeholder
+    """The Secret the smoke's ModelConfig references, with a placeholder
     key: enough for the controller to resolve the ModelConfig and for a template
     to reach Ready (no model is called)."""
     kube.apply({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": PLACEHOLDER_PROVIDER_SECRET["name"], "namespace": KAGENT_NAMESPACE},

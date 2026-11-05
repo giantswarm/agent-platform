@@ -752,6 +752,7 @@ components:  # @schema additionalProperties: true
       # The store block is this chart's and the connectivity chart's: the kagent
       # chart gets the derived harness.snapshotLocation, never the block.
       - harness.snapshotStore
+      - defaultModelConfig
       - modelConfigs
       - oauth2ProxyIngress
       - remoteMcpServers
@@ -858,7 +859,7 @@ components:  # @schema additionalProperties: true
     # each actor's DNS queries (ate_actor_stats_dns_queries_total); from
     # 1.13.0 ate-idp-server serves the actor-JWT issuer
     # (https://idp.<namespace>.svc) muster verifies a Session's actor JWT
-    # against (muster.credentialProvider.actorBearer, with workspaces on).
+    # against (muster.credentialProvider.actorBearer, on with Substrate).
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
     versionRange: ">=1.17.5 <1.18.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
@@ -1300,10 +1301,10 @@ components:  # @schema additionalProperties: true
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # Pinned exactly, not a range: the operator's image and its CRD (CreateReplace)
     # move only with a change here, and a release that needs more wiring
-    # (commit mode, agent-platform-operator#10) never rolls in before the
-    # wiring does. 0.1.0-rc.5 carries the CRD, the curated copies and the
-    # erasure (agent-platform-operator#2, #3, #7).
-    versionRange: "0.1.0-rc.5"
+    # never rolls in before the wiring does. 0.1.0-rc.11 carries the CRD, the
+    # curated copies, the erasure and the ate-api CA projected from
+    # ClusterTrustBundles (agent-platform-operator#2, #3, #7, #21).
+    versionRange: "0.1.0-rc.11"
     valuesFrom: agent-platform-operator
     # App-owned CRD: the chart ships agentplatformorganizations in its crds/
     # dir. CreateReplace makes Flux upgrade it with the app on every release
@@ -3470,6 +3471,16 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         promptCaching: true
         cacheTTL: "5m"
 
+  # The kagent chart's own default ModelConfig (default-model-config, rendered
+  # from providers). false writes providers: false to the kagent release, so the
+  # kagent chart renders no default ModelConfig and deletes the one it rendered:
+  # an Agent or agent HelmRelease that names default-model-config no longer
+  # resolves its model. Before turning it off, mark a kagent.modelConfigs entry
+  # `default: true` and point the agents at it. providers.anthropic.config stays
+  # what the connectivity chart's Anthropic modelConfigs entries inherit.
+  defaultModelConfig:
+    enabled: true
+
   # OTel — traces and logs to the collector global.observability.traces.otlp
   # names, in the kagent chart's SDK-spec shape: the controller exports with
   # these settings and compiles them into every actor (OTEL_EXPORTER_OTLP_*,
@@ -3799,18 +3810,17 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           accountKeySecretRef:
             name: ""
             key: ""
-    # The Harness's environment. KAGENT_PROPAGATE_TOKEN makes the Go ADK re-emit
-    # the caller's bearer on its MCP calls, so muster sees the person, not the
-    # platform. OTEL_EXPORTER_OTLP_HEADERS is the tenant header of the OTLP
-    # gateway kagent.otel names: the controller compiles the rest of the
-    # actors' telemetry settings from kagent.otel and passes this one through
-    # from the Harness, like the controller's own copy (kagent.controller.env).
-    # The meta chart drops it when both exporters resolve off (auto: no
-    # observability platform). Nothing else today (a per-namespace skills
-    # credential is a later, separate decision).
+    # The Harness's environment. OTEL_EXPORTER_OTLP_HEADERS is the tenant
+    # header of the OTLP gateway kagent.otel names: the controller compiles the
+    # rest of the actors' telemetry settings from kagent.otel and passes this
+    # one through from the Harness, like the controller's own copy
+    # (kagent.controller.env). The meta chart drops it when both exporters
+    # resolve off (auto: no observability platform). No KAGENT_PROPAGATE_TOKEN:
+    # a runtime never re-emits the caller's token on its MCP calls, so the
+    # controller hands it none, and a Session reaches muster with its Actor's
+    # JWT, which the egress gateway injects on muster's host for every Session
+    # agent-manager starts and binds (muster.credentialProvider.actorBearer).
     env:
-      - name: KAGENT_PROPAGATE_TOKEN
-        value: "true"
       - name: OTEL_EXPORTER_OTLP_HEADERS
         value: auto
 
@@ -3963,10 +3973,13 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # Additional ModelConfig CRs — the model catalog beyond the
   # default-model-config the kagent chart creates from providers.anthropic.
   # An AgentTemplate references a ModelConfig by name (spec.modelConfig).
-  # The apiKeySecret must be pre-created in the kagent namespace.
+  # The apiKeySecret must be pre-created in the kagent namespace. `default: true`
+  # annotates the entry agent-platform.giantswarm.io/is-default-model-config:
+  # "true", the namespace's default model; at most one entry may set it.
   modelConfigs: []
   # - name: anthropic-sonnet
   #   displayName: Anthropic Sonnet 4.6
+  #   default: true
   #   provider: Anthropic
   #   model: claude-sonnet-4-6
   #   apiKeySecret: kagent-anthropic
@@ -4027,15 +4040,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # - name: claude
   #   runtime: claude
   #   snapshotLocation: s3://<bucket>/claude
-  #   env:
-  #     - name: KAGENT_PROPAGATE_TOKEN          # tool calls to muster as the person
-  #       value: "true"
   # - name: codex
   #   runtime: codex
   #   snapshotLocation: s3://<bucket>/codex
-  #   env:
-  #     - name: KAGENT_PROPAGATE_TOKEN
-  #       value: "true"
   # - name: omp
   #   runtime: byo
   #   displayName: oh-my-pi
@@ -5583,18 +5590,17 @@ tenants:
 #     organization's UID prefix of the bucket only, named on the operator's
 #     ServiceAccount (IRSA). The capz and s3proxy stores give the operator no
 #     snapshot access yet: there the erasure stops at the snapshots' step;
-#   - the ConfigMap agent-platform-operator-ate-api-ca (the substrate bootstrap
-#     hook), ate-api-server's serving roots, which the operator verifies it
-#     with.
+#   - ate-api-server's serving roots, which the operator verifies it with:
+#     the ClusterTrustBundles of servicedns.podcert.ate.dev/identity
+#     labelled podcert.ate.dev/canarying: live, projected into its pod.
 # The operator's own values are the agent-platform-operator block below.
 # agent-manager's chart keeps its tenants.enabled off: its tenant reconciler is
 # gone (tenants.organizations, the namespaces labelled giantswarm.io/organization,
 # is removed; giantswarm/agent-platform#1268), and the connectivity chart renders
 # the ClusterRole agent-platform-tenant-flux the operator binds.
 # The switch is the rollout gate, off by default for now: it turns on by default
-# once the capz and s3proxy snapshot stores give the operator access, the kagent
-# line carries giantswarm/kagent-extensions#27, and an operator release with
-# giantswarm/agent-platform-operator#10 (commit mode) is the range's floor.
+# once the capz and s3proxy snapshot stores give the operator access and the
+# kagent line carries giantswarm/kagent-extensions#27.
 # Before you turn this on in an installation: the kagent line must carry
 # giantswarm/kagent-extensions#27 (kagent reviews a delete of another
 # creator's Session as a cluster-wide `delete`); until it does, the erasure of
@@ -5612,10 +5618,33 @@ agentPlatformOrganizations:
   enabled: false
   # -- The namespace of the installation's Flux source, where the operator
   # keeps an organization's Kustomization and Flux ServiceAccount (commit
-  # mode), and the operator's erasure.fluxNamespace (derived). Empty: the
-  # operator writes no Kustomization and no ServiceAccount outside the
+  # mode), both named after the organization namespace, the Kustomization
+  # running as that ServiceAccount into that namespace, and the operator's
+  # erasure.fluxNamespace (derived); set, the ClusterRole
+  # agent-platform:organization-flux renders for the ServiceAccount. Empty:
+  # the operator writes no Kustomization and no ServiceAccount outside the
   # organization namespaces.
   fluxNamespace: ""
+  # -- The installation's Flux source in fluxNamespace, which an
+  # organization's Kustomization applies from (agent-platform-operator's
+  # commitMode.sourceRef). The admission policy holds the operator's
+  # Kustomizations to this source. The name is required with fluxNamespace:
+  # the render fails without it.
+  fluxSource:
+    kind: GitRepository
+    name: ""
+  # -- The start of every organization's path in the installation's source
+  # (the fixed part of agent-platform-operator's commitMode.path, which must
+  # be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies
+  # exactly this prefix, its parent and its name, from the labels the
+  # operator writes on it. ./<segments>/ with no empty, . or .. segment; the
+  # render fails otherwise.
+  fluxPathPrefix: ./agent-platform/organizations/
+  # -- The installation's SOPS key Secret in fluxNamespace
+  # (agent-platform-operator's commitMode.decryptionSecret): the only Secret
+  # an organization's Kustomization may decrypt with. Empty: none may set
+  # spec.decryption.
+  fluxDecryptionSecret: sops-keys
   # -- The installation's Kubernetes API hostnames beside api.<global.domain>,
   # which is derived while global.domain is set: an EgressPolicy in an
   # organization namespace may not name them, nor a wildcard origin that
@@ -5641,8 +5670,9 @@ agentPlatformOrganizations:
 # store's region); erasure.fluxNamespace (agentPlatformOrganizations.fluxNamespace);
 # erasure.kagent.target and .audience (the kagent controller's API Service and
 # the controller's machine audience); erasure.substrate.target, .audience and
-# .caConfigMap (ate-api-server's Service, the audience its authentication
-# config accepts, and the ConfigMap with its serving roots); and, with the
+# .caClusterTrustBundle (ate-api-server's Service, the audience its
+# authentication config accepts, and the signer and labels of the
+# ClusterTrustBundles with its serving roots); and, with the
 # Crossplane AWS snapshot store, serviceAccount.annotations
 # eks.amazonaws.com/role-arn (the role <store role>-operator). Everything
 # else (erasure.snapshotDelay, objectQuota, syncPeriod, resources, image) is

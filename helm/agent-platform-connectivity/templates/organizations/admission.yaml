@@ -18,9 +18,20 @@ these.
     writes RoleBindings only in organization namespaces, ServiceAccounts only
     there or in agentPlatformOrganizations.fluxNamespace, and Kustomizations
     only in fluxNamespace; there only objects labelled
-    agent-platform.giantswarm.io/organization-uid, before and after the write,
-    and a Kustomization names a spec.serviceAccountName for Flux to
-    impersonate.
+    agent-platform.giantswarm.io/organization-uid, before and after the write.
+    A Kustomization there is the organization's own (giantswarm/giantswarm#38989):
+    named agents-*, it names its own name in spec.serviceAccountName (the
+    organization's Flux ServiceAccount, which Flux impersonates) and in
+    spec.targetNamespace (the organization namespace). The operator names
+    both after the organization namespace; a policy cannot read another
+    namespace's labels, so the pin is that name. It applies its own path,
+    fluxPathPrefix + <parent>/<organization> from the labels the operator
+    writes on it, from the installation's source (fluxSource,
+    its name required with fluxNamespace) and decrypts with its key
+    (fluxDecryptionSecret) only, and sets no kubeConfig, postBuild
+    substituteFrom, patches or components: kustomize-controller acts on those
+    as itself. The operator binds a ServiceAccount of fluxNamespace to
+    agent-platform:organization-flux only.
   * agent-platform-organization-labels: only the operator's ServiceAccount
     sets, changes or removes the three organization labels of a namespace, on
     CREATE and UPDATE. kagent's authorization, Substrate's credential grants
@@ -34,12 +45,24 @@ these.
     organization-admins of an organization namespace binds agent-platform:admin
     to at least one subject; it is not deleted or emptied while the namespace
     is not terminating. A policy cannot count the other admin bindings, so
-    this one name is held; a lockout is a cluster-admin's to fix.
+    this one name is held; a lockout is a cluster-admin's to fix. Applied
+    from git (labelled kustomize.toolkit.fluxcd.io/name), it carries
+    kustomize.toolkit.fluxcd.io/prune: disabled: Flux never prunes it, and the
+    namespace's deletion removes it.
   * agent-platform-organization-rolebinding-subjects: a RoleBinding in an
     organization namespace binds no system:* group or user and no
     ServiceAccount of another namespace, whoever writes it; only the operator
-    binds a ServiceAccount of fluxNamespace (the organization's Flux
-    ServiceAccount).
+    binds a ServiceAccount of fluxNamespace, and only the one named after the
+    binding's namespace (the organization's Flux ServiceAccount).
+  * agent-platform-organization-flux-writes: what an organization's Flux
+    ServiceAccount (agents-* in fluxNamespace, not the operator) writes in an
+    organization namespace: a RoleBinding binds the ClusterRole
+    agent-platform:user, editor or admin (RBAC lets an identity bind any role
+    whose rules it holds without `bind`, agent-platform:organization-flux
+    itself among them, which reads every Secret of the namespace); it changes
+    or deletes only a RoleBinding its own Kustomization applied (labelled
+    kustomize.toolkit.fluxcd.io/name with its name), never organization-admins
+    or another binding people wrote; and a Secret is no ServiceAccount token.
   * agent-platform-organization-helmreleases: for every requester but the
     operator, an organization's Flux ServiceAccount included, a HelmRelease in
     an organization namespace installs the agent chart from the namespace's
@@ -85,6 +108,20 @@ controllers) is the same pair of policies as a tenant's
 {{- $objectLabel := include "agent-platform.organizations.objectLabel" . }}
 {{- $copiedFrom := include "agent-platform.organizations.copiedFromAnnotation" . }}
 {{- $fluxNs := $values.fluxNamespace | default "" }}
+{{- $fluxSource := $values.fluxSource | default dict }}
+{{- $fluxSourceKind := $fluxSource.kind | default "GitRepository" }}
+{{- $fluxSourceName := "" }}
+{{- if $fluxNs }}
+{{- $fluxSourceName = required "agentPlatformOrganizations.fluxSource.name is required with fluxNamespace: the operator's Kustomizations apply from that source only (agent-platform-operator's commitMode.sourceRef.name)" $fluxSource.name }}
+{{- end }}
+{{- $fluxPathPrefix := $values.fluxPathPrefix | default "" }}
+{{- if and $fluxNs (not (regexMatch "^\\./([^/.][^/]*/)+$" $fluxPathPrefix)) }}
+{{- fail (printf "agentPlatformOrganizations.fluxPathPrefix %q must be a path of the source that starts with ./ and ends with /, with no empty, . or .. segment: an organization's path is the prefix, its parent and its name" $fluxPathPrefix) }}
+{{- end }}
+{{- $orgLabel := include "agent-platform.organizations.label" . }}
+{{- $parentLabel := "agent-platform.giantswarm.io/parent" }}
+{{- $segment := "[a-z0-9]([-a-z0-9]*[a-z0-9])?" }}
+{{- $fluxKey := $values.fluxDecryptionSecret | default "" }}
 {{- $helmSA := required "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: an organization's HelmReleases run as it" (include "agent-platform.kagent.fluxServiceAccountName" .) }}
 {{- $chartSource := include "agent-platform.organizations.chartSource" . }}
 {{- $collectors := "['system:serviceaccount:kube-system:namespace-controller', 'system:serviceaccount:kube-system:generic-garbage-collector']" }}
@@ -173,6 +210,18 @@ spec:
     - expression: "request.resource.resource != 'rolebindings' || variables.organizationNamespace"
       reason: Forbidden
       messageExpression: "'the agent-platform-operator writes RoleBindings only in organization namespaces; refused in ' + request.namespace"
+    {{- if $fluxNs }}
+    # The organization's Flux ServiceAccount gets agent-platform:organization-flux
+    # and nothing else: every merged file runs with what it is bound to.
+    - expression: >-
+        request.resource.resource != 'rolebindings' || request.operation == 'DELETE' ||
+        !(has(object.subjects) ? object.subjects : []).exists(s, s.kind == 'ServiceAccount' && has(s.namespace) && s.namespace == {{ squote $fluxNs }}) ||
+        (object.roleRef.kind == 'ClusterRole' && object.roleRef.name == 'agent-platform:organization-flux')
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'the agent-platform-operator binds a ServiceAccount of %s to the ClusterRole agent-platform:organization-flux only; refused: '" $fluxNs }} +
+        request.namespace + '/' + object.metadata.name + ' to ' + object.roleRef.kind + ' ' + object.roleRef.name
+    {{- end }}
     - expression: "request.resource.resource != 'serviceaccounts' || variables.organizationNamespace || variables.organizationObject"
       reason: Forbidden
       messageExpression: {{ printf "'the agent-platform-operator writes ServiceAccounts only in organization namespaces%s; refused: ' + request.namespace + '/' + request.name" (ternary (printf " and, labelled %s, in %s" $uidLabel $fluxNs) "" (ne $fluxNs "")) | quote }}
@@ -181,14 +230,83 @@ spec:
       messageExpression: {{ printf "'the agent-platform-operator writes %s; refused: ' + request.namespace + '/' + request.name" (ternary (printf "only Kustomizations labelled %s in %s" $uidLabel $fluxNs) "no Kustomization (agentPlatformOrganizations.fluxNamespace is empty)" (ne $fluxNs "")) | quote }}
     # Flux impersonates spec.serviceAccountName; without one, or with a Flux
     # controller's own, kustomize-controller applies with a controller's
-    # identity.
+    # identity. The organization's Flux ServiceAccount and namespace carry
+    # the Kustomization's name, agents-<organization>-*: a Flux controller's
+    # name is never one.
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
-        (has(object.spec) && has(object.spec.serviceAccountName) && object.spec.serviceAccountName != '' &&
-        !(object.spec.serviceAccountName in ['kustomize-controller', 'helm-controller', 'source-controller', 'notification-controller',
-        'image-reflector-controller', 'image-automation-controller', 'source-watcher']))
+        object.metadata.name.startsWith('agents-')
       reason: Forbidden
-      messageExpression: "'a Kustomization of the agent-platform-operator names the organization Flux ServiceAccount in spec.serviceAccountName; refused: ' + request.namespace + '/' + request.name"
+      messageExpression: "'a Kustomization of the agent-platform-operator is an organization Kustomization, named agents-<organization>-*; refused: ' + request.namespace + '/' + object.metadata.name"
+    - expression: >-
+        request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
+        (has(object.spec) && has(object.spec.serviceAccountName) && object.spec.serviceAccountName == object.metadata.name)
+      reason: Forbidden
+      messageExpression: >-
+        'a Kustomization of the agent-platform-operator runs as the organization Flux ServiceAccount, spec.serviceAccountName ' +
+        object.metadata.name + '; refused: ' + request.namespace + '/' + object.metadata.name +
+        ' with ' + (has(object.spec) && has(object.spec.serviceAccountName) ? object.spec.serviceAccountName : 'none')
+    - expression: >-
+        request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
+        (has(object.spec) && has(object.spec.targetNamespace) && object.spec.targetNamespace == object.metadata.name)
+      reason: Forbidden
+      messageExpression: >-
+        'a Kustomization of the agent-platform-operator applies into the organization namespace, spec.targetNamespace ' +
+        object.metadata.name + '; refused: ' + request.namespace + '/' + object.metadata.name +
+        ' with ' + (has(object.spec) && has(object.spec.targetNamespace) ? object.spec.targetNamespace : 'none')
+    # kustomize-controller acts on these fields with its own identity, not the
+    # impersonated one: a kubeConfig Secret and the postBuild substituteFrom
+    # objects it reads, patches and components it builds in. None may bring
+    # the Flux namespace's Secrets into an organization or apply elsewhere.
+    # What a path's kustomization.yaml loads is beyond these pins: a file of
+    # another path, which the installation's key decrypts
+    # (giantswarm/agent-platform-operator#15, a source or a key per
+    # organization; giantswarm/giantswarm#39013, a CI check refusing ..),
+    # and remote bases, which kustomize-controller fetches unless it runs with
+    # --no-remote-bases (giantswarm/flux-app#384).
+    - expression: >-
+        request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
+        !has(object.spec) || (!has(object.spec.kubeConfig) && !(has(object.spec.postBuild) && has(object.spec.postBuild.substituteFrom)) &&
+        !has(object.spec.patches) && !has(object.spec.components))
+      reason: Forbidden
+      messageExpression: "'a Kustomization of the agent-platform-operator sets none of spec.kubeConfig, spec.postBuild.substituteFrom, spec.patches and spec.components; refused: ' + request.namespace + '/' + object.metadata.name"
+    # The source it fetches and the key it decrypts with, both read by
+    # kustomize-controller as itself: the installation's
+    # (agentPlatformOrganizations.fluxSource and fluxDecryptionSecret, the
+    # operator's commitMode.sourceRef and decryptionSecret).
+    - expression: >-
+        request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
+        (has(object.spec) && has(object.spec.sourceRef) && object.spec.sourceRef.kind == {{ squote $fluxSourceKind }} &&
+        (!has(object.spec.sourceRef.namespace) || object.spec.sourceRef.namespace == {{ squote $fluxNs }}) &&
+        object.spec.sourceRef.name == {{ squote $fluxSourceName }})
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'a Kustomization of the agent-platform-operator applies from the installation source %s %s/%s; refused: '" $fluxSourceKind $fluxNs $fluxSourceName }} +
+        request.namespace + '/' + object.metadata.name
+    # Its own organization's path only: the prefix, then the parent and the
+    # name the operator labels it with (two DNS labels, so no `.`, `..` or
+    # empty segment). One organization's Kustomization never applies the
+    # organizations' root, a whole parent, another organization's path or the
+    # installation's.
+    - expression: >-
+        request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
+        (has(object.spec) && has(object.spec.path) &&
+        object.spec.path.matches({{ printf "r'^%s%s/%s$'" (regexQuoteMeta $fluxPathPrefix) $segment $segment }}) &&
+        has(object.metadata.labels) && {{ squote $parentLabel }} in object.metadata.labels && {{ squote $orgLabel }} in object.metadata.labels &&
+        object.spec.path == {{ squote $fluxPathPrefix }} + object.metadata.labels[{{ squote $parentLabel }}] + '/' + object.metadata.labels[{{ squote $orgLabel }}])
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'a Kustomization of the agent-platform-operator applies its organization path, %s<%s>/<%s>; refused: '" $fluxPathPrefix $parentLabel $orgLabel }} +
+        request.namespace + '/' + object.metadata.name + ' with ' + (has(object.spec) && has(object.spec.path) ? object.spec.path : 'none')
+    - expression: >-
+        request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
+        !has(object.spec) || !has(object.spec.decryption){{ if $fluxKey }} ||
+        (has(object.spec.decryption.secretRef) && object.spec.decryption.secretRef.name == {{ squote $fluxKey }} &&
+        !has(object.spec.decryption.serviceAccountName)){{ end }}
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'a Kustomization of the agent-platform-operator decrypts %s; refused: '" (ternary (printf "with the installation key %s only" $fluxKey) "nothing (agentPlatformOrganizations.fluxDecryptionSecret is empty)" (ne $fluxKey "")) }} +
+        request.namespace + '/' + object.metadata.name
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -313,6 +431,21 @@ spec:
     - expression: "request.operation == 'DELETE' || (object.roleRef.kind == 'ClusterRole' && object.roleRef.name == 'agent-platform:admin')"
       reason: Forbidden
       messageExpression: "'the RoleBinding organization-admins of an organization namespace binds the ClusterRole agent-platform:admin, not ' + object.roleRef.kind + ' ' + object.roleRef.name"
+    # Applied from git (commit mode: the first admins are a file of the
+    # organization's path), it carries Flux's prune: disabled, on create and
+    # on every update. Flux then never prunes it, which the first rule would
+    # refuse while the namespace lives: the organization's Kustomization,
+    # which the erasure deletes first and waits for, would keep its finalizer
+    # for good. The namespace's deletion removes the binding.
+    - expression: >-
+        request.operation == 'DELETE' ||
+        !(has(object.metadata.labels) && 'kustomize.toolkit.fluxcd.io/name' in object.metadata.labels) ||
+        (has(object.metadata.annotations) && 'kustomize.toolkit.fluxcd.io/prune' in object.metadata.annotations &&
+        object.metadata.annotations['kustomize.toolkit.fluxcd.io/prune'] == 'disabled')
+      reason: Forbidden
+      messageExpression: >-
+        'the RoleBinding organization-admins applied from git carries kustomize.toolkit.fluxcd.io/prune: disabled, so the erasure of its organization never waits on its prune; refused: ' +
+        request.operation + ' in ' + request.namespace
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -343,13 +476,13 @@ spec:
   variables:
     # A system: identity (a group or a user) other than a ServiceAccount of
     # this namespace, or a ServiceAccount of another namespace: for the
-    # operator, but one of the Flux namespace, the organization's Flux
-    # ServiceAccount.
+    # operator, but the one of the Flux namespace named after this
+    # namespace, the organization's Flux ServiceAccount.
     - name: refused
       expression: >-
         (has(object.subjects) ? object.subjects : []).filter(s,
         (s.kind == 'ServiceAccount' && has(s.namespace) && s.namespace != request.namespace{{ if $fluxNs }} &&
-        !(request.userInfo.username == {{ squote $operator }} && s.namespace == {{ squote $fluxNs }}){{ end }}) ||
+        !(request.userInfo.username == {{ squote $operator }} && s.namespace == {{ squote $fluxNs }} && s.name == request.namespace){{ end }}) ||
         (s.kind != 'ServiceAccount' && s.name.startsWith('system:') &&
         !(s.kind == 'User' && s.name.startsWith('system:serviceaccount:' + request.namespace + ':'))))
   validations:
@@ -368,6 +501,78 @@ metadata:
 spec:
   policyName: agent-platform-organization-rolebinding-subjects
   validationActions: [Deny]
+{{- if $fluxNs }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-flux-writes
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      {{- include "agent-platform.organizations.namespaces" . | nindent 6 }}
+    resourceRules:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["rolebindings"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["secrets"]
+  matchConditions:
+    - name: organization-flux
+      # An organization's Flux ServiceAccount: agents-* in fluxNamespace, as
+      # the operator names it. Neither the operator nor a Flux controller
+      # acting as itself.
+      expression: {{ printf "request.userInfo.username.startsWith('system:serviceaccount:%s:agents-') && request.userInfo.username != '%s'" $fluxNs $operator | quote }}
+  validations:
+    # A binding that exists is changed or deleted only when this
+    # ServiceAccount's own Kustomization (of its name, in fluxNamespace)
+    # applied it, as kustomize-controller labels what it applies: a file in
+    # git never takes over organization-admins or another binding people
+    # wrote, and prune never deletes one.
+    - expression: >-
+        request.resource.resource != 'rolebindings' || request.operation == 'CREATE' ||
+        (has(oldObject.metadata.labels) &&
+        'kustomize.toolkit.fluxcd.io/name' in oldObject.metadata.labels &&
+        'kustomize.toolkit.fluxcd.io/namespace' in oldObject.metadata.labels &&
+        oldObject.metadata.labels['kustomize.toolkit.fluxcd.io/namespace'] == {{ squote $fluxNs }} &&
+        request.userInfo.username == {{ squote (printf "system:serviceaccount:%s:" $fluxNs) }} + oldObject.metadata.labels['kustomize.toolkit.fluxcd.io/name'])
+      reason: Forbidden
+      messageExpression: >-
+        'a file from an organization path in git changes or deletes only a RoleBinding that git applied; refused: ' +
+        request.operation + ' ' + request.namespace + '/' + oldObject.metadata.name
+    - expression: >-
+        request.resource.resource != 'rolebindings' || request.operation == 'DELETE' ||
+        (object.roleRef.kind == 'ClusterRole' &&
+        object.roleRef.name in ['agent-platform:user', 'agent-platform:editor', 'agent-platform:admin'])
+      reason: Forbidden
+      messageExpression: >-
+        'a RoleBinding from an organization path in git binds agent-platform:user, editor or admin; refused: ' +
+        request.namespace + '/' + object.metadata.name + ' to ' + object.roleRef.kind + ' ' + object.roleRef.name
+    # A ServiceAccount token Secret would hand out a token, without expiry, of
+    # any ServiceAccount of the namespace (the Helm ServiceAccount, the
+    # workers').
+    - expression: >-
+        request.resource.resource != 'secrets' || !has(object.type) || object.type != 'kubernetes.io/service-account-token'
+      reason: Forbidden
+      messageExpression: >-
+        'a Secret from an organization path in git is no ServiceAccount token; refused: ' + request.namespace + '/' + object.metadata.name
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-flux-writes
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-flux-writes
+  validationActions: [Deny]
+{{- end }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -397,7 +602,7 @@ spec:
         request.operation == 'UPDATE' && variables.spec == (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
     - name: forbidden
       expression: >-
-        ['chart', 'valuesFrom', 'postRenderers', 'kubeConfig', 'targetNamespace', 'storageNamespace'].filter(f, f in variables.spec)
+        {{ include "agent-platform.helmReleases.forbiddenFields" . }}.filter(f, f in variables.spec)
     - name: chartRef
       expression: "'chartRef' in variables.spec ? dyn(variables.spec.chartRef) : dyn({})"
   validations:

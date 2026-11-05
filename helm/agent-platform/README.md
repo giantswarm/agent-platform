@@ -498,12 +498,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.omitKeys[1] | string | `"controller.vpa"` |  |
 | components.kagent.omitKeys[2] | string | `"fluxServiceAccountName"` |  |
 | components.kagent.omitKeys[3] | string | `"harness.snapshotStore"` |  |
-| components.kagent.omitKeys[4] | string | `"modelConfigs"` |  |
-| components.kagent.omitKeys[5] | string | `"oauth2ProxyIngress"` |  |
-| components.kagent.omitKeys[6] | string | `"remoteMcpServers"` |  |
-| components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
-| components.kagent.omitKeys[8] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
-| components.kagent.omitKeys[9] | string | `"substrateWorkerPool.priorityClass"` |  |
+| components.kagent.omitKeys[4] | string | `"defaultModelConfig"` |  |
+| components.kagent.omitKeys[5] | string | `"modelConfigs"` |  |
+| components.kagent.omitKeys[6] | string | `"oauth2ProxyIngress"` |  |
+| components.kagent.omitKeys[7] | string | `"remoteMcpServers"` |  |
+| components.kagent.omitKeys[8] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[9] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
+| components.kagent.omitKeys[10] | string | `"substrateWorkerPool.priorityClass"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
@@ -619,7 +620,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.toolchain-manager.gatedRoster | bool | `true` |  |
 | components.agent-platform-operator.chart | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-operator.versionRange | string | `"0.1.0-rc.5"` |  |
+| components.agent-platform-operator.versionRange | string | `"0.1.0-rc.11"` |  |
 | components.agent-platform-operator.valuesFrom | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.crds | string | `"CreateReplace"` |  |
 | components.agent-platform-operator.ownedCrds[0] | string | `"agentplatformorganizations.agent-platform.giantswarm.io"` |  |
@@ -1021,6 +1022,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.providers.anthropic.apiKey | string | `""` |  |
 | kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
 | kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
+| kagent.defaultModelConfig.enabled | bool | `true` |  |
 | kagent.otel.exporter.otlp.endpoint | string | `"auto"` |  |
 | kagent.otel.exporter.otlp.protocol | string | `"auto"` |  |
 | kagent.otel.exporter.otlp.timeout | string | `"500"` |  |
@@ -1115,10 +1117,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.harness.snapshotStore.s3proxy.azure.container | string | `""` |  |
 | kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name | string | `""` |  |
 | kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key | string | `""` |  |
-| kagent.harness.env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
-| kagent.harness.env[0].value | string | `"true"` |  |
-| kagent.harness.env[1].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
-| kagent.harness.env[1].value | string | `"auto"` |  |
+| kagent.harness.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
+| kagent.harness.env[0].value | string | `"auto"` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
@@ -1481,7 +1481,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects. |
 | tenants.platformTeam | list | `[]` | The customer's platform team, per installation: RBAC subjects bound to agent-platform:editor in the kagent namespace beside `platform.editors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation). |
 | agentPlatformOrganizations.enabled | bool | `false` | Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a model whose provider the listener serves (Anthropic, Mistral or OpenAI) and llmRouting.modelConfigPolicy.enabled on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain or apiHostnames: the render fails without them. The rollout gate: off by default for now (see above). |
-| agentPlatformOrganizations.fluxNamespace | string | `""` | The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), and the operator's erasure.fluxNamespace (derived). Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces. |
+| agentPlatformOrganizations.fluxNamespace | string | `""` | The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace, and the operator's erasure.fluxNamespace (derived); set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces. |
+| agentPlatformOrganizations.fluxSource | object | `{"kind":"GitRepository","name":""}` | The installation's Flux source in fluxNamespace, which an organization's Kustomization applies from (agent-platform-operator's commitMode.sourceRef). The admission policy holds the operator's Kustomizations to this source. The name is required with fluxNamespace: the render fails without it. |
+| agentPlatformOrganizations.fluxPathPrefix | string | `"./agent-platform/organizations/"` | The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies exactly this prefix, its parent and its name, from the labels the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise. |
+| agentPlatformOrganizations.fluxDecryptionSecret | string | `"sops-keys"` | The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption. |
 | agentPlatformOrganizations.apiHostnames | list | `[]` | The installation's Kubernetes API hostnames beside api.<global.domain>, which is derived while global.domain is set: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. The render fails while both are empty. |
 | agent-platform-operator | object | `{}` |  |
 | workspaces.enabled | bool | `false` |  |
