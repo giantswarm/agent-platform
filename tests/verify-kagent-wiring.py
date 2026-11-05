@@ -257,9 +257,10 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
         fail("kagent.harness.create is not true; since 4.8.0 the kagent chart renders the platform Harness")
     if re.search(r"^image:", harness, re.M):
         fail("kagent.harness.image forwarded by default; the chart's own Go ADK digest is the Harness image — an override travels only when set")
-    for needle, what in (("snapshotLocation: ", "the snapshot location"), ("- name: KAGENT_PROPAGATE_TOKEN", "KAGENT_PROPAGATE_TOKEN in env")):
-        if needle not in harness:
-            fail(f"kagent.harness forwarded without {what}: the meta chart owns the GS policy of the platform Harness\n{harness}")
+    if "snapshotLocation: " not in harness:
+        fail(f"kagent.harness forwarded without the snapshot location: the meta chart owns the GS policy of the platform Harness\n{harness}")
+    if "KAGENT_PROPAGATE_TOKEN" in harness:
+        fail(f"kagent.harness forwards KAGENT_PROPAGATE_TOKEN: a runtime re-emits the caller's token on every MCP call (giantswarm/giantswarm#38993)\n{harness}")
     if "allowedAgentTemplates" in harness:
         fail("kagent.harness.allowedAgentTemplates forwarded; the line's Harness has no admission selector (an Agent names its Harness by spec.harnessRef)")
     pool = scalar(values.get("substrateWorkerPool", []), "name")
