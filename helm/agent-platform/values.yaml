@@ -848,9 +848,13 @@ components:  # @schema additionalProperties: true
     # kagent line's own pin moves
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
-    # The floor is 1.17.5, the Substrate release the kagent line's 1.24
-    # builds are published against (tests/verify-worker-image.py). From
-    # 1.17.0 ate-api serves the actor JWT mint as
+    # The floor is 1.18.0, on the same upstream as 1.17.5, the Substrate
+    # release the kagent line's 1.24 builds are published against
+    # (tests/verify-worker-image.py, SAME_UPSTREAM). From 1.18.0 the
+    # credential provider's Secret reader is bound only where the derived
+    # namespacePolicies grant (credentialProvider.rbac.namespaces) and
+    # ate-controller reads only the egress MITM CA pool's Secret
+    # (giantswarm/agent-platform#1269); from 1.17.0 ate-api serves the actor JWT mint as
     # Control.MintActorJwt and its egress gateway runs agentgateway 2.6.5,
     # which mints through that name (a 1.16 ate-api with that gateway, or a
     # 1.17 ate-api with an older one, answers every actor_jwt header source
@@ -863,7 +867,7 @@ components:  # @schema additionalProperties: true
     # (https://idp.<namespace>.svc) muster verifies a Session's actor JWT
     # against (muster.credentialProvider.actorBearer, on with Substrate).
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.17.5 <1.18.0"
+    versionRange: ">=1.18.0 <1.19.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
     # release Flux resolved (ateController.gvisorWorker.followRelease, which
@@ -892,7 +896,7 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.17.5 <1.18.0"
+    versionRange: ">=1.18.0 <1.19.0"
     valuesFrom: substrate
     injectGlobal: false
     targetNamespace: ate-system
@@ -946,11 +950,13 @@ components:  # @schema additionalProperties: true
     # (agent-platform.componentDerivedValues). The Substrate chart routes the
     # class to it through substrate.credentialProvider.additionalProviders
     # below; a Substrate release before 1.14.0 refuses that entry, its bundled
-    # provider serving the name itself. The floor is 0.2.0, the first plugin
-    # that reads the selector grants agentPlatformOrganizations.enabled derives; an
-    # older plugin refuses its policy file at start.
+    # provider serving the name itself. The floor is 0.3.0, whose chart binds
+    # its Secret reader only where the derived namespacePolicies grant
+    # (rbac.namespaces, giantswarm/agent-platform#1269); from 0.2.0 the plugin
+    # reads the selector grants agentPlatformOrganizations.enabled derives (an
+    # older plugin refuses its policy file at start).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: ">=0.2.0 <0.3.0"
+    versionRange: ">=0.3.0 <0.4.0"
     valuesFrom: google-access-token-credential-provider
     injectGlobal: false
     targetNamespace: ate-system
