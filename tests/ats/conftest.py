@@ -952,9 +952,18 @@ class MusterSession:
         and every connected server's x_<server>_<tool> — from the list_tools
         meta-tool. tools/list carries only the meta-tools (list_tools,
         describe_tool, filter_tools, call_tool, …); the aggregated tools are
-        called through call_tool."""
-        listing = json.loads(self.text_of(self.call("list_tools")))
-        return [t["name"] for t in (listing.get("tools", []) if isinstance(listing, dict) else listing)]
+        called through call_tool. list_tools answers one page (50 tools
+        unless a limit is given), so every page is read until truncated is
+        false."""
+        names: List[str] = []
+        while True:
+            listing = json.loads(self.text_of(self.call("list_tools", {"limit": 1000, "offset": len(names)})))
+            if not isinstance(listing, dict):
+                return names + [t["name"] for t in listing]
+            page = [t["name"] for t in listing.get("tools", [])]
+            names += page
+            if not listing.get("truncated") or not page:
+                return names
 
     @staticmethod
     def text_of(result: Dict[str, Any]) -> str:
