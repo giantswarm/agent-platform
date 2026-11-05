@@ -76,6 +76,7 @@ RELEASE_NS = "agent-platform"
 FLUX_NS = "flux-giantswarm"
 FLUX_SOURCE = "management-clusters-fleet"  # the installation's GitRepository
 SOPS_KEY = "sops-keys"  # the installation's SOPS key Secret, the chart's default
+ORG_PATHS = "./agent-platform/organizations/"  # agentPlatformOrganizations.fluxPathPrefix, the chart's default
 API_HOST = "api.acme.example.io"
 POOL = "kagent-default"
 OP = f"system:serviceaccount:{RELEASE_NS}:agent-platform-operator"
@@ -145,7 +146,7 @@ def check_render(chart):
     if r.returncode == 0 or "agentPlatformOrganizations.enabled needs kagent" not in r.stderr:
         fail(f"agentPlatformOrganizations.enabled with kagent off renders, or fails for another reason:\n{r.stderr}")
     print("ok:  on with kagent off, the render fails naming kagent")
-    r = render(chart, *ON[:4])
+    r = render(chart, *ON[:4], *ON[6:])
     if r.returncode == 0 or "agentPlatformOrganizations.apiHostnames must name" not in r.stderr:
         fail(f"agentPlatformOrganizations.enabled without apiHostnames renders, or fails for another reason:\n{r.stderr}")
     print("ok:  on without apiHostnames, the render fails naming the key")
@@ -163,6 +164,10 @@ def check_render(chart):
     if any(d["metadata"]["name"] == "agent-platform:organization-flux" for d in no_flux):
         fail("agent-platform:organization-flux renders without fluxNamespace")
     print("ok:  agent-platform:organization-flux renders with fluxNamespace only")
+    r = render(chart, *ON[:6])
+    if r.returncode == 0 or "agentPlatformOrganizations.fluxSource.name is required with fluxNamespace" not in r.stderr:
+        fail(f"fluxNamespace without fluxSource.name renders, or fails for another reason:\n{r.stderr}")
+    print("ok:  fluxNamespace without fluxSource.name: the render fails naming the key")
     policies = [d for d in organization_objects(objs) if d["kind"] != "ClusterRole"]
     # The sandbox shape is admission's own object, not Kyverno's: a
     # PolicyException excepts from Kyverno policies only.
@@ -318,7 +323,7 @@ def kustomization(name, namespace, uid=True):
     if uid:
         meta["labels"] = {"agent-platform.giantswarm.io/organization-uid": UID}
     return {"apiVersion": "kustomize.toolkit.fluxcd.io/v1", "kind": "Kustomization", "metadata": meta,
-            "spec": {"interval": "10m", "prune": True, "path": "./agents", "serviceAccountName": name, "targetNamespace": name,
+            "spec": {"interval": "10m", "prune": True, "path": f"{ORG_PATHS}{PARENT}/{name}", "serviceAccountName": name, "targetNamespace": name,
                      "sourceRef": {"kind": "GitRepository", "name": FLUX_SOURCE, "namespace": namespace},
                      "decryption": {"provider": "sops", "secretRef": {"name": SOPS_KEY}}}}
 
@@ -506,6 +511,11 @@ def prove_operator():
     case("the operator creates no Kustomization that decrypts as a ServiceAccount",
          create(changed(decryption={"provider": "sops", "secretRef": {"name": SOPS_KEY}, "serviceAccountName": "kustomize-controller"}), as_=OP), pinned, key)
     case("the operator creates a Kustomization that decrypts nothing", create(changed(decryption=None), as_=OP))
+    under = f"applies a path under {ORG_PATHS}, without ..; refused: {FLUX_NS}/{ORG2} with "
+    for what, path in (("outside the organizations' paths", "./management-clusters/acme"),
+                       ("that steps out with ..", f"{ORG_PATHS}org-acme/billing/../../../management-clusters/acme"),
+                       ("of the prefix alone", ORG_PATHS)):
+        case(f"the operator creates no Kustomization with a path {what}", create(changed(path=path), as_=OP), pinned, under + path)
     case("the operator updates its Kustomization within the pins",
          patch("kustomization", ORG, FLUX_NS, {"spec": {"path": "./agent-platform/organizations/org-acme/payments"}}, as_=OP))
     case("the operator creates no Kustomization outside the Flux namespace", create(kustomization(ORG2, PLAIN), as_=OP),
@@ -568,6 +578,32 @@ def prove_flux_role():
          "RBAC:cannot create resource \"secrets\"")
     for role in ("agent-platform:user", "agent-platform:editor", "agent-platform:admin"):
         case(f"a merged RoleBinding binds {role}", create(rb("members-git", ORG, role=role), as_=FLUX_SA, groups=()))
+    # What git applied carries kustomize-controller's labels of the
+    # organization's Kustomization; organization-admins (a fixture written by
+    # people) carries none.
+    took = "agent-platform-organization-flux-writes"
+    def applied_by(name, ks):
+        b = rb(name, ORG)
+        b["metadata"]["labels"] = {"kustomize.toolkit.fluxcd.io/name": ks, "kustomize.toolkit.fluxcd.io/namespace": FLUX_NS}
+        must(create(b, as_=PERSON, dry=False), f"create RoleBinding {ORG}/{name}")
+    applied_by("members-from-git", ORG)
+    applied_by("members-other-git", ORG2)
+    more = {"subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "acme-git"}]}
+    case("a file in git takes over no RoleBinding people wrote (organization-admins)",
+         patch("rolebinding", "organization-admins", ORG, more, as_=FLUX_SA, groups=()), took,
+         f"changes or deletes only a RoleBinding that git applied; refused: UPDATE {ORG}/organization-admins")
+    # organization-admins itself is not deleted while its namespace lives
+    # (agent-platform-organization-admins-binding); members is another
+    # binding people wrote.
+    case("prune deletes no RoleBinding people wrote (members)",
+         delete("rolebinding", "members", ORG, as_=FLUX_SA, groups=()), took,
+         f"changes or deletes only a RoleBinding that git applied; refused: DELETE {ORG}/members")
+    case("a file in git changes no RoleBinding another organization's Kustomization applied",
+         patch("rolebinding", "members-other-git", ORG, more, as_=FLUX_SA, groups=()), took, f"refused: UPDATE {ORG}/members-other-git")
+    case("a file in git changes a RoleBinding its own Kustomization applied",
+         patch("rolebinding", "members-from-git", ORG, more, as_=FLUX_SA, groups=()))
+    case("prune deletes a RoleBinding its own Kustomization applied",
+         delete("rolebinding", "members-from-git", ORG, as_=FLUX_SA, groups=()))
     case("a merged RoleBinding binds no other role", create(rb("members-git", ORG, role="cluster-admin"), as_=FLUX_SA, groups=()),
          "RBAC:attempting to grant RBAC permissions not currently held")
     # RBAC admits a binding of a role whose rules the binder holds, without

@@ -24,8 +24,9 @@ these.
     organization's Flux ServiceAccount, which Flux impersonates) and in
     spec.targetNamespace (the organization namespace). The operator names
     both after the organization namespace; a policy cannot read another
-    namespace's labels, so the pin is that name. It applies from the
-    installation's source (fluxSource) and decrypts with its key
+    namespace's labels, so the pin is that name. It applies a path under
+    fluxPathPrefix, without `..`, from the installation's source (fluxSource,
+    its name required with fluxNamespace) and decrypts with its key
     (fluxDecryptionSecret) only, and sets no kubeConfig, postBuild
     substituteFrom, patches or components: kustomize-controller acts on those
     as itself. The operator binds a ServiceAccount of fluxNamespace to
@@ -54,8 +55,10 @@ these.
     organization namespace: a RoleBinding binds the ClusterRole
     agent-platform:user, editor or admin (RBAC lets an identity bind any role
     whose rules it holds without `bind`, agent-platform:organization-flux
-    itself among them, which reads every Secret of the namespace), and a
-    Secret is no ServiceAccount token.
+    itself among them, which reads every Secret of the namespace); it changes
+    or deletes only a RoleBinding its own Kustomization applied (labelled
+    kustomize.toolkit.fluxcd.io/name with its name), never organization-admins
+    or another binding people wrote; and a Secret is no ServiceAccount token.
   * agent-platform-organization-helmreleases: for every requester but the
     operator, an organization's Flux ServiceAccount included, a HelmRelease in
     an organization namespace installs the agent chart from the namespace's
@@ -101,7 +104,11 @@ controllers) is the same pair of policies as a tenant's
 {{- $fluxNs := $values.fluxNamespace | default "" }}
 {{- $fluxSource := $values.fluxSource | default dict }}
 {{- $fluxSourceKind := $fluxSource.kind | default "GitRepository" }}
-{{- $fluxSourceName := $fluxSource.name | default "" }}
+{{- $fluxSourceName := "" }}
+{{- if $fluxNs }}
+{{- $fluxSourceName = required "agentPlatformOrganizations.fluxSource.name is required with fluxNamespace: the operator's Kustomizations apply from that source only (agent-platform-operator's commitMode.sourceRef.name)" $fluxSource.name }}
+{{- end }}
+{{- $fluxPathPrefix := $values.fluxPathPrefix | default "" }}
 {{- $fluxKey := $values.fluxDecryptionSecret | default "" }}
 {{- $helmSA := required "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: an organization's HelmReleases run as it" (include "agent-platform.kagent.fluxServiceAccountName" .) }}
 {{- $chartSource := include "agent-platform.organizations.chartSource" . }}
@@ -255,12 +262,23 @@ spec:
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
         (has(object.spec) && has(object.spec.sourceRef) && object.spec.sourceRef.kind == {{ squote $fluxSourceKind }} &&
-        (!has(object.spec.sourceRef.namespace) || object.spec.sourceRef.namespace == {{ squote $fluxNs }}){{ if $fluxSourceName }} &&
-        object.spec.sourceRef.name == {{ squote $fluxSourceName }}{{ end }})
+        (!has(object.spec.sourceRef.namespace) || object.spec.sourceRef.namespace == {{ squote $fluxNs }}) &&
+        object.spec.sourceRef.name == {{ squote $fluxSourceName }})
       reason: Forbidden
       messageExpression: >-
-        {{ printf "'a Kustomization of the agent-platform-operator applies from the installation source %s %s/%s; refused: '" $fluxSourceKind $fluxNs ($fluxSourceName | default "*") }} +
+        {{ printf "'a Kustomization of the agent-platform-operator applies from the installation source %s %s/%s; refused: '" $fluxSourceKind $fluxNs $fluxSourceName }} +
         request.namespace + '/' + object.metadata.name
+    # The organizations' paths only, with no step out of them: one
+    # organization's Kustomization never applies another's path or the
+    # installation's.
+    - expression: >-
+        request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
+        (has(object.spec) && has(object.spec.path) && object.spec.path.startsWith({{ squote $fluxPathPrefix }}) &&
+        object.spec.path.size() > {{ len $fluxPathPrefix }} && !object.spec.path.contains('..'))
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'a Kustomization of the agent-platform-operator applies a path under %s, without ..; refused: '" $fluxPathPrefix }} +
+        request.namespace + '/' + object.metadata.name + ' with ' + (has(object.spec) && has(object.spec.path) ? object.spec.path : 'none')
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
         !has(object.spec) || !has(object.spec.decryption){{ if $fluxKey }} ||
@@ -465,7 +483,7 @@ spec:
     resourceRules:
       - apiGroups: ["rbac.authorization.k8s.io"]
         apiVersions: ["v1"]
-        operations: ["CREATE", "UPDATE"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
         resources: ["rolebindings"]
       - apiGroups: [""]
         apiVersions: ["v1"]
@@ -478,8 +496,24 @@ spec:
       # acting as itself.
       expression: {{ printf "request.userInfo.username.startsWith('system:serviceaccount:%s:agents-') && request.userInfo.username != '%s'" $fluxNs $operator | quote }}
   validations:
+    # A binding that exists is changed or deleted only when this
+    # ServiceAccount's own Kustomization (of its name, in fluxNamespace)
+    # applied it, as kustomize-controller labels what it applies: a file in
+    # git never takes over organization-admins or another binding people
+    # wrote, and prune never deletes one.
     - expression: >-
-        request.resource.resource != 'rolebindings' ||
+        request.resource.resource != 'rolebindings' || request.operation == 'CREATE' ||
+        (has(oldObject.metadata.labels) &&
+        'kustomize.toolkit.fluxcd.io/name' in oldObject.metadata.labels &&
+        'kustomize.toolkit.fluxcd.io/namespace' in oldObject.metadata.labels &&
+        oldObject.metadata.labels['kustomize.toolkit.fluxcd.io/namespace'] == {{ squote $fluxNs }} &&
+        request.userInfo.username == {{ squote (printf "system:serviceaccount:%s:" $fluxNs) }} + oldObject.metadata.labels['kustomize.toolkit.fluxcd.io/name'])
+      reason: Forbidden
+      messageExpression: >-
+        'a file from an organization path in git changes or deletes only a RoleBinding that git applied; refused: ' +
+        request.operation + ' ' + request.namespace + '/' + oldObject.metadata.name
+    - expression: >-
+        request.resource.resource != 'rolebindings' || request.operation == 'DELETE' ||
         (object.roleRef.kind == 'ClusterRole' &&
         object.roleRef.name in ['agent-platform:user', 'agent-platform:editor', 'agent-platform:admin'])
       reason: Forbidden
