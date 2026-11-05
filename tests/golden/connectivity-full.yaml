@@ -15659,10 +15659,18 @@ spec:
       expression: "'chartRef' in variables.spec ? dyn(variables.spec.chartRef) : dyn({})"
     - name: values
       expression: "'values' in variables.spec ? dyn(variables.spec.values) : dyn({})"
-    - name: skillsCredential
+    - name: extraAgentSpec
+      expression: "'extraAgentSpec' in variables.values ? dyn(variables.values.extraAgentSpec) : dyn({})"
+    # An empty name asks for every Secret of the namespace.
+    - name: credentials
       expression: >-
-        'skillsGitAuthSecretRef' in variables.values && 'name' in variables.values.skillsGitAuthSecretRef ?
-        string(variables.values.skillsGitAuthSecretRef.name) : ''
+        ('skillsGitAuthSecretRef' in variables.values && 'name' in variables.values.skillsGitAuthSecretRef &&
+        string(variables.values.skillsGitAuthSecretRef.name) != '' ?
+        [string(variables.values.skillsGitAuthSecretRef.name)] : dyn([])) +
+        (('skills' in variables.extraAgentSpec ? dyn(variables.extraAgentSpec.skills) : dyn([])) +
+        ('plugins' in variables.extraAgentSpec ? dyn(variables.extraAgentSpec.plugins) : dyn([])))
+        .filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
+        .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '')
   validations:
     - expression: "size(variables.forbidden) == 0"
       reason: Forbidden
@@ -15680,13 +15688,14 @@ spec:
       reason: Forbidden
       messageExpression: "'in the kagent namespace, a HelmRelease runs as the ServiceAccount kagent-flux (spec.serviceAccountName); refused for ' + request.userInfo.username + ': ' + request.name"
     - expression: >-
-        variables.skillsCredential == '' ||
-        authorizer.group('').resource('secrets').namespace(request.namespace).name(variables.skillsCredential).check('get').allowed()
+        variables.credentials.all(n,
+        authorizer.group('').resource('secrets').namespace(request.namespace).name(n).check('get').allowed())
       reason: Forbidden
       messageExpression: >-
-        'in the kagent namespace, a HelmRelease names as values.skillsGitAuthSecretRef.name the installation skills
-        credential or a Secret its writer may get; refused for ' + request.userInfo.username + ', who may not get ' +
-        variables.skillsCredential
+        'in the kagent namespace, a HelmRelease names as a git credential (values.skillsGitAuthSecretRef.name,
+        values.extraAgentSpec skills and plugins) the installation skills credential or a Secret its writer may get;
+        refused for ' + request.userInfo.username + ', who may not get at least one of: ' +
+        variables.credentials.map(n, n == '' ? '<no name>' : n).join(', ')
 ---
 # Source: agent-platform-connectivity/templates/tenants/platform-tenant-credential-refs.yaml
 apiVersion: admissionregistration.k8s.io/v1

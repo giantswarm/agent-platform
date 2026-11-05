@@ -26,7 +26,7 @@ giantswarm/giantswarm#38993: the platform Harness no longer sets `KAGENT_PROPAGA
 
 ## \<current\> → \<next\> (a HelmRelease in the kagent namespace is an agent release)
 
-giantswarm/giantswarm#38840: the ValidatingAdmissionPolicy `agent-platform-platform-helmreleases` refuses, in the kagent namespace, a HelmRelease created or changed in its spec unless it installs the agent chart from the namespace's `agent` OCIRepository as `kagent.fluxServiceAccountName` (`kagent-flux`), sets none of `spec.chart`, `valuesFrom`, `postRenderers`, `kubeConfig`, `targetNamespace` and `storageNamespace`, and names as `values.skillsGitAuthSecretRef.name` the installation skills credential or a Secret its writer may `get`. A HelmRelease that already exists keeps running; only its next spec change is checked.
+giantswarm/giantswarm#38840: the ValidatingAdmissionPolicy `agent-platform-platform-helmreleases` refuses, in the kagent namespace, a HelmRelease created or changed in its spec unless it installs the agent chart from the namespace's `agent` OCIRepository as `kagent.fluxServiceAccountName` (`kagent-flux`), sets none of `spec.chart`, `valuesFrom`, `postRenderers`, `kubeConfig`, `targetNamespace` and `storageNamespace`, and names as a git credential (`values.skillsGitAuthSecretRef.name`, or a `credentialRef` in `values.extraAgentSpec`) only the installation skills credential or a Secret its writer may `get`. A HelmRelease that already exists keeps running; only its next spec change is checked.
 
 ### Operator action
 

@@ -13,7 +13,8 @@ Each case pins one property:
   admitted; spec.chart, valuesFrom, postRenderers, kubeConfig,
   targetNamespace and storageNamespace, another OCIRepository, one of another
   namespace, another ServiceAccount or none are refused;
-  values.skillsGitAuthSecretRef.name is admitted empty, as the installation's
+  values.skillsGitAuthSecretRef.name and a git credentialRef of an
+  extraAgentSpec skill or plugin are admitted empty, as the installation's
   skills credential (either name) or as a Secret the editor may get, and
   refused for one the editor may not get; a HelmRelease written before the
   policy takes an annotation but no spec change; a HelmRelease outside the
@@ -149,12 +150,19 @@ def case(name, rc_out, refused=False):
     print(("ok:  " if ok else "FAIL:"), name, "|", last)
 
 
-def helmrelease(name, namespace=KAGENT, skills=None, **spec_extra):
+def git_source(credential):
+    return {"source": {"git": {"url": "https://example.com/x.git", "commit": "0" * 40,
+                               "credentialRef": {"name": credential, "key": "token"}}, "path": "."}}
+
+
+def helmrelease(name, namespace=KAGENT, skills=None, extra_agent_spec=None, **spec_extra):
     """An agent's HelmRelease as agent-manager composes it
     (internal/agents/compose.go)."""
     values = {"agent": {"name": name}}
     if skills is not None:
         values["skillsGitAuthSecretRef"] = {"name": skills}
+    if extra_agent_spec is not None:
+        values["extraAgentSpec"] = extra_agent_spec
     spec = {"interval": "10m", "chartRef": {"kind": "OCIRepository", "name": "agent"}, "serviceAccountName": "kagent-flux",
             "values": values}
     spec.update(spec_extra)
@@ -212,6 +220,16 @@ def prove():
     case("a HelmRelease names no Secret its writer may not get", create(helmrelease("a", skills=PLATFORM_SECRET)), refused=True)
     case("a cluster-admin names any Secret", create(helmrelease("a", skills=PLATFORM_SECRET), as_="jose", groups=("system:masters",)))
     case("an empty skills credential name passes", create(helmrelease("a", skills="")))
+    case("an extraAgentSpec without a credential passes",
+         create(helmrelease("a", extra_agent_spec={"systemMessage": "hi", "skills": [{"name": "s", "source": {"oci": "r@sha256:" + "0" * 64}}]})))
+    for kind in ("skills", "plugins"):
+        entry = lambda c: {"name": "s", **git_source(c)} if kind == "skills" else git_source(c)  # noqa: E731
+        case(f"an extraAgentSpec {kind} credentialRef names a Secret its writer may get",
+             create(helmrelease("a", extra_agent_spec={kind: [entry(READABLE)]})))
+        case(f"an extraAgentSpec {kind} credentialRef names the installation skills credential",
+             create(helmrelease("a", extra_agent_spec={kind: [entry(SKILLS)]})))
+        case(f"an extraAgentSpec {kind} credentialRef names no Secret its writer may not get",
+             create(helmrelease("a", skills=SKILLS, extra_agent_spec={kind: [entry(READABLE), entry(PLATFORM_SECRET)]})), refused=True)
     case("a HelmRelease written before the policy takes an annotation",
          patch("legacy", KAGENT, {"metadata": {"annotations": {"reconcile.fluxcd.io/requestedAt": "now"}}}, as_=None, groups=("system:masters",)))
     case("a HelmRelease written before the policy changes no spec", patch("legacy", KAGENT, {"spec": {"values": {"x": 1}}},
