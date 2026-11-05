@@ -3165,9 +3165,9 @@ tenants:
 #     organization's UID prefix of the bucket only, named on the operator's
 #     ServiceAccount (IRSA). The capz and s3proxy stores give the operator no
 #     snapshot access yet: there the erasure stops at the snapshots' step;
-#   - the ConfigMap agent-platform-operator-ate-api-ca (the substrate bootstrap
-#     hook), ate-api-server's serving roots, which the operator verifies it
-#     with.
+#   - ate-api-server's serving roots, which the operator verifies it with:
+#     the ClusterTrustBundles of servicedns.podcert.ate.dev/identity
+#     labelled podcert.ate.dev/canarying: live, projected into its pod.
 # The operator's own values are the agent-platform-operator block below.
 # agent-manager's chart keeps its tenants.enabled off: its tenant reconciler is
 # gone (tenants.organizations, the namespaces labelled giantswarm.io/organization,

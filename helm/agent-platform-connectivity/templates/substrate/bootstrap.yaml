@@ -19,11 +19,6 @@ render, minted once by a pre-install / pre-upgrade hook Job and kept.
     the pool's tls.crt and tls.key and does not start without it. The actors
     project the pool's roots as the trust bundle egress-mitm.ate.dev. ECDSA
     P-256, the key type agentgateway signs leaves with;
-  * with agentPlatformOrganizations.enabled, the ConfigMap
-    agent-platform-operator-ate-api-ca in this release's namespace — the
-    service-dns-ca-pool roots as ca.crt, applied (server-side) on every run
-    like the ClusterTrustBundle, so agent-platform-operator verifies
-    ate-api-server's serving certificate;
   * the ConfigMap ate-api-authentication — ate-api-server accepts the cluster's
     ServiceAccount tokens for the audience api.ate-system.svc, verified against
     the apiserver's own issuer, spelled exactly as its OpenID discovery document
@@ -75,12 +70,6 @@ the default.
 {{- if include "agent-platform.substrate.enabled" . }}
 {{- $ns := include "agent-platform.substrate.namespace" . }}
 {{- $pcNs := include "agent-platform.substrate.podcertNamespace" . }}
-{{- /* With agentPlatformOrganizations.enabled, the operator's copy of the
-ate-api serving roots (agent-platform.organizations.ateApiCa). */}}
-{{- $operatorCa := dict }}
-{{- if include "agent-platform.organizations.enabled" . }}
-{{- $operatorCa = include "agent-platform.organizations.ateApiCa" . | fromJson }}
-{{- end }}
 {{ include "agent-platform.hooks.job" (dict "root" $ "name" "substrate-namespaces" "hook" "pre-install,pre-upgrade" "weight" -4
       "about" (printf "create the namespaces %s and %s the Substrate bootstrap writes into when they are missing, ahead of its Roles there" $ns $pcNs)
       "script" (include "agent-platform.substrate.bootstrap.namespaces" (dict "namespaces" (list $pcNs $ns)))) }}
@@ -89,7 +78,7 @@ ate-api serving roots (agent-platform.organizations.ateApiCa). */}}
       "about" (printf "mint the Agent Substrate CA/JWT pools and ate-api-server's authentication config in %s and %s when they are missing, keep them when they exist; publish the trust anchors derived from the pools (actor-id-ca-certs, the podcert signers' ClusterTrustBundles)" $ns $pcNs)
       "init" (dict "name" "openssl" "image" (include "agent-platform.hooks.imageRef" .Values.hooks.opensslImage) "script" (include "agent-platform.substrate.bootstrap.mint" .))
       "memory" "256Mi"
-      "script" (include "agent-platform.substrate.bootstrap.apply" (dict "root" $ "ns" $ns "pcNs" $pcNs "caConfigMap" $operatorCa))) }}
+      "script" (include "agent-platform.substrate.bootstrap.apply" (dict "root" $ "ns" $ns "pcNs" $pcNs))) }}
 {{- end }}
 
 {{- /* The init container: one candidate per pool under /work/<pool>. Whether a
@@ -208,14 +197,6 @@ trust_bundle() {
 ca_pool "$pc_ns" service-dns-ca-pool
 ca_pool "$pc_ns" pod-identity-ca-pool
 trust_bundle "$pc_ns" service-dns-ca-pool servicedns.podcert.ate.dev/identity
-{{- with .caConfigMap }}
-# agent-platform-operator verifies ate-api-server's serving certificate (a
-# servicedns.podcert.ate.dev certificate) against the same roots, which its
-# chart reads from a ConfigMap: the bundle just published, as ca.crt.
-kubectl -n {{ .namespace | quote }} create configmap {{ .name | quote }} --from-file=ca.crt=/tmp/bundle.pem --dry-run=client -o yaml \
-  | kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f - >/dev/null
-echo "trust anchor {{ .namespace }}/{{ .name }}: applied (the roots of $pc_ns/service-dns-ca-pool, for agent-platform-operator)"
-{{- end }}
 trust_bundle "$pc_ns" pod-identity-ca-pool podidentity.podcert.ate.dev/identity
 jwt_pool "$ns" actor-id-jwt-pool
 ca_pool "$ns" actor-id-ca-pool

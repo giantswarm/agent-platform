@@ -5122,7 +5122,7 @@ role name and -operator (organization-erasure/crossplane-aws.yaml). */ -}}
 {{- $erasure := dict
       "fluxNamespace" (dig "fluxNamespace" "" (.Values.agentPlatformOrganizations | default dict))
       "kagent" (dict "target" (include "agent-platform.kagent.controllerAddress" .) "audience" (include "agent-platform.kagent.tokenAudience" .))
-      "substrate" (dict "target" (printf "grpcs://api.%s.svc:443" $ateNs) "audience" (printf "api.%s.svc" $ateNs) "caConfigMap" (dict "name" "agent-platform-operator-ate-api-ca" "key" "ca.crt")) -}}
+      "substrate" (dict "target" (printf "grpcs://api.%s.svc:443" $ateNs) "audience" (printf "api.%s.svc" $ateNs) "caClusterTrustBundle" (dict "signerName" "servicedns.podcert.ate.dev/identity" "matchLabels" (dict "podcert.ate.dev/canarying" "live"))) -}}
 {{- $_ := set $derived "erasure" $erasure -}}
 {{- $own := index .Values "agent-platform-operator" | default dict -}}
 {{- /* Commit mode needs the ClusterRole agent-platform:organization-flux and

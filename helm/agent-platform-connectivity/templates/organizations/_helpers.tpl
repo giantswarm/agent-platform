@@ -113,12 +113,3 @@ matchExpressions:
     operator: Exists
 {{- end -}}
 
-{{/*
-The ConfigMap agent-platform-operator reads ate-api-server's serving roots
-from, as JSON {name, namespace}: the substrate bootstrap hook writes it
-(substrate/bootstrap.yaml), the meta chart names it in the operator's
-erasure.substrate.caConfigMap.
-*/}}
-{{- define "agent-platform.organizations.ateApiCa" -}}
-{{- dict "name" "agent-platform-operator-ate-api-ca" "namespace" .Release.Namespace | toJson -}}
-{{- end -}}
