@@ -463,10 +463,10 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 
 # Every credential key the guard knows, set to one canary value. The value must
 # never appear in the failure message; the paths must all appear.
-INLINE_SECRET_PATHS := kagent.providers.anthropic.apiKey kagent.oauth2-proxy.config.clientSecret kagent.oauth2-proxy.config.cookieSecret muster.muster.oauth.server.dex.clientSecret muster.muster.oauth.server.registrationToken muster.muster.oauth.server.encryptionKeyValue muster.muster.oauth.server.storage.valkey.password valkey.valkey.auth.aclUsers.default.password klausGateway.slack.botToken klausGateway.slack.signingSecret klausGateway.obo.stateKey klausGateway.obo.storeKey model-manager.oauth.dex.clientSecret agent-manager.oauth.dex.clientSecret cluster-manager.oauth.dex.clientSecret
-INLINE_SECRET_SETS := --set kagent.providers.anthropic.apiKey=LEAK-CANARY-VALUE --set kagent.oauth2-proxy.config.clientSecret=LEAK-CANARY-VALUE --set kagent.oauth2-proxy.config.cookieSecret=LEAK-CANARY-VALUE --set muster.muster.oauth.server.dex.clientSecret=LEAK-CANARY-VALUE --set muster.muster.oauth.server.registrationToken=LEAK-CANARY-VALUE --set muster.muster.oauth.server.encryptionKeyValue=LEAK-CANARY-VALUE --set muster.muster.oauth.server.storage.valkey.password=LEAK-CANARY-VALUE --set valkey.valkey.auth.aclUsers.default.password=LEAK-CANARY-VALUE --set klausGateway.slack.botToken=LEAK-CANARY-VALUE --set klausGateway.slack.signingSecret=LEAK-CANARY-VALUE --set klausGateway.obo.stateKey=LEAK-CANARY-VALUE --set klausGateway.obo.storeKey=LEAK-CANARY-VALUE --set model-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE --set agent-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE --set cluster-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE
+INLINE_SECRET_PATHS := kagent.oauth2-proxy.config.clientSecret kagent.oauth2-proxy.config.cookieSecret muster.muster.oauth.server.dex.clientSecret muster.muster.oauth.server.registrationToken muster.muster.oauth.server.encryptionKeyValue muster.muster.oauth.server.storage.valkey.password valkey.valkey.auth.aclUsers.default.password klausGateway.slack.botToken klausGateway.slack.signingSecret klausGateway.obo.stateKey klausGateway.obo.storeKey model-manager.oauth.dex.clientSecret agent-manager.oauth.dex.clientSecret cluster-manager.oauth.dex.clientSecret
+INLINE_SECRET_SETS := --set kagent.oauth2-proxy.config.clientSecret=LEAK-CANARY-VALUE --set kagent.oauth2-proxy.config.cookieSecret=LEAK-CANARY-VALUE --set muster.muster.oauth.server.dex.clientSecret=LEAK-CANARY-VALUE --set muster.muster.oauth.server.registrationToken=LEAK-CANARY-VALUE --set muster.muster.oauth.server.encryptionKeyValue=LEAK-CANARY-VALUE --set muster.muster.oauth.server.storage.valkey.password=LEAK-CANARY-VALUE --set valkey.valkey.auth.aclUsers.default.password=LEAK-CANARY-VALUE --set klausGateway.slack.botToken=LEAK-CANARY-VALUE --set klausGateway.slack.signingSecret=LEAK-CANARY-VALUE --set klausGateway.obo.stateKey=LEAK-CANARY-VALUE --set klausGateway.obo.storeKey=LEAK-CANARY-VALUE --set model-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE --set agent-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE --set cluster-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE
 # The same installation on referenced Secrets: the knobs an operator sets instead.
-REFERENCED_SECRET_SETS := --set kagent.providers.anthropic.apiKeySecretRef=kagent-anthropic-key --set kagent.oauth2-proxy.config.existingSecret=kagent-oauth2-proxy-credentials --set muster.muster.oauth.server.existingSecret=muster-oauth-credentials --set muster.muster.oauth.server.storage.valkey.existingSecret=muster-valkey-credentials --set valkey.valkey.auth.usersExistingSecret=muster-valkey-credentials --set valkey.valkey.auth.aclUsers.default.passwordKey=valkey-password --set klausGateway.slack.secretName=klaus-gateway-slack-credentials --set klausGateway.obo.existingSecret=klaus-gateway-obo-keys
+REFERENCED_SECRET_SETS := --set kagent.oauth2-proxy.config.existingSecret=kagent-oauth2-proxy-credentials --set muster.muster.oauth.server.existingSecret=muster-oauth-credentials --set muster.muster.oauth.server.storage.valkey.existingSecret=muster-valkey-credentials --set valkey.valkey.auth.usersExistingSecret=muster-valkey-credentials --set valkey.valkey.auth.aclUsers.default.passwordKey=valkey-password --set klausGateway.slack.secretName=klaus-gateway-slack-credentials --set klausGateway.obo.existingSecret=klaus-gateway-obo-keys
 
 .PHONY: verify-secrets
 verify-secrets: ## Assert gitops.forbidInlineSecrets: off by default, fails the render naming (only) the inline credential paths, passes on referenced Secrets.
@@ -486,9 +486,9 @@ verify-secrets: ## Assert gitops.forbidInlineSecrets: off by default, fails the 
 	@echo "--> the failure message carries the key paths, never the values"
 	@if grep -q 'LEAK-CANARY-VALUE' $(VERIFY_TMP)/vs-forbid.out; then echo "FAIL: the guard's message leaked a credential value"; exit 1; else echo "ok: no value in the message"; fi
 	@echo "--> a single inline key is enough to fail, and is the only one named"
-	@if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.forbidInlineSecrets=true --set kagent.providers.anthropic.apiKey=LEAK-CANARY-VALUE >$(VERIFY_TMP)/vs-one.out 2>&1; then \
+	@if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.forbidInlineSecrets=true --set kagent.oauth2-proxy.config.clientSecret=LEAK-CANARY-VALUE >$(VERIFY_TMP)/vs-one.out 2>&1; then \
 		echo "FAIL: one inline key passed the guard"; exit 1; fi
-	@grep -q 'kagent.providers.anthropic.apiKey' $(VERIFY_TMP)/vs-one.out || { echo "FAIL: the single key was not named"; cat $(VERIFY_TMP)/vs-one.out; exit 1; }
+	@grep -q 'kagent.oauth2-proxy.config.clientSecret' $(VERIFY_TMP)/vs-one.out || { echo "FAIL: the single key was not named"; cat $(VERIFY_TMP)/vs-one.out; exit 1; }
 	@if grep -q 'klausGateway.slack.botToken' $(VERIFY_TMP)/vs-one.out; then echo "FAIL: an unset key was named"; exit 1; fi
 	@echo "ok: single key"
 	@echo "--> forbidInlineSecrets: true with referenced Secrets renders, and no child HelmRelease carries a credential"
@@ -496,7 +496,7 @@ verify-secrets: ## Assert gitops.forbidInlineSecrets: off by default, fails the 
 	@if grep -E '^\s*(apiKey|clientSecret|cookieSecret|botToken|signingSecret|appToken|stateKey|storeKey|registrationToken|encryptionKeyValue|password): ' $(VERIFY_TMP)/vs-ref.out | grep -vqE ': ""$$'; then \
 		echo "FAIL: a child HelmRelease still carries a non-empty credential key:"; grep -nE '^\s*(apiKey|clientSecret|cookieSecret|botToken|signingSecret|appToken|stateKey|storeKey|registrationToken|encryptionKeyValue|password): ' $(VERIFY_TMP)/vs-ref.out | grep -vE ': ""$$'; exit 1; fi
 	@grep -q 'existingSecret: klaus-gateway-obo-keys' $(VERIFY_TMP)/vs-ref.out || { echo "FAIL: klausGateway.obo.existingSecret was not forwarded to the klaus-gateway release"; exit 1; }
-	@grep -q 'apiKeySecretRef: kagent-anthropic-key' $(VERIFY_TMP)/vs-ref.out || { echo "FAIL: kagent.providers.anthropic.apiKeySecretRef was not forwarded"; exit 1; }
+	@grep -q 'existingSecret: kagent-oauth2-proxy-credentials' $(VERIFY_TMP)/vs-ref.out || { echo "FAIL: kagent.oauth2-proxy.config.existingSecret was not forwarded"; exit 1; }
 	@echo "ok: referenced Secrets render clean"
 	@echo "--> the flag itself is meta-package plumbing and is not forwarded to any child release"
 	@if grep -q 'forbidInlineSecrets' $(VERIFY_TMP)/vs-ref.out; then echo "FAIL: gitops.forbidInlineSecrets leaked into a child HelmRelease's values"; exit 1; else echo "ok: flag not forwarded"; fi
@@ -856,67 +856,11 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	elif ! grep -q "is already taken by the http listener" $(VERIFY_TMP)/vl-port.out; then \
 		echo "FAIL: the port-collision guard failed for the wrong reason"; cat $(VERIFY_TMP)/vl-port.out; exit 1; \
 	else echo "ok: port-collision guard"; fi
-	@echo "--> the CI scenario renders, and a chart-owned ModelConfig can ride the listener"
+	@echo "--> the CI scenario renders"
 	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >$(VERIFY_TMP)/vl-ci.out 2>&1 || { cat $(VERIFY_TMP)/vl-ci.out; exit 1; }
-	@grep -A3 'anthropic:' $(VERIFY_TMP)/vl-ci.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: a chart-owned ModelConfig does not reach the listener; that agent would bypass it"; exit 1; }
-	@echo "ok: CI scenario"
-	@echo "--> a ModelConfig that names no baseUrl rides the listener"
-	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: an entry with no baseUrl stayed direct; a new model would be unmetered by default"; exit 1; }
-	@echo "ok: routed by default"
-	@echo "--> an explicit baseUrl wins (the escape hatch), and an entry for another provider stays direct"
-	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out | grep -q 'baseUrl: "https://api.anthropic.com"' || { echo "FAIL: an explicit baseUrl was overwritten by the listener default; a model could never leave the gateway"; exit 1; }
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].provider=Mistral' >$(VERIFY_TMP)/vl-other.out 2>&1 || { cat $(VERIFY_TMP)/vl-other.out; exit 1; }
-	@if awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-other.out | grep -q 'baseUrl:'; then \
-		echo "FAIL: a model of a provider no llmRouting.models entry serves was pointed at the listener; it would reach the wrong upstream"; exit 1; \
-	else echo "ok: explicit URL and foreign provider"; fi
-	@echo "--> an entry whose provider has no baseUrl in ModelConfigSpec fails the render, naming the entry"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].provider=Ollama' >$(VERIFY_TMP)/vl-nourl.out 2>&1; then \
-		echo "FAIL: a baseUrl rendered under a provider block the CRD prunes; the model would stay direct in silence"; exit 1; \
-	else grep -q 'anthropic-opus-direct' $(VERIFY_TMP)/vl-nourl.out || { cat $(VERIFY_TMP)/vl-nourl.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
-	@echo "ok: provider without a baseUrl"
-	@echo "--> a non-Anthropic entry's baseUrl goes under the CRD's block key (openAI), never the lower-cased provider"
-	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out | grep -A1 '^  openAI:$$' | grep -q 'baseUrl: "https://api.openai.com/v1"' || { echo "FAIL: the OpenAI entry's baseUrl is not under spec.openAI; the API server would prune it and the model would stay direct in silence"; exit 1; }
-	@if grep -qE '^  (openai|sapaicore):$$' $(VERIFY_TMP)/vl-ci.out; then echo "FAIL: a lower-cased provider block rendered; the CRD knows openAI and sapAICore only"; exit 1; fi
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set-json 'llmRouting.models=[{"name":"openai","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"gpt-*"}]' --set 'kagent.modelConfigs[0].provider=OpenAI' >$(VERIFY_TMP)/vl-openai-routed.out 2>&1 || { cat $(VERIFY_TMP)/vl-openai-routed.out; exit 1; }
-	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-openai-routed.out | grep -A1 '^  openAI:$$' | grep -q 'baseUrl: "http://agentgateway.default.svc:8081/v1"' || { echo "FAIL: the routed default for an OpenAI listener is not spec.openAI.baseUrl ending in /v1; an OpenAI client appends /responses to it and would miss the listener's routes"; exit 1; }
-	@echo "ok: openAI block key, explicit and routed"
-	@echo "--> a codex model rides the listener's OpenAI entry: the Responses API format, the listener URL with /v1, nothing the codex compiler refuses"
-	@awk '/name: "openai-gpt-codex"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out >$(VERIFY_TMP)/vl-codex.out
-	@grep -A2 '^  openAI:$$' $(VERIFY_TMP)/vl-codex.out | grep -q 'apiFormat: responses' || { cat $(VERIFY_TMP)/vl-codex.out; echo "FAIL: the codex ModelConfig carries no openAI.apiFormat: responses; the codex compiler refuses it"; exit 1; }
-	@grep -A2 '^  openAI:$$' $(VERIFY_TMP)/vl-codex.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081/v1"' || { cat $(VERIFY_TMP)/vl-codex.out; echo "FAIL: the codex ModelConfig does not reach the listener at /v1; its calls would bypass the metering and the rate limits"; exit 1; }
-	@if grep -qE '^  (defaultHeaders|tls|apiKeyPassthrough):|maxTokens|maxCompletionTokens' $(VERIFY_TMP)/vl-codex.out; then cat $(VERIFY_TMP)/vl-codex.out; echo "FAIL: the codex ModelConfig carries a field the codex compiler refuses"; exit 1; fi
+	@if grep -q '^kind: ModelConfig$$' $(VERIFY_TMP)/vl-ci.out; then echo "FAIL: the chart rendered a ModelConfig; an installation declares its own"; exit 1; fi
 	@awk '/^kind: AgentgatewayModel$$/{f=1} f&&/^---/{f=0} f' $(VERIFY_TMP)/vl-ci.out | grep -q '^  provider: OpenAI$$' || { echo "FAIL: no OpenAI AgentgatewayModel on the listener; a codex call has no Responses upstream"; exit 1; }
-	@echo "ok: codex ModelConfig"
-	@echo "--> guard: apiFormat on a provider without it, or outside the CRD's enum, fails the render naming the entry"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].apiFormat=responses' >$(VERIFY_TMP)/vl-fmt.out 2>&1; then \
-		echo "FAIL: apiFormat rendered on an Anthropic entry; the API server would prune it in silence"; exit 1; \
-	else grep -q 'anthropic-sonnet' $(VERIFY_TMP)/vl-fmt.out || { cat $(VERIFY_TMP)/vl-fmt.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[3].apiFormat=Responses' >$(VERIFY_TMP)/vl-fmt.out 2>&1; then \
-		echo "FAIL: apiFormat outside the CRD's enum rendered; the API server refuses it at admission"; exit 1; \
-	else grep -q 'openai-gpt-codex' $(VERIFY_TMP)/vl-fmt.out || { cat $(VERIFY_TMP)/vl-fmt.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
-	@echo "ok: apiFormat guards"
-	@echo "--> a ChatGPT login (credentialType chatgptOAuth): no apiKeySecretKey, the Responses API, off the listener"
-	@awk '/name: "openai-chatgpt-codex"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out >$(VERIFY_TMP)/vl-chatgpt.out
-	@grep -q '^  apiKeySecret: "kagent-chatgpt-login"$$' $(VERIFY_TMP)/vl-chatgpt.out || { cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig does not name its login Secret"; exit 1; }
-	@if grep -q 'apiKeySecretKey' $(VERIFY_TMP)/vl-chatgpt.out; then cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig carries apiKeySecretKey; the CRD refuses it at admission"; exit 1; fi
-	@grep -A3 '^  openAI:$$' $(VERIFY_TMP)/vl-chatgpt.out | grep -q 'credentialType: chatgptOAuth' || { cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig carries no openAI.credentialType: chatgptOAuth"; exit 1; }
-	@grep -A3 '^  openAI:$$' $(VERIFY_TMP)/vl-chatgpt.out | grep -q 'apiFormat: responses' || { cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig carries no openAI.apiFormat: responses"; exit 1; }
-	@if grep -q 'baseUrl:' $(VERIFY_TMP)/vl-chatgpt.out; then cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig was pointed at the listener, whose OpenAI route serves the OpenAI API, not the ChatGPT Codex backend"; exit 1; fi
-	@echo "ok: ChatGPT login ModelConfig"
-	@echo "--> guard: a ChatGPT login on another provider, with apiKeySecretKey, without apiFormat responses, or a credentialType outside the CRD's enum fails the render naming the entry"
-	@for args in "kagent.modelConfigs[4].provider=Anthropic" "kagent.modelConfigs[4].apiKeySecretKey=OPENAI_API_KEY" "kagent.modelConfigs[4].apiFormat=chatCompletions" "kagent.modelConfigs[4].apiFormat=" "kagent.modelConfigs[4].credentialType=ChatGPTOAuth"; do \
-		if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set "$$args" >$(VERIFY_TMP)/vl-chatgpt-guard.out 2>&1; then \
-			echo "FAIL: $$args rendered a ChatGPT login ModelConfig the CRD or the codex compiler refuses"; exit 1; \
-		fi; \
-		grep -q 'openai-chatgpt-codex' $(VERIFY_TMP)/vl-chatgpt-guard.out || { cat $(VERIFY_TMP)/vl-chatgpt-guard.out; echo "FAIL: $$args: the failure does not name the entry"; exit 1; }; \
-	done
-	@echo "ok: ChatGPT login guards"
-	@echo "--> guard: a provider outside the CRD's enum fails the render, naming the entry and the enum"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].provider=openai' >$(VERIFY_TMP)/vl-enum.out 2>&1; then \
-		echo "FAIL: provider 'openai' rendered; the API server refuses it at admission (the enum is case-sensitive) after the chart said nothing"; exit 1; \
-	elif ! grep -q 'anthropic-sonnet' $(VERIFY_TMP)/vl-enum.out || ! grep -q 'Anthropic, OpenAI, AzureOpenAI, Ollama, Gemini, GeminiVertexAI, AnthropicVertexAI, Bedrock, SAPAICore, Foundry' $(VERIFY_TMP)/vl-enum.out; then \
-		cat $(VERIFY_TMP)/vl-enum.out; echo "FAIL: the enum guard does not name the entry and the CRD's enum"; exit 1; \
-	else echo "ok: enum guard"; fi
+	@echo "ok: CI scenario"
 	@echo "--> the MutatingAdmissionPolicy writes the provider's own block name"
 	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set-json 'llmRouting.models=[{"name":"openai","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"gpt-*"}]' >$(VERIFY_TMP)/vl-openai.out 2>&1 || { cat $(VERIFY_TMP)/vl-openai.out; exit 1; }
 	@grep -q 'object.spec.openAI.baseUrl' $(VERIFY_TMP)/vl-openai.out || { echo "FAIL: the policy reads the lower-cased provider name, not the ModelConfigSpec block; every CEL evaluation would error"; exit 1; }
@@ -928,7 +872,7 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 		echo "FAIL: the policy rendered without the GA API version; on 1.34/1.35 it would exist and mutate nothing"; exit 1; \
 	fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy >$(VERIFY_TMP)/vl-map.out 2>&1 || { cat $(VERIFY_TMP)/vl-map.out; exit 1; }
-	@grep -q 'kind: MutatingAdmissionPolicy$$' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: no MutatingAdmissionPolicy on a 1.36 API server; a ModelConfig created outside the chart would be unmetered"; exit 1; }
+	@grep -q 'kind: MutatingAdmissionPolicy$$' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: no MutatingAdmissionPolicy on a 1.36 API server; a ModelConfig without a baseUrl would be unmetered"; exit 1; }
 	@grep -q 'kind: MutatingAdmissionPolicyBinding' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy has no binding; it matches nothing"; exit 1; }
 	@grep -q 'failurePolicy: Ignore' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy fails closed; a CEL error would block every ModelConfig write"; exit 1; }
 	@grep -q 'kubernetes.io/metadata.name: kagent' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy is not scoped to the kagent namespace"; exit 1; }
@@ -938,11 +882,6 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set llmRouting.modelConfigPolicy.enabled=false 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
 		echo "FAIL: llmRouting.modelConfigPolicy.enabled=false still rendered the policy"; exit 1; \
 	else echo "ok: admission policy gated on the GA group and its own toggle"; fi
-	@echo "--> the meta chart forwards the cutover value to the kagent release"
-	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.providers.anthropic.config.baseUrl=http://agentgateway.default.svc:8081 >$(VERIFY_TMP)/vl-meta.out 2>&1 || { cat $(VERIFY_TMP)/vl-meta.out; exit 1; }
-	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: kagent$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-meta.out >$(VERIFY_TMP)/vl-meta-kagent.out
-	@grep -A8 '^    providers:$$' $(VERIFY_TMP)/vl-meta-kagent.out | grep -q 'baseUrl: http://agentgateway.default.svc:8081' || { echo "FAIL: the cutover value never reaches the kagent HelmRelease (flat, kagent 0.2.0+: providers.anthropic.config.baseUrl at the values root); the default ModelConfig would stay direct"; exit 1; }
-	@echo "ok: cutover forwarded"
 	@echo "All llmRouting behaviors verified."
 
 # The names of the AgentgatewayPolicy documents of a render that carry a
@@ -1372,78 +1311,6 @@ verify-access-log: ## Assert the data plane's access log fields (giantswarm/gian
 	@for f in agent_instance_id request_id; do grep -A12 '^      accessLog:$$' $(VERIFY_TMP)/val-meta-conn.out | grep -q "^          $$f:$$" || { echo "FAIL: the meta chart does not forward gateway.accessLog.attributes.$$f to the connectivity release"; exit 1; }; done
 	@echo "ok: $@"
 
-# Anthropic prompt caching (giantswarm/giantswarm#37788; the kagent line's carried patch kagent-dev/kagent#2788).
-.PHONY: verify-prompt-caching
-verify-prompt-caching: ## Assert Anthropic prompt caching: the meta chart forwards kagent.providers.anthropic.config.promptCaching: true + cacheTTL to the kagent release (the default ModelConfig) and to the connectivity release; the connectivity chart's Anthropic catalog entries inherit both in the one provider block next to the listener baseUrl, an entry's own keys win (false included), an OpenAI entry gets nothing, a Bedrock entry takes its own keys under spec.bedrock, the chart alone renders nothing; a cacheTTL outside the CRD's enum and the keys on a provider without them fail the render naming the entry.
-	@echo "====> $@"
-	@echo "--> the meta chart forwards promptCaching + cacheTTL to the kagent release and to the connectivity release"
-	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >$(VERIFY_TMP)/vpc-meta.out 2>&1 || { cat $(VERIFY_TMP)/vpc-meta.out; exit 1; }
-	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: kagent$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vpc-meta.out >$(VERIFY_TMP)/vpc-meta-kagent.out
-	@grep -A14 '^    providers:$$' $(VERIFY_TMP)/vpc-meta-kagent.out | grep -q 'promptCaching: true' || { echo "FAIL: the kagent HelmRelease values carry no providers.anthropic.config.promptCaching: true; the default ModelConfig would stay uncached"; exit 1; }
-	@grep -A14 '^    providers:$$' $(VERIFY_TMP)/vpc-meta-kagent.out | grep -q 'cacheTTL: 5m' || { echo "FAIL: the kagent HelmRelease values carry no providers.anthropic.config.cacheTTL"; exit 1; }
-	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vpc-meta.out >$(VERIFY_TMP)/vpc-meta-conn.out
-	@grep -q 'promptCaching: true' $(VERIFY_TMP)/vpc-meta-conn.out || { echo "FAIL: the connectivity HelmRelease values carry no providers.anthropic.config.promptCaching; the catalog's Anthropic entries would inherit nothing"; exit 1; }
-	@echo "ok: forwarded to both releases"
-	@echo "--> connectivity: an Anthropic entry inherits the platform default in one block next to the listener baseUrl; an OpenAI entry gets nothing"
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >$(VERIFY_TMP)/vpc-ci.out 2>&1 || { cat $(VERIFY_TMP)/vpc-ci.out; exit 1; }
-	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vpc-ci.out >$(VERIFY_TMP)/vpc-sonnet.out
-	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' $(VERIFY_TMP)/vpc-sonnet.out && grep -q '^    promptCaching: true$$' $(VERIFY_TMP)/vpc-sonnet.out && grep -q '^    cacheTTL: 5m$$' $(VERIFY_TMP)/vpc-sonnet.out || { cat $(VERIFY_TMP)/vpc-sonnet.out; echo "FAIL: an Anthropic entry without its own keys did not inherit promptCaching: true / cacheTTL: 5m under spec.anthropic next to the listener baseUrl"; exit 1; }
-	@if [ "$$(grep -c '^  anthropic:$$' $(VERIFY_TMP)/vpc-sonnet.out)" != "1" ]; then cat $(VERIFY_TMP)/vpc-sonnet.out; echo "FAIL: the anthropic block renders more than once (baseUrl and the cache keys share one block; a second would overwrite the first)"; exit 1; fi
-	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vpc-ci.out >$(VERIFY_TMP)/vpc-openai.out
-	@if grep -qE 'promptCaching|cacheTTL' $(VERIFY_TMP)/vpc-openai.out; then cat $(VERIFY_TMP)/vpc-openai.out; echo "FAIL: an OpenAI entry carries the Anthropic cache keys; the API server would prune them"; exit 1; fi
-	@echo "ok: inherited by Anthropic entries only"
-	@echo "--> an entry's own keys win, false included"
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].promptCaching=false' --set 'kagent.modelConfigs[1].cacheTTL=1h' >$(VERIFY_TMP)/vpc-own.out 2>&1 || { cat $(VERIFY_TMP)/vpc-own.out; exit 1; }
-	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vpc-own.out >$(VERIFY_TMP)/vpc-opus.out
-	@grep -q '^    promptCaching: false$$' $(VERIFY_TMP)/vpc-opus.out && grep -q '^    cacheTTL: 1h$$' $(VERIFY_TMP)/vpc-opus.out || { cat $(VERIFY_TMP)/vpc-opus.out; echo "FAIL: an entry's own promptCaching: false / cacheTTL: 1h did not win over the platform default"; exit 1; }
-	@echo "ok: own keys win"
-	@echo "--> the connectivity chart alone (no platform default): nothing renders"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"plain","provider":"Anthropic","model":"m","apiKeySecret":"s","apiKeySecretKey":"k"}]' >$(VERIFY_TMP)/vpc-plain.out 2>&1 || { cat $(VERIFY_TMP)/vpc-plain.out; exit 1; }
-	@if grep -qE 'promptCaching|cacheTTL' $(VERIFY_TMP)/vpc-plain.out; then cat $(VERIFY_TMP)/vpc-plain.out; echo "FAIL: the connectivity chart invents a caching default of its own; the meta chart owns it"; exit 1; fi
-	@echo "ok: nothing by default"
-	@echo "--> a Bedrock entry takes its own keys under spec.bedrock (no baseUrl there)"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"bedrock","provider":"Bedrock","model":"m","apiKeySecret":"s","promptCaching":true,"cacheTTL":"1h"}]' >$(VERIFY_TMP)/vpc-bedrock.out 2>&1 || { cat $(VERIFY_TMP)/vpc-bedrock.out; exit 1; }
-	@grep -A2 '^  bedrock:$$' $(VERIFY_TMP)/vpc-bedrock.out | grep -q 'promptCaching: true' || { cat $(VERIFY_TMP)/vpc-bedrock.out; echo "FAIL: a Bedrock entry's promptCaching is not under spec.bedrock"; exit 1; }
-	@echo "ok: bedrock block"
-	@echo "--> guards: a cacheTTL outside the CRD's enum, and the keys on a provider without them, fail naming the entry"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].cacheTTL=10m' >$(VERIFY_TMP)/vpc-ttl.out 2>&1; then \
-		echo "FAIL: cacheTTL 10m rendered; the CRD's enum is 5m, 1h and the API server refuses it after the render said nothing"; exit 1; \
-	elif ! grep -q 'anthropic-sonnet' $(VERIFY_TMP)/vpc-ttl.out || ! grep -q '5m, 1h' $(VERIFY_TMP)/vpc-ttl.out; then cat $(VERIFY_TMP)/vpc-ttl.out; echo "FAIL: the cacheTTL guard does not name the entry and the enum"; exit 1; \
-	else echo "ok: cacheTTL guard"; fi
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[2].promptCaching=true' >$(VERIFY_TMP)/vpc-foreign.out 2>&1; then \
-		echo "FAIL: promptCaching on an OpenAI entry rendered; the API server would prune it and the model would stay uncached in silence"; exit 1; \
-	elif ! grep -q 'openai-gpt-direct' $(VERIFY_TMP)/vpc-foreign.out; then cat $(VERIFY_TMP)/vpc-foreign.out; echo "FAIL: the provider guard does not name the entry"; exit 1; \
-	else echo "ok: provider guard"; fi
-	@echo "All prompt-caching behaviors verified."
-
-# The ModelConfig output bound (giantswarm/agent-platform#702).
-.PHONY: verify-max-tokens
-verify-max-tokens: ## Assert the ModelConfig output bound: the connectivity chart's Anthropic catalog entries inherit kagent.providers.anthropic.config.maxTokens in the one provider block next to the listener baseUrl, an entry's own maxTokens wins, an OpenAI entry takes its own under spec.openAI and inherits nothing, the chart alone renders nothing; maxTokens on a provider without the field fails the render naming the entry.
-	@echo "====> $@"
-	@echo "--> an Anthropic entry inherits the platform bound in one block next to the listener baseUrl; an OpenAI entry inherits nothing"
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >$(VERIFY_TMP)/vmt-ci.out 2>&1 || { cat $(VERIFY_TMP)/vmt-ci.out; exit 1; }
-	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vmt-ci.out >$(VERIFY_TMP)/vmt-sonnet.out
-	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' $(VERIFY_TMP)/vmt-sonnet.out && grep -q '^    maxTokens: 32000$$' $(VERIFY_TMP)/vmt-sonnet.out || { cat $(VERIFY_TMP)/vmt-sonnet.out; echo "FAIL: an Anthropic entry without its own maxTokens did not inherit 32000 under spec.anthropic next to the listener baseUrl; it would stop at kagent's 8192"; exit 1; }
-	@if [ "$$(grep -c '^  anthropic:$$' $(VERIFY_TMP)/vmt-sonnet.out)" != "1" ]; then cat $(VERIFY_TMP)/vmt-sonnet.out; echo "FAIL: the anthropic block renders more than once"; exit 1; fi
-	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vmt-ci.out >$(VERIFY_TMP)/vmt-openai.out
-	@if grep -q 'maxTokens' $(VERIFY_TMP)/vmt-openai.out; then cat $(VERIFY_TMP)/vmt-openai.out; echo "FAIL: an OpenAI entry inherited the Anthropic default's maxTokens"; exit 1; fi
-	@echo "ok: inherited by Anthropic entries only"
-	@echo "--> an entry's own maxTokens wins; an OpenAI entry's own lands under spec.openAI"
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].maxTokens=64000' --set 'kagent.modelConfigs[2].maxTokens=16000' >$(VERIFY_TMP)/vmt-own.out 2>&1 || { cat $(VERIFY_TMP)/vmt-own.out; exit 1; }
-	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vmt-own.out | grep -q '^    maxTokens: 64000$$' || { cat $(VERIFY_TMP)/vmt-own.out; echo "FAIL: an entry's own maxTokens 64000 did not win over the platform bound"; exit 1; }
-	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vmt-own.out | grep -A3 '^  openAI:$$' | grep -q 'maxTokens: 16000' || { cat $(VERIFY_TMP)/vmt-own.out; echo "FAIL: an OpenAI entry's own maxTokens is not under spec.openAI"; exit 1; }
-	@echo "ok: own maxTokens wins"
-	@echo "--> the connectivity chart alone (no platform bound): nothing renders"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"plain","provider":"Anthropic","model":"m","apiKeySecret":"s","apiKeySecretKey":"k"}]' >$(VERIFY_TMP)/vmt-plain.out 2>&1 || { cat $(VERIFY_TMP)/vmt-plain.out; exit 1; }
-	@if grep -q 'maxTokens' $(VERIFY_TMP)/vmt-plain.out; then cat $(VERIFY_TMP)/vmt-plain.out; echo "FAIL: the connectivity chart invents a maxTokens of its own; the platform owns the bound"; exit 1; fi
-	@echo "ok: nothing by default"
-	@echo "--> guard: maxTokens on a provider without the field fails naming the entry"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"gemini-bounded","provider":"Gemini","model":"m","apiKeySecret":"s","maxTokens":1000}]' >$(VERIFY_TMP)/vmt-foreign.out 2>&1; then \
-		echo "FAIL: maxTokens on a Gemini entry rendered; the API server would prune it"; exit 1; \
-	elif ! grep -q 'gemini-bounded' $(VERIFY_TMP)/vmt-foreign.out; then cat $(VERIFY_TMP)/vmt-foreign.out; echo "FAIL: the provider guard does not name the entry"; exit 1; \
-	else echo "ok: provider guard"; fi
-	@echo "All max-tokens behaviors verified."
-
 .PHONY: verify-engine
 verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure renderer, no CRD/hook/operator/identity) and engine on (the eleven CRDs, operator, FluxInstance, agent-platform-flux on every HelmRelease, the teardown hooks at pre-delete and post-delete, resource-policy keep on exactly the engine objects they remove). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
@@ -1563,7 +1430,7 @@ verify-toolchain-manager: ## Assert the toolchain-manager component (giantswarm/
 	@python3 tests/verify-toolchain-manager.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "toolchain-manager component verified."
 .PHONY: verify-chatgpt-personal-login
-verify-chatgpt-personal-login: ## Assert the wiring of a person's own ChatGPT login (giantswarm/giantswarm#38731): a kagent.modelConfigs[] entry with credentialType chatgptOAuth and no apiKeySecret derives muster's provider App chatgpt (flow chatgptDeviceCode) and kagent's installation provider chatgpt (chatgpt.com, /backend-api/codex/, Bearer) for the kagent and connectivity releases, own values stand, the installation's own login derives nothing, and muster 5.52.5 and kagent 1.24.0 take the values; the guards (muster's token encryption, its OAuth client, the credential provider, the kagent, kagent-crds and muster floors); the connectivity chart renders the model without apiKeySecret, as "ChatGPT (your subscription)", only beside the provider, and still requires apiFormat responses; the muster chart refuses the App without its encryption key. Network: gsoci.azurecr.io (the component charts). HELM selects the binary.
+verify-chatgpt-personal-login: ## Assert the wiring of a person's own ChatGPT login (giantswarm/giantswarm#38731): chatgptPersonalLogin.enabled derives muster's provider App chatgpt (flow chatgptDeviceCode) and kagent's installation provider chatgpt (chatgpt.com, /backend-api/codex/, Bearer) for the kagent release, own values stand, the switch off derives nothing, and muster 5.52.5 and kagent 1.24.0 take the values; the guards (muster's token encryption, its OAuth client, the credential provider, the kagent, kagent-crds and muster floors); the muster chart refuses the App without its encryption key. Network: gsoci.azurecr.io (the component charts). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-chatgpt-personal-login.py $(CHART_DIR)
 	@echo "ChatGPT personal login verified."
@@ -2332,12 +2199,12 @@ verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for m
 	@echo "kagent tool-discovery invariants verified."
 
 .PHONY: verify-model-catalog
-verify-model-catalog: ## Assert llmRouting.modelCatalog is an overlay of what the pinned gateway lacks (giantswarm/giantswarm#37975): no provider/model in it is priced by the built-in catalog of the data plane's release (catalog/model-catalog.json of giantswarm/agentgateway-upstream at v<agentgateway.proxy.image.tag>), the gateway tags of both charts agree, both charts carry the same overlay, and the platform's default model is priced. A gateway bump that starts pricing an overlay model fails here until the entry is dropped. Network: raw.githubusercontent.com (MODEL_CATALOG_FILE for offline). Needs PyYAML.
+verify-model-catalog: ## Assert llmRouting.modelCatalog is an overlay of what the pinned gateway lacks (giantswarm/giantswarm#37975): no provider/model in it is priced by the built-in catalog of the data plane's release (catalog/model-catalog.json of giantswarm/agentgateway-upstream at v<agentgateway.proxy.image.tag>), the gateway tags of both charts agree, and both charts carry the same overlay. A gateway bump that starts pricing an overlay model fails here until the entry is dropped. Network: raw.githubusercontent.com (MODEL_CATALOG_FILE for offline). Needs PyYAML.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-model-catalog.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 
 .PHONY: verify-kagent-crds
-verify-kagent-crds: ## Assert every api.kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — api.kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that a ModelConfig of every provider in the CRD's enum renders (its baseUrl under the block the CRD gives one to, refused where it gives none, an unknown provider refused naming the enum), that the pinned AgentTemplate CRD serves the private repositories' per-source skills[]/plugins[].source.git.credentialRef, and no render of the chart carries kagent.dev/v1alpha2 — at the floor of components.kagent-crds.versionRange (tests/verify-kagent-crds.py; needs PyYAML).
+verify-kagent-crds: ## Assert every api.kagent.dev object the connectivity chart renders (the RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — api.kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that the LLM routing policies write a ModelConfig's baseUrl under the block the CRD gives one to, for exactly the providers whose block has one, that the pinned AgentTemplate CRD serves the private repositories' per-source skills[]/plugins[].source.git.credentialRef, and no render of the chart carries kagent.dev/v1alpha2 — at the floor of components.kagent-crds.versionRange (tests/verify-kagent-crds.py; needs PyYAML).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-crds.py $(CONNECTIVITY_DIR)
@@ -4626,7 +4493,7 @@ verify-tenant-modelconfigs: ## Assert the render of an organization's own ModelC
 	@echo "ok: $@"
 
 .PHONY: verify-default-model-config
-verify-default-model-config: ## Assert the default ModelConfig marker (giantswarm/agent-platform#1274): the meta chart forwards providers to the kagent release by default and providers: false with kagent.defaultModelConfig.enabled=false, changing nothing else of that release, and kagent.defaultModelConfig never reaches it; the connectivity chart annotates the kagent.modelConfigs entry with default: true (a string "false" marks nothing) agent-platform.giantswarm.io/is-default-model-config: "true", fails the render naming two such entries, and Anthropic entries keep inheriting kagent.providers.anthropic.config with kagent.defaultModelConfig.enabled=false. Needs PyYAML. HELM selects the binary.
+verify-default-model-config: ## Assert the charts declare no model (giantswarm/giantswarm-platform-manager#789): the meta chart writes providers: false into the kagent release on every render (so the kagent chart renders no default-model-config), forwards no meta-only key to the kagent or connectivity release, and both charts fail the render naming kagent.providers, kagent.defaultModelConfig (meta) and kagent.modelConfigs, pointing at ModelConfig objects declared in GitOps; the connectivity chart renders no ModelConfig.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-default-model-config.py $(CHART_DIR) $(CONNECTIVITY_DIR)

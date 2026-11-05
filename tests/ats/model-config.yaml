@@ -1,0 +1,17 @@
+# The smoke's model, declared as an installation declares its models: a plain
+# ModelConfig next to the agents, the namespace's default by its annotation. The
+# placeholder key Secret it names is the smoke's
+# (conftest.apply_placeholder_provider_secret): Ready means the Harness booted
+# the actor's golden snapshot, not that a model answered.
+apiVersion: api.kagent.dev/v1alpha3
+kind: ModelConfig
+metadata:
+  name: ats-model
+  namespace: kagent
+  annotations:
+    agent-platform.giantswarm.io/is-default-model-config: "true"
+spec:
+  provider: Anthropic
+  model: claude-sonnet-4-6
+  apiKeySecret: kagent-anthropic
+  apiKeySecretKey: ANTHROPIC_API_KEY

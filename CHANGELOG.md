@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking:** **The charts declare no model: `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` are removed** (giantswarm/giantswarm-platform-manager#789). The meta chart writes `providers: false` into the kagent release on every render, so the kagent chart renders no `default-model-config` and deletes the one it rendered; the connectivity chart renders no ModelConfig. An installation declares its ModelConfigs as `api.kagent.dev/v1alpha3` objects next to its agents, the namespace's default annotated `agent-platform.giantswarm.io/is-default-model-config: "true"`; the LLM routing policies still fill in the listener `baseUrl` of a ModelConfig without one. Values that set any of the three keys fail the render naming them, in both charts. `gitops.forbidInlineSecrets` no longer checks `kagent.providers.*.apiKey`. This supersedes the entries below for giantswarm/agent-platform#1274 (`kagent.modelConfigs[].default`, `kagent.defaultModelConfig.enabled`).
+
+### Changed
+
+- **Breaking:** **A person's own ChatGPT login is switched on by `chatgptPersonalLogin.enabled`** (default `false`, giantswarm/giantswarm#38731). It derives muster's provider App `chatgpt` and kagent's installation provider `chatgpt`, as a `kagent.modelConfigs[]` entry with `credentialType: chatgptOAuth` and no `apiKeySecret` did, with the same guards; the ModelConfig is declared with the agents. The connectivity release no longer carries `kagent.controller.session.actorJWTProviders.chatgpt`.
+
 ### Security
 
 - **The connectivity hooks read only the Secrets they write** (giantswarm/agent-platform#1269). The hook ServiceAccount's ClusterRole no longer carries `secrets` or `configmaps`. Each hook gets a Role, at its own events, in each namespace it writes, on the names it reads or writes; only the Substrate bootstrap's `create` is unnamed. The bootstrap's Roles are in `ate-system` and `podcertificate-controller-system`, which the new pre-install / pre-upgrade hook Job `<release>-substrate-namespaces` (weight -4) creates when they are missing. With `agentPlatformOrganizations.enabled` the bootstrap also gets `create` and `patch` on the ConfigMap `agent-platform-operator-ate-api-ca` in the release namespace. The databases hook's Roles are in `postgres.namespace` and every `secretNamespaces` entry, and the sign-in keys cleanup's Role is in the release namespace.

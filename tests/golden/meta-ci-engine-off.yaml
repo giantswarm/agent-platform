@@ -714,8 +714,6 @@ spec:
           urlFile: /etc/kagent-db/uri
           vectorEnabled: true
           vectorSchema: public
-      defaultModelConfig:
-        enabled: true
       fluxServiceAccountName: kagent-flux
       fullnameOverride: kagent
       grafana-mcp:
@@ -779,7 +777,6 @@ spec:
                 ephemeral-storage: 256Mi
                 memory: 1Gi
       harnesses: []
-      modelConfigs: []
       namespaceOverride: kagent
       oauth2-proxy:
         config:
@@ -855,17 +852,6 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      providers:
-        anthropic:
-          apiKey: ""
-          apiKeySecretKey: ANTHROPIC_API_KEY
-          apiKeySecretRef: kagent-anthropic
-          config:
-            cacheTTL: 5m
-            promptCaching: true
-          model: claude-sonnet-5-5
-          provider: Anthropic
-        default: anthropic
       registry: gsoci.azurecr.io
       remoteMcpServers: []
       securityContext:
@@ -2098,17 +2084,7 @@ spec:
       runAsNonRoot: true
       seccompProfile:
         type: RuntimeDefault
-    providers:
-      anthropic:
-        apiKey: ""
-        apiKeySecretKey: ANTHROPIC_API_KEY
-        apiKeySecretRef: kagent-anthropic
-        config:
-          cacheTTL: 5m
-          promptCaching: true
-        model: claude-sonnet-5-5
-        provider: Anthropic
-      default: anthropic
+    providers: false
     registry: gsoci.azurecr.io
     securityContext:
       allowPrivilegeEscalation: false

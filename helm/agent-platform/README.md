@@ -498,13 +498,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.omitKeys[1] | string | `"controller.vpa"` |  |
 | components.kagent.omitKeys[2] | string | `"fluxServiceAccountName"` |  |
 | components.kagent.omitKeys[3] | string | `"harness.snapshotStore"` |  |
-| components.kagent.omitKeys[4] | string | `"defaultModelConfig"` |  |
-| components.kagent.omitKeys[5] | string | `"modelConfigs"` |  |
-| components.kagent.omitKeys[6] | string | `"oauth2ProxyIngress"` |  |
-| components.kagent.omitKeys[7] | string | `"remoteMcpServers"` |  |
-| components.kagent.omitKeys[8] | string | `"uiRoute"` |  |
-| components.kagent.omitKeys[9] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
-| components.kagent.omitKeys[10] | string | `"substrateWorkerPool.priorityClass"` |  |
+| components.kagent.omitKeys[4] | string | `"oauth2ProxyIngress"` |  |
+| components.kagent.omitKeys[5] | string | `"remoteMcpServers"` |  |
+| components.kagent.omitKeys[6] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[7] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
+| components.kagent.omitKeys[8] | string | `"substrateWorkerPool.priorityClass"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
@@ -710,6 +708,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.omitKeys[3] | string | `"toolchain-manager"` |  |
 | components.agent-platform-connectivity.omitKeys[4] | string | `"kserve-runtime-configs"` |  |
 | components.agent-platform-connectivity.omitKeys[5] | string | `"agent-platform-operator"` |  |
+| components.agent-platform-connectivity.omitKeys[6] | string | `"chatgptPersonalLogin"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -1014,15 +1013,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.securityContext.allowPrivilegeEscalation | bool | `false` |  |
 | kagent.securityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | kagent.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
-| kagent.providers.default | string | `"anthropic"` |  |
-| kagent.providers.anthropic.provider | string | `"Anthropic"` |  |
-| kagent.providers.anthropic.model | string | `"claude-sonnet-5-5"` |  |
-| kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
-| kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
-| kagent.providers.anthropic.apiKey | string | `""` |  |
-| kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
-| kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
-| kagent.defaultModelConfig.enabled | bool | `true` |  |
 | kagent.otel.exporter.otlp.endpoint | string | `"auto"` |  |
 | kagent.otel.exporter.otlp.protocol | string | `"auto"` |  |
 | kagent.otel.exporter.otlp.timeout | string | `"500"` |  |
@@ -1150,7 +1140,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.uiRoute.backendTrafficPolicy.timeout | string | `"60s"` |  |
 | kagent.uiRoute.backendTrafficPolicy.annotations | object | `{}` |  |
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
-| kagent.modelConfigs | list | `[]` |  |
 | kagent.remoteMcpServers | list | `[]` |  |
 | kagent.harnesses | list | `[]` |  |
 | dashboards.enabled | bool | `true` |  |
@@ -1487,6 +1476,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentPlatformOrganizations.fluxDecryptionSecret | string | `"sops-keys"` | The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption. |
 | agentPlatformOrganizations.apiHostnames | list | `[]` | The installation's Kubernetes API hostnames beside api.<global.domain>, which is derived while global.domain is set: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. The render fails while both are empty. |
 | agent-platform-operator | object | `{}` |  |
+| chatgptPersonalLogin.enabled | bool | `false` |  |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |

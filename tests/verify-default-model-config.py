@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
-"""Assert the default ModelConfig marker and kagent's own default ModelConfig switch.
+"""Assert the charts declare no model: an installation's ModelConfigs are
+objects declared in GitOps next to its agents.
 
 Render, meta chart:
-- kagent.defaultModelConfig.enabled true (the default): the kagent release
-  carries the providers block; false: providers is exactly false (not null,
-  which Helm's upgrade patch drops) and nothing else of the release changes;
-- defaultModelConfig never reaches the kagent release;
-- with the switch off, the connectivity release still carries
-  kagent.providers.anthropic.config, which its Anthropic modelConfigs entries
-  inherit.
+- the kagent release carries providers: false on every render (not null, which
+  Helm's upgrade patch drops, and not {}, which merges the kagent chart's
+  defaults back in), so the kagent chart renders no default-model-config;
+- no meta-only key (defaultModelConfig, modelConfigs, chatgptPersonalLogin)
+  reaches the kagent or the connectivity release;
+- kagent.providers, kagent.defaultModelConfig and kagent.modelConfigs each fail
+  the render, naming the key and the replacement.
 
 Render, connectivity chart:
-- a kagent.modelConfigs[] entry with default: true (or "true") carries the
-  annotation agent-platform.giantswarm.io/is-default-model-config: "true";
-  false, "false" and an unset default carry none;
-- two entries with default: true fail the render, naming both.
+- kagent on renders no ModelConfig;
+- kagent.providers and kagent.modelConfigs each fail the render, naming the key
+  and the replacement.
 
 Needs helm and PyYAML. HELM selects the binary.
 
 Usage: verify-default-model-config.py META_CHART CONNECTIVITY_CHART
 """
-import json
 import os
 import subprocess
 import sys
@@ -28,8 +27,7 @@ import sys
 import yaml
 
 HELM = os.environ.get("HELM", "helm")
-ANNOTATION = "agent-platform.giantswarm.io/is-default-model-config"
-KAGENT_NS = "kagent"
+REPLACEMENT = "Declare each model as a ModelConfig object"
 
 
 def fail(msg):
@@ -61,7 +59,7 @@ def meta(chart, *extra):
 def connectivity(chart, *extra):
     return run([HELM, "template", "t", chart, "--namespace", "agent-platform",
                 "--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://a/b",
-                "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", f"kagent.namespaceOverride={KAGENT_NS}",
+                "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "kagent.namespaceOverride=kagent",
                 "--set", "components.kagent.enabled=true", *extra])
 
 
@@ -72,56 +70,45 @@ def release_values(objs, name):
     fail(f"no {name} HelmRelease in the render")
 
 
-def entry(name, **kw):
-    return {"name": name, "provider": "Anthropic", "model": "m", "apiKeySecret": "s", **kw}
-
-
-def model_configs(objs):
-    return {d["metadata"]["name"]: d for d in objs if d.get("kind") == "ModelConfig"}
+def refused(r, key, what):
+    if r.returncode == 0:
+        fail(f"{what}: {key} rendered; it must fail the render")
+    if key not in r.stderr or REPLACEMENT not in r.stderr:
+        fail(f"{what}: {key} failed without naming the key and the replacement:\n{r.stderr}")
 
 
 def check_meta(chart):
-    on = docs(meta(chart), "meta, default")
-    kagent = release_values(on, "kagent")
-    if not isinstance(kagent.get("providers"), dict) or "anthropic" not in kagent["providers"]:
-        fail(f"default: the kagent release's providers is {kagent.get('providers')!r}, want the anthropic block")
-    off = docs(meta(chart, "--set", "kagent.defaultModelConfig.enabled=false"), "meta, defaultModelConfig off")
-    kagent_off = release_values(off, "kagent")
-    if kagent_off.get("providers") is not False:
-        fail(f"defaultModelConfig.enabled=false: the kagent release's providers is {kagent_off.get('providers')!r}, want false")
-    if {k: v for k, v in kagent_off.items() if k != "providers"} != {k: v for k, v in kagent.items() if k != "providers"}:
-        fail("defaultModelConfig.enabled=false changes the kagent release's values beside providers")
-    ok("the kagent release carries providers by default and providers: false with defaultModelConfig.enabled=false")
-    for objs in (on, off):
-        if "defaultModelConfig" in release_values(objs, "kagent"):
-            fail("the kagent release carries the meta-only key defaultModelConfig")
-    ok("defaultModelConfig does not reach the kagent release")
-    conn = release_values(off, "agent-platform-connectivity").get("kagent", {})
-    inherited = ((conn.get("providers") or {}).get("anthropic") or {}).get("config")
-    if not isinstance(inherited, dict) or inherited.get("promptCaching") is not True:
-        fail(f"defaultModelConfig.enabled=false: the connectivity release's kagent.providers.anthropic.config is {inherited!r}, want the meta default the modelConfigs entries inherit")
-    ok("with defaultModelConfig.enabled=false the connectivity release keeps kagent.providers.anthropic.config")
+    objs = docs(meta(chart), "meta, default")
+    kagent = release_values(objs, "kagent")
+    if "providers" not in kagent or kagent["providers"] is not False:
+        fail(f"the kagent release's providers is {kagent.get('providers')!r}, want false")
+    ok("the kagent release carries providers: false")
+    for key in ("defaultModelConfig", "modelConfigs", "chatgptPersonalLogin"):
+        if key in kagent:
+            fail(f"the kagent release carries the meta-only key {key}")
+    conn = release_values(objs, "agent-platform-connectivity")
+    if "chatgptPersonalLogin" in conn:
+        fail("the connectivity release carries the meta-only key chatgptPersonalLogin")
+    for key in ("providers", "defaultModelConfig", "modelConfigs"):
+        if key in (conn.get("kagent") or {}):
+            fail(f"the connectivity release carries kagent.{key}")
+    ok("no meta-only key reaches the kagent or the connectivity release")
+    for args, key in ((["--set", "kagent.providers.anthropic.model=m"], "kagent.providers"),
+                      (["--set", "kagent.defaultModelConfig.enabled=false"], "kagent.defaultModelConfig"),
+                      (["--set", "kagent.modelConfigs[0].name=m"], "kagent.modelConfigs")):
+        refused(meta(chart, *args), key, "meta")
+    ok("kagent.providers, kagent.defaultModelConfig and kagent.modelConfigs fail the meta render, naming the replacement")
 
 
 def check_connectivity(chart):
-    entries = [entry("a", default=True), entry("b"), entry("c", default=False), entry("d", default="false"), entry("e", default="true")]
-    objs = docs(connectivity(chart, "--set-json", f"kagent.modelConfigs={json.dumps([entries[0], *entries[1:4]])}"), "connectivity, one default")
-    mcs = model_configs(objs)
-    marks = {n: (m["metadata"].get("annotations") or {}).get(ANNOTATION) for n, m in mcs.items()}
-    if marks != {"a": "true", "b": None, "c": None, "d": None}:
-        fail(f"the default annotation renders as {marks}, want it on a only")
-    ok('default: true annotates the entry; false, "false" and unset carry no marker')
-
-    quoted = model_configs(docs(connectivity(chart, "--set-json", f"kagent.modelConfigs={json.dumps([entries[4]])}"), "connectivity, quoted true"))
-    if (quoted["e"]["metadata"].get("annotations") or {}).get(ANNOTATION) != "true":
-        fail(f'default: "true" does not annotate the entry: {quoted["e"]["metadata"]}')
-    ok('default: "true" annotates the entry')
-
-    two = [entry("a", default=True), entry("b", default=True)]
-    r = connectivity(chart, "--set-json", f"kagent.modelConfigs={json.dumps(two)}")
-    if r.returncode == 0 or "more than one entry default (a, b)" not in r.stderr:
-        fail(f"two default entries render, or fail for another reason:\n{r.stderr}")
-    ok("two default entries fail the render, naming both")
+    objs = docs(connectivity(chart), "connectivity, kagent on")
+    if any(d.get("kind") == "ModelConfig" for d in objs):
+        fail("the connectivity chart rendered a ModelConfig")
+    ok("the connectivity chart renders no ModelConfig")
+    for args, key in ((["--set", "kagent.providers.anthropic.model=m"], "kagent.providers"),
+                      (["--set", "kagent.modelConfigs[0].name=m"], "kagent.modelConfigs")):
+        refused(connectivity(chart, *args), key, "connectivity")
+    ok("kagent.providers and kagent.modelConfigs fail the connectivity render, naming the replacement")
 
 
 def main():

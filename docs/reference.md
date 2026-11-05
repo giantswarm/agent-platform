@@ -324,7 +324,8 @@ A workspace is an Organization's set of repositories, mirrored on one shared rea
 - **Image references travel inside the chart.** The controller and UI tag and the Go ADK digest of the platform `Harness` are stamped into the chart at publish time. The meta chart forwards none of them.
   - `kagent.harness.image` is an override, by digest. It is forwarded only when set.
   - `kagent.substrateWorkerPool.workerImage` is **derived from the floor of `components.substrate.versionRange`**, never taken from the kagent chart's stamp. An own value must carry that tag, or the render fails. See the meta chart README, [One source of the Substrate version](../helm/agent-platform/README.md#one-source-of-the-substrate-version-componentssubstrateversionrange-giantswarmagent-platform466-giantswarmagent-platform822).
-- **The `kagent:` block** uses upstream's chart shape, keys at the root. The connectivity keys are dropped before the values reach the kagent release (`components.kagent.omitKeys`): `controllerRoute`, `controller.vpa`, `fluxServiceAccountName`, `harness.snapshotStore`, `modelConfigs`, `oauth2ProxyIngress`, `remoteMcpServers`, `uiRoute`, `substrateWorkerPool.podDisruptionBudget`, `substrateWorkerPool.priorityClass`.
+- **The `kagent:` block** uses upstream's chart shape, keys at the root. The connectivity keys are dropped before the values reach the kagent release (`components.kagent.omitKeys`): `controllerRoute`, `controller.vpa`, `fluxServiceAccountName`, `harness.snapshotStore`, `oauth2ProxyIngress`, `remoteMcpServers`, `uiRoute`, `substrateWorkerPool.podDisruptionBudget`, `substrateWorkerPool.priorityClass`.
+- **Models.** The chart declares no model, and the kagent release always carries `providers: false`, so the kagent chart renders no `default-model-config`. An installation declares its ModelConfigs as plain objects in GitOps next to its agents; the namespace's default carries the annotation `agent-platform.giantswarm.io/is-default-model-config: "true"`. `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` fail the render.
 - **Drift detection.** The kagent, muster and kserve-runtime-configs releases set `spec.driftDetection.mode: enabled` (`components.<name>.driftDetection`). helm-controller re-applies anything that drifted on every reconcile. An object can opt out with `helm.toolkit.fluxcd.io/driftDetection: disabled`. If you turn on `muster.autoscaling.enabled`, add an `ignore` rule for the Deployment's `spec.replicas`.
 
 `make verify-meta`, `make verify-components-charts` and `make verify-kagent-crds` hold the pin and the forwarded blocks.
@@ -437,7 +438,7 @@ A `Strict` `AgentgatewayPolicy` on the Gateway verifies the bearer against `glob
 - `spec.router.scheduler` (boolean) switches the llm-d endpoint picker for one preset.
 - `resources.gpus` must equal the preset's `--tensor-parallel-size` (1 without the flag).
 
-**codex on a person's own ChatGPT subscription.** What a person connects in the Dev Portal, the ModelConfig entry an installation adds and what the chart derives from it: [docs/chatgpt-login.md](chatgpt-login.md).
+**codex on a person's own ChatGPT subscription.** What a person connects in the Dev Portal, the switch and the ModelConfig an installation adds, and what the chart derives: [docs/chatgpt-login.md](chatgpt-login.md).
 
 **Models as OCI images.** A preset whose `spec.model.storageUri` is `oci://…` is served from a model image (KServe's modelcar). The node pulls the image, and the cache claim is not used.
 

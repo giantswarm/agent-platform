@@ -219,6 +219,15 @@
             "type": "object",
             "additionalProperties": true
         },
+        "chatgptPersonalLogin": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
         "ciliumNetworkPolicy": {
             "type": "object",
             "additionalProperties": true
