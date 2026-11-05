@@ -1120,11 +1120,13 @@ components:  # @schema additionalProperties: true
     # without defaultToolchains with the github toolchain, so gh stays in its
     # Sessions once the Harness images carry none; it is the floor before any
     # kagent line without gh in its Harness images (giantswarm/agent-manager#252).
-    # The ceiling 2.19.0 keeps agent-manager on the line whose tenants.enabled
-    # is the old tenant reconciler, which this chart keeps off: from 2.19.0
-    # tenants.enabled serves the organizations (with devPortal.url), and the
-    # range moves past it together with the values that turn it on.
-    versionRange: ">=2.16.0 <2.19.0"
+    # 2.19.0 reports a namespace's default ModelConfig (the one annotated
+    # agent-platform.giantswarm.io/is-default-model-config) as `default` on
+    # list_model_configs and fills an omitted modelConfig on create_agent
+    # from it (giantswarm/agent-manager#298). Its tenants.enabled serves the
+    # organizations (with devPortal.url); this chart keeps it off
+    # (agent-platform.agentManager.tenants).
+    versionRange: ">=2.19.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
