@@ -163,9 +163,8 @@ def check_meta(chart):
                               "caConfigMap": {"name": "agent-platform-operator-ate-api-ca", "key": "ca.crt"}},
            "the erasure reaches ate-api with the audience its authentication config accepts and the CA the bootstrap hook publishes")
     hook = [d for d in docs(connectivity(f"{chart}/../agent-platform-connectivity")) if d["kind"] == "Job" and "substrate-bootstrap" in d["metadata"]["name"]]
-    script = yaml.safe_dump(hook)
-    expect(hook and f"create configmap \"{e['substrate']['caConfigMap']['name']}\" --from-file={e['substrate']['caConfigMap']['key']}=" in script.replace("\\\"", "\"")
-           and f"-n \"{op['targetNamespace']}\"" in script.replace("\\\"", "\""),
+    script = "\n".join(a for j in hook for c in j["spec"]["template"]["spec"]["containers"] for a in c.get("args", []))
+    expect(hook and f"kubectl -n \"{op['targetNamespace']}\" create configmap \"{e['substrate']['caConfigMap']['name']}\" --from-file={e['substrate']['caConfigMap']['key']}=" in script,
            "the bootstrap hook writes the CA ConfigMap and key the operator mounts, in the operator's namespace")
     expect(find(docs(connectivity(f"{chart}/../agent-platform-connectivity")), "ClusterRole", "agent-platform-tenant-flux") is not None,
            "on, the connectivity chart renders agent-platform-tenant-flux, which the operator binds")
