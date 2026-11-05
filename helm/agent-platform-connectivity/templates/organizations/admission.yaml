@@ -78,8 +78,10 @@ these.
     organization namespace names no cluster-internal or host-local host
     (*.svc, *.cluster.local, kubernetes.default, localhost, *.localhost,
     *.internal, a name without a dot, which only a search path resolves) and
-    none of agentPlatformOrganizations.apiHostnames, nor a wildcard origin
-    that covers one of these names.
+    none of the installation's API hostnames (api.<global.domain> and
+    agentPlatformOrganizations.apiHostnames,
+    agent-platform.organizations.apiHostnames), nor a wildcard origin that
+    covers one of these names.
   * agent-platform-organization-copies: the operator's copies and mirrors in
     an organization namespace (labelled
     agent-platform.giantswarm.io/organization-object, before or after the
@@ -120,11 +122,8 @@ controllers) is the same pair of policies as a tenant's
 {{- $helmSA := required "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: an organization's HelmReleases run as it" (include "agent-platform.kagent.fluxServiceAccountName" .) }}
 {{- $chartSource := include "agent-platform.organizations.chartSource" . }}
 {{- $collectors := "['system:serviceaccount:kube-system:namespace-controller', 'system:serviceaccount:kube-system:generic-garbage-collector']" }}
-{{- if not $values.apiHostnames }}
-{{- fail "agentPlatformOrganizations.apiHostnames must name the installation's Kubernetes API hostnames: an organization's EgressPolicy may not name them" }}
-{{- end }}
 {{- $apiHosts := list }}
-{{- range ($values.apiHostnames | default list) }}{{ $apiHosts = append $apiHosts (squote (lower .)) }}{{ end }}
+{{- range (include "agent-platform.organizations.apiHostnames" . | fromJsonArray) }}{{ $apiHosts = append $apiHosts (squote .) }}{{ end }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy

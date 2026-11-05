@@ -1,0 +1,74 @@
+{{- /*
+agent-platform-organization-operator-scope: the kinds agent-platform-operator's
+ClusterRole lets it write in every namespace (its chart's rbac.yaml: RBAC
+cannot select namespaces by label) are written only in organization
+namespaces, labelled agent-platform.giantswarm.io/organization: the network
+policies it copies, the ResourceQuota, the agent chart's OCIRepository, the
+HelmReleases and Agents the erasure deletes, and the curated copies (Agents,
+AgentTemplates, Harnesses, RemoteMCPServers, WorkerPools). It reads the
+platform namespace and writes nothing there. A bug or a leaked operator token
+then cannot overwrite the platform's policies, add one in kube-system or
+delete the platform's HelmReleases. RoleBindings, ServiceAccounts and
+Kustomizations are agent-platform-organization-operator-objects', namespaces
+agent-platform-organization-operator-namespaces' (admission.yaml).
+*/ -}}
+{{- if include "agent-platform.organizations.enabled" . }}
+{{- $operator := include "agent-platform.organizations.operatorUser" . }}
+{{- $label := include "agent-platform.organizations.label" . }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-operator-scope
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["networking.k8s.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["networkpolicies"]
+      - apiGroups: ["cilium.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["ciliumnetworkpolicies"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["resourcequotas"]
+      - apiGroups: ["source.toolkit.fluxcd.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["ocirepositories"]
+      - apiGroups: ["helm.toolkit.fluxcd.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["helmreleases"]
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["agents", "agenttemplates", "harnesses", "remotemcpservers"]
+      - apiGroups: ["ate.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["workerpools"]
+  matchConditions:
+    - name: operator
+      expression: {{ printf "request.userInfo.username == '%s'" $operator | quote }}
+  validations:
+    - expression: {{ printf "has(namespaceObject.metadata.labels) && '%s' in namespaceObject.metadata.labels" $label | quote }}
+      reason: Forbidden
+      messageExpression: "'the agent-platform-operator writes ' + request.resource.resource + ' only in organization namespaces; refused in ' + request.namespace"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-operator-scope
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-operator-scope
+  validationActions: [Deny]
+{{- end }}

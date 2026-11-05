@@ -1,11 +1,11 @@
 {{- /*
 A tenant's own ModelConfig (giantswarm/agent-platform#759): with kagent and
-tenants.organizations.enabled, a tenant brings its own model key, and every
-model call of the tenant still goes through the `llm` listener, so the gateway
-meters it under the tenant's namespace. Two ValidatingAdmissionPolicies, in
-every namespace labelled giantswarm.io/organization (selected by the label,
-never listed) except the kagent namespace, the platform tenant, for every
-requester:
+agentPlatformOrganizations.enabled, an organization brings its own model key, and every model call of the
+organization still goes through the `llm` listener, so the gateway meters it
+under the organization's namespace. Two ValidatingAdmissionPolicies, in every
+organization namespace (agent-platform.orgNamespaces.label: selected by the
+label, never listed) except the kagent namespace, the platform tenant, for
+every requester:
 
 agent-platform-tenant-model-routing admits a ModelConfig only when the
 listener serves its provider (agent-platform.llmRouting.providers, from
@@ -18,11 +18,8 @@ and fills in a missing baseUrl with the listener URL; a baseUrl the writer
 set is judged here, and the refusal names the field and the URL. If the
 routing policy fails (failurePolicy Ignore), the baseUrl stays empty and is
 refused here: the path fails closed. The tenant's own key passes the listener
-untouched. The copy of the platform's default ModelConfig that agent-manager's
-tenant reconciler writes is held the same way, so the default ModelConfig
-needs a provider the listener serves (the render fails otherwise) and no
-baseUrl but the listener (kagent.providers.<default>.config.baseUrl; not
-checked here: the copy is refused at admission).
+untouched. No ModelConfig of the platform is copied into an organization
+namespace.
 
 agent-platform-tenant-secret-creation admits the creation of a Secret whose
 name lacks the tenant-credential- prefix only for a requester who may already
@@ -36,26 +33,20 @@ Secrets) are in egress-policy-admission.yaml and render with kagent alone.
 
 The render fails without llmRouting.enabled (no listener to name) and without
 the routing policy (agent-platform.llmRouting.modelConfigs): without it, every
-ModelConfig without a baseUrl, agent-manager's copy included, is refused.
+ModelConfig without a baseUrl is refused.
 */ -}}
 {{- if include "agent-platform.tenants.modelConfigs" . }}
+{{- $switch := "agentPlatformOrganizations.enabled" }}
 {{- if not (include "agent-platform.llmRouting" .) }}
-{{- fail "tenants.organizations.enabled needs llmRouting.enabled: a ModelConfig in an Organization namespace must name the llm listener as its baseUrl, and with routing off there is no listener" }}
+{{- fail (printf "%s needs llmRouting.enabled: a ModelConfig in an organization namespace must name the llm listener as its baseUrl, and with routing off there is no listener" $switch) }}
 {{- end }}
 {{- $providers := include "agent-platform.llmRouting.providers" . | fromJsonArray }}
 {{- if not $providers }}
-{{- fail "tenants.organizations.enabled needs an llmRouting.models entry whose provider a ModelConfig can point at the listener (Anthropic, Mistral or OpenAI): no other ModelConfig is admitted in an Organization namespace" }}
+{{- fail (printf "%s needs an llmRouting.models entry whose provider a ModelConfig can point at the listener (Anthropic, Mistral or OpenAI): no other ModelConfig is admitted in an organization namespace" $switch) }}
 {{- end }}
 {{- if not (include "agent-platform.llmRouting.modelConfigs" .) }}
-{{- fail "tenants.organizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy, which fills in the listener as the baseUrl of a ModelConfig in an Organization namespace (agent-manager's copy of the default ModelConfig included): set llmRouting.modelConfigPolicy.enabled, on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy" }}
+{{- fail (printf "%s needs the modelconfig-llm-routing MutatingAdmissionPolicy, which fills in the listener as the baseUrl of a ModelConfig in an organization namespace: set llmRouting.modelConfigPolicy.enabled, on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy" $switch) }}
 {{- end }}
-{{- $kp := dig "providers" dict (.Values.kagent | default dict) | default dict }}
-{{- $default := dig (toString (dig "default" "" $kp)) "provider" "" $kp }}
-{{- $defaultKey := toString (dig "default" "" $kp) }}
-{{- if not (has (lower $default) $providers) }}
-{{- fail (printf "tenants.organizations.enabled needs the default ModelConfig's provider (kagent.providers.%s.provider %q) among the listener's (%s): agent-manager copies that ModelConfig into the Organizations' namespaces, where only a ModelConfig the listener serves is admitted" $defaultKey $default (join ", " $providers)) }}
-{{- end }}
-{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $prefix := include "agent-platform.tenants.credentialPrefix" . }}
 {{- /* provider (lower case) -> [the ModelConfigSpec block that carries baseUrl,
 the listener URL], as a CEL map literal. */}}
@@ -74,12 +65,7 @@ spec:
   failurePolicy: Fail
   matchConstraints:
     namespaceSelector:
-      matchExpressions:
-        - key: giantswarm.io/organization
-          operator: Exists
-        - key: kubernetes.io/metadata.name
-          operator: NotIn
-          values: [{{ $kagentNs | quote }}]
+      {{- include "agent-platform.orgNamespaces.selector" . | nindent 6 }}
     resourceRules:
       - apiGroups: ["api.kagent.dev"]
         apiVersions: ["*"]
@@ -141,12 +127,7 @@ spec:
   failurePolicy: Fail
   matchConstraints:
     namespaceSelector:
-      matchExpressions:
-        - key: giantswarm.io/organization
-          operator: Exists
-        - key: kubernetes.io/metadata.name
-          operator: NotIn
-          values: [{{ $kagentNs | quote }}]
+      {{- include "agent-platform.orgNamespaces.selector" . | nindent 6 }}
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]

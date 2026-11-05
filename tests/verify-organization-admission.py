@@ -63,11 +63,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from apiserver import APIServer  # noqa: E402
 
 HELM = os.environ.get("HELM", "helm")
-# The operator's chart carries the AgentPlatformOrganization CRD; slice 3 of
-# giantswarm/giantswarm#38891 adds the operator to the components and this
-# pin moves to its floor.
+# The operator's chart carries the AgentPlatformOrganization CRD: the floor of
+# components.agent-platform-operator.versionRange (read in crds()).
 OPERATOR_CHART = "oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-operator"
-OPERATOR_VERSION = "0.1.0-rc.2"
 FLUX_INSTALL = "https://github.com/fluxcd/flux2/releases/download/{v}/install.yaml"
 KYVERNO_VERSION = "v1.19.1"  # the kyverno CLI CI installs (.circleci/custom.yml)
 KYVERNO_CRD = "https://raw.githubusercontent.com/kyverno/kyverno/{v}/config/crds/kyverno/kyverno.io_policyexceptions.yaml"
@@ -122,7 +120,9 @@ def render(chart, *extra):
 
 ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", f"agentPlatformOrganizations.fluxNamespace={FLUX_NS}",
       "--set", f"agentPlatformOrganizations.apiHostnames[0]={API_HOST}",
-      "--set", f"agentPlatformOrganizations.fluxSource.name={FLUX_SOURCE}"]
+      # An organization's ModelConfigs go through the llm listener (giantswarm/agent-platform#1268).
+      "--set", "llmRouting.enabled=true", "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy",
+      "--set", f"agentPlatformOrganizations.fluxSource.name={FLUX_SOURCE}"]  # last: ON[:-2] drops it
 SUBSTRATE = ["--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true"]
 
 
@@ -147,9 +147,14 @@ def check_render(chart):
         fail(f"agentPlatformOrganizations.enabled with kagent off renders, or fails for another reason:\n{r.stderr}")
     print("ok:  on with kagent off, the render fails naming kagent")
     r = render(chart, *ON[:4], *ON[6:])
-    if r.returncode == 0 or "agentPlatformOrganizations.apiHostnames must name" not in r.stderr:
-        fail(f"agentPlatformOrganizations.enabled without apiHostnames renders, or fails for another reason:\n{r.stderr}")
-    print("ok:  on without apiHostnames, the render fails naming the key")
+    if r.returncode == 0 or "agentPlatformOrganizations.enabled needs the installation's Kubernetes API hostnames" not in r.stderr:
+        fail(f"agentPlatformOrganizations.enabled without apiHostnames and global.domain renders, or fails for another reason:\n{r.stderr}")
+    print("ok:  on without apiHostnames and global.domain, the render fails naming the keys")
+    floor = [d for d in docs(render(chart, *ON[:4], *ON[6:], "--set", "global.domain=acme.example.io"))
+             if d["kind"] == "ValidatingAdmissionPolicy" and d["metadata"]["name"] == "agent-platform-organization-egress-floor"]
+    if not floor or "'api.acme.example.io'" not in yaml.safe_dump(floor[0]):
+        fail("with global.domain and no apiHostnames, the EgressPolicy floor does not name api.<global.domain>")
+    print("ok:  with global.domain, the EgressPolicy floor names api.<global.domain>")
     no_substrate = {d["metadata"]["name"] for d in organization_objects(docs(render(chart, *ON)))}
     if {"agent-platform-organization-workers", "agent-platform-organization-workerpool-copy"} & no_substrate:
         fail("the organization workers' policies render with Substrate off")
@@ -164,7 +169,7 @@ def check_render(chart):
     if any(d["metadata"]["name"] == "agent-platform:organization-flux" for d in no_flux):
         fail("agent-platform:organization-flux renders without fluxNamespace")
     print("ok:  agent-platform:organization-flux renders with fluxNamespace only")
-    r = render(chart, *ON[:6])
+    r = render(chart, *ON[:-2])
     if r.returncode == 0 or "agentPlatformOrganizations.fluxSource.name is required with fluxNamespace" not in r.stderr:
         fail(f"fluxNamespace without fluxSource.name renders, or fails for another reason:\n{r.stderr}")
     print("ok:  fluxNamespace without fluxSource.name: the render fails naming the key")
@@ -204,9 +209,11 @@ def fetch(url):
 def crds(meta, tmp):
     """The CRDs, as one multi-document YAML."""
     out = []
-    r = run([HELM, "pull", OPERATOR_CHART, "--version", OPERATOR_VERSION, "--untar", "--untardir", tmp])
+    values = yaml.safe_load(open(os.path.join(meta, "values.yaml")))
+    operator = re.match(r"^(?:>=\s*)?(\S+)", values["components"]["agent-platform-operator"]["versionRange"]).group(1)
+    r = run([HELM, "pull", OPERATOR_CHART, "--version", operator, "--untar", "--untardir", tmp])
     if r.returncode != 0:
-        fail(f"helm pull {OPERATOR_CHART} {OPERATOR_VERSION}:\n{r.stderr}")
+        fail(f"helm pull {OPERATOR_CHART} {operator}:\n{r.stderr}")
     crd_dir = os.path.join(tmp, "agent-platform-operator", "crds")
     out += [open(os.path.join(crd_dir, f)).read() for f in sorted(os.listdir(crd_dir))]
     flux = open(os.path.join(meta, "charts", "flux-engine", "crds", "flux.yaml")).read()

@@ -9,7 +9,7 @@ object, and the release that carries it fails its upgrade.
 
 Every PolicyException of the meta and connectivity charts is rendered here, in
 the values sets that turn each one on: Agent Substrate with
-tenants.organizations off and on, the pgvector ImageVolume, model serving, and
+agentPlatformOrganizations off and on, the pgvector ImageVolume, model serving, and
 the workspaces' CSI companion per preset (the meta chart). An exception that
 matches on user info must carry `background: false`; each one that does not
 fails, named with the offending entries. Every chart template that renders a
@@ -38,8 +38,10 @@ KAGENT = ["--set", "components.kagent.enabled=true", "--set", "kagent.harness.sn
 KYVERNO = ["--set", "kyvernoPolicies.enabled=true"]
 CONNECTIVITY = ["--namespace", "agent-platform", "--set", "ingress.parentRefs[0].name=x", *KAGENT, *KYVERNO, *FLEET_APIS]
 SUBSTRATE = ["--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true"]
-# tenants.organizations.enabled needs the llm listener and its routing policy (giantswarm/agent-platform#759).
-TENANTS = ["--set", "tenants.organizations.enabled=true", "--set", "llmRouting.enabled=true",
+# agentPlatformOrganizations.enabled needs the llm listener and its routing policy, the agents'
+# Flux identity and the API hostname (giantswarm/agent-platform#759, #1268).
+TENANTS = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "llmRouting.enabled=true",
+           "--set", "kagent.fluxServiceAccountName=kagent-flux", "--set", "global.domain=ci.example.com",
            "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
 PGVECTOR = ["--set", "postgres.enabled=true", "--set", "postgres.vector.enabled=true",
             "--set", "postgres.vector.extensionImage.reference=gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm"]
@@ -53,10 +55,10 @@ RELEASABLE = ["--set", "muster.muster.credentialProvider.releasable.github=https
 def connectivity_sets():
     sets = {
         "substrate": SUBSTRATE,
-        "substrate, tenants.organizations on": SUBSTRATE + TENANTS,
+        "substrate, agentPlatformOrganizations on": SUBSTRATE + TENANTS,
         "postgres pgvector ImageVolume": PGVECTOR,
         "model serving": MODEL_SERVING,
-        "everything, tenants.organizations on": SUBSTRATE + TENANTS + PGVECTOR + MODEL_SERVING,
+        "everything, agentPlatformOrganizations on": SUBSTRATE + TENANTS + PGVECTOR + MODEL_SERVING,
     }
     return {label: CONNECTIVITY + args for label, args in sets.items()}
 
@@ -66,7 +68,7 @@ def meta_sets(meta):
             *KAGENT, *KYVERNO, *FLEET_APIS, *RELEASABLE]
     return {
         "ci-values": base,
-        "ci-values, tenants.organizations on": base + TENANTS,
+        "ci-values, agentPlatformOrganizations on": base + TENANTS,
         "CSI companion efs": base + ["-f", "tests/fixtures/workspaces-csi-companion-efs-values.yaml"],
         "CSI companion azureFiles": base + ["-f", "tests/fixtures/workspaces-csi-companion-azure-files-values.yaml"],
     }

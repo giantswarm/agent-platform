@@ -334,7 +334,7 @@ A workspace is an Organization's set of repositories, mirrored on one shared rea
 - The Secret lives in the template's namespace. Its key holds `base64("<username>:<token>")`; on GitHub that is `x-access-token:<token>`.
 - The source URL must be `https://`.
 - Use one credential per host. The label `ui.giantswarm.io/agent-skills-git-auth: "true"` makes the portal offer the Secret.
-- Any other namespace than `kagent` also needs an entry in `substrate.credentialProvider.namespacePolicies`. With `tenants.organizations.enabled`, the chart adds the Organizations' namespaces itself.
+- Any other namespace than `kagent` also needs an entry in `substrate.credentialProvider.namespacePolicies`. With `agentPlatformOrganizations.enabled`, the chart adds the organizations' namespaces itself.
 - To rotate, replace the Secret's contents and keep its name.
 - agent-manager can keep a Secret named `agent-manager-skills-token` filled with its GitHub App's token (`agent-manager.skills.mintGitAuthSecret`). It belongs to the installation, so a tenant's Organization namespace refuses it.
 - A missing or wrong credential fails only the templates that name it: `Ready=False`, `ActorTemplateRetrying`, then `ActorTemplateFailed`.
@@ -534,13 +534,11 @@ Agents are Flux `HelmRelease`s in the kagent namespace. Under a Flux multi-tenan
 
 The platform's own component `HelmRelease`s need no tenant identity in an exempt namespace (`gitops.namespace: flux-giantswarm` on Giant Swarm management clusters). With the bundled Flux engine they run as `agent-platform-flux`.
 
-### A tenant's own model
+### An organization's own model
 
-Each Organization namespace (labelled `giantswarm.io/organization`) that holds an agent gets a copy of the platform's `default-model-config` and its key Secret from agent-manager. A tenant that pays for its own model usage adds its own ModelConfig and key Secret in its namespace, and its agents select it by name. Another tenant's agents cannot, because a template names only ModelConfigs of its own namespace.
+An organization brings its own model key: no ModelConfig of the platform is copied into an organization namespace. This comes with `agentPlatformOrganizations.enabled` (and kagent). It needs `llmRouting.enabled` and `llmRouting.modelConfigPolicy.enabled`; the render fails otherwise. In every organization namespace:
 
-This comes with `tenants.organizations.enabled` (and kagent). It needs `llmRouting.enabled`, a default provider the LLM listener serves, and `llmRouting.modelConfigPolicy.enabled`; the render fails otherwise. In every Organization namespace:
-
-- A ModelConfig's provider must be one the listener serves (Anthropic, OpenAI or Mistral in `llmRouting.models`). Its `baseUrl` is filled in with the listener URL, and any other `baseUrl` or provider (Bedrock included) is refused. Every model call of the tenant is metered on the listener, and the tenant's key passes through untouched.
+- A ModelConfig's provider must be one the listener serves (Anthropic, OpenAI or Mistral in `llmRouting.models`). Its `baseUrl` is filled in with the listener URL, and any other `baseUrl` or provider (Bedrock included) is refused. Every model call of the organization is metered on the listener, and its own key passes through untouched.
 - `apiKeySecret` must name a Secret prefixed `tenant-credential-`, of type `Opaque`.
 
 ```yaml
@@ -548,7 +546,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: tenant-credential-anthropic
-  namespace: org-acme
+  namespace: agents-acme-x7k2q
 type: Opaque
 stringData:
   ANTHROPIC_API_KEY: <the tenant's key>
@@ -557,7 +555,7 @@ apiVersion: api.kagent.dev/v1alpha3
 kind: ModelConfig
 metadata:
   name: acme-sonnet
-  namespace: org-acme
+  namespace: agents-acme-x7k2q
 spec:
   provider: Anthropic
   model: claude-sonnet-4-6
@@ -565,24 +563,20 @@ spec:
   apiKeySecretKey: ANTHROPIC_API_KEY
 ```
 
-- **Before turning it on,** point every ModelConfig already in an Organization namespace at the listener, or delete it. Later updates of one that is not on the listener are refused.
-- **Turning routing off** needs `tenants.organizations.enabled` off first. Then repoint or delete the Organization namespaces' ModelConfigs annotated `agent-platform.giantswarm.io/llm-routing-base-url` ([UPGRADE.md](../UPGRADE.md)).
-- How a tenant's key Secret reaches its namespace is not decided yet. `make prove-tenant-modelconfigs` checks the rules on a cluster.
+- **Turning routing off** needs `agentPlatformOrganizations.enabled` off first. Then repoint or delete the organization namespaces' ModelConfigs annotated `agent-platform.giantswarm.io/llm-routing-base-url` ([UPGRADE.md](../UPGRADE.md)).
+- An organization's key Secret is written by reference; agent-manager's organization tools, which come with the agent-platform release that moves agent-manager's range to giantswarm/agent-manager#294, write it this way, and the Dev Portal's credential form fills the Secret.
 
-### A tenant's own MCP servers
+### Agent Platform organizations
 
-With `tenants.organizations.enabled` (and muster on), the muster release gets `muster.mcpServersInAllNamespaces: true` ([giantswarm/muster#1601](https://github.com/giantswarm/muster/pull/1601)) and `muster.writesAsCaller.kubernetesAudience` from `mcp-kubernetes.kubernetesAudience`, the audience the API server trusts (default `dex-k8s-authenticator`, the audience of Giant Swarm API servers). muster then serves the `MCPServer`s of the namespaces named `org-…` next to the servers of its own namespace:
+`agentPlatformOrganizations.enabled` (off by default; [giantswarm/giantswarm#38891](https://github.com/giantswarm/giantswarm/issues/38891)) installs [agent-platform-operator](https://github.com/giantswarm/agent-platform-operator) (`components.agent-platform-operator`, which follows the switch) into the connectivity release's namespace. The operator reconciles each `AgentPlatformOrganization` (`agent-platform.giantswarm.io/v1alpha1`, its CRD under `crds: CreateReplace`) in a parent namespace into an organization namespace `agents-<name>-<random>`, labelled `agent-platform.giantswarm.io/organization`, with read-only copies of the curated objects of the kagent namespace, and erases a deleted organization behind a finalizer.
 
-- muster lists the servers of each namespace with the person's own Dex token for that audience. A person sees a server only where Kubernetes RBAC lets them `list` `mcpservers.muster.giantswarm.io`: muster's namespace through `agent-platform:mcpserver-viewer` (bound to `tenants.platform.users`), an Organization's namespace through `agent-platform:user`, `:editor` or `:admin` there. A server that a person may not see does not exist for that person.
-- A tenant server signs in through `<muster>/oauth/ns/<namespace>/callback`, and its token stays in its namespace.
-
-Do not set `muster.muster.mcpServersInAllNamespaces` yourself: a value against the switch fails the render. A `muster.muster.writesAsCaller.kubernetesAudience` that differs from `mcp-kubernetes.kubernetesAudience` also fails it: set the audience in `mcp-kubernetes.kubernetesAudience`. The render also fails when the muster range admits a muster below 5.48.0, when muster's OAuth server is off or not on the `dex` provider, and when `tenants.platform.users` is empty.
-
-The chart cannot do these steps. Do them before you turn the switch on:
-
-- **Dex.** Dex must let muster's client (`muster.muster.oauth.server.dex.clientId`) ask for the audience of `mcp-kubernetes.kubernetesAudience`: the Dex client of that audience lists muster's client in its `trustedPeers`.
-- **The callbacks.** Each OAuth app of an MCP server in an Organization's namespace registers `<muster's public URL>/oauth/ns/<namespace>/callback`. The chart's NOTES print this URL.
-- **The client Secrets.** muster gets no read of an Organization's Secrets. For each MCP server there that names a client Secret (`clientCredentialsSecretRef`), whoever declares the server also declares a Role in that namespace that gives muster's ServiceAccount `get` on that Secret alone (`resourceNames`), and its RoleBinding. Without them, a sign-in to that server answers that it is not ready and names the Secret and the Role.
+- **The label.** Every policy of the organizations' namespaces and kagent's authorizer select `agent-platform.giantswarm.io/organization`: Substrate's credential-provider grants, the workers' PolicyException, admission policies and network peers, the egress, credential and ModelConfig admission policies, the `llm` listener's base-URL policy, and the namespaces a person's agent list ranges over (`kagent.controller.authorization.namespaceSelector`, derived). Nothing selects the Giant Swarm Organization label `giantswarm.io/organization` for agents, and agent-manager's `tenants.enabled` stays off under its current range. The connectivity chart renders the ClusterRole `agent-platform-tenant-flux` the operator binds an organization's Helm ServiceAccount to.
+- **The rollout gate.** The switch is off by default for now. It turns on by default once the capz and s3proxy snapshot stores give the operator access, the kagent line carries giantswarm/kagent-extensions#27, and an operator release with giantswarm/agent-platform-operator#10 (commit mode) is the floor of its range.
+- **The wiring.** The chart derives the operator's values from the platform's (the `agent-platform-operator` block in `values.yaml` lists them; an own value that differs fails the render): the curated copies, the workers' policies of the network flavour, the agent chart line, the snapshot bucket, the erasure's kagent and ate-api targets with their audiences and the ConfigMap `agent-platform-operator-ate-api-ca` (ate-api-server's serving roots, published by the substrate bootstrap hook), `agentPlatformOrganizations.fluxNamespace`, and with the Crossplane AWS snapshot store the IRSA role `<store role>-operator`. The capz and s3proxy stores give the operator no snapshot access yet.
+- **The operator's reach.** RBAC cannot select namespaces by label, so `agent-platform-organization-operator-scope` holds the operator's writes of network policies, ResourceQuotas, OCIRepositories, HelmReleases, Agents, AgentTemplates, Harnesses, RemoteMCPServers and WorkerPools to namespaces labelled `agent-platform.giantswarm.io/organization`; the platform namespace is read-only to it.
+- **The API hostnames.** An organization's EgressPolicy may not name `api.<global.domain>` or an entry of `agentPlatformOrganizations.apiHostnames`.
+- **Curated objects.** The operator copies the curated Agents, AgentTemplates and RemoteMCPServers unchanged, and in an organization namespace a skill's `credentialRef` or a `headersFrom` Secret must be a `tenant-credential-*` Secret for every writer, the operator included (`agent-platform-tenant-credential-refs`). A curated object that names another Secret (the installation's skills credential, say) is refused there, and that organization's reconcile reports it: keep curated objects free of such references.
+- **Before you turn it on:** kagent, Agent Substrate, `kagent.fluxServiceAccountName`, `llmRouting.enabled` with a model whose provider the listener serves (Anthropic, Mistral or OpenAI), `llmRouting.modelConfigPolicy.enabled` on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, and `global.domain` or `agentPlatformOrganizations.apiHostnames`; and the kagent line must carry [giantswarm/kagent-extensions#27](https://github.com/giantswarm/kagent-extensions/issues/27), or the erasure of an organization that holds a person's Session stops at the Sessions' step and erases nothing after it.
 
 ### OAuth secrets
 

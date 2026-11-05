@@ -17,8 +17,9 @@ Each case pins one property:
   klaus-gateway's ServiceAccount as the session reader while refusal notices
   are on; an installation's own authorization keys stand;
 - an own entry of kagent.controller.env stands, first and once;
-- with organizationErasure on, agent-platform-operator's ServiceAccount is a
-  machine caller too (giantswarm/giantswarm#38988);
+- with agentPlatformOrganizations on, agent-platform-operator's ServiceAccount
+  (in the connectivity release's namespace) is a machine caller too
+  (giantswarm/giantswarm#38988);
 - with the line's own controller (giantswarm/kagent/controller) no variable of
   the binary is set and none of its guards applies;
 - every variable the chart sets names a flag of the binary;
@@ -109,7 +110,7 @@ def main() -> None:
         "KAGENT_EXTENSIONS_OIDC_USERNAME_PREFIX": "",
         "KAGENT_EXTENSIONS_OIDC_GROUPS_PREFIX": "",
         "KAGENT_EXTENSIONS_AUTHORIZATION_MODE": "kubernetes",
-        "KAGENT_EXTENSIONS_NAMESPACE_SELECTOR": "giantswarm.io/organization",
+        "KAGENT_EXTENSIONS_NAMESPACE_SELECTOR": "agent-platform.giantswarm.io/organization",
         "KAGENT_EXTENSIONS_INCLUDE_NAMESPACE": "kagent",
         "KAGENT_EXTENSIONS_MACHINE_AUDIENCE": "kagent",
         "KAGENT_EXTENSIONS_MACHINE_CALLER": f"{ka.NAMESPACE}/workspace-manager",
@@ -128,16 +129,16 @@ def main() -> None:
     expect(env(controller(ON))["KAGENT_EXTENSIONS_MACHINE_CALLER"], "", "without workspaces no machine caller")
     ok("the machine caller is workspace-manager's ServiceAccount while workspaces are on")
 
-    erasure = ["--set", "organizationErasure.enabled=true"]
+    erasure = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "kagent.fluxServiceAccountName=kagent-flux",
+               "--set", "llmRouting.enabled=true", "--set", "global.domain=ci.example.com"]
     expect(env(controller([*ON, *erasure]))["KAGENT_EXTENSIONS_MACHINE_CALLER"], f"{ka.NAMESPACE}/agent-platform-operator",
-           "with organizationErasure the machine caller is agent-platform-operator's ServiceAccount")
+           "with agentPlatformOrganizations the machine caller is agent-platform-operator's ServiceAccount")
     expect(env(controller([*ON, *WORKSPACES, *erasure]))["KAGENT_EXTENSIONS_MACHINE_CALLER"],
            f"{ka.NAMESPACE}/workspace-manager,{ka.NAMESPACE}/agent-platform-operator",
-           "with workspaces and organizationErasure both are machine callers")
-    expect(env(controller([*ON, *erasure, "--set", "organizationErasure.operatorServiceAccount.namespace=apo",
-                           "--set", "organizationErasure.operatorServiceAccount.name=op"]))["KAGENT_EXTENSIONS_MACHINE_CALLER"],
-           "apo/op", "the operator's machine caller follows organizationErasure.operatorServiceAccount")
-    ok("agent-platform-operator's ServiceAccount is a machine caller while organizationErasure is on")
+           "with workspaces and agentPlatformOrganizations both are machine callers")
+    expect(env(controller([*ON, *erasure, "--set", "components.agent-platform-connectivity.targetNamespace=apo"]))["KAGENT_EXTENSIONS_MACHINE_CALLER"],
+           "apo/agent-platform-operator", "the operator's machine caller is in the connectivity release's namespace, where the operator installs")
+    ok("agent-platform-operator's ServiceAccount is a machine caller while agentPlatformOrganizations is on")
 
     got = env(controller([*ON, *REFUSALS]))
     expect(got["KAGENT_EXTENSIONS_SESSION_READER"], f"{ka.NAMESPACE}/klaus-gateway",

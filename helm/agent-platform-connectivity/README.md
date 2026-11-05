@@ -1275,6 +1275,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
 | networkPolicy.substrate.credentialProvider.egressFQDNs | list | `[]` |  |
+| networkPolicy.substrate.egressGateway.privateCIDRs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
 | networkPolicy.musterInClusterMcpPorts[1] | int | `8443` |  |
 | networkPolicy.mcpBackends | object | `{}` |  |
@@ -1285,6 +1286,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.kubernetes.worldExcludedCIDRs[1] | string | `"172.16.0.0/12"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[2] | string | `"192.168.0.0/16"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[3] | string | `"169.254.0.0/16"` |  |
+| networkPolicy.kubernetes.ipv6.enabled | bool | `false` |  |
+| networkPolicy.kubernetes.ipv6.excludedCIDRs | list | `[]` |  |
 | kyvernoPolicies.enabled | string | `"auto"` | `auto` (default) renders the Kyverno objects when kyverno.io/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
 | kyvernoPolicies.rules.privileged-containers | string | `"disallow-privileged-containers"` |  |
@@ -1729,6 +1732,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelManager.networkPolicy.registry.fqdns[0].matchName | string | `"gsoci.azurecr.io"` |  |
 | modelManager.networkPolicy.registry.fqdns[1].matchPattern | string | `"*.blob.core.windows.net"` |  |
 | modelManager.networkPolicy.registry.cidrs | list | `[]` |  |
+| modelManager.networkPolicy.registry.ports[0] | int | `443` |  |
 | modelManager.networkPolicy.workloadClusters | object | `{}` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
@@ -1820,14 +1824,12 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: agent-platform:user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC "everyone" group instead. |
 | tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: agent-platform:editor in the kagent namespace. |
 | tenants.platformTeam | list | `[]` | The customer's platform team: agent-platform:editor in the kagent namespace beside platform.editors (the meta chart also adds it to muster's editor bindings). |
-| tenants.organizations.enabled | bool | `false` | The worker pods of the namespaces labelled `giantswarm.io/organization` (agent-manager's tenants, its `tenants.enabled`; it copies the workers' own policy into them, `substrate-workers` in the cilium flavor, `substrate-workers-ingress` in the kubernetes flavor): with Agent Substrate on, the router, the egress gateway and the actors' dns admit them as they admit the kagent namespace's workers, and the workers' Kyverno PolicyException covers them when Substrate's controllers write them (Kyverno 1.15.2 or later; an older Kyverno never applies the exception and the workers are refused). Two ValidatingAdmissionPolicies hold the workers there for every requester: only agent-manager's ServiceAccount writes a WorkerPool, as a copy of kagent.substrateWorkerPool.name in the kagent namespace (only replicas may differ), and only Substrate's controllers write a Deployment, ReplicaSet or Pod labelled `ate.dev/worker-pool`; no one adds an ephemeral container to a worker, execs into one or attaches to one (Kubernetes 1.30 or later). With kagent on, a tenant also brings its own ModelConfig and model key, metered on the `llm` listener (giantswarm/agent-platform#759): the modelconfig-llm-routing policies fill in the listener as the baseUrl of a ModelConfig there that has none, and two more ValidatingAdmissionPolicies hold every such namespace but kagent: a ModelConfig names a provider the listener serves and the listener as its baseUrl (any other provider, Bedrock included, and any other baseUrl are refused), and only a requester who may read a namespace's Secrets creates one there without the tenant-credential- prefix; only agent-manager's copy of the default ModelConfig names the platform's key. It needs llmRouting.enabled, a default ModelConfig provider the listener serves, and the modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled, served MutatingAdmissionPolicy); the render fails otherwise. A namespace without the label gets nothing. Off, the render is that of a chart without the key. |
-| agentPlatformOrganizations.enabled | bool | `false` | Render the organizations' role and admission policies. Needs kagent (components.kagent.enabled) and kagent.fluxServiceAccountName: the render fails without them. |
-| agentPlatformOrganizations.operator | object | `{"serviceAccount":{"name":"agent-platform-operator","namespace":""}}` | The agent-platform-operator's ServiceAccount: the only writer of the organization labels on a namespace and of the operator's copies (labelled agent-platform.giantswarm.io/organization-object), and itself held to agents-* namespaces carrying the labels, RoleBindings there, and in fluxNamespace Kustomizations and ServiceAccounts it labels agent-platform.giantswarm.io/organization-uid. An empty namespace is the release namespace. |
-| agentPlatformOrganizations.fluxNamespace | string | `""` | The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace; set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces. |
+| agentPlatformOrganizations.enabled | bool | `false` | Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a model whose provider the listener serves (Anthropic, Mistral or OpenAI) and llmRouting.modelConfigPolicy.enabled on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain or apiHostnames: the render fails without them. The rollout gate: off by default for now (see above). |
+| agentPlatformOrganizations.fluxNamespace | string | `""` | The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace, and the operator's erasure.fluxNamespace (derived); set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces. |
 | agentPlatformOrganizations.fluxSource | object | `{"kind":"GitRepository","name":""}` | The installation's Flux source in fluxNamespace, which an organization's Kustomization applies from (agent-platform-operator's commitMode.sourceRef). The admission policy holds the operator's Kustomizations to this source. The name is required with fluxNamespace: the render fails without it. |
 | agentPlatformOrganizations.fluxPathPrefix | string | `"./agent-platform/organizations/"` | The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies exactly this prefix, its parent and its name, from the labels the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise. |
 | agentPlatformOrganizations.fluxDecryptionSecret | string | `"sops-keys"` | The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption. |
-| agentPlatformOrganizations.apiHostnames | list | `[]` | The installation's Kubernetes API hostnames: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. Required with enabled: the render fails while it is empty. |
+| agentPlatformOrganizations.apiHostnames | list | `[]` | The installation's Kubernetes API hostnames beside api.<global.domain>, which is derived while global.domain is set: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. The render fails while both are empty. |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |
@@ -1914,9 +1916,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspaceManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |
-| organizationErasure.enabled | bool | `false` | Grant agent-platform-operator's ServiceAccount the erasure's access. |
-| organizationErasure.operatorServiceAccount | object | `{"name":"agent-platform-operator","namespace":""}` | agent-platform-operator's ServiceAccount. An empty namespace is the release namespace. |
-| organizationErasure.operatorPodLabels | object | `{"app.kubernetes.io/name":"agent-platform-operator"}` | The labels of agent-platform-operator's pods: the kagent controller's API port admits them (with networkPolicy.enabled, both flavors). |
 | backstage.hostname | string | `""` |  |
 | backstage.parentRefs | list | `[]` |  |
 | backstage.installationName | string | `"agent-platform"` |  |
@@ -1996,6 +1995,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.shippedPresets.enabled | bool | `true` |  |
 | modelServing.shippedPresets.exclude | list | `[]` |  |
 | modelServing.modelImages.registry | string | `""` |  |
+| modelServing.runtimeImages.registry | string | `""` |  |
 | modelServing.cache.enabled | bool | `true` |  |
 | modelServing.cache.pvc.name | string | `"hf-cache"` |  |
 | modelServing.cache.pvc.existingClaim | string | `""` |  |
