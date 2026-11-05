@@ -44,6 +44,12 @@ these.
     ServiceAccount of another namespace, whoever writes it; only the operator
     binds a ServiceAccount of fluxNamespace, and only the one named after the
     binding's namespace (the organization's Flux ServiceAccount).
+  * agent-platform-organization-flux-rolebindings: a RoleBinding that an
+    organization's Flux ServiceAccount (a ServiceAccount of fluxNamespace)
+    writes in an organization namespace binds the ClusterRole
+    agent-platform:user, editor or admin. RBAC lets an identity bind any role
+    whose rules it holds without `bind`, agent-platform:organization-flux
+    itself among them, which reads every Secret of the namespace.
   * agent-platform-organization-helmreleases: for every requester but the
     operator, an organization's Flux ServiceAccount included, a HelmRelease in
     an organization namespace installs the agent chart from the namespace's
@@ -196,20 +202,29 @@ spec:
       messageExpression: "'a Kustomization of the agent-platform-operator is an organization Kustomization, named agents-<organization>-*; refused: ' + request.namespace + '/' + object.metadata.name"
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
-        (has(object.spec.serviceAccountName) && object.spec.serviceAccountName == object.metadata.name)
+        (has(object.spec) && has(object.spec.serviceAccountName) && object.spec.serviceAccountName == object.metadata.name)
       reason: Forbidden
       messageExpression: >-
         'a Kustomization of the agent-platform-operator runs as the organization Flux ServiceAccount, spec.serviceAccountName ' +
         object.metadata.name + '; refused: ' + request.namespace + '/' + object.metadata.name +
-        ' with ' + (has(object.spec.serviceAccountName) ? object.spec.serviceAccountName : 'none')
+        ' with ' + (has(object.spec) && has(object.spec.serviceAccountName) ? object.spec.serviceAccountName : 'none')
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
-        (has(object.spec.targetNamespace) && object.spec.targetNamespace == object.metadata.name)
+        (has(object.spec) && has(object.spec.targetNamespace) && object.spec.targetNamespace == object.metadata.name)
       reason: Forbidden
       messageExpression: >-
         'a Kustomization of the agent-platform-operator applies into the organization namespace, spec.targetNamespace ' +
         object.metadata.name + '; refused: ' + request.namespace + '/' + object.metadata.name +
-        ' with ' + (has(object.spec.targetNamespace) ? object.spec.targetNamespace : 'none')
+        ' with ' + (has(object.spec) && has(object.spec.targetNamespace) ? object.spec.targetNamespace : 'none')
+    # kustomize-controller reads a kubeConfig Secret and the postBuild
+    # substituteFrom objects with its own identity, not the impersonated one:
+    # neither may bring the Flux namespace's Secrets into an organization or
+    # apply elsewhere.
+    - expression: >-
+        request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
+        !has(object.spec) || (!has(object.spec.kubeConfig) && !(has(object.spec.postBuild) && has(object.spec.postBuild.substituteFrom)))
+      reason: Forbidden
+      messageExpression: "'a Kustomization of the agent-platform-operator sets neither spec.kubeConfig nor spec.postBuild.substituteFrom; refused: ' + request.namespace + '/' + object.metadata.name"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -389,6 +404,46 @@ metadata:
 spec:
   policyName: agent-platform-organization-rolebinding-subjects
   validationActions: [Deny]
+{{- if $fluxNs }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-flux-rolebindings
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      {{- include "agent-platform.organizations.namespaces" . | nindent 6 }}
+    resourceRules:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["rolebindings"]
+  matchConditions:
+    - name: organization-flux
+      expression: {{ printf "request.userInfo.username.startsWith('system:serviceaccount:%s:')" $fluxNs | quote }}
+  validations:
+    - expression: >-
+        object.roleRef.kind == 'ClusterRole' &&
+        object.roleRef.name in ['agent-platform:user', 'agent-platform:editor', 'agent-platform:admin']
+      reason: Forbidden
+      messageExpression: >-
+        'a RoleBinding from an organization path in git binds agent-platform:user, editor or admin; refused: ' +
+        request.namespace + '/' + object.metadata.name + ' to ' + object.roleRef.kind + ' ' + object.roleRef.name
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-flux-rolebindings
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-flux-rolebindings
+  validationActions: [Deny]
+{{- end }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy

@@ -45,7 +45,9 @@ kinds in its own namespace and nothing else: its agents' HelmReleases (the
 HelmRelease field lock holds for this identity too), Agents, AgentTemplates,
 ModelConfigs, RemoteMCPServers, EgressPolicies, Secrets, and its members'
 RoleBindings, which bind agent-platform:user, editor or admin and no other
-role (`bind` on those three, no `escalate`). get, list and watch are what
+role (`bind` on those three, no `escalate`; RBAC would let it bind a role
+whose rules it holds, this one among them, so the policy
+agent-platform-organization-flux-rolebindings pins the roleRef). get, list and watch are what
 kustomize-controller reads before it applies and while it waits. Rendered
 with fluxNamespace, the only case in which the operator binds it.
 */ -}}

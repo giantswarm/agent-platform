@@ -248,6 +248,14 @@ def can_i(verb, resource, ns, as_):
     return "yes" if rc == 0 else "no"
 
 
+def sar(user, verb, group, resource, ns):
+    """The authorizer's answer for a kind the API server need not serve."""
+    review = {"apiVersion": "authorization.k8s.io/v1", "kind": "SubjectAccessReview",
+              "spec": {"user": user, "resourceAttributes": {"verb": verb, "group": group, "resource": resource, "namespace": ns}}}
+    out = must(kubectl(["create", "-f", "-", "-o", "json"], yaml.safe_dump(review)), f"SubjectAccessReview {verb} {resource} as {user}")
+    return "yes" if json.loads(out)["status"].get("allowed") else "no"
+
+
 def case(name, rc_out, by=None, msg=None):
     """by=None: admitted. by=<policy>: refused by that ValidatingAdmissionPolicy,
     with msg in its message when given. by='RBAC:<text>': refused by the
@@ -478,6 +486,10 @@ def prove_operator():
          create(other, as_=OP), pinned, "is an organization Kustomization, named agents-<organization>-*")
     case("the operator moves no Kustomization into another organization's namespace",
          patch("kustomization", ORG, FLUX_NS, {"spec": {"targetNamespace": ORG2}}, as_=OP), pinned, "spec.targetNamespace " + ORG + "; refused")
+    for field, value in (("kubeConfig", {"secretRef": {"name": "other-cluster"}}),
+                         ("postBuild", {"substituteFrom": [{"kind": "Secret", "name": "sops-keys"}]})):
+        case(f"the operator creates no Kustomization with {field}", create(changed(**{field: value}), as_=OP), pinned,
+             "sets neither spec.kubeConfig nor spec.postBuild.substituteFrom")
     case("the operator updates its Kustomization within the pins",
          patch("kustomization", ORG, FLUX_NS, {"spec": {"path": "./agent-platform/organizations/org-acme/payments"}}, as_=OP))
     case("the operator creates no Kustomization outside the Flux namespace", create(kustomization(ORG2, PLAIN), as_=OP),
@@ -516,14 +528,19 @@ def prove_flux_role():
     must(create(rb("organization-flux", ORG, role="agent-platform:organization-flux",
                    subjects=[{"kind": "ServiceAccount", "name": ORG, "namespace": FLUX_NS}]), as_=OP, dry=False),
          "bind the organization's Flux ServiceAccount")
-    # Of kagent's kinds this API server serves EgressPolicy only (kubectl
-    # resolves the others to nothing); the role grants the five in one rule.
+    # kubectl auth can-i resolves only served kinds; of kagent's this API
+    # server serves EgressPolicy, the others are asked by a
+    # SubjectAccessReview.
     want = {(v, r, n): "yes" if n == ORG else "no" for v, r in (("create", "secrets"), ("create", "helmreleases.helm.toolkit.fluxcd.io"),
             ("create", "egresspolicies.api.kagent.dev"), ("create", "rolebindings")) for n in (ORG, ORG2, FLUX_NS, "kagent")}
     for v, r in (("create", "kustomizations.kustomize.toolkit.fluxcd.io"), ("create", "ocirepositories.source.toolkit.fluxcd.io"),
                  ("create", "workerpools.ate.dev"), ("create", "namespaces")):
         want[(v, r, ORG)] = "no"
     wrong = {f"{v} {r} in {n}": a for (v, r, n), w in want.items() if (a := can_i(v, r, n, FLUX_SA)) != w}
+    for r in ("agents", "agenttemplates", "modelconfigs", "remotemcpservers"):
+        for n in (ORG, ORG2):
+            if (a := sar(FLUX_SA, "create", "api.kagent.dev", r, n)) != ("yes" if n == ORG else "no"):
+                wrong[f"create {r}.api.kagent.dev in {n}"] = a
     case("the organization's Flux ServiceAccount writes the organization's kinds in its namespace and nowhere else", (1 if wrong else 0, json.dumps(wrong)))
     case("a merged Secret lands in the organization namespace", create({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "tenant-credential-a", "namespace": ORG}},
          as_=FLUX_SA, groups=()))
@@ -534,6 +551,14 @@ def prove_flux_role():
         case(f"a merged RoleBinding binds {role}", create(rb("members-git", ORG, role=role), as_=FLUX_SA, groups=()))
     case("a merged RoleBinding binds no other role", create(rb("members-git", ORG, role="cluster-admin"), as_=FLUX_SA, groups=()),
          "RBAC:attempting to grant RBAC permissions not currently held")
+    # RBAC admits a binding of a role whose rules the binder holds, without
+    # bind: the policy refuses it.
+    for role, kind in (("agent-platform:organization-flux", "ClusterRole"), ("agent-platform:organization-flux", "Role")):
+        if kind == "Role":
+            must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": role, "namespace": ORG},
+                         "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["get", "list"]}]}, dry=False), "create a Role")
+        case(f"a merged RoleBinding binds no {kind} {role}, whose rules it holds", create(rb("members-git", ORG, role=role, kind=kind), as_=FLUX_SA, groups=()),
+             "agent-platform-organization-flux-rolebindings", f"refused: {ORG}/members-git to {kind} {role}")
 
 
 def prove_labels():
