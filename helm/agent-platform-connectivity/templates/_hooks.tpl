@@ -267,6 +267,11 @@ name, so the SSA-only databases hook holds create on its names alone.
       $create
       (dict "resource" "configmaps" "names" (list "ate-api-authentication") "verbs" (list "get"))
       (dict "resource" "configmaps" "names" list "verbs" (list "create")))) -}}
+{{- if include "agent-platform.organizations.enabled" . -}}
+{{- $operatorCa := include "agent-platform.organizations.ateApiCa" . | fromJson -}}
+{{- $out = append $out (dict "purpose" "operator-ate-api-ca" "namespace" $operatorCa.namespace "events" $events "rules" (list
+      (dict "resource" "configmaps" "names" (list $operatorCa.name) "verbs" (list "create" "patch")))) -}}
+{{- end -}}
 {{- end -}}
 {{- $databases := include "agent-platform.postgres.databases" . | fromJsonArray -}}
 {{- if $databases -}}

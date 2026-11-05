@@ -2,7 +2,9 @@
 """Prove the connectivity hook identity reads only the Secrets its hooks write
 (giantswarm/agent-platform#1269), on a local API server.
 
-The connectivity chart renders, with Substrate and Postgres on, the hook
+The connectivity chart renders, with Substrate, Postgres and the Agent
+Platform organizations on (the bootstrap then also writes the operator's copy
+of the ate-api serving roots into the release namespace), the hook
 identity (templates/substrate/hooks-rbac.yaml) and the hook Jobs. This script
 renders them, starts an API server (tests/apiserver.py: envtest's etcd and
 kube-apiserver, RBAC on, no controllers) and replays each event the way Helm
@@ -88,7 +90,10 @@ def render(chart):
                         "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
                         "--set", f"kagent.namespaceOverride={KAGENT_NS}", "--set", "components.kagent.enabled=true",
                         "--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true",
-                        "--set", "postgres.enabled=true"], capture_output=True, text=True)
+                        "--set", "postgres.enabled=true",
+                        "--set", "agentPlatformOrganizations.enabled=true", "--set", "agentPlatformOrganizations.fluxNamespace=flux-system",
+                        "--set", "agentPlatformOrganizations.apiHostnames[0]=api.ci.example.com", "--set", "llmRouting.enabled=true",
+                        "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"], capture_output=True, text=True)
     if r.returncode != 0:
         raise SystemExit(f"FAIL: helm template:\n{r.stderr}")
     return [d for d in yaml.safe_load_all(r.stdout) if d]

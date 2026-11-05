@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **The connectivity hooks read only the Secrets they write** (giantswarm/agent-platform#1269). The hook ServiceAccount's ClusterRole no longer carries `secrets` or `configmaps`. Each hook gets a Role, at its own events, in each namespace it writes, on the names it reads or writes; only the Substrate bootstrap's `create` is unnamed. The bootstrap's Roles are in `ate-system` and `podcertificate-controller-system`, which the new pre-install / pre-upgrade hook Job `<release>-substrate-namespaces` (weight -4) creates when they are missing. The databases hook's Roles are in `postgres.namespace` and every `secretNamespaces` entry, and the sign-in keys cleanup's Role is in the release namespace.
+- **The connectivity hooks read only the Secrets they write** (giantswarm/agent-platform#1269). The hook ServiceAccount's ClusterRole no longer carries `secrets` or `configmaps`. Each hook gets a Role, at its own events, in each namespace it writes, on the names it reads or writes; only the Substrate bootstrap's `create` is unnamed. The bootstrap's Roles are in `ate-system` and `podcertificate-controller-system`, which the new pre-install / pre-upgrade hook Job `<release>-substrate-namespaces` (weight -4) creates when they are missing. With `agentPlatformOrganizations.enabled` the bootstrap also gets `create` and `patch` on the ConfigMap `agent-platform-operator-ate-api-ca` in the release namespace. The databases hook's Roles are in `postgres.namespace` and every `secretNamespaces` entry, and the sign-in keys cleanup's Role is in the release namespace.
 
 ### Added
 
