@@ -36,7 +36,10 @@ origins and the Secrets they authenticate with; its editors read them.
 
 {{/*
 The rules agent-platform:editor adds: the writes and reads agent-manager
-performs as the caller.
+performs as the caller. The agent chart's OCIRepository is read only: its
+writer is the namespace's keeper (agent-platform-operator in an organization
+namespace, agent-manager's tenant reconciler in a tenant namespace), never an
+editor (giantswarm/agent-platform#1267).
 */}}
 {{- define "agent-platform.tenants.editorRules" -}}
 - apiGroups: ["helm.toolkit.fluxcd.io"]
@@ -44,7 +47,7 @@ performs as the caller.
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: ["source.toolkit.fluxcd.io"]
   resources: ["ocirepositories"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  verbs: ["get", "list", "watch"]
 - apiGroups: ["api.kagent.dev"]
   resources: ["agents", "agenttemplates", "remotemcpservers"]
   verbs: ["create", "update", "patch", "delete"]

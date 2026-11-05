@@ -378,6 +378,14 @@ spec:
           name: giantswarm-default
           namespace: envoy-gateway-system
         pathPrefix: /agent-manager
+    agentPlatformOrganizations:
+      apiHostnames: []
+      enabled: false
+      fluxNamespace: ""
+      operator:
+        serviceAccount:
+          name: agent-platform-operator
+          namespace: ""
     agentSandbox:
       podSecurity:
         containerSecurityContext:
@@ -1403,6 +1411,13 @@ spec:
       substrate:
         credentialProvider:
           egressFQDNs: []
+    organizationErasure:
+      enabled: false
+      operatorPodLabels:
+        app.kubernetes.io/name: agent-platform-operator
+      operatorServiceAccount:
+        name: agent-platform-operator
+        namespace: ""
     postgres:
       affinity: {}
       applicationDatabase:

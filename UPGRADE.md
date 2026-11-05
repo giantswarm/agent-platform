@@ -29,6 +29,15 @@ giantswarm/giantswarm#38970, giantswarm/giantswarm#38322: the chart deploys the 
 - **An air-gapped installation**: set `skills.platformSource.enabled: false`.
 - **An installation that keeps agent-manager's own skill discovery**: set `components.skill-manager.enabled: false`.
 
+## \<current\> → \<next\> (editors no longer write the agent chart's OCIRepository)
+
+giantswarm/agent-platform#1267: `agent-platform:editor` and `agent-platform:admin` keep `get`, `list` and `watch` on `ocirepositories.source.toolkit.fluxcd.io` and lose `create`, `update`, `patch` and `delete`. agent-manager creates a namespace's `agent` OCIRepository as the caller when the first agent of that namespace is created, so in a namespace without one that first create is refused for a caller who holds no other right on OCIRepositories.
+
+### Operator action
+
+- **None** for a tenant namespace that agent-manager's tenant reconciler keeps (`tenants.organizations.enabled`): the reconciler writes the OCIRepository as its own ServiceAccount.
+- **A namespace bound to `agent-platform:editor` that has no `agent` OCIRepository yet** (the kagent namespace of a new installation, for one): create it once, as a cluster admin, before the first agent, or create the first agent as a person who holds OCIRepository writes there. `kubectl get ocirepository agent -n <namespace>` shows whether it exists.
+
 ## \<current\> → \<next\> (the agents' Flux identity holds a Role in place of `cluster-admin`)
 
 The ServiceAccount `kagent.fluxServiceAccountName` (`kagent-flux`) is bound to the Role `kagent-flux-agent-releases` in the kagent namespace: the Generic agent chart 2.x kinds (`api.kagent.dev` Agents and RemoteMCPServers) and the Secret verbs of Helm's release storage. The RoleBinding `kagent-flux` to `cluster-admin` is removed by the upgrade. The agent-manager migrate run and its start hook run as `agent-platform-connectivity-agent-manager-migrate`.

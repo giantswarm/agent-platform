@@ -2639,6 +2639,16 @@ Usage: include "agent-platform.kagent.extensions" $root | fromJson
 {{- $wmNs := dig "workspace-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
 {{- $callers = append $callers (printf "%s/%s" $wmNs $saName) -}}
 {{- end -}}
+{{- /* agent-platform-operator, while organizationErasure is on: it lists and
+deletes a deleted organization's Sessions as its own ServiceAccount
+(connectivity organization-erasure/kagent-sessions-rbac.yaml). Its namespace
+defaults to the connectivity release's, as the binding's does. */ -}}
+{{- $erasure := .Values.organizationErasure | default dict -}}
+{{- if dig "enabled" false $erasure -}}
+{{- $opSa := dig "operatorServiceAccount" dict $erasure -}}
+{{- $opNs := $opSa.namespace | default (dig "agent-platform-connectivity" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .)) -}}
+{{- $callers = append $callers (printf "%s/%s" $opNs (required "organizationErasure.operatorServiceAccount.name must be set" $opSa.name)) -}}
+{{- end -}}
 {{- $settings := list
   (dict "name" "KAGENT_EXTENSIONS_OIDC_ISSUERS" "value" (list (dict "issuer" $auth.issuer "jwksURL" $auth.jwksURL) | toJson))
   (dict "name" "KAGENT_EXTENSIONS_OIDC_USERNAME_CLAIM" "value" (toString ($auth.userIdClaim | default "sub")))

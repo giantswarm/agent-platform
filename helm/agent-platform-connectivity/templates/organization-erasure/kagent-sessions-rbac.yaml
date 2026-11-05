@@ -1,0 +1,44 @@
+{{- /*
+agent-platform-operator erases a deleted organization's kagent sessions: it
+lists every creator's Sessions (ListSessions with all_creators) and deletes
+each (DeleteSession), as its own ServiceAccount with a projected token of
+kagent's machine audience, which the kagent-extensions controller admits as a
+machine caller (the meta chart's KAGENT_EXTENSIONS_MACHINE_CALLER) and reviews
+the listing of as `list` on sessions.api.kagent.dev with no namespace. No tenant role grants it: the list carries the Session names of
+every tenant. The `delete` is for kagent's review of a delete of another
+creator's session: kagent's session service deletes only the caller's own
+sessions for any caller but its control plane today, so the operator's
+erasure stops at that step until kagent reviews such a delete as a
+cluster-wide `delete` here: giantswarm/kagent-extensions#27. The erasure of
+an organization with a person's session works once that change ships in the
+kagent line.
+*/ -}}
+{{- if and (dig "enabled" false (.Values.organizationErasure | default dict)) (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
+{{- $sa := include "agent-platform.organizationErasure.serviceAccount" . | fromJson }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:organization-erasure
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+rules:
+  - apiGroups: [api.kagent.dev]
+    resources: [sessions]
+    verbs: [list, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agent-platform:organization-erasure
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agent-platform:organization-erasure
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa.name }}
+    namespace: {{ $sa.namespace }}
+{{- end }}
