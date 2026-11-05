@@ -1295,15 +1295,15 @@ components:  # @schema additionalProperties: true
     # (agent-platform-operator, its chart's name), and another targetNamespace
     # fails the render.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # Pinned exactly, not a range: the operator's image and its CRD (CreateReplace)
-    # move only with a change here, and a release that needs more wiring
-    # never rolls in before the wiring does. 0.1.0-rc.11 carries the CRD, the
-    # curated copies, the erasure and the ate-api CA projected from
-    # ClusterTrustBundles (agent-platform-operator#2, #3, #7, #21); 0.1.0
-    # (0.1.0-rc.13 promoted) keeps the serviceAccountBindings the meta chart derives: the credential
-    # providers' Secret readers bound in every organization namespace
-    # (agent-platform-operator#23, giantswarm/agent-platform#1269).
-    versionRange: "0.1.0"
+    # A 0.1.x release rolls in without a change here, its CRD with it
+    # (CreateReplace); one that needs wiring of this chart is a minor
+    # release, 0.2.0, outside the range. 0.1.0 carries the CRD, the curated
+    # copies, the erasure, the ate-api CA projected from ClusterTrustBundles
+    # (agent-platform-operator#2, #3, #7, #21) and the serviceAccountBindings
+    # the meta chart derives: the credential providers' Secret readers bound
+    # in every organization namespace (agent-platform-operator#23,
+    # giantswarm/agent-platform#1269).
+    versionRange: ">=0.1.0 <0.2.0"
     valuesFrom: agent-platform-operator
     # App-owned CRD: the chart ships agentplatformorganizations in its crds/
     # dir. CreateReplace makes Flux upgrade it with the app on every release
