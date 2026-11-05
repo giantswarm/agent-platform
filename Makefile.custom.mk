@@ -3589,7 +3589,7 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@if grep -q -E 'expiration:|id: Expiration' $(VERIFY_TMP)/vss-lifecycle.out; then echo "FAIL: the snapshot bucket expires objects (every object left is a live snapshot, #792)"; exit 1; fi
 	@awk '/^kind: BucketPolicy$$/,/^---/' $(VERIFY_TMP)/vss-on.out | grep -q '"aws:SecureTransport": "false"' || { echo "FAIL: no TLS-only bucket policy"; exit 1; }
 	@awk '/^kind: BucketPublicAccessBlock$$/,/^---/' $(VERIFY_TMP)/vss-on.out | grep -q 'restrictPublicBuckets: true' || { echo "FAIL: no public-access block"; exit 1; }
-	@awk '/^kind: Role$$/,/^---/' $(VERIFY_TMP)/vss-on.out >$(VERIFY_TMP)/vss-role.out
+	@awk '/^apiVersion: iam\.aws\.upbound\.io\//{a=1;next} a&&/^kind: Role$$/{f=1} {a=0} f&&/^---/{f=0} f' $(VERIFY_TMP)/vss-on.out >$(VERIFY_TMP)/vss-role.out
 	@grep -q '"irsa.ci.example.com:sub": "system:serviceaccount:ate-system:atelet"' $(VERIFY_TMP)/vss-role.out || { echo "FAIL: the role does not trust atelet"; exit 1; }
 	@grep -q '"irsa.ci.example.com:sub": "system:serviceaccount:ate-system:ate-api-server"' $(VERIFY_TMP)/vss-role.out || { echo "FAIL: the role does not trust ate-api-server"; exit 1; }
 	@[ "$$(grep -c 'sts:AssumeRoleWithWebIdentity' $(VERIFY_TMP)/vss-role.out)" = "2" ] || { echo "FAIL: the trust policy has not exactly two statements"; exit 1; }
@@ -4120,15 +4120,15 @@ verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with n
 HOOKS_ALL := -f $(CONNECTIVITY_DIR)/ci/test-model-serving-oci-values.yaml $(VM) $(SUBSTRATE_ON) --set postgres.enabled=true --set modelServing.cache.enabled=true --set modelServing.prepull.enabled=true
 
 .PHONY: verify-hooks-memory
-verify-hooks-memory: ## Assert the connectivity hook Jobs' memory (#513): every hook container requests 10m/32Mi and 16Mi ephemeral-storage, is limited to 256Mi ephemeral-storage (#780) and to agent-platform.hooks.job's default 128Mi of memory, except the Substrate bootstrap's kubectl container at 256Mi (two kubectl processes at once next to its in-memory /work); all four hook Jobs render. Needs PyYAML.
+verify-hooks-memory: ## Assert the connectivity hook Jobs' memory (#513): every hook container requests 10m/32Mi and 16Mi ephemeral-storage, is limited to 256Mi ephemeral-storage (#780) and to agent-platform.hooks.job's default 128Mi of memory, except the Substrate bootstrap's kubectl container at 256Mi (two kubectl processes at once next to its in-memory /work); all five hook Jobs render. Needs PyYAML.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >$(VERIFY_TMP)/vhm.out 2>&1 || { cat $(VERIFY_TMP)/vhm.out; exit 1; }
-	@python3 -c 'import sys,yaml; R={"cpu":"10m","memory":"32Mi","ephemeral-storage":"16Mi"}; lim=lambda m: (R, {"memory": m, "ephemeral-storage": "256Mi"}); want={"t-substrate-bootstrap": {"openssl": lim("128Mi"), "sh": lim("256Mi")}, "t-postgres-databases": {"sh": lim("128Mi")}, "t-model-serving-cache": {"sh": lim("128Mi")}, "t-model-serving-prepull-cleanup": {"sh": lim("128Mi")}}; jobs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; got={j["metadata"]["name"]: {c["name"]: (c["resources"]["requests"], c["resources"]["limits"]) for c in j["spec"]["template"]["spec"].get("initContainers",[])+j["spec"]["template"]["spec"]["containers"]} for j in jobs}; sys.exit("FAIL: hook containers (requests, limits) are %s, want %s" % (got, want)) if got!=want else print("ok: four hook Jobs, 10m/32Mi/16Mi ephemeral-storage requests; t-substrate-bootstrap sh limited to 256Mi, every other hook container to 128Mi; 256Mi ephemeral-storage each")' $(VERIFY_TMP)/vhm.out
+	@python3 -c 'import sys,yaml; R={"cpu":"10m","memory":"32Mi","ephemeral-storage":"16Mi"}; lim=lambda m: (R, {"memory": m, "ephemeral-storage": "256Mi"}); want={"t-substrate-namespaces": {"sh": lim("128Mi")}, "t-substrate-bootstrap": {"openssl": lim("128Mi"), "sh": lim("256Mi")}, "t-postgres-databases": {"sh": lim("128Mi")}, "t-model-serving-cache": {"sh": lim("128Mi")}, "t-model-serving-prepull-cleanup": {"sh": lim("128Mi")}}; jobs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; got={j["metadata"]["name"]: {c["name"]: (c["resources"]["requests"], c["resources"]["limits"]) for c in j["spec"]["template"]["spec"].get("initContainers",[])+j["spec"]["template"]["spec"]["containers"]} for j in jobs}; sys.exit("FAIL: hook containers (requests, limits) are %s, want %s" % (got, want)) if got!=want else print("ok: five hook Jobs, 10m/32Mi/16Mi ephemeral-storage requests; t-substrate-bootstrap sh limited to 256Mi, every other hook container to 128Mi; 256Mi ephemeral-storage each")' $(VERIFY_TMP)/vhm.out
 	@echo "ok: $@"
 
 .PHONY: verify-hooks-ephemeral-storage
-verify-hooks-ephemeral-storage: ## Assert every hook Job and CronJob of both charts bounds its emptyDirs (#780, #866, Kyverno's require-emptydir-requests-and-limits): each container mounting an emptyDir requests and limits ephemeral-storage, each emptyDir carries a sizeLimit — the connectivity chart's four hook Jobs, the Backstage config-reload, the migrate start and the migrate CronJob, the meta chart's hooks with the engine on (self-management's included) and the serving teardown with it off. Needs PyYAML.
+verify-hooks-ephemeral-storage: ## Assert every hook Job and CronJob of both charts bounds its emptyDirs (#780, #866, Kyverno's require-emptydir-requests-and-limits): each container mounting an emptyDir requests and limits ephemeral-storage, each emptyDir carries a sizeLimit — the connectivity chart's five hook Jobs, the Backstage config-reload, the migrate start and the migrate CronJob, the meta chart's hooks with the engine on (self-management's included) and the serving teardown with it off. Needs PyYAML.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >$(VERIFY_TMP)/vhe-conn.out 2>&1 || { cat $(VERIFY_TMP)/vhe-conn.out; exit 1; }
@@ -4137,7 +4137,7 @@ verify-hooks-ephemeral-storage: ## Assert every hook Job and CronJob of both cha
 	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) >$(VERIFY_TMP)/vhe-meta.out 2>&1 || { cat $(VERIFY_TMP)/vhe-meta.out; exit 1; }
 	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) --set components.flux.enabled=false --set components.kserve-llmisvc-crd.enabled=true --set components.kserve-llmisvc-resources.enabled=true --set components.kserve-runtime-configs.enabled=true >$(VERIFY_TMP)/vhe-serving.out 2>&1 || { cat $(VERIFY_TMP)/vhe-serving.out; exit 1; }
 	@python3 tests/verify-hooks-ephemeral-storage.py \
-		$(VERIFY_TMP)/vhe-conn.out=t-substrate-bootstrap,t-postgres-databases,t-model-serving-cache,t-model-serving-prepull-cleanup \
+		$(VERIFY_TMP)/vhe-conn.out=t-substrate-namespaces,t-substrate-bootstrap,t-postgres-databases,t-model-serving-cache,t-model-serving-prepull-cleanup \
 		$(VERIFY_TMP)/vhe-backstage.out=agent-platform-connectivity-backstage-config-reload \
 		$(VERIFY_TMP)/vhe-migrate.out=t-agent-manager-migrate-start,agent-platform-connectivity-agent-manager-migrate \
 		$(VERIFY_TMP)/vhe-meta.out=t-flux-operator-crds,t-kagent-namespace,t-self-stop-resumer,t-self-suspend,t-self-values,t-teardown-engine,t-teardown-operator,t-teardown-releases \
@@ -4158,10 +4158,10 @@ verify-connectivity-hooks-netpol: ## Assert the connectivity hook identity's net
 	@grep -q 'app.kubernetes.io/instance: "t"' $(VERIFY_TMP)/vchn-cnp.out || { echo "FAIL: the policy does not select the release's instance label"; exit 1; }
 	@grep -q 'toEntities: \["kube-apiserver"\]' $(VERIFY_TMP)/vchn-cnp.out || { echo "FAIL: the cilium policy does not admit egress to the kube-apiserver entity"; exit 1; }
 	@if grep -q 'ingress:\|toFQDNs\|toCIDR\|toEndpoints\|world' $(VERIFY_TMP)/vchn-cnp.out; then echo "FAIL: the cilium policy admits more than apiserver egress"; exit 1; fi
-	@echo "--> all four hook Jobs: pre-delete joins the events, every hook Job's pod carries the selected labels"
+	@echo "--> all five hook Jobs: pre-delete joins the events, every hook Job's pod carries the selected labels"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >$(VERIFY_TMP)/vchn-all.out 2>&1 || { cat $(VERIFY_TMP)/vchn-all.out; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vchn-all.out CiliumNetworkPolicy t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete$$' || { echo "FAIL: with the pre-pull cleanup the policy is not at pre-delete too"; exit 1; }
-	@python3 -c 'import sys,yaml; docs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; sel={"app.kubernetes.io/instance":"t","app.kubernetes.io/component":"hooks"}; bad=[d["metadata"]["name"] for d in docs if any(d["spec"]["template"]["metadata"]["labels"].get(k)!=v for k,v in sel.items())]; sys.exit("FAIL: hook Jobs the policy does not select: %s" % bad) if bad or len(docs)!=4 else print("ok: 4 hook Jobs selected: %s" % sorted(d["metadata"]["name"] for d in docs))' $(VERIFY_TMP)/vchn-all.out
+	@python3 -c 'import sys,yaml; docs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; sel={"app.kubernetes.io/instance":"t","app.kubernetes.io/component":"hooks"}; bad=[d["metadata"]["name"] for d in docs if any(d["spec"]["template"]["metadata"]["labels"].get(k)!=v for k,v in sel.items())]; sys.exit("FAIL: hook Jobs the policy does not select: %s" % bad) if bad or len(docs)!=5 else print("ok: 5 hook Jobs selected: %s" % sorted(d["metadata"]["name"] for d in docs))' $(VERIFY_TMP)/vchn-all.out
 	@echo "--> kubernetes flavour: a NetworkPolicy hook, Egress only, to networkPolicy.kubernetes.apiServerCIDR"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) $(SUBSTRATE_ON) --set networkPolicy.flavor=kubernetes --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >$(VERIFY_TMP)/vchn-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vchn-k8s.out; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vchn-k8s.out NetworkPolicy t-hooks >$(VERIFY_TMP)/vchn-np.out || { echo "FAIL: no NetworkPolicy t-hooks in the kubernetes flavour"; exit 1; }
@@ -4556,6 +4556,13 @@ verify-tenant-workers: ## Assert the workers of the organizations' namespaces (g
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-tenant-workers.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-hooks-secrets
+verify-hooks-secrets: ## Assert the connectivity hook identity reads only the Secrets its hooks write (giantswarm/agent-platform#1269), on a local API server (tests/apiserver.py: envtest's etcd and kube-apiserver, RBAC on, no controllers): with Substrate and Postgres on, the hook ClusterRole carries no rule on secrets or configmaps and every Role rule but create names its objects; replaying pre-install (the substrate-namespaces Job, the bootstrap's Roles and scripts), a second bootstrap run and post-install (the databases hook against a stand-in CNPG Secret) as the hook ServiceAccount, every script succeeds; that ServiceAccount is then refused a workload cluster kubeconfig in an org- namespace, a Secret and a ConfigMap no hook writes in each namespace a hook writes, and a list of Secrets there and across the cluster. Needs PyYAML, openssl and jq. HELM selects the binary. Network: github.com (the envtest binaries, cached in .bin/).
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-hooks-secrets.py $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
 .PHONY: verify-organization-admission

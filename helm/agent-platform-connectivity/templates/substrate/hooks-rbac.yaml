@@ -1,23 +1,31 @@
 {{- /*
 The identity the hook Jobs of this release run as (templates/_hooks.tpl): a
-ServiceAccount in the release namespace bound to a ClusterRole on secrets,
-configmaps and namespaces, and on the podcert signers' cluster-scoped
-ClusterTrustBundles the bootstrap publishes — get, list, watch, create and
-patch (server-side apply), never delete — plus `attest` on the two podcert
+ServiceAccount in the release namespace, a ClusterRole on what has no
+namespace of its own and Roles on the Secrets and ConfigMaps the hooks write.
+
+The ClusterRole: get and create on namespaces (the substrate-namespaces Job),
+the podcert signers' ClusterTrustBundles the bootstrap publishes (get, list,
+watch, create and patch, never delete) plus `attest` on the two podcert
 signers, which the apiserver demands of whoever writes a bundle naming them,
-on persistentvolumeclaims (and get on storageclasses) while this chart applies
-model serving's cache claim (templates/model-serving/cache-pvc.yaml), and delete on the pre-pull
-DaemonSet by name while it renders (templates/model-serving/prepull.yaml: the
-DaemonSet is a post-install/post-upgrade hook object, and the pre-delete hook
-Job removes it), and delete on the workspace-manager sign-in keys Secret by
-name while its cleanup renders (templates/workspace-manager/signin-keys-cleanup.yaml).
-Cluster-scoped because the
-bootstrap writes into two namespaces the substrate release has not created yet
-(a Role there cannot precede its namespace), publishes cluster-scoped objects,
-and the databases hook writes into every namespace of
-postgres.databases.*.secretNamespaces. Created for each hook event the
-rendered Jobs use (agent-platform.hooks.events, templates/_hooks.tpl) at weight
--5, ahead of the Jobs at 0, and removed once the event's hooks succeeded.
+persistentvolumeclaims (and get on storageclasses) while this chart applies
+model serving's cache claim (templates/model-serving/cache-pvc.yaml), delete on
+the pre-pull DaemonSet by name while it renders (templates/model-serving/prepull.yaml),
+and the ModelConfigs llmRouting reconciles. It reads no Secret and no
+ConfigMap: on a management cluster every workload cluster's kubeconfig is a
+Secret.
+
+The Roles (agent-platform.hooks.secretGrants): one per namespace a hook writes,
+at that hook's events only, with get, list, watch, patch and delete on exactly
+the names it reads or writes. create is not narrowed by name (the apiserver
+cannot: a create names no object in its URL), and creates nothing readable.
+Weight -3: after the substrate-namespaces Job (-4) created the namespaces the
+bootstrap's Roles live in, before the Jobs (0). The databases hook runs
+post-install, when every namespace of postgres.databases.*.secretNamespaces
+exists or the hook fails as it would without a Role.
+
+The ServiceAccount and ClusterRole are created for each hook event the rendered
+Jobs use (agent-platform.hooks.events) at weight -5, and every object here is
+removed once the event's hooks succeeded.
 */ -}}
 {{- if include "agent-platform.hooks.enabled" . }}
 {{- $name := include "agent-platform.hooks.serviceAccountName" . }}
@@ -47,12 +55,11 @@ metadata:
     helm.sh/hook-weight: "-5"
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 rules:
-  - apiGroups: [""]
-    resources: ["secrets", "configmaps"]
-    verbs: ["get", "list", "watch", "create", "patch"]
+  {{- if include "agent-platform.substrate.enabled" . }}
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "create"]
+  {{- end }}
   {{- if include "agent-platform.modelServing.cacheClaimManaged" . }}
   # The cache claim hook (templates/model-serving/cache-pvc.yaml) server-side
   # applies the claim into the serving namespace: get says created or present
@@ -75,14 +82,6 @@ rules:
   - apiGroups: ["apps"]
     resources: ["daemonsets"]
     resourceNames: [{{ include "agent-platform.modelServing.prepull.name" . | quote }}]
-    verbs: ["delete"]
-  {{- end }}
-  {{- with include "agent-platform.workspaceManager.signinKeysOrphan" . }}
-  # The sign-in keys cleanup (templates/workspace-manager/signin-keys-cleanup.yaml)
-  # deletes the Secret an earlier release kept: delete on exactly that Secret.
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames: [{{ . | quote }}]
     verbs: ["delete"]
   {{- end }}
   {{- if include "agent-platform.llmRouting.modelConfigs" . }}
@@ -125,4 +124,50 @@ subjects:
   - kind: ServiceAccount
     name: {{ $name }}
     namespace: {{ .Release.Namespace }}
+{{- range $grant := include "agent-platform.hooks.secretGrants" . | fromJsonArray }}
+{{- $roleName := printf "%s-%s" $name $grant.purpose }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $roleName }}
+  namespace: {{ $grant.namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: {{ $grant.events }}
+    helm.sh/hook-weight: "-3"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  {{- range $grant.rules }}
+  - apiGroups: [""]
+    resources: [{{ .resource | quote }}]
+    {{- with .names }}
+    resourceNames: {{ toJson . }}
+    {{- end }}
+    verbs: {{ toJson .verbs }}
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $roleName }}
+  namespace: {{ $grant.namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: {{ $grant.events }}
+    helm.sh/hook-weight: "-3"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $roleName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
 {{- end }}
