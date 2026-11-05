@@ -3548,7 +3548,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/oauth2-proxy
-      tag: v7.15.5
+      tag: v7.15.6
     # Co-locate with kagent resources so the templates ConfigMap (created in
     # kagent namespace by the kagent chart) is reachable.
     namespaceOverride: kagent
