@@ -16,7 +16,9 @@ Each case pins one property:
   values.skillsGitAuthSecretRef.name and a git credentialRef of an
   extraAgentSpec skill or plugin are admitted empty, as the installation's
   skills credential (either name) or as a Secret the editor may get, and
-  refused for one the editor may not get; a HelmRelease written before the
+  refused for one the editor may not get; each name counts once, and more
+  than two distinct Secrets besides the installation's skills credential are
+  refused, for a cluster-admin too; a HelmRelease written before the
   policy takes an annotation but no spec change; a HelmRelease outside the
   kagent namespace is not held. Every refusal names the policy with its own
   message, never an evaluation error.
@@ -45,6 +47,7 @@ EDITOR = "bob"  # agent-platform:editor in the kagent namespace, no Secret right
 SKILLS = "agent-manager-skills-token"
 SKILLS_OLD = "old-skills-token"
 READABLE = "bob-readable"  # a Secret bob may get
+READABLE_MORE = ["bob-readable-2", "bob-readable-3"]  # two more he may get
 PLATFORM_SECRET = "kagent-postgres"  # one he may not
 
 API = None
@@ -178,7 +181,7 @@ def fixtures():
         apply({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": {"name": "bob-editor", "namespace": n},
                "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "agent-platform:editor"}, "subjects": subject})
     apply({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "bob-readable", "namespace": KAGENT},
-           "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["get"], "resourceNames": [READABLE]}]})
+           "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["get"], "resourceNames": [READABLE, *READABLE_MORE]}]})
     apply({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": {"name": "bob-readable", "namespace": KAGENT},
            "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "bob-readable"}, "subjects": subject})
     # Written before the policy, as another identity.
@@ -230,6 +233,17 @@ def prove():
              create(helmrelease("a", extra_agent_spec={kind: [entry(SKILLS)]})))
         case(f"an extraAgentSpec {kind} credentialRef names no Secret its writer may not get",
              create(helmrelease("a", skills=SKILLS, extra_agent_spec={kind: [entry(READABLE), entry(PLATFORM_SECRET)]})), refused=True)
+    case("an extraAgentSpec naming one Secret its writer may get six times passes",
+         create(helmrelease("a", skills=READABLE, extra_agent_spec={"skills": [{"name": f"s{i}", **git_source(READABLE)} for i in range(6)]})))
+    case("the installation skills credential named six times beside two distinct Secrets its writer may get passes",
+         create(helmrelease("a", skills=SKILLS, extra_agent_spec={"skills": [{"name": f"s{i}", **git_source(c)} for i, c in
+                                                                            enumerate([SKILLS] * 5 + [READABLE, READABLE_MORE[0], READABLE])]})))
+    case("three distinct Secrets besides the installation skills credential are refused by the limit",
+         create(helmrelease("a", skills=SKILLS, extra_agent_spec={"skills": [{"name": f"s{i}", **git_source(c)} for i, c in
+                                                                            enumerate([READABLE, *READABLE_MORE])]})), refused=True)
+    case("a cluster-admin's three distinct Secrets are refused by the limit",
+         create(helmrelease("a", extra_agent_spec={"skills": [{"name": f"s{i}", **git_source(c)} for i, c in enumerate([READABLE, *READABLE_MORE])]}),
+                as_="jose", groups=("system:masters",)), refused=True)
     case("a HelmRelease written before the policy takes an annotation",
          patch("legacy", KAGENT, {"metadata": {"annotations": {"reconcile.fluxcd.io/requestedAt": "now"}}}, as_=None, groups=("system:masters",)))
     case("a HelmRelease written before the policy changes no spec", patch("legacy", KAGENT, {"spec": {"values": {"x": 1}}},
