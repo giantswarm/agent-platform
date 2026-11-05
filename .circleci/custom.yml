@@ -34,6 +34,9 @@ version: 2.1
 
 jobs:
   test-ingress-modes:
+    # Separate containers/checkouts: fixed-name render files and local tool
+    # downloads are never shared between shards. Each shard runs serially.
+    parallelism: 4
     # cimg/base: CircleCI's convenience image (no custom entrypoint, passwordless
     # sudo). We install a recent Helm here rather than reuse the lint-chart ct
     # image — ct v3.0.0-rc.1 bundles Helm ~3.3, which predates OCI dependency
@@ -79,7 +82,7 @@ jobs:
         # chart's render, also run locally. The meta chart's one dependency is
         # the flux-engine subchart, a directory in its charts/, which needs no
         # `helm dependency build`.
-        command: make verify-all
+        command: make verify-all VERIFY_SHARD_INDEX="$CIRCLE_NODE_INDEX" VERIFY_SHARD_TOTAL="$CIRCLE_NODE_TOTAL"
 
   verify-release-floors:
     # The tag pipeline's gate (giantswarm/agent-platform#624). Same image and the

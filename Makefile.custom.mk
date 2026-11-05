@@ -4628,12 +4628,15 @@ VERIFY_CHAINED := $(sort $(shell sed -n 's/^verify-[a-z0-9-]*: *\(verify-.*\)$$/
 VERIFY_RELEASE_ONLY := verify-release-floors
 VERIFY_TARGETS := $(filter-out verify-all $(VERIFY_CHAINED) $(VERIFY_RELEASE_ONLY),$(VERIFY_ALL_DEFINED))
 
+# Explicit opt-in: local `make verify-all` always runs the complete set.
+VERIFY_SHARD_INDEX ?= 0
+VERIFY_SHARD_TOTAL ?= 1
+
+.PHONY: verify-runner
+verify-runner: ## Assert verify-all's shard coverage, private scratch directories and failure propagation.
+	@python3 tests/verify-runner.py
+
 .PHONY: verify-all
-verify-all: ## Run every verify-* target of this file, the set CI runs, each with its wall-clock. Some resolve a component chart over the network.
-	@echo "====> $@ ($(words $(VERIFY_TARGETS)) targets)"
-	@for target in $(VERIFY_TARGETS); do \
-		start=$$(date +%s%N); \
-		$(MAKE) --no-print-directory $$target || { echo "FAIL: $$target"; exit 1; }; \
-		echo "<==== $$target: $$(( ($$(date +%s%N) - start) / 1000000 )) ms"; \
-	done
-	@echo "all $(words $(VERIFY_TARGETS)) verify targets passed."
+verify-all: ## Run every verify-* target, or one VERIFY_SHARD_INDEX of VERIFY_SHARD_TOTAL isolated CI shards, with wall-clock timings.
+	@python3 tests/run-verify.py --make "$(MAKE)" \
+		--shard-index "$(VERIFY_SHARD_INDEX)" --shard-total "$(VERIFY_SHARD_TOTAL)" $(VERIFY_TARGETS)

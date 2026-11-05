@@ -1212,8 +1212,10 @@ def registry(kube: Kube) -> str:
 
 
 @pytest.fixture(scope="module")
-def muster_forward(kube: Kube) -> Iterator[Optional[PortForward]]:
-    """muster's base URL, answerable from the test. The scenario says how it is
+def muster_forward(kube: Kube, app_deployment: float) -> Iterator[Optional[PortForward]]:
+    """Only wait for endpoints after app_deployment succeeded. A failed install
+    must not spend another READY_TIMEOUT_S waiting for a Service it never made.
+    muster's base URL, answerable from the test. The scenario says how it is
     reached: a port-forward to svc/muster on the port the URL carries, or a real
     hostname served through the Gateway, which needs no forward."""
     if not SCENARIO.via_port_forward:
@@ -1226,8 +1228,9 @@ def muster_forward(kube: Kube) -> Iterator[Optional[PortForward]]:
 
 
 @pytest.fixture(scope="module")
-def mcp_forward(kube: Kube) -> Iterator[Optional[PortForward]]:
-    """The MCP endpoint, answerable from the test: a port-forward to the
+def mcp_forward(kube: Kube, app_deployment: float) -> Iterator[Optional[PortForward]]:
+    """Only wait for endpoints after app_deployment succeeded, as muster_forward.
+    The MCP endpoint, answerable from the test: a port-forward to the
     agentgateway data plane's Service on the port the MCP URL carries, or a real
     hostname whose public /mcp route ends on the data plane, which needs none."""
     if not SCENARIO.via_port_forward:
