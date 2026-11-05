@@ -42,6 +42,7 @@ By default there is no filter and no prerelease.
 | klaus-gateway | `components.klaus-gateway.enabled` | `false` |
 | agent-sandbox | `components.agent-sandbox.enabled` | `false` |
 | agent-manager | `components.agent-manager.enabled` | `false` |
+| skill-manager | `components.skill-manager.enabled` | follows `components.agent-manager` |
 | vm-manager | `components.vm-manager.enabled` | `false` |
 | cluster-manager | `components.cluster-manager.enabled` | `false` |
 | workspace-manager | `workspaces.enabled` (`components.workspace-manager` follows it) | `false` |
@@ -272,12 +273,24 @@ The Agent Manager is the platform's meta agent, `agent-manager-assistant` in the
 | `components.agent-manager-assistant.enabled` | `true` | Deploys the agent while kagent, muster and agent-manager are on. The portal's meta-agent features use it. |
 | `agentManagerAssistant.modelConfig` | `""` | The `ModelConfig` it runs on. Empty uses `default-model-config`. |
 | `backstage.metaAgents.<role>` | unset | The agent behind a portal role, as `<installation>/<namespace>/<name>`. Roles: `generalInformation`, `agentManagement`, `workflowManagement`, `platformOperations`, `skillEvaluation`, `skillCreation`. Unset roles use the Agent Manager while it is on. |
-| `skills.repositories` | `[giantswarm/agent-skills]` | Skill sources for agent-manager and the portal, as URLs or `{url, ref, path, readOnly}`. |
+| `skillManager.sources` | `[giantswarm/agent-skills]` | Skill sources for the skill-manager and the portal, as URLs or `{url, ref, path, readOnly}`. |
 | `skills.platformSource.enabled` | `true` | Lists the platform's `skills/` first, read-only, at the release tag. Set `false` where GitHub is unreachable. |
-| `agent-manager.skills.repositories`, `backstage.skillsRepositories` | `[]` | Deprecated. When set, replaces `skills.repositories` for that consumer. |
+| `agent-manager.skills.repositories`, `backstage.skillsRepositories` | `[]` | Deprecated. When set, replaces `skillManager.sources` for that consumer. |
 
 - A release pins the skills to the tag's commit. A branch build deploys the agent without skills.
-- agent-manager and the portal get the platform source and object entries only from the floors in `_helpers.tpl` (`skillSourcesFloor`). Below them they get URLs only.
+- The portal gets the platform source and object entries from `agent-platform.backstage.skillSourcesFloor` in `_helpers.tpl`. Below it, URLs only.
+
+### Skill manager
+
+**[skill-manager](https://github.com/giantswarm/skill-manager)** owns the skill sources. It lists their skills and pins a skill to a commit as the person: MCP through muster (`x_skill-manager_*`), REST for agent-manager.
+
+- `components.skill-manager` follows `components.agent-manager`. `enabled: false` leaves it out. `dependsOn: [muster]`; agent-manager depends on it.
+- Its `sources` are derived: the platform source, then `skillManager.sources`. An own `skill-manager.sources` fails the render.
+- GitHub access goes in `skill-manager.github` (`app.secretName` or `tokenSecret`). Empty reads public repositories anonymously.
+- agent-manager gets `skillManager.url`, the skill-manager's Service, from `agent-platform.agentManager.skillManagerFloor` on. Below it, or with the skill-manager off, agent-manager gets `skills.repositories` as URLs, without the platform source. `agent-manager.skills.repositories` set while agent-manager uses the skill-manager fails the render.
+- The connectivity chart admits muster and agent-manager to its pods (`networkPolicy.mcpBackends.skill-manager`, derived) and opens agent-manager's egress to it.
+
+`make verify-agent-manager-assistant` covers it.
 
 ### Cluster manager
 

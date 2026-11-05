@@ -31,6 +31,7 @@ spec:
   dependsOn:
     - name: muster
     - name: kagent
+    - name: skill-manager
   values:
     agentChart:
       ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
@@ -571,6 +572,8 @@ spec:
       modelServing:
         enabled: false
       muster:
+        enabled: true
+      skill-manager:
         enabled: true
       substrate:
         enabled: true
@@ -1387,7 +1390,13 @@ spec:
       - matchLabels:
           app.kubernetes.io/instance: alloy-metrics
         namespace: kube-system
-      mcpBackends: {}
+      mcpBackends:
+        skill-manager:
+          namespace: default
+          podSelector:
+            app.kubernetes.io/name: skill-manager
+          ports:
+          - 8080
       musterInClusterMcpPorts:
       - 8080
       - 8443
@@ -2681,6 +2690,85 @@ spec:
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
+  name: skill-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: skill-manager
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: skill-manager
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+  values:
+    fullnameOverride: skill-manager
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: https://dex.ci.example.com
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: http://otlp-gateway.kube-system.svc:4317
+            headers: {}
+            protocol: grpc
+            tenant: giantswarm
+      registry: gsoci.azurecr.io
+    muster:
+      mcpServer:
+        auth:
+          forwardToken: true
+          requiredAudiences:
+          - dex-k8s-authenticator
+        enabled: true
+    oauth:
+      dex:
+        allowPrivateURLs: true
+      enabled: true
+      sso:
+        allowPrivateIPs: true
+    observability:
+      otel:
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        headers: X-Scope-OrgID=giantswarm
+        protocol: grpc
+    sources:
+    - path: skills
+      readOnly: true
+      url: https://github.com/giantswarm/agent-platform
+    - https://github.com/giantswarm/agent-skills
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
   name: substrate
   namespace: default
   labels:
@@ -3328,6 +3416,29 @@ spec:
     operation: copy
   ref:
     semver: ">=5.52.5 <6.0.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: skill-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 1m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/skill-manager
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    semver: ">=0.1.0 <0.2.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

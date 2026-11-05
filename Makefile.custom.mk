@@ -1628,7 +1628,7 @@ verify-fast-links: ## Assert the fast-link input of the model serving layer (gia
 	@python3 tests/verify-fast-links.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 
 .PHONY: verify-agent-manager-assistant
-verify-agent-manager-assistant: ## Assert the Agent Manager (components.agent-manager-assistant, giantswarm/giantswarm#38970): one agent chart release in kagent while it, kagent and muster are on, with the derived values; no skills unstamped, every skill of skills/ pinned to the commit hack/stamp-release-commit.sh stamps into a packaged copy (the tag pipeline's step); skills.repositories feeding agent-manager and the portal; the portal's meta agents. HELM selects the binary.
+verify-agent-manager-assistant: ## Assert the Agent Manager (components.agent-manager-assistant, giantswarm/giantswarm#38970): one agent chart release in kagent while it, kagent and muster are on, with the derived values; no skills unstamped, every skill of skills/ pinned to the commit hack/stamp-release-commit.sh stamps into a packaged copy (the tag pipeline's step); the skill-manager (follows agent-manager, skillManager.sources with the platform source first, its MCP backend entry, agent-manager's egress) and skillManager.sources feeding the portal; agent-manager's skillManager.url from its floor, else the deprecated URL list; the portal's meta agents. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-agent-manager-assistant.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 

@@ -97,6 +97,10 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- /* The data plane's route to muster: on whenever muster is on
        (agent-platform.validateMusterRoute refuses an explicit false then). */ -}}
 {{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "muster")) "true" }}
+{{- else if eq .name "skill-manager" }}
+{{- /* The skill-manager serves agent-manager's skills: on with it, unless
+       its own switch says otherwise. */ -}}
+{{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "agent-manager")) "true" }}
 {{- else if eq .name "workspace-manager" }}
 {{- /* The workspace-manager follows the one switch workspaces.enabled
        (agent-platform.validateWorkspaces refuses an explicit value that
@@ -240,6 +244,13 @@ overwrite would hide a values file that still spells the old key.
     audience its grant.audience — defaults as for klaus-gateway, the kagent
     block's own value stands per key; the kagent floor that takes the block,
     an issuer and the email claim are guarded (agent-platform.validateSessionAdmission).
+  skill-manager: sources, the platform's skill source and skillManager.sources
+    (agent-platform.skills.repositories; an own list fails); agent-manager
+    skillManager.url (agent-platform.skillManager.url) in place of
+    skills.repositories, from agent-platform.agentManager.skillManagerFloor
+    (agent-platform.agentManager.viaSkillManager); the connectivity release
+    its MCP backend entry, networkPolicy.mcpBackends.skill-manager
+    (agent-platform.skillManager.mcpBackend), while the component is on.
   toolchain-manager: the login, the muster registration and its pin to the
     installation's agents GitHub App, and the sources with additionalSources
     after them, klausGateway.url and .audience while klaus-gateway takes its
@@ -389,8 +400,17 @@ floor that takes the key (agent-platform.agentManager.registryConfigFloor). */ -
 {{- with (include "agent-platform.agentManager.tenants" .root | fromJson) -}}
 {{- $_ := set $derived "tenants" . -}}
 {{- end -}}
-{{- /* The skill sources list_skills offers (agent-platform.skills.repositories). */ -}}
+{{- /* Skills: through the skill-manager (skillManager.url) where it pins
+them (agent-platform.agentManager.viaSkillManager), else the deprecated
+in-process list of URLs (agent-platform.skills.repositories). */ -}}
+{{- if include "agent-platform.agentManager.viaSkillManager" .root -}}
+{{- with dig "skills" "repositories" list (index .root.Values "agent-manager" | default dict) -}}
+{{- fail (printf "agent-manager.skills.repositories (%v) is set, but agent-manager takes its skill sources from the skill-manager (components.skill-manager): move the list to skillManager.sources" .) -}}
+{{- end -}}
+{{- $_ := set $derived "skillManager" (dict "url" (include "agent-platform.skillManager.url" .root)) -}}
+{{- else -}}
 {{- $_ := set $derived "skills" (dict "repositories" (include "agent-platform.skills.repositories" (dict "root" .root "consumer" "agent-manager") | fromJson).list) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "agent-manager-assistant" -}}
 {{- $derived = include "agent-platform.agentManagerAssistant.derived" .root | fromJson -}}
@@ -415,14 +435,31 @@ which the connectivity chart requires beside the model
 {{- /* muster alone reaches the toolchain-manager's pods, while the component
 is on: an MCP backend entry, whose ingress policy the connectivity chart
 renders (networkPolicy.mcpBackends). */ -}}
+{{- $mcpBackends := dict -}}
 {{- with (include "agent-platform.toolchainManager.mcpBackend" .root | fromJson) -}}
-{{- $_ := set $derived "networkPolicy" (dict "mcpBackends" (dict "toolchain-manager" .)) -}}
+{{- $_ := set $mcpBackends "toolchain-manager" . -}}
+{{- end -}}
+{{- /* And the skill-manager's, which agent-manager calls too
+(agent-platform.skillManager.mcpBackend). */ -}}
+{{- with (include "agent-platform.skillManager.mcpBackend" .root | fromJson) -}}
+{{- $_ := set $mcpBackends "skill-manager" . -}}
+{{- end -}}
+{{- with $mcpBackends -}}
+{{- $_ := set $derived "networkPolicy" (dict "mcpBackends" .) -}}
 {{- end -}}
 {{- /* The skill sources the portal offers (agent-platform.skills.repositories). */ -}}
 {{- $_ := set $derived "backstage" (dict "skillsRepositories" (include "agent-platform.skills.repositories" (dict "root" .root "consumer" "backstage") | fromJson).list) -}}
 {{- end -}}
 {{- if eq .name "toolchain-manager" -}}
 {{- $derived = include "agent-platform.toolchainManager.derived" .root | fromJson -}}
+{{- end -}}
+{{- if eq .name "skill-manager" -}}
+{{- /* The skill sources: the platform's first, then skillManager.sources
+(agent-platform.skills.repositories). */ -}}
+{{- with dig "sources" list (index .root.Values "skill-manager" | default dict) -}}
+{{- fail (printf "skill-manager.sources (%v) is set: the chart derives the skill-manager's sources from skillManager.sources — move the list there" .) -}}
+{{- end -}}
+{{- $_ := set $derived "sources" (include "agent-platform.skills.repositories" (dict "root" .root "consumer" "skill-manager") | fromJson).list -}}
 {{- end -}}
 {{- if eq .name "cluster-manager" -}}
 {{- /* model-manager's namespace: where the model-manager component lands — the
@@ -3804,7 +3841,7 @@ klaus-gateway gates read the endpoints. Emits nothing.
               modelServing.networkPolicy.otlpEndpoint from that preset's
               resolved endpoint (the model pods' egress);
               <manager>.observability.otel.endpoint (model-manager,
-              agent-manager, vm-manager, cluster-manager, workspace-manager,
+              agent-manager, skill-manager, vm-manager, cluster-manager, workspace-manager,
               backstage);
               mcp-kubernetes.mcpKubernetes.instrumentation.otlpEndpoint as
               host:port (the scheme and path dropped, the port the scheme's or
@@ -3890,7 +3927,7 @@ is turned off, where the chart would export to the SDK's localhost default. */ -
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" $path "value" $protocol) -}}
 {{- end -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "otel" "headers") "value" $joined) -}}
-{{- range $name := list "model-manager" "agent-manager" "vm-manager" "cluster-manager" "workspace-manager" "backstage" -}}
+{{- range $name := list "model-manager" "agent-manager" "skill-manager" "vm-manager" "cluster-manager" "workspace-manager" "backstage" -}}
 {{- $base := list $name "observability" "otel" -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "endpoint") "value" $endpoint) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (append $base "protocol") "value" $protocol) -}}
@@ -4445,14 +4482,21 @@ toolchain-manager.registryPullSecret. One line, no comment inside the define.
 {{- define "agent-platform.agentManager.registryConfigFloor" -}}2.16.0{{- end -}}
 
 {{/*
-The first releases of agent-manager and of the portal (backstage) that take a
-skill repository as {url, ref, path, readOnly}; below them a consumer gets
-URLs alone and no platform source. Set each to the release that ships the
-object form (giantswarm/giantswarm#38970) before raising the component's floor
-to it. One line each, no comment inside the define.
+The first release of the portal (backstage) that takes a skill repository as
+{url, ref, path, readOnly}; below it the portal gets URLs alone and no
+platform source. One line, no comment inside the define.
 */}}
-{{- define "agent-platform.agentManager.skillSourcesFloor" -}}2.19.0{{- end -}}
 {{- define "agent-platform.backstage.skillSourcesFloor" -}}3.31.0{{- end -}}
+
+{{/*
+PLACEHOLDER (giantswarm/giantswarm#38322): the first agent-manager release
+that takes skillManager.url and pins skills through the skill-manager
+(giantswarm/agent-manager#290); an earlier release's closed values schema
+refuses the key. Set it to that release before raising
+components.agent-manager.versionRange to it. One line, no comment inside the
+define.
+*/}}
+{{- define "agent-platform.agentManager.skillManagerFloor" -}}2.19.0{{- end -}}
 
 {{/*
 "true" when this chart is a published release: a version without a
@@ -4490,27 +4534,35 @@ A skill source's identity, url + ref + path, the URL without a trailing `/` or
 {{- end -}}
 
 {{/*
-The skill repositories one consumer (agent-manager: skills.repositories,
-backstage: skillsRepositories) offers, as JSON {"list": [...]}:
-- the platform's source first (skills.platformSource.enabled), and only from
-  the consumer's skillSourcesFloor on: below it the source would be a bare,
-  writable URL scanned whole;
-- the installation's sources: the consumer's own deprecated list
-  (agent-manager.skills.repositories, backstage.skillsRepositories) when set,
-  which replaces skills.repositories for that consumer; else
-  skills.repositories. Objects from the floor on, URLs below it.
-One entry per url + ref + path. An installation entry for the platform's
-repository while its source is on fails the render.
-Usage: include "agent-platform.skills.repositories" (dict "root" $ "consumer" "agent-manager") | fromJson
+The skill sources one consumer offers, as JSON {"list": [...]}, all from
+skillManager.sources:
+- skill-manager (sources): the platform's source first
+  (skills.platformSource.enabled), then skillManager.sources, as written (a
+  URL or {url, ref, path, readOnly});
+- backstage (skillsRepositories): the same, from the portal's
+  skillSourcesFloor on; below it URLs alone and no platform source;
+- agent-manager (skills.repositories, deprecated): URLs alone and no platform
+  source, for an agent-manager that does not pin through the skill-manager
+  (agent-platform.agentManager.viaSkillManager).
+A consumer's own deprecated list (agent-manager.skills.repositories,
+backstage.skillsRepositories), when set, replaces skillManager.sources for
+that consumer. One entry per url + ref + path. An installation entry for the
+platform's repository while its source is on fails the render.
+Usage: include "agent-platform.skills.repositories" (dict "root" $ "consumer" "backstage") | fromJson
 */}}
 {{- define "agent-platform.skills.repositories" -}}
 {{- $v := .root.Values -}}
 {{- $platform := include "agent-platform.skills.platformSource" .root | fromJson -}}
 {{- $platformOn := ne (toString (dig "platformSource" "enabled" true ($v.skills | default dict))) "false" -}}
-{{- $own := ternary (dig "skills" "repositories" list (index $v "agent-manager" | default dict)) (dig "skillsRepositories" list ($v.backstage | default dict)) (eq .consumer "agent-manager") | default list -}}
-{{- $installation := $own | default (dig "repositories" list ($v.skills | default dict)) | default list -}}
-{{- $floor := ternary (include "agent-platform.agentManager.skillSourcesFloor" .root) (include "agent-platform.backstage.skillSourcesFloor" .root) (eq .consumer "agent-manager") -}}
-{{- $objects := eq (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" .consumer "version" $floor)) "true" -}}
+{{- $own := list -}}
+{{- if eq .consumer "agent-manager" }}{{- $own = dig "skills" "repositories" list (index $v "agent-manager" | default dict) -}}
+{{- else if eq .consumer "backstage" }}{{- $own = dig "skillsRepositories" list ($v.backstage | default dict) -}}
+{{- end -}}
+{{- $installation := $own | default (dig "sources" list ($v.skillManager | default dict)) | default list -}}
+{{- $objects := eq .consumer "skill-manager" -}}
+{{- if eq .consumer "backstage" -}}
+{{- $objects = eq (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "backstage" "version" (include "agent-platform.backstage.skillSourcesFloor" .root))) "true" -}}
+{{- end -}}
 {{- $platformKey := include "agent-platform.skills.sourceKey" (dict "url" $platform.url) | splitList "|" | first -}}
 {{- $seen := dict -}}
 {{- $out := list -}}
@@ -4523,14 +4575,61 @@ Usage: include "agent-platform.skills.repositories" (dict "root" $ "consumer" "a
 {{- if and $platformOn (eq (first (splitList "|" $key)) $platformKey) -}}
 {{- fail (printf "the skill source %v names the platform's own repository, which the chart already offers read-only at its release (skills.platformSource); remove the entry, or set skills.platformSource.enabled=false to list the repository yourself" .) -}}
 {{- end -}}
-{{- if not (hasKey $seen $key) -}}
-{{- $_ := set $seen $key true -}}
 {{- $entry := . -}}
 {{- if and (kindIs "map" .) (not $objects) }}{{ $entry = .url }}{{ end -}}
+{{- $key = include "agent-platform.skills.sourceKey" $entry -}}
+{{- if not (hasKey $seen $key) -}}
+{{- $_ := set $seen $key true -}}
 {{- $out = append $out $entry -}}
 {{- end -}}
 {{- end -}}
 {{- dict "list" $out | toJson -}}
+{{- end -}}
+
+{{/*
+"true" when agent-manager pins and lists skills through the skill-manager:
+both components on and the floor of components.agent-manager.versionRange at
+or above agent-platform.agentManager.skillManagerFloor. agent-manager then
+gets skillManager.url and no skill sources; otherwise its deprecated
+skills.repositories (agent-platform.skills.repositories).
+Usage: include "agent-platform.agentManager.viaSkillManager" $
+*/}}
+{{- define "agent-platform.agentManager.viaSkillManager" -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) (include "agent-platform.componentEnabled" (dict "root" . "name" "skill-manager")) (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" (include "agent-platform.agentManager.skillManagerFloor" .))) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The skill-manager's in-cluster REST URL, the one agent-manager calls:
+http://<skill-manager.fullnameOverride>.<its namespace>.svc.cluster.local:<skill-manager.service.port, 8080>.
+Usage: include "agent-platform.skillManager.url" $
+*/}}
+{{- define "agent-platform.skillManager.url" -}}
+{{- $sm := index .Values "skill-manager" | default dict -}}
+{{- $ns := dig "skill-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- printf "http://%s.%s.svc.cluster.local:%v" ($sm.fullnameOverride | default "skill-manager") $ns (dig "service" "port" 8080 $sm) -}}
+{{- end -}}
+
+{{/*
+The skill-manager's MCP backend entry for the connectivity release
+(networkPolicy.mcpBackends.skill-manager), while the component is on: its
+pods in its release's namespace on its Service port, so the ingress policy
+admits muster (its MCP tools) and the namespace's own pods (agent-manager's
+REST calls); the connectivity chart opens agent-manager's egress to it. Emits
+JSON, {} while the component is off.
+Usage: include "agent-platform.skillManager.mcpBackend" . | fromJson
+*/}}
+{{- define "agent-platform.skillManager.mcpBackend" -}}
+{{- $out := dict -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "skill-manager") -}}
+{{- $sm := index .Values "skill-manager" | default dict -}}
+{{- $ns := dig "skill-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $out = dict "namespace" $ns "ports" (list (int (dig "service" "port" 8080 $sm))) "podSelector" (dict "app.kubernetes.io/name" "skill-manager") -}}
+{{- $amNs := dig "agent-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- if and (include "agent-platform.agentManager.viaSkillManager" .) (ne $amNs $ns) -}}
+{{- $_ := set $out "additionalPeers" (list (dict "namespace" $amNs "matchLabels" (dict "app.kubernetes.io/name" (dig "nameOverride" "agent-manager" (index .Values "agent-manager" | default dict))))) -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
 {{- end -}}
 
 {{/*

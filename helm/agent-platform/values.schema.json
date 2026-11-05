@@ -136,7 +136,7 @@
         },
         "skill-repository.schema.json": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "$comment": "One entry of skills.repositories: a repository URL, or {url, ref, path, readOnly}.",
+            "$comment": "One entry of skillManager.sources: a repository URL, or {url, ref, path, readOnly}.",
             "anyOf": [
                 {
                     "type": "string",
@@ -1007,6 +1007,33 @@
                             "items": {
                                 "type": "string"
                             }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "skill-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
                         },
                         "repository": {
                             "type": "string"
@@ -3060,6 +3087,27 @@
                 }
             }
         },
+        "skill-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "skillManager": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/skill-repository.schema.json",
+                        "type": [
+                            "string",
+                            "object"
+                        ],
+                        "unevaluatedProperties": false
+                    }
+                }
+            }
+        },
         "skills": {
             "type": "object",
             "additionalProperties": false,
@@ -3071,17 +3119,6 @@
                         "enabled": {
                             "type": "boolean"
                         }
-                    }
-                },
-                "repositories": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/$defs/skill-repository.schema.json",
-                        "type": [
-                            "string",
-                            "object"
-                        ],
-                        "unevaluatedProperties": false
                     }
                 }
             }

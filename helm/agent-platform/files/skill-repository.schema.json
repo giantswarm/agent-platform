@@ -1,6 +1,6 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$comment": "One entry of skills.repositories: a repository URL, or {url, ref, path, readOnly}.",
+    "$comment": "One entry of skillManager.sources: a repository URL, or {url, ref, path, readOnly}.",
     "anyOf": [
         {
             "type": "string",

@@ -523,6 +523,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
+| components.agent-manager.dependsOn[2] | string | `"skill-manager"` |  |
+| components.skill-manager.chart | string | `"skill-manager"` |  |
+| components.skill-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.skill-manager.versionRange | string | `">=0.1.0 <0.2.0"` |  |
+| components.skill-manager.valuesFrom | string | `"skill-manager"` |  |
+| components.skill-manager.dependsOn[0] | string | `"muster"` |  |
+| components.skill-manager.gatedRoster | bool | `true` |  |
 | components.agent-manager-assistant.chart | string | `"agent"` |  |
 | components.agent-manager-assistant.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.agent-manager-assistant.versionRange | string | `">=2.0.0 <3.0.0"` |  |
@@ -666,7 +673,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.omitKeys[3] | string | `"toolchain-manager"` |  |
 | components.agent-platform-connectivity.omitKeys[4] | string | `"kserve-runtime-configs"` |  |
 | components.agent-platform-connectivity.omitKeys[5] | string | `"skills"` |  |
-| components.agent-platform-connectivity.omitKeys[6] | string | `"agentManagerAssistant"` |  |
+| components.agent-platform-connectivity.omitKeys[6] | string | `"skillManager"` |  |
+| components.agent-platform-connectivity.omitKeys[7] | string | `"skill-manager"` |  |
+| components.agent-platform-connectivity.omitKeys[8] | string | `"agentManagerAssistant"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -1404,7 +1413,17 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | skills.platformSource.enabled | bool | `true` |  |
-| skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| skillManager.sources[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| skill-manager.fullnameOverride | string | `"skill-manager"` |  |
+| skill-manager.observability.otel.endpoint | string | `"auto"` |  |
+| skill-manager.observability.otel.protocol | string | `"auto"` |  |
+| skill-manager.observability.otel.headers | string | `"auto"` |  |
+| skill-manager.oauth.enabled | bool | `true` |  |
+| skill-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| skill-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| skill-manager.muster.mcpServer.enabled | bool | `true` |  |
+| skill-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| skill-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | agentManagerAssistant.modelConfig | string | `""` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
 | cluster-manager.observability.otel.endpoint | string | `"auto"` |  |

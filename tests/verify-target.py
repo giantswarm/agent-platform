@@ -125,11 +125,20 @@ def targeted(doc: str) -> str:
     its chartRef's and its dependsOn names prefixed with the release name, its
     workloads and their Helm storage in agent-platform, so the namespace a
     release's values name for the platform's pods (the kagent controller's
-    NetworkPolicy peers, controller.networkPolicy.from) is agent-platform too."""
-    out, section = [], ""
+    NetworkPolicy peers, controller.networkPolicy.from) is agent-platform too,
+    and so is the namespace of a derived MCP backend entry
+    (networkPolicy.mcpBackends.<key>.namespace: the component's pods)."""
+    out, section, backends = [], "", -1
     for line in doc.split("\n"):
         if re.match(r"^  \S", line):
             section = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if backends >= 0 and line.strip() and indent <= backends:
+            backends = -1
+        if re.match(r"^ +mcpBackends:$", line):
+            backends = indent
+        elif backends >= 0 and re.match(r"^ +namespace: default$", line):
+            line = line.replace(": default", ": agent-platform")
         if re.match(r"^  name: ", line) and section.startswith("name:"):
             line = line.replace("name: ", "name: t-", 1)
         elif section in ("chartRef:", "dependsOn:") and re.match(r"^    (- )?name: ", line):

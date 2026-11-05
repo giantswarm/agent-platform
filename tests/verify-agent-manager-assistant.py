@@ -12,12 +12,24 @@
   hack/stamp-release-commit.sh, the packaged chart pins every skill of skills/
   to that commit (the tag pipeline's step, simulated on a copy); a release
   packaged unstamped fails its render.
-- skills.repositories feeds agent-manager.skills.repositories and
-  backstage.skillsRepositories: the platform's source first, only at a
-  consumer floor that takes objects, without a ref unless the chart is a published release, off with
-  skills.platformSource.enabled=false; a consumer's own deprecated list
-  replaces skills.repositories; one entry per url + ref + path; an entry for
-  the platform's repository fails the render. The schema takes URLs and objects.
+- components.skill-manager follows agent-manager (its own switch wins), one
+  release from the catalog's skill-manager chart in the platform's namespace,
+  after muster, with agent-manager after it; the connectivity release gets its
+  roster entry and MCP backend entry only while it is on, and agent-manager's
+  egress policy reaches it.
+- skillManager.sources feeds skill-manager.sources and
+  backstage.skillsRepositories: the platform's source first (the portal: only
+  from its object-form floor), without a ref unless the chart is a published
+  release, off with skills.platformSource.enabled=false;
+  backstage.skillsRepositories replaces skillManager.sources for the portal;
+  one entry per url + ref + path; an entry for the platform's repository fails
+  the render; an own skill-manager.sources fails. The schema takes URLs and
+  objects.
+- agent-manager gets skillManager.url (the skill-manager's Service) and no
+  skill sources from agent-platform.agentManager.skillManagerFloor on, with
+  the skill-manager on; else skills.repositories as URLs, no platform source,
+  replaced by its own deprecated list. That list fails the render while
+  agent-manager pins through the skill-manager.
 - The connectivity chart wires the portal's meta agents to it while it is on.
 
 usage: verify-agent-manager-assistant.py <meta chart dir> <connectivity chart dir>
@@ -53,6 +65,8 @@ BASE = [
 ]
 ON = ["--set", "components.kagent.enabled=true", "--set", "components.agent-manager.enabled=true"]
 FLOORS = ["--set", "components.agent-manager.versionRange=>=2.99.0 <3.0.0", "--set", "components.backstage.versionRange=>=3.99.0 <4.0.0"]
+SM_OFF = ["--set", "components.skill-manager.enabled=false"]
+SM_URL = "http://skill-manager.agent-platform.svc.cluster.local:8080"
 PORTAL = ["--set", "components.backstage.enabled=true"]
 
 
@@ -83,9 +97,16 @@ def find(docs: list[dict], kind: str, name: str) -> dict | None:
 
 
 def repos(docs: list[dict]) -> tuple[list, list]:
-    am = find(docs, "HelmRelease", "agent-manager")["spec"]["values"]["skills"]["repositories"]
+    """The skill-manager's sources and the portal's skillsRepositories."""
+    sm = find(docs, "HelmRelease", "skill-manager")["spec"]["values"]["sources"]
     conn = find(docs, "HelmRelease", "agent-platform-connectivity")["spec"]["values"]["backstage"]["skillsRepositories"]
-    return am, conn
+    return sm, conn
+
+
+def am_skills(docs: list[dict]) -> tuple[list, dict | None]:
+    """agent-manager's skills.repositories and skillManager."""
+    v = find(docs, "HelmRelease", "agent-manager")["spec"]["values"]
+    return v["skills"]["repositories"], v.get("skillManager")
 
 
 def package(tmp: str, version: str, stamp: bool) -> str:
@@ -108,7 +129,7 @@ semver = values["agent-manager"]["agentChart"]["semver"]
 if values["components"][NAME]["versionRange"] != semver:
     fail(f"components.{NAME}.versionRange {values['components'][NAME]['versionRange']!r} is not agent-manager.agentChart.semver {semver!r}: the Agent Manager runs the agent chart line agent-manager composes")
 skills = sorted(p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md"))
-installation = values["skills"]["repositories"]
+installation = values["skillManager"]["sources"]
 
 # Off with kagent, muster, agent-manager or its own switch off.
 for what, args in {"kagent off (the default)": ["--set", "components.agent-manager.enabled=true"],
@@ -173,54 +194,127 @@ with tempfile.TemporaryDirectory() as tmp:
     want = [{"name": s, "path": f"skills/{s}", "git": {"url": PLATFORM, "commit": SHA}} for s in skills]
     if sorted(v["skills"], key=lambda e: e["name"]) != want:
         fail(f"the stamped release's {NAME} skills are {v['skills']!r}, want every skill of skills/ at {SHA}: {want!r}")
-    am, _ = repos(docs)
-    if am[0] != {"url": PLATFORM, "ref": "v9.9.9", "path": "skills", "readOnly": True}:
-        fail(f"release 9.9.9: the platform source is {am[0]!r}, want it at ref v9.9.9")
+    sm, conn = repos(docs)
+    if sm[0] != {"url": PLATFORM, "ref": "v9.9.9", "path": "skills", "readOnly": True} or conn[0] != sm[0]:
+        fail(f"release 9.9.9: the platform source is {sm[0]!r} (portal {conn[0]!r}), want it at ref v9.9.9")
     refused(package(tmp, "9.9.8", stamp=False), "[[ .SHA ]] placeholder", *ON)
     dev = package(tmp, "9.9.9-dev.1", stamp=False)
     docs = render(dev, *ON, *FLOORS, *PORTAL)
     if find(docs, "HelmRelease", NAME)["spec"]["values"]["skills"] != []:
         fail("a pre-release carries the unstamped skills")
-    am, _ = repos(docs)
-    if am[0] != {"url": PLATFORM, "path": "skills", "readOnly": True}:
-        fail(f"a pre-release's platform source is {am[0]!r}, want it without a ref (the default branch)")
+    sm, _ = repos(docs)
+    if sm[0] != {"url": PLATFORM, "path": "skills", "readOnly": True}:
+        fail(f"a pre-release's platform source is {sm[0]!r}, want it without a ref (the default branch)")
 print(f"ok: a stamped release pins the {len(skills)} skills of skills/ to its commit, an unstamped release fails, a pre-release carries none")
 
-# One skill-repository value, both consumers.
+# The skill-manager component: on with agent-manager, its own switch wins.
+for what, args, want in (("agent-manager off (the default)", [], False), ("agent-manager on", ON, True),
+                         ("its switch off", [*ON, *SM_OFF], False),
+                         ("its switch on, agent-manager off", ["--set", "components.skill-manager.enabled=true"], True)):
+    docs = render(META, *args)
+    hr, oci = find(docs, "HelmRelease", "skill-manager"), find(docs, "OCIRepository", "skill-manager")
+    conn = find(docs, "HelmRelease", "agent-platform-connectivity")["spec"]["values"]
+    backend = conn["networkPolicy"].get("mcpBackends", {}).get("skill-manager")
+    if bool(hr) != want or bool(oci) != want or ("skill-manager" in conn["components"]) != want or bool(backend) != want:
+        fail(f"skill-manager, {what}: HelmRelease {bool(hr)}, OCIRepository {bool(oci)}, roster entry {'skill-manager' in conn['components']}, MCP backend {backend!r}; want {want} for each")
+    if "skillManager" in conn or "skill-manager" in conn:
+        fail(f"skill-manager, {what}: the skillManager / skill-manager blocks reach the connectivity release, whose root schema refuses them")
+docs = render(META, *ON)
+hr, oci = find(docs, "HelmRelease", "skill-manager"), find(docs, "OCIRepository", "skill-manager")
+v = hr["spec"]["values"]
+checks = {
+    "chart": (oci["spec"]["url"], "oci://gsoci.azurecr.io/charts/giantswarm/skill-manager"),
+    "range": (oci["spec"]["ref"]["semver"], values["components"]["skill-manager"]["versionRange"]),
+    "targetNamespace": (hr["spec"]["targetNamespace"], "agent-platform"),
+    "dependsOn": ([d["name"] for d in hr["spec"]["dependsOn"]], ["muster"]),
+    "agent-manager dependsOn": ([d["name"] for d in find(docs, "HelmRelease", "agent-manager")["spec"]["dependsOn"]], ["muster", "kagent", "skill-manager"]),
+    "muster.mcpServer": (v["muster"]["mcpServer"], {"enabled": True, "auth": {"forwardToken": True, "requiredAudiences": ["dex-k8s-authenticator"]}}),
+    "oauth.enabled": (v["oauth"]["enabled"], True),
+    "MCP backend": (find(docs, "HelmRelease", "agent-platform-connectivity")["spec"]["values"]["networkPolicy"]["mcpBackends"]["skill-manager"],
+                    {"namespace": "agent-platform", "ports": [8080], "podSelector": {"app.kubernetes.io/name": "skill-manager"}}),
+}
+for what, (got, want) in checks.items():
+    if got != want:
+        fail(f"skill-manager: {what} is {got!r}, want {want!r}")
+refused(META, "skill-manager.sources", *ON, "--set", "skill-manager.sources[0]=https://github.com/acme/skills")
+for flavor, extra in (("kubernetes", []), ("cilium", ["--api-versions", "cilium.io/v2"])):
+    conn = find(render(META, *ON, *extra), "HelmRelease", "agent-platform-connectivity")["spec"]["values"]
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml") as f:
+        yaml.safe_dump(conn, f)
+        f.flush()
+        kind = "CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy"
+        cdocs = render(CONN, "-f", f.name, *extra)
+        egress = find(cdocs, kind, "ap-agent-manager-egress") or find(cdocs, kind, "agent-platform-connectivity-agent-manager-egress")
+        if not egress or "skill-manager" not in json.dumps(egress):
+            fail(f"agent-manager's {flavor} egress policy does not reach the skill-manager: {egress and json.dumps(egress)[:300]!r}")
+        ingress = next((d for d in cdocs if d["kind"] == kind and d["metadata"]["name"].endswith("mcp-backend-skill-manager")), None)
+        if not ingress:
+            fail(f"no {flavor} ingress policy for the skill-manager's MCP backend")
+print("ok: skill-manager follows agent-manager, after muster and before agent-manager, muster and agent-manager admitted to it")
+
+# One skill source value: the skill-manager and the portal.
 # The working tree is no published release (appVersion is not its version): no ref, as on a pre-release.
 own = {"url": PLATFORM, "path": "skills", "readOnly": True}
-am, conn = repos(render(META, *ON, *PORTAL))
-if am != installation or conn != installation:
-    fail(f"below the object-form floors: agent-manager {am!r}, portal {conn!r}; want skills.repositories as URLs and no platform source")
-am, conn = repos(render(META, *ON, *PORTAL, *FLOORS))
-if am != [own, *installation] or conn != [own, *installation]:
-    fail(f"at the object-form floors: agent-manager {am!r}, portal {conn!r}; want the platform source, then skills.repositories")
-am, conn = repos(render(META, *ON, *PORTAL, *FLOORS, "--set", "skills.platformSource.enabled=false"))
-if am != installation or conn != installation:
-    fail(f"skills.platformSource.enabled=false: agent-manager {am!r}, portal {conn!r}; want no platform source")
-am, conn = repos(render(META, *ON, *PORTAL, *FLOORS,
-                       "--set", "agent-manager.skills.repositories[0]=https://github.com/acme/skills",
+sm, conn = repos(render(META, *ON, *PORTAL))
+if sm != [own, *installation] or conn != installation:
+    fail(f"below the portal's object-form floor: skill-manager {sm!r}, portal {conn!r}; want the platform source, then skillManager.sources, and the portal URLs only")
+sm, conn = repos(render(META, *ON, *PORTAL, *FLOORS))
+if sm != [own, *installation] or conn != [own, *installation]:
+    fail(f"at the portal's object-form floor: skill-manager {sm!r}, portal {conn!r}; want the platform source, then skillManager.sources")
+sm, conn = repos(render(META, *ON, *PORTAL, *FLOORS, "--set", "skills.platformSource.enabled=false"))
+if sm != installation or conn != installation:
+    fail(f"skills.platformSource.enabled=false: skill-manager {sm!r}, portal {conn!r}; want no platform source")
+sm, conn = repos(render(META, *ON, *PORTAL, *FLOORS,
+                       "--set", "skillManager.sources[0]=https://github.com/acme/skills",
+                       "--set", "skillManager.sources[1].url=https://github.com/acme/skills.git",
+                       "--set", "skillManager.sources[1].ref=v1",
+                       "--set", "skillManager.sources[1].path=skills/",
+                       "--set", "skillManager.sources[1].readOnly=true",
+                       "--set", "skillManager.sources[2].url=https://github.com/acme/skills/",
                        "--set", "backstage.skillsRepositories[0]=https://github.com/acme/more.git",
                        "--set", "backstage.skillsRepositories[1]=https://github.com/acme/more/",
                        "--set", "backstage.skillsRepositories[2].url=https://github.com/acme/more",
                        "--set", "backstage.skillsRepositories[2].ref=main"))
-if am != [own, "https://github.com/acme/skills"] or conn != [own, "https://github.com/acme/more.git", {"url": "https://github.com/acme/more", "ref": "main"}]:
-    fail(f"the deprecated lists: agent-manager {am!r}, portal {conn!r}; want each replacing skills.repositories for its consumer, one entry per url + ref + path")
-refused(META, "names the platform's own repository", *ON, *FLOORS, "--set", f"skills.repositories[0]={PLATFORM}.git")
-am, _ = repos(render(META, *ON, *FLOORS, "--set", "skills.platformSource.enabled=false", "--set", f"skills.repositories[0].url={PLATFORM}", "--set", "skills.repositories[0].path=skills"))
-if am != [{"url": PLATFORM, "path": "skills"}]:
-    fail(f"with the platform source off an installation lists the repository itself: {am!r}")
+if sm != [own, "https://github.com/acme/skills", {"url": "https://github.com/acme/skills.git", "ref": "v1", "path": "skills/", "readOnly": True}] \
+        or conn != [own, "https://github.com/acme/more.git", {"url": "https://github.com/acme/more", "ref": "main"}]:
+    fail(f"skillManager.sources and the portal's deprecated list: skill-manager {sm!r}, portal {conn!r}; want the entries as written, the portal's list replacing them, one entry per url + ref + path")
+refused(META, "names the platform's own repository", *ON, "--set", f"skillManager.sources[0]={PLATFORM}.git")
+sm, _ = repos(render(META, *ON, "--set", "skills.platformSource.enabled=false", "--set", f"skillManager.sources[0].url={PLATFORM}", "--set", "skillManager.sources[0].path=skills"))
+if sm != [{"url": PLATFORM, "path": "skills"}]:
+    fail(f"with the platform source off an installation lists the repository itself: {sm!r}")
+
+# agent-manager: through the skill-manager from its floor on, else the deprecated URL list.
+objs = ["--set", "skillManager.sources[0].url=https://github.com/acme/skills", "--set", "skillManager.sources[0].ref=v1",
+        "--set", "skillManager.sources[1].url=https://github.com/acme/skills", "--set", "skillManager.sources[1].path=x"]
+for what, args in (("below agent-platform.agentManager.skillManagerFloor", [*ON, *objs]), ("the skill-manager off", [*ON, *FLOORS, *SM_OFF, *objs])):
+    repositories, smv = am_skills(render(META, *args))
+    if repositories != ["https://github.com/acme/skills"] or smv is not None:
+        fail(f"agent-manager, {what}: skills.repositories {repositories!r}, skillManager {smv!r}; want skillManager.sources as URLs, once, no platform source, no skillManager")
+repositories, _ = am_skills(render(META, *ON, "--set", "agent-manager.skills.repositories[0]=https://github.com/acme/own"))
+if repositories != ["https://github.com/acme/own"]:
+    fail(f"agent-manager below the floor: its deprecated list does not replace skillManager.sources: {repositories!r}")
+repositories, smv = am_skills(render(META, *ON, *FLOORS))
+if repositories != [] or smv != {"url": SM_URL}:
+    fail(f"agent-manager at the floor: skills.repositories {repositories!r}, skillManager {smv!r}; want none and {{'url': {SM_URL!r}}}")
+_, smv = am_skills(render(META, *ON, *FLOORS, "--set", "skill-manager.fullnameOverride=skills", "--set", "skill-manager.service.port=9090",
+                          "--set", "components.skill-manager.targetNamespace=skills"))
+if smv != {"url": "http://skills.skills.svc.cluster.local:9090"}:
+    fail(f"agent-manager's skillManager.url does not follow the skill-manager's name, port and namespace: {smv!r}")
+refused(META, "move the list to skillManager.sources", *ON, *FLOORS, "--set", "agent-manager.skills.repositories[0]=https://github.com/acme/own")
+
 schema = json.load(open(f"{META}/values.schema.json"))
 try:
     import jsonschema
 except ImportError:
     jsonschema = None
 for entry in ("https://github.com/acme/skills", {"url": "https://github.com/acme/skills", "ref": "main", "path": "skills", "readOnly": True}):
-    if jsonschema and (errors := [e.message for e in jsonschema.Draft202012Validator(schema).iter_errors({"skills": {"repositories": [entry]}})]):
+    if jsonschema and (errors := [e.message for e in jsonschema.Draft202012Validator(schema).iter_errors({"skillManager": {"sources": [entry]}})]):
         fail(f"values.schema.json (draft 2020-12) refuses the skill source {entry!r}: {errors}")
-if jsonschema and not list(jsonschema.Draft202012Validator(schema).iter_errors({"skills": {"repositories": [{"url": "https://x", "branch": "main"}]}})):
+if jsonschema and not list(jsonschema.Draft202012Validator(schema).iter_errors({"skillManager": {"sources": [{"url": "https://x", "branch": "main"}]}})):
     fail("values.schema.json takes a skill source with an unknown key")
-print(f"ok: skills.repositories feeds both consumers; the platform source, the deprecated lists, dedup and the schema ({'draft 2020-12 checked' if jsonschema else 'helm only, jsonschema missing'})")
+if jsonschema and not list(jsonschema.Draft202012Validator(schema).iter_errors({"skills": {"repositories": ["https://github.com/acme/skills"]}})):
+    fail("values.schema.json still takes skills.repositories")
+print(f"ok: skillManager.sources feeds the skill-manager and the portal, agent-manager through skillManager.url from its floor; the platform source, the deprecated lists, dedup and the schema ({'draft 2020-12 checked' if jsonschema else 'helm only, jsonschema missing'})")
 
 
 # The portal's meta agents: every role the portal reads
