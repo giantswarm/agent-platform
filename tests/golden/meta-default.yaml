@@ -442,7 +442,11 @@ spec:
     agentPlatformOrganizations:
       apiHostnames: []
       enabled: false
+      fluxDecryptionSecret: sops-keys
       fluxNamespace: ""
+      fluxSource:
+        kind: GitRepository
+        name: ""
       operator:
         serviceAccount:
           name: agent-platform-operator
