@@ -392,7 +392,6 @@ def test_self_management_adopts_the_release(kube: Kube, helm: Helm, candidate_ve
 
 
 @pytest.mark.smoke
-@pytest.mark.flaky(reruns=2, reruns_delay=20)
 def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: Optional[PortForward]) -> None:
     try:
         meta = unauthenticated_mcp_challenge(MCP_URL, MUSTER_BASE_URL)
@@ -403,7 +402,6 @@ def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: O
 
 
 @pytest.mark.smoke
-@pytest.mark.flaky(reruns=2, reruns_delay=20)
 @REQUIRES_STATIC_USER
 def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: Optional[PortForward], dex: Optional[str]) -> None:
     """The lab Dex's OAuth password grant issues an ID token for the platform
@@ -430,7 +428,6 @@ def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: Optional
 
 
 @pytest.mark.smoke
-@pytest.mark.flaky(reruns=2, reruns_delay=20)
 @REQUIRES_STATIC_USER
 def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: Optional[PortForward], dex: Optional[str]) -> None:
     """The full muster login — dynamic client registration, authorization code
@@ -517,7 +514,7 @@ def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, must
         assert info.get("chart", {}).get("ociUrl") == AGENT_CHART_URL, info.get("chart")
         assert info.get("chart", {}).get("semver") == AGENT_CHART_SEMVER, info.get("chart")
         assert info.get("harness", {}).get("name") == HARNESS, info.get("harness")
-        # Clean up an earlier attempt (a flaky rerun) so create_agent does not refuse a duplicate.
+        # Clean up a previous manual run so create_agent does not refuse a duplicate.
         kube.delete("helmreleases.helm.toolkit.fluxcd.io", MANAGED_AGENT, namespace=KAGENT_NAMESPACE, timeout="2m")
         result = session.call_server_json("x_agent-manager_create_agent", {
             "name": MANAGED_AGENT, "modelConfig": MODEL_CONFIG, "displayName": MANAGED_AGENT_DISPLAY_NAME,

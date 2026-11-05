@@ -157,6 +157,34 @@ on the same commit: 18.1 min; the median of the 144 green runs before it, 19.2).
 | the functional scenario (pytest) | 231 |
 | the whole `execute-chart-tests` job | 11:00 min |
 
+## CI execution and failure handling
+
+The render job `test-ingress-modes` uses four independent CircleCI containers.
+`make verify-all` still discovers every `verify-*` target from
+`Makefile.custom.mk`, excluding only the existing chained and release-only
+targets. `tests/run-verify.py` sorts that list and assigns positions `i, i+N, …`
+to shard `i` of `N`: every assertion runs once, and a new target is included
+automatically. Targets run serially within each shard; checkouts, downloaded
+tools and temporary files are not shared between CI nodes. Each invocation
+gets a private temporary directory for both Make's scratch renders and Python's
+temporary files. No test result is cached and no failed target is retried.
+
+Locally, `make verify-all` runs the whole suite. To reproduce a CI shard:
+
+```sh
+make verify-all VERIFY_SHARD_INDEX=0 VERIFY_SHARD_TOTAL=4
+```
+
+The Kubernetes smoke and functional scenarios stay sequential on one cluster:
+the second scenario verifies reinstalling over the first scenario's retained
+state. The smoke's endpoint fixtures depend explicitly on `app_deployment`.
+If installation fails, they never wait for endpoints of the missing deployment.
+The auth tests wait on the existing bounded health/route readiness predicates
+and execute their assertions once, without pytest's blanket flaky reruns.
+`test_fixture_dependencies.py` verifies successful forwarding and cleanup, the
+external-endpoint path, and failure propagation with no endpoint wait or second
+install, using the real fixture definitions in a sandbox pytest session.
+
 ## Render assertions (no cluster)
 
 The three shapes of the chart and the `auto` knobs are asserted offline, in CI
