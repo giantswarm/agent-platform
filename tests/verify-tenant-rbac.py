@@ -188,7 +188,7 @@ def check_roles(docs: list) -> None:
     ok("agent-platform:platform-user is agent-platform:user without the EgressPolicies")
 
 
-def check_egress_admission(docs: list) -> None:
+def check_egress_admission(docs: list, label: str) -> None:
     name = "agent-platform-tenant-egress-credentials"
     vap = find(docs, "ValidatingAdmissionPolicy", name)
     vapb = find(docs, "ValidatingAdmissionPolicyBinding", name)
@@ -199,7 +199,7 @@ def check_egress_admission(docs: list) -> None:
         fail(f"{name} failurePolicy is {spec.get('failurePolicy')}, want Fail")
     if vapb["spec"].get("policyName") != name or vapb["spec"].get("validationActions") != ["Deny"]:
         fail(f"{name}'s binding is {vapb['spec']}, want the policy with Deny")
-    want_ns = [{"key": "giantswarm.io/organization", "operator": "Exists"},
+    want_ns = [{"key": label, "operator": "Exists"},
                {"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": ["kagent"]}]
     if spec["matchConstraints"].get("namespaceSelector", {}).get("matchExpressions") != want_ns:
         fail(f"{name} selects {spec['matchConstraints'].get('namespaceSelector')}, want the Organizations' namespaces but kagent")
@@ -400,7 +400,9 @@ def main() -> None:
 
     on = render(conn, [*CONN, "--set", "components.kagent.enabled=true"])
     check_roles(on)
-    check_egress_admission(on)
+    # Outside the tenants mode the organizations' namespaces carry
+    # agent-platform.giantswarm.io/organization (giantswarm/agent-platform#1268).
+    check_egress_admission(on, "agent-platform.giantswarm.io/organization")
     check_platform_tenant_refs(on, "kagent")
     check_platform_tenant_refs(render(conn, [*CONN, "--set", "components.kagent.enabled=true",
                                              "--set", "kagent.namespaceOverride=agents",
@@ -415,6 +417,7 @@ def main() -> None:
     check_installation_credential(render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "components.agent-manager.enabled=true",
                                                 "--set", "agent-manager.skills.mintGitAuthSecret=true"]))
     check_platform_secrets(orgs)
+    check_egress_admission(orgs, "giantswarm.io/organization")
     model = find(orgs, "ValidatingAdmissionPolicy", "agent-platform-tenant-model-credentials")
     if f"'{RECONCILER}'" not in " ".join(v["expression"] for v in model["spec"]["validations"]):
         fail("agent-platform-tenant-model-credentials does not admit agent-manager's copy with its tenant reconciler on")

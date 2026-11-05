@@ -129,7 +129,8 @@ def main() -> None:
     expect(env(controller(ON))["KAGENT_EXTENSIONS_MACHINE_CALLER"], "", "without workspaces no machine caller")
     ok("the machine caller is workspace-manager's ServiceAccount while workspaces are on")
 
-    erasure = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "kagent.fluxServiceAccountName=kagent-flux"]
+    erasure = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "kagent.fluxServiceAccountName=kagent-flux",
+               "--set", "llmRouting.enabled=true", "--set", "global.domain=ci.example.com"]
     expect(env(controller([*ON, *erasure]))["KAGENT_EXTENSIONS_MACHINE_CALLER"], f"{ka.NAMESPACE}/agent-platform-operator",
            "with agentPlatformOrganizations the machine caller is agent-platform-operator's ServiceAccount")
     expect(env(controller([*ON, *WORKSPACES, *erasure]))["KAGENT_EXTENSIONS_MACHINE_CALLER"],

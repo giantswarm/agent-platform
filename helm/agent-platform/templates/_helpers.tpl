@@ -5244,7 +5244,11 @@ Fail the render for an organizations setup that cannot work
   - the switch on beside tenants.organizations.enabled: kagent's authorizer and
     every policy of the organizations' namespaces select one label;
   - the switch on without kagent or Agent Substrate: the operator copies the
-    curated kagent objects and the WorkerPool, and its erasure asks ate-api.
+    curated kagent objects and the WorkerPool, and its erasure asks ate-api;
+    without kagent.fluxServiceAccountName, without the llm listener's routing
+    of ModelConfigs (llmRouting.enabled, llmRouting.modelConfigPolicy.enabled),
+    and without the installation's API hostnames (global.domain or
+    agentPlatformOrganizations.apiHostnames).
 */}}
 {{- define "agent-platform.validateOrganizations" -}}
 {{- $on := include "agent-platform.organizations.on" . -}}
@@ -5270,6 +5274,12 @@ Fail the render for an organizations setup that cannot work
 {{- end -}}
 {{- if not (include "agent-platform.kagent.fluxServiceAccountName" .) -}}
 {{- fail "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: it is the operator's helmReleaseServiceAccount, the ServiceAccount an organization's HelmReleases run as" -}}
+{{- end -}}
+{{- if not (and (dig "enabled" false (.Values.llmRouting | default dict)) (dig "modelConfigPolicy" "enabled" true (.Values.llmRouting | default dict))) -}}
+{{- fail "agentPlatformOrganizations.enabled needs llmRouting.enabled and llmRouting.modelConfigPolicy.enabled: an organization's ModelConfigs go through the llm listener, whose MutatingAdmissionPolicy fills in the base URL (an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy)" -}}
+{{- end -}}
+{{- if not (or .Values.global.domain (dig "apiHostnames" list (.Values.agentPlatformOrganizations | default dict))) -}}
+{{- fail "agentPlatformOrganizations.enabled needs the installation's Kubernetes API hostnames: set global.domain (api.<global.domain> is derived) or agentPlatformOrganizations.apiHostnames; an organization's EgressPolicy may not name them" -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

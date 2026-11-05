@@ -2028,11 +2028,12 @@ verify-kagent-netpol: ## Assert no egress to kagent's built-in tool server rende
 	@awk "/^  name: substrate-ate-api-server$$/,/^---/" $(VERIFY_TMP)/vkn-sub.out | grep -q 'port: "8085"' || { echo "FAIL: ate-api-server has no egress to atelet's hostPort 8085 (the bootstrap API → node agent rule upstream lacks)"; exit 1; }
 	@if grep -q 'kagent-agent-muster-egress' $(VERIFY_TMP)/vkn-sub.out; then echo "FAIL: the v1alpha2 agent pods' egress policy is back; the actors' egress is the egress gateway's"; exit 1; fi
 	@echo "ok: Substrate hops (cilium)"
-	@echo "--> Agent Substrate on, kubernetes flavour: the ingress policies of the hops, no egress policy, no cilium.io object"
+	@echo "--> Agent Substrate on, kubernetes flavour: the ingress policies of the hops, egress policies for the egress gateway and the workers only, no cilium.io object"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vkn-sub-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vkn-sub-k8s.out; exit 1; }
 	@for n in substrate-ate-api-server-ingress substrate-atenet-router-ingress substrate-atenet-egress-ingress substrate-k8s-credential-provider-ingress substrate-dns-ingress substrate-workers-ingress substrate-actors-to-kagent-controller; do grep -q "^  name: $$n$$" $(VERIFY_TMP)/vkn-sub-k8s.out || { echo "FAIL: kubernetes flavour: no policy $$n"; exit 1; }; done
 	@if grep -q 'cilium.io' $(VERIFY_TMP)/vkn-sub-k8s.out; then echo "FAIL: cilium.io objects render in the kubernetes flavour"; exit 1; fi
-	@if awk '/^---/{p=0} /^  name: substrate-/{p=1} p' $(VERIFY_TMP)/vkn-sub-k8s.out | grep -q 'policyTypes: \[Egress\]'; then echo "FAIL: the kubernetes flavour renders an egress policy for Substrate; it renders ingress only, as for kagent (model-manager, on by default, has its own egress policy in this flavour)"; exit 1; fi
+	@got=$$(awk '/^---/{n=""} /^  name: substrate-/{n=$$2} /policyTypes: \[Egress\]/{if(n)print n}' $(VERIFY_TMP)/vkn-sub-k8s.out | sort | tr '\n' ' '); \
+		if [ "$$got" != "substrate-atenet-egress-egress substrate-workers-egress " ]; then echo "FAIL: the kubernetes flavour's Substrate egress policies are [$$got]; want the egress gateway's and the workers' only (giantswarm/agent-platform#1268), the other hops' egress stays open as for kagent"; exit 1; fi
 	@echo "ok: Substrate hops (kubernetes)"
 	@echo "--> the atenet router admits the kagent controller on 8080 from the controller's namespace (kagent.namespaceOverride), never the release's or the Substrate namespace, in both flavours (#827)"
 	@for f in cilium kubernetes; do \
@@ -2106,9 +2107,10 @@ verify-kagent-netpol: ## Assert no egress to kagent's built-in tool server rende
 	@awk "/^  name: substrate-atenet-egress$$/,/^---/" $(VERIFY_TMP)/vkn-mm-two.out >$(VERIFY_TMP)/vkn-mm-two-dns.out
 	@if grep -q 'matchPattern' $(VERIFY_TMP)/vkn-mm-two-dns.out; then echo "FAIL: the DNS proxy renders for IP-only host model servers"; cat $(VERIFY_TMP)/vkn-mm-two-dns.out; exit 1; fi
 	@echo "ok: the DNS proxy renders only where a name needs it"
-	@echo "--> kubernetes flavor: no egress gateway policy to extend, so no host-model rule either"
+	@echo "--> kubernetes flavor: the egress gateway's NetworkPolicy opens a host model server named by IP, by ipBlock (giantswarm/agent-platform#1268)"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_MM) --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vkn-mm-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vkn-mm-k8s.out; exit 1; }
-	@if grep -q 'host model server the actors dial' $(VERIFY_TMP)/vkn-mm-k8s.out; then echo "FAIL: the kubernetes flavor renders a host-model rule it has no egress gateway policy for"; exit 1; else echo "ok: kubernetes flavor has no host-model rule"; fi
+	@$(PICK) $(VERIFY_TMP)/vkn-mm-k8s.out NetworkPolicy substrate-atenet-egress-egress | grep -A3 'host model server the actors dial, an IP endpoint' | grep -q 'cidr: .*/32' || { echo "FAIL: the kubernetes flavor's egress gateway policy does not open the host model server's address"; exit 1; }
+	@echo "ok: kubernetes flavor opens the host model server by address"
 	@echo "--> kubernetes flavor: renders, and has no kagent egress policy to extend"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_NETPOL) --set networkPolicy.flavor=kubernetes --set kagent.kagent-tools.enabled=true >$(VERIFY_TMP)/vkn-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vkn-k8s.out; exit 1; }
 	@if grep -q 'kagent-tools' $(VERIFY_TMP)/vkn-k8s.out; then echo "FAIL: kubernetes flavor renders a tool-server rule it has no egress policy for"; exit 1; else echo "ok: kubernetes flavor untouched"; fi

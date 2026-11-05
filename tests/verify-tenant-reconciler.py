@@ -9,7 +9,7 @@ release (giantswarm/agent-platform#1036):
   changes nothing else, so an agent-manager 1.x chart takes them as before;
 - on: tenants.enabled, the kagent namespace's default ModelConfig and its key
   Secret (kagent.providers), the workers' own network policy in the resolved
-  flavor (substrate-workers on cilium, substrate-workers-ingress on kubernetes,
+  flavor (substrate-workers on cilium, substrate-workers-ingress and -egress on kubernetes,
   none with networkPolicy.enabled off) and 1 warm worker per tenant (not
   kagent.substrateWorkerPool.replicas);
   the operator's own workerPoolReplicas and interval stand;
@@ -102,7 +102,7 @@ def main() -> None:
     print("--> on: the derived block in both flavors and without network policies")
     expect("on, cilium: tenants", on["tenants"], tenants({"flavor": "cilium", "names": ["substrate-workers"]}))
     expect("on, kubernetes: tenants", agent_manager(meta, ON)["tenants"],
-           tenants({"flavor": "kubernetes", "names": ["substrate-workers-ingress"]}))
+           tenants({"flavor": "kubernetes", "names": ["substrate-workers-ingress", "substrate-workers-egress"]}))
     expect("on, networkPolicy.enabled=false: tenants",
            agent_manager(meta, [*CILIUM, *ON, "--set", "networkPolicy.enabled=false"])["tenants"], tenants(None))
     own = agent_manager(meta, [*CILIUM, *ON, "--set", "agent-manager.tenants.workerPoolReplicas=3",

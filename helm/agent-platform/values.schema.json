@@ -167,7 +167,7 @@
                 },
                 "enabled": {
                     "type": "boolean",
-                    "description": "Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate and kagent.fluxServiceAccountName: the render fails without them, and with tenants.organizations.enabled on."
+                    "description": "Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a model whose provider the listener serves (Anthropic, Mistral or OpenAI) and llmRouting.modelConfigPolicy.enabled on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain or apiHostnames: the render fails without them, and with tenants.organizations.enabled on."
                 },
                 "fluxNamespace": {
                     "type": "string",

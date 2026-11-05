@@ -3181,8 +3181,12 @@ tenants:
 agentPlatformOrganizations:
   # -- Install agent-platform-operator and render the organizations' role,
   # admission policies and access. Needs kagent (components.kagent.enabled),
-  # Agent Substrate and kagent.fluxServiceAccountName: the render fails
-  # without them, and with tenants.organizations.enabled on.
+  # Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a
+  # model whose provider the listener serves (Anthropic, Mistral or OpenAI)
+  # and llmRouting.modelConfigPolicy.enabled on an API server that serves
+  # admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain
+  # or apiHostnames: the render fails without them, and with
+  # tenants.organizations.enabled on.
   enabled: false
   # -- The namespace of the installation's Flux source, where the operator
   # keeps an organization's Kustomization and Flux ServiceAccount (commit

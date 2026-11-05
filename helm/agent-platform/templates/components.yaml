@@ -309,6 +309,12 @@ connectivity chart's migrate Job read the same range and filter. */ -}}
 {{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
 {{- if and (index $roster $key).enabled (hasKey $c "chart") }}
 {{- $name := $c.chart }}
+{{- /* agent-platform-operator installs into the connectivity release's
+namespace, where the policies, bindings and the CA ConfigMap name its
+ServiceAccount (agent-platform.organizations.operatorServiceAccount). */ -}}
+{{- if and (eq $key "agent-platform-operator") (not $c.targetNamespace) }}
+{{- $c = set (deepCopy $c) "targetNamespace" (dig "agent-platform-connectivity" "targetNamespace" "" $root.Values.components) }}
+{{- end }}
 {{- $child := include "agent-platform.childName" (dict "root" $root "name" $name) }}
 {{- /* passthrough values */ -}}
 {{- $vals := dict }}

@@ -102,7 +102,8 @@ def expect(cond, what):
 
 def meta(chart, *extra):
     return run([HELM, "template", "t", chart, "-n", RELEASE_NS, "-f", f"{chart}/ci/ci-values.yaml",
-                "--set", "kagent.fluxServiceAccountName=kagent-flux", "--set", "llmRouting.enabled=true", *MAP_API, *extra])
+                "--set", "kagent.fluxServiceAccountName=kagent-flux", "--set", "llmRouting.enabled=true", "--set", "global.domain=ci.example.com",
+                *MAP_API, *extra])
 
 
 ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "agentPlatformOrganizations.fluxNamespace=flux-giantswarm"]
@@ -163,6 +164,10 @@ def check_meta(chart):
     expect(conn["components"].get("agent-platform-operator") == {"enabled": True} and "agent-platform-operator" not in conn,
            "the connectivity release sees the operator in the roster, never its values block")
 
+    moved = docs(meta(chart, *ON, "--set", "components.agent-platform-connectivity.targetNamespace=apo"))
+    expect(release(moved, "agent-platform-operator")["targetNamespace"] == "apo",
+           "with the connectivity release in another namespace, the operator installs there too")
+
     aws = docs(meta(chart, *ON, *AWS))
     arn = release(aws, "agent-platform-operator")["values"]["serviceAccount"]["annotations"]["eks.amazonaws.com/role-arn"]
     roles = [d for d in docs(run([HELM, "template", "t", f"{chart}/../agent-platform-connectivity", "-n", RELEASE_NS, "-f",
@@ -185,6 +190,8 @@ def check_meta(chart):
              "components.agent-platform-operator.targetNamespace (elsewhere) differs"),
             ("an own derived operator value", ["--set", "agent-platform-operator.platformNamespace=other"],
              "agent-platform-operator.platformNamespace (\"other\") differs from what the chart derives"),
+            ("llmRouting off", ["--set", "llmRouting.enabled=false"], "needs llmRouting.enabled"),
+            ("no API hostname", ["--set", "global.domain="], "needs the installation's Kubernetes API hostnames"),
             ("an own kagent namespaceSelector", ["--set", f"kagent.controller.authorization.namespaceSelector={OLD}"],
              "kagent.controller.authorization.namespaceSelector (giantswarm.io/organization) differs")):
         r = meta(chart, *ON, *extra)
@@ -380,7 +387,8 @@ def prove_render_check(chart):
     # This API server serves none of the chart's custom kinds (Cilium, Gateway
     # API, kagent, Kyverno), so Helm stops after the templates rendered, at
     # building the objects; what matters is that templating passed.
-    passed = "execution error" not in r.stderr and "hostNetwork" not in r.stderr
+    passed = ("execution error" not in r.stderr and "hostNetwork" not in r.stderr
+              and (r.returncode == 0 or "ensure CRDs are installed first" in r.stderr))
     case("a server-side render gets past the render check while muster's Gateway runs on pod networking",
          (0 if passed else 1, r.stderr.strip()[-200:]))
 
