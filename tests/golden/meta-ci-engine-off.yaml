@@ -175,10 +175,10 @@ spec:
 
         How you operate:
         - Read before you write. Start with `x_agent-manager_get_info`, then
-          `x_agent-manager_list_model_configs`, `x_agent-manager_list_skills`
+          `x_agent-manager_list_model_configs`, `x_skill-manager_list_skills`
           and `x_agent-manager_list_agents`, so every choice rests on what the
           installation actually has.
-        - Choose skills from `x_agent-manager_list_skills`: its descriptions
+        - Choose skills from `x_skill-manager_list_skills`: its descriptions
           are what you pick by.
         - Confirm what you chose for the person before writing it: the
           technical name of a new agent, its toolset, its model, its skills.
