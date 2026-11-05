@@ -639,7 +639,7 @@ spec:
         request.operation == 'UPDATE' && variables.spec == (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
     - name: forbidden
       expression: >-
-        ['chart', 'valuesFrom', 'postRenderers', 'kubeConfig', 'targetNamespace', 'storageNamespace'].filter(f, f in variables.spec)
+        {{ include "agent-platform.helmReleases.forbiddenFields" . }}.filter(f, f in variables.spec)
     - name: chartRef
       expression: "'chartRef' in variables.spec ? dyn(variables.spec.chartRef) : dyn({})"
   validations:

@@ -28,7 +28,7 @@ NAMESPACE = "agent-platform"
 ON = ["--set", "gitops.prereleases=true"]
 # Components the chart keeps on stable releases (components.<name>.prereleases:
 # false): none since Substrate 1.4.0 runs its gVisor workers on its own release
-# (giantswarm/substrate#114). The knob itself is checked on muster below.
+# (giantswarm/substrate#114). The knob itself is checked below on model-manager, which has no version floor.
 STABLE_ONLY: set[str] = set()
 
 
@@ -177,26 +177,26 @@ def main() -> None:
             fail(f"{name}: semverFilter {flt!r} renders with gitops.prereleases off")
     # A release candidate's floor on a component with prereleases: false is
     # filtered too.
-    rc_floor = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=false", "--set", "components.muster.versionRange=>=5.0.0-rc.1 <6.0.0"]))
-    check_filter("muster (an rc floor, prereleases: false)", *rc_floor["muster"])
+    rc_floor = refs(helm(chart, [*ON, "--set", "components.model-manager.prereleases=false", "--set", "components.model-manager.versionRange=>=5.0.0-rc.1 <6.0.0"]))
+    check_filter("model-manager (an rc floor, prereleases: false)", *rc_floor["model-manager"])
 
     # The self-management range is one of them (ci-values renders the engine).
     if RELEASE not in off:
         fail(f"no self-management OCIRepository {RELEASE} rendered; the test no longer covers its range")
 
     # A semverFilter selects a dev channel with its own range: left as written.
-    filtered = refs(helm(chart, [*ON, "--set", "components.muster.semverFilter=^.*-rabc$", "--set", "components.muster.versionRange=>=5.0.0-0"]))
-    if filtered.get("muster") != (">=5.0.0-0", "^.*-rabc$"):
-        fail(f"muster with a semverFilter: {filtered.get('muster')!r}, want the range and the filter as written")
+    filtered = refs(helm(chart, [*ON, "--set", "components.model-manager.semverFilter=^.*-rabc$", "--set", "components.model-manager.versionRange=>=5.0.0-0"]))
+    if filtered.get("model-manager") != (">=5.0.0-0", "^.*-rabc$"):
+        fail(f"model-manager with a semverFilter: {filtered.get('model-manager')!r}, want the range and the filter as written")
 
     # prereleases: false on any component keeps its range; true follows the switch.
     # The probe names a stable range: an rc floor is filtered (above).
-    kept = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=false", "--set", "components.muster.versionRange=>=5.0.0 <6.0.0"])).get("muster")
+    kept = refs(helm(chart, [*ON, "--set", "components.model-manager.prereleases=false", "--set", "components.model-manager.versionRange=>=5.0.0 <6.0.0"])).get("model-manager")
     if kept != (">=5.0.0 <6.0.0", ""):
-        fail(f"muster with prereleases: false: {kept!r}, want '>=5.0.0 <6.0.0' without a filter")
-    widened = refs(helm(chart, [*ON, "--set", "components.muster.prereleases=true"])).get("muster")
-    if widened != (on["muster"], refs(helm(chart, ON))["muster"][1]):
-        fail(f"muster with prereleases: true: {widened!r}, want the switch's range {on['muster']!r}")
+        fail(f"model-manager with prereleases: false: {kept!r}, want '>=5.0.0 <6.0.0' without a filter")
+    widened = refs(helm(chart, [*ON, "--set", "components.model-manager.prereleases=true"])).get("model-manager")
+    if widened != (on["model-manager"], refs(helm(chart, ON))["model-manager"][1]):
+        fail(f"model-manager with prereleases: true: {widened!r}, want the switch's range {on['model-manager']!r}")
 
     # The agent chart line agent-manager composes for every agent, in the
     # agent-manager release and in the connectivity release (its migrate Job
@@ -233,9 +233,9 @@ def main() -> None:
         (">=5.0.0-rc.1", ">=5.0.0-rc.1", True),
         ("1.2.3 || >=2.0.0 <3.0.0", "1.2.3 || >=2.0.0-0 <3.0.0-0", True),
     ]:
-        got = refs(helm(chart, [*ON, "--set-string", f"components.muster.versionRange={written}"])).get("muster")
+        got = refs(helm(chart, [*ON, "--set-string", f"components.model-manager.versionRange={written}"])).get("model-manager")
         if got is None or got[0] != want or bool(got[1]) != filtered:
-            fail(f"components.muster.versionRange={written!r}: {got!r}, want {want!r} {'with' if filtered else 'without'} a filter")
+            fail(f"components.model-manager.versionRange={written!r}: {got!r}, want {want!r} {'with' if filtered else 'without'} a filter")
         if want == "1.2.3" and not fluxsemver.satisfies("1.2.3", got[0]):
             fail(f"the exact pin {got[0]!r} does not admit 1.2.3")
     self_pin = refs(helm(chart, [*ON, "--set-string", "gitops.self.versionRange=1.1.35"])).get(RELEASE)
@@ -243,7 +243,7 @@ def main() -> None:
         fail(f"gitops.self.versionRange=1.1.35: {self_pin!r}, want the pin as written and no filter")
 
     # A range with no version to mark would stay stable-only: refused.
-    helm(chart, [*ON, "--set", "components.muster.versionRange=*"], expect_fail="has no version to admit pre-releases for")
+    helm(chart, [*ON, "--set", "components.model-manager.versionRange=*"], expect_fail="has no version to admit pre-releases for")
 
     print(f"gitops.prereleases verified over {len(off)} ranges.")
 
