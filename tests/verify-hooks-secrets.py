@@ -14,14 +14,19 @@ does, in weight order, as the hook ServiceAccount:
 - the same again, pre-upgrade, against what the first run left (everything
   present, nothing re-minted);
 - post-install: a stand-in for CNPG's <cluster>-app Secret, the databases
-  hook's Roles and its script.
+  hook's Roles and its script;
+- post-upgrade: a sign-in keys Secret an earlier release kept, the chart
+  rendered against the API server (its lookup renders the cleanup), the
+  cleanup's Role and its script, which must delete that Secret.
 
 Every script must succeed. Then, as the same ServiceAccount, with every hook
 Role and the ClusterRole still bound: a workload cluster's kubeconfig in an
 org- namespace, a Secret and a ConfigMap no hook writes in each namespace a
-hook writes, and a list of Secrets in each of those namespaces and across the
-cluster are all refused by RBAC. The rendered ClusterRole carries no rule on
-secrets or configmaps.
+hook writes, a list of Secrets in each of those namespaces and across the
+cluster, a Secret of any name outside the Substrate bootstrap's namespaces and
+the deletion of a Secret the cleanup does not name are all refused by RBAC.
+The rendered ClusterRole carries no rule on secrets or configmaps, and every
+Role rule names its objects but the bootstrap's create.
 
 Needs helm, openssl, jq, PyYAML and github.com on the first run (the envtest
 binaries). HELM selects the binary.
@@ -60,6 +65,23 @@ def ok(msg):
     print(f"ok: {msg}")
 
 
+def helm_template(chart, flags, api=None):
+    live = ["--dry-run=server", "--kubeconfig", api.kubeconfig, "--kube-context", "verify"] if api else []
+    r = subprocess.run([HELM, "template", RELEASE, chart, "--namespace", RELEASE_NS, *live, *flags], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit(f"FAIL: helm template:\n{r.stderr}")
+    return [d for d in yaml.safe_load_all(r.stdout) if d]
+
+
+# The sign-in keys cleanup renders from a lookup, so against the API server;
+# Helm then refuses a render whose Namespaces exist unowned, hence the smallest
+# release that renders the workspace-manager.
+CLEANUP_FLAGS = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.workspace-manager.enabled=true",
+                 "-f", os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "workspaces-values.yaml"),
+                 "--set", "global.domain=ci.example.com", "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+                 "--set", "global.identity.clientId=platform", "--set", "global.identity.existingSecret=platform-oauth"]
+
+
 def render(chart):
     r = subprocess.run([HELM, "template", RELEASE, chart, "--namespace", RELEASE_NS,
                         "--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://a/b",
@@ -70,6 +92,32 @@ def render(chart):
     if r.returncode != 0:
         raise SystemExit(f"FAIL: helm template:\n{r.stderr}")
     return [d for d in yaml.safe_load_all(r.stdout) if d]
+
+
+def stub_crds(cluster, docs):
+    """Permissive CRDs for the kinds the render carries and envtest does not serve: a server-side render maps every object."""
+    served = set()
+    for line in cluster.admin(["api-resources", "--no-headers"]).splitlines():
+        f = line.split()
+        served.add((f[-3], f[-1]))
+    seen = set()
+    for d in docs:
+        api, kind = d["apiVersion"], d["kind"]
+        if "/" not in api or (api, kind) in served or (api, kind) in seen:
+            continue
+        seen.add((api, kind))
+        group, version = api.split("/")
+        plural = kind.lower() + "stubs"
+        meta = {"name": f"{plural}.{group}"}
+        if group.endswith((".k8s.io", ".kubernetes.io")):
+            meta["annotations"] = {"api-approved.kubernetes.io": "unapproved, test stub"}
+        cluster.admin(["apply", "--server-side", "-f", "-"], stdin=yaml.safe_dump({"apiVersion": "apiextensions.k8s.io/v1", "kind": "CustomResourceDefinition",
+                       "metadata": meta,
+                       "spec": {"group": group, "scope": "Namespaced" if d["metadata"].get("namespace") else "Cluster",
+                                "names": {"kind": kind, "plural": plural, "singular": kind.lower() + "stub", "listKind": kind + "List"},
+                                "versions": [{"name": version, "served": True, "storage": True, "schema": {"openAPIV3Schema": {
+                                    "type": "object", "x-kubernetes-preserve-unknown-fields": True}}}]}}))
+    cluster.admin(["wait", "--for=condition=Established", "crd", "--all", "--timeout=60s"])
 
 
 def hook_objects(docs, event):
@@ -162,11 +210,15 @@ def main():
         ok("the hook ClusterRole has no rule on secrets or configmaps")
 
     roles = [d for d in docs if d["kind"] == "Role" and d["metadata"]["name"].startswith(f"{RELEASE}-hooks")]
+    bootstrap = f"{RELEASE}-hooks-substrate-bootstrap"
     for role in roles:
         for rule in role["rules"]:
-            if set(rule["verbs"]) - {"create"} and not rule.get("resourceNames"):
+            if rule.get("resourceNames"):
+                continue
+            if role["metadata"]["name"] != bootstrap or rule["verbs"] != ["create"]:
                 fail(f"Role {role['metadata']['namespace']}/{role['metadata']['name']}: {rule['verbs']} on {rule['resources']} without resourceNames")
-    written = sorted({r["metadata"]["namespace"] for r in roles})
+    unnamed_create = {r["metadata"]["namespace"] for r in roles if r["metadata"]["name"] == bootstrap}
+    written = {r["metadata"]["namespace"] for r in roles}
 
     api = APIServer()
     work = tempfile.mkdtemp(prefix="verify-hooks-secrets-")
@@ -195,8 +247,28 @@ def main():
                        "--from-literal=pgpass=kagent-pg-rw:5432:app:kagent:pw"])
         run_event(cluster, [d for d in docs if d["kind"] != "Job" or d is pg], "post-install")
 
+        # The sign-in keys Secret an earlier release kept: the chart's lookup
+        # renders the cleanup only while it is there and this release's.
+        orphan = "workspace-manager-signin-keys"
+        cluster.admin(["apply", "--server-side", "-f", "-"], stdin=yaml.safe_dump({"apiVersion": "v1", "kind": "Secret", "metadata": {
+            "name": orphan, "namespace": RELEASE_NS,
+            "annotations": {"meta.helm.sh/release-name": RELEASE, "meta.helm.sh/release-namespace": RELEASE_NS}}}))
+        stub_crds(cluster, helm_template(sys.argv[1], CLEANUP_FLAGS))
+        live = helm_template(sys.argv[1], CLEANUP_FLAGS, api)
+        cleanup = [d for d in live if d["metadata"]["name"].endswith("-signin-keys-cleanup")]
+        if not any(d["kind"] == "Job" for d in cleanup):
+            fail("the chart rendered against the API server has no sign-in keys cleanup Job")
+        written |= {d["metadata"]["namespace"] for d in cleanup if d["kind"] == "Role"}
+        run_event(cluster, cleanup, "post-upgrade")
+        rc, out = api.kubectl(["-n", RELEASE_NS, "get", "secret", orphan])
+        if rc == 0:
+            fail(f"the sign-in keys cleanup left {RELEASE_NS}/{orphan}")
+        else:
+            ok(f"the sign-in keys cleanup deleted {RELEASE_NS}/{orphan}")
+
         # Decoys: what a management cluster keeps next to the platform.
         cluster.admin(["-n", ORG_NS, "create", "secret", "generic", "acme-kubeconfig", "--from-literal=value=x"])
+        written = sorted(written)
         for ns in written:
             cluster.admin(["-n", ns, "create", "secret", "generic", "not-a-hook-secret", "--from-literal=v=x"])
             cluster.admin(["-n", ns, "create", "configmap", "not-a-hook-configmap", "--from-literal=v=x"])
@@ -207,6 +279,11 @@ def main():
             refused += [(["-n", ns, "get", "secret", "not-a-hook-secret"], f"a Secret no hook writes in {ns}"),
                         (["-n", ns, "get", "configmap", "not-a-hook-configmap"], f"a ConfigMap no hook writes in {ns}"),
                         (["-n", ns, "get", "secrets"], f"a list of the Secrets in {ns}")]
+            if ns not in unnamed_create:
+                refused.append((["-n", ns, "create", "secret", "generic", "squatted", "--from-literal=v=x"],
+                                f"a Secret of any name in {ns}"))
+        refused.append((["-n", RELEASE_NS, "delete", "secret", "not-a-hook-secret"],
+                        f"the deletion of a Secret the cleanup does not name in {RELEASE_NS}"))
         for args, what in refused:
             rc, out = cluster.as_sa(args)
             if rc == 0 or "forbidden" not in out.lower():

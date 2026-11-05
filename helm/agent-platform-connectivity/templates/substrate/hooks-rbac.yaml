@@ -15,9 +15,13 @@ ConfigMap: on a management cluster every workload cluster's kubeconfig is a
 Secret.
 
 The Roles (agent-platform.hooks.secretGrants): one per namespace a hook writes,
-at that hook's events only, with get, list, watch, patch and delete on exactly
-the names it reads or writes. create is not narrowed by name (the apiserver
-cannot: a create names no object in its URL), and creates nothing readable.
+at that hook's events only, on exactly the names it reads or writes. The one
+unnamed rule is the bootstrap's create of its CA and JWT pools and
+ate-api-server's authentication config: a POST names no object in its URL, so
+RBAC cannot narrow it, and naming it would mean server-side apply, which needs
+patch on the pools and so the power to replace a signing root. The databases
+hook writes only by server-side apply, whose create the apiserver authorizes
+with the object's name, so its create is on its names.
 Weight -3: after the substrate-namespaces Job (-4) created the namespaces the
 bootstrap's Roles live in, before the Jobs (0). The databases hook runs
 post-install, when every namespace of postgres.databases.*.secretNamespaces

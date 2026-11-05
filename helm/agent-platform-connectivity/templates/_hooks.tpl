@@ -34,8 +34,8 @@ DaemonSet by name while it renders), created for each hook event the rendered
 Jobs use (agent-platform.hooks.events: the install and upgrade events for the
 first three, pre-delete for the cleanup) and removed with it (hook-succeeded),
 and no read of a Secret or ConfigMap: those are Roles, one per namespace a hook
-writes, at the events of that hook only, with get, list, watch, patch and
-delete on the names it writes (create has no name to narrow by). The bootstrap
+writes, at the events of that hook only, on the names it reads or writes (the
+bootstrap's create aside, which a POST leaves unnamed). The bootstrap
 writes into the two Substrate namespaces, which the substrate release has not
 created on a first install, so the substrate-namespaces Job creates them first.
 One more hook Job comes from this include with an identity of its own (identity below): the start of the agent-manager migrate
@@ -248,8 +248,10 @@ spec:
 {{/*
 The Secrets and ConfigMaps each hook Job reads or writes, by namespace: the
 Roles of the hook identity (templates/substrate/hooks-rbac.yaml). A JSON array
-of {purpose, namespace, events, rules: [{resource, names, verbs}]}; a rule
-without names is create, which the apiserver cannot narrow by name.
+of {purpose, namespace, events, rules: [{resource, names, verbs}]}. A rule
+without names is the bootstrap's create: a POST names no object, so RBAC cannot
+narrow it. A server-side apply authorizes the create it makes with the object's
+name, so the SSA-only databases hook holds create on its names alone.
 */}}
 {{- define "agent-platform.hooks.secretGrants" -}}
 {{- $out := list -}}
@@ -268,13 +270,11 @@ without names is create, which the apiserver cannot narrow by name.
 {{- end -}}
 {{- $databases := include "agent-platform.postgres.databases" . | fromJsonArray -}}
 {{- if $databases -}}
-{{- $source := "" -}}
-{{- $sourceNs := "" -}}
+{{- $source := printf "%s-app" (first $databases).cluster -}}
+{{- $sourceNs := (first $databases).namespace -}}
 {{- $targets := dict -}}
 {{- $order := list -}}
 {{- range $databases -}}
-{{- $source = printf "%s-app" .cluster -}}
-{{- $sourceNs = .namespace -}}
 {{- $derived := printf "%s-%s-app" .cluster .key -}}
 {{- range .secretNamespaces -}}
 {{- if not (hasKey $targets .) -}}{{- $order = append $order . -}}{{- end -}}
@@ -288,8 +288,7 @@ without names is create, which the apiserver cannot narrow by name.
 {{- $rules = append $rules (dict "resource" "secrets" "names" (list $source) "verbs" (list "get" "list" "watch")) -}}
 {{- end -}}
 {{- with get $targets $ns -}}
-{{- $rules = append $rules (dict "resource" "secrets" "names" (. | uniq) "verbs" (list "get" "patch")) -}}
-{{- $rules = append $rules $create -}}
+{{- $rules = append $rules (dict "resource" "secrets" "names" (. | uniq) "verbs" (list "get" "create" "patch")) -}}
 {{- end -}}
 {{- $out = append $out (dict "purpose" "postgres-databases" "namespace" $ns "events" "post-install,post-upgrade" "rules" $rules) -}}
 {{- end -}}
