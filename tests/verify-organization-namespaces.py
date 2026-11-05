@@ -299,6 +299,18 @@ def check_egress(chart):
     v6 = blocks(gateway("--set", "networkPolicy.kubernetes.ipv6.enabled=true", "--set", "networkPolicy.kubernetes.ipv6.excludedCIDRs[0]=2600:1f14::/56"))
     expect(({"cidr": "::/0", "except": ["fc00::/7", "fe80::/10", "2600:1f14::/56"]}, None) in v6,
            "with networkPolicy.kubernetes.ipv6 the gateway reaches the IPv6 world but the cluster's own IPv6 CIDRs, ULA and link-local")
+    for cidr in ("10.20.0.0/16", "172.16.0.0/12", "192.168.0.0/16"):
+        expect(connectivity(chart, "kubernetes", "--set", f"networkPolicy.substrate.egressGateway.privateCIDRs[0]={cidr}").returncode == 0,
+               f"privateCIDRs takes the RFC 1918 range {cidr}")
+    for cidr, why in (("169.254.169.254/32", "overlaps the instance metadata range"), ("169.0.0.0/8", "overlaps the instance metadata range"),
+                      ("168.63.129.16/32", "overlaps Azure's WireServer"), ("128.0.0.0/1", "overlaps")):
+        r = connectivity(chart, "kubernetes", "--set", f"networkPolicy.substrate.egressGateway.privateCIDRs[0]={cidr}")
+        expect(r.returncode != 0 and why in r.stderr, f"privateCIDRs {cidr} fails the render: it {why}")
+    for cidr in ("0.0.0.0/0", "2600:1f14::/56", "10.20.0.0"):
+        r = connectivity(chart, "kubernetes", "--set", f"networkPolicy.substrate.egressGateway.privateCIDRs[0]={cidr}")
+        expect(r.returncode != 0 and "privateCIDRs" in r.stderr, f"privateCIDRs {cidr} is refused: not an IPv4 CIDR with a prefix of 1 to 32")
+    r = connectivity(chart, "kubernetes", "--set", "networkPolicy.kubernetes.ipv6.enabled=true", "--set", "networkPolicy.kubernetes.ipv6.excludedCIDRs[0]=10.0.0.0/8")
+    expect(r.returncode != 0 and "excludedCIDRs" in r.stderr, "an IPv4 CIDR in networkPolicy.kubernetes.ipv6.excludedCIDRs is refused at render, not at apply")
     r = connectivity(chart, "kubernetes", "--set", "networkPolicy.kubernetes.ipv6.enabled=true")
     expect(r.returncode != 0 and "networkPolicy.kubernetes.ipv6.enabled needs networkPolicy.kubernetes.ipv6.excludedCIDRs" in r.stderr,
            "networkPolicy.kubernetes.ipv6 without the cluster's IPv6 CIDRs fails the render")

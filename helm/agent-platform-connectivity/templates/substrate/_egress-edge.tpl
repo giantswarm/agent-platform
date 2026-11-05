@@ -47,3 +47,49 @@ Usage: include "agent-platform.substrate.egressEdge" . | fromJsonArray
 {{- end -}}
 {{- $peers | toJson -}}
 {{- end -}}
+
+{{/*
+Fail the render for an entry of networkPolicy.substrate.egressGateway.privateCIDRs
+that is not an IPv4 CIDR with a prefix of 1 to 32, or that overlaps the instance
+metadata range (169.254.0.0/16) or Azure's WireServer (168.63.129.16): the
+actors' egress gateway reaches those on every port. RFC 1918 ranges are what
+the list is for. The values schema refuses the shape too; this guard holds
+the addresses.
+Usage: include "agent-platform.substrate.validatePrivateCIDRs" .
+*/}}
+{{- define "agent-platform.substrate.validatePrivateCIDRs" -}}
+{{- range (dig "substrate" "egressGateway" "privateCIDRs" list .Values.networkPolicy) -}}
+{{- $cidr := toString . -}}
+{{- if not (regexMatch "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(?:3[0-2]|[12][0-9]|[1-9])$" $cidr) -}}
+{{- fail (printf "networkPolicy.substrate.egressGateway.privateCIDRs: %q is not an IPv4 CIDR with a prefix of 1 to 32: the actors' egress gateway reaches each entry on every port" $cidr) -}}
+{{- end -}}
+{{- $parts := splitList "/" $cidr -}}
+{{- $octets := splitList "." (first $parts) -}}
+{{- $ip := add (mul (atoi (index $octets 0)) 16777216) (mul (atoi (index $octets 1)) 65536) (mul (atoi (index $octets 2)) 256) (atoi (index $octets 3)) -}}
+{{- $prefix := atoi (last $parts) -}}
+{{- range $name, $target := dict "the instance metadata range 169.254.0.0/16" (list 2851995648 16) "Azure's WireServer 168.63.129.16" (list 2822734096 32) -}}
+{{- /* Two blocks overlap when they agree on the shorter prefix's bits. */ -}}
+{{- $bits := min $prefix (index $target 1) -}}
+{{- $block := 1 -}}
+{{- range until (sub 32 $bits | int) }}{{ $block = mul $block 2 }}{{ end -}}
+{{- if eq (div $ip $block) (div (index $target 0) $block) -}}
+{{- fail (printf "networkPolicy.substrate.egressGateway.privateCIDRs: %s overlaps %s, which the actors' egress gateway never reaches" $cidr $name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Fail the render for an entry of networkPolicy.kubernetes.ipv6.excludedCIDRs that
+is not an IPv6 CIDR: it is an `except` of the gateway's ::/0 block, and the API
+server refuses an IPv4 one there at apply time, failing the release instead of
+the render.
+Usage: include "agent-platform.substrate.validateIPv6CIDRs" .
+*/}}
+{{- define "agent-platform.substrate.validateIPv6CIDRs" -}}
+{{- range (dig "kubernetes" "ipv6" "excludedCIDRs" list .Values.networkPolicy) -}}
+{{- if not (regexMatch "^[0-9a-fA-F]{0,4}:[0-9a-fA-F:]*/(?:12[0-8]|1[01][0-9]|[1-9]?[0-9])$" (toString .)) -}}
+{{- fail (printf "networkPolicy.kubernetes.ipv6.excludedCIDRs: %q is not an IPv6 CIDR: name the cluster's own IPv6 pod and Service CIDRs" (toString .)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
