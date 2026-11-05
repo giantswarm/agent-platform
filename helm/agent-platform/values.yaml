@@ -858,7 +858,7 @@ components:  # @schema additionalProperties: true
     # each actor's DNS queries (ate_actor_stats_dns_queries_total); from
     # 1.13.0 ate-idp-server serves the actor-JWT issuer
     # (https://idp.<namespace>.svc) muster verifies a Session's actor JWT
-    # against (muster.credentialProvider.actorBearer, with workspaces on).
+    # against (muster.credentialProvider.actorBearer, on with Substrate).
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
     versionRange: ">=1.17.5 <1.18.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
