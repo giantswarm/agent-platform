@@ -92,6 +92,8 @@ from conftest import (
     KAGENT_NAMESPACE,
     KEPT_CRDS,
     Kube,
+    DEFAULT_MODEL_LABEL,
+    KAGENT_DEFAULT_MODEL_CONFIG,
     MODEL_CONFIG,
     MUSTER_BASE_URL,
     MUSTER_BASE_URL_SETS,
@@ -470,10 +472,32 @@ def test_substrate_runs_a_worker_for_the_platform_harness(kube: Kube, substrate:
 
 
 @pytest.mark.smoke
+def test_one_default_model_config_per_namespace(kube: Kube, kagent_controller: None) -> None:
+    """The smoke's ModelConfig carries the default label, kagent's own
+    default-model-config is not rendered (kagent.defaultModelConfig.enabled
+    false), and agent-platform-default-model-config refuses a second labelled
+    ModelConfig in the namespace, naming the first."""
+    model = kube.get("modelconfigs.api.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE)
+    assert (model["metadata"].get("labels") or {}).get(DEFAULT_MODEL_LABEL) == "true", model["metadata"]
+    assert kube.get("modelconfigs.api.kagent.dev", KAGENT_DEFAULT_MODEL_CONFIG, namespace=KAGENT_NAMESPACE) is None, \
+        f"the kagent chart rendered {KAGENT_DEFAULT_MODEL_CONFIG} with kagent.defaultModelConfig.enabled false"
+    second = {"apiVersion": "api.kagent.dev/v1alpha3", "kind": "ModelConfig",
+              "metadata": {"name": "ats-second-default", "namespace": KAGENT_NAMESPACE, "labels": {DEFAULT_MODEL_LABEL: "true"}},
+              "spec": {"provider": "Anthropic", "model": "claude-sonnet-4-6", "apiKeySecret": "kagent-anthropic", "apiKeySecretKey": "ANTHROPIC_API_KEY"}}
+    refusal = "ValidatingAdmissionPolicy 'agent-platform-default-model-config'"
+
+    def refused() -> bool:
+        r = kube.cmd(["create", "--dry-run=server", "-f", "-"], stdin=yaml.safe_dump(second), check=False)
+        return r.returncode != 0 and refusal in r.stderr and f"already has a default ModelConfig, {MODEL_CONFIG}" in r.stderr
+
+    wait_for("a second labelled ModelConfig refused", refused, 60)
+
+
+@pytest.mark.smoke
 def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None, substrate: Dict[str, Any]) -> None:
     """A minimal declarative Agent on the platform Harness (spec.harnessRef)
-    with its template inline, against the chart's default ModelConfig (a
-    placeholder provider key): Ready means the controller compiled the template
+    with its template inline, against the smoke's ModelConfig (a placeholder
+    provider key): Ready means the controller compiled the template
     for the Harness and Substrate booted the actor's golden snapshot on the
     WorkerPool — not that a model call succeeded."""
     started = time.monotonic()

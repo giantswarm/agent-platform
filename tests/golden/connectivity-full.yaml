@@ -15407,6 +15407,41 @@ spec:
           matchLabels:
             app: k8s-credential-provider
 ---
+# Source: agent-platform-connectivity/templates/kagent/default-modelconfig-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-default-model-config
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: api.kagent.dev/v1alpha3
+    kind: ModelConfig
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["modelconfigs"]
+  matchConditions:
+    - name: labelled-default
+      expression: "has(object.metadata.labels) && 'agent-platform.giantswarm.io/is-default-model-config' in object.metadata.labels && object.metadata.labels['agent-platform.giantswarm.io/is-default-model-config'] == 'true'"
+    - name: not-deleting
+      expression: "!has(object.metadata.deletionTimestamp)"
+  validations:
+    - expression: "params.metadata.name == object.metadata.name"
+      reason: Invalid
+      messageExpression: >-
+        'namespace ' + request.namespace + ' already has a default ModelConfig, ' + params.metadata.name + ' (label agent-platform.giantswarm.io/is-default-model-config=true); remove the label there first. Refused: ' + object.metadata.name
+---
 # Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -15663,6 +15698,28 @@ spec:
         as a git credentialRef, a headersFrom Secret, a secretKeyRef, an apiKeySecret or a secretRef. Refused for ' +
         request.userInfo.username + ', who may not get at least one of: ' +
         variables.refs.map(n, n == '' ? '<no name>' : n).join(', ')
+---
+# Source: agent-platform-connectivity/templates/kagent/default-modelconfig-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-default-model-config
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-default-model-config
+  paramRef:
+    selector:
+      matchLabels:
+        agent-platform.giantswarm.io/is-default-model-config: "true"
+    parameterNotFoundAction: Allow
+  validationActions: [Deny]
 ---
 # Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1

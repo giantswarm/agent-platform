@@ -19,8 +19,7 @@ cluster; this script pins what the connectivity chart renders:
   (Ignore) selects no namespace itself and gets a second binding for those
   namespaces, beside its kagent one;
 - with tenants.organizations.enabled the render fails, naming the key, with
-  llmRouting off, with a default ModelConfig provider the listener does not
-  serve, and without the modelconfig-llm-routing policy
+  llmRouting off and without the modelconfig-llm-routing policy
   (llmRouting.modelConfigPolicy.enabled off, or MutatingAdmissionPolicy not
   served), which fills in the listener as the baseUrl of agent-manager's copy
   of the default ModelConfig.
@@ -180,9 +179,6 @@ def main() -> None:
     refused(chart, ON + ["--set", "llmRouting.modelConfigPolicy.enabled=false"],
             ["tenants.organizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy", "llmRouting.modelConfigPolicy.enabled"],
             "with llmRouting.modelConfigPolicy.enabled off the render fails")
-    refused(chart, ON + ["--set", "kagent.providers.default=bedrock", "--set", "kagent.providers.bedrock.provider=Bedrock",
-                         "--set", "kagent.providers.bedrock.model=m", "--set", "kagent.providers.bedrock.apiKeySecretRef=k"],
-            ["kagent.providers.bedrock.provider", "Bedrock"], "a default ModelConfig the listener does not serve fails the render")
 
 if __name__ == "__main__":
     main()

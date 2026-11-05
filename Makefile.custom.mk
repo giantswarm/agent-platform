@@ -201,6 +201,11 @@ DATAPLANE_RBAC := agentgateway-listenerset-t
 # (giantswarm/agent-platform#1040), an intended change of the default render with kagent on (verify-tenant-rbac asserts
 # it); dropped from the golden until GOLDEN_REF carries it.
 TENANT_EGRESS_ADMISSION := agent-platform-tenant-egress-credentials agent-platform-tenant-model-credentials agent-platform-tenant-credentials agent-platform-tenant-credential-refs agent-platform-platform-tenant-credential-refs
+# The admission of the default ModelConfig marker (giantswarm/agent-platform#1274),
+# an intended change of the default render with kagent on
+# (verify-default-model-config asserts it); dropped from the golden until
+# GOLDEN_REF carries it.
+DEFAULT_MODEL_ADMISSION := agent-platform-default-model-config
 # New beside GOLDEN_REF: left out of both sides of the postgres golden too.
 WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
@@ -213,7 +218,7 @@ WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
 # shape is asserted by verify-kagent-harness / verify-kagent-crds). The RBAC of
 # agent tenants (#706) is new too: drop TENANT_RBAC_ALL once GOLDEN_REF carries
 # it. Empty this list once GOLDEN_REF carries the line.
-GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP) $(TENANT_RBAC_ALL) $(TENANT_EGRESS_ADMISSION)
+GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP) $(TENANT_RBAC_ALL) $(TENANT_EGRESS_ADMISSION) $(DEFAULT_MODEL_ADMISSION)
 # Any reference is enough: the assertions read the rendered exception, not the image.
 PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
@@ -4593,7 +4598,7 @@ verify-tenant-credentials: ## Assert Substrate's credential provider follows ten
 	@echo "ok: $@"
 
 .PHONY: verify-tenant-reconciler
-verify-tenant-reconciler: ## Assert agent-manager's tenant reconciler follows tenants.organizations.enabled (giantswarm/agent-platform#1044): off, the agent-manager release carries no tenants key and the switch changes nothing else in its values; on, tenants.enabled with the kagent namespace's default ModelConfig and its key Secret, the workers' network policy in the resolved flavor (substrate-workers on cilium, substrate-workers-ingress on kubernetes, none with networkPolicy.enabled off) and 1 warm worker per tenant, the operator's workerPoolReplicas and interval standing; the agent-manager chart of the reconciler's release takes the forwarded values and starts with --multi-tenant; the render refuses, naming the key, agent-manager.tenants.enabled against the switch, a range below the reconciler's release, kagent off, OAuth or downstream OAuth off, no kagent.fluxServiceAccountName, a default provider without apiKeySecretRef and an own tenants value that differs. Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io.
+verify-tenant-reconciler: ## Assert agent-manager's tenant reconciler follows tenants.organizations.enabled (giantswarm/agent-platform#1044): off, the agent-manager release carries no tenants key and the switch changes nothing else in its values; on, tenants.enabled (no tenant model: agent-manager gets no tenants.modelConfig), the workers' network policy in the resolved flavor (substrate-workers on cilium, substrate-workers-ingress on kubernetes, none with networkPolicy.enabled off) and 1 warm worker per tenant, the operator's workerPoolReplicas and interval standing; the agent-manager chart of the reconciler's release takes the forwarded values and starts with --multi-tenant; the render refuses, naming the key, agent-manager.tenants.enabled against the switch, a range below the reconciler's release, kagent off, OAuth or downstream OAuth off, no kagent.fluxServiceAccountName and an own tenants value that differs. Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-tenant-reconciler.py $(CHART_DIR)
@@ -4607,10 +4612,17 @@ verify-tenant-muster: ## Assert muster serves the Organizations' MCP servers wit
 	@echo "ok: $@"
 
 .PHONY: verify-tenant-modelconfigs
-verify-tenant-modelconfigs: ## Assert the render of a tenant's own ModelConfig (giantswarm/agent-platform#759): with tenants.organizations.enabled off, neither agent-platform-tenant-model-routing nor agent-platform-tenant-secret-creation renders and the modelconfig-llm-routing policies bind the kagent namespace only; on, both (Fail, Deny) select every Organization namespace but kagent, the routing policy carries each listener provider's block and URL, the Secret policy asks the authorizer on creations outside the tenant-credential- prefix, only agent-manager's default-model-config names the platform's key, and each modelconfig-llm-routing policy (Ignore) gets a second binding for the Organizations' namespaces; the render fails with llmRouting off, with a default ModelConfig provider the listener does not serve, and without the modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled off, or MutatingAdmissionPolicy not served). What the CEL decides is proven by make prove-tenant-modelconfigs. Needs PyYAML. HELM selects the binary.
+verify-tenant-modelconfigs: ## Assert the render of a tenant's own ModelConfig (giantswarm/agent-platform#759): with tenants.organizations.enabled off, neither agent-platform-tenant-model-routing nor agent-platform-tenant-secret-creation renders and the modelconfig-llm-routing policies bind the kagent namespace only; on, both (Fail, Deny) select every Organization namespace but kagent, the routing policy carries each listener provider's block and URL, the Secret policy asks the authorizer on creations outside the tenant-credential- prefix, only agent-manager's default-model-config names the platform's key, and each modelconfig-llm-routing policy (Ignore) gets a second binding for the Organizations' namespaces; the render fails with llmRouting off and without the modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled off, or MutatingAdmissionPolicy not served). What the CEL decides is proven by make prove-tenant-modelconfigs. Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-tenant-modelconfigs.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-default-model-config
+verify-default-model-config: ## Assert the default ModelConfig marker (giantswarm/agent-platform#1274): the meta chart forwards providers to the kagent release by default and providers: false with kagent.defaultModelConfig.enabled=false, and kagent.defaultModelConfig / kagent.modelConfigDefaults to the connectivity release only; the connectivity chart labels a kagent.modelConfigs entry with default: true agent-platform.giantswarm.io/is-default-model-config: "true", fails the render naming two such entries, lets Anthropic entries inherit per key from kagent.modelConfigDefaults.anthropic before kagent.providers.anthropic.config, and renders the agent-platform-default-model-config ValidatingAdmissionPolicy and binding with kagent on; on a local API server (tests/apiserver.py) with the ModelConfig CRD of the kagent-crds floor, a second labelled ModelConfig in a namespace is refused on create and on relabel naming the first, and every twin is admitted. Needs PyYAML and openssl. HELM selects the binary. Network: gsoci.azurecr.io, github.com (the envtest binaries, cached in .bin/).
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-default-model-config.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
 .PHONY: prove-tenant-modelconfigs

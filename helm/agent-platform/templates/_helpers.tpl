@@ -4186,11 +4186,6 @@ refuses the key). One switch: the connectivity release admits the
 Organizations' workers on the same key (templates/substrate/ in that chart).
 On, from what this chart already has for the kagent namespace:
   enabled                    true;
-  modelConfig.name           default-model-config, the ModelConfig the kagent
-                             chart renders from kagent.providers;
-  modelConfig.apiKeySecretName
-                             kagent.providers.<providers.default>.apiKeySecretRef,
-                             its key Secret;
   networkPolicy              the workers' own policy the connectivity release
                              renders in the kagent namespace with Agent
                              Substrate and networkPolicy.enabled on: flavor
@@ -4221,9 +4216,7 @@ The render fails, naming what is missing, when the switch is on and:
     off (a request in a tenant runs as the caller);
   * kagent.fluxServiceAccountName is empty (agent-manager's
     flux.helmReleaseServiceAccount, which the agents' HelmReleases in a tenant
-    run as);
-  * the default ModelConfig has no key Secret (kagent.providers empty, or its
-    default provider without apiKeySecretRef).
+    run as).
 Called from agent-platform.componentDerivedValues, i.e. only while
 components.agent-manager is on.
 Usage: include "agent-platform.agentManager.tenants" $root | fromJson
@@ -4255,18 +4248,12 @@ Usage: include "agent-platform.agentManager.tenants" $root | fromJson
 {{- if not (include "agent-platform.kagent.fluxServiceAccountName" .) -}}
 {{- fail "tenants.organizations.enabled needs kagent.fluxServiceAccountName: it is agent-manager's flux.helmReleaseServiceAccount, the ServiceAccount the agents' HelmReleases in a tenant run as" -}}
 {{- end -}}
-{{- $providers := dig "providers" dict (.Values.kagent | default dict) | default dict -}}
-{{- $provider := toString (dig "default" "" $providers) -}}
-{{- $secret := dig $provider "apiKeySecretRef" "" $providers -}}
-{{- if not $secret -}}
-{{- fail (printf "tenants.organizations.enabled needs kagent.providers.%s.apiKeySecretRef (kagent.providers.default %q): the Secret with the key of the default ModelConfig, which agent-manager copies into a tenant with its first agent; set it in this chart's values, which do not read the kagent chart's own provider defaults" $provider $provider) -}}
-{{- end -}}
-{{- $tenants := dict "enabled" true "modelConfig" (dict "name" "default-model-config" "apiKeySecretName" $secret) -}}
+{{- $tenants := dict "enabled" true -}}
 {{- if and .Values.networkPolicy.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
 {{- $flavor := include "agent-platform.shape.networkPolicyFlavor" . -}}
 {{- $_ := set $tenants "networkPolicy" (dict "flavor" $flavor "names" (list (ternary "substrate-workers" "substrate-workers-ingress" (eq $flavor "cilium")))) -}}
 {{- end -}}
-{{- range $key, $value := dict "modelConfig.name" $tenants.modelConfig.name "modelConfig.apiKeySecretName" $tenants.modelConfig.apiKeySecretName "networkPolicy.flavor" (dig "networkPolicy" "flavor" "" $tenants) "networkPolicy.names" (dig "networkPolicy" "names" list $tenants) -}}
+{{- range $key, $value := dict "networkPolicy.flavor" (dig "networkPolicy" "flavor" "" $tenants) "networkPolicy.names" (dig "networkPolicy" "names" list $tenants) -}}
 {{- $path := splitList "." $key -}}
 {{- $mine := dig (first $path) (last $path) nil $own -}}
 {{- if and (not (kindIs "invalid" $mine)) (ne (toJson $mine) (toJson $value)) -}}

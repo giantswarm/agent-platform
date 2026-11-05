@@ -341,6 +341,12 @@ nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- /* Derived values win over the block's own copy (the helper fails the
 render when the two disagree). */ -}}
 {{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
+{{- /* false, not null: Helm's upgrade patch turns a null into a delete, which
+brings back the kagent chart's own providers default. false wins over the
+chart's map in coalescing and fails its `if .Values.providers` gate. */ -}}
+{{- if and (eq $key "kagent") (eq (toString (dig "defaultModelConfig" "enabled" true ($root.Values.kagent | default dict))) "false") }}
+{{- $_ := set $vals "providers" false }}
+{{- end }}
 {{- end }}
 {{- /* Drop dependsOn references to components that are toggled off, so an
 always-on consumer (e.g. connectivity) does not block on a HelmRelease that was

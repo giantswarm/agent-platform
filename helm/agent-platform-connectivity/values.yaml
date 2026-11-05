@@ -1831,6 +1831,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # agent-platform.musterMcpUrl helper's value), the toolset header, the
   # discovery opt-out label — and binds it.
 
+  # Settings the Anthropic entries of modelConfigs inherit when they set none
+  # of their own, per key, before providers.anthropic.config: promptCaching,
+  # cacheTTL and maxTokens.
+  modelConfigDefaults:
+    anthropic: {}
+
   # Additional ModelConfig CRs — the model catalog beyond the
   # default-model-config the kagent chart creates from providers.anthropic.
   # An AgentTemplate references a ModelConfig by name (spec.modelConfig).
@@ -1838,6 +1844,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   modelConfigs: []
   # - name: anthropic-sonnet
   #   displayName: Anthropic Sonnet 4.6
+  #   # Optional. Labels the ModelConfig
+  #   # agent-platform.giantswarm.io/is-default-model-config: "true", the
+  #   # namespace's default model. At most one entry sets it (the render
+  #   # fails otherwise), and the agent-platform-default-model-config
+  #   # admission policy refuses a second labelled ModelConfig in a namespace.
+  #   default: true
   #   # One of the ModelConfig CRD's providers, in its spelling: Anthropic,
   #   # OpenAI, AzureOpenAI, Ollama, Gemini, GeminiVertexAI, AnthropicVertexAI,
   #   # Bedrock, SAPAICore, Foundry, Mistral. Any other value fails the render.
@@ -1857,6 +1869,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   baseUrl: http://agentgateway.<release namespace>.svc:8081
   #   # Optional (Anthropic and Bedrock). An
   #   # Anthropic entry that sets neither inherits the platform's default from
+  #   # kagent.modelConfigDefaults.anthropic, else
   #   # kagent.providers.anthropic.config (the meta chart turns promptCaching
   #   # on there); an entry's own values win, `false` included. Any other
   #   # provider refuses the keys: ModelConfigSpec has none for it.
@@ -1864,7 +1877,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   #   cacheTTL: "5m"   # or "1h"
   #   # Optional (Anthropic, AnthropicVertexAI, AzureOpenAI, Mistral, OpenAI).
   #   # The output bound, thinking included. An Anthropic entry without it
-  #   # inherits kagent.providers.anthropic.config.maxTokens; unset everywhere,
+  #   # inherits kagent.modelConfigDefaults.anthropic.maxTokens, else
+  #   # kagent.providers.anthropic.config.maxTokens; unset everywhere,
   #   # kagent's built-in 8192 applies. Any other provider refuses the key.
   #   maxTokens: 32000
   #   # Optional (OpenAI). The OpenAI HTTP API the runtime speaks:

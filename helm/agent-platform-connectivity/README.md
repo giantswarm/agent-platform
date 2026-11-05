@@ -244,6 +244,18 @@ On the installation, after the cutover:
   chart rendered one of its own, selecting by gateway name; it is gone, because
   two monitors of the same pods double every data-plane series.
 
+## The default ModelConfig
+
+A namespace's default model is the ModelConfig labelled
+`agent-platform.giantswarm.io/is-default-model-config: "true"`, at most one per
+namespace. `kagent.modelConfigs[].default: true` sets the label on that entry;
+the render fails when two entries set it. With kagent on, the
+ValidatingAdmissionPolicy `agent-platform-default-model-config` refuses, in any
+namespace, a create or update that would leave two labelled ModelConfigs there,
+naming the labelled one. To move the default, remove the label from the old
+ModelConfig first. kagent's own `default-model-config` is switched off in the
+meta chart with `kagent.defaultModelConfig.enabled: false`.
+
 ## Metric labels
 
 The data plane puts custom Prometheus labels on every metric it emits — the
@@ -1548,6 +1560,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.uiRoute.backendTrafficPolicy.timeout | string | `"60s"` |  |
 | kagent.uiRoute.backendTrafficPolicy.annotations | object | `{}` |  |
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
+| kagent.modelConfigDefaults.anthropic | object | `{}` |  |
 | kagent.modelConfigs | list | `[]` |  |
 | kagent.remoteMcpServers | list | `[]` |  |
 | postgres.enabled | bool | `false` |  |

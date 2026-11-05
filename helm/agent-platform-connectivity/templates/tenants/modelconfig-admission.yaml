@@ -18,11 +18,8 @@ and fills in a missing baseUrl with the listener URL; a baseUrl the writer
 set is judged here, and the refusal names the field and the URL. If the
 routing policy fails (failurePolicy Ignore), the baseUrl stays empty and is
 refused here: the path fails closed. The tenant's own key passes the listener
-untouched. The copy of the platform's default ModelConfig that agent-manager's
-tenant reconciler writes is held the same way, so the default ModelConfig
-needs a provider the listener serves (the render fails otherwise) and no
-baseUrl but the listener (kagent.providers.<default>.config.baseUrl; not
-checked here: the copy is refused at admission).
+untouched. A copy of a platform ModelConfig that agent-manager's tenant
+reconciler writes is held the same way.
 
 agent-platform-tenant-secret-creation admits the creation of a Secret whose
 name lacks the tenant-credential- prefix only for a requester who may already
@@ -48,12 +45,6 @@ ModelConfig without a baseUrl, agent-manager's copy included, is refused.
 {{- end }}
 {{- if not (include "agent-platform.llmRouting.modelConfigs" .) }}
 {{- fail "tenants.organizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy, which fills in the listener as the baseUrl of a ModelConfig in an Organization namespace (agent-manager's copy of the default ModelConfig included): set llmRouting.modelConfigPolicy.enabled, on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy" }}
-{{- end }}
-{{- $kp := dig "providers" dict (.Values.kagent | default dict) | default dict }}
-{{- $default := dig (toString (dig "default" "" $kp)) "provider" "" $kp }}
-{{- $defaultKey := toString (dig "default" "" $kp) }}
-{{- if not (has (lower $default) $providers) }}
-{{- fail (printf "tenants.organizations.enabled needs the default ModelConfig's provider (kagent.providers.%s.provider %q) among the listener's (%s): agent-manager copies that ModelConfig into the Organizations' namespaces, where only a ModelConfig the listener serves is admitted" $defaultKey $default (join ", " $providers)) }}
 {{- end }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $prefix := include "agent-platform.tenants.credentialPrefix" . }}

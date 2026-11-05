@@ -710,6 +710,8 @@ spec:
           urlFile: /etc/kagent-db/uri
           vectorEnabled: true
           vectorSchema: public
+      defaultModelConfig:
+        enabled: true
       fluxServiceAccountName: kagent-flux
       fullnameOverride: kagent
       grafana-mcp:
@@ -775,6 +777,8 @@ spec:
                 ephemeral-storage: 256Mi
                 memory: 1Gi
       harnesses: []
+      modelConfigDefaults:
+        anthropic: {}
       modelConfigs: []
       namespaceOverride: kagent
       oauth2-proxy:

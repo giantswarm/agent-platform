@@ -7,8 +7,8 @@ release (giantswarm/agent-platform#1036):
 - off (the default): the agent-manager release carries no tenants key, and its
   values are those of the render with the switch on minus that key — the switch
   changes nothing else, so an agent-manager 1.x chart takes them as before;
-- on: tenants.enabled, the kagent namespace's default ModelConfig and its key
-  Secret (kagent.providers), the workers' own network policy in the resolved
+- on: tenants.enabled, no tenants.modelConfig (the meta chart derives no
+  tenant model, with or without kagent.providers), the workers' own network policy in the resolved
   flavor (substrate-workers on cilium, substrate-workers-ingress on kubernetes,
   none with networkPolicy.enabled off) and 1 warm worker per tenant (not
   kagent.substrateWorkerPool.replicas);
@@ -19,8 +19,7 @@ release (giantswarm/agent-platform#1036):
 - the render fails, naming the key, for: agent-manager.tenants.enabled against
   the switch (either way), an agent-manager range below TENANTS_FLOOR, kagent
   off, agent-manager's OAuth or downstream OAuth off, no
-  kagent.fluxServiceAccountName, a default provider without apiKeySecretRef,
-  and an own tenants value that differs from the derived one.
+  kagent.fluxServiceAccountName and an own tenants value that differs from the derived one.
 
 Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io.
 
@@ -80,7 +79,6 @@ def expect(what: str, got, want) -> None:
 def tenants(want_policy):
     block = {
         "enabled": True,
-        "modelConfig": {"name": "default-model-config", "apiKeySecretName": "kagent-anthropic"},
         "workerPoolReplicas": 1,
     }
     if want_policy:
@@ -110,7 +108,10 @@ def main() -> None:
     expect("on: the operator's workerPoolReplicas", own.get("workerPoolReplicas"), 3)
     expect("on: the operator's interval", own.get("interval"), "5m")
     expect("on: an own value equal to the derived one", agent_manager(
-        meta, [*CILIUM, *ON, "--set", "agent-manager.tenants.modelConfig.name=default-model-config"])["tenants"],
+        meta, [*CILIUM, *ON, "--set", "agent-manager.tenants.networkPolicy.flavor=cilium"])["tenants"],
+        on["tenants"])
+    expect("on, without kagent.providers: tenants", agent_manager(
+        meta, [*CILIUM, *ON, "--set", "kagent.defaultModelConfig.enabled=false", "--set", "kagent.providers=null"])["tenants"],
         on["tenants"])
     print("ok: on")
 
@@ -126,8 +127,7 @@ def main() -> None:
                  "-f", values, *CILIUM)
         if r.returncode != 0:
             fail(f"agent-manager {TENANTS_FLOOR} rejects the forwarded values\n{r.stderr}")
-        for flag in ("--multi-tenant=true", "--tenant-model-config=default-model-config",
-                     "--tenant-model-secret=kagent-anthropic", "--tenant-worker-pool-replicas=1",
+        for flag in ("--multi-tenant=true", "--tenant-worker-pool-replicas=1",
                      "--tenant-network-policy-flavor=cilium", "--tenant-network-policies=substrate-workers",
                      "--helmrelease-service-account=kagent-flux"):
             if flag not in r.stdout:
@@ -150,8 +150,6 @@ def main() -> None:
          "needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled"),
         ("no Flux ServiceAccount", [*CILIUM, *ON, "--set", "kagent.fluxServiceAccountName="],
          "needs kagent.fluxServiceAccountName"),
-        ("no key Secret", [*CILIUM, *ON, "--set", "kagent.providers.anthropic.apiKeySecretRef="],
-         "needs kagent.providers.anthropic.apiKeySecretRef"),
         ("an own value that differs", [*CILIUM, *ON, "--set", "agent-manager.tenants.networkPolicy.flavor=kubernetes"],
          "agent-manager.tenants.networkPolicy.flavor (\"kubernetes\") differs"),
     ]
