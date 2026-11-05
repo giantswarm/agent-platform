@@ -27,6 +27,9 @@ rendered as one more ingress peer in the flavor's own dialect. */ -}}
 {{- end }}
 {{- $hf := $mm.networkPolicy.huggingFace }}
 {{- $reg := $mm.networkPolicy.registry }}
+{{- /* The registry's ports (registry.ports, default 443): a mirror on its own
+port (gitops.mirror.registry host:port) is reached there. */ -}}
+{{- $regPorts := $reg.ports | default (list 443) }}
 {{- $egress := $mm.networkPolicy.egress }}
 {{- /* Backends registered at runtime (modelManager.networkPolicy.registeredBackends):
 {cidr | fqdn, port} entries, each one more egress rule on its port in the
@@ -171,8 +174,10 @@ spec:
         {{- toYaml . | nindent 8 }}
       toPorts:
         - ports:
-            - port: "443"
+            {{- range $regPorts }}
+            - port: {{ . | toString | quote }}
               protocol: TCP
+            {{- end }}
     {{- end }}
     {{- with $reg.cidrs }}
     # The registry by address (a mirror, a proxy).
@@ -180,8 +185,10 @@ spec:
         {{- toYaml . | nindent 8 }}
       toPorts:
         - ports:
-            - port: "443"
+            {{- range $regPorts }}
+            - port: {{ . | toString | quote }}
               protocol: TCP
+            {{- end }}
     {{- end }}
     {{- with $wc.fqdns }}
     # The workload clusters' API servers a kserve backend targets, by name
@@ -493,8 +500,10 @@ spec:
             cidr: {{ . | quote }}
         {{- end }}
       ports:
-        - port: 443
+        {{- range $regPorts }}
+        - port: {{ . | int }}
           protocol: TCP
+        {{- end }}
     {{- end }}
     {{- if or $oauthOn (and $kserveOn (not (and $hf.cidrs $reg.cidrs))) }}
     - to:

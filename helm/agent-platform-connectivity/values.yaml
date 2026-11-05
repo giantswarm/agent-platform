@@ -2597,6 +2597,11 @@ modelManager:  # @schema skipProperties: true; additionalProperties: true
       # huggingFace.cidrs; a list narrows the registry egress to these blocks.
       # The cilium flavor adds them next to the names.
       cidrs: []
+      # The registry's ports, for the names and the blocks above (the
+      # kubernetes flavor's every-public-destination default stays 443). The
+      # meta chart's mirror (gitops.mirror.registry host:port) sets its port
+      # here and its host, without the port, as the one matchName.
+      ports: [443]
     # The workload clusters' API servers the kserve backend calls as the caller:
     # a backend cluster-manager registers targets a workload cluster's apiserver
     # (list_backends, loads and fits all go there). Same shape as
@@ -3944,6 +3949,13 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
     # hf:// (or any other) storageUri is untouched. Empty leaves every
     # reference as written. Published in the discovery ConfigMap as
     # spec.modelImages.registry.
+    registry: ""
+  runtimeImages:
+    # The registry host (host or host:port; no scheme, no path) every preset's
+    # runtime image (spec.template's containers, the vLLM server) is published
+    # with: the host of each image is replaced by this value, the path, tag or
+    # digest kept. Empty leaves every image as written. The meta chart sets it
+    # from gitops.mirror.registry.
     registry: ""
   # Hugging Face model cache: one PVC in the serving namespace with one
   # subdirectory per served model, so a model downloads once and every
