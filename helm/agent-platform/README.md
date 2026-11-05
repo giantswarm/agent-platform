@@ -1032,7 +1032,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.oauth2-proxy.fullnameOverride | string | `"kagent-oauth2-proxy"` |  |
 | kagent.oauth2-proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | kagent.oauth2-proxy.image.repository | string | `"giantswarm/oauth2-proxy"` |  |
-| kagent.oauth2-proxy.image.tag | string | `"v7.15.5"` |  |
+| kagent.oauth2-proxy.image.tag | string | `"v7.15.6"` |  |
 | kagent.oauth2-proxy.namespaceOverride | string | `"kagent"` |  |
 | kagent.oauth2-proxy.redis.enabled | bool | `false` |  |
 | kagent.oauth2-proxy.sessionStorage.type | string | `"cookie"` |  |
