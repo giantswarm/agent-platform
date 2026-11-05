@@ -165,9 +165,26 @@
                     "type": "boolean",
                     "description": "Render the organizations' role and admission policies. Needs kagent (components.kagent.enabled) and kagent.fluxServiceAccountName: the render fails without them."
                 },
+                "fluxDecryptionSecret": {
+                    "type": "string",
+                    "description": "The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption."
+                },
                 "fluxNamespace": {
                     "type": "string",
                     "description": "The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace; set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces."
+                },
+                "fluxSource": {
+                    "type": "object",
+                    "description": "The installation's Flux source in fluxNamespace, which an organization's Kustomization applies from (agent-platform-operator's commitMode.sourceRef). The admission policy holds the operator's Kustomizations to a source of this kind in fluxNamespace, and to this name when it is set.",
+                    "additionalProperties": false,
+                    "properties": {
+                        "kind": {
+                            "type": "string"
+                        },
+                        "name": {
+                            "type": "string"
+                        }
+                    }
                 },
                 "operator": {
                     "type": "object",

@@ -47,9 +47,19 @@ ModelConfigs, RemoteMCPServers, EgressPolicies, Secrets, and its members'
 RoleBindings, which bind agent-platform:user, editor or admin and no other
 role (`bind` on those three, no `escalate`; RBAC would let it bind a role
 whose rules it holds, this one among them, so the policy
-agent-platform-organization-flux-rolebindings pins the roleRef). get, list and watch are what
+agent-platform-organization-flux-writes pins the roleRef, and refuses a
+ServiceAccount token Secret). get, list and watch are what
 kustomize-controller reads before it applies and while it waits. Rendered
 with fluxNamespace, the only case in which the operator binds it.
+
+Who may merge into an organization's path is that organization's admin: the
+members are files there, organization-admins among them, and
+kustomize-controller's apply takes over a binding of the same name. The
+installation repository guards the path (review, CODEOWNERS), as it guards
+every other path. The path holds no ConfigMap (no configMapGenerator): the
+organization's kinds are its agents, models, connectors, egress and
+members, and a file of another kind fails the organization's apply, shown on
+its Kustomization.
 */ -}}
 {{- if and (include "agent-platform.organizations.enabled" .) .Values.agentPlatformOrganizations.fluxNamespace }}
 ---

@@ -74,6 +74,8 @@ KYVERNO_CRD = "https://raw.githubusercontent.com/kyverno/kyverno/{v}/config/crds
 
 RELEASE_NS = "agent-platform"
 FLUX_NS = "flux-giantswarm"
+FLUX_SOURCE = "management-clusters-fleet"  # the installation's GitRepository
+SOPS_KEY = "sops-keys"  # the installation's SOPS key Secret, the chart's default
 API_HOST = "api.acme.example.io"
 POOL = "kagent-default"
 OP = f"system:serviceaccount:{RELEASE_NS}:agent-platform-operator"
@@ -118,7 +120,8 @@ def render(chart, *extra):
 
 
 ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", f"agentPlatformOrganizations.fluxNamespace={FLUX_NS}",
-      "--set", f"agentPlatformOrganizations.apiHostnames[0]={API_HOST}"]
+      "--set", f"agentPlatformOrganizations.apiHostnames[0]={API_HOST}",
+      "--set", f"agentPlatformOrganizations.fluxSource.name={FLUX_SOURCE}"]
 SUBSTRATE = ["--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true"]
 
 
@@ -316,7 +319,8 @@ def kustomization(name, namespace, uid=True):
         meta["labels"] = {"agent-platform.giantswarm.io/organization-uid": UID}
     return {"apiVersion": "kustomize.toolkit.fluxcd.io/v1", "kind": "Kustomization", "metadata": meta,
             "spec": {"interval": "10m", "prune": True, "path": "./agents", "serviceAccountName": name, "targetNamespace": name,
-                     "sourceRef": {"kind": "GitRepository", "name": "installation"}}}
+                     "sourceRef": {"kind": "GitRepository", "name": FLUX_SOURCE, "namespace": namespace},
+                     "decryption": {"provider": "sops", "secretRef": {"name": SOPS_KEY}}}}
 
 
 def sa(name, namespace, uid=True):
@@ -487,9 +491,21 @@ def prove_operator():
     case("the operator moves no Kustomization into another organization's namespace",
          patch("kustomization", ORG, FLUX_NS, {"spec": {"targetNamespace": ORG2}}, as_=OP), pinned, "spec.targetNamespace " + ORG + "; refused")
     for field, value in (("kubeConfig", {"secretRef": {"name": "other-cluster"}}),
-                         ("postBuild", {"substituteFrom": [{"kind": "Secret", "name": "sops-keys"}]})):
+                         ("postBuild", {"substituteFrom": [{"kind": "Secret", "name": SOPS_KEY}]}),
+                         ("patches", [{"patch": "[]", "target": {"kind": "Secret"}}]), ("components", ["../../other"])):
         case(f"the operator creates no Kustomization with {field}", create(changed(**{field: value}), as_=OP), pinned,
-             "sets neither spec.kubeConfig nor spec.postBuild.substituteFrom")
+             "sets none of spec.kubeConfig, spec.postBuild.substituteFrom, spec.patches and spec.components")
+    source = f"applies from the installation source GitRepository {FLUX_NS}/{FLUX_SOURCE}"
+    for what, ref in (("another GitRepository", {"kind": "GitRepository", "name": "customer-fleet"}),
+                      ("a source of another namespace", {"kind": "GitRepository", "name": FLUX_SOURCE, "namespace": "org-acme"}),
+                      ("a Bucket", {"kind": "Bucket", "name": FLUX_SOURCE})):
+        case(f"the operator creates no Kustomization that applies from {what}", create(changed(sourceRef=ref), as_=OP), pinned, source)
+    key = f"decrypts with the installation key {SOPS_KEY} only"
+    case("the operator creates no Kustomization that decrypts with another Secret",
+         create(changed(decryption={"provider": "sops", "secretRef": {"name": "other-team-age"}}), as_=OP), pinned, key)
+    case("the operator creates no Kustomization that decrypts as a ServiceAccount",
+         create(changed(decryption={"provider": "sops", "secretRef": {"name": SOPS_KEY}, "serviceAccountName": "kustomize-controller"}), as_=OP), pinned, key)
+    case("the operator creates a Kustomization that decrypts nothing", create(changed(decryption=None), as_=OP))
     case("the operator updates its Kustomization within the pins",
          patch("kustomization", ORG, FLUX_NS, {"spec": {"path": "./agent-platform/organizations/org-acme/payments"}}, as_=OP))
     case("the operator creates no Kustomization outside the Flux namespace", create(kustomization(ORG2, PLAIN), as_=OP),
@@ -516,6 +532,9 @@ def prove_operator():
          "agent-platform-organization-rolebinding-subjects")
     case("the operator binds the organization's Flux ServiceAccount in its namespace",
          create(rb("organization-flux", ORG, role="agent-platform:organization-flux", subjects=[{"kind": "ServiceAccount", "name": ORG, "namespace": FLUX_NS}]), as_=OP))
+    case("the operator binds the organization's Flux ServiceAccount to nothing but agent-platform:organization-flux",
+         create(rb("organization-flux", ORG, role="agent-platform:admin", subjects=[{"kind": "ServiceAccount", "name": ORG, "namespace": FLUX_NS}]), as_=OP),
+         "agent-platform-organization-operator-objects", "to the ClusterRole agent-platform:organization-flux only; refused: " + ORG + "/organization-flux to ClusterRole agent-platform:admin")
     case("the operator binds no other organization's Flux ServiceAccount",
          create(rb("organization-flux", ORG2, role="agent-platform:organization-flux", subjects=[{"kind": "ServiceAccount", "name": ORG, "namespace": FLUX_NS}]), as_=OP),
          "agent-platform-organization-rolebinding-subjects", f"ServiceAccount {FLUX_NS}/{ORG}")
@@ -558,7 +577,15 @@ def prove_flux_role():
             must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": role, "namespace": ORG},
                          "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["get", "list"]}]}, dry=False), "create a Role")
         case(f"a merged RoleBinding binds no {kind} {role}, whose rules it holds", create(rb("members-git", ORG, role=role, kind=kind), as_=FLUX_SA, groups=()),
-             "agent-platform-organization-flux-rolebindings", f"refused: {ORG}/members-git to {kind} {role}")
+             "agent-platform-organization-flux-writes", f"refused: {ORG}/members-git to {kind} {role}")
+    token = {"apiVersion": "v1", "kind": "Secret", "type": "kubernetes.io/service-account-token",
+             "metadata": {"name": "minted", "namespace": ORG, "annotations": {"kubernetes.io/service-account.name": "kagent-flux"}}}
+    case("a merged Secret is no ServiceAccount token", create(token, as_=FLUX_SA, groups=()), "agent-platform-organization-flux-writes",
+         f"is no ServiceAccount token; refused: {ORG}/minted")
+    # A Flux controller acting as itself (a platform Kustomization) is not an
+    # organization's Flux ServiceAccount.
+    case("kustomize-controller as itself is not held as an organization's Flux ServiceAccount",
+         create(rb("platform-view", ORG, role="view"), as_=f"system:serviceaccount:{FLUX_NS}:kustomize-controller"))
 
 
 def prove_labels():

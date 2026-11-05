@@ -3169,6 +3169,19 @@ agentPlatformOrganizations:
   # the operator writes no Kustomization and no ServiceAccount outside the
   # organization namespaces.
   fluxNamespace: ""
+  # -- The installation's Flux source in fluxNamespace, which an
+  # organization's Kustomization applies from (agent-platform-operator's
+  # commitMode.sourceRef). The admission policy holds the operator's
+  # Kustomizations to a source of this kind in fluxNamespace, and to this name
+  # when it is set.
+  fluxSource:
+    kind: GitRepository
+    name: ""
+  # -- The installation's SOPS key Secret in fluxNamespace
+  # (agent-platform-operator's commitMode.decryptionSecret): the only Secret
+  # an organization's Kustomization may decrypt with. Empty: none may set
+  # spec.decryption.
+  fluxDecryptionSecret: sops-keys
   # -- The installation's Kubernetes API hostnames: an EgressPolicy in an
   # organization namespace may not name them, nor a wildcard origin that
   # covers one, beside the cluster-internal and host-local names it never
