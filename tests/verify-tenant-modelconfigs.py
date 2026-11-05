@@ -1,28 +1,29 @@
 #!/usr/bin/env python3
-"""Assert the render of a tenant's own ModelConfig (giantswarm/agent-platform#759).
+"""Assert the render of an organization's own ModelConfig (giantswarm/agent-platform#759, #1268).
 
-What the policies' CEL decides is proven by prove-tenant-modelconfigs.py on a
-cluster; this script pins what the connectivity chart renders:
+What the policies' CEL decides for a listener and a direct base URL, an
+unserved provider, a Secret outside the prefix from a requester who may not
+read it, and a typed tenant credential is proven on a local API server by
+verify-organization-namespaces.py; this script pins what the connectivity
+chart renders:
 
-- with tenants.organizations.enabled off, neither
+- with agentPlatformOrganizations.enabled off, neither
   agent-platform-tenant-model-routing nor agent-platform-tenant-secret-creation
   renders, and each modelconfig-llm-routing MutatingAdmissionPolicy selects
   and binds the kagent namespace only;
 - on, both policies render (Fail, bound with Deny) for every namespace
-  labelled giantswarm.io/organization but the kagent namespace: the model
-  routing one over modelconfigs.api.kagent.dev of every version, created or
-  updated, with each listener provider's block and listener URL (an OpenAI
-  model's ends in /v1); the Secret one over Secret creation only, for names
-  outside the tenant-credential- prefix, with the authorizer's check; and
-  agent-manager's exception in agent-platform-tenant-model-credentials holds
-  to the name default-model-config. Each modelconfig-llm-routing policy
-  (Ignore) selects no namespace itself and gets a second binding for those
-  namespaces, beside its kagent one;
-- with tenants.organizations.enabled the render fails, naming the key, with
-  llmRouting off and without the modelconfig-llm-routing policy
-  (llmRouting.modelConfigPolicy.enabled off, or MutatingAdmissionPolicy not
-  served), which fills in the listener as the baseUrl of agent-manager's copy
-  of the default ModelConfig.
+  labelled agent-platform.giantswarm.io/organization but the kagent
+  namespace: the model routing one over modelconfigs.api.kagent.dev of every
+  version, created or updated, with each listener provider's block and
+  listener URL (an OpenAI model's ends in /v1); the Secret one over Secret
+  creation only, for names outside the tenant-credential- prefix, with the
+  authorizer's check; agent-platform-tenant-model-credentials excepts no
+  writer. Each modelconfig-llm-routing policy (Ignore) selects no namespace
+  itself and gets a second binding for those namespaces, beside its kagent
+  one;
+- on, the render fails, naming the key, with llmRouting off and without the
+  modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled off, or
+  MutatingAdmissionPolicy not served).
 
 Needs PyYAML. HELM selects the binary.
 
@@ -49,7 +50,8 @@ BASE = [
     "--set", "global.identity.existingSecret=platform-oauth",
     "--set", "llmRouting.enabled=true",
 ]
-ORGS = ["--set", "tenants.organizations.enabled=true"]
+ORGS = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "kagent.fluxServiceAccountName=kagent-flux",
+        "--set", "global.domain=ci.example.com"]
 LISTENER = "http://agentgateway.agent-platform.svc:8081"
 MAP = ["--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
 ON = ORGS + MAP
@@ -58,9 +60,8 @@ OPENAI = ["--set", "llmRouting.models[0].name=anthropic", "--set", "llmRouting.m
           "--set", "llmRouting.models[1].name=openai", "--set", "llmRouting.models[1].provider=OpenAI",
           "--set", "llmRouting.models[1].baseURL=https://api.openai.com/v1"]
 NEW = ["agent-platform-tenant-model-routing", "agent-platform-tenant-secret-creation"]
-ORG_NS = [{"key": "giantswarm.io/organization", "operator": "Exists"},
+ORG_NS = [{"key": "agent-platform.giantswarm.io/organization", "operator": "Exists"},
           {"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": ["kagent"]}]
-RECONCILER = "system:serviceaccount:agent-platform:agent-manager"
 ROUTING = "agent-platform-connectivity-modelconfig-llm-routing"
 
 
@@ -155,9 +156,9 @@ def check_on(chart: str) -> None:
         fail(f"{NEW[1]} does not ask the authorizer for Secrets outside the prefix: {secrets}")
     ok(f"{NEW[1]} asks the authorizer on the creation of a Secret outside the tenant-credential- prefix")
     exception = credentials_exception(docs)
-    if RECONCILER not in exception or "request.name == 'default-model-config'" not in exception:
-        fail(f"on, agent-manager's key exception is not held to default-model-config: {exception}")
-    ok("on, only agent-manager's default-model-config names the platform's key")
+    if "system:serviceaccount" in exception or "default-model-config" in exception:
+        fail(f"on, a writer is excepted from the key rule: {exception}")
+    ok("on, no ModelConfig of an organization namespace names the platform's key, for any writer")
     kagent = {"matchLabels": {"kubernetes.io/metadata.name": "kagent"}}
     for name, (selector, bindings) in routing_policies(docs).items():
         policy = find(docs, "MutatingAdmissionPolicy", name)
@@ -172,12 +173,12 @@ def main() -> None:
     chart = sys.argv[1]
     check_off(chart)
     check_on(chart)
-    refused(chart, ["--set", "llmRouting.enabled=false"] + ON, ["tenants.organizations.enabled needs llmRouting.enabled"],
+    refused(chart, ["--set", "llmRouting.enabled=false"] + ON, ["agentPlatformOrganizations.enabled needs llmRouting.enabled"],
             "with llmRouting off the render fails")
-    refused(chart, ORGS, ["tenants.organizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy", "admissionregistration.k8s.io/v1"],
+    refused(chart, ORGS, ["agentPlatformOrganizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy", "admissionregistration.k8s.io/v1"],
             "without MutatingAdmissionPolicy served the render fails")
     refused(chart, ON + ["--set", "llmRouting.modelConfigPolicy.enabled=false"],
-            ["tenants.organizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy", "llmRouting.modelConfigPolicy.enabled"],
+            ["agentPlatformOrganizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy", "llmRouting.modelConfigPolicy.enabled"],
             "with llmRouting.modelConfigPolicy.enabled off the render fails")
 
 if __name__ == "__main__":

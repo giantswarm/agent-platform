@@ -7,13 +7,13 @@ starts with a UID (the s3:prefix condition) and deletes only keys under one:
 never the platform Harness's own snapshots, nor anything else in the bucket.
 It reads and writes nothing.
 */ -}}
-{{- if and (dig "enabled" false (.Values.organizationErasure | default dict)) (eq (include "agent-platform.substrateStore.crossplane" .) "aws") }}
+{{- if and (include "agent-platform.organizations.enabled" .) (eq (include "agent-platform.substrateStore.crossplane" .) "aws") }}
 {{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane }}
 {{- $bucket := $xp.aws.bucketName }}
 {{- $partition := include "agent-platform.crossplane.awsPartition" (dict "xp" $xp) }}
 {{- $roleName := include "agent-platform.organizationErasure.awsRoleName" . }}
 {{- $uid := include "agent-platform.organizationErasure.uidPattern" . }}
-{{- $sa := include "agent-platform.organizationErasure.serviceAccount" . | fromJson }}
+{{- $sa := include "agent-platform.organizations.operatorServiceAccount" . | fromJson }}
 {{- $tags := include "agent-platform.crossplane.tags" (dict "xp" $xp "app" "agent-platform-operator" "name" $roleName) | fromYaml }}
 ---
 apiVersion: iam.aws.upbound.io/v1beta1

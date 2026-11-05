@@ -156,35 +156,37 @@
             "properties": {
                 "apiHostnames": {
                     "type": "array",
-                    "description": "The installation's Kubernetes API hostnames: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. Required with enabled: the render fails while it is empty.",
+                    "description": "The installation's Kubernetes API hostnames beside api.<global.domain>, which is derived while global.domain is set: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. The render fails while both are empty.",
                     "items": {
                         "type": "string"
                     }
                 },
                 "enabled": {
                     "type": "boolean",
-                    "description": "Render the organizations' role and admission policies. Needs kagent (components.kagent.enabled) and kagent.fluxServiceAccountName: the render fails without them."
+                    "description": "Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a model whose provider the listener serves (Anthropic, Mistral or OpenAI) and llmRouting.modelConfigPolicy.enabled on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain or apiHostnames: the render fails without them. The rollout gate: off by default for now (see above)."
+                },
+                "fluxDecryptionSecret": {
+                    "type": "string",
+                    "description": "The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption."
                 },
                 "fluxNamespace": {
                     "type": "string",
-                    "description": "The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode). Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces."
+                    "description": "The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace, and the operator's erasure.fluxNamespace (derived); set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces."
                 },
-                "operator": {
+                "fluxPathPrefix": {
+                    "type": "string",
+                    "description": "The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies exactly this prefix, its parent and its name, from the labels the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise."
+                },
+                "fluxSource": {
                     "type": "object",
-                    "description": "The agent-platform-operator's ServiceAccount: the only writer of the organization labels on a namespace and of the operator's copies (labelled agent-platform.giantswarm.io/organization-object), and itself held to agents-* namespaces carrying the labels, RoleBindings there, and in fluxNamespace Kustomizations and ServiceAccounts it labels agent-platform.giantswarm.io/organization-uid. An empty namespace is the release namespace.",
+                    "description": "The installation's Flux source in fluxNamespace, which an organization's Kustomization applies from (agent-platform-operator's commitMode.sourceRef). The admission policy holds the operator's Kustomizations to this source. The name is required with fluxNamespace: the render fails without it.",
                     "additionalProperties": false,
                     "properties": {
-                        "serviceAccount": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "properties": {
-                                "name": {
-                                    "type": "string"
-                                },
-                                "namespace": {
-                                    "type": "string"
-                                }
-                            }
+                        "kind": {
+                            "type": "string"
+                        },
+                        "name": {
+                            "type": "string"
                         }
                     }
                 }
@@ -1461,6 +1463,22 @@
                         "apiServerCIDR": {
                             "type": "string"
                         },
+                        "ipv6": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "excludedCIDRs": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "pattern": "^[0-9a-fA-F]{0,4}:[0-9a-fA-F:]*/(?:12[0-8]|1[01][0-9]|[1-9]?[0-9])$"
+                                    }
+                                }
+                            }
+                        },
                         "worldExcludedCIDRs": {
                             "type": "array",
                             "items": {
@@ -1582,39 +1600,19 @@
                                     }
                                 }
                             }
-                        }
-                    }
-                }
-            }
-        },
-        "organizationErasure": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "enabled": {
-                    "type": "boolean",
-                    "description": "Grant agent-platform-operator's ServiceAccount the erasure's access."
-                },
-                "operatorPodLabels": {
-                    "type": "object",
-                    "description": "The labels of agent-platform-operator's pods: the kagent controller's API port admits them (with networkPolicy.enabled, both flavors).",
-                    "additionalProperties": true,
-                    "properties": {
-                        "app.kubernetes.io/name": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "operatorServiceAccount": {
-                    "type": "object",
-                    "description": "agent-platform-operator's ServiceAccount. An empty namespace is the release namespace.",
-                    "additionalProperties": false,
-                    "properties": {
-                        "name": {
-                            "type": "string"
                         },
-                        "namespace": {
-                            "type": "string"
+                        "egressGateway": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "privateCIDRs": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])[.]){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(?:3[0-2]|[12][0-9]|[1-9])$"
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -2111,16 +2109,6 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "organizations": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean",
-                            "description": "The worker pods of the namespaces labelled `giantswarm.io/organization` (agent-manager's tenants, its `tenants.enabled`; it copies the workers' own policy into them, `substrate-workers` in the cilium flavor, `substrate-workers-ingress` in the kubernetes flavor): with Agent Substrate on, the router, the egress gateway and the actors' dns admit them as they admit the kagent namespace's workers, and the workers' Kyverno PolicyException covers them when Substrate's controllers write them (Kyverno 1.15.2 or later; an older Kyverno never applies the exception and the workers are refused). Two ValidatingAdmissionPolicies hold the workers there for every requester: only agent-manager's ServiceAccount writes a WorkerPool, as a copy of kagent.substrateWorkerPool.name in the kagent namespace (only replicas may differ), and only Substrate's controllers write a Deployment, ReplicaSet or Pod labelled `ate.dev/worker-pool`; no one adds an ephemeral container to a worker, execs into one or attaches to one (Kubernetes 1.30 or later). With kagent on, a tenant also brings its own ModelConfig and model key, metered on the `llm` listener (giantswarm/agent-platform#759): the modelconfig-llm-routing policies fill in the listener as the baseUrl of a ModelConfig there that has none, and two more ValidatingAdmissionPolicies hold every such namespace but kagent: a ModelConfig names a provider the listener serves and the listener as its baseUrl (any other provider, Bedrock included, and any other baseUrl are refused), and only a requester who may read a namespace's Secrets creates one there without the tenant-credential- prefix; only agent-manager's copy of the default ModelConfig names the platform's key. It needs llmRouting.enabled, a default ModelConfig provider the listener serves, and the modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled, served MutatingAdmissionPolicy); the render fails otherwise. A namespace without the label gets nothing. Off, the render is that of a chart without the key."
-                        }
-                    }
-                },
                 "platform": {
                     "type": "object",
                     "additionalProperties": false,

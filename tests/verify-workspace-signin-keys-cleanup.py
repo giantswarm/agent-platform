@@ -13,7 +13,8 @@ the Secret left it behind. Each case below pins one property:
   there and this release's (meta.helm.sh/release-name and -namespace), ONE
   post-install,post-upgrade hook Job, <release>-signin-keys-cleanup (a
   label value of at most 63 characters), deletes exactly it as the hook identity,
-  whose ClusterRole gains delete on exactly that Secret and is created for the
+  whose Role <release>-hooks-signin-keys-cleanup in the release namespace,
+  bound to it, holds delete on exactly that Secret, and which is created for the
   post events; a Secret of the name another release holds renders neither.
 
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
@@ -69,9 +70,13 @@ def documents(render: str) -> dict:
     return out
 
 
+ROLE = f"{RELEASE}-hooks-{SUFFIX}"
+
+
 def delete_rule(docs: dict) -> bool:
-    role = docs.get(("ClusterRole", f"{RELEASE}-hooks"), "")
-    return f'resourceNames: ["{SECRET}"]\n    verbs: ["delete"]' in role
+    role = docs.get(("Role", ROLE), "")
+    return (f'resourceNames: ["{SECRET}"]\n    verbs: ["delete"]' in role
+            and f"name: {ROLE}" in docs.get(("RoleBinding", ROLE), ""))
 
 
 def live(connectivity: str) -> None:
@@ -98,7 +103,7 @@ def live(connectivity: str) -> None:
             if line not in job:
                 fail(f"the cleanup Job lacks {line!r}:\n{job}")
         if not delete_rule(docs):
-            fail(f"the hook identity's ClusterRole lacks delete on exactly {SECRET}:\n{docs.get(('ClusterRole', f'{RELEASE}-hooks'))}")
+            fail(f"the hook identity's Role {ROLE} lacks delete on exactly {SECRET}, or its binding:\n{docs.get(('Role', ROLE))}")
         if "post-upgrade" not in docs[("ServiceAccount", f"{RELEASE}-hooks")]:
             fail("the hook identity is not created for post-upgrade")
         if any(k == "Secret" and n == SECRET for k, n in docs):

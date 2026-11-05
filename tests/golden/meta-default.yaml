@@ -442,11 +442,12 @@ spec:
     agentPlatformOrganizations:
       apiHostnames: []
       enabled: false
+      fluxDecryptionSecret: sops-keys
       fluxNamespace: ""
-      operator:
-        serviceAccount:
-          name: agent-platform-operator
-          namespace: ""
+      fluxPathPrefix: ./agent-platform/organizations/
+      fluxSource:
+        kind: GitRepository
+        name: ""
     agentSandbox:
       podSecurity:
         containerSecurityContext:
@@ -821,7 +822,7 @@ spec:
           groupsPrefix: ""
           includeNamespaces: []
           mode: kubernetes
-          namespaceSelector: giantswarm.io/organization
+          namespaceSelector: ""
           usernamePrefix: ""
         env: []
         image:
@@ -1426,6 +1427,9 @@ spec:
       flavor: kubernetes
       kubernetes:
         apiServerCIDR: 0.0.0.0/0
+        ipv6:
+          enabled: false
+          excludedCIDRs: []
         worldExcludedCIDRs:
         - 10.0.0.0/8
         - 172.16.0.0/12
@@ -1442,13 +1446,8 @@ spec:
       substrate:
         credentialProvider:
           egressFQDNs: []
-    organizationErasure:
-      enabled: false
-      operatorPodLabels:
-        app.kubernetes.io/name: agent-platform-operator
-      operatorServiceAccount:
-        name: agent-platform-operator
-        namespace: ""
+        egressGateway:
+          privateCIDRs: []
     postgres:
       affinity: {}
       applicationDatabase:
@@ -1662,8 +1661,6 @@ spec:
         enabled: false
     substrate-crds: {}
     tenants:
-      organizations:
-        enabled: false
       platform:
         editors:
         - apiGroup: rbac.authorization.k8s.io
