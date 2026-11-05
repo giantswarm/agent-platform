@@ -112,4 +112,3 @@ matchExpressions:
   - key: {{ include "agent-platform.organizations.label" . }}
     operator: Exists
 {{- end -}}
-
