@@ -553,7 +553,7 @@ def prove_flux_role():
          "RBAC:attempting to grant RBAC permissions not currently held")
     # RBAC admits a binding of a role whose rules the binder holds, without
     # bind: the policy refuses it.
-    for role, kind in (("agent-platform:organization-flux", "ClusterRole"), ("agent-platform:organization-flux", "Role")):
+    for role, kind in (("agent-platform:organization-flux", "ClusterRole"), ("flux-held-subset", "Role")):
         if kind == "Role":
             must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": role, "namespace": ORG},
                          "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["get", "list"]}]}, dry=False), "create a Role")

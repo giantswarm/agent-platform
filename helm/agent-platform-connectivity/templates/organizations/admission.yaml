@@ -45,8 +45,8 @@ these.
     binds a ServiceAccount of fluxNamespace, and only the one named after the
     binding's namespace (the organization's Flux ServiceAccount).
   * agent-platform-organization-flux-rolebindings: a RoleBinding that an
-    organization's Flux ServiceAccount (a ServiceAccount of fluxNamespace)
-    writes in an organization namespace binds the ClusterRole
+    organization's Flux ServiceAccount (a ServiceAccount of fluxNamespace but
+    the operator's) writes in an organization namespace binds the ClusterRole
     agent-platform:user, editor or admin. RBAC lets an identity bind any role
     whose rules it holds without `bind`, agent-platform:organization-flux
     itself among them, which reads every Secret of the namespace.
@@ -219,7 +219,8 @@ spec:
     # kustomize-controller reads a kubeConfig Secret and the postBuild
     # substituteFrom objects with its own identity, not the impersonated one:
     # neither may bring the Flux namespace's Secrets into an organization or
-    # apply elsewhere.
+    # apply elsewhere. spec.decryption stays open: the operator names the
+    # installation's SOPS key there, a decision of the plan.
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
         !has(object.spec) || (!has(object.spec.kubeConfig) && !(has(object.spec.postBuild) && has(object.spec.postBuild.substituteFrom)))
@@ -424,7 +425,10 @@ spec:
         resources: ["rolebindings"]
   matchConditions:
     - name: organization-flux
-      expression: {{ printf "request.userInfo.username.startsWith('system:serviceaccount:%s:')" $fluxNs | quote }}
+      # Not the operator, whose binding of the Flux ServiceAccount is
+      # agent-platform-organization-rolebinding-subjects' to hold, should
+      # fluxNamespace be its release namespace.
+      expression: {{ printf "request.userInfo.username.startsWith('system:serviceaccount:%s:') && request.userInfo.username != '%s'" $fluxNs $operator | quote }}
   validations:
     - expression: >-
         object.roleRef.kind == 'ClusterRole' &&
