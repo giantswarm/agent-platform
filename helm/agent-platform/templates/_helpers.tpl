@@ -200,10 +200,16 @@ Usage: include "agent-platform.operator.serviceAccountBindings" . | fromJsonArra
 {{- $floor := include "agent-platform.semverRangeFloor" (dig "agent-platform-operator" "versionRange" "" .Values.components) -}}
 {{- if and (include "agent-platform.organizations.on" .) $floor (semverCompare (printf ">=%s" (include "agent-platform.operator.serviceAccountBindingsFloor" .)) $floor) -}}
 {{- $ns := dig "substrate" "targetNamespace" "ate-system" .Values.components -}}
-{{- $out = append $out (dict "clusterRole" "k8s-credential-provider-secret-reader" "serviceAccount" (dict "namespace" $ns "name" "k8s-credential-provider")) -}}
-{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "google-access-token-credential-provider") -}}
+{{- $plugin := include "agent-platform.componentEnabled" (dict "root" . "name" "google-access-token-credential-provider") -}}
 {{- $pns := dig "google-access-token-credential-provider" "targetNamespace" "ate-system" .Values.components -}}
+{{- /* The connectivity chart's admission policy admits the operator's binding
+of a provider's ServiceAccount of ate-system only: another namespace binds
+nothing, and the readers stay cluster-wide. */ -}}
+{{- if and (eq $ns "ate-system") (or (not $plugin) (eq $pns "ate-system")) -}}
+{{- $out = append $out (dict "clusterRole" "k8s-credential-provider-secret-reader" "serviceAccount" (dict "namespace" $ns "name" "k8s-credential-provider")) -}}
+{{- if $plugin -}}
 {{- $out = append $out (dict "clusterRole" "google-access-token-credential-provider-secret-reader" "serviceAccount" (dict "namespace" $pns "name" "google-access-token-credential-provider")) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
@@ -231,7 +237,9 @@ Usage: (include "agent-platform.credentialProvider.readerNamespaces" $root | fro
 {{- if and . (not (and $orgs (eq (toJson .) (toJson $sel)))) -}}{{- $bound = false -}}{{- end -}}
 {{- end -}}
 {{- range (.allowedNamespaces | default list) -}}
-{{- if not (has . $namespaces) -}}{{- $namespaces = append $namespaces . -}}{{- end -}}
+{{- /* An organization namespace is the operator's to bind: a release's
+binding there of the same name would be refused by its subject lock. */ -}}
+{{- if and (not (has . $namespaces)) (not (and $orgs (hasPrefix "agents-" .))) -}}{{- $namespaces = append $namespaces . -}}{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- if and $orgs (not (include "agent-platform.operator.serviceAccountBindings" . | fromJsonArray)) -}}{{- $bound = false -}}{{- end -}}

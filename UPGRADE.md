@@ -22,6 +22,7 @@ giantswarm/agent-platform#1269: once `components.substrate.versionRange` selects
 ### Operator action
 
 - **None** for an installation on the default `namespacePolicies` (the platform namespace) or with the organizations on.
+- **An installation whose own `namespacePolicies` name a namespace in `allowedNamespaces`**: the namespace must exist before the ranges move, since the Substrate and plugin releases create a RoleBinding in it; remove a grant of a namespace that is gone. An `agents-*` entry is left to agent-platform-operator while the organizations are on.
 - **An installation whose own `namespacePolicies` grant namespaces by a label other than the organizations'**: nothing; the readers stay bound cluster-wide. To narrow them, list the namespaces in `substrate.credentialProvider.rbac.namespaces` (and `google-access-token-credential-provider.rbac.namespaces`).
 
 ## \<current\> → \<next\> (no runtime forwards the person's token)

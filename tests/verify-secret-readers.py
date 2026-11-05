@@ -25,6 +25,10 @@ Render checks:
   loses its credentials, and no labelled namespace is left unbound;
 - an installation's own rbac.namespaces stays.
 
+A control first: Substrate BEFORE, rendered as release `old` in its own
+namespace, grants its controller and provider a workload cluster's kubeconfig,
+so the reviews below can tell a grant from a refusal.
+
 Then the Substrate chart NARROWED and the plugin chart NARROWED_PLUGIN are
 rendered with the values the meta chart forwards, their RBAC applied to an API
 server (tests/apiserver.py) beside the operator's bindings in an organization
@@ -59,6 +63,10 @@ HELM = os.environ.get("HELM", "helm")
 NARROWED = "1.18.0-rc.8"
 NARROWED_PLUGIN = "0.3.0-rc.1"
 OPERATOR = "0.1.0-rc.13"
+# The control: a Substrate whose ate-controller and credential provider read
+# every Secret, rendered beside the narrowed one in a namespace of its own.
+BEFORE = "1.17.5"
+BEFORE_NS = "ate-old"
 SUBSTRATE_CHART = "oci://gsoci.azurecr.io/giantswarm/substrate/helm/substrate"
 SUBSTRATE_SOURCE = "https://github.com/giantswarm/substrate.git"
 PLUGIN = "google-access-token-credential-provider"
@@ -144,6 +152,22 @@ def render_checks(meta, tmp):
             {"atespace": "team-b", "allowedNamespaceSelector": {"matchLabels": {"team": "b"}}}]}}}, f)
     labelled = releases(meta, *PINS, "-f", path)
     check(bound(labelled)[:2] == (None, None), f"a grant on namespaces of another label: the readers stay cluster-wide: {bound(labelled)}")
+    labelled = releases(meta, *ON, *PINS, "-f", path)
+    check(bound(labelled)[:2] == (None, None), f"on, a grant on namespaces of another label: the readers stay cluster-wide: {bound(labelled)}")
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump({"substrate": {"credentialProvider": {"namespacePolicies": [
+            {"atespace": "team-b", "allowedNamespaceSelector": {"matchExpressions": [
+                {"key": "agent-platform.giantswarm.io/organization", "operator": "Exists"},
+                {"key": "team", "operator": "In", "values": ["b"]}]}}]}}}, f)
+    narrower = releases(meta, *ON, *PINS, "-f", path)
+    check(bound(narrower)[:2] == (None, None), f"on, a selector of the organizations' label and one more: the readers stay cluster-wide: {bound(narrower)}")
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump({"substrate": {"credentialProvider": {"namespacePolicies": [
+            {"atespace": "team-a", "allowedNamespaces": [ORG, KAGENT]}]}}}, f)
+    org_listed = releases(meta, *ON, *PINS, "-f", path)
+    check(bound(org_listed)[0] == {"namespaces": [KAGENT]}, f"on, an own grant of an organization namespace is left to the operator: {bound(org_listed)[0]}")
+    moved = releases(meta, *ON, *PINS, "--set", "components.substrate.targetNamespace=substrate")
+    check(bound(moved) == (None, None, None), f"Substrate outside ate-system: no binding the admission policy would refuse, the readers stay cluster-wide: {bound(moved)}")
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump({"substrate": {"credentialProvider": {"namespacePolicies": [
             {"atespace": "team-a", "allowedNamespaces": ["team-a", KAGENT]}]}}}, f)
@@ -175,22 +199,31 @@ def pull(chart, version, release, tmp, source=None):
     return os.path.join(clone, "charts", name)
 
 
-def rbac(chart, version, release, values, tmp, source=None):
+def rbac(chart, version, release, values, tmp, source=None, namespace=ATE):
     path = os.path.join(tmp, f"{release}-values.yaml")
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump(values, f)
     name = os.path.basename(chart)
-    r = helm("template", release, pull(chart, version, release, tmp, source), "-n", ATE, "-f", path)
+    r = helm("template", release, pull(chart, version, release, tmp, source), "-n", namespace, "-f", path)
     if r.returncode != 0:
         fail(f"the {name} chart {version} rejects the forwarded values\n{r.stderr}")
-    return [d for d in yaml.safe_load_all(r.stdout) if d and d.get("kind") in ("ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding")]
+    objs = [d for d in yaml.safe_load_all(r.stdout) if d and d.get("kind") in ("ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding")]
+    for d in objs:
+        if d["kind"] in ("Role", "RoleBinding"):
+            d["metadata"].setdefault("namespace", namespace)
+    return objs
 
 
 def main():
     meta = sys.argv[1]
     with tempfile.TemporaryDirectory() as tmp:
         on = render_checks(meta, tmp)
-        objs = rbac(SUBSTRATE_CHART, NARROWED, "substrate", on["substrate"], tmp, SUBSTRATE_SOURCE) + rbac(PLUGIN_CHART, NARROWED_PLUGIN, PLUGIN, on[PLUGIN], tmp)
+        # The control: the pinned Substrate line's floor, which binds the
+        # reader cluster-wide, as release `old` in its own namespace: the same
+        # reviews must be answered yes there, or they prove nothing.
+        before = [d for d in rbac(SUBSTRATE_CHART, BEFORE, "old", on["substrate"], tmp, namespace=BEFORE_NS)
+                  if d["metadata"]["name"].startswith(("old-ate-controller", "old-k8s-credential-provider"))]
+        objs = before + rbac(SUBSTRATE_CHART, NARROWED, "substrate", on["substrate"], tmp, SUBSTRATE_SOURCE) + rbac(PLUGIN_CHART, NARROWED_PLUGIN, PLUGIN, on[PLUGIN], tmp)
         api = APIServer()
         try:
             def kubectl(args, stdin=None, as_=None, groups=("system:masters",)):
@@ -199,10 +232,7 @@ def main():
                     fail(f"kubectl {' '.join(args)}:\n{out}")
                 return rc, out
 
-            for d in objs:
-                if d["kind"] in ("Role", "RoleBinding"):
-                    d["metadata"].setdefault("namespace", ATE)
-            namespaces = {ATE: {}, KAGENT: {}, WC: {}, ORG: {"agent-platform.giantswarm.io/organization": "payments"}}
+            namespaces = {ATE: {}, BEFORE_NS: {}, KAGENT: {}, WC: {}, ORG: {"agent-platform.giantswarm.io/organization": "payments"}}
             namespaces.update({d["metadata"]["namespace"]: {} for d in objs if d["metadata"].get("namespace") not in namespaces and d["metadata"].get("namespace")})
             for ns, labels in namespaces.items():
                 kubectl(["create", "-f", "-"], yaml.safe_dump({"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": ns, "labels": labels}}))
@@ -216,15 +246,18 @@ def main():
             for d in objs:
                 kubectl(["create", "-f", "-"], yaml.safe_dump(d))
 
-            def can(sa, verb, what, ns):
-                user = f"system:serviceaccount:{ATE}:{sa}"
-                groups = ("system:serviceaccounts", f"system:serviceaccounts:{ATE}", "system:authenticated")
+            def can(sa, verb, what, ns, home=ATE):
+                user = f"system:serviceaccount:{home}:{sa}"
+                groups = ("system:serviceaccounts", f"system:serviceaccounts:{home}", "system:authenticated")
                 args = ["auth", "can-i", verb, what] + (["-n", ns] if ns else ["--all-namespaces"])
                 rc, out = api.kubectl(args, as_=user, groups=groups)
                 if rc not in (0, 1):
                     fail(f"kubectl auth can-i {' '.join(args)} as {user}:\n{out}")
                 return rc == 0
 
+            for sa, what, ns in (("old-ate-controller", "secrets/other", BEFORE_NS), ("old-ate-controller", f"secrets/{KUBECONFIG_SECRET}", WC),
+                                 ("old-k8s-credential-provider", f"secrets/{KUBECONFIG_SECRET}", WC), ("old-k8s-credential-provider", f"secrets/{POOL}", ATE)):
+                check(can(sa, "get", what, ns, home=BEFORE_NS), f"control: Substrate {BEFORE}'s {sa} may get {ns}/{what.split('/')[1]}")
             ctl = "ate-controller"
             for verb in ("get", "list", "watch"):
                 check(can(ctl, verb, f"secrets/{POOL}", ATE), f"{ctl} may {verb} {ATE}/{POOL}")
