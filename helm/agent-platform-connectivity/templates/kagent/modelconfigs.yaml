@@ -2,7 +2,7 @@
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $routed := include "agent-platform.llmRouting" $ }}
 {{- $listenerProviders := include "agent-platform.llmRouting.providers" $ | fromJsonArray }}
-{{- $defaultLabel := include "agent-platform.defaultModelConfigLabel" $ }}
+{{- $defaultAnnotation := include "agent-platform.defaultModelConfigAnnotation" $ }}
 {{- $marked := list }}
 {{- range .Values.kagent.modelConfigs }}{{ if .default }}{{ $marked = append $marked (toString .name) }}{{ end }}{{ end }}
 {{- if gt (len $marked) 1 }}
@@ -70,13 +70,15 @@ kind: ModelConfig
 metadata:
   name: {{ $name | quote }}
   namespace: {{ $ns }}
-  {{- if .default }}
-  labels:
-    {{ $defaultLabel }}: "true"
-  {{- end }}
-  {{- with .displayName | default (ternary "ChatGPT (your subscription)" "" $personal) }}
+  {{- $displayName := .displayName | default (ternary "ChatGPT (your subscription)" "" $personal) }}
+  {{- if or .default $displayName }}
   annotations:
+    {{- if .default }}
+    {{ $defaultAnnotation }}: "true"
+    {{- end }}
+    {{- with $displayName }}
     ui.giantswarm.io/display-name: {{ . | quote }}
+    {{- end }}
   {{- end }}
 spec:
   provider: {{ $provider | quote }}

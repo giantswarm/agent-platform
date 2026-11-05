@@ -246,15 +246,14 @@ On the installation, after the cutover:
 
 ## The default ModelConfig
 
-A namespace's default model is the ModelConfig labelled
-`agent-platform.giantswarm.io/is-default-model-config: "true"`, at most one per
-namespace. `kagent.modelConfigs[].default: true` sets the label on that entry;
-the render fails when two entries set it. With kagent on, the
-ValidatingAdmissionPolicy `agent-platform-default-model-config` refuses, in any
-namespace, a create or update that would leave two labelled ModelConfigs there,
-naming the labelled one. To move the default, remove the label from the old
-ModelConfig first. kagent's own `default-model-config` is switched off in the
-meta chart with `kagent.defaultModelConfig.enabled: false`.
+A namespace's default model is the ModelConfig annotated
+`agent-platform.giantswarm.io/is-default-model-config: "true"`.
+`kagent.modelConfigs[].default: true` sets the annotation on that entry; the
+render fails when two entries set it. Nothing enforces one per namespace at
+admission: the writers (the portal, agent-manager) keep it unique, and a
+namespace with more than one marked ModelConfig has no default. kagent's own
+`default-model-config` is switched off in the meta chart with
+`kagent.defaultModelConfig.enabled: false`.
 
 ## Metric labels
 

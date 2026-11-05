@@ -114,7 +114,7 @@ SANDBOX_CONFIG = "gvisor-default"
 # answered). kagent's own default-model-config is off there.
 MODEL_CONFIG = "ats-model"
 KAGENT_DEFAULT_MODEL_CONFIG = "default-model-config"
-DEFAULT_MODEL_LABEL = "agent-platform.giantswarm.io/is-default-model-config"
+DEFAULT_MODEL_ANNOTATION = "agent-platform.giantswarm.io/is-default-model-config"
 PLACEHOLDER_PROVIDER_SECRET = {"name": "kagent-anthropic", "key": "ANTHROPIC_API_KEY"}
 # The Generic agent chart, 1.x = kagent API v2 (0.x rendered the retired Agent).
 AGENT_CHART_URL = "oci://gsoci.azurecr.io/charts/giantswarm/agent"

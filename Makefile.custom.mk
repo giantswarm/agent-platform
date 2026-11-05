@@ -201,11 +201,6 @@ DATAPLANE_RBAC := agentgateway-listenerset-t
 # (giantswarm/agent-platform#1040), an intended change of the default render with kagent on (verify-tenant-rbac asserts
 # it); dropped from the golden until GOLDEN_REF carries it.
 TENANT_EGRESS_ADMISSION := agent-platform-tenant-egress-credentials agent-platform-tenant-model-credentials agent-platform-tenant-credentials agent-platform-tenant-credential-refs agent-platform-platform-tenant-credential-refs
-# The admission of the default ModelConfig marker (giantswarm/agent-platform#1274),
-# an intended change of the default render with kagent on
-# (verify-default-model-config asserts it); dropped from the golden until
-# GOLDEN_REF carries it.
-DEFAULT_MODEL_ADMISSION := agent-platform-default-model-config
 # New beside GOLDEN_REF: left out of both sides of the postgres golden too.
 WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
@@ -218,7 +213,7 @@ WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
 # shape is asserted by verify-kagent-harness / verify-kagent-crds). The RBAC of
 # agent tenants (#706) is new too: drop TENANT_RBAC_ALL once GOLDEN_REF carries
 # it. Empty this list once GOLDEN_REF carries the line.
-GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP) $(TENANT_RBAC_ALL) $(TENANT_EGRESS_ADMISSION) $(DEFAULT_MODEL_ADMISSION)
+GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP) $(TENANT_RBAC_ALL) $(TENANT_EGRESS_ADMISSION)
 # Any reference is enough: the assertions read the rendered exception, not the image.
 PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
@@ -4619,7 +4614,7 @@ verify-tenant-modelconfigs: ## Assert the render of a tenant's own ModelConfig (
 	@echo "ok: $@"
 
 .PHONY: verify-default-model-config
-verify-default-model-config: ## Assert the default ModelConfig marker (giantswarm/agent-platform#1274): the meta chart forwards providers to the kagent release by default and providers: false with kagent.defaultModelConfig.enabled=false, and kagent.defaultModelConfig / kagent.modelConfigDefaults to the connectivity release only; the connectivity chart labels a kagent.modelConfigs entry with default: true agent-platform.giantswarm.io/is-default-model-config: "true", fails the render naming two such entries, lets Anthropic entries inherit per key from kagent.modelConfigDefaults.anthropic before kagent.providers.anthropic.config, and renders the agent-platform-default-model-config ValidatingAdmissionPolicy and binding with kagent on; on a local API server (tests/apiserver.py) with the ModelConfig CRD of the kagent-crds floor, a second labelled ModelConfig in a namespace is refused on create and on relabel naming the first, and every twin is admitted. Needs PyYAML and openssl. HELM selects the binary. Network: gsoci.azurecr.io, github.com (the envtest binaries, cached in .bin/).
+verify-default-model-config: ## Assert the default ModelConfig marker (giantswarm/agent-platform#1274): the meta chart forwards providers to the kagent release by default and providers: false with kagent.defaultModelConfig.enabled=false, and kagent.defaultModelConfig / kagent.modelConfigDefaults to the connectivity release only; the connectivity chart annotates a kagent.modelConfigs entry with default: true agent-platform.giantswarm.io/is-default-model-config: "true", fails the render naming two such entries, and lets Anthropic entries inherit per key from kagent.modelConfigDefaults.anthropic before kagent.providers.anthropic.config. Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-default-model-config.py $(CHART_DIR) $(CONNECTIVITY_DIR)

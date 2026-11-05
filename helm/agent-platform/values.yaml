@@ -3877,8 +3877,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # default-model-config the kagent chart creates from providers.anthropic.
   # An AgentTemplate references a ModelConfig by name (spec.modelConfig).
   # The apiKeySecret must be pre-created in the kagent namespace. `default: true`
-  # labels the entry agent-platform.giantswarm.io/is-default-model-config: "true",
-  # the namespace's default model; at most one entry may set it.
+  # annotates the entry agent-platform.giantswarm.io/is-default-model-config:
+  # "true", the namespace's default model; at most one entry may set it.
   modelConfigs: []
   # - name: anthropic-sonnet
   #   displayName: Anthropic Sonnet 4.6

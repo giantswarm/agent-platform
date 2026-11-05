@@ -948,10 +948,10 @@ under the Gateway's own name.
 {{- end -}}
 
 {{/*
-The label that marks a namespace's default ModelConfig, value "true". At most
-one ModelConfig per namespace carries it (templates/kagent/default-modelconfig-admission.yaml).
+The annotation that marks a namespace's default ModelConfig, value "true".
+More than one marked ModelConfig in a namespace means no default.
 */}}
-{{- define "agent-platform.defaultModelConfigLabel" -}}
+{{- define "agent-platform.defaultModelConfigAnnotation" -}}
 agent-platform.giantswarm.io/is-default-model-config
 {{- end -}}
 

@@ -9,46 +9,28 @@ Render, meta chart:
   release; the connectivity release carries both.
 
 Render, connectivity chart:
-- a kagent.modelConfigs[] entry with default: true carries the label
+- a kagent.modelConfigs[] entry with default: true carries the annotation
   agent-platform.giantswarm.io/is-default-model-config: "true", the others none;
 - two entries with default: true fail the render, naming both;
 - an Anthropic entry inherits promptCaching, cacheTTL and maxTokens per key
   from kagent.modelConfigDefaults.anthropic first, then
   kagent.providers.anthropic.config;
-- with kagent on, the ValidatingAdmissionPolicy
-  agent-platform-default-model-config (Fail, paramKind ModelConfig) and its
-  binding (Deny, paramRef selecting the label in the request namespace,
-  parameterNotFoundAction Allow); none with kagent off.
+- no admission policy holds the marker.
 
-API server (tests/apiserver.py), with the ModelConfig CRD of the
-components.kagent-crds floor and the rendered policy: with one labelled
-ModelConfig in a namespace, a second labelled one is refused on create and on
-update naming the first; an unlabelled one, one labelled "false", the first one
-itself, a labelled one in another namespace and the first namespace after the
-label moved are admitted.
-
-Needs helm (gsoci.azurecr.io), openssl, PyYAML and github.com on the first run
-(the envtest binaries). HELM selects the binary.
+Needs helm and PyYAML. HELM selects the binary.
 
 Usage: verify-default-model-config.py META_CHART CONNECTIVITY_CHART
 """
 import json
 import os
-import re
 import subprocess
 import sys
-import time
 
 import yaml
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from apiserver import APIServer  # noqa: E402
-
 HELM = os.environ.get("HELM", "helm")
-LABEL = "agent-platform.giantswarm.io/is-default-model-config"
-POLICY = "agent-platform-default-model-config"
+ANNOTATION = "agent-platform.giantswarm.io/is-default-model-config"
 KAGENT_NS = "kagent"
-results = []
 
 
 def fail(msg):
@@ -125,10 +107,12 @@ def check_connectivity(chart):
     entries = [entry("a", default=True), entry("b"), entry("c", default=False)]
     objs = docs(connectivity(chart, "--set-json", f"kagent.modelConfigs={json.dumps(entries)}"), "connectivity, one default")
     mcs = model_configs(objs)
-    labels = {n: (m["metadata"].get("labels") or {}).get(LABEL) for n, m in mcs.items()}
-    if labels != {"a": "true", "b": None, "c": None}:
-        fail(f"the default label renders as {labels}, want it on a only")
-    ok("default: true labels the entry, the others carry no label")
+    marks = {n: (m["metadata"].get("annotations") or {}).get(ANNOTATION) for n, m in mcs.items()}
+    if marks != {"a": "true", "b": None, "c": None}:
+        fail(f"the default annotation renders as {marks}, want it on a only")
+    if any(ANNOTATION in (m["metadata"].get("labels") or {}) for m in mcs.values()):
+        fail("the default marker renders as a label")
+    ok("default: true annotates the entry, the others carry no marker")
 
     two = [entry("a", default=True), entry("b", default=True)]
     r = connectivity(chart, "--set-json", f"kagent.modelConfigs={json.dumps(two)}")
@@ -155,113 +139,13 @@ def check_connectivity(chart):
         fail(f"without kagent.providers, modelConfigDefaults.anthropic.maxTokens is not inherited: {got}")
     ok("Anthropic entries inherit per key from modelConfigDefaults.anthropic, then providers.anthropic.config")
 
-    policy = [d for d in objs if d["metadata"]["name"] == POLICY]
-    kinds = {d["kind"]: d for d in policy}
-    if set(kinds) != {"ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding"}:
-        fail(f"{POLICY} renders as {sorted(kinds)}, want a ValidatingAdmissionPolicy and its binding")
-    vap, binding = kinds["ValidatingAdmissionPolicy"]["spec"], kinds["ValidatingAdmissionPolicyBinding"]["spec"]
-    if vap["failurePolicy"] != "Fail" or vap["paramKind"] != {"apiVersion": "api.kagent.dev/v1alpha3", "kind": "ModelConfig"}:
-        fail(f"{POLICY}: failurePolicy {vap['failurePolicy']}, paramKind {vap['paramKind']}")
-    if "namespaceSelector" in vap["matchConstraints"]:
-        fail(f"{POLICY} selects namespaces: {vap['matchConstraints']['namespaceSelector']}, want every namespace")
-    want_ref = {"selector": {"matchLabels": {LABEL: "true"}}, "parameterNotFoundAction": "Allow"}
-    if binding.get("paramRef") != want_ref or binding.get("validationActions") != ["Deny"]:
-        fail(f"{POLICY} binding: paramRef {binding.get('paramRef')}, actions {binding.get('validationActions')}; want {want_ref}, [Deny]")
-    ok(f"{POLICY}: Fail, paramKind ModelConfig, every namespace; binding Deny, the label's params of the request namespace, Allow without one")
-    none = docs(connectivity(chart, "--set", "components.kagent.enabled=false"), "connectivity, kagent off")
-    if any(d["metadata"]["name"] == POLICY for d in none):
-        fail(f"{POLICY} renders with kagent off")
-    ok(f"{POLICY} does not render with kagent off")
-    return policy
-
-
-def crd(meta_chart):
-    values = yaml.safe_load(open(os.path.join(meta_chart, "values.yaml")))
-    component = values["components"]["kagent-crds"]
-    floor = re.match(r"^>=\s*(\S+)", component["versionRange"]).group(1)
-    r = run([HELM, "template", "t", f"{component['repository']}/kagent-crds", "--version", floor])
-    if r.returncode != 0:
-        fail(f"helm template kagent-crds {floor}:\n{r.stderr}")
-    found = [d for d in yaml.safe_load_all(r.stdout) if d and d.get("metadata", {}).get("name") == "modelconfigs.api.kagent.dev"]
-    if not found:
-        fail(f"kagent-crds {floor} carries no modelconfigs.api.kagent.dev")
-    return yaml.safe_dump(found[0])
-
-
-def model_config(name, ns, label=None):
-    labels = {LABEL: label} if label is not None else {}
-    return {"apiVersion": "api.kagent.dev/v1alpha3", "kind": "ModelConfig",
-            "metadata": {"name": name, "namespace": ns, "labels": labels},
-            "spec": {"provider": "Anthropic", "model": "m", "apiKeySecret": "s", "apiKeySecretKey": "k"}}
-
-
-def prove(api, meta_chart, policy):
-    def kubectl(args, stdin=None):
-        return api.kubectl(args, stdin=stdin)
-
-    def must(rc_out, what):
-        if rc_out[0] != 0:
-            fail(f"{what}:\n{rc_out[1]}")
-
-    must(kubectl(["apply", "-f", "-"], crd(meta_chart)), "install the ModelConfig CRD")
-    must(kubectl(["wait", "--for=condition=Established", "crd/modelconfigs.api.kagent.dev", "--timeout=60s"]), "the CRD is established")
-    for ns in (KAGENT_NS, "org-acme"):
-        must(kubectl(["create", "namespace", ns]), f"create namespace {ns}")
-    must(kubectl(["create", "-f", "-"], yaml.safe_dump(model_config("first", KAGENT_NS, "true"))), "create the first labelled ModelConfig")
-    must(kubectl(["apply", "-f", "-"], yaml.safe_dump_all(policy)), "install the policy")
-
-    def create(obj):
-        return kubectl(["create", "--dry-run=server", "-f", "-"], yaml.safe_dump(obj))
-
-    def relabel(name, ns, value):
-        return kubectl(["label", "--dry-run=server", "--overwrite", "-n", ns, "modelconfig.api.kagent.dev", name, f"{LABEL}={value}"])
-
-    refused_create = model_config("second", KAGENT_NS, "true")
-    deadline = time.time() + 60
-    while True:
-        rc, out = create(refused_create)
-        if rc != 0 and f"ValidatingAdmissionPolicy '{POLICY}'" in out:
-            break
-        if time.time() > deadline:
-            fail(f"a second labelled ModelConfig is still admitted 60 s after the policy was installed:\n{out}")
-        time.sleep(1)
-
-    def case(name, rc_out, refused):
-        rc, out = rc_out
-        good = (rc != 0 and f"ValidatingAdmissionPolicy '{POLICY}'" in out and "denied request" in out
-                and "already has a default ModelConfig, first" in out and "failed expression" not in out) if refused else rc == 0
-        results.append((good, name))
-        print(("ok:  " if good else "FAIL:"), name, "|", out.strip().splitlines()[-1] if out.strip() else "")
-
-    must(kubectl(["create", "-f", "-"], yaml.safe_dump(model_config("plain", KAGENT_NS))), "create an unlabelled ModelConfig")
-    case("a second labelled ModelConfig in the namespace is refused, naming the first", create(refused_create), True)
-    case("labelling an existing ModelConfig the second default is refused", relabel("plain", KAGENT_NS, "true"), True)
-    case("an unlabelled ModelConfig is admitted", create(model_config("other", KAGENT_NS)), False)
-    case("a ModelConfig labelled \"false\" is admitted", create(model_config("other", KAGENT_NS, "false")), False)
-    case("the labelled ModelConfig itself is updated", kubectl(["annotate", "--dry-run=server", "-n", KAGENT_NS, "modelconfig.api.kagent.dev", "first", "x=y"]), False)
-    case("a labelled ModelConfig in another namespace is admitted", create(model_config("second", "org-acme", "true")), False)
-    must(kubectl(["label", "-n", KAGENT_NS, "modelconfig.api.kagent.dev", "first", f"{LABEL}-"]), "remove the label from the first")
-    deadline = time.time() + 60
-    while relabel("plain", KAGENT_NS, "true")[0] != 0:
-        if time.time() > deadline:
-            fail("the default does not move once the label left the first ModelConfig")
-        time.sleep(1)
-    case("the default moves once the label left the first ModelConfig", relabel("plain", KAGENT_NS, "true"), False)
-
+    if any(d.get("kind") in ("ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding") and "default-model" in d["metadata"]["name"] for d in objs):
+        fail("an admission policy holds the default marker")
+    ok("no admission policy holds the default marker")
 
 def main():
-    meta_chart, conn_chart = sys.argv[1], sys.argv[2]
-    check_meta(meta_chart)
-    policy = check_connectivity(conn_chart)
-    api = APIServer()
-    try:
-        prove(api, meta_chart, policy)
-    finally:
-        api.stop()
-    failed = [n for good, n in results if not good]
-    if failed:
-        fail(f"{len(failed)} case(s): {failed}")
-    print(f"ok:  {len(results)} admission cases")
+    check_meta(sys.argv[1])
+    check_connectivity(sys.argv[2])
 
 
 if __name__ == "__main__":
