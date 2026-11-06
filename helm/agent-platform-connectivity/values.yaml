@@ -544,15 +544,12 @@ gatewayApi:
 # `x-api-key` header passes through untouched, so reach to the listener grants
 # no spend.
 #
-# Two values turn it on, and the order matters:
-#   1. llmRouting.enabled: true  — renders the `llm` listener on the data-plane
-#      Gateway plus the AgentgatewayModels attached to it (llmRouting.models)
-#      that carry the traffic, and the model-price ConfigMap. Nothing routes
-#      through it yet.
-#   2. kagent.providers.anthropic.config.baseUrl:
-#        http://<gateway.name>.<release namespace>.svc:<llmRouting.listener.port>
-#      — points kagent's default ModelConfig at the listener. This is the
-#      cutover; rollback is the removal of this second value.
+# llmRouting.enabled: true renders the `llm` listener on the data-plane Gateway
+# plus the AgentgatewayModels attached to it (llmRouting.models) that carry the
+# traffic, and the model-price ConfigMap. A ModelConfig of a served provider
+# without a baseUrl of its own takes the listener as its baseUrl at its next
+# create or update (llmRouting.modelConfigPolicy). Rollback is
+# llmRouting.enabled: false: the reconcile hook takes that baseUrl off again.
 # Requires the agentgateway component, in front of muster. The
 # render fails when llmRouting.enabled is true and that component is off.
 llmRouting:
@@ -583,8 +580,7 @@ llmRouting:
   # whose `match` takes the model wins, so a `*` entry would shadow every model
   # named after it — a served model (model-manager, the LLMEndpoint
   # document) joins under its preset's name. Every entry's provider rides the
-  # listener: its ModelConfigs (kagent.modelConfigs, modelConfigPolicy) get
-  # the listener as baseUrl. An OpenAI entry serves the Responses route
+  # listener: its ModelConfigs get the listener as baseUrl (modelConfigPolicy). An OpenAI entry serves the Responses route
   # (/v1/responses) a codex agent calls, metered and rate-limited like the
   # rest:
   #   - name: openai
@@ -674,10 +670,9 @@ llmRouting:
         matchLabels: {}  # @schema additionalProperties: {"type": "string"}
       configMapSelector:
         matchLabels: {}  # @schema additionalProperties: {"type": "string"}
-  # A MutatingAdmissionPolicy that sends a ModelConfig this chart does NOT
-  # render through the LLM listener — one created by Backstage, agent-manager or
-  # kubectl. Chart-owned entries already carry the baseUrl (kagent.modelConfigs
-  # below), so the policy never touches them. One policy per provider of
+  # A MutatingAdmissionPolicy that sends a ModelConfig through the LLM
+  # listener, whoever declares it: GitOps, Backstage, agent-manager or
+  # kubectl. One policy per provider of
   # llmRouting.models; each writes only when the ModelConfig's provider is its
   # own and the baseUrl is absent (an OpenAI ModelConfig gets the listener's
   # URL with /v1). An object that names its own baseUrl is never touched.
@@ -1480,19 +1475,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     seccompProfile:
       type: RuntimeDefault
 
-  # Model provider — Anthropic by default.
-  # Set kagent.providers.anthropic.apiKey in the per-cluster secret values
-  # (SOPS-encrypted). When apiKey is set alongside apiKeySecretRef, the chart
-  # creates the Secret automatically — no manual pre-creation needed.
-  providers:
-    default: anthropic
-    anthropic:
-      provider: Anthropic
-      model: claude-sonnet-5-5
-      apiKeySecretRef: kagent-anthropic
-      apiKeySecretKey: ANTHROPIC_API_KEY
-      apiKey: ""  # Set per-cluster in secret-values; chart creates the Secret
-
   # OTel — traces and logs to the GS Observability Platform OTLP gateway, the
   # kagent chart's SDK-spec shape (the meta chart's kagent.otel). This chart
   # reads it for the OTLP egress rules of the kagent controller and the
@@ -1856,68 +1838,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # in-cluster URL (its value muster.url; agent-manager composes it from the
   # agent-platform.musterMcpUrl helper's value), the toolset header, the
   # discovery opt-out label — and binds it.
-
-  # Additional ModelConfig CRs — the model catalog beyond the
-  # default-model-config the kagent chart creates from providers.anthropic.
-  # An AgentTemplate references a ModelConfig by name (spec.modelConfig).
-  # The apiKeySecret must be pre-created in the kagent namespace.
-  modelConfigs: []
-  # - name: anthropic-sonnet
-  #   displayName: Anthropic Sonnet 4.6
-  #   # One of the ModelConfig CRD's providers, in its spelling: Anthropic,
-  #   # OpenAI, AzureOpenAI, Ollama, Gemini, GeminiVertexAI, AnthropicVertexAI,
-  #   # Bedrock, SAPAICore, Foundry, Mistral. Any other value fails the render.
-  #   provider: Anthropic
-  #   model: claude-sonnet-4-6
-  #   apiKeySecret: kagent-anthropic
-  #   apiKeySecretKey: ANTHROPIC_API_KEY
-  #   # Optional. An explicit upstream for this entry. Leave it unset: with
-  #   # llmRouting.enabled the chart fills in the LLM listener, so the gateway
-  #   # meters this model's usage. Set it to reach a different upstream: the
-  #   # provider's own URL is how a model stays on the direct, unmetered path.
-  #   # An entry whose provider no llmRouting.models entry serves stays direct
-  #   # either way; an OpenAI entry's listener URL ends in /v1. Only the
-  #   # Anthropic, Mistral, OpenAI and SAPAICore providers carry a baseUrl in
-  #   # ModelConfigSpec, under the CRD's block key (anthropic, mistral, openAI,
-  #   # sapAICore); the render fails for a baseUrl on any other provider.
-  #   baseUrl: http://agentgateway.<release namespace>.svc:8081
-  #   # Optional (Anthropic and Bedrock). An
-  #   # Anthropic entry that sets neither inherits the platform's default from
-  #   # kagent.providers.anthropic.config (the meta chart turns promptCaching
-  #   # on there); an entry's own values win, `false` included. Any other
-  #   # provider refuses the keys: ModelConfigSpec has none for it.
-  #   promptCaching: true
-  #   cacheTTL: "5m"   # or "1h"
-  #   # Optional (Anthropic, AnthropicVertexAI, AzureOpenAI, Mistral, OpenAI).
-  #   # The output bound, thinking included. An Anthropic entry without it
-  #   # inherits kagent.providers.anthropic.config.maxTokens; unset everywhere,
-  #   # kagent's built-in 8192 applies. Any other provider refuses the key.
-  #   maxTokens: 32000
-  #   # Optional (OpenAI). The OpenAI HTTP API the runtime speaks:
-  #   # chatCompletions (the CRD's default) or responses. A model a codex agent
-  #   # uses needs responses and no maxTokens: the codex compiler refuses any
-  #   # other OpenAI option. Any other provider refuses the key.
-  #   apiFormat: responses
-  #   # Optional (OpenAI). What apiKeySecret holds: apiKey (the CRD's default)
-  #   # or chatgptOAuth, a ChatGPT subscription login (docs/chatgpt-login.md).
-  #   # chatgptOAuth renders no apiKeySecretKey, needs apiFormat: responses,
-  #   # and stays off the LLM listener. Any other provider refuses the key.
-  #   # chatgptOAuth without apiKeySecret is the Session person's own login
-  #   # ("ChatGPT (your subscription)", the default displayName): it renders
-  #   # only beside kagent.controller.session.actorJWTProviders.chatgpt, which
-  #   # the meta chart derives from the entry.
-  #   credentialType: chatgptOAuth
-  # - name: openai-gpt-5-5   # a codex model, through the llm listener's
-  #   provider: OpenAI       # OpenAI entry (llmRouting.models)
-  #   model: gpt-5.5
-  #   apiKeySecret: kagent-openai
-  #   apiKeySecretKey: OPENAI_API_KEY
-  #   apiFormat: responses
-  # - name: chatgpt-subscription   # a codex model on the ChatGPT subscription
-  #   provider: OpenAI              # the Session's person connected in muster
-  #   model: gpt-5.6-luna           # (docs/chatgpt-login.md)
-  #   credentialType: chatgptOAuth
-  #   apiFormat: responses
 
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
@@ -2943,7 +2863,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.17.31
+      tag: 2.20.4
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
@@ -3164,18 +3084,15 @@ tenants:
 #     organization's UID prefix of the bucket only, named on the operator's
 #     ServiceAccount (IRSA). The capz and s3proxy stores give the operator no
 #     snapshot access yet: there the erasure stops at the snapshots' step;
-#   - the ConfigMap agent-platform-operator-ate-api-ca (the substrate bootstrap
-#     hook), ate-api-server's serving roots, which the operator verifies it
-#     with.
+#   - ate-api-server's serving roots, which the operator verifies it with:
+#     the ClusterTrustBundles of servicedns.podcert.ate.dev/identity
+#     labelled podcert.ate.dev/canarying: live, projected into its pod.
 # The operator's own values are the agent-platform-operator block below.
-# agent-manager's chart keeps its tenants.enabled off: its tenant reconciler is
-# gone (tenants.organizations, the namespaces labelled giantswarm.io/organization,
-# is removed; giantswarm/agent-platform#1268), and the connectivity chart renders
-# the ClusterRole agent-platform-tenant-flux the operator binds.
+# This chart renders the ClusterRole agent-platform-tenant-flux the operator
+# binds; agent-manager's chart (2.20.0 and later) leaves it to this one.
 # The switch is the rollout gate, off by default for now: it turns on by default
-# once the capz and s3proxy snapshot stores give the operator access, the kagent
-# line carries giantswarm/kagent-extensions#27, and an operator release with
-# giantswarm/agent-platform-operator#10 (commit mode) is the range's floor.
+# once the capz and s3proxy snapshot stores give the operator access and the
+# kagent line carries giantswarm/kagent-extensions#27.
 # Before you turn this on in an installation: the kagent line must carry
 # giantswarm/kagent-extensions#27 (kagent reviews a delete of another
 # creator's Session as a cluster-wide `delete`); until it does, the erasure of

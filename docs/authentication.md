@@ -40,7 +40,7 @@ muster aggregates many MCP servers behind `/mcp`. Each server entry in `agent-pl
 | `forward` | The server trusts the issuer the caller signed in with (typically the same cluster). | The person's bearer goes through unchanged. |
 | `exchange` | The server sits behind a different issuer (another cluster's Dex). | muster performs an [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) token exchange at that issuer's token endpoint, with the client credentials of the `identityProviders.<provider>` entry. |
 
-muster signs no tokens of its own: every downstream server validates against Dex. A kagent agent acts as the person who invoked it: the Harness propagates that person's token (`KAGENT_PROPAGATE_TOKEN`) as the only `Authorization` reaching muster. model-manager, agent-manager and mcp-kubernetes receive the person's token with the audience `dex-k8s-authenticator` and act on the cluster with that person's RBAC (install.md, [The identity provider](install.md#the-identity-provider)).
+muster signs no tokens of its own: every downstream server validates against Dex. A kagent agent acts as the person who started its Session: agent-manager binds the Session's Actor to that person at muster, and the egress gateway puts the Actor's JWT on every call to muster, which serves it as the bound person. The runtime never holds or forwards the person's token: the Harness sets no `KAGENT_PROPAGATE_TOKEN`, so no MCP server receives it, and muster refuses a Session nobody bound. model-manager, agent-manager and mcp-kubernetes receive the person's token with the audience `dex-k8s-authenticator` and act on the cluster with that person's RBAC (install.md, [The identity provider](install.md#the-identity-provider)).
 
 ## 4. Edge JWT validation and JWKS
 

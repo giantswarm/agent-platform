@@ -63,6 +63,26 @@ place.
 {{- dict "name" "agent-platform-operator" "namespace" .Release.Namespace | toJson -}}
 {{- end -}}
 
+{{/*
+The Secret readers of Substrate's credential providers the operator binds in
+every organization namespace (its serviceAccountBindings, derived by the meta
+chart; giantswarm/agent-platform#1269), as a JSON map "<namespace>/<name>" of
+the provider's ServiceAccount -> its Secret reader ClusterRole: Substrate's
+bundled provider (release substrate) and the Google access-token plugin
+(release google-access-token-credential-provider), both in Substrate's
+namespace. The operator names each RoleBinding after its ClusterRole. With
+Substrate 1.18 and the plugin 0.3 those releases bind their readers in the
+platform namespace only, so these bindings are what lets a provider read an
+organization's credential Secrets, and nothing else may write them.
+*/}}
+{{- define "agent-platform.organizations.secretReaders" -}}
+{{- $ns := include "agent-platform.substrate.namespace" . -}}
+{{- dict
+      (printf "%s/k8s-credential-provider" $ns) "k8s-credential-provider-secret-reader"
+      (printf "%s/google-access-token-credential-provider" $ns) "google-access-token-credential-provider-secret-reader"
+    | toJson -}}
+{{- end -}}
+
 {{/* The labels of agent-platform-operator's pods (the operator chart's selector labels). */}}
 {{- define "agent-platform.organizations.operatorPodLabels" -}}
 app.kubernetes.io/name: agent-platform-operator
@@ -111,14 +131,4 @@ never a list of names.
 matchExpressions:
   - key: {{ include "agent-platform.organizations.label" . }}
     operator: Exists
-{{- end -}}
-
-{{/*
-The ConfigMap agent-platform-operator reads ate-api-server's serving roots
-from, as JSON {name, namespace}: the substrate bootstrap hook writes it
-(substrate/bootstrap.yaml), the meta chart names it in the operator's
-erasure.substrate.caConfigMap.
-*/}}
-{{- define "agent-platform.organizations.ateApiCa" -}}
-{{- dict "name" "agent-platform-operator-ate-api-ca" "namespace" .Release.Namespace | toJson -}}
 {{- end -}}

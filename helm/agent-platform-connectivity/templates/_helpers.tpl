@@ -210,6 +210,23 @@ the root schema rejects it already.
 {{- end -}}
 
 {{/*
+The kagent block takes any key (its schema skips properties), so a removed
+model key would pass the schema and render nothing in silence; refused here
+instead.
+*/}}
+{{- define "agent-platform.validateRemovedModelKeys" -}}
+{{- $found := list -}}
+{{- range list "providers" "modelConfigs" -}}
+{{- if hasKey ($.Values.kagent | default dict) . -}}
+{{- $found = append $found (printf "kagent.%s" .) -}}
+{{- end -}}
+{{- end -}}
+{{- with $found -}}
+{{- fail (printf "%s: removed, the chart declares no model. Declare each model as a ModelConfig object (api.kagent.dev/v1alpha3) in GitOps next to the agents, and annotate the namespace's default agent-platform.giantswarm.io/is-default-model-config: \"true\"; remove the keys from the values (see UPGRADE.md)" (join ", " .)) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Name of the AgentgatewayParameters CR — defaults to release name.
 */}}
 {{- define "agent-platform.parametersName" -}}
@@ -727,7 +744,7 @@ provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
 {{- end -}}
 
 {{/*
-Truthy when this chart routes the ModelConfigs it does not render, routing on
+Truthy when this chart routes ModelConfigs through the LLM listener, routing on
 or off: kagent is a component, the modelconfig-llm-routing policies are wanted
 (llmRouting.modelConfigPolicy) and the API server serves their GA group. With
 routing on the policies render (templates/llm/modelconfig-policy.yaml); either
@@ -832,9 +849,9 @@ validateLlmRouting holds it to exactly one.
 The providers whose ModelConfigs ride the LLM listener, as a JSON list: every
 llmRouting.models entry's provider that has a baseUrl in ModelConfigSpec
 (agent-platform.modelConfigBaseUrlKey), lower-cased, once each, in the entries'
-order (["anthropic","openai"]). kagent.modelConfigs entries and the
-MutatingAdmissionPolicies point a ModelConfig of such a provider at the
-listener; a ModelConfig of any other provider keeps its own path.
+order (["anthropic","openai"]). The MutatingAdmissionPolicies point a
+ModelConfig of such a provider at the listener; a ModelConfig of any other
+provider keeps its own path.
 Usage: include "agent-platform.llmRouting.providers" . | fromJsonArray
 */}}
 {{- define "agent-platform.llmRouting.providers" -}}
@@ -948,22 +965,6 @@ under the Gateway's own name.
 {{- end -}}
 
 {{/*
-The spec.provider of a kagent.modelConfigs[] entry, checked against the
-ModelConfig CRD's enum (api.kagent.dev/v1alpha3). The enum is case-sensitive and
-the API server refuses any other value at admission, after the render has said
-nothing; failing here names the entry and the eleven values instead. Takes the
-entry.
-*/}}
-{{- define "agent-platform.modelConfigProvider" -}}
-{{- $enum := list "Anthropic" "OpenAI" "AzureOpenAI" "Ollama" "Gemini" "GeminiVertexAI" "AnthropicVertexAI" "Bedrock" "SAPAICore" "Foundry" "Mistral" -}}
-{{- $provider := required "kagent.modelConfigs[].provider is required" .provider -}}
-{{- if not (has $provider $enum) -}}
-{{- fail (printf "kagent.modelConfigs[].provider %q on %q is not a ModelConfig provider; the CRD's enum is %s (case-sensitive)" $provider .name (join ", " $enum)) -}}
-{{- end -}}
-{{- $provider -}}
-{{- end -}}
-
-{{/*
 Key of the ModelConfigSpec provider block that carries baseUrl, for a
 spec.provider value in any case (the CRD's spelling from a catalog entry, the
 lower-cased provider of agent-platform.llmRouting.provider). The key is not
@@ -976,43 +977,6 @@ Emits nothing for every other provider (empty string = falsy).
 {{- define "agent-platform.modelConfigBaseUrlKey" -}}
 {{- $keys := dict "anthropic" "anthropic" "mistral" "mistral" "openai" "openAI" "sapaicore" "sapAICore" -}}
 {{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
-{{- end -}}
-
-{{/*
-Key of the ModelConfigSpec provider block that carries promptCaching and
-cacheTTL, for a spec.provider value in any case: Anthropic (anthropic) and
-Bedrock (bedrock), the two providers whose adapters mark cache_control
-breakpoints (the kagent line's carried patch kagent-dev/kagent#2788). Emits nothing
-for every other provider (empty string = falsy): the API server would prune the
-fields at admission and the model would stay uncached in silence, so the
-template refuses them instead.
-*/}}
-{{- define "agent-platform.modelConfigCacheKey" -}}
-{{- $keys := dict "anthropic" "anthropic" "bedrock" "bedrock" -}}
-{{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
-{{- end -}}
-
-{{/*
-Key of the ModelConfigSpec provider block that carries maxTokens, for a
-spec.provider value in any case: Anthropic, AnthropicVertexAI, AzureOpenAI,
-Mistral and OpenAI. Emits nothing for every other provider (empty string =
-falsy): the API server would prune the field and the model would answer at
-kagent's own default in silence, so the template refuses it instead.
-*/}}
-{{- define "agent-platform.modelConfigMaxTokensKey" -}}
-{{- $keys := dict "anthropic" "anthropic" "anthropicvertexai" "anthropicVertexAI" "azureopenai" "azureOpenAI" "mistral" "mistral" "openai" "openAI" -}}
-{{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
-{{- end -}}
-
-{{/*
-Key of the ModelConfigSpec provider block that carries apiFormat (the OpenAI
-HTTP API the runtime speaks: chatCompletions, the CRD's default, or responses,
-which codex requires), for a spec.provider value in any case: OpenAI only.
-Emits nothing for every other provider (empty string = falsy), which the
-template refuses rather than letting the API server prune the field.
-*/}}
-{{- define "agent-platform.modelConfigApiFormatKey" -}}
-{{- if eq (lower .) "openai" -}}openAI{{- end -}}
 {{- end -}}
 
 {{/*

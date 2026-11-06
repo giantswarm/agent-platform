@@ -68,6 +68,7 @@ spec:
     mcp:
       enabled: true
     muster:
+      actorBearer: true
       mcpServer:
         auth:
           forwardToken: true
@@ -96,9 +97,10 @@ spec:
       interval: 60s
       labels:
         observability.giantswarm.io/tenant: giantswarm
+    skillManager:
+      url: http://skill-manager.default.svc.cluster.local:8080
     skills:
-      repositories:
-      - https://github.com/giantswarm/agent-skills
+      repositories: []
     tenants:
       enabled: false
 ---
@@ -197,7 +199,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.17.31
+          tag: 2.20.4
       networkPolicy:
         egress:
           cidrs: []
@@ -229,6 +231,10 @@ spec:
           name: giantswarm-default
           namespace: envoy-gateway-system
         pathPrefix: /agent-manager
+      skillManager:
+        namespace: default
+        serviceTokenSecret: skill-manager-service-token
+        url: http://skill-manager.default.svc.cluster.local:8080
     agentPlatformOrganizations:
       apiHostnames: []
       enabled: false
@@ -727,9 +733,7 @@ spec:
           eventRetentionSize: 4
           tokenThreshold: 600000
         create: true
-        env:
-        - name: KAGENT_PROPAGATE_TOKEN
-          value: "true"
+        env: []
         image: ""
         snapshotLocation: s3://ci-agent-snapshots/agents
         snapshotStore:
@@ -783,7 +787,6 @@ spec:
                 ephemeral-storage: 256Mi
                 memory: 1Gi
       harnesses: []
-      modelConfigs: []
       namespaceOverride: kagent
       oauth2-proxy:
         config:
@@ -859,17 +862,6 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      providers:
-        anthropic:
-          apiKey: ""
-          apiKeySecretKey: ANTHROPIC_API_KEY
-          apiKeySecretRef: kagent-anthropic
-          config:
-            cacheTTL: 5m
-            promptCaching: true
-          model: claude-sonnet-5-5
-          provider: Anthropic
-        default: anthropic
       registry: gsoci.azurecr.io
       remoteMcpServers: []
       securityContext:
@@ -1974,6 +1966,9 @@ spec:
     - allowedNamespaces:
       - kagent
       atespace: ate-golden
+    rbac:
+      namespaces:
+      - kagent
     substrate:
       namespace: ate-system
       releaseName: substrate
@@ -2135,9 +2130,7 @@ spec:
         eventRetentionSize: 4
         tokenThreshold: 600000
       create: true
-      env:
-      - name: KAGENT_PROPAGATE_TOKEN
-        value: "true"
+      env: []
       snapshotLocation: s3://ci-agent-snapshots/agents
     harnesses: []
     namespaceOverride: kagent
@@ -2215,17 +2208,7 @@ spec:
       runAsNonRoot: true
       seccompProfile:
         type: RuntimeDefault
-    providers:
-      anthropic:
-        apiKey: ""
-        apiKeySecretKey: ANTHROPIC_API_KEY
-        apiKeySecretRef: kagent-anthropic
-        config:
-          cacheTTL: 5m
-          promptCaching: true
-        model: claude-sonnet-5-5
-        provider: Anthropic
-      default: anthropic
+    providers: false
     registry: gsoci.azurecr.io
     securityContext:
       allowPrivilegeEscalation: false
@@ -2260,7 +2243,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.17.5
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.18.0
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -2527,10 +2510,12 @@ spec:
   install:
     createNamespace: true
     crds: CreateReplace
+    disableWait: true
     remediation:
       retries: 5
   upgrade:
     crds: CreateReplace
+    disableWait: true
     remediation:
       retries: 5
   driftDetection:
@@ -2578,6 +2563,12 @@ spec:
     image:
       registry: gsoci.azurecr.io
     muster:
+      credentialProvider:
+        actorBearer:
+          enabled: true
+          issuer: https://idp.ate-system.svc
+        enabled: true
+        gatewayIdentity: spiffe://cluster.local/ns/ate-system/sa/atenet-egress
       oauth:
         server:
           baseUrl: ""
@@ -2717,7 +2708,8 @@ spec:
           - dex-k8s-authenticator
         enabled: true
     networkPolicy:
-      ingressNamespaces: []
+      ingressNamespaces:
+      - kagent
     oauth:
       dex:
         allowPrivateURLs: true
@@ -2729,6 +2721,8 @@ spec:
         endpoint: http://otlp-gateway.kube-system.svc:4317
         headers: X-Scope-OrgID=giantswarm
         protocol: grpc
+    serviceToken:
+      secretName: skill-manager-service-token
     sources:
     - path: skills
       readOnly: true
@@ -2824,6 +2818,9 @@ spec:
       - allowedNamespaces:
         - kagent
         atespace: ate-golden
+      rbac:
+        namespaces:
+        - kagent
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/substrate
@@ -3109,7 +3106,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=2.16.0 <2.19.0"
+    semver: ">=2.20.0 <3.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3270,7 +3267,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=0.2.0 <0.3.0"
+    semver: ">=0.3.0 <0.4.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3293,7 +3290,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.29.0 <1.30.0"
+    semver: ">=1.31.0 <1.32.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3316,7 +3313,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.29.0 <1.30.0"
+    semver: ">=1.31.0 <1.32.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3385,7 +3382,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=5.52.5 <6.0.0"
+    semver: ">=5.58.0 <6.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3431,7 +3428,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.17.5 <1.18.0"
+    semver: ">=1.18.0 <1.19.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3454,7 +3451,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.17.5 <1.18.0"
+    semver: ">=1.18.0 <1.19.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

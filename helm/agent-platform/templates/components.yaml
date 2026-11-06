@@ -72,7 +72,7 @@ knowledge:
   omitKeys      — keys dropped from the forwarded block, top-level or dotted
       paths (agent-platform.omitPath; a parent emptied by the drop goes too).
       For a component whose block holds a key that belongs to THIS umbrella
-      rather than to the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs
+      rather than to the chart (e.g. kagent's controllerRoute/uiRoute
       and harness.snapshotStore, which only the connectivity chart reads), and
       whose chart validates values with additionalProperties: false and would
       reject it — or, without a schema, would carry a block it never reads
@@ -244,6 +244,7 @@ knowledge:
 {{- include "agent-platform.validateLegacyToggles" . -}}
 {{- include "agent-platform.validateRemovedComponents" . -}}
 {{- include "agent-platform.validateRemovedBackstageKeys" . -}}
+{{- include "agent-platform.validateRemovedModelKeys" . -}}
 {{- include "agent-platform.validateMusterRoute" . -}}
 {{- include "agent-platform.validateKagentCrds" . -}}
 {{- include "agent-platform.validateKagentSubcharts" . -}}
@@ -368,6 +369,15 @@ nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- /* Derived values win over the block's own copy (the helper fails the
 render when the two disagree). */ -}}
 {{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
+{{- /* The kagent chart renders no default-model-config, and deletes the one
+it rendered: models are ModelConfig objects declared next to the agents.
+false, not null: Helm's upgrade patch turns a null into a delete, which brings
+back the kagent chart's own providers default, and {} merges that default back
+in. false wins over the chart's map in coalescing and fails its
+`if .Values.providers` gate. */ -}}
+{{- if eq $key "kagent" }}
+{{- $_ := set $vals "providers" false }}
+{{- end }}
 {{- end }}
 {{- /* On the mirror, every source reference of the release's values moves there.
 The connectivity chart's model-serving presets name their runtime and model

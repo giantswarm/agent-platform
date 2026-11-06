@@ -12,7 +12,10 @@ The meta chart's render:
   kagent namespace, the workers' policies of the flavor, the agent chart line,
   the curated copies, the snapshot bucket, the erasure's targets, audiences and
   CA ConfigMap, the Flux namespace, and with the AWS store the IRSA role the
-  connectivity chart renders); agent-manager's tenant reconciler off;
+  connectivity chart renders); agent-manager's organization tools on
+  (tenants.enabled, with an agent-manager floor of 2.20.0, whose chart leaves
+  agent-platform-tenant-flux to the connectivity chart) with devPortal.url from
+  the installed portal;
   Substrate's credential provider reading
   the organization namespaces by the new label;
 - tenants.organizations is refused by the schema (the tenants mode is gone);
@@ -49,6 +52,7 @@ github.com (the envtest binaries, cached in .bin/).
 Usage: verify-organization-namespaces.py META_CHART CONNECTIVITY_CHART
 """
 
+import json
 import os
 import re
 import subprocess
@@ -118,7 +122,8 @@ def meta(chart, *extra):
                 *MAP_API, *extra])
 
 
-ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "agentPlatformOrganizations.fluxNamespace=flux-giantswarm"]
+SWITCH = ["--set", "agentPlatformOrganizations.enabled=true"]
+ON = [*SWITCH, "--set", "agentPlatformOrganizations.fluxNamespace=flux-giantswarm", "--set", "agentPlatformOrganizations.fluxSource.name=giantswarm-config"]
 AWS = ["--set", "kagent.harness.snapshotLocation=", "--set", "kagent.harness.snapshotStore.crossplane.enabled=true",
        "--set", "kagent.harness.snapshotStore.crossplane.provider=aws", "--set", "kagent.harness.snapshotStore.crossplane.providerConfigRef=ci",
        "--set", "kagent.harness.snapshotStore.crossplane.region=eu-west-1",
@@ -160,17 +165,60 @@ def check_meta(chart):
     expect(e["kagent"] == {"target": "grpc://kagent-controller.kagent.svc:8083", "audience": "kagent"},
            "the erasure reaches the kagent controller's API Service with kagent's machine audience")
     expect(e["substrate"] == {"target": "grpcs://api.ate-system.svc:443", "audience": "api.ate-system.svc",
-                              "caConfigMap": {"name": "agent-platform-operator-ate-api-ca", "key": "ca.crt"}},
-           "the erasure reaches ate-api with the audience its authentication config accepts and the CA the bootstrap hook publishes")
+                              "caClusterTrustBundle": {"signerName": "servicedns.podcert.ate.dev/identity",
+                                                       "matchLabels": {"podcert.ate.dev/canarying": "live"}}},
+           "the erasure reaches ate-api with the audience its authentication config accepts and trusts the ClusterTrustBundles its serving certificate's signer publishes")
     hook = [d for d in docs(connectivity(f"{chart}/../agent-platform-connectivity")) if d["kind"] == "Job" and "substrate-bootstrap" in d["metadata"]["name"]]
-    script = yaml.safe_dump(hook)
-    expect(hook and f"create configmap \"{e['substrate']['caConfigMap']['name']}\" --from-file={e['substrate']['caConfigMap']['key']}=" in script.replace("\\\"", "\"")
-           and f"-n \"{op['targetNamespace']}\"" in script.replace("\\\"", "\""),
-           "the bootstrap hook writes the CA ConfigMap and key the operator mounts, in the operator's namespace")
-    expect(find(docs(connectivity(f"{chart}/../agent-platform-connectivity")), "ClusterRole", "agent-platform-tenant-flux") is not None,
+    script = "\n".join(arg for d in hook for c in d["spec"]["template"]["spec"]["containers"] for arg in c.get("command", []) + c.get("args", []))
+    expect(hook and 'trust_bundle "$pc_ns" service-dns-ca-pool servicedns.podcert.ate.dev/identity' in script
+           and "agent-platform-operator-ate-api-ca" not in script,
+           "the bootstrap hook publishes the signer's ClusterTrustBundle the operator projects, and copies no CA ConfigMap")
+    conn_chart = f"{chart}/../agent-platform-connectivity"
+    expect(find(docs(connectivity(conn_chart)), "ClusterRole", "agent-platform-tenant-flux") is not None,
            "on, the connectivity chart renders agent-platform-tenant-flux, which the operator binds")
+    expect(find(docs(connectivity(conn_chart, "kubernetes", "--set", "components.agent-manager.enabled=true", "--set", "agent-manager.oauth.enabled=false")),
+                "ClusterRole", "agent-platform-tenant-flux") is not None,
+           "on with agent-manager on, the connectivity chart still renders agent-platform-tenant-flux: no other release takes it over")
     am = release(on, "agent-manager")["values"]
-    expect(am.get("tenants") == {"enabled": False}, "agent-manager's tenant reconciler is off while the operator runs")
+    expect(am.get("tenants") == {"enabled": True}, "on, agent-manager serves the organization tools (tenants.enabled true)")
+    expect("devPortal" not in am, "on with components.backstage off, no devPortal.url is derived")
+    expect(release(off, "agent-manager")["values"].get("tenants") == {"enabled": False} and "devPortal" not in release(off, "agent-manager")["values"],
+           "off, agent-manager's tenants.enabled is false and no devPortal.url is derived")
+    portal = ["--set", "components.backstage.enabled=true"]
+    for extra, url in (([], "https://backstage.ci.example.com"),
+                       (["--set", "backstage.hostname=portal.example.com"], "https://portal.example.com"),
+                       (["--set", "agent-manager.devPortal.url=https://backstage.ci.example.com/"], "https://backstage.ci.example.com")):
+        am = release(docs(meta(chart, *ON, *portal, *extra)), "agent-manager")["values"]
+        expect(am.get("devPortal") == {"url": url}, f"on with the portal installed ({extra}), agent-manager's devPortal.url is {url}")
+    am = release(docs(meta(chart, *ON, "--set", "agent-manager.devPortal.url=https://portal.elsewhere.example.com")), "agent-manager")["values"]
+    expect(am.get("devPortal") == {"url": "https://portal.elsewhere.example.com"},
+           "on with components.backstage off, an own devPortal.url (a portal installed apart) travels unchanged")
+    expect(v["commitMode"] == {"sourceRef": {"kind": "GitRepository", "name": "giantswarm-config"},
+                               "path": "./agent-platform/organizations/{parent}/{name}", "decryptionSecret": "sops-keys"},
+           f"with fluxNamespace, the operator's commit mode follows fluxSource, fluxPathPrefix and fluxDecryptionSecret ({v.get('commitMode')})")
+    own_cm = release(docs(meta(chart, *ON, "--set", "agent-platform-operator.commitMode.interval=5m",
+                               "--set", "agent-platform-operator.commitMode.installationKustomization.name=agent-platform",
+                               "--set", "agentPlatformOrganizations.fluxSource.kind=OCIRepository",
+                               "--set", "agentPlatformOrganizations.fluxPathPrefix=./orgs/",
+                               "--set", "agentPlatformOrganizations.fluxDecryptionSecret=")), "agent-platform-operator")["values"]["commitMode"]
+    expect(own_cm.get("interval") == "5m" and own_cm.get("installationKustomization", {}).get("name") == "agent-platform"
+           and own_cm["sourceRef"] == {"kind": "OCIRepository", "name": "giantswarm-config"}
+           and own_cm["path"] == "./orgs/{parent}/{name}" and own_cm["decryptionSecret"] == "",
+           f"an own commitMode.interval and installationKustomization travel beside the derived source, path and key ({own_cm})")
+    no_flux = release(docs(meta(chart, *SWITCH)), "agent-platform-operator")["values"]
+    expect("commitMode" not in no_flux or not no_flux["commitMode"].get("sourceRef", {}).get("name"),
+           "without fluxNamespace the operator gets no commit mode")
+    org_selector = {"matchExpressions": [{"key": NEW, "operator": "Exists"}]}
+    muster = release(on, "muster")["values"]["muster"]
+    expect(muster.get("mcpServerNamespaceSelector") == org_selector,
+           f"on, muster serves the MCPServers of the namespaces labelled {NEW} (mcpServerNamespaceSelector)")
+    expect("mcpServerNamespaceSelector" not in release(off, "muster")["values"].get("muster", {}),
+           "off, muster gets no namespace selector and serves its own namespace only")
+    own = {"matchLabels": {"team": "a"}}
+    muster = release(docs(meta(chart, "--set-json", f"muster.muster.mcpServerNamespaceSelector={json.dumps(own)}")), "muster")["values"]["muster"]
+    expect(muster.get("mcpServerNamespaceSelector") == own, "off, an own muster namespace selector travels unchanged")
+    muster = release(docs(meta(chart, *ON, "--set-json", f"muster.muster.mcpServerNamespaceSelector={json.dumps(org_selector)}")), "muster")["values"]["muster"]
+    expect(muster.get("mcpServerNamespaceSelector") == org_selector, "on, an own muster namespace selector equal to the derived one is a no-op")
     kagent = release(on, "kagent")["values"]["controller"]
     env = {x["name"]: x.get("value") for x in kagent.get("env", [])}
     expect(kagent["authorization"]["namespaceSelector"] == NEW and env.get("KAGENT_EXTENSIONS_NAMESPACE_SELECTOR") == NEW,
@@ -208,23 +256,49 @@ def check_meta(chart):
     expect(r.returncode != 0 and refuses_key(r.stderr, "organizations"),
            "tenants.organizations is refused by the connectivity chart, naming the key")
     r = meta(chart, "--set", "agent-manager.tenants.enabled=true")
-    expect(r.returncode != 0 and "agent-manager.tenants.enabled is true" in r.stderr,
-           "an own agent-manager.tenants.enabled true fails the render: the old reconciler stays off")
+    expect(r.returncode != 0 and "agent-manager.tenants.enabled (true) differs from agentPlatformOrganizations.enabled (false)" in r.stderr,
+           "off with an own agent-manager.tenants.enabled true, the render fails naming the switch")
+    r = meta(chart, "--set", "agent-manager.tenants.organizations.enabled=true")
+    expect(r.returncode != 0 and "agent-manager.tenants.organizations is set" in r.stderr,
+           "an own agent-manager.tenants key other than enabled fails the render naming it (agent-manager 2.19 refuses it)")
     for what, extra, needle in (
             ("components.agent-platform-operator.enabled false", ["--set", "components.agent-platform-operator.enabled=false"],
              "components.agent-platform-operator.enabled is false but agentPlatformOrganizations.enabled is true"),
             ("another targetNamespace", ["--set", "components.agent-platform-operator.targetNamespace=elsewhere"],
              "components.agent-platform-operator.targetNamespace (elsewhere) differs"),
-            ("an own commitMode", ["--set", "agent-platform-operator.commitMode.sourceRef.name=flux"],
-             "agent-platform-operator.commitMode is set"),
+            ("an agent-manager floor below 2.20.0", ["--set", "components.agent-manager.versionRange=>=2.19.0 <3.0.0"],
+             "agentPlatformOrganizations.enabled needs agent-manager 2.20.0 or later: components.agent-manager.versionRange (>=2.19.0 <3.0.0)"),
+            ("an own agent-manager.tenants.enabled false", ["--set", "agent-manager.tenants.enabled=false"],
+             "agent-manager.tenants.enabled (false) differs from agentPlatformOrganizations.enabled (true)"),
+            ("agent-manager's downstream OAuth off", ["--set", "agent-manager.oauth.downstream.enabled=false"],
+             "needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled"),
+            ("an own devPortal.url other than the installed portal's",
+             ["--set", "components.backstage.enabled=true", "--set", "agent-manager.devPortal.url=https://other.example.com"],
+             "agent-manager.devPortal.url (https://other.example.com) differs from the Dev Portal this chart installs (https://backstage.ci.example.com"),
+            ("an own commit mode path that differs", ["--set", "agent-platform-operator.commitMode.path=./elsewhere/{name}"],
+             "agent-platform-operator.commitMode.path (\"./elsewhere/{name}\") differs from what the chart derives"),
+            ("an own commit mode source that differs", ["--set", "agent-platform-operator.commitMode.sourceRef.name=other"],
+             "agent-platform-operator.commitMode.sourceRef.name (\"other\") differs from what the chart derives"),
+            ("fluxNamespace without fluxSource.name", ["--set", "agentPlatformOrganizations.fluxSource.name="],
+             "agentPlatformOrganizations.fluxSource.name is required with fluxNamespace"),
             ("an own derived operator value", ["--set", "agent-platform-operator.platformNamespace=other"],
              "agent-platform-operator.platformNamespace (\"other\") differs from what the chart derives"),
+            ("a muster floor below 5.58.0", ["--set", "components.muster.versionRange=>=5.57.0 <6.0.0"],
+             "agentPlatformOrganizations.enabled needs muster 5.58.0 or later, whose chart takes muster.mcpServerNamespaceSelector"),
+            ("an own muster namespace selector that differs", ["--set-json", 'muster.muster.mcpServerNamespaceSelector={"matchLabels":{"team":"a"}}'],
+             "muster.muster.mcpServerNamespaceSelector ({\"matchLabels\":{\"team\":\"a\"}}) differs from the one agentPlatformOrganizations.enabled derives"),
+            ("muster's OAuth server off", ["--set", "muster.muster.oauth.server.enabled=false"],
+             "needs muster.muster.oauth.server.enabled with the provider dex"),
+            ("no platform users", ["--set", "tenants.platform.users=null"], "needs tenants.platform.users"),
             ("llmRouting off", ["--set", "llmRouting.enabled=false"], "needs llmRouting.enabled"),
             ("no API hostname", ["--set", "global.domain="], "needs the installation's Kubernetes API hostnames"),
             ("an own kagent namespaceSelector", ["--set", f"kagent.controller.authorization.namespaceSelector={OLD}"],
              "kagent.controller.authorization.namespaceSelector (giantswarm.io/organization) differs")):
         r = meta(chart, *ON, *extra)
         expect(r.returncode != 0 and needle in r.stderr, f"on with {what}, the render fails naming it")
+    r = meta(chart, *SWITCH, "--set", "agent-platform-operator.commitMode.sourceRef.name=flux")
+    expect(r.returncode != 0 and "agent-platform-operator.commitMode.sourceRef.name is set but agentPlatformOrganizations.fluxNamespace is not" in r.stderr,
+           "on without fluxNamespace, an own commit mode source fails the render naming fluxNamespace")
     r = meta(chart, "--set", "components.agent-platform-operator.enabled=true")
     expect(r.returncode != 0 and "components.agent-platform-operator.enabled is true but agentPlatformOrganizations.enabled is false" in r.stderr,
            "off with components.agent-platform-operator.enabled true, the render fails naming it")
@@ -247,7 +321,11 @@ def check_default(chart):
     expect(NEW in keys and OLD not in keys,
            f"with the switch off, the organizations' egress and credential policies select {NEW}, never {OLD}")
     expect(find(objs, "ClusterRole", "agent-platform-tenant-flux") is not None,
-           "with kagent on, the connectivity chart renders agent-platform-tenant-flux, whatever the switch says")
+           "with the switch off and kagent on, the connectivity chart renders agent-platform-tenant-flux")
+    objs = docs(run([HELM, "template", "t", chart, "-n", RELEASE_NS, "-f", f"{chart}/ci/test-llm-routing-values.yaml",
+                     "--set", "components.agent-manager.enabled=true", "--set", "agent-manager.oauth.enabled=false"]))
+    expect(find(objs, "ClusterRole", "agent-platform-tenant-flux") is not None,
+           "with the switch off and agent-manager on, the connectivity chart renders agent-platform-tenant-flux")
 
 
 def check_egress(chart):
@@ -318,7 +396,7 @@ def check_egress(chart):
     # server named by hostname reaches the nodes on its port (never on 443 or
     # 10443), and an external OTLP collector is the world rule's.
     mm = ["--set", "components.model-manager.enabled=true", "--set", "model-manager.backend=ollama",
-          "--set", "global.identity.issuerUrl=https://dex.ci.example.com", "--set", "global.identity.clientId=platform",
+          "--set", "agent-manager.oauth.enabled=false", "--set", "global.identity.clientId=platform",
           "--set", "global.identity.existingSecret=platform-oauth"]
     for endpoint, port in (("https://models.example.com", "443"), ("https://models.example.com:10443", "10443"), ("http://ollama.lan:11434", "11434")):
         egress = find(docs(connectivity(chart, "cilium", *mm, "--set", f"model-manager.ollama.endpoint={endpoint}")),

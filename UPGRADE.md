@@ -29,6 +29,73 @@ giantswarm/giantswarm#38970, giantswarm/giantswarm#38322: the chart deploys the 
 - **An air-gapped installation**: set `skills.platformSource.enabled: false`.
 - **An installation that keeps agent-manager's own skill discovery**: set `components.skill-manager.enabled: false`.
 
+## \<current\> → \<next\> (the charts declare no model)
+
+giantswarm/giantswarm-platform-manager#789: `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` fail the render. The kagent release always carries `providers: false`, so the upgrade deletes `default-model-config` from the kagent namespace, and the connectivity release deletes every ModelConfig it rendered from `kagent.modelConfigs`.
+
+### Operator action
+
+- **Before the upgrade**, declare every model the agents use as a ModelConfig object in the installation's GitOps repository, next to its agents, and point every Agent and agent HelmRelease that names `default-model-config` at one of them. An entry of `kagent.modelConfigs` becomes:
+
+  ```yaml
+  apiVersion: api.kagent.dev/v1alpha3
+  kind: ModelConfig
+  metadata:
+    name: anthropic-sonnet
+    namespace: kagent
+    annotations:
+      agent-platform.giantswarm.io/is-default-model-config: "true"  # the entry with default: true
+      ui.giantswarm.io/display-name: Anthropic Sonnet 4.6           # its displayName
+  spec:
+    provider: Anthropic
+    model: claude-sonnet-4-6
+    apiKeySecret: kagent-anthropic
+    apiKeySecretKey: ANTHROPIC_API_KEY
+    anthropic:
+      promptCaching: true
+      cacheTTL: 5m
+  ```
+
+  An entry's `promptCaching`, `cacheTTL`, `maxTokens`, `apiFormat`, `credentialType` and `baseUrl` go under the provider's block (`anthropic`, `openAI`, ...); an Anthropic entry inherited `kagent.providers.anthropic.config` before, so carry those keys over. Leave `baseUrl` out to ride the LLM listener with `llmRouting.enabled`. A ModelConfig of the same name that the connectivity release rendered is deleted by the upgrade; give the declared one another name, or let Flux recreate it on its next reconcile.
+- **Remove** `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` from the values. A Secret the kagent chart created from `kagent.providers.<name>.apiKey` goes with the upgrade too: pre-create the Secret the ModelConfig names.
+- **A person's own ChatGPT login**: replace the `kagent.modelConfigs[]` entry with `credentialType: chatgptOAuth` and no `apiKeySecret` by the same ModelConfig declared with the agents; the chart wires the login wherever its prerequisites are on ([docs/chatgpt-login.md](docs/chatgpt-login.md)).
+
+## \<current\> → \<next\> (the credential providers read Secrets only where bound)
+
+giantswarm/agent-platform#1269: once `components.substrate.versionRange` selects Substrate 1.18.0 or later and `components.google-access-token-credential-provider.versionRange` the plugin 0.3.0 or later, their Secret readers are bound in the namespaces the credential grants name (every `allowedNamespaces` entry of `substrate.credentialProvider.namespacePolicies`) and, with `agentPlatformOrganizations.enabled`, by agent-platform-operator in every organization namespace. The providers already refused an actor a Secret outside its grants in their own process; what changes is that their ServiceAccounts can no longer read any other Secret of the cluster, a workload cluster's kubeconfig on a management cluster among them. An own `substrate.credentialProvider.rbac.namespaces` that leaves out a granted namespace makes the egress gateway answer that namespace's credentials with `403` (`not permitted to read secret <namespace>/<name>`).
+
+### Operator action
+
+- **None** for an installation on the default `namespacePolicies` (the platform namespace) or with the organizations on.
+- **An installation whose own `namespacePolicies` name a namespace in `allowedNamespaces`**: the namespace must exist before the ranges move, since the Substrate and plugin releases create a RoleBinding in it; remove a grant of a namespace that is gone. An `agents-*` entry is left to agent-platform-operator while the organizations are on.
+- **An installation whose own `namespacePolicies` grant namespaces by a label other than the organizations'**: nothing; the readers stay bound cluster-wide. To narrow them, list the namespaces in `substrate.credentialProvider.rbac.namespaces` (and `google-access-token-credential-provider.rbac.namespaces`).
+
+## \<current\> → \<next\> (no runtime forwards the person's token)
+
+giantswarm/giantswarm#38993: the platform Harness no longer sets `KAGENT_PROPAGATE_TOKEN`. A Session reaches muster with its Actor's JWT, which needs muster to trust the actor JWT and agent-manager to bind the Session (on whenever Agent Substrate is on, from the release that carries `make verify-actor-bearer`). A Session nobody bound (one created through the kagent UI or the controller API, not agent-manager) gets no muster tools.
+
+### Operator action
+
+- **Upgrade to the release where muster trusts the actor JWT without workspaces first**, and confirm a Session started through agent-manager reaches muster as its Actor (muster logs `actor_bearer` accepted).
+- **An installation whose `kagent.harnesses[]` entries set `KAGENT_PROPAGATE_TOKEN`** (a claude or codex Harness): remove the variable from each entry's `env`. While it is set, that Harness's runtime still receives the person's token and forwards it to every MCP server of its agents.
+
+## \<current\> → \<next\> (a HelmRelease in the kagent namespace is an agent release)
+
+giantswarm/giantswarm#38840: the ValidatingAdmissionPolicy `agent-platform-platform-helmreleases` refuses, in the kagent namespace, a HelmRelease created or changed in its spec unless it installs the agent chart from the namespace's `agent` OCIRepository as `kagent.fluxServiceAccountName` (`kagent-flux`), sets none of `spec.chart`, `valuesFrom`, `postRenderers`, `kubeConfig`, `targetNamespace` and `storageNamespace`, and names as a git credential (`values.skillsGitAuthSecretRef.name`, or a `credentialRef` in `values.extraAgentSpec`) only the installation skills credential or a Secret its writer may `get`. A HelmRelease that already exists keeps running; only its next spec change is checked.
+
+### Operator action
+
+- **None** for an installation whose kagent HelmReleases all have agent-manager's shape. List the others with:
+
+  ```sh
+  kubectl get helmreleases -n kagent -o json | jq -r '.items[] | select(.spec.serviceAccountName != "kagent-flux"
+    or .spec.chartRef.name != "agent" or (.spec | has("valuesFrom") or has("postRenderers") or has("chart")
+    or has("kubeConfig") or has("targetNamespace") or has("storageNamespace"))) | .metadata.name'
+  ```
+
+- **An agent HelmRelease running as another ServiceAccount** (`kagent-controller`, say): set `spec.serviceAccountName: kagent-flux`. Helm upgrades the release in place, and the policy admits that change.
+- **A HelmRelease in kagent that installs another chart**: move it out of the kagent namespace, together with a ServiceAccount and Role of its own.
+
 ## \<current\> → \<next\> (the tenants mode is removed)
 
 giantswarm/agent-platform#1268: `tenants.organizations` is refused by both charts' schemas. agent-manager's tenant reconciler no longer keeps the `org-<name>` namespaces, muster no longer serves their MCP servers, and no policy of the platform selects `giantswarm.io/organization`. Organizations are AgentPlatformOrganizations (`agentPlatformOrganizations.enabled`), each with an organization namespace `agents-<name>-<random>`.
@@ -54,7 +121,7 @@ giantswarm/agent-platform#1268: `tenants.organizations` is refused by both chart
      ```
 
      The connectivity release adopts it, and the agent-manager release keeps it when it drops it from its manifest. Then remove `tenants.organizations` and any `agent-manager.tenants` and `muster.muster.mcpServersInAllNamespaces` from the installation's values.
-  2. Turn `agentPlatformOrganizations.enabled` on with its prerequisites: kagent and Agent Substrate on, `kagent.fluxServiceAccountName`, `llmRouting.enabled` with a model whose provider the listener serves and `llmRouting.modelConfigPolicy.enabled` on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, `global.domain` (or `agentPlatformOrganizations.apiHostnames`), and the kagent line with giantswarm/kagent-extensions#27 for the erasure.
+  2. Turn `agentPlatformOrganizations.enabled` on with its prerequisites: kagent and Agent Substrate on, `kagent.fluxServiceAccountName`, `llmRouting.enabled` with a model whose provider the listener serves and `llmRouting.modelConfigPolicy.enabled` on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, `global.domain` (or `agentPlatformOrganizations.apiHostnames`), muster's OAuth server on the `dex` provider with `tenants.platform.users` (muster lists the MCP servers as the person), and the kagent line with giantswarm/kagent-extensions#27 for the erasure.
   3. Create each organization through agent-manager's organization tools (`create_organization` in the parent `org-<name>`, then its members and its model). Two steps decide when they answer:
      - With this release, `components.agent-manager.versionRange` is `>=2.16.0 <2.19.0` and agent-manager gets `tenants.enabled: false`: an agent-manager 2.18 with `tenants.enabled` would run the old tenant reconciler over every `giantswarm.io/organization` namespace. Its organization tools do not exist yet.
      - The next agent-platform release whose CHANGELOG moves `components.agent-manager.versionRange` to the release with giantswarm/agent-manager#294 turns agent-manager's `tenants.enabled` on with `agentPlatformOrganizations.enabled` (and sets `devPortal.url`); without it the organization tools answer `unsupported`. That release also hands `agent-platform-tenant-flux` back: the connectivity chart drops it and agent-manager's chart renders it again. Its UPGRADE.md entry gives the same annotation step in the other direction (the agent-manager release's name and namespace), so the role is never missing. Upgrade graveler to that release before this step.
@@ -85,7 +152,7 @@ The ServiceAccount `kagent.fluxServiceAccountName` (`kagent-flux`) is bound to t
 ### Operator action
 
 - **None** for an installation whose kagent-namespace HelmReleases with `serviceAccountName: kagent-flux` all install the Generic agent chart (every agent the portal or agent-manager creates).
-- **A HelmRelease in kagent that installs another chart as `kagent-flux`**: give it a ServiceAccount and Role of its own for the kinds that chart renders, and name that ServiceAccount in the HelmRelease, before the upgrade.
+- **A HelmRelease in kagent that installs another chart as `kagent-flux`**: move it out of the kagent namespace with a ServiceAccount and Role of its own for the kinds that chart renders, before the upgrade (`agent-platform-platform-helmreleases` refuses any chart but the agent chart there).
 - **A management cluster that applies its own copy of the RoleBinding `kagent-flux`** (outside this chart): remove that copy, or it binds `cluster-admin` again.
 
 ## \<current\> → \<next\> (agent-platform-mcps follows muster)

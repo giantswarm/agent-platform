@@ -92,6 +92,8 @@ from conftest import (
     KAGENT_NAMESPACE,
     KEPT_CRDS,
     Kube,
+    DEFAULT_MODEL_ANNOTATION,
+    KAGENT_DEFAULT_MODEL_CONFIG,
     MODEL_CONFIG,
     MUSTER_BASE_URL,
     MUSTER_BASE_URL_SETS,
@@ -139,7 +141,7 @@ from conftest import (
     wait_for_substrate,
     wait_for_agent_ready,
 )
-from scenarios import AGENTGATEWAY_SERVICE, EXAMPLES_DIR, KIND_LAB_VALUES
+from scenarios import AGENTGATEWAY_SERVICE, EXAMPLES_DIR, KIND_LAB_VALUES, MODEL_CONFIG_MANIFEST
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +277,7 @@ def kagent_controller(kube: Kube, app_deployment: float) -> None:
     """The kagent controller running (its HelmRelease is Ready before the pod is)."""
     started = time.monotonic()
     kube.wait_deployment(KAGENT_NAMESPACE, "kagent-controller", timeout=600)
-    wait_for(f"ModelConfig {MODEL_CONFIG}", lambda: kube.get("modelconfigs.api.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE), 120)
+    kube.apply_file(str(MODEL_CONFIG_MANIFEST))
     apply_placeholder_provider_secret(kube)
     TIMINGS.record("kagent controller Ready after the install returned", time.monotonic() - started)
 
@@ -473,10 +475,21 @@ def test_substrate_runs_a_worker_for_the_platform_harness(kube: Kube, substrate:
 
 
 @pytest.mark.smoke
+def test_the_default_model_config_is_marked(kube: Kube, kagent_controller: None) -> None:
+    """The smoke's ModelConfig carries the default annotation, and kagent's own
+    default-model-config is not rendered (the meta chart writes providers:
+    false into the kagent release)."""
+    model = kube.get("modelconfigs.api.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE)
+    assert (model["metadata"].get("annotations") or {}).get(DEFAULT_MODEL_ANNOTATION) == "true", model["metadata"]
+    assert kube.get("modelconfigs.api.kagent.dev", KAGENT_DEFAULT_MODEL_CONFIG, namespace=KAGENT_NAMESPACE) is None, \
+        f"the kagent chart rendered {KAGENT_DEFAULT_MODEL_CONFIG}; the meta chart must write providers: false"
+
+
+@pytest.mark.smoke
 def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None, substrate: Dict[str, Any]) -> None:
     """A minimal declarative Agent on the platform Harness (spec.harnessRef)
-    with its template inline, against the chart's default ModelConfig (a
-    placeholder provider key): Ready means the controller compiled the template
+    with its template inline, against the smoke's ModelConfig (a placeholder
+    provider key): Ready means the controller compiled the template
     for the Harness and Substrate booted the actor's golden snapshot on the
     WorkerPool — not that a model call succeeded."""
     started = time.monotonic()
@@ -764,14 +777,15 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     # helm.sh/resource-policy: keep — survived it, so every Agent and
     # RemoteMCPServer is still there in the kept kagent namespace (the
     # agents' HelmRelease objects went with the Flux CRDs; the declarative Agent
-    # was never Helm's). The platform Harness goes with the kagent release:
+    # was never Helm's), and so is the smoke's ModelConfig, declared like the
+    # declarative Agent. The platform Harness goes with the kagent release:
     # from kagent 1.8.1 the release renders it (harness.create) without
     # helm.sh/resource-policy: keep, so an entry removed from the values is
     # deleted on the next upgrade (giantswarm/kagent-upstream#371). The keep
     # of giantswarm/agent-platform#406 served the 4.8.0 hand-over from the
     # connectivity release, long done; a reinstall renders the Harness again
     # and the kept Agents name it by spec.harnessRef. Nothing else of the agent
-    # runtime survives: the ModelConfig, the WorkerPool and its workers, the
+    # runtime survives: the WorkerPool and its workers, the
     # controller, the substrate release's SandboxConfig and Substrate's control
     # plane go. The database stays: the CloudNativePG Cluster (keep policy) with
     # its instance pods, which hold every Session. The
@@ -798,7 +812,8 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     servers = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.api.kagent.dev", namespace=KAGENT_NAMESPACE))
     assert servers == [MANAGED_AGENT], f"RemoteMCPServers after the uninstall {servers}: the agent's survives (keep policy), the kagent release's {KAGENT_API_SERVER} goes with the release"
     assert kube.get("harnesses.api.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE) is None, f"the platform Harness {HARNESS} survived the uninstall of the kagent release, whose object it is since kagent 1.8.1 (giantswarm/kagent-upstream#371)"
-    assert not kube.items("modelconfigs.api.kagent.dev", namespace=KAGENT_NAMESPACE), "ModelConfigs survived the uninstall of the kagent release"
+    models = sorted(m["metadata"]["name"] for m in kube.items("modelconfigs.api.kagent.dev", namespace=KAGENT_NAMESPACE))
+    assert models == [MODEL_CONFIG], f"ModelConfigs after the uninstall {models}: the declared {MODEL_CONFIG} survives (never Helm's), no release renders one"
     assert kube.get("sandboxconfigs.ate.dev", SANDBOX_CONFIG) is None, "the substrate release's SandboxConfig survived its uninstall"
     assert not kube.items("workerpools.ate.dev", all_namespaces=True), "a WorkerPool survived the kagent release's uninstall"
     assert kube.get("clusters.postgresql.cnpg.io", POSTGRES_CLUSTER, namespace=KAGENT_NAMESPACE), f"the CloudNativePG Cluster {POSTGRES_CLUSTER} went with the uninstall; it must be kept (it holds the Sessions)"
