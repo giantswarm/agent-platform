@@ -5329,10 +5329,24 @@ role name and -operator (organization-erasure/crossplane-aws.yaml). */ -}}
 {{- $_ := set $derived "serviceAccountBindings" . -}}
 {{- end -}}
 {{- $own := index .Values "agent-platform-operator" | default dict -}}
-{{- /* The chart derives no commit mode for the operator (its source, path and
-installation Kustomization), so an own one is refused. */ -}}
-{{- if hasKey $own "commitMode" -}}
-{{- fail "agent-platform-operator.commitMode is set: this chart does not derive the operator's commit mode yet; remove agent-platform-operator.commitMode" -}}
+{{- /* Commit mode follows the Flux values the organizations' admission policy
+holds the operator's Kustomizations to: the source, the path under
+fluxPathPrefix and the SOPS key Secret, so the operator writes exactly what
+the policy admits. Its interval and installationKustomization (the
+installation's own Kustomization that applies the organizations) are the
+operator block's own. Without fluxNamespace there is no commit mode. */ -}}
+{{- $orgs := .Values.agentPlatformOrganizations | default dict -}}
+{{- if $orgs.fluxNamespace -}}
+{{- $source := $orgs.fluxSource | default dict -}}
+{{- if not $source.name -}}
+{{- fail "agentPlatformOrganizations.fluxSource.name is required with fluxNamespace: an organization's Kustomization applies its path from the installation's Flux source" -}}
+{{- end -}}
+{{- $_ := set $derived "commitMode" (dict
+      "sourceRef" (dict "kind" ($source.kind | default "GitRepository") "name" $source.name)
+      "path" (printf "%s{parent}/{name}" ($orgs.fluxPathPrefix | default ""))
+      "decryptionSecret" ($orgs.fluxDecryptionSecret | default "")) -}}
+{{- else if dig "commitMode" "sourceRef" "name" "" $own -}}
+{{- fail "agent-platform-operator.commitMode.sourceRef.name is set but agentPlatformOrganizations.fluxNamespace is not: commit mode needs the installation's Flux namespace, where the operator keeps the organizations' Kustomizations; set agentPlatformOrganizations.fluxNamespace and fluxSource, and leave agent-platform-operator.commitMode.sourceRef unset" -}}
 {{- end -}}
 {{- include "agent-platform.operator.checkOwn" (dict "own" $own "derived" $derived "path" "agent-platform-operator") -}}
 {{- $derived | toJson -}}
