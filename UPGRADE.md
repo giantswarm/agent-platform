@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the General Purpose Agent)
+
+giantswarm/giantswarm#39057: the chart deploys the General Purpose Agent (`default-agent` in the kagent namespace) wherever kagent and muster are on. klaus-gateway's `a2a.defaultAgent` and the portal's agent roles default to it.
+
+### Operator action
+
+- **An installation with an Agent named `default-agent` in the kagent namespace**: Helm refuses to take over an object of another release, so the install of the platform's release fails. Remove that agent first, or set `components.default-agent.enabled: false`.
+- **An installation whose `default-model-config` does not resolve**: set `defaultAgent.modelConfig`.
+- **An installation that sets `klausGateway.a2a.defaultAgent`**: none; the own value stays. Remove it to use the General Purpose Agent.
+
 ## \<current\> → \<next\> (the charts declare no model)
 
 giantswarm/giantswarm-platform-manager#789: `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` fail the render. The kagent release always carries `providers: false`, so the upgrade deletes `default-model-config` from the kagent namespace, and the connectivity release deletes every ModelConfig it rendered from `kagent.modelConfigs`.

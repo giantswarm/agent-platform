@@ -167,7 +167,19 @@ data:
     signed-in person through muster (the x_model-manager_* tools of the
     muster.installations entry above; giantswarm/backstage#2294), and its
     backend has no model-manager client to configure. */}}
-    {{- if or $fluxSa $backstage.skillsRepositories $kagentRoute }}
+    {{- /* The agent behind each of the portal's agent roles: default-agent
+    while the meta chart installs it (components.default-agent), in the kagent
+    namespace; backstage.metaAgents sets a role's agent itself and wins.
+    backstage >= 3.0.0; an earlier portal ignores the key. */}}
+    {{- $metaAgents := dict }}
+    {{- if include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "default-agent") }}
+    {{- $agent := printf "%s/%s/default-agent" $installation (.Values.kagent.namespaceOverride | default .Release.Namespace) }}
+    {{- range list "generalInformation" "agentManagement" "workflowManagement" "platformOperations" "skillEvaluation" "skillCreation" }}
+    {{- $_ := set $metaAgents . $agent }}
+    {{- end }}
+    {{- end }}
+    {{- $metaAgents = mergeOverwrite $metaAgents ($backstage.metaAgents | default dict) }}
+    {{- if or $fluxSa $backstage.skillsRepositories $kagentRoute $metaAgents }}
     agentPlatform:
       {{- with $fluxSa }}
       {{- /* The tenant identity of the agents' HelmReleases: the ONE value
@@ -185,6 +197,10 @@ data:
       skills:
         repositories:
           {{- toYaml . | nindent 10 }}
+      {{- end }}
+      {{- with $metaAgents }}
+      metaAgents:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- if $kagentRoute }}
       {{- /* The kagent controller of this installation, as the portal backend

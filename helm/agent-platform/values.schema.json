@@ -541,6 +541,54 @@
                         }
                     }
                 },
+                "default-agent": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "disableWait": {
+                            "type": "boolean"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
+                        },
+                        "inKagentNamespace": {
+                            "type": "boolean"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "labels": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "agent-platform.giantswarm.io/managed-by": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFile": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "dicebear": {
                     "type": "object",
                     "additionalProperties": true,
@@ -1257,6 +1305,18 @@
                     "type": "string"
                 },
                 "organization": {
+                    "type": "string"
+                }
+            }
+        },
+        "defaultAgent": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "displayName": {
+                    "type": "string"
+                },
+                "modelConfig": {
                     "type": "string"
                 }
             }

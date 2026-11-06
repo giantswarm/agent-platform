@@ -263,6 +263,19 @@ The OAuth issuer, client, secret and base URL come from the block, else from `gl
 
 `make verify-managers` covers the wiring and the guards.
 
+### General Purpose Agent and skills
+
+The General Purpose Agent is the agent the platform ships, `default-agent` in the kagent namespace. A session starts with it unless the person picks another agent. Its prompt is in [`agents/default-agent/values.yaml`](../agents/default-agent/values.yaml) and its skills are in [`skills/`](../skills).
+
+| Value | Default | Effect |
+|---|---|---|
+| `components.default-agent.enabled` | `true` | Deploys the agent while kagent and muster are on. klaus-gateway's `a2a.defaultAgent` and the portal's agent roles default to it. |
+| `defaultAgent.displayName` | `General Purpose Agent` | The name people see. |
+| `defaultAgent.modelConfig` | `""` | The `ModelConfig` it runs on. Empty uses `default-model-config`. |
+| `backstage.metaAgents.<role>` | `{}` | The agent of one portal role, as `<installation>/<namespace>/<agent>`. A role left out uses `default-agent`. |
+
+Its toolset is `preset:full`: every connector the person is signed in to. A release pins the skills to the tag's commit. A branch build deploys the agent without skills.
+
 ### Cluster manager
 
 **[cluster-manager](https://github.com/giantswarm/cluster-manager)** is the cluster write surface. It lists clusters and node pools, creates and deletes GPU node pools, and switches model serving on a cluster.

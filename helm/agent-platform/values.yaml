@@ -1144,6 +1144,34 @@ components:  # @schema additionalProperties: true
     # and manages agents in the kagent namespace; both references are dropped
     # at render time when the component is off.
     dependsOn: [muster, kagent]
+  default-agent:  # @schema additionalProperties: true
+    # The General Purpose Agent, the agent every surface starts a session with
+    # unless the person picks another: one release of the Generic agent chart
+    # with the values of agents/default-agent/values.yaml and the platform's
+    # skills (skills/) pinned to the release's commit. Its muster.url,
+    # agent.iconUrl, toolset, display name and modelConfig.name are derived
+    # (defaultAgent). On while kagent and muster are on; false leaves it out.
+    chart: agent
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # The agent chart line, moved with agent-manager.agentChart.semver
+    # (make verify-default-agent).
+    versionRange: ">=2.0.0 <3.0.0"
+    valuesFile: agents/default-agent/values.yaml
+    injectGlobal: false
+    # Installs where the agents live: the kagent component's namespace
+    # (kagent.namespaceOverride).
+    inKagentNamespace: true
+    # The Agent's readiness (its model, its skills) is reported on the Agent,
+    # never a reason to hold the platform's install or upgrade.
+    disableWait: true
+    # agent-manager lists it read-only.
+    labels:
+      agent-platform.giantswarm.io/managed-by: agent-platform
+    # Travels to the connectivity release only while on, which then points the
+    # portal's agent roles and klaus-gateway's fallback at it.
+    gatedRoster: true
+    enabled: true
+    dependsOn: [muster, kagent]
   vm-manager:  # @schema additionalProperties: true
     chart: vm-manager
     # VM provisioning for the Agent Platform (giantswarm/vm-manager): KVM
@@ -1385,6 +1413,7 @@ components:  # @schema additionalProperties: true
       - enabledExtensions
       - disabledExtensions
       - skillsRepositories
+      - metaAgents
       - configReload
     enabled: false
     # Renders a CNPG Cluster for its database when backstage.database.engine is
@@ -1678,6 +1707,8 @@ components:  # @schema additionalProperties: true
       # the connectivity chart reads agentPlatformOrganizations, never this
       # block.
       - agent-platform-operator
+      # default-agent's values reach its own release only.
+      - defaultAgent
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -5263,6 +5294,14 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     dryRun: false
     gitopsNamespaces: []
 
+# === Default agent (components.default-agent) ===
+defaultAgent:
+  # The name people see for the agent.
+  displayName: "General Purpose Agent"
+  # ModelConfig in the kagent namespace the agent runs on; empty: the agent
+  # chart's default-model-config.
+  modelConfig: ""
+
 # === Cluster manager (cluster-manager) ===
 # Values forwarded verbatim to the cluster-manager component release
 # (giantswarm/cluster-manager, the cluster write surface of the Agent
@@ -6403,6 +6442,9 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # Skill repositories offered when an agent is created.
   skillsRepositories:
     - https://github.com/giantswarm/agent-skills
+  # backstage.metaAgents (unset): the agent behind each of the portal's agent
+  # roles, as <installation>/<namespace>/<agent>; a role left out takes
+  # default-agent while it is on (the connectivity chart's backstage.metaAgents).
   # Roll the Backstage pod when the app-config ConfigMap changes: a
   # post-install/post-upgrade hook Job of the connectivity release stamps the
   # rendered app-config's checksum into the Deployment's pod template (no-op

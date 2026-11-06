@@ -62,8 +62,8 @@ layerSelector:
 
 {{/*
 Whether a component is enabled — reads `components.<name>.enabled`, the single
-on/off switch. `name` is the components.<key> name, which equals the component's
-chart name and is therefore what a dependsOn entry references. A component with
+on/off switch. `name` is the components.<key> name, which names the component's
+release and is therefore what a dependsOn entry references. A component with
 no `enabled` key is force-enabled — except kagent-crds, which then follows
 components.kagent. Emits "true" when on, empty string otherwise.
 
@@ -107,6 +107,10 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
        (agent-platform.validateOrganizations refuses an explicit value that
        disagrees with it). */ -}}
 {{- $on = ($root.Values.agentPlatformOrganizations | default dict).enabled | default false }}
+{{- end }}
+{{- if and $on (eq .name "default-agent") }}
+{{- /* An agent: only where kagent runs it and muster serves its tools. */ -}}
+{{- $on = and (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true") (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "muster")) "true") }}
 {{- end }}
 {{- if $on }}true{{- end -}}
 {{- else -}}
@@ -289,7 +293,10 @@ overwrite would hide a values file that still spells the old key.
     reviews.allowedCallers while the toolchain-manager posts its notices and
     asks there (agent-platform.toolchainManager.reviews): the block's own list,
     else the klaus-gateway chart's default, with the toolchain-manager's
-    ServiceAccount added.
+    ServiceAccount added. And a2a.defaultAgent, default-agent while that
+    component is on and the block names no agent of its own.
+  default-agent: muster.url, toolset, agent.iconUrl, agent.displayName, labels
+    and modelConfig.name (agent-platform.defaultAgent.derived).
   valkey:auth.usersExistingSecret and auth.aclUsers.default.passwordKey, when
     its own block leaves them empty, from the Secret and key muster reads the
     same password with (agent-platform.valkeySecretName / valkeyPasswordKey:
@@ -667,6 +674,14 @@ the block otherwise: a klaus-gateway before 4.11.0 refuses it. */ -}}
 {{- $_ := set $refusals "enabled" true -}}
 {{- $_ := set $derived "refusals" $refusals -}}
 {{- end -}}
+{{- /* The agent of a channel turn that names none: default-agent while it
+is on. An own value wins. */ -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" .root "name" "default-agent")) (not (dig "a2a" "defaultAgent" "" $kg)) -}}
+{{- $_ := set $derived "a2a" (dict "defaultAgent" "default-agent") -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .name "default-agent" -}}
+{{- $derived = include "agent-platform.defaultAgent.derived" .root | fromJson -}}
 {{- end -}}
 {{- if eq .name "valkey" -}}
 {{- $auth := dig "valkey" "auth" dict (.root.Values.valkey | default dict) -}}
@@ -3224,7 +3239,7 @@ Usage: include "agent-platform.muster.awaitsSubstrate" (dict "root" $root "value
 {{- if dig "muster" "credentialProvider" "enabled" false .values -}}
 {{- $ready := false -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" .root "name" "substrate")) (not (include "agent-platform.targetSecretName" .root)) -}}
-{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" (.root.Values.gitops.namespace | default .root.Release.Namespace) (include "agent-platform.childName" (dict "root" .root "name" (index .root.Values.components "substrate" "chart"))) -}}
+{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" (.root.Values.gitops.namespace | default .root.Release.Namespace) (include "agent-platform.childName" (dict "root" .root "name" "substrate")) -}}
 {{- range (dig "status" "conditions" list ($release | default dict)) -}}
 {{- if and (eq .type "Ready") (eq .status "True") -}}{{- $ready = true -}}{{- end -}}
 {{- end -}}
@@ -3257,7 +3272,7 @@ Usage: include "agent-platform.muster.awaitsSubstrate" (dict "root" $root "value
 {{- range $pod.containers }}{{ $mounts = concat $mounts (.volumeMounts | default list) }}{{ end -}}
 {{- $old := include "agent-platform.kagent.databaseSecret" (dict "urlFile" $urlFile "volumes" ($pod.volumes | default list) "mounts" $mounts) -}}
 {{- $new := include "agent-platform.kagent.databaseSecret" (dict "urlFile" $urlFile "volumes" (dig "controller" "volumes" list $kagent) "mounts" (dig "controller" "volumeMounts" list $kagent)) -}}
-{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" ($.Values.gitops.namespace | default $.Release.Namespace) (include "agent-platform.childName" (dict "root" $ "name" (index $.Values.components "kagent" "chart"))) -}}
+{{- $release := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" ($.Values.gitops.namespace | default $.Release.Namespace) (include "agent-platform.childName" (dict "root" $ "name" "kagent")) -}}
 {{- $oldUrl := dig "spec" "values" "database" "postgres" "url" "" ($release | default dict) -}}
 {{- $newUrl := dig "database" "postgres" "url" "" $kagent -}}
 {{- if and (eq $old $new) (eq $oldUrl $newUrl) -}}
@@ -4636,10 +4651,10 @@ Usage: include "agent-platform.targetNamespace" .
 
 {{/*
 The name of a component's OCIRepository and HelmRelease on the installation:
-the component's chart name; with the target knob `<gitops.target.name>-<chart>`
+the component's key; with the target knob `<gitops.target.name>-<key>`
 (target.name empty = the release name), so two targeted releases in one
 namespace never share a child (giantswarm/agent-platform#688).
-Usage: include "agent-platform.childName" (dict "root" $ "name" $chart)
+Usage: include "agent-platform.childName" (dict "root" $ "name" $key)
 */}}
 {{- define "agent-platform.childName" -}}
 {{- if include "agent-platform.targetSecretName" .root -}}
@@ -4706,7 +4721,7 @@ under `helm template`, where this guard is therefore silent.
 {{- with (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" .) -}}
 {{- $owner := dig "metadata" "labels" "helm.toolkit.fluxcd.io/name" "" . -}}
 {{- $ownerNs := dig "metadata" "labels" "helm.toolkit.fluxcd.io/namespace" "" . -}}
-{{- if and $owner (or (ne $owner $c.chart) (ne $ownerNs $ns)) -}}
+{{- if and $owner (or (ne $owner $key) (ne $ownerNs $ns)) -}}
 {{- $foreign = append $foreign (printf "%s (components.%s) belongs to HelmRelease %s/%s" .metadata.name $key $ownerNs $owner) -}}
 {{- end -}}
 {{- end -}}
@@ -4742,7 +4757,7 @@ show it (README, "The GPU operator").
 {{- $c := index .Values.components "gpu-operator" | default dict -}}
 {{- if and $c (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "gpu-operator")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
 {{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
-{{- $release := $c.chart -}}
+{{- $release := "gpu-operator" -}}
 {{- $releaseNs := $c.targetNamespace | default (include "agent-platform.targetNamespace" .) -}}
 {{- $foreign := list -}}
 {{- if .Capabilities.APIVersions.Has "nvidia.com/v1" -}}
@@ -4795,7 +4810,7 @@ Usage: include "agent-platform.platformReleaseNames" . | fromYamlArray
 {{- $names := list -}}
 {{- range $key, $c := .Values.components -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" $key)) (hasKey $c "chart") -}}
-{{- $names = append $names $c.chart -}}
+{{- $names = append $names $key -}}
 {{- end -}}
 {{- end -}}
 {{- toYaml $names -}}
@@ -4822,10 +4837,10 @@ Usage: include "agent-platform.teardownWaves" . | fromYamlArray  (a list of list
 {{- $on := list -}}
 {{- range ($c.dependsOn | default list) -}}
 {{- if and (hasKey $root.Values.components .) (include "agent-platform.componentEnabled" (dict "root" $root "name" .)) (hasKey (index $root.Values.components .) "chart") -}}
-{{- $on = append $on (index $root.Values.components .).chart -}}
+{{- $on = append $on . -}}
 {{- end -}}
 {{- end -}}
-{{- $_ := set $deps $c.chart $on -}}
+{{- $_ := set $deps $key $on -}}
 {{- end -}}
 {{- end -}}
 {{- $waves := list -}}
@@ -5387,4 +5402,76 @@ secretRef:
 certSecretRef:
   name: {{ . }}
 {{- end }}
+{{- end -}}
+
+{{/*
+"true" when this chart is a published release: a version without a
+pre-release, packaged with appVersion = version (the pipeline stamps both). A
+pre-release (a branch build, a candidate) and the working tree (appVersion
+0.1.0) are not; they have no release tag and no stamped commit.
+Usage: include "agent-platform.publishedRelease" $
+*/}}
+{{- define "agent-platform.publishedRelease" -}}
+{{- if and (not (semver .Chart.Version).Prerelease) (eq (toString .Chart.AppVersion) .Chart.Version) }}true{{ end -}}
+{{- end -}}
+
+{{/*
+A component's values file (components.<name>.valuesFile, a path in this chart),
+as JSON. The release pipeline stamps the tag's commit over the `[[ .SHA ]]`
+placeholder (hack/stamp-release-commit.sh). A skills[] entry still carrying it
+is dropped where the chart is no published release
+(agent-platform.publishedRelease), and fails the render of a published
+release: such a chart was packaged without the stamp.
+Usage: include "agent-platform.componentValuesFile" (dict "root" $ "path" $c.valuesFile) | fromJson
+*/}}
+{{- define "agent-platform.componentValuesFile" -}}
+{{- $vals := .root.Files.Get .path | fromYaml -}}
+{{- if not $vals -}}
+{{- fail (printf "%s is missing from the chart or empty" .path) -}}
+{{- end -}}
+{{- $released := include "agent-platform.publishedRelease" .root -}}
+{{- if hasKey $vals "skills" -}}
+{{- $pinned := list -}}
+{{- range $vals.skills -}}
+{{- if eq (toString (dig "git" "commit" "" (ternary . dict (kindIs "map" .)))) "[[ .SHA ]]" -}}
+{{- if $released -}}
+{{- fail (printf "%s: skill %s still carries the [[ .SHA ]] placeholder in release %s: the chart was published without hack/stamp-release-commit.sh" $.path .name $.root.Chart.Version) -}}
+{{- end -}}
+{{- else -}}
+{{- $pinned = append $pinned . -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $vals "skills" $pinned -}}
+{{- end -}}
+{{- $vals | toJson -}}
+{{- end -}}
+
+{{/*
+The values default-agent's release (components.default-agent) takes from the
+platform, merged over agents/default-agent/values.yaml: the muster URL every
+agent targets, the whole catalogue of the person's connectors as its toolset
+(preset:full), its avatar on the DiceBear host (the route's first hostname,
+else avatars.<global.domain>; none without either), the managed-by label on the
+Agent (agent-manager lists it read-only), defaultAgent.displayName, and
+defaultAgent.modelConfig (empty: the agent chart's default).
+Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
+*/}}
+{{- define "agent-platform.defaultAgent.derived" -}}
+{{- $own := .Values.defaultAgent | default dict -}}
+{{- $agent := dict -}}
+{{- with $own.displayName -}}{{- $_ := set $agent "displayName" . -}}{{- end -}}
+{{- $host := "" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "dicebear") -}}
+{{- $host = first (dig "route" "hostnames" list (.Values.dicebear | default dict) | default (list "")) -}}
+{{- with .Values.global.domain -}}{{- $host = $host | default (printf "avatars.%s" .) -}}{{- end -}}
+{{- end -}}
+{{- with $host -}}
+{{- $_ := set $agent "iconUrl" (printf "https://%s/v1/default-agent.png" .) -}}
+{{- end -}}
+{{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:full") "labels" (dict "agent-platform.giantswarm.io/managed-by" "agent-platform") -}}
+{{- with $agent }}{{- $_ := set $out "agent" . -}}{{- end -}}
+{{- with $own.modelConfig -}}
+{{- $_ := set $out "modelConfig" (dict "name" .) -}}
+{{- end -}}
+{{- $out | toJson -}}
 {{- end -}}

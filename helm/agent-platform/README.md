@@ -571,6 +571,18 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
+| components.default-agent.chart | string | `"agent"` |  |
+| components.default-agent.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.default-agent.versionRange | string | `">=2.0.0 <3.0.0"` |  |
+| components.default-agent.valuesFile | string | `"agents/default-agent/values.yaml"` |  |
+| components.default-agent.injectGlobal | bool | `false` |  |
+| components.default-agent.inKagentNamespace | bool | `true` |  |
+| components.default-agent.disableWait | bool | `true` |  |
+| components.default-agent.labels."agent-platform.giantswarm.io/managed-by" | string | `"agent-platform"` |  |
+| components.default-agent.gatedRoster | bool | `true` |  |
+| components.default-agent.enabled | bool | `true` |  |
+| components.default-agent.dependsOn[0] | string | `"muster"` |  |
+| components.default-agent.dependsOn[1] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.vm-manager.versionRange | string | `">=0.24.0 <0.25.0"` |  |
@@ -636,7 +648,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.omitKeys[5] | string | `"enabledExtensions"` |  |
 | components.backstage.omitKeys[6] | string | `"disabledExtensions"` |  |
 | components.backstage.omitKeys[7] | string | `"skillsRepositories"` |  |
-| components.backstage.omitKeys[8] | string | `"configReload"` |  |
+| components.backstage.omitKeys[8] | string | `"metaAgents"` |  |
+| components.backstage.omitKeys[9] | string | `"configReload"` |  |
 | components.backstage.enabled | bool | `false` |  |
 | components.backstage.dependsOn[0] | string | `"cloudnative-pg"` |  |
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
@@ -708,6 +721,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.omitKeys[3] | string | `"toolchain-manager"` |  |
 | components.agent-platform-connectivity.omitKeys[4] | string | `"kserve-runtime-configs"` |  |
 | components.agent-platform-connectivity.omitKeys[5] | string | `"agent-platform-operator"` |  |
+| components.agent-platform-connectivity.omitKeys[6] | string | `"defaultAgent"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -1436,6 +1450,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.image.tag | string | `"2.20.3"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
+| defaultAgent.displayName | string | `"General Purpose Agent"` |  |
+| defaultAgent.modelConfig | string | `""` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
 | cluster-manager.observability.otel.endpoint | string | `"auto"` |  |
 | cluster-manager.observability.otel.protocol | string | `"auto"` |  |

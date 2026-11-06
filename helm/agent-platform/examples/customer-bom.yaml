@@ -51,6 +51,8 @@ components:
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "1.14.0" }
   agent-manager:                 { versionRange: "2.20.0" }
+  # The General Purpose Agent (components.default-agent): the agent chart.
+  default-agent:                 { versionRange: "2.0.0" }
   vm-manager:                    { versionRange: "0.24.0" }
   # The cluster write surface (components.cluster-manager, off by default).
   cluster-manager:               { versionRange: "0.22.0" }

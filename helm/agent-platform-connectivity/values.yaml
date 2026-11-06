@@ -109,6 +109,10 @@ components:  # @schema additionalProperties: true
     enabled: true
   agent-manager:  # @schema additionalProperties: true
     enabled: false
+  # The General Purpose Agent (kagent/default-agent). The meta chart forwards
+  # the entry only while it is on.
+  default-agent:  # @schema additionalProperties: true
+    enabled: false
   vm-manager:  # @schema additionalProperties: true
     enabled: false
   cluster-manager:  # @schema additionalProperties: true
@@ -3476,6 +3480,12 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # Skill repositories offered when an agent is created.
   skillsRepositories:
     - https://github.com/giantswarm/agent-skills
+  # The agent behind each of the portal's agent roles (generalInformation,
+  # agentManagement, workflowManagement, platformOperations, skillEvaluation,
+  # skillCreation) as <installation>/<namespace>/<agent>. A role left out
+  # takes default-agent while the meta chart installs it; a role without an
+  # agent is hidden in the portal.
+  metaAgents: {}
   # Roll the Backstage pod when this chart's app-config ConfigMap changes.
   # The backstage chart's own checksum annotations cover only its own
   # templates, so an app-config change (templates/backstage/app-config.yaml)

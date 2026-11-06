@@ -43,7 +43,7 @@ the manual order for any other.
 {{- if $controller }}pre-delete{{ end -}}
 {{- else -}}
 {{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
-{{- $live := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" $ns (index .Values.components "kserve-runtime-configs").chart -}}
+{{- $live := lookup "helm.toolkit.fluxcd.io/v2" "HelmRelease" $ns "kserve-runtime-configs" -}}
 {{- $ann := dig "metadata" "annotations" dict $live -}}
 {{- if and (eq (get $ann "meta.helm.sh/release-name") .Release.Name) (eq (get $ann "meta.helm.sh/release-namespace") .Release.Namespace) -}}
 {{- if $controller -}}
@@ -93,15 +93,15 @@ release() {
     echo "no $hr API: $1 is not a HelmRelease any more"
   fi
 }
-echo "1/3 the llm-d controller's release {{ $controller.chart }}: its webhook denies every delete of a well-known config while it runs"
-release {{ $controller.chart }}
+echo "1/3 the llm-d controller's release kserve-llmisvc-resources: its webhook denies every delete of a well-known config while it runs"
+release kserve-llmisvc-resources
 gone "the llm-d controller" deployments --namespace {{ $controllerNs }} --selector control-plane=llmisvc-controller-manager
 gone "the llmisvc webhook" validatingwebhookconfigurations llminferenceserviceconfig.serving.kserve.io
-echo "2/3 the configs of {{ $configs.chart }} in {{ $configsNs }}, through the CRD's storage version, with $finalizer taken off"
+echo "2/3 the configs of kserve-runtime-configs in {{ $configsNs }}, through the CRD's storage version, with $finalizer taken off"
 version=$(kubectl get customresourcedefinitions llminferenceserviceconfigs.serving.kserve.io --ignore-not-found -o jsonpath='{.spec.versions[?(@.storage==true)].name}')
 if [ -n "$version" ]; then
   res="llminferenceserviceconfigs.$version.serving.kserve.io"
-  names=$(kubectl get "$res" --namespace {{ $configsNs }} -o json | jq -r --arg release {{ $configs.chart }} '.items[] | select(.metadata.annotations["meta.helm.sh/release-name"] == $release) | .metadata.name')
+  names=$(kubectl get "$res" --namespace {{ $configsNs }} -o json | jq -r --arg release kserve-runtime-configs '.items[] | select(.metadata.annotations["meta.helm.sh/release-name"] == $release) | .metadata.name')
   for name in $names; do
     kubectl delete "$res" "$name" --namespace {{ $configsNs }} --ignore-not-found --wait=false
     rest=$(kubectl get "$res" "$name" --namespace {{ $configsNs }} --ignore-not-found -o json | jq -c --arg f "$finalizer" '[.metadata.finalizers // [] | .[] | select(. != $f)]')
@@ -115,6 +115,6 @@ if [ -n "$version" ]; then
     gone "the configs" "$res" --namespace {{ $configsNs }} $names
   fi
 fi
-echo "3/3 the configs' release {{ $configs.chart }}"
-release {{ $configs.chart }}
+echo "3/3 the configs' release kserve-runtime-configs"
+release kserve-runtime-configs
 {{- end -}}

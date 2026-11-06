@@ -2,7 +2,7 @@
 name: agent-platform-agent-management
 description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.0.0"
+  version: "3.1.0"
 ---
 
 # Managing agents and their building blocks
@@ -43,7 +43,7 @@ Where the reference lives — fetch it, never quote it from memory:
 - **`gitops`** — applied by Flux from a repository. A live write is refused; with `mode: commit`
   (where `get_info` `capabilities.commit` is true) agent-manager opens the pull request as you.
   Never `force` a write onto it.
-- **`platform`** — ships with the Agent Platform (the Agent Manager itself). Every update, re-pin and
+- **`platform`** — ships with the Agent Platform (the General Purpose Agent, `default-agent`). Every update, re-pin and
   delete is refused; it changes only through the platform's configuration and releases. Say so.
 - **`none`** — a bare Agent without a release.
 
