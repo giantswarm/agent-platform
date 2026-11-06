@@ -10,7 +10,8 @@ metadata:
 Public pages: https://docs.giantswarm.io/tutorials/agent-platform/create-an-agent/ and
 https://docs.giantswarm.io/tutorials/agent-platform/troubleshooting/. Muster's meta-tools, the
 `call_tool` contract, toolsets and connectors are the `agent-platform-tools` skill; the skill format
-and what a pin is are `agent-platform-skill-authoring`. The one reference here is
+and what a pin is are `agent-platform-skill-authoring`; whether a task needs a new agent, and its
+start link, are `agent-platform-agent-routing`. The one reference here is
 `references/system-prompt.md`: the paragraph every tooled agent's prompt needs, and a template.
 
 ## The agent unit
@@ -43,7 +44,7 @@ Where the reference lives — fetch it, never quote it from memory:
 - **`gitops`** — applied by Flux from a repository. A live write is refused; with `mode: commit`
   (where `get_info` `capabilities.commit` is true) agent-manager opens the pull request as you.
   Never `force` a write onto it.
-- **`platform`** — ships with the Agent Platform (the Agent Manager itself). Every update, re-pin and
+- **`platform`** — ships with the Agent Platform (the default agent itself). Every update, re-pin and
   delete is refused; it changes only through the platform's configuration and releases. Say so.
 - **`none`** — a bare Agent without a release.
 

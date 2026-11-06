@@ -1,6 +1,6 @@
 ---
 name: agent-platform-overview
-description: Use when someone asks what the Agent Platform is, how it is built or works — components, connectors, how people reach agents (Dev Portal, Slack, IDE), identity, how an agent runs, what the Agent Manager is, or how to look at the live platform or yourself.
+description: Use when someone asks what the Agent Platform is, how it is built or works — components, connectors, how people reach agents (Dev Portal, Slack, IDE), identity, how an agent runs, what the default agent is, or how to look at the live platform or yourself.
 metadata:
   version: "3.0.0"
 ---
@@ -12,7 +12,8 @@ Concepts: https://docs.giantswarm.io/overview/agent-platform/ (`architecture/`, 
 (`install/`, `create-an-agent/`, `access-control/`, `troubleshooting/`). Answer in layers — the
 paragraph first, then the layer the question needs — and link the page instead of reproducing it.
 Tools, toolsets and connectors are the `agent-platform-tools` skill; agents and their building blocks
-are `agent-platform-agent-management`; skills are `agent-platform-skill-authoring`.
+are `agent-platform-agent-management`; which agent fits a task and start links are
+`agent-platform-agent-routing`; skills are `agent-platform-skill-authoring`.
 
 ## The platform in one paragraph
 
@@ -53,12 +54,13 @@ a person. Groups, states and sign-in: the `agent-platform-tools` skill; the live
   connect to the installation's Muster `/mcp` endpoint, the one agents use
   (https://docs.giantswarm.io/getting-started/ai-agent-setup/).
 
-## The Agent Manager
+## The default agent
 
-The platform ships one agent of its own, `agent-manager-assistant` ("Agent Manager"), in the runtime's
-namespace whenever kagent, Muster and agent-manager run. It manages agents **and their building
-blocks** — skills, models, toolsets, connectors, egress policies — as the person asking, with the
-`preset:agent-platform` toolset and the platform's skills pinned to the release. The portal's assist
+The platform ships one agent of its own, `default-agent` ("Assistant"), in the runtime's namespace
+whenever kagent, Muster and agent-manager run, labelled `agent-platform.giantswarm.io/default: "true"`.
+It is where people start: it does one-off tasks with their connectors (`preset:full`, as the person),
+recommends an existing agent or helps create a specialist (`agent-platform-agent-routing`), and
+manages agents and their building blocks, with the platform's skills pinned to the release. The portal's assist
 buttons ("Create with …", "Edit with …", "Evaluate with …") start sessions with it. It is
 `managed: platform`: agent-manager refuses every change or delete of it; it changes only through the
 platform's configuration and releases.
