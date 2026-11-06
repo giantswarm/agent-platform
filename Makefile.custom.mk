@@ -1500,6 +1500,11 @@ verify-fast-links: ## Assert the fast-link input of the model serving layer (gia
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-fast-links.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 
+.PHONY: verify-skills
+verify-skills: ## Validate every skill of skills/ against what the agent runtime accepts, and that no SKILL.md lives elsewhere (scripts/validate_skills.py). Needs PyYAML.
+	@echo "====> $@"
+	@python3 scripts/validate_skills.py
+
 .PHONY: verify-gpu-pool
 verify-gpu-pool: ## Assert the GPU node pool input of the model serving layer (giantswarm/agent-platform#315): modelServing.gpuPool.taint tolerated by every published preset (the pool's entry first, a preset's equal entry once; Exists without a value, Equal with one), modelServing.gpuPool.nodeSelector merged under the presets' own (their keys win), both published as spec.gpuPool in the discovery ConfigMap model-manager >= 0.23.0 reads; an empty taint key renders no toleration and no taint, and the parsed serving render equals the default render with the pool's toleration taken out, object for object, but for the discovery block (both renders are the head's; a mismatch prints a unified diff); the guards (effect, key, string label values); the meta chart forwards the block. Fixture: ci/test-model-serving-gpu-pool-values.yaml. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
