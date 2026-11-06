@@ -1573,6 +1573,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaceManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| toolchain-manager.muster.mcpServer.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | toolchain-manager.owners.groups | list | `[]` |  |
 | toolchain-manager.owners.emails | list | `[]` |  |
 | toolchain-manager.sources[0].repository | string | `"giantswarm/agent-toolchains"` |  |
