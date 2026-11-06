@@ -50,7 +50,6 @@ scenario against any cluster; see README.md.
 
 import base64
 import hashlib
-import html
 import json
 import logging
 import re
@@ -70,6 +69,7 @@ import yaml
 from pytest_helm_charts.clusters import Cluster
 
 import scenarios
+from oauth_browser import authorization_form, origin
 from scenarios import AGENTGATEWAY_SERVICE, AGENTGATEWAY_SERVICE_PORT, ATS_DIR, LOOPBACK, MUSTER_SERVICE_PORT, REPO_ROOT, Scenario
 
 logger = logging.getLogger(__name__)
@@ -1055,22 +1055,21 @@ def login_through_muster(base_url: str, ca_path: Optional[str]) -> str:
     url = f"{base_url}/oauth/authorize?" + urlencode({
         "response_type": "code", "client_id": client_id, "redirect_uri": callback, "state": state,
         "code_challenge": challenge, "code_challenge_method": "S256", "scope": "openid profile email groups"})
-    # Walk the redirects by hand: muster -> the issuer -> login form ->
-    # (approval skipped) -> muster callback -> the redirect URI, never fetched.
+    r = None
     for _ in range(15):
-        if url.startswith(callback):
+        if urlsplit(url)._replace(query="", fragment="") == urlsplit(callback)._replace(query="", fragment=""):
             break
-        r = session.get(url, allow_redirects=False, timeout=30)
+        if r is None:
+            r = session.get(url, allow_redirects=False, timeout=30)
         if r.status_code in (301, 302, 303, 307, 308):
             url = urljoin(url, r.headers["Location"])
+            r = None
             continue
         assert r.status_code == 200, f"{url} -> {r.status_code}: {r.text[:300]}"
-        action = re.search(r'action="([^"]+)"', r.text)
-        assert action, f"no form to submit on {url}: {r.text[:300]}"
-        post_url = urljoin(url, html.unescape(action.group(1)))
-        r = session.post(post_url, data={"login": SCENARIO.user, "password": SCENARIO.password}, allow_redirects=False, timeout=30)
-        assert r.status_code in (302, 303), f"the login form was refused: {r.status_code} {r.text[:300]}"
-        url = urljoin(post_url, r.headers["Location"])
+        post_url, fields = authorization_form(r.text, url, base_url, SCENARIO.issuer_url, SCENARIO.user, SCENARIO.password)
+        scheme, authority = origin(url)
+        r = session.post(post_url, data=fields, headers={"Origin": f"{scheme}://{authority}"}, allow_redirects=False, timeout=30)
+        url = post_url
     else:
         raise AssertionError(f"OAuth flow never reached the redirect URI: {url}")
     query = parse_qs(urlsplit(url).query)

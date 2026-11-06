@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- ATS OAuth login submits client consent separately from the identity provider's password form and retains the browser session through both steps.
+
 ### Changed
 
 - **agent-platform-operator's commit mode follows `agentPlatformOrganizations.flux*`** (giantswarm/giantswarm#38891). With `agentPlatformOrganizations.fluxNamespace` set, the meta chart sets the operator's `commitMode.sourceRef` from `fluxSource`, `commitMode.path` to `<fluxPathPrefix>{parent}/{name}` and `commitMode.decryptionSecret` from `fluxDecryptionSecret`, the values the organizations' admission policy holds the operator's Kustomizations to, so every organization gets its Kustomization and Flux ServiceAccount. `commitMode.interval` and `commitMode.installationKustomization` stay the operator block's own. The render fails without `fluxSource.name`, on an own `commitMode.sourceRef`, `path` or `decryptionSecret` that differs, and on an own `commitMode.sourceRef.name` without `fluxNamespace`. An installation runs agent-platform-operator 0.1.0 or later (the range's floor) before it sets `fluxNamespace`.
