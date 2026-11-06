@@ -63,8 +63,9 @@ the agent and prefills the composer:
 ```
 
 - **`agent`**: the portal's agent id, `<installation>/<namespace>/<name>`, URL-encoded (`/` becomes
-  `%2F`). `<installation>` is the installation's Dev Portal name from your system message;
-  `<namespace>` and `<name>` (the technical name) come from `x_agent-manager_list_agents`.
+  `%2F`). `<installation>` is `installation` from `x_agent-manager_get_info`; `<namespace>` and
+  `<name>` (the technical name) come from `x_agent-manager_list_agents`. No `installation` in
+  `get_info`: name the agent instead of linking it.
 - **`prompt`**: optional. A short brief of the task in the person's terms, URL-encoded (space `%20`),
   at most a few hundred characters. It prefills the composer; the person edits and sends it.
 - **Never in the brief**: conversation data — mail or message contents, logs, customer data, secrets,

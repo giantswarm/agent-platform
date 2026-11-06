@@ -8,8 +8,7 @@
   while it, kagent, muster and agent-manager are on; its range is
   agent-manager's agentChart.semver; its values are
   agents/default-agent/values.yaml with the derived muster.url, iconUrl,
-  the installation's portal name in the system message, toolset, labels and
-  modelConfig.name.
+  toolset, labels and modelConfig.name.
 - The working tree and a pre-release carry no skills; stamped by
   hack/stamp-release-commit.sh, the packaged chart pins every skill of skills/
   to that commit (the tag pipeline's step, simulated on a copy); a release
@@ -30,7 +29,9 @@
 - agent-manager gets skillManager.url (the skill-manager's Service) and no
   skill sources from agent-platform.agentManager.skillManagerFloor on, with
   the skill-manager on; else skills.repositories as URLs, no platform source,
-  replaced by its own deprecated list. That list fails the render while
+  replaced by its own deprecated list. From the same floor agent-manager gets
+  installation (backstage.installationName), which get_info reports for the
+  default agent's start links. The deprecated list fails the render while
   agent-manager pins through the skill-manager.
 - The connectivity chart wires the portal's meta agents to it while it is on.
 
@@ -163,7 +164,7 @@ checks = {
     "displayName": (v["agent"]["displayName"], "General Assistant"),
     "iconUrl (the route's hostname)": (v["agent"]["iconUrl"], f"https://avatars.example.org/v1/{NAME}.png"),
     "toolset": (v["toolset"], ["preset:full"]),
-    "systemMessage names the portal's installation": (v["agent"]["systemMessage"].endswith("\nIn the Dev Portal this installation is `agent-platform`.\n"), True),
+    "systemMessage carries no installation name": ("this installation is" in v["agent"]["systemMessage"], False),
     "muster.url": (v["muster"]["url"], "http://muster.agent-platform.svc.cluster.local:8090/mcp"),
     "modelConfig (unset: the chart's default)": (v.get("modelConfig"), None),
     "skills (the working tree is unstamped)": (v["skills"], []),
@@ -178,9 +179,12 @@ if v["agent"].get("iconUrl") != f"https://avatars.example.com/v1/{NAME}.png":
 v = find(render(META, *ON, "--set", "components.dicebear.enabled=false", "--set", "defaultAgent.modelConfig=claude-opus"), "HelmRelease", NAME)["spec"]["values"]
 if v.get("modelConfig") != {"name": "claude-opus"} or "iconUrl" in v["agent"]:
     fail(f"{NAME}: defaultAgent.modelConfig is not its modelConfig.name, or an iconUrl renders without DiceBear: {v.get('modelConfig')!r}, {v['agent']!r}")
-v = find(render(META, *ON, "--set", "backstage.installationName=lab"), "HelmRelease", NAME)["spec"]["values"]
-if not v["agent"]["systemMessage"].endswith("\nIn the Dev Portal this installation is `lab`.\n"):
-    fail(f"{NAME}: the system message does not follow backstage.installationName=lab: {v['agent']['systemMessage'][-120:]!r}")
+# agent-manager reports the portal's installation name (get_info installation) from its floor on.
+for what, args, want in (("below the floor", [*ON], None), ("from the floor", [*ON, *FLOORS], "agent-platform"),
+                         ("backstage.installationName=lab", [*ON, *FLOORS, "--set", "backstage.installationName=lab"], "lab")):
+    got = find(render(META, *args), "HelmRelease", "agent-manager")["spec"]["values"].get("installation")
+    if got != want:
+        fail(f"agent-manager, {what}: installation {got!r}, want {want!r}")
 hr = find(render(META, *ON, "--set", "kagent.namespaceOverride=agents"), "HelmRelease", NAME)
 if hr["spec"]["targetNamespace"] != "agents":
     fail(f"{NAME}: targetNamespace {hr['spec']['targetNamespace']!r} does not follow kagent.namespaceOverride=agents")

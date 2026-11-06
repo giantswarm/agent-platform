@@ -1,7 +1,7 @@
 # The default agent, "General Assistant": where people start, and the portal's meta
 # agent. Values of the Generic agent chart for components.default-agent. The
-# meta chart adds muster.url, agent.iconUrl, the portal's installation name to
-# the system message, toolset (preset:full), labels and modelConfig.name.
+# meta chart adds muster.url, agent.iconUrl, toolset (preset:full), labels and
+# modelConfig.name.
 agent:
   displayName: "General Assistant"
   description: "Start here. Handles everyday tasks with your connectors and helps you find or create the right agent."

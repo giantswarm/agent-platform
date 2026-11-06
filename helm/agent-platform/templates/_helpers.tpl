@@ -504,6 +504,12 @@ in-process list of URLs (agent-platform.skills.repositories). */ -}}
 {{- else -}}
 {{- $_ := set $derived "skills" (dict "repositories" (include "agent-platform.skills.repositories" (dict "root" .root "consumer" "agent-manager") | fromJson).list) -}}
 {{- end -}}
+{{- /* The installation's name in the portal (agent ids are
+<installation>/<namespace>/<name>), which get_info reports: from the release
+that takes the key (agent-platform.agentManager.skillManagerFloor). */ -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "agent-manager" "version" (include "agent-platform.agentManager.skillManagerFloor" .root)) -}}
+{{- $_ := set $derived "installation" (include "agent-platform.portalInstallationName" .root) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "default-agent" -}}
 {{- $derived = include "agent-platform.defaultAgent.derived" .root | fromJson -}}
@@ -4556,13 +4562,22 @@ platform source. One line, no comment inside the define.
 
 {{/*
 PLACEHOLDER (giantswarm/giantswarm#38322): the first agent-manager release
-that takes skillManager.url and pins skills through the skill-manager
-(giantswarm/agent-manager#290); an earlier release's closed values schema
-refuses the key. Set it to that release before raising
+that takes skillManager.url and pins skills through the skill-manager, and
+takes installation (giantswarm/agent-manager#290); an earlier release's closed
+values schema refuses the keys. Set it to that release before raising
 components.agent-manager.versionRange to it. One line, no comment inside the
 define.
 */}}
 {{- define "agent-platform.agentManager.skillManagerFloor" -}}2.22.0{{- end -}}
+
+{{/*
+The installation's name in the portal: the key of its entries in the
+app-config the connectivity chart renders (backstage.installationName).
+Usage: include "agent-platform.portalInstallationName" $
+*/}}
+{{- define "agent-platform.portalInstallationName" -}}
+{{- dig "installationName" "" (.Values.backstage | default dict) | default "agent-platform" -}}
+{{- end -}}
 
 {{/*
 "true" when this chart is a published release: a version without a
@@ -4739,9 +4754,7 @@ Usage: include "agent-platform.skillManager.mcpBackend" . | fromJson
 The values the default agent's release (components.default-agent)
 takes from the platform, merged over agents/default-agent/values.yaml: the
 muster URL every agent targets, its avatar on the DiceBear host (the route's
-first hostname, else avatars.<global.domain>; none without either), its system
-message with the portal's name of the installation (backstage.installationName)
-appended, the
+first hostname, else avatars.<global.domain>; none without either), the
 toolset preset:full (it acts as the person), the managed-by label (agent-manager
 lists it read-only) and the default label (agent-manager reports it as the
 installation's default agent) on the Agent, and defaultAgent.modelConfig (empty: the agent
@@ -4757,14 +4770,6 @@ Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 {{- end -}}
 {{- with $host -}}
 {{- $_ := set $agent "iconUrl" (printf "https://%s/v1/default-agent.png" .) -}}
-{{- end -}}
-{{- /* The portal names agents <installation>/<namespace>/<name>: the agent's
-       start links (agent-platform-agent-routing) need the installation's
-       name, which only the platform knows. */ -}}
-{{- $file := .Files.Get (dig "default-agent" "valuesFile" "agents/default-agent/values.yaml" .Values.components) | fromYaml -}}
-{{- with dig "agent" "systemMessage" "" $file -}}
-{{- $installation := dig "installationName" "" ($.Values.backstage | default dict) | default "agent-platform" -}}
-{{- $_ := set $agent "systemMessage" (printf "%s\nIn the Dev Portal this installation is `%s`.\n" (trimSuffix "\n" .) $installation) -}}
 {{- end -}}
 {{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:full") "labels" (dict "agent-platform.giantswarm.io/managed-by" "agent-platform" "agent-platform.giantswarm.io/default" "true") -}}
 {{- with $agent }}{{- $_ := set $out "agent" . -}}{{- end -}}
