@@ -1126,9 +1126,13 @@ components:  # @schema additionalProperties: true
     # agent-platform.giantswarm.io/is-default-model-config) as `default` on
     # list_model_configs and fills an omitted modelConfig on create_agent
     # from it (giantswarm/agent-manager#298). Its tenants.enabled serves the
-    # organizations (with devPortal.url); this chart keeps it off
-    # (agent-platform.agentManager.tenants).
-    versionRange: ">=2.19.0 <3.0.0"
+    # organization tools; this chart derives it and devPortal.url from
+    # agentPlatformOrganizations.enabled (agent-platform.agentManager.organizations).
+    # 2.20.0 is the floor agentPlatformOrganizations.enabled needs: its chart
+    # leaves the ClusterRole agent-platform-tenant-flux to the connectivity
+    # chart (giantswarm/agent-manager#305), and its organization tools write
+    # in commit mode (giantswarm/agent-manager#300).
+    versionRange: ">=2.20.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -5524,10 +5528,13 @@ tenants:
 #     the ClusterTrustBundles of servicedns.podcert.ate.dev/identity
 #     labelled podcert.ate.dev/canarying: live, projected into its pod.
 # The operator's own values are the agent-platform-operator block below.
-# agent-manager's chart keeps its tenants.enabled off: its tenant reconciler is
-# gone (tenants.organizations, the namespaces labelled giantswarm.io/organization,
-# is removed; giantswarm/agent-platform#1268), and the connectivity chart renders
-# the ClusterRole agent-platform-tenant-flux the operator binds.
+# With components.agent-manager on, agent-manager's tenants.enabled follows
+# this switch, so it serves the organization tools (the floor of
+# components.agent-manager.versionRange must be 2.20.0 or later), and with
+# components.backstage on its devPortal.url is the portal's
+# https://<backstage.hostname> (else backstage.<global.domain>), where the
+# tools link a missing credential. The connectivity chart renders the
+# ClusterRole agent-platform-tenant-flux the operator binds.
 # The switch is the rollout gate, off by default for now: it turns on by default
 # once the capz and s3proxy snapshot stores give the operator access and the
 # kagent line carries giantswarm/kagent-extensions#27.
