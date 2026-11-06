@@ -1,8 +1,6 @@
-{{- /* Sends a ModelConfig this chart does not render through the LLM listener.
-The chart's own entries already carry the baseUrl, so this policy only reaches
-objects created elsewhere: Backstage, agent-manager, or kubectl. Without it such
-a model calls the provider directly and its usage never reaches the gateway's
-metrics.
+{{- /* Sends a ModelConfig through the LLM listener, whoever declares it:
+GitOps, Backstage, agent-manager or kubectl. Without it the model calls the
+provider directly and its usage never reaches the gateway's metrics.
 
 Rendered only where the API server serves the GA group. On a beta API server
 (1.34, 1.35) the object is accepted and the admission plugin stays off behind

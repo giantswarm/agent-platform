@@ -264,8 +264,9 @@ overwrite would hide a values file that still spells the old key.
     block's own subjects with tenants.platformTeam appended (each subject
     once), while that list is not empty.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
-                 tenants.enabled false: the tenant reconciler is gone
-                 (agent-platform.agentManager.tenants);
+                 tenants.enabled from agentPlatformOrganizations.enabled and,
+                 with it on and components.backstage on, devPortal.url from
+                 the portal's hostname (agent-platform.agentManager.organizations);
                  muster.url from the muster Service (agent-platform.musterMcpUrl);
                  kagent.controllerTarget, the kagent controller its session
                  tools call, from the agentgateway data plane
@@ -471,8 +472,10 @@ floor that takes the key (agent-platform.agentManager.registryConfigFloor). */ -
 {{- fail (printf "agent-manager.kagent.controllerTarget (%s) differs from the platform's kagent controller target (%q): agent-manager's session tools reach the controller through the agentgateway data plane this chart installs, on kagent.controllerRoute; the target follows gateway.name and gateway.listeners[0].port; leave agent-manager.kagent.controllerTarget unset" $ownTarget $target) -}}
 {{- end -}}
 {{- $_ := set $derived "kagent" (dict "controllerTarget" $target) -}}
-{{- with (include "agent-platform.agentManager.tenants" .root | fromJson) -}}
-{{- $_ := set $derived "tenants" . -}}
+{{- $orgs := include "agent-platform.agentManager.organizations" .root | fromJson -}}
+{{- $_ := set $derived "tenants" $orgs.tenants -}}
+{{- with $orgs.devPortal -}}
+{{- $_ := set $derived "devPortal" . -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "agent-platform-connectivity" -}}
@@ -485,12 +488,6 @@ manager's ServiceAccount there (workspace-manager/kagent-sessions-rbac.yaml). */
 {{- if ne $wmNs $connNs -}}
 {{- $_ := set $derived "workspaceManager" (dict "namespace" $wmNs) -}}
 {{- end -}}
-{{- end -}}
-{{- /* A person's own ChatGPT login: the kagent release's provider chatgpt,
-which the connectivity chart requires beside the model
-(agent-platform.chatgpt.personalLogin). */ -}}
-{{- with (include "agent-platform.chatgpt.personalLogin" .root | fromJson).provider -}}
-{{- $_ := set $derived "kagent" (dict "controller" (dict "session" (dict "actorJWTProviders" (dict "chatgpt" .)))) -}}
 {{- end -}}
 {{- /* muster alone reaches the toolchain-manager's pods, while the component
 is on: an MCP backend entry, whose ingress policy the connectivity chart
@@ -748,7 +745,6 @@ the manager signs grants (agent-platform.kagent.sessionAdmission); the block's
 own value stands per key. Guarded first: the kagent floor that takes the
 block, an issuer, the email claim, an own block set in part. */ -}}
 {{- include "agent-platform.validateSessionAdmission" .root -}}
-{{- include "agent-platform.validateChatGPTPersonalLogin" .root -}}
 {{- $session := dict -}}
 {{- with (include "agent-platform.kagent.sessionAdmission" .root | fromJson) -}}
 {{- $_ := set $session "admission" (dict "jwt" .) -}}
@@ -822,7 +818,6 @@ has failed the render. */ -}}
 {{- /* A person's own ChatGPT login: the App chatgpt after them, unless the
 installation keeps its own (agent-platform.chatgpt.personalLogin). */ -}}
 {{- with (include "agent-platform.chatgpt.personalLogin" .root | fromJson).app -}}
-{{- include "agent-platform.validateChatGPTPersonalLogin" $.root -}}
 {{- $app := . -}}
 {{- $all := $apps | default (dig "muster" "providerApps" list ($.root.Values.muster | default dict)) -}}
 {{- $named := false -}}
@@ -1661,11 +1656,11 @@ Usage: include "agent-platform.kagent.musterActorJWTProvider" . | fromJson
 
 
 {{/*
-A person's own ChatGPT login (giantswarm/giantswarm#38687): a
-kagent.modelConfigs[] entry with credentialType chatgptOAuth and no
-apiKeySecret is the model "ChatGPT (your subscription)", whose codex turns run
-on the ChatGPT subscription the Session's person connected in muster. The entry
-is the one switch; from it this chart derives:
+A person's own ChatGPT login (giantswarm/giantswarm#38687): a ModelConfig with
+credentialType chatgptOAuth and no apiKeySecret, declared with the agents, is
+the model "ChatGPT (your subscription)", whose codex turns run on the ChatGPT
+subscription the Session's person connected in muster. The ModelConfig is the
+only switch: wherever the platform carries the login, this chart derives:
 - muster's provider App `chatgpt` (muster.providerApps, flow
   chatgptDeviceCode: OpenAI's device-code sign-in, the Codex CLI's public
   client), which keeps each person's login as their grant, refreshes it as its
@@ -1676,71 +1671,45 @@ is the one switch; from it this chart derives:
   scheme Bearer), which every bound Session is admitted with and the egress
   gateway resolves by credential URI at muster's authority.
 An own key of the kagent block's chatgpt entry stands; an own muster App named
-chatgpt stands in place of the derived one. Emits JSON {models, app, provider},
-or {} without such an entry or with kagent off.
-Usage: include "agent-platform.chatgpt.personalLogin" . | fromJson
-*/}}
-{{- define "agent-platform.chatgpt.personalLogin" -}}
-{{- $models := list -}}
-{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") -}}
-{{- range (dig "modelConfigs" list (.Values.kagent | default dict)) -}}
-{{- if and (eq (toString .credentialType) "chatgptOAuth") (not .apiKeySecret) -}}
-{{- $models = append $models (toString .name) -}}
-{{- end -}}
-{{- end -}}
-{{- end -}}
-{{- if $models -}}
-{{- $own := dig "controller" "session" "actorJWTProviders" "chatgpt" dict (.Values.kagent | default dict) | default dict -}}
-{{- $provider := mergeOverwrite (dict "hostname" "chatgpt.com" "pathPrefix" "/backend-api/codex/" "scheme" "Bearer") $own -}}
-{{- dict "models" $models "app" (dict "name" "chatgpt" "flow" "chatgptDeviceCode") "provider" $provider | toJson -}}
-{{- else -}}
-{}
-{{- end -}}
-{{- end -}}
-
-{{/*
-The guards of a person's own ChatGPT login (agent-platform.chatgpt.personalLogin),
-run while the kagent and muster components render:
+chatgpt stands in place of the derived one.
+The platform carries the login when all of these hold, and the chart derives
+nothing otherwise (a chatgptOAuth ModelConfig there finds no login at run time):
+- kagent and muster are on;
 - muster's credential provider is on (workspaces.enabled with Substrate on,
   agent-platform.muster.credentialProvider) and kagent's Session admission is
   derived (a grant signing key, agent-platform.kagent.sessionAdmission), which
-  carries the credential authority the provider resolves at: without them no
-  Session is bound to a person and no turn finds a login;
+  carries the credential authority the provider resolves at;
 - muster keeps tokens encrypted (muster.muster.oauth.server.encryptionKey): a
-  person's ChatGPT login is never stored unencrypted, and the muster chart
-  refuses the App without it;
+  person's ChatGPT login is never stored unencrypted;
 - muster's OAuth client role is on (muster.muster.oauth.mcpClient.enabled),
   which the muster chart needs for any provider App;
-- the floors of components.kagent.versionRange and
-  components.kagent-crds.versionRange at agent-platform.kagent.chatgptPersonalLoginFloor
-  (a ModelConfig without apiKeySecret, the credential-URI Session provider) and
-  of components.muster.versionRange at agent-platform.muster.chatgptAppFloor
+- components.kagent.versionRange and components.kagent-crds.versionRange admit
+  no release before agent-platform.kagent.chatgptPersonalLoginFloor (a
+  ModelConfig without apiKeySecret, the credential-URI Session provider), and
+  components.muster.versionRange none before agent-platform.muster.chatgptAppFloor
   (the device-code App).
-Emits nothing; fails naming the key and the fix.
+Emits JSON {app, provider}, or {}.
+Usage: include "agent-platform.chatgpt.personalLogin" . | fromJson
 */}}
-{{- define "agent-platform.validateChatGPTPersonalLogin" -}}
-{{- with (include "agent-platform.chatgpt.personalLogin" . | fromJson) -}}
-{{- $what := printf "kagent.modelConfigs %s (credentialType chatgptOAuth without apiKeySecret) is a person's own ChatGPT login" (join ", " .models) -}}
-{{- if not (and ($.Values.workspaces | default dict).enabled (include "agent-platform.muster.credentialProvider" $ | fromJson).enabled) -}}
-{{- fail (printf "%s, which muster releases to the egress gateway through its credential provider for a Session bound to the person, but the credential provider is off: set workspaces.enabled with components.substrate.enabled, or give the entry apiKeySecret (the installation's own login)" $what) -}}
+{{- define "agent-platform.chatgpt.personalLogin" -}}
+{{- $on := and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
+{{- if $on -}}
+{{- $on = and ((.Values.workspaces | default dict).enabled) ((include "agent-platform.muster.credentialProvider" . | fromJson).enabled) (include "agent-platform.kagent.sessionAdmission" . | fromJson) -}}
 {{- end -}}
-{{- if not (include "agent-platform.kagent.sessionAdmission" $ | fromJson) -}}
-{{- fail (printf "%s, which kagent binds through the Session admission this chart derives with a grant signing key, but none is derived: set workspace-manager.grant.signingKey" $what) -}}
-{{- end -}}
-{{- $muster := dig "muster" dict ($.Values.muster | default dict) | default dict -}}
-{{- if not (dig "oauth" "server" "encryptionKey" false $muster) -}}
-{{- fail (printf "%s, kept by muster as the person's grant, but muster.muster.oauth.server.encryptionKey is off: a person's ChatGPT tokens are never stored unencrypted — set it, with the key oauth-encryption-key in muster's OAuth Secret" $what) -}}
-{{- end -}}
-{{- if not (dig "oauth" "mcpClient" "enabled" false $muster) -}}
-{{- fail (printf "%s, connected through muster's provider App chatgpt, but muster.muster.oauth.mcpClient.enabled is off: the muster chart refuses its provider Apps without it — set it, with muster.muster.oauth.mcpClient.publicUrl" $what) -}}
-{{- end -}}
+{{- $muster := dig "muster" dict (.Values.muster | default dict) | default dict -}}
+{{- $on = and $on (dig "oauth" "server" "encryptionKey" false $muster) (dig "oauth" "mcpClient" "enabled" false $muster) -}}
+{{- if $on -}}
 {{- range $c, $floor := dict "kagent" (include "agent-platform.kagent.chatgptPersonalLoginFloor" $) "kagent-crds" (include "agent-platform.kagent.chatgptPersonalLoginFloor" $) "muster" (include "agent-platform.muster.chatgptAppFloor" $) -}}
-{{- $range := dig $c "versionRange" "" $.Values.components -}}
-{{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
-{{- if lt ((semver $have).Compare (semver $floor)) 0 -}}
-{{- fail (printf "%s, but components.%s.versionRange (%s) admits releases before %s, the first that serves it: raise the floor to %s" $what $c $range $floor $floor) -}}
+{{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig $c "versionRange" "" $.Values.components) | default "0.0.0") "" -}}
+{{- if lt ((semver $have).Compare (semver $floor)) 0 -}}{{- $on = false -}}{{- end -}}
 {{- end -}}
 {{- end -}}
+{{- if $on -}}
+{{- $own := dig "controller" "session" "actorJWTProviders" "chatgpt" dict (.Values.kagent | default dict) | default dict -}}
+{{- $provider := mergeOverwrite (dict "hostname" "chatgpt.com" "pathPrefix" "/backend-api/codex/" "scheme" "Bearer") $own -}}
+{{- dict "app" (dict "name" "chatgpt" "flow" "chatgptDeviceCode") "provider" $provider | toJson -}}
+{{- else -}}
+{}
 {{- end -}}
 {{- end -}}
 
@@ -2819,6 +2788,21 @@ rejects it only when its HelmRelease installs; refused here instead. */ -}}
 {{- end -}}
 {{- end -}}
 
+{{- define "agent-platform.validateRemovedModelKeys" -}}
+{{- /* The kagent block takes any key (its schema skips properties), so a
+removed key would pass the schema and be forwarded or ignored in silence;
+refused here instead. */ -}}
+{{- $found := list -}}
+{{- range list "providers" "defaultModelConfig" "modelConfigs" -}}
+{{- if hasKey ($.Values.kagent | default dict) . -}}
+{{- $found = append $found (printf "kagent.%s" .) -}}
+{{- end -}}
+{{- end -}}
+{{- with $found -}}
+{{- fail (printf "%s: removed, the chart declares no model. Declare each model as a ModelConfig object (api.kagent.dev/v1alpha3) in GitOps next to the agents, and annotate the namespace's default agent-platform.giantswarm.io/is-default-model-config: \"true\"; remove the keys from the values (see UPGRADE.md)" (join ", " .)) -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "agent-platform.validateLegacyToggles" -}}
 {{- $moved := list
       (list "agentgateway" "components.agentgateway.enabled")
@@ -3306,10 +3290,9 @@ joined by ", ". Empty when none is set. Only the paths are emitted, never the
 values, so the string is safe to print in a fail message.
 
 A component's credentials belong in a pre-created Secret the component chart
-references (kagent providers.<name>.apiKeySecretRef / oauth2-proxy
-config.existingSecret, muster oauth.server.existingSecret /
-storage.valkey.existingSecret, valkey auth.usersExistingSecret, klaus-gateway
-slack.secretName / obo.existingSecret, model-manager, agent-manager and vm-manager
+references (kagent oauth2-proxy config.existingSecret, muster
+oauth.server.existingSecret / storage.valkey.existingSecret, valkey
+auth.usersExistingSecret, klaus-gateway slack.secretName / obo.existingSecret, model-manager, agent-manager and vm-manager
 oauth.existingSecret). Set inline, they are forwarded verbatim into that
 component's HelmRelease spec.values and into Helm's release storage, readable
 by anyone allowed to get HelmReleases there.
@@ -3350,12 +3333,6 @@ by anyone allowed to get HelmReleases there.
 {{- $found = append $found (printf "%s.%s" (first .) (join "." (last .))) -}}
 {{- end -}}
 {{- end -}}
-{{- /* Every kagent model provider: providers.<name>.apiKey (providers.default is a string). */ -}}
-{{- range $name, $p := (dig "providers" dict (index $v "kagent" | default dict)) -}}
-{{- if and (kindIs "map" $p) (hasKey $p "apiKey") (index $p "apiKey") -}}
-{{- $found = append $found (printf "kagent.providers.%s.apiKey" $name) -}}
-{{- end -}}
-{{- end -}}
 {{- /* Every valkey ACL user: valkey.auth.aclUsers.<user>.password. */ -}}
 {{- range $user, $spec := (dig "valkey" "auth" "aclUsers" dict (index $v "valkey" | default dict)) -}}
 {{- if and (kindIs "map" $spec) (hasKey $spec "password") (index $spec "password") -}}
@@ -3372,7 +3349,7 @@ The message names the key paths only.
 {{- define "agent-platform.validateInlineSecrets" -}}
 {{- if .Values.gitops.forbidInlineSecrets -}}
 {{- with (include "agent-platform.inlineSecretPaths" .) -}}
-{{- fail (printf "gitops.forbidInlineSecrets is true but these values carry credentials inline, which would land in clear text in the component HelmReleases and in Helm release storage: %s. Move each into a pre-created Secret and reference it (kagent providers.<name>.apiKeySecretRef with an empty apiKey, kagent.oauth2-proxy.config.existingSecret, muster.muster.oauth.server.existingSecret and .storage.valkey.existingSecret, valkey.valkey.auth.usersExistingSecret, klausGateway.slack.secretName with an empty botToken, klausGateway.obo.existingSecret, model-manager/agent-manager/vm-manager/cluster-manager/workspace-manager oauth.existingSecret), or set gitops.forbidInlineSecrets: false" .) -}}
+{{- fail (printf "gitops.forbidInlineSecrets is true but these values carry credentials inline, which would land in clear text in the component HelmReleases and in Helm release storage: %s. Move each into a pre-created Secret and reference it (kagent.oauth2-proxy.config.existingSecret, muster.muster.oauth.server.existingSecret and .storage.valkey.existingSecret, valkey.valkey.auth.usersExistingSecret, klausGateway.slack.secretName with an empty botToken, klausGateway.obo.existingSecret, model-manager/agent-manager/vm-manager/cluster-manager/workspace-manager oauth.existingSecret), or set gitops.forbidInlineSecrets: false" .) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -4278,22 +4255,59 @@ the controller's kubernetes authorization mode needs (agent-platform.kagent.auth
 {{- define "agent-platform.workspaceManager.tokenFloor" -}}0.10.0{{- end -}}
 
 {{/*
-agent-manager's tenants block, as JSON: {"enabled": false}. The tenant
-reconciler is gone (giantswarm/agent-platform#1268): agent-platform-operator
-keeps the organization namespaces, and the connectivity chart renders the
-ClusterRole agent-platform-tenant-flux. components.agent-manager.versionRange
-ends before the release with giantswarm/agent-manager#294, whose tenants.enabled
-serves the organizations instead; it moves with the change that turns it on.
-An own agent-manager.tenants.enabled true fails the render.
+agent-manager's organization values, as JSON: {"tenants": {"enabled": <bool>},
+"devPortal": {"url": <url>}}. tenants.enabled follows
+agentPlatformOrganizations.enabled: agent-manager then serves the organization
+tools. The switch needs the agent-manager floor
+agent-platform.agentManager.organizationsFloor, whose chart leaves the ClusterRole
+agent-platform-tenant-flux to the connectivity chart: an earlier chart renders
+it too, and the two releases' upgrades, in either order, end without it.
+devPortal.url, with the switch
+on and components.backstage on, is https://<backstage.hostname, else
+backstage.<global.domain>>: the organization tools link a missing credential
+to its form there. With components.backstage off an own devPortal.url (a Dev
+Portal installed apart) travels unchanged. The agent-manager line's tenants
+block takes `enabled` only: any other own tenants key, an own tenants.enabled
+or devPortal.url that disagrees, or the switch on without
+oauth.downstream.enabled (the tools run as the caller) fails the render.
 Called from agent-platform.componentDerivedValues, i.e. only while
 components.agent-manager is on.
-Usage: include "agent-platform.agentManager.tenants" $root | fromJson
+Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 */}}
-{{- define "agent-platform.agentManager.tenants" -}}
-{{- if dig "tenants" "enabled" false (index .Values "agent-manager" | default dict) -}}
-{{- fail "agent-manager.tenants.enabled is true: agent-manager's tenant reconciler is gone, agent-platform-operator keeps the organization namespaces (agentPlatformOrganizations.enabled); leave agent-manager.tenants.enabled unset" -}}
+{{- define "agent-platform.agentManager.organizations" -}}
+{{- $am := index .Values "agent-manager" | default dict -}}
+{{- $on := eq (include "agent-platform.organizations.on" .) "true" -}}
+{{- $own := dig "tenants" dict $am | default dict -}}
+{{- range $k, $_ := $own -}}
+{{- if ne $k "enabled" -}}
+{{- fail (printf "agent-manager.tenants.%s is set: agent-manager's tenants block takes enabled only, which this chart derives from agentPlatformOrganizations.enabled — remove agent-manager.tenants.%s" $k $k) -}}
 {{- end -}}
-{{- dict "enabled" false | toJson -}}
+{{- end -}}
+{{- if and (hasKey $own "enabled") (ne (toString $own.enabled) (toString $on)) -}}
+{{- fail (printf "agent-manager.tenants.enabled (%v) differs from agentPlatformOrganizations.enabled (%v): agent-manager serves the organization tools exactly while the operator keeps the organization namespaces — set agentPlatformOrganizations.enabled and leave agent-manager.tenants.enabled unset" $own.enabled $on) -}}
+{{- end -}}
+{{- $out := dict "tenants" (dict "enabled" $on) -}}
+{{- if $on -}}
+{{- $floor := include "agent-platform.agentManager.organizationsFloor" . -}}
+{{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" $floor)) -}}
+{{- fail (printf "agentPlatformOrganizations.enabled needs agent-manager %s or later: components.agent-manager.versionRange (%s) admits a chart that renders the ClusterRole agent-platform-tenant-flux beside the connectivity chart's, and the two releases' upgrades end without it — raise the range's floor to %s" $floor (dig "agent-manager" "versionRange" "" .Values.components) $floor) -}}
+{{- end -}}
+{{- if not (and (dig "oauth" "enabled" false $am) (dig "oauth" "downstream" "enabled" false $am)) -}}
+{{- fail "agentPlatformOrganizations.enabled needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled: the organization tools run as the caller, whose RoleBindings in the organization namespace grant the writes" -}}
+{{- end -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "backstage") -}}
+{{- $host := (.Values.backstage | default dict).hostname | default (and .Values.global.domain (printf "backstage.%s" .Values.global.domain)) -}}
+{{- if $host -}}
+{{- $url := printf "https://%s" $host -}}
+{{- $ownUrl := dig "devPortal" "url" "" $am -}}
+{{- if and $ownUrl (ne (trimSuffix "/" $ownUrl) $url) -}}
+{{- fail (printf "agent-manager.devPortal.url (%s) differs from the Dev Portal this chart installs (%s, from backstage.hostname or global.domain): the organization tools link a credential to its form there — leave agent-manager.devPortal.url unset" $ownUrl $url) -}}
+{{- end -}}
+{{- $_ := set $out "devPortal" (dict "url" $url) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
 {{- end -}}
 
 {{/*
@@ -4396,6 +4410,14 @@ candidate of it included) the chart derives it from
 toolchain-manager.registryPullSecret. One line, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.registryConfigFloor" -}}2.16.0{{- end -}}
+
+{{/*
+The first agent-manager release whose tenants.enabled leaves the ClusterRole
+agent-platform-tenant-flux to the connectivity chart
+(giantswarm/agent-manager#305), the floor agentPlatformOrganizations.enabled
+needs (agent-platform.agentManager.organizations).
+*/}}
+{{- define "agent-platform.agentManager.organizationsFloor" -}}2.20.0{{- end -}}
 
 {{/*
 The first release of the Substrate line (giantswarm/substrate) whose chart
