@@ -1133,7 +1133,11 @@ components:  # @schema additionalProperties: true
     # from it (giantswarm/agent-manager#298). Its tenants.enabled serves the
     # organization tools; this chart derives it and devPortal.url from
     # agentPlatformOrganizations.enabled (agent-platform.agentManager.organizations).
-    versionRange: ">=2.19.0 <3.0.0"
+    # 2.20.0 is the floor agentPlatformOrganizations.enabled needs: its chart
+    # leaves the ClusterRole agent-platform-tenant-flux to the connectivity
+    # chart (giantswarm/agent-manager#305), and its organization tools write
+    # in commit mode (giantswarm/agent-manager#300).
+    versionRange: ">=2.20.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
