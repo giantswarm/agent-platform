@@ -97,10 +97,9 @@ spec:
       interval: 60s
       labels:
         observability.giantswarm.io/tenant: giantswarm
-    skillManager:
-      url: http://skill-manager.default.svc.cluster.local:8080
     skills:
-      repositories: []
+      repositories:
+      - https://github.com/giantswarm/agent-skills
     tenants:
       enabled: false
 ---
@@ -231,10 +230,6 @@ spec:
           name: giantswarm-default
           namespace: envoy-gateway-system
         pathPrefix: /agent-manager
-      skillManager:
-        namespace: default
-        serviceTokenSecret: skill-manager-service-token
-        url: http://skill-manager.default.svc.cluster.local:8080
     agentPlatformOrganizations:
       apiHostnames: []
       enabled: false
@@ -2708,8 +2703,7 @@ spec:
           - dex-k8s-authenticator
         enabled: true
     networkPolicy:
-      ingressNamespaces:
-      - kagent
+      ingressNamespaces: []
     oauth:
       dex:
         allowPrivateURLs: true
@@ -2721,8 +2715,6 @@ spec:
         endpoint: http://otlp-gateway.kube-system.svc:4317
         headers: X-Scope-OrgID=giantswarm
         protocol: grpc
-    serviceToken:
-      secretName: skill-manager-service-token
     sources:
     - path: skills
       readOnly: true
