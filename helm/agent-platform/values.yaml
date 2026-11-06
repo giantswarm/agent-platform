@@ -456,9 +456,14 @@ components:  # @schema additionalProperties: true
     # Floor 5.52.5: a person's ChatGPT login is muster's provider App chatgpt, whose device-code grant muster files
     # as the person's from 5.52.5 (giantswarm/muster#1653); an older muster files it
     # under the asking session only and refuses every codex request.
+    # Floor 5.58.0: muster serves the MCPServers of the namespaces
+    # mcpServerNamespaceSelector selects, which this chart sets to the
+    # organization namespaces with agentPlatformOrganizations.enabled
+    # (giantswarm/muster#1783, agent-platform.muster.organizations); an older
+    # chart refuses the key.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.52.5 <6.0.0"
+    versionRange: ">=5.58.0 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them

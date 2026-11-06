@@ -122,8 +122,7 @@ def meta(chart, *extra):
                 *MAP_API, *extra])
 
 
-MUSTER_FLOOR = ["--set", "components.muster.versionRange=>=5.58.0-0 <6.0.0"]
-ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "agentPlatformOrganizations.fluxNamespace=flux-giantswarm", *MUSTER_FLOOR]
+ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "agentPlatformOrganizations.fluxNamespace=flux-giantswarm"]
 AWS = ["--set", "kagent.harness.snapshotLocation=", "--set", "kagent.harness.snapshotStore.crossplane.enabled=true",
        "--set", "kagent.harness.snapshotStore.crossplane.provider=aws", "--set", "kagent.harness.snapshotStore.crossplane.providerConfigRef=ci",
        "--set", "kagent.harness.snapshotStore.crossplane.region=eu-west-1",
