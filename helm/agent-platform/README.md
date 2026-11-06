@@ -579,19 +579,20 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.skill-manager.valuesFrom | string | `"skill-manager"` |  |
 | components.skill-manager.dependsOn[0] | string | `"muster"` |  |
 | components.skill-manager.gatedRoster | bool | `true` |  |
-| components.agent-manager-assistant.chart | string | `"agent"` |  |
-| components.agent-manager-assistant.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager-assistant.versionRange | string | `">=2.0.0 <3.0.0"` |  |
-| components.agent-manager-assistant.valuesFile | string | `"agents/agent-manager/values.yaml"` |  |
-| components.agent-manager-assistant.injectGlobal | bool | `false` |  |
-| components.agent-manager-assistant.inKagentNamespace | bool | `true` |  |
-| components.agent-manager-assistant.disableWait | bool | `true` |  |
-| components.agent-manager-assistant.labels."agent-platform.giantswarm.io/managed-by" | string | `"agent-platform"` |  |
-| components.agent-manager-assistant.gatedRoster | bool | `true` |  |
-| components.agent-manager-assistant.enabled | bool | `true` |  |
-| components.agent-manager-assistant.dependsOn[0] | string | `"muster"` |  |
-| components.agent-manager-assistant.dependsOn[1] | string | `"kagent"` |  |
-| components.agent-manager-assistant.dependsOn[2] | string | `"agent-manager"` |  |
+| components.default-agent.chart | string | `"agent"` |  |
+| components.default-agent.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.default-agent.versionRange | string | `">=2.0.0 <3.0.0"` |  |
+| components.default-agent.valuesFile | string | `"agents/default-agent/values.yaml"` |  |
+| components.default-agent.injectGlobal | bool | `false` |  |
+| components.default-agent.inKagentNamespace | bool | `true` |  |
+| components.default-agent.disableWait | bool | `true` |  |
+| components.default-agent.labels."agent-platform.giantswarm.io/managed-by" | string | `"agent-platform"` |  |
+| components.default-agent.labels."agent-platform.giantswarm.io/default" | string | `"true"` |  |
+| components.default-agent.gatedRoster | bool | `true` |  |
+| components.default-agent.enabled | bool | `true` |  |
+| components.default-agent.dependsOn[0] | string | `"muster"` |  |
+| components.default-agent.dependsOn[1] | string | `"kagent"` |  |
+| components.default-agent.dependsOn[2] | string | `"agent-manager"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.vm-manager.versionRange | string | `">=0.24.0 <0.25.0"` |  |
@@ -732,7 +733,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.omitKeys[5] | string | `"skills"` |  |
 | components.agent-platform-connectivity.omitKeys[6] | string | `"skillManager"` |  |
 | components.agent-platform-connectivity.omitKeys[7] | string | `"skill-manager"` |  |
-| components.agent-platform-connectivity.omitKeys[8] | string | `"agentManagerAssistant"` |  |
+| components.agent-platform-connectivity.omitKeys[8] | string | `"defaultAgent"` |  |
 | components.agent-platform-connectivity.omitKeys[9] | string | `"agent-platform-operator"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
@@ -1485,7 +1486,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | skill-manager.muster.mcpServer.enabled | bool | `true` |  |
 | skill-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | skill-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
-| agentManagerAssistant.modelConfig | string | `""` |  |
+| defaultAgent.modelConfig | string | `""` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
 | cluster-manager.observability.otel.endpoint | string | `"auto"` |  |
 | cluster-manager.observability.otel.protocol | string | `"auto"` |  |

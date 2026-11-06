@@ -186,15 +186,6 @@
             "type": "object",
             "additionalProperties": true
         },
-        "agentManagerAssistant": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "modelConfig": {
-                    "type": "string"
-                }
-            }
-        },
         "agentPlatformOrganizations": {
             "type": "object",
             "additionalProperties": false,
@@ -322,54 +313,6 @@
                             "type": "string"
                         },
                         "valuesFrom": {
-                            "type": "string"
-                        },
-                        "versionRange": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "agent-manager-assistant": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "properties": {
-                        "chart": {
-                            "type": "string"
-                        },
-                        "dependsOn": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            }
-                        },
-                        "disableWait": {
-                            "type": "boolean"
-                        },
-                        "enabled": {
-                            "type": "boolean"
-                        },
-                        "gatedRoster": {
-                            "type": "boolean"
-                        },
-                        "inKagentNamespace": {
-                            "type": "boolean"
-                        },
-                        "injectGlobal": {
-                            "type": "boolean"
-                        },
-                        "labels": {
-                            "type": "object",
-                            "additionalProperties": false,
-                            "properties": {
-                                "agent-platform.giantswarm.io/managed-by": {
-                                    "type": "string"
-                                }
-                            }
-                        },
-                        "repository": {
-                            "type": "string"
-                        },
-                        "valuesFile": {
                             "type": "string"
                         },
                         "versionRange": {
@@ -623,6 +566,57 @@
                             "type": "string"
                         },
                         "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "default-agent": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "disableWait": {
+                            "type": "boolean"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
+                        },
+                        "inKagentNamespace": {
+                            "type": "boolean"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "labels": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "agent-platform.giantswarm.io/default": {
+                                    "type": "string"
+                                },
+                                "agent-platform.giantswarm.io/managed-by": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFile": {
                             "type": "string"
                         },
                         "versionRange": {
@@ -1373,6 +1367,15 @@
                     "type": "string"
                 },
                 "organization": {
+                    "type": "string"
+                }
+            }
+        },
+        "defaultAgent": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "modelConfig": {
                     "type": "string"
                 }
             }

@@ -260,15 +260,6 @@
                         }
                     }
                 },
-                "agent-manager-assistant": {
-                    "type": "object",
-                    "additionalProperties": true,
-                    "properties": {
-                        "enabled": {
-                            "type": "boolean"
-                        }
-                    }
-                },
                 "agent-platform-mcps": {
                     "type": "object",
                     "additionalProperties": true,
@@ -315,6 +306,15 @@
                     }
                 },
                 "cluster-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "default-agent": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {

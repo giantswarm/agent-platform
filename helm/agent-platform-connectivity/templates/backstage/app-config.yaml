@@ -167,13 +167,13 @@ data:
     signed-in person through muster (the x_model-manager_* tools of the
     muster.installations entry above; giantswarm/backstage#2294), and its
     backend has no model-manager client to configure. */}}
-    {{- /* The agent behind each of the portal's platform roles: the Agent
-    Manager the meta chart installs (components.agent-manager-assistant) for
+    {{- /* The agent behind each of the portal's platform roles: the default
+    agent the meta chart installs (components.default-agent) for
     every role while it is on; backstage.metaAgents.<role> points a role
     elsewhere. backstage >= 3.0.0; an earlier portal ignores the key. */}}
     {{- $metaAgents := dict }}
-    {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager-assistant")) (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) }}
-    {{- $assistant := printf "%s/%s/agent-manager-assistant" $installation (.Values.kagent.namespaceOverride | default .Release.Namespace) }}
+    {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "default-agent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) }}
+    {{- $assistant := printf "%s/%s/default-agent" $installation (.Values.kagent.namespaceOverride | default .Release.Namespace) }}
     {{- range list "generalInformation" "agentManagement" "workflowManagement" "platformOperations" "skillEvaluation" "skillCreation" }}
     {{- $_ := set $metaAgents . $assistant }}
     {{- end }}

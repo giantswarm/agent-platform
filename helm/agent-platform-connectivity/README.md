@@ -1166,7 +1166,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | components.agent-sandbox.enabled | bool | `false` |  |
 | components.model-manager.enabled | bool | `true` |  |
 | components.agent-manager.enabled | bool | `false` |  |
-| components.agent-manager-assistant.enabled | bool | `false` |  |
+| components.default-agent.enabled | bool | `false` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.workspace-manager.enabled | bool | `false` |  |

@@ -11,7 +11,7 @@ knowledge:
   chart/repository/versionRange — where to pull and which versions. The
       release, its HelmRelease and OCIRepository are named after the entry's
       key, the chart's name except for a second release of a chart
-      (agent-manager-assistant, a release of the agent chart). An entry
+      (default-agent, a release of the agent chart). An entry
       WITHOUT a chart key is a feature switch (components.flux, the condition of
       the flux-engine subchart): it is part of the roster forwarded to
       connectivity and of the enabled/disabled logic like every other entry, but
@@ -194,7 +194,7 @@ knowledge:
       (giantswarm/agent-platform#1107). Once Substrate is Ready both wait again.
   disableWait   — render `disableWait: true` on install and upgrade: the release
       is Ready once its objects are applied. For a release whose object's own
-      readiness is no condition of the platform's (the Agent Manager's Agent,
+      readiness is no condition of the platform's (the default agent's Agent,
       Ready only once its model answers; its status says why).
   disableWaitForJobs — render `disableWaitForJobs: true` on the child
       HelmRelease's install and upgrade: helm-controller then does not wait for

@@ -752,7 +752,7 @@ def main(meta: str) -> int:
     renders = {shape: (next(manifests), next(manifests)) for shape in SHAPES}
     wide, pinned = next(iter(renders.values()))
     # The HelmRelease is named after the entry (its chart's name but for a second
-    # release of a chart, agent-manager-assistant), and its chartRef names the
+    # release of a chart, default-agent), and its chartRef names the
     # OCIRepository (the same name; with the chart's version for one released
     # with it, agent-platform.sourceName).
     charts = {n: n for n in components}

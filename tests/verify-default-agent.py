@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Assert the Agent Manager the meta chart ships (giantswarm/giantswarm#38970).
+"""Assert the default agent the meta chart ships (giantswarm/giantswarm#38970).
 
-- components.agent-manager-assistant renders one HelmRelease of the agent chart,
-  named agent-manager-assistant, into the kagent component's namespace,
-  labelled managed-by agent-platform (the HelmRelease and the Agent), only
+- components.default-agent renders one HelmRelease of the agent chart,
+  named default-agent, into the kagent component's namespace,
+  labelled managed-by agent-platform and default "true" (the HelmRelease and
+  the Agent), only
   while it, kagent, muster and agent-manager are on; its range is
   agent-manager's agentChart.semver; its values are
-  agents/agent-manager/values.yaml with the derived muster.url, iconUrl,
-  toolset, labels and modelConfig.name.
+  agents/default-agent/values.yaml with the derived muster.url, iconUrl,
+  the installation's portal name in the system message, toolset, labels and
+  modelConfig.name.
 - The working tree and a pre-release carry no skills; stamped by
   hack/stamp-release-commit.sh, the packaged chart pins every skill of skills/
   to that commit (the tag pipeline's step, simulated on a copy); a release
@@ -32,7 +34,7 @@
   agent-manager pins through the skill-manager.
 - The connectivity chart wires the portal's meta agents to it while it is on.
 
-usage: verify-agent-manager-assistant.py <meta chart dir> <connectivity chart dir>
+usage: verify-default-agent.py <meta chart dir> <connectivity chart dir>
 """
 import json
 import os
@@ -47,8 +49,8 @@ import yaml
 META, CONN = sys.argv[1], sys.argv[2]
 HELM = os.environ.get("HELM") or "helm"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-NAME = "agent-manager-assistant"
-LABEL = {"agent-platform.giantswarm.io/managed-by": "agent-platform"}
+NAME = "default-agent"
+LABEL = {"agent-platform.giantswarm.io/managed-by": "agent-platform", "agent-platform.giantswarm.io/default": "true"}
 PLATFORM = "https://github.com/giantswarm/agent-platform"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 BASE = [
@@ -127,7 +129,7 @@ def package(tmp: str, version: str, stamp: bool) -> str:
 values = yaml.safe_load(open(f"{META}/values.yaml"))
 semver = values["agent-manager"]["agentChart"]["semver"]
 if values["components"][NAME]["versionRange"] != semver:
-    fail(f"components.{NAME}.versionRange {values['components'][NAME]['versionRange']!r} is not agent-manager.agentChart.semver {semver!r}: the Agent Manager runs the agent chart line agent-manager composes")
+    fail(f"components.{NAME}.versionRange {values['components'][NAME]['versionRange']!r} is not agent-manager.agentChart.semver {semver!r}: the default agent runs the agent chart line agent-manager composes")
 skills = sorted(p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md"))
 installation = values["skillManager"]["sources"]
 
@@ -142,7 +144,7 @@ for what, args in {"kagent off (the default)": ["--set", "components.agent-manag
     conn = find(docs, "HelmRelease", "agent-platform-connectivity")
     if conn and NAME in conn["spec"]["values"]["components"]:
         fail(f"{what}: the roster forwards {NAME} to the connectivity release (gatedRoster)")
-print("ok: no Agent Manager without kagent, muster, agent-manager or its switch")
+print("ok: no default agent without kagent, muster, agent-manager or its switch")
 
 docs = render(META, *ON, "--set", "dicebear.route.hostnames[0]=avatars.example.org")
 hr, oci = find(docs, "HelmRelease", NAME), find(docs, "OCIRepository", NAME)
@@ -153,14 +155,15 @@ checks = {
     "releaseName": (spec["releaseName"], NAME),
     "install/upgrade disableWait": ((spec["install"].get("disableWait"), spec["upgrade"].get("disableWait")), (True, True)),
     "targetNamespace": (spec["targetNamespace"], "kagent"),
-    "HelmRelease managed-by label": (hr["metadata"]["labels"].get("agent-platform.giantswarm.io/managed-by"), "agent-platform"),
+    "HelmRelease labels": ({k: hr["metadata"]["labels"].get(k) for k in LABEL}, LABEL),
     "Agent labels": (v.get("labels"), LABEL),
     "chart": (oci["spec"]["url"], "oci://gsoci.azurecr.io/charts/giantswarm/agent"),
     "range": (oci["spec"]["ref"]["semver"], semver),
     "dependsOn": (sorted(d["name"] for d in spec["dependsOn"]), ["agent-manager", "kagent", "muster"]),
-    "displayName": (v["agent"]["displayName"], "Agent Manager"),
+    "displayName": (v["agent"]["displayName"], "Assistant"),
     "iconUrl (the route's hostname)": (v["agent"]["iconUrl"], f"https://avatars.example.org/v1/{NAME}.png"),
-    "toolset": (v["toolset"], ["preset:agent-platform"]),
+    "toolset": (v["toolset"], ["preset:full"]),
+    "systemMessage names the portal's installation": (v["agent"]["systemMessage"].endswith("\nIn the Dev Portal this installation is `agent-platform`.\n"), True),
     "muster.url": (v["muster"]["url"], "http://muster.agent-platform.svc.cluster.local:8090/mcp"),
     "modelConfig (unset: the chart's default)": (v.get("modelConfig"), None),
     "skills (the working tree is unstamped)": (v["skills"], []),
@@ -172,9 +175,12 @@ for what, (got, want) in checks.items():
 v = find(render(META, *ON), "HelmRelease", NAME)["spec"]["values"]
 if v["agent"].get("iconUrl") != f"https://avatars.example.com/v1/{NAME}.png":
     fail(f"{NAME}: without a route hostname the avatar is not on avatars.<global.domain>: {v['agent']!r}")
-v = find(render(META, *ON, "--set", "components.dicebear.enabled=false", "--set", "agentManagerAssistant.modelConfig=claude-opus"), "HelmRelease", NAME)["spec"]["values"]
+v = find(render(META, *ON, "--set", "components.dicebear.enabled=false", "--set", "defaultAgent.modelConfig=claude-opus"), "HelmRelease", NAME)["spec"]["values"]
 if v.get("modelConfig") != {"name": "claude-opus"} or "iconUrl" in v["agent"]:
-    fail(f"{NAME}: agentManagerAssistant.modelConfig is not its modelConfig.name, or an iconUrl renders without DiceBear: {v.get('modelConfig')!r}, {v['agent']!r}")
+    fail(f"{NAME}: defaultAgent.modelConfig is not its modelConfig.name, or an iconUrl renders without DiceBear: {v.get('modelConfig')!r}, {v['agent']!r}")
+v = find(render(META, *ON, "--set", "backstage.installationName=lab"), "HelmRelease", NAME)["spec"]["values"]
+if not v["agent"]["systemMessage"].endswith("\nIn the Dev Portal this installation is `lab`.\n"):
+    fail(f"{NAME}: the system message does not follow backstage.installationName=lab: {v['agent']['systemMessage'][-120:]!r}")
 hr = find(render(META, *ON, "--set", "kagent.namespaceOverride=agents"), "HelmRelease", NAME)
 if hr["spec"]["targetNamespace"] != "agents":
     fail(f"{NAME}: targetNamespace {hr['spec']['targetNamespace']!r} does not follow kagent.namespaceOverride=agents")
@@ -375,9 +381,9 @@ if meta != {**{k: f"agent-platform/kagent/{NAME}" for k in ROLES}, "generalInfor
     fail(f"backstage.metaAgents.generalInformation does not point that role elsewhere: {meta!r}")
 meta = app_config(render(META, *ON, *PORTAL, "--set", f"components.{NAME}.enabled=false", "--set", "backstage.metaAgents.skillCreation=agent-platform/kagent/writer")).get("metaAgents")
 if meta != {"skillCreation": "agent-platform/kagent/writer"}:
-    fail(f"with the Agent Manager off, an installation's role does not render alone: {meta!r}")
+    fail(f"with the default agent off, an installation's role does not render alone: {meta!r}")
 if "metaAgents" in app_config(render(META, *ON, *PORTAL, "--set", f"components.{NAME}.enabled=false")):
     fail(f"agentPlatform.metaAgents renders with components.{NAME} off")
 if "metaAgents" in app_config(render(META, "--set", "components.kagent.enabled=true", *PORTAL)):
     fail("agentPlatform.metaAgents renders with agent-manager off")
-print("ok: the portal's meta agents are the Agent Manager while it is on, in the kagent namespace")
+print("ok: the portal's meta agents are the default agent while it is on, in the kagent namespace")

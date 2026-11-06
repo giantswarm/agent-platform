@@ -4,7 +4,7 @@
 - A skill is skills/<name>/SKILL.md. A SKILL.md anywhere else fails: a skill
   source listed without a path is scanned whole and would offer it.
 - Its YAML frontmatter parses to a mapping whose `name` is the directory name,
-  the name the Agent Manager's values pin it by (agents/agent-manager/values.yaml).
+  the name the default agent's values pin it by (agents/default-agent/values.yaml).
 
 What the agent runtime accepts beyond that (fields, lengths) is the runtime's
 own check; this script does not copy it.

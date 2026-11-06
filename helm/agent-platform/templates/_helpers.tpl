@@ -112,7 +112,7 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
        disagrees with it). */ -}}
 {{- $on = ($root.Values.agentPlatformOrganizations | default dict).enabled | default false }}
 {{- end }}
-{{- if and $on (eq .name "agent-manager-assistant") }}
+{{- if and $on (eq .name "default-agent") }}
 {{- /* An agent: only where kagent runs it, muster serves its tools and
        agent-manager, whose tools it calls, is on. */ -}}
 {{- $on = and (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent")) "true") (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "muster")) "true") (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "agent-manager")) "true") }}
@@ -411,8 +411,8 @@ in-process list of URLs (agent-platform.skills.repositories). */ -}}
 {{- $_ := set $derived "skills" (dict "repositories" (include "agent-platform.skills.repositories" (dict "root" .root "consumer" "agent-manager") | fromJson).list) -}}
 {{- end -}}
 {{- end -}}
-{{- if eq .name "agent-manager-assistant" -}}
-{{- $derived = include "agent-platform.agentManagerAssistant.derived" .root | fromJson -}}
+{{- if eq .name "default-agent" -}}
+{{- $derived = include "agent-platform.defaultAgent.derived" .root | fromJson -}}
 {{- end -}}
 {{- if eq .name "agent-platform-connectivity" -}}
 {{- /* The namespace the workspace-manager release installs into, when it is
@@ -4543,16 +4543,19 @@ Usage: include "agent-platform.skillManager.mcpBackend" . | fromJson
 {{- end -}}
 
 {{/*
-The values the Agent Manager's release (components.agent-manager-assistant)
-takes from the platform, merged over agents/agent-manager/values.yaml: the
+The values the default agent's release (components.default-agent)
+takes from the platform, merged over agents/default-agent/values.yaml: the
 muster URL every agent targets, its avatar on the DiceBear host (the route's
-first hostname, else avatars.<global.domain>; none without either), the
-agent-platform toolset preset, the managed-by label on the Agent (agent-manager
-lists it read-only), and agentManagerAssistant.modelConfig (empty: the agent
+first hostname, else avatars.<global.domain>; none without either), its system
+message with the portal's name of the installation (backstage.installationName)
+appended, the
+toolset preset:full (it acts as the person), the managed-by label (agent-manager
+lists it read-only) and the default label (agent-manager reports it as the
+installation's default agent) on the Agent, and defaultAgent.modelConfig (empty: the agent
 chart's default).
-Usage: include "agent-platform.agentManagerAssistant.derived" $ | fromJson
+Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 */}}
-{{- define "agent-platform.agentManagerAssistant.derived" -}}
+{{- define "agent-platform.defaultAgent.derived" -}}
 {{- $agent := dict -}}
 {{- $host := "" -}}
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "dicebear") -}}
@@ -4560,11 +4563,19 @@ Usage: include "agent-platform.agentManagerAssistant.derived" $ | fromJson
 {{- with .Values.global.domain -}}{{- $host = $host | default (printf "avatars.%s" .) -}}{{- end -}}
 {{- end -}}
 {{- with $host -}}
-{{- $_ := set $agent "iconUrl" (printf "https://%s/v1/agent-manager-assistant.png" .) -}}
+{{- $_ := set $agent "iconUrl" (printf "https://%s/v1/default-agent.png" .) -}}
 {{- end -}}
-{{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:agent-platform") "labels" (dict "agent-platform.giantswarm.io/managed-by" "agent-platform") -}}
+{{- /* The portal names agents <installation>/<namespace>/<name>: the agent's
+       start links (agent-platform-agent-routing) need the installation's
+       name, which only the platform knows. */ -}}
+{{- $file := .Files.Get (dig "default-agent" "valuesFile" "agents/default-agent/values.yaml" .Values.components) | fromYaml -}}
+{{- with dig "agent" "systemMessage" "" $file -}}
+{{- $installation := dig "installationName" "" ($.Values.backstage | default dict) | default "agent-platform" -}}
+{{- $_ := set $agent "systemMessage" (printf "%s\nIn the Dev Portal this installation is `%s`.\n" (trimSuffix "\n" .) $installation) -}}
+{{- end -}}
+{{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:full") "labels" (dict "agent-platform.giantswarm.io/managed-by" "agent-platform" "agent-platform.giantswarm.io/default" "true") -}}
 {{- with $agent }}{{- $_ := set $out "agent" . -}}{{- end -}}
-{{- with dig "modelConfig" "" (.Values.agentManagerAssistant | default dict) -}}
+{{- with dig "modelConfig" "" (.Values.defaultAgent | default dict) -}}
 {{- $_ := set $out "modelConfig" (dict "name" .) -}}
 {{- end -}}
 {{- $out | toJson -}}

@@ -3,7 +3,7 @@
 # agents' values files (helm/agent-platform/agents/) becomes the full commit id
 # the agent chart pins the platform's skills to (it refuses a tag). Run by the
 # tag pipeline (.circleci/custom.yml, stamp-release-commit) before the chart is
-# packaged; make verify-agent-manager-assistant runs it on a copy.
+# packaged; make verify-default-agent runs it on a copy.
 #
 # usage: hack/stamp-release-commit.sh [<commit>] [<chart dir>]
 #   commit     40-hex commit id; default: git rev-parse HEAD

@@ -264,15 +264,15 @@ The OAuth issuer, client, secret and base URL come from the block, else from `gl
 
 `make verify-managers` covers the wiring and the guards.
 
-### Agent Manager and skills
+### Default agent and skills
 
-The Agent Manager is the platform's meta agent, `agent-manager-assistant` in the kagent namespace. It creates and manages agents and their building blocks: skills, connectors, models and toolsets. Its prompt is in [`agents/agent-manager/values.yaml`](../agents/agent-manager/values.yaml) and its skills are in [`skills/`](../skills).
+The default agent, "Assistant", is `default-agent` in the kagent namespace, labelled `agent-platform.giantswarm.io/default: "true"`. It does one-off tasks with the person's connectors (`preset:full`), points to or helps create specialist agents, and serves every portal role. Its prompt is in [`agents/default-agent/values.yaml`](../agents/default-agent/values.yaml) and its skills are in [`skills/`](../skills).
 
 | Value | Default | Effect |
 |---|---|---|
-| `components.agent-manager-assistant.enabled` | `true` | Deploys the agent while kagent, muster and agent-manager are on. The portal's meta-agent features use it. |
-| `agentManagerAssistant.modelConfig` | `""` | The `ModelConfig` it runs on. Empty uses `default-model-config`. |
-| `backstage.metaAgents.<role>` | unset | The agent behind a portal role, as `<installation>/<namespace>/<name>`. Roles: `generalInformation`, `agentManagement`, `workflowManagement`, `platformOperations`, `skillEvaluation`, `skillCreation`. Unset roles use the Agent Manager while it is on. |
+| `components.default-agent.enabled` | `true` | Deploys the agent while kagent, muster and agent-manager are on. The portal's meta-agent features use it. |
+| `defaultAgent.modelConfig` | `""` | The `ModelConfig` it runs on. Empty uses `default-model-config`. |
+| `backstage.metaAgents.<role>` | unset | The agent behind a portal role, as `<installation>/<namespace>/<name>`. Roles: `generalInformation`, `agentManagement`, `workflowManagement`, `platformOperations`, `skillEvaluation`, `skillCreation`. Unset roles use the default agent while it is on. |
 | `skillManager.sources` | `[giantswarm/agent-skills]` | Skill sources for the skill-manager and the portal, as URLs or `{url, ref, path, readOnly}`. |
 | `skills.platformSource.enabled` | `true` | Lists the platform's `skills/` first, read-only, at the release tag. Set `false` where GitHub is unreachable. |
 | `agent-manager.skills.repositories`, `backstage.skillsRepositories` | `[]` | Deprecated. When set, replaces `skillManager.sources` for that consumer. |
@@ -291,7 +291,7 @@ The Agent Manager is the platform's meta agent, `agent-manager-assistant` in the
 - Its NetworkPolicy admits its callers' namespaces (`networkPolicy.ingressNamespaces`, derived: muster's, the portal's, agent-manager's, the kagent namespace). The connectivity chart registers it as muster's MCP backend and opens agent-manager's and its migrate run's egress to it.
 - agent-manager's migrate run calls it with a service token: the connectivity chart generates the Secret `skill-manager-service-token` (skill-manager's and the kagent namespace) and the chart sets `skill-manager.serviceToken.secretName`.
 
-`make verify-agent-manager-assistant` covers it.
+`make verify-default-agent` covers it.
 
 ### Cluster manager
 

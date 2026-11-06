@@ -27,12 +27,12 @@
 #     image). A release refused this way is recovered by rerunning the tag's
 #     workflow from failed once the component chart is out, without a new tag.
 #   - stamp-release-commit (tags only): hack/stamp-release-commit.sh writes the
-#     tag's commit into helm/agent-platform/agents/ (the Agent Manager's skill
+#     tag's commit into helm/agent-platform/agents/ (the default agent's skill
 #     pins; the agent chart refuses a tag) and persists it to the workspace,
 #     which the generated push-chart-release attaches over its checkout before
 #     packaging: it requires the stamp through verify-release-floors and
-#     push-connectivity-chart-release. Unstamped (branch builds) the Agent
-#     Manager renders without skills; make verify-agent-manager-assistant
+#     push-connectivity-chart-release. Unstamped (branch builds) the default
+#     agent renders without skills; make verify-default-agent
 #     simulates the step.
 #
 # The agent-platform-crds chart has been RETIRED — every component now ships
@@ -101,7 +101,7 @@ jobs:
           commit=$(git rev-parse HEAD)
           [ "$commit" = "$CIRCLE_SHA1" ] || { echo "checked out $commit, the pipeline's commit is $CIRCLE_SHA1" >&2; exit 1; }
           hack/stamp-release-commit.sh "$commit"
-          grep -cF "commit: \"$commit\"" helm/agent-platform/agents/agent-manager/values.yaml
+          grep -cF "commit: \"$commit\"" helm/agent-platform/agents/default-agent/values.yaml
     - persist_to_workspace:
         root: .
         paths:

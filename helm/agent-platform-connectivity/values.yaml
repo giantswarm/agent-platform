@@ -109,9 +109,9 @@ components:  # @schema additionalProperties: true
     enabled: true
   agent-manager:  # @schema additionalProperties: true
     enabled: false
-  # The Agent Manager (kagent/agent-manager-assistant), the portal's meta agent.
+  # The default agent (kagent/default-agent, "Assistant"), the portal's meta agent.
   # The meta chart forwards the entry only while it is on.
-  agent-manager-assistant:  # @schema additionalProperties: true
+  default-agent:  # @schema additionalProperties: true
     enabled: false
   vm-manager:  # @schema additionalProperties: true
     enabled: false
@@ -3565,8 +3565,8 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
     - https://github.com/giantswarm/agent-skills
   # The agent behind a portal role (generalInformation, agentManagement,
   # workflowManagement, platformOperations, skillEvaluation, skillCreation), as
-  # <installation>/<namespace>/<name>. Unset roles take the Agent Manager while
-  # components.agent-manager-assistant is on.
+  # <installation>/<namespace>/<name>. Unset roles take the default agent while
+  # components.default-agent is on.
   metaAgents: {}
   # Roll the Backstage pod when this chart's app-config ConfigMap changes.
   # The backstage chart's own checksum annotations cover only its own
