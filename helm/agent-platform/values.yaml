@@ -6288,6 +6288,13 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
 # (networkPolicy.mcpBackends.toolchain-manager, derived while the component is
 # on).
 toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
+  muster:
+    mcpServer:
+      # Muster requests this cross-client audience at login. The manager's
+      # chart trusts it alongside auth.trustedAudiences so portal ID tokens
+      # are accepted when their Dex client differs from the platform's.
+      requiredAudiences:
+        - dex-k8s-authenticator
   # The installation's owners, who approve a source a person adds before its
   # toolchains are offered: Dex groups and verified emails. Without any, an
   # added source is never approved.

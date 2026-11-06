@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Toolchain-manager requests and trusts the `dex-k8s-authenticator` cross-client audience through its MCPServer registration, so forwarded portal ID tokens are accepted when the portal and platform use different Dex clients. `toolchain-manager.muster.mcpServer.requiredAudiences` overrides the audience list, including an empty list.
 - **An agent with three or more skills behind one credential can be changed again** (giantswarm/giantswarm#38827). `agent-platform-platform-tenant-credential-refs` asks the authorizer once per distinct Secret name instead of once per reference, and `agent-platform-platform-helmreleases` does the same for the Secrets it does not take as the installation skills credential. The API server allows two authorizer checks per CEL expression, so an Agent or AgentTemplate whose skills named `agent-manager-skills-token` three or more times was refused with `actual cost limit exceeded` on every spec change. Both policies now refuse, with their own message and for every requester, an object that names more than two distinct such Secrets.
 
 ### Security
