@@ -122,7 +122,8 @@ def meta(chart, *extra):
                 *MAP_API, *extra])
 
 
-ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "agentPlatformOrganizations.fluxNamespace=flux-giantswarm"]
+SWITCH = ["--set", "agentPlatformOrganizations.enabled=true"]
+ON = [*SWITCH, "--set", "agentPlatformOrganizations.fluxNamespace=flux-giantswarm", "--set", "agentPlatformOrganizations.fluxSource.name=giantswarm-config"]
 AWS = ["--set", "kagent.harness.snapshotLocation=", "--set", "kagent.harness.snapshotStore.crossplane.enabled=true",
        "--set", "kagent.harness.snapshotStore.crossplane.provider=aws", "--set", "kagent.harness.snapshotStore.crossplane.providerConfigRef=ci",
        "--set", "kagent.harness.snapshotStore.crossplane.region=eu-west-1",
@@ -192,6 +193,21 @@ def check_meta(chart):
     am = release(docs(meta(chart, *ON, "--set", "agent-manager.devPortal.url=https://portal.elsewhere.example.com")), "agent-manager")["values"]
     expect(am.get("devPortal") == {"url": "https://portal.elsewhere.example.com"},
            "on with components.backstage off, an own devPortal.url (a portal installed apart) travels unchanged")
+    expect(v["commitMode"] == {"sourceRef": {"kind": "GitRepository", "name": "giantswarm-config"},
+                               "path": "./agent-platform/organizations/{parent}/{name}", "decryptionSecret": "sops-keys"},
+           f"with fluxNamespace, the operator's commit mode follows fluxSource, fluxPathPrefix and fluxDecryptionSecret ({v.get('commitMode')})")
+    own_cm = release(docs(meta(chart, *ON, "--set", "agent-platform-operator.commitMode.interval=5m",
+                               "--set", "agent-platform-operator.commitMode.installationKustomization.name=agent-platform",
+                               "--set", "agentPlatformOrganizations.fluxSource.kind=OCIRepository",
+                               "--set", "agentPlatformOrganizations.fluxPathPrefix=./orgs/",
+                               "--set", "agentPlatformOrganizations.fluxDecryptionSecret=")), "agent-platform-operator")["values"]["commitMode"]
+    expect(own_cm.get("interval") == "5m" and own_cm.get("installationKustomization", {}).get("name") == "agent-platform"
+           and own_cm["sourceRef"] == {"kind": "OCIRepository", "name": "giantswarm-config"}
+           and own_cm["path"] == "./orgs/{parent}/{name}" and own_cm["decryptionSecret"] == "",
+           f"an own commitMode.interval and installationKustomization travel beside the derived source, path and key ({own_cm})")
+    no_flux = release(docs(meta(chart, *SWITCH)), "agent-platform-operator")["values"]
+    expect("commitMode" not in no_flux or not no_flux["commitMode"].get("sourceRef", {}).get("name"),
+           "without fluxNamespace the operator gets no commit mode")
     org_selector = {"matchExpressions": [{"key": NEW, "operator": "Exists"}]}
     muster = release(on, "muster")["values"]["muster"]
     expect(muster.get("mcpServerNamespaceSelector") == org_selector,
@@ -259,8 +275,12 @@ def check_meta(chart):
             ("an own devPortal.url other than the installed portal's",
              ["--set", "components.backstage.enabled=true", "--set", "agent-manager.devPortal.url=https://other.example.com"],
              "agent-manager.devPortal.url (https://other.example.com) differs from the Dev Portal this chart installs (https://backstage.ci.example.com"),
-            ("an own commitMode", ["--set", "agent-platform-operator.commitMode.sourceRef.name=flux"],
-             "agent-platform-operator.commitMode is set"),
+            ("an own commit mode path that differs", ["--set", "agent-platform-operator.commitMode.path=./elsewhere/{name}"],
+             "agent-platform-operator.commitMode.path (\"./elsewhere/{name}\") differs from what the chart derives"),
+            ("an own commit mode source that differs", ["--set", "agent-platform-operator.commitMode.sourceRef.name=other"],
+             "agent-platform-operator.commitMode.sourceRef.name (\"other\") differs from what the chart derives"),
+            ("fluxNamespace without fluxSource.name", ["--set", "agentPlatformOrganizations.fluxSource.name="],
+             "agentPlatformOrganizations.fluxSource.name is required with fluxNamespace"),
             ("an own derived operator value", ["--set", "agent-platform-operator.platformNamespace=other"],
              "agent-platform-operator.platformNamespace (\"other\") differs from what the chart derives"),
             ("a muster floor below 5.58.0", ["--set", "components.muster.versionRange=>=5.57.0 <6.0.0"],
@@ -276,6 +296,9 @@ def check_meta(chart):
              "kagent.controller.authorization.namespaceSelector (giantswarm.io/organization) differs")):
         r = meta(chart, *ON, *extra)
         expect(r.returncode != 0 and needle in r.stderr, f"on with {what}, the render fails naming it")
+    r = meta(chart, *SWITCH, "--set", "agent-platform-operator.commitMode.sourceRef.name=flux")
+    expect(r.returncode != 0 and "agent-platform-operator.commitMode.sourceRef.name is set but agentPlatformOrganizations.fluxNamespace is not" in r.stderr,
+           "on without fluxNamespace, an own commit mode source fails the render naming fluxNamespace")
     r = meta(chart, "--set", "components.agent-platform-operator.enabled=true")
     expect(r.returncode != 0 and "components.agent-platform-operator.enabled is true but agentPlatformOrganizations.enabled is false" in r.stderr,
            "off with components.agent-platform-operator.enabled true, the render fails naming it")
