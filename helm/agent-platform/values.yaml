@@ -284,7 +284,6 @@ gitops:
   retries: 5
   # Refuse credentials given inline in these values. Every component chart can
   # read its credentials from a pre-created Secret instead: kagent
-  # providers.<name>.apiKeySecretRef (with an empty apiKey) and
   # oauth2-proxy.config.existingSecret; muster.muster.oauth.server.existingSecret
   # and .storage.valkey.existingSecret; valkey.valkey.auth.usersExistingSecret;
   # klausGateway.slack.secretName (with an empty botToken) and
@@ -293,7 +292,7 @@ gitops:
   # component's HelmRelease spec.values and into Helm's release storage,
   # readable by anyone allowed to get HelmReleases in `namespace`. With true the render fails and names the offending key paths
   # (never their values); false keeps the pre-existing behavior. The keys it
-  # checks: kagent.providers.*.apiKey, kagent.oauth2-proxy.config.clientSecret
+  # checks: kagent.oauth2-proxy.config.clientSecret
   # and .cookieSecret, muster.muster.oauth.server.dex.clientSecret,
   # .google.clientSecret, .registrationToken, .encryptionKeyValue and
   # .storage.valkey.password, valkey.valkey.auth.aclUsers.*.password,
@@ -454,10 +453,8 @@ components:  # @schema additionalProperties: true
     # request of the Session's sandbox resolves within it (binding ∩ header,
     # giantswarm/muster#1618); agent-manager from 2.9.0 sends it, which an
     # older muster refuses, so the two floors move together.
-    # Floor 5.52.5: a person's ChatGPT login (a kagent.modelConfigs entry
-    # with credentialType chatgptOAuth and no apiKeySecret) is muster's
-    # provider App chatgpt, whose device-code grant muster files as the
-    # person's from 5.52.5 (giantswarm/muster#1653); an older muster files it
+    # Floor 5.52.5: a person's ChatGPT login is muster's provider App chatgpt, whose device-code grant muster files
+    # as the person's from 5.52.5 (giantswarm/muster#1653); an older muster files it
     # under the asking session only and refuses every codex request.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
@@ -754,8 +751,6 @@ components:  # @schema additionalProperties: true
       # The store block is this chart's and the connectivity chart's: the kagent
       # chart gets the derived harness.snapshotLocation, never the block.
       - harness.snapshotStore
-      - defaultModelConfig
-      - modelConfigs
       - oauth2ProxyIngress
       - remoteMcpServers
       - uiRoute
@@ -2121,15 +2116,12 @@ gatewayApi:
 # `x-api-key` header passes through untouched, so reach to the listener grants
 # no spend.
 #
-# Two values turn it on, and the order matters:
-#   1. llmRouting.enabled: true  — renders the `llm` listener on the data-plane
-#      Gateway plus the AgentgatewayModels attached to it (llmRouting.models)
-#      that carry the traffic, and the model-price ConfigMap. Nothing routes
-#      through it yet.
-#   2. kagent.providers.anthropic.config.baseUrl:
-#        http://<gateway.name>.<release namespace>.svc:<llmRouting.listener.port>
-#      — points kagent's default ModelConfig at the listener. This is the
-#      cutover; rollback is the removal of this second value.
+# llmRouting.enabled: true renders the `llm` listener on the data-plane Gateway
+# plus the AgentgatewayModels attached to it (llmRouting.models) that carry the
+# traffic, and the model-price ConfigMap. A ModelConfig of a served provider
+# without a baseUrl of its own takes the listener as its baseUrl at its next
+# create or update (llmRouting.modelConfigPolicy). Rollback is
+# llmRouting.enabled: false: the reconcile hook takes that baseUrl off again.
 # Requires the agentgateway component, in front of muster. The
 # render fails when llmRouting.enabled is true and that component is off.
 # Consumed by the connectivity chart; see its values.yaml for the rendered
@@ -2162,8 +2154,7 @@ llmRouting:
   # whose `match` takes the model wins, so a `*` entry would shadow every model
   # named after it — a served model (model-manager, the LLMEndpoint
   # document) joins under its preset's name. Every entry's provider rides the
-  # listener: its ModelConfigs (kagent.modelConfigs, modelConfigPolicy) get
-  # the listener as baseUrl. An OpenAI entry serves the Responses route
+  # listener: its ModelConfigs get the listener as baseUrl (modelConfigPolicy). An OpenAI entry serves the Responses route
   # (/v1/responses) a codex agent calls, metered and rate-limited like the
   # rest:
   #   - name: openai
@@ -3455,49 +3446,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     seccompProfile:
       type: RuntimeDefault
 
-  # Model provider — Anthropic by default.
-  # Pre-create the Secret named by apiKeySecretRef in the kagent namespace with
-  # the key apiKeySecretKey and leave apiKey empty: the chart then renders no
-  # Secret and the default ModelConfig references the pre-created one. An apiKey
-  # set inline makes the chart create the Secret, but also copies the key into
-  # this component's HelmRelease values and Helm release storage
-  # (gitops.forbidInlineSecrets rejects it).
-  providers:
-    default: anthropic
-    anthropic:
-      provider: Anthropic
-      model: claude-sonnet-5-5
-      apiKeySecretRef: kagent-anthropic
-      apiKeySecretKey: ANTHROPIC_API_KEY
-      apiKey: ""  # Leave empty; pre-create the apiKeySecretRef Secret instead
-      # Provider options the kagent chart renders into the default ModelConfig's
-      # `anthropic` block, next to the baseUrl the LLM cut-over forwards
-      # (llmRouting; README "LLM routing"). promptCaching (the kagent line's
-      # carried patch kagent-dev/kagent#2788) marks the last tool definition,
-      # the last system prompt block and the last content block of the latest
-      # turn with cache_control, so every model call after the first reads its
-      # prefix — system prompt, tool schemas, previous turns — from Anthropic's
-      # cache at a tenth of the input price and with a time to first token that
-      # no longer grows with the history; the first call of a turn writes the
-      # cache at 1.25× (giantswarm/giantswarm#37788). On for the platform: an
-      # agent loop reads every prefix it writes. cacheTTL "5m" (each hit
-      # refreshes the window) or "1h" (dearer writes, for calls spaced further
-      # apart). The connectivity chart's kagent.modelConfigs[] entries inherit
-      # both for their Anthropic models unless an entry sets its own.
-      config:
-        promptCaching: true
-        cacheTTL: "5m"
-
-  # The kagent chart's own default ModelConfig (default-model-config, rendered
-  # from providers). false writes providers: false to the kagent release, so the
-  # kagent chart renders no default ModelConfig and deletes the one it rendered:
-  # an Agent or agent HelmRelease that names default-model-config no longer
-  # resolves its model. Before turning it off, mark a kagent.modelConfigs entry
-  # `default: true` and point the agents at it. providers.anthropic.config stays
-  # what the connectivity chart's Anthropic modelConfigs entries inherit.
-  defaultModelConfig:
-    enabled: true
-
   # OTel — traces and logs to the collector global.observability.traces.otlp
   # names, in the kagent chart's SDK-spec shape: the controller exports with
   # these settings and compiles them into every actor (OTEL_EXPORTER_OTLP_*,
@@ -3987,37 +3935,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # agent-platform.musterMcpUrl helper's value), the toolset header, the
   # discovery opt-out label — and binds it.
 
-  # Additional ModelConfig CRs — the model catalog beyond the
-  # default-model-config the kagent chart creates from providers.anthropic.
-  # An AgentTemplate references a ModelConfig by name (spec.modelConfig).
-  # The apiKeySecret must be pre-created in the kagent namespace. `default: true`
-  # annotates the entry agent-platform.giantswarm.io/is-default-model-config:
-  # "true", the namespace's default model; at most one entry may set it.
-  modelConfigs: []
-  # - name: anthropic-sonnet
-  #   displayName: Anthropic Sonnet 4.6
-  #   default: true
-  #   provider: Anthropic
-  #   model: claude-sonnet-4-6
-  #   apiKeySecret: kagent-anthropic
-  #   apiKeySecretKey: ANTHROPIC_API_KEY
-  # - name: openai-gpt-5-5   # a codex model: the Responses API, through the
-  #   provider: OpenAI       # llm listener's OpenAI entry (llmRouting.models)
-  #   model: gpt-5.5
-  #   apiKeySecret: kagent-openai
-  #   apiKeySecretKey: OPENAI_API_KEY
-  #   apiFormat: responses
-  # - name: chatgpt-subscription   # "ChatGPT (your subscription)": a codex
-  #   provider: OpenAI              # model on the ChatGPT subscription the
-  #   model: gpt-5.6-luna           # Session's person connected in muster
-  #                                 # (docs/chatgpt-login.md).
-  #   credentialType: chatgptOAuth  # No apiKeySecret: the chart derives
-  #   apiFormat: responses          # muster's provider App chatgpt and kagent's
-  #                                 # provider chatgpt from it (needs workspaces
-  #                                 # with Substrate, muster's
-  #                                 # oauth.server.encryptionKey and
-  #                                 # oauth.mcpClient, kagent 1.24, muster 5.52.5)
-
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
   # by name. Set tokenSecret to a pre-existing Secret holding key "token" with
@@ -4050,7 +3967,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # declares its own egress (spec.egress, which
   # agent-manager writes from agent-manager.harness.egress.<Harness name>); a
   # Harness carries none. A codex agent's model is a Responses API ModelConfig
-  # (kagent.modelConfigs[].apiFormat: responses). kagent refuses a share of a
+  # (spec.openAI.apiFormat: responses). kagent refuses a share of a
   # Session on a coding Harness. Empty (the default) renders no further
   # Harness: an installation opts into each runtime here.
   harnesses: []

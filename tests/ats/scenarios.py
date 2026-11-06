@@ -33,6 +33,8 @@ EXAMPLES_DIR = REPO_ROOT / "helm" / "agent-platform" / "examples"
 # asserts the path, so the example and the test cannot drift.
 KIND_LAB_VALUES = EXAMPLES_DIR / "kind-lab-dex.yaml"
 KAGENT_VALUES = ATS_DIR / "values-kagent.yaml"
+# The smoke's model, a ModelConfig object (the chart declares none).
+MODEL_CONFIG_MANIFEST = ATS_DIR / "model-config.yaml"
 ROUND_TRIP_VALUES = ATS_DIR / "values-round-trips.yaml"
 
 # The lab Dex manifest (tests/ats/lab-dex.yaml). Public lab credentials by
