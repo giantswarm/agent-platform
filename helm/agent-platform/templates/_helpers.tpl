@@ -384,6 +384,50 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
 {{- $derived := dict -}}
+{{- if eq .name "mcp-kubernetes" -}}
+{{- $oauth := dig "mcpKubernetes" "oauth" dict (index .root.Values "mcp-kubernetes" | default dict) -}}
+{{- if $oauth.enabled -}}
+{{- $oauthDerived := dict -}}
+{{- $kubernetes := index .root.Values "mcp-kubernetes" -}}
+{{- $gateway := $kubernetes.gatewayAPI | default dict -}}
+{{- if not (hasKey $gateway "enabled") -}}
+{{- $baseURL := $oauth.baseURL | default (printf "https://%s.%s" ($kubernetes.fullnameOverride | default "mcp-kubernetes") .root.Values.global.domain) -}}
+{{- $hostname := regexReplaceAll ":[0-9]+$" (urlParse $baseURL).host "" -}}
+{{- $parents := .root.Values.ingress.parentRefs | default .root.Values.global.gatewayApi.parentRefs -}}
+{{- if and (not .root.Values.ingress.parentRefs) .root.Values.gatewayApi.gateway.create -}}
+{{- $parents = list (dict "name" .root.Values.gateway.name "namespace" .root.Release.Namespace "group" "gateway.networking.k8s.io" "kind" "Gateway" "sectionName" "https") -}}
+{{- end -}}
+{{- $_ := set $derived "gatewayAPI" (dict "enabled" true "httpRoute" (dict "parentRefs" $parents "hostnames" (list $hostname))) -}}
+{{- end -}}
+{{- if and .root.Values.gatewayApi.gateway.create (dig "gatewayAPI" "enabled" true $kubernetes) -}}
+{{- $peers := dig "ciliumNetworkPolicy" "ingress" "gatewayPeers" list $kubernetes -}}
+{{- $namespace := dig "agent-platform-connectivity" "targetNamespace" "" .root.Values.components | default (include "agent-platform.targetNamespace" .root) -}}
+{{- $peer := dict "namespace" $namespace "matchLabels" (dict "gateway.networking.k8s.io/gateway-name" .root.Values.gateway.name) -}}
+{{- if not (has $peer $peers) -}}{{- $peers = append $peers $peer -}}{{- end -}}
+{{- $_ := set $derived "ciliumNetworkPolicy" (dict "ingress" (dict "gatewayPeers" $peers)) -}}
+{{- end -}}
+{{- $audience := $kubernetes.kubernetesAudience | default "" -}}
+{{- if and $audience (eq ($oauth.provider | default "dex") "dex") (not (dig "dex" "kubernetesAuthenticatorClientID" "" $oauth)) -}}
+{{- $_ := set $oauthDerived "dex" (dict "kubernetesAuthenticatorClientID" $audience) -}}
+{{- end -}}
+{{- $storage := $oauth.storage | default dict -}}
+{{- $type := $storage.type | default "valkey" -}}
+{{- if eq $type "valkey" -}}
+{{- $own := $storage.valkey | default dict -}}
+{{- $valkey := dict "keyPrefix" (printf "%s:mcp-kubernetes:" .root.Release.Namespace) -}}
+{{- range $key, $value := dict "url" (include "agent-platform.valkeyAddress" .root) "existingSecret" (include "agent-platform.valkeySecretName" .root) "secretKeyPassword" (include "agent-platform.valkeyPasswordKey" .root) -}}
+{{- if not (get $own $key) -}}{{- $_ := set $valkey $key $value -}}{{- end -}}
+{{- end -}}
+{{- if $own.keyPrefix -}}{{- $_ := set $valkey "keyPrefix" $own.keyPrefix -}}{{- end -}}
+{{- if and (not $own.url) (ne (include "agent-platform.componentEnabled" (dict "root" .root "name" "valkey")) "true") -}}
+{{- fail "mcp-kubernetes OAuth needs shared storage: enable the platform Valkey or set mcp-kubernetes.mcpKubernetes.oauth.storage.valkey.url" -}}
+{{- end -}}
+{{- $_ := set $oauthDerived "encryptionKey" true -}}
+{{- $_ := set $oauthDerived "storage" (dict "type" "valkey" "valkey" $valkey) -}}
+{{- end -}}
+{{- if $oauthDerived -}}{{- $_ := set $derived "mcpKubernetes" (dict "oauth" $oauthDerived) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if eq .name "google-access-token-credential-provider" -}}
 {{- /* The plugin resolves keys under the same atespace-to-namespace grants as
 Substrate's bundled provider: one list, Substrate's, with the entries the
@@ -677,6 +721,14 @@ the block otherwise: a klaus-gateway before 4.11.0 refuses it. */ -}}
 {{- $_ := set $out "aclUsers" (dict "default" (dict "passwordKey" (include "agent-platform.valkeyPasswordKey" .root))) -}}
 {{- end -}}
 {{- if $out -}}{{- $_ := set $derived "valkey" (dict "auth" $out) -}}{{- end -}}
+{{- $kubernetes := index .root.Values "mcp-kubernetes" | default dict -}}
+{{- $oauth := dig "mcpKubernetes" "oauth" dict $kubernetes -}}
+{{- if and (eq (include "agent-platform.componentEnabled" (dict "root" .root "name" "mcp-kubernetes")) "true") $oauth.enabled (eq (dig "storage" "type" "valkey" $oauth) "valkey") -}}
+{{- $clients := dig "ciliumNetworkPolicy" "ingress" "clients" list (.root.Values.valkey | default dict) -}}
+{{- $reader := dict "namespace" "" "matchLabels" (dict "app.kubernetes.io/name" "mcp-kubernetes") -}}
+{{- if not (has $reader $clients) -}}{{- $clients = append $clients $reader -}}{{- end -}}
+{{- $_ := set $derived "ciliumNetworkPolicy" (dict "ingress" (dict "clients" $clients)) -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}

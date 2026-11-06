@@ -3015,17 +3015,17 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	elif ! grep -q "global.domain is empty" $(VERIFY_TMP)/vw-bs-nodomain.out; then \
 		echo "FAIL: the Backstage domain guard failed for the wrong reason"; cat $(VERIFY_TMP)/vw-bs-nodomain.out; exit 1; \
 	else echo "ok: Backstage domain guard"; fi
-	@echo "--> mcp-kubernetes on: the MCPServer with OAuth, the forwarded token and the kube audience; OAuth off drops the auth block; an empty audience drops requiredAudiences; muster off drops the CR"
+	@echo "--> mcp-kubernetes on: the MCPServer with OAuth, a per-server access token and the kube audience; OAuth off drops the auth block; an empty audience drops requiredAudiences; muster off drops the CR"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --namespace agent-platform --set components.mcp-kubernetes.enabled=true >$(VERIFY_TMP)/vw-mcpk.out 2>&1 || { cat $(VERIFY_TMP)/vw-mcpk.out; exit 1; }
 	@awk '/^kind: MCPServer$$/,/^---/' $(VERIFY_TMP)/vw-mcpk.out >$(VERIFY_TMP)/vw-mcpk-cr.out
-	@for pattern in '^  name: mcp-kubernetes$$' 'muster.giantswarm.io/type: mcp-kubernetes' 'agent-platform.giantswarm.io/tool-group: infrastructure' 'url: http://mcp-kubernetes.agent-platform.svc.cluster.local:8080/mcp' 'type: oauth' 'forwardToken: true' '- dex-k8s-authenticator'; do \
+	@for pattern in '^  name: mcp-kubernetes$$' 'muster.giantswarm.io/type: mcp-kubernetes' 'agent-platform.giantswarm.io/tool-group: infrastructure' 'url: http://mcp-kubernetes.agent-platform.svc.cluster.local:8080/mcp' 'type: oauth' 'forwardToken: false' '- dex-k8s-authenticator'; do \
 		grep -q -- "$$pattern" $(VERIFY_TMP)/vw-mcpk-cr.out || { echo "FAIL: the mcp-kubernetes MCPServer lacks $$pattern"; exit 1; }; \
 	done
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.mcp-kubernetes.enabled=true --set mcp-kubernetes.mcpKubernetes.oauth.enabled=false 2>/dev/null | awk '/^kind: MCPServer$$/,/^---/' >$(VERIFY_TMP)/vw-mcpk-noauth.out
 	@if grep -q 'forwardToken' $(VERIFY_TMP)/vw-mcpk-noauth.out; then echo "FAIL: the MCPServer carries an auth block with the server's OAuth off"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.mcp-kubernetes.enabled=true --set mcp-kubernetes.kubernetesAudience= 2>/dev/null | awk '/^kind: MCPServer$$/,/^---/' >$(VERIFY_TMP)/vw-mcpk-noaud.out
 	@if grep -q 'requiredAudiences' $(VERIFY_TMP)/vw-mcpk-noaud.out; then echo "FAIL: an empty kubernetesAudience still renders requiredAudiences"; exit 1; fi
-	@grep -q 'forwardToken: true' $(VERIFY_TMP)/vw-mcpk-noaud.out || { echo "FAIL: the auth block went with the audience"; exit 1; }
+	@grep -q 'forwardToken: false' $(VERIFY_TMP)/vw-mcpk-noaud.out || { echo "FAIL: the auth block went with the audience"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.mcp-kubernetes.enabled=true --set components.muster.enabled=false >$(VERIFY_TMP)/vw-mcpk-nomuster.out 2>&1 || { cat $(VERIFY_TMP)/vw-mcpk-nomuster.out; exit 1; }
 	@if grep -q 'kind: MCPServer' $(VERIFY_TMP)/vw-mcpk-nomuster.out; then echo "FAIL: the MCPServer renders with muster off (no CRD to map to)"; exit 1; fi
 	@echo "ok: mcp-kubernetes MCPServer"
