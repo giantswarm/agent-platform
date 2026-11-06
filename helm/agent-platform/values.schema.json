@@ -571,7 +571,7 @@
                         },
                         "labels": {
                             "type": "object",
-                            "additionalProperties": false,
+                            "additionalProperties": true,
                             "properties": {
                                 "agent-platform.giantswarm.io/managed-by": {
                                     "type": "string"

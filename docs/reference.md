@@ -265,7 +265,7 @@ The OAuth issuer, client, secret and base URL come from the block, else from `gl
 
 ### General Purpose Agent and skills
 
-The General Purpose Agent is the agent the platform ships, `default-agent` in the kagent namespace. A session starts with it unless the person picks another agent. Its prompt is in [`agents/default-agent/values.yaml`](../agents/default-agent/values.yaml) and its skills are in [`skills/`](../skills).
+The General Purpose Agent is the agent the platform ships, `default-agent` in the kagent namespace. A session starts with it unless the person picks another agent. Its prompt is in [`agents/default-agent/values.yaml`](../helm/agent-platform/agents/default-agent/values.yaml) and its skills are in [`skills/`](../skills).
 
 | Value | Default | Effect |
 |---|---|---|

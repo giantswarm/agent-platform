@@ -2365,7 +2365,7 @@ spec:
       retries: 5
   values:
     a2a:
-      defaultAgent: default-agent
+      defaultAgent: kagent/default-agent
       enabled: false
       fallbackIconUrlTemplate: ""
       url: grpc://agentgateway.agent-platform.svc.cluster.local:8080

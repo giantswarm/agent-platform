@@ -293,8 +293,8 @@ overwrite would hide a values file that still spells the old key.
     reviews.allowedCallers while the toolchain-manager posts its notices and
     asks there (agent-platform.toolchainManager.reviews): the block's own list,
     else the klaus-gateway chart's default, with the toolchain-manager's
-    ServiceAccount added. And a2a.defaultAgent, default-agent while that
-    component is on and the block names no agent of its own.
+    ServiceAccount added. And a2a.defaultAgent, <kagent namespace>/default-agent
+    while that component is on and the block names no agent of its own.
   default-agent: muster.url, toolset, agent.iconUrl, agent.displayName, labels
     and modelConfig.name (agent-platform.defaultAgent.derived).
   valkey:auth.usersExistingSecret and auth.aclUsers.default.passwordKey, when
@@ -675,9 +675,10 @@ the block otherwise: a klaus-gateway before 4.11.0 refuses it. */ -}}
 {{- $_ := set $derived "refusals" $refusals -}}
 {{- end -}}
 {{- /* The agent of a channel turn that names none: default-agent while it
-is on. An own value wins. */ -}}
+is on, as <kagent namespace>/default-agent (a bare name resolves in the
+gateway's own a2a.namespace). An own value wins. */ -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" .root "name" "default-agent")) (not (dig "a2a" "defaultAgent" "" $kg)) -}}
-{{- $_ := set $derived "a2a" (dict "defaultAgent" "default-agent") -}}
+{{- $_ := set $derived "a2a" (dict "defaultAgent" (printf "%s/default-agent" (include "agent-platform.kagent.namespace" .root))) -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "default-agent" -}}
@@ -5421,13 +5422,17 @@ as JSON. The release pipeline stamps the tag's commit over the `[[ .SHA ]]`
 placeholder (hack/stamp-release-commit.sh). A skills[] entry still carrying it
 is dropped where the chart is no published release
 (agent-platform.publishedRelease), and fails the render of a published
-release: such a chart was packaged without the stamp.
+release: such a chart was packaged without the stamp. The placeholder anywhere
+else, and a file that does not parse, fail every render.
 Usage: include "agent-platform.componentValuesFile" (dict "root" $ "path" $c.valuesFile) | fromJson
 */}}
 {{- define "agent-platform.componentValuesFile" -}}
 {{- $vals := .root.Files.Get .path | fromYaml -}}
 {{- if not $vals -}}
 {{- fail (printf "%s is missing from the chart or empty" .path) -}}
+{{- end -}}
+{{- if hasKey $vals "Error" -}}
+{{- fail (printf "%s does not parse: %s" .path $vals.Error) -}}
 {{- end -}}
 {{- $released := include "agent-platform.publishedRelease" .root -}}
 {{- if hasKey $vals "skills" -}}
@@ -5443,6 +5448,9 @@ Usage: include "agent-platform.componentValuesFile" (dict "root" $ "path" $c.val
 {{- end -}}
 {{- $_ := set $vals "skills" $pinned -}}
 {{- end -}}
+{{- if contains "[[ .SHA ]]" (toJson $vals) -}}
+{{- fail (printf "%s carries the [[ .SHA ]] placeholder outside skills[].git.commit, the only place an unstamped build can leave out" .path) -}}
+{{- end -}}
 {{- $vals | toJson -}}
 {{- end -}}
 
@@ -5450,8 +5458,9 @@ Usage: include "agent-platform.componentValuesFile" (dict "root" $ "path" $c.val
 The values default-agent's release (components.default-agent) takes from the
 platform, merged over agents/default-agent/values.yaml: the muster URL every
 agent targets, the whole catalogue of the person's connectors as its toolset
-(preset:full), its avatar on the DiceBear host (the route's first hostname,
-else avatars.<global.domain>; none without either), the managed-by label on the
+(preset:full), its avatar on the DiceBear host while the avatar route renders
+(agent-platform.shape.dicebearRoute; the route's first hostname, else
+avatars.<global.domain>; none without either), the managed-by label on the
 Agent (agent-manager lists it read-only), defaultAgent.displayName, and
 defaultAgent.modelConfig (empty: the agent chart's default).
 Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
@@ -5461,7 +5470,7 @@ Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 {{- $agent := dict -}}
 {{- with $own.displayName -}}{{- $_ := set $agent "displayName" . -}}{{- end -}}
 {{- $host := "" -}}
-{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "dicebear") -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "dicebear")) (eq (include "agent-platform.shape.dicebearRoute" .) "true") -}}
 {{- $host = first (dig "route" "hostnames" list (.Values.dicebear | default dict) | default (list "")) -}}
 {{- with .Values.global.domain -}}{{- $host = $host | default (printf "avatars.%s" .) -}}{{- end -}}
 {{- end -}}

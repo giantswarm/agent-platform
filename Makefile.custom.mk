@@ -1506,7 +1506,7 @@ verify-default-agent: ## Assert the General Purpose Agent (components.default-ag
 	@HELM=$(HELM) python3 tests/verify-default-agent.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 
 .PHONY: verify-skills
-verify-skills: ## Validate every skill of skills/ against what the agent runtime accepts, and that no SKILL.md lives elsewhere (scripts/validate_skills.py). Needs PyYAML.
+verify-skills: ## Check the layout of the skills of skills/ (skills/<name>/SKILL.md, frontmatter name = directory name) and that no SKILL.md lives elsewhere (scripts/validate_skills.py); what the agent runtime accepts beyond that is its own check. Needs PyYAML.
 	@echo "====> $@"
 	@python3 scripts/validate_skills.py
 

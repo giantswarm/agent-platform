@@ -21,7 +21,7 @@ giantswarm/giantswarm#39057: the chart deploys the General Purpose Agent (`defau
 
 ### Operator action
 
-- **An installation with an Agent named `default-agent` in the kagent namespace**: Helm refuses to take over an object of another release, so the install of the platform's release fails. Remove that agent first, or set `components.default-agent.enabled: false`.
+- **An installation with an agent named `default-agent` in the kagent namespace** (created through agent-manager, the portal or GitOps): rename or delete it before upgrading, or set `components.default-agent.enabled: false`. The platform's release has the same Helm release name and storage namespace, so the two would take over each other's release instead of failing.
 - **An installation whose `default-model-config` does not resolve**: set `defaultAgent.modelConfig`.
 - **An installation that sets `klausGateway.a2a.defaultAgent`**: none; the own value stays. Remove it to use the General Purpose Agent.
 

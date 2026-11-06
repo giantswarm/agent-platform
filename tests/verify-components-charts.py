@@ -748,21 +748,20 @@ def main(meta: str) -> int:
         coding = docs(coding_render.result())
     renders = {shape: (next(manifests), next(manifests)) for shape in SHAPES}
     wide, pinned = next(iter(renders.values()))
-    # The HelmRelease is named after the entry (its chart's name but for a second
-    # release of a chart, default-agent), and its chartRef names the
+    # The HelmRelease is named after the entry's key (its chart's name but for a
+    # second release of a chart, default-agent), and its chartRef names the
     # OCIRepository (the same name; with the chart's version for one released
     # with it, agent-platform.sourceName).
-    charts = {n: n for n in components}
     for shape, (w, _) in renders.items():
         rendered = {n for kind, n in w if kind == "OCIRepository" and n != RELEASE}
-        refs = {c: chart_ref(w, c) for c in charts.values()}
+        refs = {c: chart_ref(w, c) for c in components}
         if rendered != set(refs.values()) or any(r != c and not r.startswith(f"{c}-") for c, r in refs.items()):
             fail(f"the {shape} render's OCIRepositories {sorted(rendered)} are not the ones the roster's HelmReleases name {sorted(refs.values())}")
     for w, p in renders.values():
         for (kind, _), doc in [*w.items(), *p.items()]:
             if kind == "OCIRepository":
                 layer_selector(doc)
-    kagent_oci = wide.get(("OCIRepository", chart_ref(wide, charts.get("kagent", "kagent"))))
+    kagent_oci = wide.get(("OCIRepository", chart_ref(wide, "kagent")))
     kagent_tag = source(kagent_oci)[1].split()[0].lstrip(">=") if kagent_oci else ""  # the range's floor = the build the values name
     print(f"--> {len(components)} components (the meta chart's roster): {len(pins)} pinned by the BOM, {len(released)} released with the chart")
     print(f"--> {len(SHAPES)} shapes ({', '.join(SHAPES)}): each distinct forwarded block rendered once")
@@ -771,7 +770,7 @@ def main(meta: str) -> int:
     def check(name: str, tmp: str) -> None:
         """One component: its range and its BOM pin resolved, pulled and
         rendered with every distinct block the meta chart forwards to it."""
-        chart = charts[name]
+        chart = name  # the release, HelmRelease and OCIRepository name
         url, rng = source(oci(wide, chart))
         _, pin = source(oci(pinned, chart))
         for shape, (w, p) in renders.items():
@@ -787,7 +786,7 @@ def main(meta: str) -> int:
         if name in released:
             # One version matters, the working tree's: every distinct block of
             # both renders against it, once.
-            chart_dir = REPO_ROOT / "helm" / chart
+            chart_dir = REPO_ROOT / "helm" / components[name]["chart"]
             if not (chart_dir / "Chart.yaml").is_file():
                 fail(f"{name}: no chart at {chart_dir} — releasedWithChart names a chart this repository does not have")
             if rng != pin:

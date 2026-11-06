@@ -11,8 +11,11 @@
   hack/stamp-release-commit.sh, the packaged chart pins every skill of skills/
   to that commit (the tag pipeline's step, simulated on a copy); a release
   packaged unstamped fails its render.
-- klaus-gateway's a2a.defaultAgent is default-agent while it is on; an own
-  value wins.
+- The avatar renders only while the avatar route does; extra labels on the
+  entry are taken; a values file that does not parse, or carries the release
+  placeholder outside skills[].git.commit, fails the render.
+- klaus-gateway's a2a.defaultAgent is <kagent namespace>/default-agent while it
+  is on; an own value wins.
 - The connectivity chart points every portal agent role at it while it is on;
   backstage.metaAgents wins per role.
 
@@ -47,6 +50,8 @@ BASE = [
     "--set", "postgres.enabled=true",
 ]
 ON = ["--set", "components.kagent.enabled=true"]
+# The avatar HTTPRoute renders (dicebear.route.enabled: auto) where Envoy Gateway is served.
+ROUTE = ["--api-versions", "gateway.envoyproxy.io/v1alpha1"]
 PORTAL = ["--set", "components.backstage.enabled=true"]
 
 
@@ -109,7 +114,7 @@ for what, args in {"kagent off (the default)": [],
         fail(f"{what}: the roster forwards {NAME} to the connectivity release (gatedRoster)")
 print("ok: no default agent without kagent, muster or its switch")
 
-docs = render(META, *ON, "--set", "dicebear.route.hostnames[0]=avatars.example.org")
+docs = render(META, *ON, *ROUTE, "--set", "dicebear.route.hostnames[0]=avatars.example.org", "--set", f"components.{NAME}.labels.team=bumblebee")
 hr, oci = find(docs, "HelmRelease", NAME), find(docs, "OCIRepository", NAME)
 if not hr or not oci:
     fail(f"{NAME}: no HelmRelease/OCIRepository with kagent and muster on")
@@ -119,6 +124,7 @@ checks = {
     "install/upgrade disableWait": ((spec["install"].get("disableWait"), spec["upgrade"].get("disableWait")), (True, True)),
     "targetNamespace": (spec["targetNamespace"], "kagent"),
     "HelmRelease managed-by label": (hr["metadata"]["labels"].get("agent-platform.giantswarm.io/managed-by"), "agent-platform"),
+    "HelmRelease extra label": (hr["metadata"]["labels"].get("team"), "bumblebee"),
     "Agent labels": (v.get("labels"), LABEL),
     "chart": (oci["spec"]["url"], "oci://gsoci.azurecr.io/charts/giantswarm/agent"),
     "range": (oci["spec"]["ref"]["semver"], semver),
@@ -134,9 +140,13 @@ checks = {
 for what, (got, want) in checks.items():
     if got != want:
         fail(f"{NAME}: {what} is {got!r}, want {want!r}")
-v = find(render(META, *ON), "HelmRelease", NAME)["spec"]["values"]
+v = find(render(META, *ON, *ROUTE), "HelmRelease", NAME)["spec"]["values"]
 if v["agent"].get("iconUrl") != f"https://avatars.example.com/v1/{NAME}.png":
     fail(f"{NAME}: without a route hostname the avatar is not on avatars.<global.domain>: {v['agent']!r}")
+for what, args in {"auto without Envoy Gateway": [], "the route off": [*ROUTE, "--set", "dicebear.route.enabled=false"]}.items():
+    v = find(render(META, *ON, *args), "HelmRelease", NAME)["spec"]["values"]
+    if "iconUrl" in v["agent"]:
+        fail(f"{NAME}: an iconUrl renders with the avatar route not rendered ({what}): {v['agent']!r}")
 v = find(render(META, *ON, "--set", "components.dicebear.enabled=false", "--set", "defaultAgent.modelConfig=claude-opus", "--set", "defaultAgent.displayName=Helper"), "HelmRelease", NAME)["spec"]["values"]
 if v.get("modelConfig") != {"name": "claude-opus"} or "iconUrl" in v["agent"] or v["agent"]["displayName"] != "Helper":
     fail(f"{NAME}: defaultAgent.modelConfig is not its modelConfig.name, defaultAgent.displayName is not its displayName, or an iconUrl renders without DiceBear: {v.get('modelConfig')!r}, {v['agent']!r}")
@@ -162,20 +172,29 @@ with tempfile.TemporaryDirectory() as tmp:
     dev = package(tmp, "9.9.9-dev.1", stamp=False)
     if find(render(dev, *ON), "HelmRelease", NAME)["spec"]["values"]["skills"] != []:
         fail("a pre-release carries the unstamped skills")
+    values_file = pathlib.Path(f"{tmp}/9.9.9-dev.1/agent-platform/agents/{NAME}/values.yaml")
+    original = values_file.read_text()
+    values_file.write_text(original + "plugins:\n  - git:\n      commit: \"[[ .SHA ]]\"\n")
+    refused(str(values_file.parents[2]), "outside skills[].git.commit", *ON)
+    values_file.write_text(original + "agent: [unclosed\n")
+    refused(str(values_file.parents[2]), "does not parse", *ON)
 print(f"ok: a stamped release pins the {len(skills)} skills of skills/ to its commit, an unstamped release fails, a pre-release carries none")
 
 # klaus-gateway's fallback agent for a channel turn that names none.
 KG = ["--set", "components.klaus-gateway.enabled=true"]
 a2a = find(render(META, *ON, *KG), "HelmRelease", "klaus-gateway")["spec"]["values"].get("a2a", {})
-if a2a.get("defaultAgent") != NAME:
-    fail(f"klaus-gateway a2a.defaultAgent is {a2a.get('defaultAgent')!r}, want {NAME}")
+if a2a.get("defaultAgent") != f"kagent/{NAME}":
+    fail(f"klaus-gateway a2a.defaultAgent is {a2a.get('defaultAgent')!r}, want kagent/{NAME}")
+a2a = find(render(META, *ON, *KG, "--set", "kagent.namespaceOverride=agents"), "HelmRelease", "klaus-gateway")["spec"]["values"].get("a2a", {})
+if a2a.get("defaultAgent") != f"agents/{NAME}":
+    fail(f"klaus-gateway a2a.defaultAgent is {a2a.get('defaultAgent')!r} with kagent.namespaceOverride=agents, want agents/{NAME}")
 a2a = find(render(META, *ON, *KG, "--set", "klausGateway.a2a.defaultAgent=helper"), "HelmRelease", "klaus-gateway")["spec"]["values"].get("a2a", {})
 if a2a.get("defaultAgent") != "helper":
     fail(f"an own klausGateway.a2a.defaultAgent does not win: {a2a.get('defaultAgent')!r}")
 a2a = find(render(META, *ON, *KG, "--set", f"components.{NAME}.enabled=false"), "HelmRelease", "klaus-gateway")["spec"]["values"].get("a2a", {})
 if a2a.get("defaultAgent"):
     fail(f"klaus-gateway a2a.defaultAgent is {a2a.get('defaultAgent')!r} with components.{NAME} off")
-print(f"ok: klaus-gateway falls back to {NAME}; an own a2a.defaultAgent wins")
+print(f"ok: klaus-gateway falls back to <kagent namespace>/{NAME}; an own a2a.defaultAgent wins")
 
 
 # The portal's meta agents: every role the portal reads
