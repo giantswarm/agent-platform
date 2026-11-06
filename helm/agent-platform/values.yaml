@@ -1173,7 +1173,7 @@ components:  # @schema additionalProperties: true
     # the component is on (see components.yaml, gatedRoster).
     gatedRoster: true
   default-agent:  # @schema additionalProperties: true
-    # The default agent, "Assistant", where people start and the portal's meta
+    # The default agent, "General Assistant", where people start and the portal's meta
     # agent: one release of the Generic
     # agent chart in kagent with the values of agents/default-agent/values.yaml
     # and the platform's skills (skills/) pinned to the release's commit. Its

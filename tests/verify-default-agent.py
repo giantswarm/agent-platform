@@ -160,7 +160,7 @@ checks = {
     "chart": (oci["spec"]["url"], "oci://gsoci.azurecr.io/charts/giantswarm/agent"),
     "range": (oci["spec"]["ref"]["semver"], semver),
     "dependsOn": (sorted(d["name"] for d in spec["dependsOn"]), ["agent-manager", "kagent", "muster"]),
-    "displayName": (v["agent"]["displayName"], "Assistant"),
+    "displayName": (v["agent"]["displayName"], "General Assistant"),
     "iconUrl (the route's hostname)": (v["agent"]["iconUrl"], f"https://avatars.example.org/v1/{NAME}.png"),
     "toolset": (v["toolset"], ["preset:full"]),
     "systemMessage names the portal's installation": (v["agent"]["systemMessage"].endswith("\nIn the Dev Portal this installation is `agent-platform`.\n"), True),

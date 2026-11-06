@@ -109,7 +109,7 @@ components:  # @schema additionalProperties: true
     enabled: true
   agent-manager:  # @schema additionalProperties: true
     enabled: false
-  # The default agent (kagent/default-agent, "Assistant"), the portal's meta agent.
+  # The default agent (kagent/default-agent, "General Assistant"), the portal's meta agent.
   # The meta chart forwards the entry only while it is on.
   default-agent:  # @schema additionalProperties: true
     enabled: false
