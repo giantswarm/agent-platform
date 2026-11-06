@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking:** **The charts declare no model: `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` are removed** (giantswarm/giantswarm-platform-manager#789). The meta chart writes `providers: false` into the kagent release on every render, so the kagent chart renders no `default-model-config` and deletes the one it rendered; the connectivity chart renders no ModelConfig. An installation declares its ModelConfigs as `api.kagent.dev/v1alpha3` objects next to its agents, the namespace's default annotated `agent-platform.giantswarm.io/is-default-model-config: "true"`; the LLM routing policies still fill in the listener `baseUrl` of a ModelConfig without one. Values that set any of the three keys fail the render naming them, in both charts. `gitops.forbidInlineSecrets` no longer checks `kagent.providers.*.apiKey`. This supersedes the entries below for giantswarm/agent-platform#1274 (`kagent.modelConfigs[].default`, `kagent.defaultModelConfig.enabled`).
+
+### Changed
+
+- **Breaking:** **A person's own ChatGPT login is switched on by its ModelConfig alone** (giantswarm/giantswarm#38731). The meta chart derives muster's provider App `chatgpt` and kagent's installation provider `chatgpt` wherever kagent, muster, workspaces with Substrate, muster's token encryption and OAuth client role are on and the kagent and muster ranges admit 1.24.0 and 5.52.5 or later; when one is missing it derives nothing. A ModelConfig with `openAI.credentialType: chatgptOAuth` and no `apiKeySecret`, declared with the agents, is the model. The connectivity release no longer carries `kagent.controller.session.actorJWTProviders.chatgpt`.
+
 ### Fixed
 
 - **An agent with three or more skills behind one credential can be changed again** (giantswarm/giantswarm#38827). `agent-platform-platform-tenant-credential-refs` asks the authorizer once per distinct Secret name instead of once per reference, and `agent-platform-platform-helmreleases` does the same for the Secrets it does not take as the installation skills credential. The API server allows two authorizer checks per CEL expression, so an Agent or AgentTemplate whose skills named `agent-manager-skills-token` three or more times was refused with `actual cost limit exceeded` on every spec change. Both policies now refuse, with their own message and for every requester, an object that names more than two distinct such Secrets.

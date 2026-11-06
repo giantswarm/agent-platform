@@ -15,6 +15,37 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the charts declare no model)
+
+giantswarm/giantswarm-platform-manager#789: `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` fail the render. The kagent release always carries `providers: false`, so the upgrade deletes `default-model-config` from the kagent namespace, and the connectivity release deletes every ModelConfig it rendered from `kagent.modelConfigs`.
+
+### Operator action
+
+- **Before the upgrade**, declare every model the agents use as a ModelConfig object in the installation's GitOps repository, next to its agents, and point every Agent and agent HelmRelease that names `default-model-config` at one of them. An entry of `kagent.modelConfigs` becomes:
+
+  ```yaml
+  apiVersion: api.kagent.dev/v1alpha3
+  kind: ModelConfig
+  metadata:
+    name: anthropic-sonnet
+    namespace: kagent
+    annotations:
+      agent-platform.giantswarm.io/is-default-model-config: "true"  # the entry with default: true
+      ui.giantswarm.io/display-name: Anthropic Sonnet 4.6           # its displayName
+  spec:
+    provider: Anthropic
+    model: claude-sonnet-4-6
+    apiKeySecret: kagent-anthropic
+    apiKeySecretKey: ANTHROPIC_API_KEY
+    anthropic:
+      promptCaching: true
+      cacheTTL: 5m
+  ```
+
+  An entry's `promptCaching`, `cacheTTL`, `maxTokens`, `apiFormat`, `credentialType` and `baseUrl` go under the provider's block (`anthropic`, `openAI`, ...); an Anthropic entry inherited `kagent.providers.anthropic.config` before, so carry those keys over. Leave `baseUrl` out to ride the LLM listener with `llmRouting.enabled`. A ModelConfig of the same name that the connectivity release rendered is deleted by the upgrade; give the declared one another name, or let Flux recreate it on its next reconcile.
+- **Remove** `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` from the values. A Secret the kagent chart created from `kagent.providers.<name>.apiKey` goes with the upgrade too: pre-create the Secret the ModelConfig names.
+- **A person's own ChatGPT login**: replace the `kagent.modelConfigs[]` entry with `credentialType: chatgptOAuth` and no `apiKeySecret` by the same ModelConfig declared with the agents; the chart wires the login wherever its prerequisites are on ([docs/chatgpt-login.md](docs/chatgpt-login.md)).
+
 ## \<current\> → \<next\> (the credential providers read Secrets only where bound)
 
 giantswarm/agent-platform#1269: once `components.substrate.versionRange` selects Substrate 1.18.0 or later and `components.google-access-token-credential-provider.versionRange` the plugin 0.3.0 or later, their Secret readers are bound in the namespaces the credential grants name (every `allowedNamespaces` entry of `substrate.credentialProvider.namespacePolicies`) and, with `agentPlatformOrganizations.enabled`, by agent-platform-operator in every organization namespace. The providers already refused an actor a Secret outside its grants in their own process; what changes is that their ServiceAccounts can no longer read any other Secret of the cluster, a workload cluster's kubeconfig on a management cluster among them. An own `substrate.credentialProvider.rbac.namespaces` that leaves out a granted namespace makes the egress gateway answer that namespace's credentials with `403` (`not permitted to read secret <namespace>/<name>`).

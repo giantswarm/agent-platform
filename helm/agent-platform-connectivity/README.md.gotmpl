@@ -30,7 +30,7 @@ that component is off.
 
 ### Rollout
 
-Two values turn the path on, and the order matters.
+Two steps turn the path on, and the order matters.
 
 1. Render the listener and the routing resources:
 
@@ -58,21 +58,14 @@ Two values turn the path on, and the order matters.
      -d '{"model":"claude-sonnet-5-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}'
    ```
 
-2. Point kagent's default ModelConfig at the listener. This is the cutover:
-
-   ```yaml
-   kagent:
-     providers:
-       anthropic:
-         config:
-           baseUrl: http://agentgateway.<release namespace>.svc:8081
-   ```
-
-   The base URL lands in the default ModelConfig the kagent chart renders.
-   An agent is a Substrate actor with no pod of its own (see
+2. Write the ModelConfigs. This is the cutover: a ModelConfig of a provider
+   the listener serves, without a `baseUrl` of its own, takes the listener URL
+   at its next create or update (the `<release>-modelconfig-llm-routing`
+   policies, below). A ModelConfig that names its own `baseUrl` keeps it. An
+   agent is a Substrate actor with no pod of its own (see
    [Metric labels](#metric-labels)), so no agent pod rolls.
 
-Roll back by removing the second value. The listener may stay.
+Roll back by setting `llmRouting.enabled: false`.
 
 Turning `llmRouting.enabled` off afterwards also takes back what the
 `<release>-modelconfig-llm-routing` policies wrote: they mark every `baseUrl`
@@ -82,8 +75,8 @@ they set with the annotation `agent-platform.giantswarm.io/llm-routing-base-url`
 listener URL on a ModelConfig Helm does not manage that the policies wrote
 before they marked it, so every such ModelConfig calls its provider directly
 again; its log names each one. Helm cannot: it never owned the field. A
-`baseUrl` an operator set, and one a Helm release renders (the second value
-above included), is never touched: remove the second value first. With routing
+`baseUrl` an operator set, and one a Helm release renders, is never touched.
+With routing
 on, the hook also takes the listener URL off a ModelConfig whose provider no
 `llmRouting.models` entry serves any more. It never routes a ModelConfig: the
 policies do at its next write.
@@ -198,35 +191,28 @@ On the installation, after the cutover:
   in the Gateway's own `-metrics` policy — see [Metric labels](#metric-labels).
 - `ingress.httpRoute.timeouts` reaches the external routes only: the in-cluster
   path has no `HTTPRoute` to carry route timeouts.
-- An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
-  own `baseUrl` or names a provider no `llmRouting.models` entry serves; the
-  MutatingAdmissionPolicy does the same for a ModelConfig created elsewhere,
-  one policy per served provider. An OpenAI ModelConfig's listener URL ends in
-  `/v1`, the base its client appends `/responses` or `/chat/completions` to.
+- A ModelConfig rides the listener unless it sets its own `baseUrl` or names a
+  provider no `llmRouting.models` entry serves: the MutatingAdmissionPolicy,
+  one per served provider, writes the listener URL into it. An OpenAI
+  ModelConfig's listener URL ends in `/v1`, the base its client appends
+  `/responses` or `/chat/completions` to.
 - **codex**: the codex runtime speaks the Responses API only. An `OpenAI` entry
   on the listener (`baseURL: https://api.openai.com/v1`, `match: gpt-*`) and a
-  `kagent.modelConfigs[]` entry with `provider: OpenAI` and `apiFormat:
-  responses` give codex agents a model whose calls take the listener's
-  Responses route (`/v1/responses`): priced by the gateway's catalog, in the
-  GenAI usage metrics, under `llmRouting.rateLimits`. The codex compiler
-  refuses any other OpenAI option (`maxTokens` included), `defaultHeaders`,
-  `tls` and `apiKeyPassthrough`; the chart renders none of them for such an
-  entry, and refuses `apiFormat` on any other provider.
-- **codex on a ChatGPT subscription**: an `OpenAI` entry with `credentialType:
-  chatgptOAuth`, `apiFormat: responses` and no `apiKeySecret` is the Session
-  person's own ChatGPT login and renders no `apiKeySecretKey`. It
-  stays off the listener: the chart writes no listener `baseUrl`, the policy
-  skips it and the hook takes one it wrote off again, because the listener's
-  OpenAI route serves the OpenAI API, not the ChatGPT Codex backend, and a
-  subscription has no per-token price. Its turns are not in the GenAI usage
-  metrics. What a person connects and what the chart derives:
+  ModelConfig with `provider: OpenAI` and `openAI.apiFormat: responses` give
+  codex agents a model whose calls take the listener's Responses route
+  (`/v1/responses`): priced by the gateway's catalog, in the GenAI usage
+  metrics, under `llmRouting.rateLimits`.
+- **codex on a ChatGPT subscription**: an `OpenAI` ModelConfig with
+  `openAI.credentialType: chatgptOAuth` stays off the listener: the policy
+  skips it and the hook takes a listener URL it wrote off again, because the
+  listener's OpenAI route serves the OpenAI API, not the ChatGPT Codex backend,
+  and a subscription has no per-token price. Its turns are not in the GenAI
+  usage metrics. What a person connects and what the meta chart derives:
   [docs/chatgpt-login.md](../../docs/chatgpt-login.md).
-  The `baseUrl` lands under the CRD's block for the entry's provider —
-  `anthropic`, `mistral`, `openAI`, `sapAICore`, the four `ModelConfigSpec` gives one —
-  never the lower-cased provider name, which the API server would prune; the
-  render refuses a `baseUrl` on any other provider and a `provider` outside the
-  CRD's enum (case-sensitive). `make verify-kagent-crds` sweeps every provider
-  of the enum against the kagent line's CRD.
+- The policy writes the `baseUrl` under the CRD's block for the ModelConfig's
+  provider (`anthropic`, `mistral`, `openAI`, `sapAICore`, the four
+  `ModelConfigSpec` gives one), never the lower-cased provider name, which the
+  API server would prune.
 - The data plane is scraped by the packaging chart's own `PodMonitor`, under
   `agentgateway.monitoring.enabled` in the meta chart (the resolved
   `global.observability.metrics.serviceMonitor.enabled`). It selects the
@@ -237,14 +223,12 @@ On the installation, after the cutover:
 
 ## The default ModelConfig
 
-A namespace's default model is the ModelConfig annotated
-`agent-platform.giantswarm.io/is-default-model-config: "true"`.
-`kagent.modelConfigs[].default: true` sets the annotation on that entry; the
-render fails when two entries set it. Nothing enforces one per namespace at
-admission: the writers (the portal, agent-manager) keep it unique, and a
-namespace with more than one marked ModelConfig has no default. kagent's own
-`default-model-config` is switched off in the meta chart with
-`kagent.defaultModelConfig.enabled: false`.
+The chart declares no model: an installation's ModelConfigs are plain objects
+declared in GitOps next to its agents. A namespace's default model is the
+ModelConfig annotated `agent-platform.giantswarm.io/is-default-model-config:
+"true"`. Nothing enforces one per namespace at admission: the writers (the
+portal, agent-manager) keep it unique, and a namespace with more than one
+marked ModelConfig has no default.
 
 ## Metric labels
 
