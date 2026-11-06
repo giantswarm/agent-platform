@@ -28,6 +28,10 @@ OAuth on and the controller route rendered. */ -}}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") }}
 {{- $sessionsOn := and $kagentOn $oauthOn (include "agent-platform.ingress.agentgateway" .) (dig "controllerRoute" "enabled" false (.Values.kagent | default dict)) }}
 {{- $dataplanePort := (index .Values.gateway.listeners 0).port }}
+{{- /* The skill-manager, which agent-manager pins and lists skills through
+(its REST API, as the caller), while the meta chart registers it as an MCP
+backend (networkPolicy.mcpBackends.skill-manager). */ -}}
+{{- $skillManager := index (.Values.networkPolicy.mcpBackends | default dict) "skill-manager" }}
 
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
@@ -95,7 +99,7 @@ spec:
 # Egress from agent-manager: DNS (with Cilium's proxy clause so the FQDN
 # selectors below resolve), the Kubernetes API (HelmReleases, OCIRepositories,
 # Agents, ModelConfigs, workloads — as the caller), muster (filter_tools, OAuth
-# on), the identity provider
+# on), the skill-manager (while it is an MCP backend), the identity provider
 # (agent-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
 # Dex issuer by name, or the three Google hosts for the google provider) and
 # the agent chart's sources — its OCI registry (versions, values schema), the
@@ -131,6 +135,19 @@ spec:
         - ports:
             - port: {{ $dataplanePort | quote }}
               protocol: TCP
+    {{- end }}
+    {{- with $skillManager }}
+    # The skill-manager (skills pinned and listed, as the caller).
+    - toEndpoints:
+        - matchLabels:
+            {{- toYaml .podSelector | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .namespace }}
+      toPorts:
+        - ports:
+            {{- range .ports }}
+            - port: {{ . | quote }}
+              protocol: TCP
+            {{- end }}
     {{- end }}
     {{- if $filterToolsOn }}
     # muster's filter_tools (a claude Harness agent's toolset, as the caller).
@@ -266,7 +283,7 @@ spec:
     {{- end }}
 ---
 # Egress from agent-manager: DNS, the Kubernetes API, muster (filter_tools,
-# OAuth on), and — vanilla
+# OAuth on), the skill-manager (while it is an MCP backend), and — vanilla
 # NetworkPolicy has no FQDN selector — every public destination on 443 for the
 # identity provider (Dex or Google), the chart registry, its storage front and
 # GitHub (agentManager.networkPolicy.egress.cidrs narrows the chart egress,
@@ -324,6 +341,21 @@ spec:
       ports:
         - port: {{ $dataplanePort | int }}
           protocol: TCP
+    {{- end }}
+    {{- with $skillManager }}
+    # The skill-manager (skills pinned and listed, as the caller).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .podSelector | nindent 14 }}
+      ports:
+        {{- range .ports }}
+        - port: {{ . | int }}
+          protocol: TCP
+        {{- end }}
     {{- end }}
     {{- if $filterToolsOn }}
     # muster's filter_tools (a claude Harness agent's toolset, as the caller).

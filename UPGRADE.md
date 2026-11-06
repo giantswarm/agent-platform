@@ -15,6 +15,20 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the default agent, the skill-manager and `skillManager.sources`)
+
+giantswarm/giantswarm#38970, giantswarm/giantswarm#38322: the chart deploys the default agent (`default-agent` in the kagent namespace) wherever kagent, muster and agent-manager are on, and the skill-manager (`components.skill-manager`) wherever agent-manager is on. The skill-manager and the portal take their skill sources from `skillManager.sources`, with the platform's own `skills/` first. agent-manager pins skills through the skill-manager (`skillManager.url`) from `agent-platform.agentManager.skillManagerFloor` on. Platform HelmReleases are named after their `components` key, which is the chart name for every existing component, so no release is renamed.
+
+### Operator action
+
+- **An installation that deploys its own meta agent (an Agent Manager) or `swarm-operator`**: remove it, or set `components.default-agent.enabled: false`.
+- **An installation whose `default-model-config` does not resolve**: set `defaultAgent.modelConfig`.
+- **An installation that reads private skill repositories**: set `skill-manager.github` (`app.secretName` or `tokenSecret.name`), as for agent-manager's.
+- **An installation that sets `agent-manager.skills.repositories` or `backstage.skillsRepositories`**: these keys now default to `[]`. Move the list to `skillManager.sources`. A portal list still replaces the sources for the portal. An agent-manager list fails the render once agent-manager pins through the skill-manager.
+- **An installation that lists `https://github.com/giantswarm/agent-platform` itself**: the render fails. Remove the entry, or set `skills.platformSource.enabled: false`.
+- **An air-gapped installation**: set `skills.platformSource.enabled: false`.
+- **An installation that keeps agent-manager's own skill discovery**: set `components.skill-manager.enabled: false`.
+
 ## \<current\> → \<next\> (the charts declare no model)
 
 giantswarm/giantswarm-platform-manager#789: `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` fail the render. The kagent release always carries `providers: false`, so the upgrade deletes `default-model-config` from the kagent namespace, and the connectivity release deletes every ModelConfig it rendered from `kagent.modelConfigs`.

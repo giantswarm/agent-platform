@@ -31,6 +31,7 @@ spec:
   dependsOn:
     - name: muster
     - name: kagent
+    - name: skill-manager
   values:
     agentChart:
       ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
@@ -180,8 +181,7 @@ spec:
         labels:
           observability.giantswarm.io/tenant: giantswarm
       skills:
-        repositories:
-        - https://github.com/giantswarm/agent-skills
+        repositories: []
     agent-platform-mcps:
       agentgateway:
         enabled: true
@@ -369,6 +369,7 @@ spec:
       ingress:
         enabled: false
       installationName: agent-platform
+      metaAgents: {}
       observability:
         otel:
           endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -401,6 +402,8 @@ spec:
         enabled: false
       cluster-manager:
         enabled: false
+      default-agent:
+        enabled: true
       dicebear:
         enabled: true
       flux:
@@ -430,6 +433,8 @@ spec:
       modelServing:
         enabled: false
       muster:
+        enabled: true
+      skill-manager:
         enabled: true
       substrate:
         enabled: true
@@ -1235,7 +1240,13 @@ spec:
       - matchLabels:
           app.kubernetes.io/instance: alloy-metrics
         namespace: kube-system
-      mcpBackends: {}
+      mcpBackends:
+        skill-manager:
+          namespace: default
+          podSelector:
+            app.kubernetes.io/name: skill-manager
+          ports:
+          - 8080
       musterInClusterMcpPorts:
       - 8080
       - 8443
@@ -1769,6 +1780,110 @@ spec:
       runAsNonRoot: true
       seccompProfile:
         type: RuntimeDefault
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: default-agent
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    agent-platform.giantswarm.io/default: "true"
+    agent-platform.giantswarm.io/managed-by: agent-platform
+spec:
+  interval: 10m
+  releaseName: default-agent
+  targetNamespace: kagent
+  storageNamespace: kagent
+  chartRef:
+    kind: OCIRepository
+    name: default-agent
+    namespace: default
+  install:
+    createNamespace: true
+    disableWait: true
+    remediation:
+      retries: 5
+  upgrade:
+    disableWait: true
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+    - name: kagent
+    - name: agent-manager
+  values:
+    agent:
+      description: Start here. Handles everyday tasks with your connectors and helps you
+        find or create the right agent.
+      displayName: General Assistant
+      systemMessage: |
+        You are the General Assistant, the default agent of this Agent Platform:
+        where people start. You act with the identity of the person talking
+        to you, through their connectors, within their permissions; the
+        audit log names them.
+
+        Your job is triage:
+        - A one-off task (look something up, summarise, draft, check,
+          change one thing): do it yourself with the person's connectors.
+        - A task that repeats, runs on a schedule, is an automation, or needs
+          its own tools or knowledge: say a specialist agent fits better.
+          When an existing agent fits, recommend it with a start link; when
+          none does, offer to create one and guide the person through it.
+          `agent-platform-agent-routing` has how to find agents, when a task
+          deserves one and the link format.
+        - Questions about the platform and its agents: answer from your
+          skills and the live tools.
+
+        The portal also sends you its platform tasks; the first message says
+        which:
+        - Creating, changing or inspecting an agent:
+          `agent-platform-agent-management`.
+        - Workflows: find, list, read, validate, create, change, run and
+          delete them (`agent-platform-tools`).
+        - Operating the platform: report its state with the read tools;
+          change it only through the tools that write.
+        - Evaluating a skill: `agent-platform-skill-review`.
+        - Writing a skill: `agent-platform-skill-authoring`.
+
+        Your knowledge lives in your skills; load one the first time its
+        topic comes up rather than working from memory.
+
+        How you operate:
+        - Read before you write, and choose from live lists, never from
+          memory.
+        - Writes only on the person's request. Confirm what you chose for
+          them before writing; once confirmed, act and report the result.
+        - Destructive actions only on an explicit request that names the
+          target, one at a time, and say what you did.
+        - Be brief and concrete; no filler. Ask one thing at a time with
+          the `ask_user` tool, and propose rather than ask from scratch.
+        - The person sees only your reply text and the `ask_user` question.
+          Write a plan out before asking them to confirm it.
+        - Call an agent by its display name if it has one, else by its
+          technical name.
+
+        Your tools come from muster through meta-tools: `filter_tools`,
+        `describe_tool` and `call_tool` are your only functions besides your
+        built-ins. Every `x_*`, `core_*` and `workflow_*` is the `name` you
+        pass to `call_tool`, always the full name `filter_tools` returns,
+        never a function of its own. A workflow first where one fits. The
+        contract is in `agent-platform-tools`.
+    labels:
+      agent-platform.giantswarm.io/default: "true"
+      agent-platform.giantswarm.io/managed-by: agent-platform
+    muster:
+      url: http://muster.default.svc.cluster.local:8090/mcp
+    skills: []
+    toolset:
+    - preset:full
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: helm.toolkit.fluxcd.io/v2
@@ -2528,6 +2643,87 @@ spec:
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
+  name: skill-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 10m
+  releaseName: skill-manager
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: skill-manager
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+  values:
+    fullnameOverride: skill-manager
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: https://dex.ci.example.com
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: http://otlp-gateway.kube-system.svc:4317
+            headers: {}
+            protocol: grpc
+            tenant: giantswarm
+      registry: gsoci.azurecr.io
+    muster:
+      mcpServer:
+        auth:
+          forwardToken: true
+          requiredAudiences:
+          - dex-k8s-authenticator
+        enabled: true
+    networkPolicy:
+      ingressNamespaces: []
+    oauth:
+      dex:
+        allowPrivateURLs: true
+      enabled: true
+      sso:
+        allowPrivateIPs: true
+    observability:
+      otel:
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        headers: X-Scope-OrgID=giantswarm
+        protocol: grpc
+    sources:
+    - path: skills
+      readOnly: true
+      url: https://github.com/giantswarm/agent-platform
+    - https://github.com/giantswarm/agent-skills
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
   name: substrate
   namespace: default
   labels:
@@ -2999,6 +3195,29 @@ spec:
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
+  name: default-agent
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 1m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agent
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    semver: ">=2.0.0 <3.0.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
   name: dicebear
   namespace: default
   labels:
@@ -3155,6 +3374,29 @@ spec:
     operation: copy
   ref:
     semver: ">=5.58.0 <6.0.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: skill-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+spec:
+  interval: 1m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/skill-manager
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    semver: ">=0.1.0 <0.2.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

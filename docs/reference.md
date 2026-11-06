@@ -42,6 +42,7 @@ By default there is no filter and no prerelease.
 | klaus-gateway | `components.klaus-gateway.enabled` | `false` |
 | agent-sandbox | `components.agent-sandbox.enabled` | `false` |
 | agent-manager | `components.agent-manager.enabled` | `false` |
+| skill-manager | `components.skill-manager.enabled` | follows `components.agent-manager` |
 | vm-manager | `components.vm-manager.enabled` | `false` |
 | cluster-manager | `components.cluster-manager.enabled` | `false` |
 | workspace-manager | `workspaces.enabled` (`components.workspace-manager` follows it) | `false` |
@@ -262,6 +263,35 @@ Both services register with muster through their own `MCPServer` CR, so their to
 The OAuth issuer, client, secret and base URL come from the block, else from `global.identity` / `global.domain`. Anything still unset is filled from muster's OAuth server block (`muster.muster.oauth.server.dex.*`, `.existingSecret`). The render fails if anything is still missing. Further egress destinations go in `modelManager.networkPolicy.egress` / `agentManager.networkPolicy.egress`.
 
 `make verify-managers` covers the wiring and the guards.
+
+### Default agent and skills
+
+The default agent, "General Assistant", is `default-agent` in the kagent namespace, labelled `agent-platform.giantswarm.io/default: "true"`. It does one-off tasks with the person's connectors (`preset:full`), points to or helps create specialist agents, and serves every portal role. Its prompt is in [`agents/default-agent/values.yaml`](../agents/default-agent/values.yaml) and its skills are in [`skills/`](../skills).
+
+| Value | Default | Effect |
+|---|---|---|
+| `components.default-agent.enabled` | `true` | Deploys the agent while kagent, muster and agent-manager are on. The portal's meta-agent features use it. |
+| `defaultAgent.modelConfig` | `""` | The `ModelConfig` it runs on. Empty uses `default-model-config`. |
+| `backstage.metaAgents.<role>` | unset | The agent behind a portal role, as `<installation>/<namespace>/<name>`. Roles: `generalInformation`, `agentManagement`, `workflowManagement`, `platformOperations`, `skillEvaluation`, `skillCreation`. Unset roles use the default agent while it is on. |
+| `skillManager.sources` | `[giantswarm/agent-skills]` | Skill sources for the skill-manager and the portal, as URLs or `{url, ref, path, readOnly}`. |
+| `skills.platformSource.enabled` | `true` | Lists the platform's `skills/` first, read-only, at the release tag. Set `false` where GitHub is unreachable. |
+| `agent-manager.skills.repositories`, `backstage.skillsRepositories` | `[]` | Deprecated. When set, replaces `skillManager.sources` for that consumer. |
+
+- A release pins the skills to the tag's commit. A branch build deploys the agent without skills.
+- The portal gets the platform source and object entries from `agent-platform.backstage.skillSourcesFloor` in `_helpers.tpl`. Below it, URLs only.
+
+### Skill manager
+
+**[skill-manager](https://github.com/giantswarm/skill-manager)** owns the skill sources. It lists their skills and pins a skill to a commit as the person: MCP through muster (`x_skill-manager_*`), REST for agent-manager.
+
+- `components.skill-manager` follows `components.agent-manager`. `enabled: false` leaves it out. `dependsOn: [muster]`; agent-manager depends on it.
+- Its `sources` are derived: the platform source, then `skillManager.sources`. An own `skill-manager.sources` fails the render.
+- GitHub access goes in `skill-manager.github` (`app.secretName` or `tokenSecret.name`). Empty reads public repositories anonymously.
+- agent-manager gets `skillManager.url`, the skill-manager's Service, from `agent-platform.agentManager.skillManagerFloor` on, and `installation` (`backstage.installationName`), which `get_info` reports for the default agent's start links. Below it, or with the skill-manager off, agent-manager gets `skills.repositories` as URLs, without the platform source. `agent-manager.skills.repositories` set while agent-manager uses the skill-manager fails the render.
+- Its NetworkPolicy admits its callers' namespaces (`networkPolicy.ingressNamespaces`, derived: muster's, the portal's, agent-manager's, the kagent namespace). The connectivity chart registers it as muster's MCP backend and opens agent-manager's and its migrate run's egress to it.
+- agent-manager's migrate run calls it with a service token: the connectivity chart generates the Secret `skill-manager-service-token` (skill-manager's and the kagent namespace) and the chart sets `skill-manager.serviceToken.secretName`.
+
+`make verify-default-agent` covers it.
 
 ### Cluster manager
 
@@ -496,7 +526,7 @@ You need:
 
 | Toggle | What the connectivity chart renders | Inputs |
 |---|---|---|
-| `components.backstage.enabled` | The app-config ConfigMap `agent-platform-backstage-app-config`, the `HTTPRoute` `backstage.<domain>`, and a config-reload hook that rolls the Deployment when the config changes. | `backstage.{hostname, parentRefs, installationName, extraScopes, startUrlSearchParams, enabledExtensions, disabledExtensions, skillsRepositories, configReload}`, dropped before the backstage chart (`components.backstage.omitKeys`). |
+| `components.backstage.enabled` | The app-config ConfigMap `agent-platform-backstage-app-config`, the `HTTPRoute` `backstage.<domain>`, and a config-reload hook that rolls the Deployment when the config changes. | `backstage.{hostname, parentRefs, installationName, extraScopes, startUrlSearchParams, enabledExtensions, disabledExtensions, skillsRepositories, metaAgents, configReload}`, dropped before the backstage chart (`components.backstage.omitKeys`). |
 | `components.mcp-kubernetes.enabled` | The `MCPServer` registering the server with muster, with the user's token forwarded and the label `agent-platform.giantswarm.io/tool-group: infrastructure`. Needs muster. `mcp-kubernetes.mcpServer.managementCluster: <name>` makes it a member of muster's `kubernetes` family; `enabled: false` renders no CR. | `mcp-kubernetes.kubernetesAudience` (default `dex-k8s-authenticator`, `""` for Google), `mcp-kubernetes.mcpServer`. |
 | `components.modelServing.enabled` (with the three kserve components) | The serving presets and the discovery ConfigMap `agent-platform-model-serving`, the serving `Namespace`, the cache claim, the Kyverno cache policies (`modelServing.policies.enabled: auto`) and the serving namespace's network policies. Fails without the kserve components or the `serving.kserve.io` API (`modelServing.kserve.requireApi`). | `modelServing.*` |
 | `components.kserve-llmisvc-resources.enabled` | The llm-d controller's network policy, and guards: `kserve.controller.deploymentMode: Standard`, `kserve.createSharedResources: true`. The removed `components.kserve-crd` / `components.kserve-resources` are refused. | the component's own block |

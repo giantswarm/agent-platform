@@ -1161,6 +1161,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | components.agent-sandbox.enabled | bool | `false` |  |
 | components.model-manager.enabled | bool | `true` |  |
 | components.agent-manager.enabled | bool | `false` |  |
+| components.default-agent.enabled | bool | `false` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.workspace-manager.enabled | bool | `false` |  |
@@ -1924,6 +1925,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | backstage.disabledExtensions[10] | string | `"api:ai-chat/drawer"` |  |
 | backstage.disabledExtensions[11] | string | `"app-root-element:ai-chat/drawer"` |  |
 | backstage.skillsRepositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| backstage.metaAgents | object | `{}` |  |
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |

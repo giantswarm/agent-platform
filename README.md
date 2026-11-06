@@ -37,6 +37,7 @@ Declarative agents that each run in their own sandbox, are suspended to object s
 | [kagent](https://github.com/kagent-dev/kagent) | Kubernetes-native agent framework: agents, templates and model configs as CRDs, plus the controller that runs them. The platform runs [Giant Swarm's kagent line](https://github.com/giantswarm/kagent-upstream). |
 | [Agent Substrate](https://github.com/kagent-dev/substrate) | The actor runtime under kagent. Each agent is a [gVisor](https://github.com/google/gvisor) sandbox in a worker pod, with its state snapshotted to object storage. |
 | [agent-manager](https://github.com/giantswarm/agent-manager) | Creates, updates and deletes agents as GitOps releases of the [agent chart](https://github.com/giantswarm/agent), over MCP and REST, as the calling person. |
+| [skill-manager](https://github.com/giantswarm/skill-manager) | The skill sources: lists their skills and pins a skill to a commit as the calling person, for agent-manager and over MCP. |
 | [klaus-gateway](https://github.com/giantswarm/klaus-gateway) | Slack front door. A Slack thread becomes an agent session, and the agent acts as the Slack user. |
 | [workspace-manager](https://github.com/giantswarm/workspace-manager) | Workspaces: an Organization's repositories mirrored on a shared volume, with a working copy per agent session, served as MCP tools. |
 | [toolchain-manager](https://github.com/giantswarm/toolchain-manager) | Toolchains for coding agents: the sources an installation offers, package search, binaries and the Dockerfile a toolchain is built from, served as MCP tools. Opt-in. |
@@ -131,6 +132,7 @@ Each component is developed in its own repository, linked above. This repository
 
 - **[`helm/agent-platform`](helm/agent-platform)** is the chart you install. It holds the component roster with version ranges, the bundled Flux engine, self-management, and the install and upgrade hooks.
 - **[`helm/agent-platform-connectivity`](helm/agent-platform-connectivity)** wires the components together: routes and gateways, network policies for Cilium and plain Kubernetes, Kyverno exceptions, the kagent model catalog, [serving presets](docs/serving-presets.md) and Grafana dashboards.
+- **[`skills`](skills)** holds the platform's own agent skills, pinned to each release. They follow the platform: a change to it updates them in the same pull request.
 - **[`tests`](tests)** holds the render assertions behind `make verify-*` and an end-to-end install on kind ([tests/ats](tests/ats/README.md)).
 
 ```bash

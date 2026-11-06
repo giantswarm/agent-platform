@@ -389,8 +389,7 @@ spec:
         labels:
           observability.giantswarm.io/tenant: giantswarm
       skills:
-        repositories:
-        - https://github.com/giantswarm/agent-skills
+        repositories: []
     agent-platform-mcps:
       agentgateway:
         enabled: true
@@ -578,6 +577,7 @@ spec:
       ingress:
         enabled: false
       installationName: agent-platform
+      metaAgents: {}
       observability:
         otel:
           endpoint: http://otlp-gateway.kube-system.svc:4317
