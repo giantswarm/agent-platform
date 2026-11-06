@@ -5533,8 +5533,13 @@ tenants:
 # components.agent-manager.versionRange must be 2.20.0 or later), and with
 # components.backstage on its devPortal.url is the portal's
 # https://<backstage.hostname> (else backstage.<global.domain>), where the
-# tools link a missing credential. The connectivity chart renders the
-# ClusterRole agent-platform-tenant-flux the operator binds.
+# tools link a missing credential. With components.muster on, muster serves
+# the MCPServers of the namespaces labelled
+# agent-platform.giantswarm.io/organization (muster.mcpServerNamespaceSelector,
+# muster 5.58.0 or later), listed as the person: muster's OAuth server on the
+# dex provider and tenants.platform.users are then required. The
+# connectivity chart renders the ClusterRole agent-platform-tenant-flux the
+# operator binds.
 # The switch is the rollout gate, off by default for now: it turns on by default
 # once the capz and s3proxy snapshot stores give the operator access and the
 # kagent line carries giantswarm/kagent-extensions#27.

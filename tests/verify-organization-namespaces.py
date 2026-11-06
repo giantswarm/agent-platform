@@ -52,6 +52,7 @@ github.com (the envtest binaries, cached in .bin/).
 Usage: verify-organization-namespaces.py META_CHART CONNECTIVITY_CHART
 """
 
+import json
 import os
 import re
 import subprocess
@@ -121,7 +122,8 @@ def meta(chart, *extra):
                 *MAP_API, *extra])
 
 
-ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "agentPlatformOrganizations.fluxNamespace=flux-giantswarm"]
+MUSTER_FLOOR = ["--set", "components.muster.versionRange=>=5.58.0-0 <6.0.0"]
+ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "agentPlatformOrganizations.fluxNamespace=flux-giantswarm", *MUSTER_FLOOR]
 AWS = ["--set", "kagent.harness.snapshotLocation=", "--set", "kagent.harness.snapshotStore.crossplane.enabled=true",
        "--set", "kagent.harness.snapshotStore.crossplane.provider=aws", "--set", "kagent.harness.snapshotStore.crossplane.providerConfigRef=ci",
        "--set", "kagent.harness.snapshotStore.crossplane.region=eu-west-1",
@@ -191,6 +193,17 @@ def check_meta(chart):
     am = release(docs(meta(chart, *ON, "--set", "agent-manager.devPortal.url=https://portal.elsewhere.example.com")), "agent-manager")["values"]
     expect(am.get("devPortal") == {"url": "https://portal.elsewhere.example.com"},
            "on with components.backstage off, an own devPortal.url (a portal installed apart) travels unchanged")
+    org_selector = {"matchExpressions": [{"key": NEW, "operator": "Exists"}]}
+    muster = release(on, "muster")["values"]["muster"]
+    expect(muster.get("mcpServerNamespaceSelector") == org_selector,
+           f"on, muster serves the MCPServers of the namespaces labelled {NEW} (mcpServerNamespaceSelector)")
+    expect("mcpServerNamespaceSelector" not in release(off, "muster")["values"].get("muster", {}),
+           "off, muster gets no namespace selector and serves its own namespace only")
+    own = {"matchLabels": {"team": "a"}}
+    muster = release(docs(meta(chart, "--set-json", f"muster.muster.mcpServerNamespaceSelector={json.dumps(own)}")), "muster")["values"]["muster"]
+    expect(muster.get("mcpServerNamespaceSelector") == own, "off, an own muster namespace selector travels unchanged")
+    muster = release(docs(meta(chart, *ON, "--set-json", f"muster.muster.mcpServerNamespaceSelector={json.dumps(org_selector)}")), "muster")["values"]["muster"]
+    expect(muster.get("mcpServerNamespaceSelector") == org_selector, "on, an own muster namespace selector equal to the derived one is a no-op")
     kagent = release(on, "kagent")["values"]["controller"]
     env = {x["name"]: x.get("value") for x in kagent.get("env", [])}
     expect(kagent["authorization"]["namespaceSelector"] == NEW and env.get("KAGENT_EXTENSIONS_NAMESPACE_SELECTOR") == NEW,
@@ -251,6 +264,13 @@ def check_meta(chart):
              "agent-platform-operator.commitMode is set"),
             ("an own derived operator value", ["--set", "agent-platform-operator.platformNamespace=other"],
              "agent-platform-operator.platformNamespace (\"other\") differs from what the chart derives"),
+            ("a muster floor below 5.58.0", ["--set", "components.muster.versionRange=>=5.57.0 <6.0.0"],
+             "agentPlatformOrganizations.enabled needs muster 5.58.0 or later, whose chart takes muster.mcpServerNamespaceSelector"),
+            ("an own muster namespace selector that differs", ["--set-json", 'muster.muster.mcpServerNamespaceSelector={"matchLabels":{"team":"a"}}'],
+             "muster.muster.mcpServerNamespaceSelector ({\"matchLabels\":{\"team\":\"a\"}}) differs from the one agentPlatformOrganizations.enabled derives"),
+            ("muster's OAuth server off", ["--set", "muster.muster.oauth.server.enabled=false"],
+             "needs muster.muster.oauth.server.enabled with the provider dex"),
+            ("no platform users", ["--set", "tenants.platform.users=null"], "needs tenants.platform.users"),
             ("llmRouting off", ["--set", "llmRouting.enabled=false"], "needs llmRouting.enabled"),
             ("no API hostname", ["--set", "global.domain="], "needs the installation's Kubernetes API hostnames"),
             ("an own kagent namespaceSelector", ["--set", f"kagent.controller.authorization.namespaceSelector={OLD}"],

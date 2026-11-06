@@ -802,6 +802,12 @@ and muster never turns Ready (giantswarm/agent-platform#309). */ -}}
 {{- $_ := set $muster "extraCaFile" (dict "secret" (dict "name" $ca.secretName "key" ($ca.key | default "ca.crt"))) -}}
 {{- $_ := set $derived "muster" $muster -}}
 {{- end -}}
+{{- /* muster serves the organizations' MCPServers by the namespace label
+(agent-platform.muster.organizations). */ -}}
+{{- with (include "agent-platform.muster.organizations" .root | fromJson) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $derived "muster" (mergeOverwrite $muster .) -}}
+{{- end -}}
 {{- /* muster's credential provider (agent-platform.muster.credentialProvider):
 the workspace instances it releases, or the actor bearer alone. With
 workspaces on and no releasable instance agent-platform.validateWorkspaceAuth
@@ -4309,6 +4315,62 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}
+
+{{/*
+muster's organization values, as JSON: {"mcpServerNamespaceSelector":
+{"matchExpressions": [{"key": <the organizations' label>, "operator":
+"Exists"}]}} while agentPlatformOrganizations.enabled is on, {} while it is
+off. muster then serves the MCPServers of every namespace the operator labels
+as an organization's, next to its own namespace's, each to a person whom
+Kubernetes RBAC lets list mcpservers there (giantswarm/muster#1783). The
+label is the same one the connectivity chart's policies select the
+organization namespaces by, and only the operator sets it
+(agent-platform-organization-labels). With the switch off an own
+muster.muster.mcpServerNamespaceSelector travels unchanged. The render fails,
+naming what is missing, when the switch is on and:
+  * an own muster.muster.mcpServerNamespaceSelector differs from the derived one;
+  * the floor of components.muster.versionRange is below
+    agent-platform.muster.organizationsFloor, whose chart takes the selector
+    (an earlier chart refuses the key);
+  * muster's OAuth server is off or not on the dex provider: muster lists the
+    servers with the person's Dex token and refuses to start otherwise;
+  * tenants.platform.users is empty: muster lists the servers of its own
+    namespace as the person too, and with no subject the connectivity
+    release binds nobody to list them (agent-platform:mcpserver-viewer).
+Called from agent-platform.componentDerivedValues, i.e. only while
+components.muster is on.
+Usage: include "agent-platform.muster.organizations" $root | fromJson
+*/}}
+{{- define "agent-platform.muster.organizations" -}}
+{{- if not (include "agent-platform.organizations.on" .) -}}
+{{- dict | toJson -}}
+{{- else -}}
+{{- $m := dig "muster" dict (.Values.muster | default dict) | default dict -}}
+{{- $selector := dict "matchExpressions" (list (dict "key" (include "agent-platform.orgNamespaces.label" .) "operator" "Exists")) -}}
+{{- with dig "mcpServerNamespaceSelector" nil $m -}}
+{{- if ne (toJson .) (toJson $selector) -}}
+{{- fail (printf "muster.muster.mcpServerNamespaceSelector (%s) differs from the one agentPlatformOrganizations.enabled derives (%s): muster serves exactly the namespaces the operator labels as an organization's — leave muster.muster.mcpServerNamespaceSelector unset" (toJson .) (toJson $selector)) -}}
+{{- end -}}
+{{- end -}}
+{{- $floor := include "agent-platform.muster.organizationsFloor" . -}}
+{{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" $floor)) -}}
+{{- fail (printf "agentPlatformOrganizations.enabled needs muster %s or later, whose chart takes muster.mcpServerNamespaceSelector (giantswarm/muster#1783; an earlier chart refuses the key): components.muster.versionRange (%s) — raise the range's floor to %s" $floor (dig "muster" "versionRange" "" .Values.components) $floor) -}}
+{{- end -}}
+{{- if not (and (dig "oauth" "server" "enabled" false $m) (eq (toString (dig "oauth" "server" "provider" "dex" $m)) "dex")) -}}
+{{- fail "agentPlatformOrganizations.enabled needs muster.muster.oauth.server.enabled with the provider dex: muster lists the organizations' MCP servers with the person's Dex token and refuses to start with mcpServerNamespaceSelector otherwise" -}}
+{{- end -}}
+{{- if not (dig "platform" "users" list (.Values.tenants | default dict)) -}}
+{{- fail "agentPlatformOrganizations.enabled needs tenants.platform.users: muster lists the MCP servers of its own namespace as the person, and with no subject there the connectivity release binds nobody to list them (agent-platform:mcpserver-viewer)" -}}
+{{- end -}}
+{{- dict "mcpServerNamespaceSelector" $selector | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The first muster release whose chart takes muster.mcpServerNamespaceSelector
+(giantswarm/muster#1783). One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.muster.organizationsFloor" -}}5.58.0{{- end -}}
 
 {{/*
 A Go duration (time.ParseDuration: 720h, 1h30m, 0, 1.5h) in seconds, empty
