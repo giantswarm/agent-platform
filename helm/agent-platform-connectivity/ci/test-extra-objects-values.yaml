@@ -1,7 +1,6 @@
 # parentRefs is required in all modes (the muster `/` route attaches to it),
 # so set it even though this case only exercises extraObjects.
 ingress:
-  mode: muster-direct
   parentRefs:
     - name: giantswarm-default
       namespace: envoy-gateway-system
@@ -18,8 +17,3 @@ extraObjects:
     data:
       example-key: example-value
       release: "{{ .Release.Name }}"
-
-components:
-  # muster-direct runs without the agentgateway component (on by default).
-  agentgateway:
-    enabled: false

@@ -1,0 +1,140 @@
+{{- /*
+The HelmReleases of the kagent namespace, the platform tenant. Its editors
+write HelmReleases there (agent-manager writes them as the caller), and the
+writer of a HelmRelease picks what helm-controller does: the chart, the
+ServiceAccount it impersonates, and the Secrets it reads as itself
+(valuesFrom). The kagent namespace holds the platform's own Secrets (the
+model keys, the database credentials, the skills credential), which
+kagent.fluxServiceAccountName may read for Helm's release storage, so an
+agent release could otherwise read them, overwrite them or name them where
+agent-platform-platform-tenant-credential-refs asks the ServiceAccount
+instead of the writer.
+
+agent-platform-platform-helmreleases holds every HelmRelease of the kagent
+namespace, on create and on an update that changes its spec, to the agent
+release agent-manager composes: the agent chart from the namespace's
+OCIRepository (agent-manager.agentChart.ociUrl's last segment), run as
+kagent.fluxServiceAccountName, with none of spec.chart, valuesFrom,
+postRenderers, kubeConfig, targetNamespace and storageNamespace. The Secrets
+the agent chart names, values.skillsGitAuthSecretRef.name (every git skill's
+and plugin's credentialRef) and a git credentialRef of a skill or plugin of
+values.extraAgentSpec (merged over the Agent's template), are each the
+installation's skills credential (current or earlier name), or a Secret the
+requester may `get`, at most two distinct Secrets of the latter (the
+authorizer checks one expression may run).
+An update that leaves the spec as it is (a finalizer, a reconcile request)
+passes. The organization namespaces hold the same fields
+(organizations/admission.yaml). Rendered whenever
+kagent.fluxServiceAccountName is.
+*/ -}}
+{{- $helmSA := include "agent-platform.kagent.fluxServiceAccountName" . }}
+{{- if $helmSA }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $chartSource := include "agent-platform.organizations.chartSource" . }}
+{{- $installationCredentials := list }}
+{{- if include "agent-platform.agentManager.enabled" . }}
+{{- $skillsAuth := include "agent-platform.agentManager.skillsGitAuth" . | fromJson }}
+{{- range prepend $skillsAuth.previous $skillsAuth.current }}
+{{- if . }}
+{{- $installationCredentials = append $installationCredentials (squote .) }}
+{{- end }}
+{{- end }}
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-platform-helmreleases
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $kagentNs | quote }}
+    resourceRules:
+      - apiGroups: ["helm.toolkit.fluxcd.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["helmreleases"]
+  matchConditions:
+    - name: spec-written
+      expression: >-
+        request.operation == 'CREATE' ||
+        (has(object.spec) ? dyn(object.spec) : dyn({})) != (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
+  # Read untyped: the policy admits every served version.
+  variables:
+    - name: spec
+      expression: "has(object.spec) ? dyn(object.spec) : dyn({})"
+    - name: forbidden
+      expression: >-
+        {{ include "agent-platform.helmReleases.forbiddenFields" . }}.filter(f, f in variables.spec)
+    - name: chartRef
+      expression: "'chartRef' in variables.spec ? dyn(variables.spec.chartRef) : dyn({})"
+    - name: values
+      expression: "'values' in variables.spec ? dyn(variables.spec.values) : dyn({})"
+    - name: extraAgentSpec
+      expression: "'extraAgentSpec' in variables.values ? dyn(variables.values.extraAgentSpec) : dyn({})"
+    # An empty name asks for every Secret of the namespace.
+    - name: credentials
+      expression: >-
+        (('skillsGitAuthSecretRef' in variables.values && 'name' in variables.values.skillsGitAuthSecretRef &&
+        string(variables.values.skillsGitAuthSecretRef.name) != '' ?
+        [string(variables.values.skillsGitAuthSecretRef.name)] : dyn([])) +
+        (('skills' in variables.extraAgentSpec ? dyn(variables.extraAgentSpec.skills) : dyn([])) +
+        ('plugins' in variables.extraAgentSpec ? dyn(variables.extraAgentSpec.plugins) : dyn([])))
+        .filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
+        .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '')).distinct()
+    # The credentials the authorizer is asked about, each distinct name once:
+    # its cost allows two checks per expression (k8s.io/apiserver
+    # pkg/cel/library/cost.go).
+    - name: checked
+      expression: >-
+        {{- if $installationCredentials }}
+        variables.credentials.filter(n, !(n in [{{ join ", " $installationCredentials }}]))
+        {{- else }}
+        variables.credentials
+        {{- end }}
+  validations:
+    - expression: "size(variables.forbidden) == 0"
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, a HelmRelease sets none of spec.chart, valuesFrom, postRenderers, kubeConfig,
+        targetNamespace and storageNamespace; refused for ' + request.userInfo.username + ': ' + variables.forbidden.join(', ')
+    - expression: >-
+        'kind' in variables.chartRef && variables.chartRef.kind == 'OCIRepository' &&
+        'name' in variables.chartRef && variables.chartRef.name == {{ squote $chartSource }} &&
+        (!('namespace' in variables.chartRef) || variables.chartRef.namespace == request.namespace)
+      reason: Forbidden
+      messageExpression: {{ printf "'in the kagent namespace, a HelmRelease installs the agent chart from the namespace OCIRepository %s (spec.chartRef); refused for ' + request.userInfo.username + ': ' + request.name" $chartSource | quote }}
+    - expression: >-
+        'serviceAccountName' in variables.spec && variables.spec.serviceAccountName == {{ squote $helmSA }}
+      reason: Forbidden
+      messageExpression: {{ printf "'in the kagent namespace, a HelmRelease runs as the ServiceAccount %s (spec.serviceAccountName); refused for ' + request.userInfo.username + ': ' + request.name" $helmSA | quote }}
+    - expression: "size(variables.checked) <= 2"
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, a HelmRelease names as a git credential (values.skillsGitAuthSecretRef.name,
+        values.extraAgentSpec skills and plugins) at most two distinct Secrets besides the installation skills credential;
+        refused for ' + request.userInfo.username + ': ' + variables.checked.map(n, n == '' ? '<no name>' : n).join(', ')
+    - expression: >-
+        size(variables.checked) > 2 || variables.checked.all(n,
+        authorizer.group('').resource('secrets').namespace(request.namespace).name(n).check('get').allowed())
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, a HelmRelease names as a git credential (values.skillsGitAuthSecretRef.name,
+        values.extraAgentSpec skills and plugins) the installation skills credential or a Secret its writer may get;
+        refused for ' + request.userInfo.username + ', who may not get at least one of: ' +
+        variables.credentials.map(n, n == '' ? '<no name>' : n).join(', ')
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-platform-helmreleases
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-platform-helmreleases
+  validationActions: [Deny]
+{{- end }}

@@ -37,7 +37,7 @@ import tempfile
 import yaml
 
 HERE = pathlib.Path(__file__).resolve().parent
-CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "ingress.mode=agentgateway-muster", "--set", "global.domain=example.com"]
+CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "global.domain=example.com"]
 LLM_ON = ["--set", "llmRouting.enabled=true"]
 EXTERNAL_ON = ["--set", "llmRouting.external.enabled=true", "--set", "llmRouting.external.apiKeys.secretRef.name=keys",
                "--set", "global.gatewayApi.parentRefs[0].name=public"]

@@ -46,6 +46,11 @@ postgres:
       memory: 256Mi
 kagent:
   controller:
+    # The kind cluster runs no identity provider for kagent, so the line's own
+    # controller runs: the kagent-extensions binary needs the people's issuer
+    # and its key set, and is proven in the agentlab.
+    image:
+      repository: giantswarm/kagent/controller
     resources:
       requests:
         cpu: 50m

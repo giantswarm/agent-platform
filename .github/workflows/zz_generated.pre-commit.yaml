@@ -2,7 +2,7 @@
 #
 #    devctl
 #
-#    https://github.com/giantswarm/devctl/blob/1607fb958d582f3f6fb2db45a022dddef0f1c2b5/pkg/gen/input/precommit/internal/file/pre-commit-action.yaml.template
+#    https://github.com/giantswarm/devctl/blob/7141e9a44c23ab8bc9aaf8ef9fdb92c9beed7422/pkg/gen/input/precommit/internal/file/pre-commit-action.yaml.template
 #
 name: pre-commit
 
@@ -14,12 +14,17 @@ on:
       - main
       - master
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   HELM_DOCS_VERSION: "1.14.2"
 
 jobs:
   pre-commit:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
     steps:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

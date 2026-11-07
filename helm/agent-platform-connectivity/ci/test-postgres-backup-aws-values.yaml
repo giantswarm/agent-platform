@@ -3,9 +3,6 @@
 # destinationPath, s3.inheritFromIAMRole and the role annotation derive from
 # crossplane.aws. Cilium flavor: the CNPG policy gains the object-store egress.
 components:
-  # muster-direct runs without the agentgateway component (on by default).
-  agentgateway:
-    enabled: false
   kagent:
     enabled: true
 
@@ -44,7 +41,6 @@ postgres:
         oidcProvider: irsa.ci.example.com
 
 ingress:
-  mode: muster-direct
   parentRefs:
     - name: giantswarm-default
       namespace: envoy-gateway-system

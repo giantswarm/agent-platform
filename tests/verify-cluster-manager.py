@@ -12,7 +12,7 @@ one property of that:
   `cluster-manager: enabled: false`, the two blocks (`cluster-manager:`, `clusterManager:`)
   are held back from the connectivity release (gatedValues), and the connectivity chart
   renders nothing named cluster-manager;
-- on: ONE OCIRepository (the catalog's cluster-manager chart on >=0.22.0 <1.0.0) and ONE
+- on: ONE OCIRepository (the catalog's cluster-manager chart on components.cluster-manager.versionRange) and ONE
   HelmRelease that dependsOn muster, with the block forwarded — the pinned Service name,
   oauth on with downstream, the muster registration with forwardToken and the audience
   the kube-apiserver trusts, global injected, modelManager.namespace derived from the
@@ -48,11 +48,12 @@ import re
 import subprocess
 import sys
 
+import floors
+
 HELM = os.environ.get("HELM", "helm")
 NAME = "cluster-manager"
 WIRING = "clusterManager"
 REPOSITORY = "oci://gsoci.azurecr.io/charts/giantswarm"
-RANGE = ">=0.22.0 <1.0.0"
 CI = ["--set", "components.flux.enabled=false"]
 ON = ["--set", f"components.{NAME}.enabled=true"]
 IDENTITY = [
@@ -111,6 +112,7 @@ def must_have(doc: str, lines: tuple, what: str) -> None:
 
 
 def main(meta: str, connectivity: str) -> int:
+    rng = floors.range_of(NAME, meta)  # values.yaml's, the one place it is declared
     # --- off by default -------------------------------------------------------
     off = helm(meta, [])
     off_docs = documents(off)
@@ -136,7 +138,7 @@ def main(meta: str, connectivity: str) -> int:
         if (kind, NAME) not in on_docs:
             fail(f"components.{NAME}.enabled=true rendered no {kind} named {NAME}")
     oci = on_docs[("OCIRepository", NAME)]
-    must_have(oci, (f"url: {REPOSITORY}/{NAME}", f'semver: "{RANGE}"'), "the OCIRepository")
+    must_have(oci, (f"url: {REPOSITORY}/{NAME}", f'semver: "{rng}"'), "the OCIRepository")
     if "semverFilter" in oci or "insecure" in oci:
         fail("the OCIRepository carries a dev-channel knob by default")
     hr = on_docs[("HelmRelease", NAME)]
@@ -170,7 +172,7 @@ def main(meta: str, connectivity: str) -> int:
             continue
         if on_docs[key] != doc:
             fail(f"switching the component on changed {key}")
-    ok(f"on: one OCIRepository ({RANGE}) + one HelmRelease dependsOn muster, the block forwarded (Service name, OAuth as the caller, the muster registration, global), the namespace derived, the two blocks reach connectivity; nothing else moved")
+    ok(f"on: one OCIRepository ({rng}) + one HelmRelease dependsOn muster, the block forwarded (Service name, OAuth as the caller, the muster registration, global), the namespace derived, the two blocks reach connectivity; nothing else moved")
 
     # --- the derived namespace ------------------------------------------------------
     moved = documents(helm(meta, [*ON, "--set", "gitops.targetNamespace=agent-platform"]))[("HelmRelease", NAME)]
@@ -281,12 +283,17 @@ def main(meta: str, connectivity: str) -> int:
         fail("model-manager's egress opens the model registry with neither a static kserve backend nor cluster-manager")
     mirror = documents(helm(connectivity, [*CONN, "--set", "networkPolicy.flavor=cilium",
                                            "--set", "modelManager.networkPolicy.registry.fqdns[0].matchName=registry.mirror.example",
-                                           "--set", "modelManager.networkPolicy.registry.cidrs[0]=203.0.113.0/24"], ci_values=False))
+                                           "--set", "modelManager.networkPolicy.registry.cidrs[0]=203.0.113.0/24",
+                                           "--set", "modelManager.networkPolicy.registry.ports={5000}"], ci_values=False))
     mm_mirror = mirror[("CiliumNetworkPolicy", "agent-platform-connectivity-model-manager-egress")]
     must_have(mm_mirror, ("matchName: registry.mirror.example\n", "- 203.0.113.0/24\n"), "model-manager's egress with a registry mirror")
+    # registry.ports: the mirror's own port on both the names and the blocks (gitops.mirror host:port).
+    reg_rules = re.findall(r"(?:matchName: registry\.mirror\.example|- 203\.0\.113\.0/24)\n(?:.*\n)*?\s+- port: \"(\d+)\"", mm_mirror)
+    if reg_rules != ["5000", "5000"]:
+        fail(f"modelManager.networkPolicy.registry.ports does not open the registry's names and blocks on its port: {reg_rules}")
     if "gsoci.azurecr.io" in mm_mirror or "blob.core.windows.net" in mm_mirror:
         fail("a modelManager.networkPolicy.registry.fqdns mirror does not replace the gsoci list")
-    ok("model-manager's egress: gsoci.azurecr.io and its blob storage by name on 443 with cluster-manager on, not without a kserve backend; a mirror replaces the list")
+    ok("model-manager's egress: gsoci.azurecr.io and its blob storage by name on 443 with cluster-manager on, not without a kserve backend; a mirror replaces the list, on registry.ports")
 
     # --- model-manager reaches the workload clusters' API servers its kserve backends target (#687) ---
     # Nothing set on model-manager: its egress follows clusterManager.networkPolicy.workloadClusters (the

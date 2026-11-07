@@ -9,7 +9,10 @@ it by hand. There is no values-level fix: nothing rendered in one release can
 checksum a template of another. Hence this hook: after every install/upgrade of
 this release it stamps the checksum of the rendered app-config into the
 Deployment's pod template (an env var, AGENT_PLATFORM_APP_CONFIG_CHECKSUM, which
-Backstage ignores). The patch is a no-op while the checksum is unchanged
+Backstage ignores), under its own field manager,
+agent-platform-config-reload: kubectl's default, kubectl-set, is the mark of a
+hand's `kubectl set env`, and a lab that puts hand edits back to the render
+would undo the stamp and roll the portal. The patch is a no-op while the checksum is unchanged
 (kubectl sends the same value, the Deployment generation does not move) and a
 normal rolling update when it differs.
 
@@ -130,6 +133,7 @@ spec:
             - --namespace={{ .Release.Namespace }}
             - --selector=app={{ $deployment }}
             - --overwrite
+            - --field-manager=agent-platform-config-reload
             - AGENT_PLATFORM_APP_CONFIG_CHECKSUM={{ $checksum }}
           env:
             # kubectl keeps its discovery/http cache under $HOME; the root

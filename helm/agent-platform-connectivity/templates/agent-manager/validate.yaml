@@ -64,7 +64,7 @@ callers, a route the API server rejects, or an MCPServer CR without its CRD.
     {{- /* The route renders agentgateway.dev resources on the agentgateway
            Gateway. */ -}}
     {{- if not (include "agent-platform.ingress.agentgateway" .) }}
-      {{- fail "agentManager.route renders agentgateway.dev resources on the agentgateway Gateway; it requires an agentgateway-* ingress.mode" }}
+      {{- fail "agentManager.route renders agentgateway.dev resources on the agentgateway Gateway; it requires muster, which the data plane fronts" }}
     {{- end }}
     {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway")) }}
       {{- fail "agentManager.route.enabled is true but components.agentgateway.enabled is false: the route attaches to the agentgateway data plane" }}

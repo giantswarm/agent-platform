@@ -8,7 +8,7 @@ helm-controller impersonates — so `helm upgrade` and `helm rollback` fail in
 about a second with the message below in Helm's own error output, no revision
 is written, and helm-controller's revisions pass. UPDATE and DELETE are not
 matched: `helm uninstall` (status label updates, then deletes) and the install's
-own status updates go through. Kubernetes >= 1.30 (validateSelf).
+own status updates go through.
 
 The hand-back: the namespace annotation agent-platform.giantswarm.io/helm-cli=allow
 admits the CLI again for `helm upgrade --set gitops.self.enabled=false

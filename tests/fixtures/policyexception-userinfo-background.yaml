@@ -1,0 +1,80 @@
+# The failing shape for make verify-policyexception-userinfo: Kyverno refuses
+# the first two (user info with background scans on, by default and
+# explicitly); the third (background false) and the fourth (no user info) pass.
+---
+# Source: fixture/userinfo-background-default.yaml
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: userinfo-background-default
+  namespace: policy-exceptions
+spec:
+  exceptions:
+    - policyName: disallow-privilege-escalation
+      ruleNames: [privilege-escalation]
+  match:
+    any:
+      - resources:
+          kinds: [Pod]
+          namespaces: [kagent]
+      - resources:
+          kinds: [Pod]
+          namespaces: [org-example]
+        subjects:
+          - kind: ServiceAccount
+            name: replicaset-controller
+            namespace: kube-system
+---
+# Source: fixture/userinfo-background-true.yaml
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: userinfo-background-true
+  namespace: policy-exceptions
+spec:
+  background: true
+  exceptions:
+    - policyName: disallow-privilege-escalation
+      ruleNames: [privilege-escalation]
+  match:
+    all:
+      - resources:
+          kinds: [Deployment]
+        roles: [kube-system:deployer]
+        clusterRoles: [cluster-admin]
+---
+# Source: fixture/userinfo-background-false.yaml
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: userinfo-background-false
+  namespace: policy-exceptions
+spec:
+  background: false
+  exceptions:
+    - policyName: disallow-privilege-escalation
+      ruleNames: [privilege-escalation]
+  match:
+    any:
+      - resources:
+          kinds: [Pod]
+        subjects:
+          - kind: ServiceAccount
+            name: ate-controller
+            namespace: ate-system
+---
+# Source: fixture/no-userinfo.yaml
+apiVersion: kyverno.io/v2
+kind: PolicyException
+metadata:
+  name: no-userinfo
+  namespace: policy-exceptions
+spec:
+  exceptions:
+    - policyName: disallow-privilege-escalation
+      ruleNames: [privilege-escalation]
+  match:
+    any:
+      - resources:
+          kinds: [Pod]
+          namespaces: [kagent]

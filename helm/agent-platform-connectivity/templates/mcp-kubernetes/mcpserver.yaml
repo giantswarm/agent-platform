@@ -8,11 +8,10 @@ mcp-kubernetes.fullnameOverride (values.yaml) so the URL survives any release
 name; the port follows the mcp-kubernetes chart's service.port.
 
 With the server's OAuth on (mcp-kubernetes.mcpKubernetes.oauth.enabled, the
-default) the CR carries the auth block: muster forwards the session's IdP
-id_token byte-identical (forwardToken — the server validates it against the
-IdP's JWKS, trusting the platform client's audience) and requests
-mcp-kubernetes.kubernetesAudience at login so the token is also valid at the
-kube-apiserver (enableDownstreamOAuth). With OAuth off muster connects
+default) muster obtains an access token from the server's authorization
+endpoint after the person approves the client. ID tokens are not resource
+bearers. mcp-kubernetes.kubernetesAudience is requested for the upstream
+identity used at the kube-apiserver (enableDownstreamOAuth). With OAuth off muster connects
 anonymously and the server acts as its ServiceAccount.
 
 agent-platform.giantswarm.io/tool-group: infrastructure is the Agent Platform's
@@ -65,7 +64,7 @@ spec:
   {{- if $oauthOn }}
   auth:
     type: oauth
-    forwardToken: true
+    forwardToken: false
     {{- with (dig "kubernetesAudience" "" $mcpk) }}
     requiredAudiences:
       - {{ . }}

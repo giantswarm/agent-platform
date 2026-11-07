@@ -70,6 +70,10 @@ the default.
 {{- if include "agent-platform.substrate.enabled" . }}
 {{- $ns := include "agent-platform.substrate.namespace" . }}
 {{- $pcNs := include "agent-platform.substrate.podcertNamespace" . }}
+{{ include "agent-platform.hooks.job" (dict "root" $ "name" "substrate-namespaces" "hook" "pre-install,pre-upgrade" "weight" -4
+      "about" (printf "create the namespaces %s and %s the Substrate bootstrap writes into when they are missing, ahead of its Roles there" $ns $pcNs)
+      "script" (include "agent-platform.substrate.bootstrap.namespaces" (dict "namespaces" (list $pcNs $ns)))) }}
+---
 {{ include "agent-platform.hooks.job" (dict "root" $ "name" "substrate-bootstrap" "hook" "pre-install,pre-upgrade"
       "about" (printf "mint the Agent Substrate CA/JWT pools and ate-api-server's authentication config in %s and %s when they are missing, keep them when they exist; publish the trust anchors derived from the pools (actor-id-ca-certs, the podcert signers' ClusterTrustBundles)" $ns $pcNs)
       "init" (dict "name" "openssl" "image" (include "agent-platform.hooks.imageRef" .Values.hooks.opensslImage) "script" (include "agent-platform.substrate.bootstrap.mint" .))
@@ -114,20 +118,27 @@ jwt_pool actor-id-jwt-pool
 echo "candidates minted for 4 CA pools and 1 JWT authority pool"
 {{- end -}}
 
+{{- /* The namespaces the bootstrap writes into: a Role cannot precede its
+namespace, and on a first install the substrate release has not created them.
+A bare Namespace with no Helm ownership metadata, which the substrate release
+adopts. */ -}}
+{{- define "agent-platform.substrate.bootstrap.namespaces" -}}
+for ns in{{ range .namespaces }} {{ . | quote }}{{ end }}; do
+  if kubectl get namespace "$ns" >/dev/null 2>&1; then
+    echo "namespace $ns: present"
+  else
+    kubectl create namespace "$ns" >/dev/null
+    echo "namespace $ns: created (the substrate release adopts it)"
+  fi
+done
+{{- end -}}
+
 {{- define "agent-platform.substrate.bootstrap.apply" -}}
 ns={{ .ns | quote }}
 pc_ns={{ .pcNs | quote }}
 pool_id="1"
 audience="api.${ns}.svc"
 b64() { base64 < "$1" | tr -d '\n'; }
-ensure_ns() {
-  if kubectl get namespace "$1" >/dev/null 2>&1; then
-    echo "namespace $1: present"
-  else
-    kubectl create namespace "$1" >/dev/null
-    echo "namespace $1: created (the substrate release adopts it)"
-  fi
-}
 ca_pool() {
   if kubectl -n "$1" get secret "$2" >/dev/null 2>&1; then
     echo "CA pool $1/$2: present, kept (a regenerated root would orphan every certificate issued from it)"
@@ -183,8 +194,6 @@ trust_bundle() {
     | kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f - >/dev/null
   echo "trust bundle $name: $state (the roots of $1/$2)"
 }
-ensure_ns "$pc_ns"
-ensure_ns "$ns"
 ca_pool "$pc_ns" service-dns-ca-pool
 ca_pool "$pc_ns" pod-identity-ca-pool
 trust_bundle "$pc_ns" service-dns-ca-pool servicedns.podcert.ate.dev/identity

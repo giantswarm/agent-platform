@@ -1,7 +1,4 @@
 components:
-  # muster-direct runs without the agentgateway component (on by default).
-  agentgateway:
-    enabled: false
   kagent:
     enabled: true
 
@@ -64,11 +61,10 @@ postgres:
           name: kagent-pg-backup-s3
           key: ACCESS_SECRET_KEY
 
-# muster-direct: this case exercises the kagent + postgres path, not routing
+# This case exercises the kagent + postgres path, not routing
 # (kagent.controllerRoute/uiRoute stay disabled). parentRefs is still required
-# in every mode for the umbrella-owned muster `/` route.
+# for the umbrella-owned muster `/` route.
 ingress:
-  mode: muster-direct
   parentRefs:
     - name: giantswarm-default
       namespace: envoy-gateway-system

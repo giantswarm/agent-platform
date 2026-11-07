@@ -25,7 +25,7 @@
 # Layer this file over the installation's platform inputs (global.domain,
 # global.identity — the installation's Dex, whose tokens the target's
 # agentgateway verifies and the kagent controller trusts) and a BOM
-# (examples/customer-bom.yaml). The target's preconditions — Kubernetes 1.35
+# (examples/customer-bom.yaml). The target's preconditions — Kubernetes 1.36
 # with the three Substrate feature gates, a snapshot store, egress on 443 to the
 # installation's muster and model hosts — are in README "The runtime slice on
 # workload clusters".

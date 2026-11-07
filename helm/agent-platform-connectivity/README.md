@@ -33,13 +33,13 @@ The gateway holds no provider credential. Agent pods keep their own
 `ANTHROPIC_API_KEY`, and the client `x-api-key` header passes through
 untouched, so network reach to the LLM listener grants no spend.
 
-The feature needs the agentgateway data plane (`ingress.mode:
-agentgateway-muster`). The render fails when `llmRouting.enabled` is true and
+The feature needs the agentgateway data plane in front of muster. The render
+fails when `llmRouting.enabled` is true and
 that component is off.
 
 ### Rollout
 
-Two values turn the path on, and the order matters.
+Two steps turn the path on, and the order matters.
 
 1. Render the listener and the routing resources:
 
@@ -67,20 +67,14 @@ Two values turn the path on, and the order matters.
      -d '{"model":"claude-sonnet-5-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}'
    ```
 
-2. Point kagent's default ModelConfig at the listener. This is the cutover:
+2. Write the ModelConfigs. This is the cutover: a ModelConfig of a provider
+   the listener serves, without a `baseUrl` of its own, takes the listener URL
+   at its next create or update (the `<release>-modelconfig-llm-routing`
+   policies, below). A ModelConfig that names its own `baseUrl` keeps it. An
+   agent is a Substrate actor with no pod of its own (see
+   [Metric labels](#metric-labels)), so no agent pod rolls.
 
-   ```yaml
-   kagent:
-     providers:
-       anthropic:
-         config:
-           baseUrl: http://agentgateway.<release namespace>.svc:8081
-   ```
-
-   The base URL lands in each agent's config Secret and the pod template
-   carries a config hash, so one rolling update replaces the agent pods.
-
-Roll back by removing the second value. The listener may stay.
+Roll back by setting `llmRouting.enabled: false`.
 
 Turning `llmRouting.enabled` off afterwards also takes back what the
 `<release>-modelconfig-llm-routing` policies wrote: they mark every `baseUrl`
@@ -90,8 +84,8 @@ they set with the annotation `agent-platform.giantswarm.io/llm-routing-base-url`
 listener URL on a ModelConfig Helm does not manage that the policies wrote
 before they marked it, so every such ModelConfig calls its provider directly
 again; its log names each one. Helm cannot: it never owned the field. A
-`baseUrl` an operator set, and one a Helm release renders (the second value
-above included), is never touched: remove the second value first. With routing
+`baseUrl` an operator set, and one a Helm release renders, is never touched.
+With routing
 on, the hook also takes the listener URL off a ModelConfig whose provider no
 `llmRouting.models` entry serves any more. It never routes a ModelConfig: the
 policies do at its next write.
@@ -206,26 +200,28 @@ On the installation, after the cutover:
   in the Gateway's own `-metrics` policy — see [Metric labels](#metric-labels).
 - `ingress.httpRoute.timeouts` reaches the external routes only: the in-cluster
   path has no `HTTPRoute` to carry route timeouts.
-- An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
-  own `baseUrl` or names a provider no `llmRouting.models` entry serves; the
-  MutatingAdmissionPolicy does the same for a ModelConfig created elsewhere,
-  one policy per served provider. An OpenAI ModelConfig's listener URL ends in
-  `/v1`, the base its client appends `/responses` or `/chat/completions` to.
+- A ModelConfig rides the listener unless it sets its own `baseUrl` or names a
+  provider no `llmRouting.models` entry serves: the MutatingAdmissionPolicy,
+  one per served provider, writes the listener URL into it. An OpenAI
+  ModelConfig's listener URL ends in `/v1`, the base its client appends
+  `/responses` or `/chat/completions` to.
 - **codex**: the codex runtime speaks the Responses API only. An `OpenAI` entry
   on the listener (`baseURL: https://api.openai.com/v1`, `match: gpt-*`) and a
-  `kagent.modelConfigs[]` entry with `provider: OpenAI` and `apiFormat:
-  responses` give codex agents a model whose calls take the listener's
-  Responses route (`/v1/responses`): priced by the gateway's catalog, in the
-  GenAI usage metrics, under `llmRouting.rateLimits`. The codex compiler
-  refuses any other OpenAI option (`maxTokens` included), `defaultHeaders`,
-  `tls` and `apiKeyPassthrough`; the chart renders none of them for such an
-  entry, and refuses `apiFormat` on any other provider.
-  The `baseUrl` lands under the CRD's block for the entry's provider —
-  `anthropic`, `mistral`, `openAI`, `sapAICore`, the four `ModelConfigSpec` gives one —
-  never the lower-cased provider name, which the API server would prune; the
-  render refuses a `baseUrl` on any other provider and a `provider` outside the
-  CRD's enum (case-sensitive). `make verify-kagent-crds` sweeps every provider
-  of the enum against the kagent line's CRD.
+  ModelConfig with `provider: OpenAI` and `openAI.apiFormat: responses` give
+  codex agents a model whose calls take the listener's Responses route
+  (`/v1/responses`): priced by the gateway's catalog, in the GenAI usage
+  metrics, under `llmRouting.rateLimits`.
+- **codex on a ChatGPT subscription**: an `OpenAI` ModelConfig with
+  `openAI.credentialType: chatgptOAuth` stays off the listener: the policy
+  skips it and the hook takes a listener URL it wrote off again, because the
+  listener's OpenAI route serves the OpenAI API, not the ChatGPT Codex backend,
+  and a subscription has no per-token price. Its turns are not in the GenAI
+  usage metrics. What a person connects and what the meta chart derives:
+  [docs/chatgpt-login.md](../../docs/chatgpt-login.md).
+- The policy writes the `baseUrl` under the CRD's block for the ModelConfig's
+  provider (`anthropic`, `mistral`, `openAI`, `sapAICore`, the four
+  `ModelConfigSpec` gives one), never the lower-cased provider name, which the
+  API server would prune.
 - The data plane is scraped by the packaging chart's own `PodMonitor`, under
   `agentgateway.monitoring.enabled` in the meta chart (the resolved
   `global.observability.metrics.serviceMonitor.enabled`). It selects the
@@ -233,6 +229,15 @@ On the installation, after the cutover:
   the MCP path is scraped too and the monitor exists before the cutover. This
   chart rendered one of its own, selecting by gateway name; it is gone, because
   two monitors of the same pods double every data-plane series.
+
+## The default ModelConfig
+
+The chart declares no model: an installation's ModelConfigs are plain objects
+declared in GitOps next to its agents. A namespace's default model is the
+ModelConfig annotated `agent-platform.giantswarm.io/is-default-model-config:
+"true"`. Nothing enforces one per namespace at admission: the writers (the
+portal, agent-manager) keep it unique, and a namespace with more than one
+marked ModelConfig has no default.
 
 ## Metric labels
 
@@ -350,20 +355,34 @@ expression through `tpl`; Helm merges maps, so an installation adds or drops
 one field without restating the rest. A field is the place for what is per
 request: as a metric label it would make one series per value.
 
-The chart's one field is `agent_instance_id`, the session of an agent's model
-call. The kagent runtime names the `Session` a turn runs in (a Dev Portal
-conversation, a Slack thread) in `x-kagent-agent-instance-id` on every
-model call of that turn, and the field reads it behind the same Substrate
-egress predicate as the agent labels (`agent-platform.substrate.egressCall`),
-so a pod that is not the egress logs no session (the empty value drops the
-field), header or not. Summed
-per `agent_instance_id`, the `llm` listener's lines give the cost of one
-conversation. Accounting, never authorization.
+The chart's fields, after the data plane's own (`gateway`, `listener`,
+`route`, `endpoint`, `src.addr`, `http.method`, `http.host`, `http.path`,
+`http.status`, `grpc.status`, `error`, `reason`, `duration`, …):
+
+| Field | Value | Present when |
+|---|---|---|
+| `request_id` | the `x-request-id` request header | the caller sent one |
+| `agent_instance_id` | the `x-kagent-agent-instance-id` request header | an agent's model call through the Substrate egress |
+
+`request_id` is the request's id. The Dev Portal's backend sets
+`x-request-id` on every call it makes through the data plane and names it in
+an error banner (`request id 310e4b1e-…`), so that id finds exactly the line
+of the failing call. The data plane generates no id: a request without the
+header logs none (the field is dropped). Any caller can set it, so it
+correlates, never identifies.
+
+`agent_instance_id` is the session of an agent's model call. The kagent
+runtime names the `Session` a turn runs in (a Dev Portal conversation, a
+Slack thread) in `x-kagent-agent-instance-id` on every model call of that
+turn, and the field reads it behind the same Substrate egress predicate as
+the agent labels (`agent-platform.substrate.egressCall`), so a pod that is
+not the egress logs no session (the empty value drops the field), header or
+not. Summed per `agent_instance_id`, the `llm` listener's lines give the cost
+of one conversation. Accounting, never authorization.
 
 **Guards.** The schema holds every entry to `{expression, enabled}`; the render
 fails, naming the entry, on a missing, empty or multi-line expression. No
-policy renders in `muster-direct` or with every entry off. `make
-verify-access-log` asserts it.
+policy renders with every entry off. `make verify-access-log` asserts it.
 
 ## The data plane's buffer
 
@@ -1017,7 +1036,7 @@ A change to a served model's `LLMInferenceService` rolls its predictor Deploymen
 
 ### Pre-pulling the runtime image
 
-A predictor pulls its runtime image only when its main container starts — after the storage-initializer has finished the weights — so on a pool scaling from zero the two longest steps of a cold start run one after the other (measured on a fresh node: weights 116 s, then 115 s for the 8.8 GB `llm-d-cuda` image; with prewarm the node is Ready about two minutes before the model is even requested). The image is the same for every served model of an installation, and a node knows it is a GPU node the moment it joins. So `modelServing.prepull` (on by default; giantswarm/agent-platform#545) renders **a DaemonSet in the serving namespace** (`<release>-model-serving-prepull`; `templates/model-serving/prepull.yaml`) with one init container per image of `prepull.images` running `/bin/true` and a pause main container (`prepull.pauseImage`, the cluster's sandbox image mirrored; `prepull.resources` on every container, never a GPU): the kubelet pulls the images the moment the node joins, in parallel with the storage-initializer, and containerd keeps them for the predictor, whose `Pulled` event then reads "already present on machine".
+A predictor pulls its runtime image only when its main container starts — after the storage-initializer has finished the weights — so on a pool scaling from zero the two longest steps of a cold start run one after the other (measured on a fresh node: weights 116 s, then 115 s for the 8.8 GB gzip mirror of `llm-d-cuda`, before the `llm-d-fast/` re-layer of about 6.6 GB; with prewarm the node is Ready about two minutes before the model is even requested). The image is the same for every served model of an installation, and a node knows it is a GPU node the moment it joins. So `modelServing.prepull` (on by default; giantswarm/agent-platform#545) renders **a DaemonSet in the serving namespace** (`<release>-model-serving-prepull`; `templates/model-serving/prepull.yaml`) with one init container per image of `prepull.images` running `/bin/true` and a pause main container (`prepull.pauseImage`, the cluster's sandbox image mirrored; `prepull.resources` on every container, never a GPU): the kubelet pulls the images the moment the node joins, in parallel with the storage-initializer, and containerd keeps them for the predictor, whose `Pulled` event then reads "already present on machine".
 
 Where it runs: `prepull.nodeSelector` — **an installation's map renders alone**; empty (the default in both charts) renders Karpenter's `karpenter.k8s.aws/instance-gpu-manufacturer: nvidia`, which every GPU instance type carries, fractional-GPU types such as g6f included. The default is the template's (`agent-platform.modelServing.prepull.nodeSelector` in `_helpers.tpl`), not a values default, because Helm merges maps: a default key in `values.yaml` would be kept next to whatever an installation sets — a DaemonSet no node matches — and a `null` for it is coalesced away when the meta chart forwards its values (giantswarm/agent-platform#562). So a GPU node not launched by Karpenter — labelled `nvidia.com/gpu.present: "true"` by the GPU operator's feature discovery, say — is selected by its own labels alone; a label value that is not a string fails the render naming the key. The pool's own label (`gpuPool.nodeSelector`) is merged under either, so a pool release runs the DaemonSet on the pool's nodes alone; the pool's taint is tolerated first and `prepull.tolerations` after it (default `operator: Exists` — every taint, the fleet's DaemonSet convention, so the pull starts under a node's start-up taints and not once they are lifted; an empty list tolerates the pool's taint alone). The default image list is the runtime image of the well-known `LLMInferenceServiceConfig` every served model composes from — named by the `kserve-runtime-configs` chart (giantswarm/kserve), mirrored to gsoci by its `imageRegistry` — pinned here because this chart has no other value for it: a re-pin of that chart's line moves it here, never ahead, and the list is plain references on purpose so no image manager bumps it ahead of the runtime configs (a newer tag pre-pulled is a tag no predictor runs). The storage-initializer comes first in that list (`gsoci.azurecr.io/giantswarm/storage-initializer`, at the KServe version the `kserve-llmisvc-resources` line of `components:` renders for the `ClusterStorageContainer`; giantswarm/agent-platform#807): the init containers run in order, and the predictor's storage-initializer, which downloads the weights, is on the critical path. Pulled beside the 6.6 GB runtime image its 96 MB took 46–86 s on a cold node, alone 5–12 s. The kubelet de-duplicates the predictor's concurrent pull of the same reference, and the runtime image still lands while the weights download. `make verify-serving-slice` holds that reference to the line, and the runtime image second. An empty list with the switch on fails the render naming the key.
 
@@ -1136,7 +1155,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | components.muster.enabled | bool | `true` |  |
 | components.dicebear.enabled | bool | `true` |  |
 | components.agentgateway.enabled | bool | `true` |  |
-| components.agent-platform-mcps.enabled | bool | `false` |  |
+| components.agent-platform-mcps.enabled | bool | `true` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.klaus-gateway.enabled | bool | `false` |  |
 | components.agent-sandbox.enabled | bool | `false` |  |
@@ -1220,6 +1239,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | gateway.metricLabels.api_key.expression | string | `"apiKey.name"` |  |
 | gateway.accessLog.attributes.agent_instance_id.enabled | bool | `true` |  |
 | gateway.accessLog.attributes.agent_instance_id.expression | string | `"{{ include \"agent-platform.substrate.egressCall\" . }} ? request.headers[\"x-kagent-agent-instance-id\"] : \"\""` |  |
+| gateway.accessLog.attributes.request_id.enabled | bool | `true` |  |
+| gateway.accessLog.attributes.request_id.expression | string | `"request.headers[\"x-request-id\"]"` |  |
 | gatewayApi.gateway.create | bool | `false` |  |
 | gatewayApi.gateway.tls.secretName | string | `""` |  |
 | gatewayApi.gateway.serviceType | string | `"LoadBalancer"` |  |
@@ -1248,7 +1269,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.flavor | string | `"auto"` | `auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor. |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
-| networkPolicy.substrate.credentialProvider.egressFQDNs[0].matchName | string | `"oauth2.googleapis.com"` |  |
+| networkPolicy.substrate.credentialProvider.egressFQDNs | list | `[]` |  |
+| networkPolicy.substrate.egressGateway.privateCIDRs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
 | networkPolicy.musterInClusterMcpPorts[1] | int | `8443` |  |
 | networkPolicy.mcpBackends | object | `{}` |  |
@@ -1259,6 +1281,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.kubernetes.worldExcludedCIDRs[1] | string | `"172.16.0.0/12"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[2] | string | `"192.168.0.0/16"` |  |
 | networkPolicy.kubernetes.worldExcludedCIDRs[3] | string | `"169.254.0.0/16"` |  |
+| networkPolicy.kubernetes.ipv6.enabled | bool | `false` |  |
+| networkPolicy.kubernetes.ipv6.excludedCIDRs | list | `[]` |  |
 | kyvernoPolicies.enabled | string | `"auto"` | `auto` (default) renders the Kyverno objects when kyverno.io/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
 | kyvernoPolicies.rules.privileged-containers | string | `"disallow-privileged-containers"` |  |
@@ -1277,7 +1301,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
 | hooks.kubectlImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.kubectlImage.repository | string | `"giantswarm/alpine-k8s"` |  |
-| hooks.kubectlImage.tag | string | `"1.37.1"` |  |
+| hooks.kubectlImage.tag | string | `"1.37.2"` |  |
 | hooks.opensslImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.opensslImage.repository | string | `"giantswarm/alpine-openssl"` |  |
 | hooks.opensslImage.tag | string | `"3.5.9"` |  |
@@ -1411,12 +1435,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.securityContext.allowPrivilegeEscalation | bool | `false` |  |
 | kagent.securityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | kagent.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
-| kagent.providers.default | string | `"anthropic"` |  |
-| kagent.providers.anthropic.provider | string | `"Anthropic"` |  |
-| kagent.providers.anthropic.model | string | `"claude-sonnet-5-5"` |  |
-| kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
-| kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
-| kagent.providers.anthropic.apiKey | string | `""` |  |
 | kagent.otel.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
 | kagent.otel.exporter.otlp.protocol | string | `"grpc"` |  |
 | kagent.otel.exporter.otlp.timeout | string | `"500"` |  |
@@ -1466,7 +1484,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.oauth2-proxy.metrics.serviceMonitor.interval | string | `"60s"` |  |
 | kagent.oauth2-proxy.metrics.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | kagent.grafana-mcp.enabled | bool | `false` |  |
-| kagent.kagent-tools.enabled | bool | `false` |  |
 | kagent.querydoc.enabled | bool | `false` |  |
 | kagent.k8s-agent.enabled | bool | `false` |  |
 | kagent.k8s-agent.namespaceOverride | string | `"kagent"` |  |
@@ -1491,7 +1508,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.kmcp.enabled | bool | `false` |  |
 | kagent.kmcp.namespaceOverride | string | `"kagent"` |  |
 | kagent.oauth2ProxyIngress.additionalPeers | list | `[]` |  |
-| kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. Rendered in the kagent namespace whenever kagent is on, bound to `cluster-admin` by a namespace-scoped RoleBinding (full control of the kagent namespace, nothing outside it), and named from this ONE value into agent-manager (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the portal's `agentPlatform.fluxServiceAccountName` (through the `agent-platform.kagent.fluxServiceAccountName` helper), so the three cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
+| kagent.fluxServiceAccountName | string | `"kagent-flux"` | The ServiceAccount the agents' Flux `HelmRelease`s execute as. Rendered in the kagent namespace whenever kagent is on, bound to the Role `<name>-agent-releases` there (the Generic agent chart's Agents and RemoteMCPServers and Helm's release Secrets, nothing outside the kagent namespace), and named from this ONE value into agent-manager (`flux.helmReleaseServiceAccount`, derived by the meta chart) and the portal's `agentPlatform.fluxServiceAccountName` (through the `agent-platform.kagent.fluxServiceAccountName` helper), so the three cannot disagree. Under a Flux multi-tenancy lockdown a `HelmRelease` without it runs as the rights-less default ServiceAccount and fails. Empty renders no identity and hands both callers an empty name. |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
@@ -1523,7 +1540,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.uiRoute.backendTrafficPolicy.timeout | string | `"60s"` |  |
 | kagent.uiRoute.backendTrafficPolicy.annotations | object | `{}` |  |
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
-| kagent.modelConfigs | list | `[]` |  |
 | kagent.remoteMcpServers | list | `[]` |  |
 | postgres.enabled | bool | `false` |  |
 | postgres.namespace | string | `"kagent"` |  |
@@ -1650,10 +1666,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentgateway.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.controller.image.repository | string | `"giantswarm/agentgateway-upstream/controller"` |  |
-| agentgateway.controller.image.tag | string | `"2.4.0"` |  |
+| agentgateway.controller.image.tag | string | `"2.6.10"` |  |
 | agentgateway.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentgateway.proxy.image.repository | string | `"giantswarm/agentgateway-upstream/agentgateway"` |  |
-| agentgateway.proxy.image.tag | string | `"2.4.0"` |  |
+| agentgateway.proxy.image.tag | string | `"2.6.10"` |  |
 | agentgateway.podAnnotations."application.giantswarm.io/team" | string | `"bumblebee"` |  |
 | agentgateway.podSecurityContext.runAsNonRoot | bool | `true` |  |
 | agentgateway.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
@@ -1704,6 +1720,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelManager.networkPolicy.registry.fqdns[0].matchName | string | `"gsoci.azurecr.io"` |  |
 | modelManager.networkPolicy.registry.fqdns[1].matchPattern | string | `"*.blob.core.windows.net"` |  |
 | modelManager.networkPolicy.registry.cidrs | list | `[]` |  |
+| modelManager.networkPolicy.registry.ports[0] | int | `443` |  |
 | modelManager.networkPolicy.workloadClusters | object | `{}` |  |
 | modelManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | modelManager.networkPolicy.egress.cidrs | list | `[]` |  |
@@ -1766,7 +1783,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.3.0"` |  |
+| agentManager.migration.image.tag | string | `"2.21.1"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
@@ -1795,7 +1812,12 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: agent-platform:user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC "everyone" group instead. |
 | tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: agent-platform:editor in the kagent namespace. |
 | tenants.platformTeam | list | `[]` | The customer's platform team: agent-platform:editor in the kagent namespace beside platform.editors (the meta chart also adds it to muster's editor bindings). |
-| tenants.organizations.enabled | bool | `false` | The worker pods of the namespaces labelled `giantswarm.io/organization` (agent-manager's tenants, its `tenants.enabled`; it copies the workers' own policy into them, `substrate-workers` in the cilium flavor, `substrate-workers-ingress` in the kubernetes flavor): with Agent Substrate on, the router, the egress gateway and the actors' dns admit them as they admit the kagent namespace's workers, and the workers' Kyverno PolicyException covers them when Substrate's controllers write them (Kyverno 1.15.2 or later; an older Kyverno never applies the exception and the workers are refused). Two ValidatingAdmissionPolicies hold the workers there for every requester: only agent-manager's ServiceAccount writes a WorkerPool, as a copy of kagent.substrateWorkerPool.name in the kagent namespace (only replicas may differ), and only Substrate's controllers write a Deployment, ReplicaSet or Pod labelled `ate.dev/worker-pool`; no one adds an ephemeral container to a worker, execs into one or attaches to one (Kubernetes 1.30 or later). A namespace without the label gets nothing. Off, the render is that of a chart without the key. |
+| agentPlatformOrganizations.enabled | bool | `false` | Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a model whose provider the listener serves (Anthropic, Mistral or OpenAI) and llmRouting.modelConfigPolicy.enabled on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain or apiHostnames: the render fails without them. The rollout gate: off by default for now (see above). |
+| agentPlatformOrganizations.fluxNamespace | string | `""` | The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace, and the operator's erasure.fluxNamespace (derived); set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces. |
+| agentPlatformOrganizations.fluxSource | object | `{"kind":"GitRepository","name":""}` | The installation's Flux source in fluxNamespace, which an organization's Kustomization applies from (agent-platform-operator's commitMode.sourceRef). The admission policy holds the operator's Kustomizations to this source. The name is required with fluxNamespace: the render fails without it. |
+| agentPlatformOrganizations.fluxPathPrefix | string | `"./agent-platform/organizations/"` | The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies exactly this prefix, its parent and its name, from the labels the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise. |
+| agentPlatformOrganizations.fluxDecryptionSecret | string | `"sops-keys"` | The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption. |
+| agentPlatformOrganizations.apiHostnames | list | `[]` | The installation's Kubernetes API hostnames beside api.<global.domain>, which is derived while global.domain is set: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. The render fails while both are empty. |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |
@@ -1831,7 +1853,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspaces.substrate.csiCompanion.controller.resources.limits.ephemeral-storage | string | `"256Mi"` |  |
 | workspaces.substrate.csiCompanion.proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | workspaces.substrate.csiCompanion.proxy.image.repository | string | `"giantswarm/envoy"` |  |
-| workspaces.substrate.csiCompanion.proxy.image.tag | string | `"v1.39.3"` |  |
+| workspaces.substrate.csiCompanion.proxy.image.tag | string | `"v1.40.2"` |  |
 | workspaces.substrate.csiCompanion.proxy.port | int | `10000` |  |
 | workspaces.substrate.csiCompanion.proxy.clientIdentity | string | `"spiffe://cluster.local/ns/ate-system/sa/ate-api-server"` |  |
 | workspaces.substrate.csiCompanion.proxy.resources.requests.cpu | string | `"10m"` |  |
@@ -1855,7 +1877,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspaces.substrate.csiCompanion.node.resources.limits.ephemeral-storage | string | `"256Mi"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.image.registry | string | `"gsoci.azurecr.io"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.image.repository | string | `"giantswarm/livenessprobe"` |  |
-| workspaces.substrate.csiCompanion.livenessProbe.image.tag | string | `"v2.19.0"` |  |
+| workspaces.substrate.csiCompanion.livenessProbe.image.tag | string | `"v2.20.0"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.nodePort | int | `29662` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.resources.requests.cpu | string | `"5m"` |  |
 | workspaces.substrate.csiCompanion.livenessProbe.resources.requests.memory | string | `"16Mi"` |  |
@@ -1873,12 +1895,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
-| workspace-manager.signin.keys.secretName | string | `"workspace-manager-signin-keys"` |  |
-| workspace-manager.signin.keys.current | string | `"key-1"` |  |
 | workspace-manager.providers | list | `[]` |  |
 | workspaceManager.route.enabled | bool | `true` |  |
 | workspaceManager.route.parentRefs | list | `[]` |  |
-| workspaceManager.signinKeys.create | bool | `true` |  |
 | workspaceManager.grantKey.create | bool | `true` |  |
 | workspaceManager.grantKey.secretName | string | `"workspace-manager-grant-keys"` |  |
 | workspaceManager.grantKey.key | string | `"key-1"` |  |
@@ -1908,7 +1927,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |
-| backstage.configReload.image.version | string | `"v1.37.1"` |  |
+| backstage.configReload.image.version | string | `"v1.37.2"` |  |
 | mcp-kubernetes.fullnameOverride | string | `"mcp-kubernetes"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |
@@ -1928,6 +1947,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | substrate.atelet.affinity | object | `{}` |  |
 | substrate.atelet.extraEnv | list | `[]` |  |
 | substrate-crds | object | `{}` |  |
+| google-access-token-credential-provider | object | `{}` |  |
 | kserve-llmisvc-crd | object | `{}` |  |
 | kserve-llmisvc-resources | object | `{}` |  |
 | modelServing.kserve.requireApi | bool | `true` | api-versions serving.kserve.io/v1alpha2; false skips it. |
@@ -1963,6 +1983,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.shippedPresets.enabled | bool | `true` |  |
 | modelServing.shippedPresets.exclude | list | `[]` |  |
 | modelServing.modelImages.registry | string | `""` |  |
+| modelServing.runtimeImages.registry | string | `""` |  |
 | modelServing.cache.enabled | bool | `true` |  |
 | modelServing.cache.pvc.name | string | `"hf-cache"` |  |
 | modelServing.cache.pvc.existingClaim | string | `""` |  |

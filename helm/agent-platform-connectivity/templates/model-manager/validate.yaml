@@ -159,7 +159,7 @@ login provider beside global.identity.
         {{- fail "none of model-manager.oauth.existingSecret, model-manager.oauth.dex.clientSecret or global.identity.existingSecret is set: model-manager needs the login client's secret — set muster.muster.oauth.server.existingSecret (a Secret with key dex-client-secret), which the meta chart fills model-manager.oauth.existingSecret from (or set global.identity.existingSecret)" }}
       {{- end }}
       {{- if and (not (dig "baseURL" "" $oauth)) (not .Values.global.domain) }}
-        {{- fail "model-manager.oauth.baseURL is empty and global.domain is not set: the resource server needs its public base URL — under an agentgateway-* ingress.mode the meta chart derives https://agentgateway.<global.domain>/model-manager; set global.domain, or model-manager.oauth.baseURL" }}
+        {{- fail "model-manager.oauth.baseURL is empty and global.domain is not set: the resource server needs its public base URL — the meta chart derives https://agentgateway.<global.domain>/model-manager; set global.domain, or model-manager.oauth.baseURL" }}
       {{- end }}
     {{- end }}
   {{- end }}

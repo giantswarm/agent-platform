@@ -28,7 +28,10 @@ import sys
 
 HELM = os.environ.get("HELM", "helm")
 CI = ["--set", "components.flux.enabled=false"]
-ON = ["--set", "workspaces.enabled=true"]
+# muster's credential provider releases an instance while workspaces and Substrate are on
+# (agent-platform.validateWorkspaceAuth): no provider instance to pin here, so the renders name it.
+RELEASABLE = ["--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]
+ON = ["--set", "workspaces.enabled=true", *RELEASABLE]
 
 
 def fail(msg: str) -> None:

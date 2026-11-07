@@ -9,8 +9,6 @@ provider's hosts.
   {{- $chart := include "agent-platform.workspaceManager.chartValues" . | fromJson }}
   {{- $_ := include "agent-platform.workspaceManager.fullname" . }}
   {{- $_ := include "agent-platform.workspaceManager.providerHosts" . }}
-  {{- include "agent-platform.workspaceManager.validateCallback" . }}
-  {{- include "agent-platform.workspaceManager.validateSigninKeys" . }}
   {{- include "agent-platform.workspaceManager.validateGrantKey" . }}
 
   {{- /* The MCP endpoint is the server's only surface: without muster nothing

@@ -17,7 +17,9 @@ toggle the release says. This test asserts:
       Helm does not manage, each with its mark, and touches nothing else (an
       operator's provider URL, a Helm release's own listener URL);
       on marks an unmarked listener URL, takes the chart's baseUrl off a
-      provider the listener no longer serves and routes no ModelConfig
+      provider the listener no longer serves and off a ChatGPT login
+      (openAI.credentialType chatgptOAuth, which the OpenAI policy skips) and
+      routes no ModelConfig
       without a baseUrl (the policies do at its next write; the default
       ModelConfig's cutover stays the README's second step);
       a second run on the result changes nothing;
@@ -71,7 +73,7 @@ def find(docs, kind, name):
     return next((d for d in docs if d["kind"] == kind and d["metadata"]["name"] == name), None)
 
 
-def mc(name, provider, base_url=None, mark=None, helm=False):
+def mc(name, provider, base_url=None, mark=None, helm=False, chatgpt=False):
     meta = {"name": name, "resourceVersion": str(len(name))}
     if mark:
         meta["annotations"] = {MARK: mark}
@@ -81,6 +83,8 @@ def mc(name, provider, base_url=None, mark=None, helm=False):
     if base_url:
         key = {"Anthropic": "anthropic", "OpenAI": "openAI"}[provider]
         spec[key] = {"baseUrl": base_url}
+    if chatgpt:
+        spec.setdefault("openAI", {})["credentialType"] = "chatgptOAuth"
     return {"metadata": meta, "spec": spec}
 
 
@@ -93,6 +97,8 @@ FIXTURE = [
     mc("bare", "Anthropic"),
     mc("bare-openai", "OpenAI"),
     mc("gemini", "Gemini"),
+    mc("chatgpt-marked", "OpenAI", ORIGIN + "/v1", mark=ORIGIN + "/v1", chatgpt=True),
+    mc("chatgpt-bare", "OpenAI", chatgpt=True),
 ]
 
 
@@ -172,6 +178,9 @@ def main():
         expr = pol["spec"]["mutations"][0]["applyConfiguration"]["expression"]
         if f'"{MARK}": "{url}"' not in expr or f'baseUrl: "{url}"' not in expr:
             fail(f"{name} does not write and mark {url}: {expr}")
+        chatgpt = [c for c in pol["spec"]["matchConditions"] if "chatgptOAuth" in c["expression"]]
+        if (url == ORIGIN + "/v1") != bool(chatgpt):
+            fail(f"{name}: a ChatGPT login condition {chatgpt}, want one on the OpenAI policy only")
 
     print("--> the hook renders on and off wherever the policies would, with its RBAC")
     off = render(chart, *MAP, "--set", "llmRouting.enabled=false")
@@ -192,25 +201,28 @@ def main():
 
     print("--> off: the chart's baseUrls come off, the operator's stay")
     patched, log = run_hook(hook_script(off), FIXTURE)
-    if set(patched) != {"marked", "legacy-openai"}:
-        fail(f"off patched {sorted(patched)}, want marked and legacy-openai")
+    if set(patched) != {"marked", "legacy-openai", "chatgpt-marked"}:
+        fail(f"off patched {sorted(patched)}, want marked, legacy-openai and chatgpt-marked")
     for name, p in patched.items():
         (block,) = p["spec"].values()
         if block["baseUrl"] is not None or p["metadata"]["annotations"][MARK] is not None:
             fail(f"off: {name} keeps its baseUrl or mark: {p}")
-    if "2 changed" not in log:
+    if "3 changed" not in log:
         fail(f"off: the log does not count the changes: {log}")
     again, _ = run_hook(hook_script(off), apply(FIXTURE, patched))
     if again:
         fail(f"off: a second run patches {sorted(again)}")
 
-    print("--> on: the chart's listener URLs are marked, nothing else is routed")
+    print("--> on: the chart's listener URLs are marked, a ChatGPT login's comes off, nothing else is routed")
     patched, _ = run_hook(hook_script(on), FIXTURE)
+    chatgpt = patched.pop("chatgpt-marked", None)
+    if not chatgpt or chatgpt["spec"]["openAI"]["baseUrl"] is not None or chatgpt["metadata"]["annotations"][MARK] is not None:
+        fail(f"on: a ChatGPT login keeps the listener URL the chart wrote: {chatgpt}")
     want = {"legacy-openai": ORIGIN + "/v1"}
     got = {n: url_of(p) for n, p in patched.items()}
     if got != want:
         fail(f"on patched {got}, want {want}")
-    again, _ = run_hook(hook_script(on), apply(FIXTURE, patched))
+    again, _ = run_hook(hook_script(on), apply(FIXTURE, {**patched, "chatgpt-marked": chatgpt}))
     if again:
         fail(f"on: a second run patches {sorted(again)}")
 

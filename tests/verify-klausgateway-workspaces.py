@@ -27,12 +27,14 @@ import sys
 
 HELM = os.environ.get("HELM", "helm")
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
+# The agents beside them: the meta chart refuses workspaces without kagent.
+AGENTS = "tests/fixtures/workspaces-agents-values.yaml"
 BASE = [
     "--set", "components.flux.enabled=false",
     "--set", "components.klaus-gateway.enabled=true",
     "--set", "kagent.harness.snapshotLocation=s3://ci/agents", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
 ]
-ON = ["-f", FIXTURE]
+ON = ["-f", FIXTURE, "-f", AGENTS]
 FLOOR = ["--set", "components.klaus-gateway.versionRange=>=4.3.0 <5.0.0"]
 RC = ["--set", "components.klaus-gateway.versionRange=>=4.3.0-rc.1 <5.0.0"]
 BELOW = ["--set", "components.klaus-gateway.versionRange=>=4.2.1 <5.0.0"]

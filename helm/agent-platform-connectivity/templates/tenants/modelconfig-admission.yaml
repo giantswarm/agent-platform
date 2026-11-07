@@ -1,0 +1,156 @@
+{{- /*
+A tenant's own ModelConfig (giantswarm/agent-platform#759): with kagent and
+agentPlatformOrganizations.enabled, an organization brings its own model key, and every model call of the
+organization still goes through the `llm` listener, so the gateway meters it
+under the organization's namespace. Two ValidatingAdmissionPolicies, in every
+organization namespace (agent-platform.orgNamespaces.label: selected by the
+label, never listed) except the kagent namespace, the platform tenant, for
+every requester:
+
+agent-platform-tenant-model-routing admits a ModelConfig only when the
+listener serves its provider (agent-platform.llmRouting.providers, from
+llmRouting.models) and its baseUrl is the listener URL for that provider
+(agent-platform.llmListenerUrl). A ModelConfig of any other provider, Bedrock
+included (it has no baseUrl), is refused: it would reach the provider
+directly, unmetered. The chart's routing policy
+(templates/llm/modelconfig-policy.yaml) runs first, in these namespaces too,
+and fills in a missing baseUrl with the listener URL; a baseUrl the writer
+set is judged here, and the refusal names the field and the URL. If the
+routing policy fails (failurePolicy Ignore), the baseUrl stays empty and is
+refused here: the path fails closed. The tenant's own key passes the listener
+untouched. No ModelConfig of the platform is copied into an organization
+namespace.
+
+agent-platform-tenant-secret-creation admits the creation of a Secret whose
+name lacks the tenant-credential- prefix only for a requester who may already
+`get` that Secret in the namespace (the policy's authorizer check). Helm, the
+customer's GitOps, agent-manager's reconciler and the cluster's controllers
+read Secrets there and keep writing as today; a requester who may only create
+Secrets writes tenant credentials only, which
+agent-platform-tenant-credentials keeps Opaque. The other credential rules
+(the apiKeySecret, credentialRef and headersFrom prefix, the platform's
+Secrets) are in egress-policy-admission.yaml and render with kagent alone.
+
+The render fails without llmRouting.enabled (no listener to name) and without
+the routing policy (agent-platform.llmRouting.modelConfigs): without it, every
+ModelConfig without a baseUrl is refused.
+*/ -}}
+{{- if include "agent-platform.tenants.modelConfigs" . }}
+{{- $switch := "agentPlatformOrganizations.enabled" }}
+{{- if not (include "agent-platform.llmRouting" .) }}
+{{- fail (printf "%s needs llmRouting.enabled: a ModelConfig in an organization namespace must name the llm listener as its baseUrl, and with routing off there is no listener" $switch) }}
+{{- end }}
+{{- $providers := include "agent-platform.llmRouting.providers" . | fromJsonArray }}
+{{- if not $providers }}
+{{- fail (printf "%s needs an llmRouting.models entry whose provider a ModelConfig can point at the listener (Anthropic, Mistral or OpenAI): no other ModelConfig is admitted in an organization namespace" $switch) }}
+{{- end }}
+{{- if not (include "agent-platform.llmRouting.modelConfigs" .) }}
+{{- fail (printf "%s needs the modelconfig-llm-routing MutatingAdmissionPolicy, which fills in the listener as the baseUrl of a ModelConfig in an organization namespace: set llmRouting.modelConfigPolicy.enabled, on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy" $switch) }}
+{{- end }}
+{{- $prefix := include "agent-platform.tenants.credentialPrefix" . }}
+{{- /* provider (lower case) -> [the ModelConfigSpec block that carries baseUrl,
+the listener URL], as a CEL map literal. */}}
+{{- $served := list }}
+{{- range $providers }}
+{{- $served = append $served (printf "'%s': ['%s', '%s']" . (include "agent-platform.modelConfigBaseUrlKey" .) (include "agent-platform.llmListenerUrl" (dict "root" $ "provider" .))) }}
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-model-routing
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      {{- include "agent-platform.orgNamespaces.selector" . | nindent 6 }}
+    resourceRules:
+      - apiGroups: ["api.kagent.dev"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["modelconfigs"]
+  # The object read untyped: the policy admits every served version.
+  variables:
+    - name: spec
+      expression: "has(object.spec) ? dyn(object.spec) : dyn({})"
+    - name: provider
+      expression: "'provider' in variables.spec ? string(variables.spec.provider) : ''"
+    - name: served
+      expression: {{ printf "{%s}" (join ", " $served) | quote }}
+    # [block, listener URL] of a served provider, else [].
+    - name: route
+      expression: >-
+        variables.provider.lowerAscii() in variables.served ? variables.served[variables.provider.lowerAscii()] : []
+    - name: baseUrl
+      expression: >-
+        size(variables.route) == 2 && variables.route[0] in variables.spec &&
+        'baseUrl' in variables.spec[variables.route[0]] ? string(variables.spec[variables.route[0]].baseUrl) : ''
+    # A write to an object already being deleted that leaves its spec as it
+    # is passes, so its controllers can release their finalizers. A spec
+    # change does not: a finalizer the writer sets holds it there
+    # indefinitely.
+    - name: releasing
+      expression: >-
+        has(object.metadata.deletionTimestamp) && request.operation == 'UPDATE' &&
+        variables.spec == (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
+  validations:
+    - expression: "variables.releasing || size(variables.route) == 2"
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'in an Organization namespace a ModelConfig goes through the platform\\'s LLM listener, which meters every model call; it serves the providers %s, and provider ' + (variables.provider == '' ? '<none>' : variables.provider) + ' is not one of them (a Bedrock ModelConfig has no baseUrl and would bypass the listener). Use a served provider (its spec.<provider>.baseUrl is the listener, filled in when you leave it out), or ask the platform team to add the provider to llmRouting.models. Refused for ' + request.userInfo.username + ': ' + request.name" (join ", " $providers) }}
+    - expression: "variables.releasing || size(variables.route) != 2 || variables.baseUrl == variables.route[1]"
+      reason: Forbidden
+      messageExpression: >-
+        'in an Organization namespace a ModelConfig goes through the platform\'s LLM listener, which meters every model call and passes your own key through untouched: set spec.' +
+        variables.route[0] + '.baseUrl to ' + variables.route[1] + ', or leave it out and the listener is filled in (it is ' + (variables.baseUrl == '' ? 'unset' : variables.baseUrl) +
+        '). Refused for ' + request.userInfo.username + ': ' + request.name
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-model-routing
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-tenant-model-routing
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-tenant-secret-creation
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      {{- include "agent-platform.orgNamespaces.selector" . | nindent 6 }}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["secrets"]
+  matchConditions:
+    # The API server generates a generateName's name before admission.
+    - name: outside-prefix
+      expression: {{ printf "!object.metadata.name.startsWith('%s')" $prefix | quote }}
+  validations:
+    - expression: >-
+        authorizer.group('').resource('secrets').namespace(request.namespace).name(object.metadata.name).check('get').allowed()
+      reason: Forbidden
+      messageExpression: >-
+        {{ printf "'in an Organization namespace only a requester who may read its Secrets creates a Secret outside the tenant credentials; name a tenant credential %s<name>, of type Opaque. Refused for ' + request.userInfo.username + ': ' + object.metadata.name" $prefix }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-tenant-secret-creation
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-tenant-secret-creation
+  validationActions: [Deny]
+{{- end }}

@@ -1,0 +1,96 @@
+{{- /*
+agent-platform:organizations-admin (giantswarm/agent-platform#1267): manages
+AgentPlatformOrganizations and their members. It creates, changes and deletes
+AgentPlatformOrganizations in the namespaces it is bound in, and writes
+RoleBindings that bind agent-platform:user, editor or admin. Nothing else of
+an organization: it reads agents, sessions or credentials only after binding
+itself, which shows in the organization's members.
+
+RBAC cannot keep the RoleBinding writes in the organization namespaces, so
+the policy agent-platform-organizations-admin-rolebindings refuses them
+everywhere else (admission.yaml). The chart binds it to nobody: platform staff
+get it by a ClusterRoleBinding, a customer's platform team by a RoleBinding in
+its parent namespace, which agent-platform-operator mirrors into that parent's
+organization namespaces. A cluster-admin already holds every right it grants.
+*/ -}}
+{{- if include "agent-platform.organizations.enabled" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:organizations-admin
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+rules:
+  - apiGroups: ["agent-platform.giantswarm.io"]
+    resources: ["agentplatformorganizations"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
+{{- end }}
+{{- /*
+agent-platform:organization-flux (giantswarm/giantswarm#38989): what an
+organization's Flux ServiceAccount applies from the organization's path in
+git (commit mode). agent-platform-operator keeps one ServiceAccount per
+organization in agentPlatformOrganizations.fluxNamespace and binds it to this
+role by the RoleBinding organization-flux in the organization namespace only;
+the organization's Kustomization names it in spec.serviceAccountName, which
+kustomize-controller impersonates. So a merged file writes the organization's
+kinds in its own namespace and nothing else: its agents' HelmReleases (the
+HelmRelease field lock holds for this identity too), Agents, AgentTemplates,
+ModelConfigs, RemoteMCPServers, EgressPolicies, Secrets, and its members'
+RoleBindings, which bind agent-platform:user, editor or admin and no other
+role (`bind` on those three, no `escalate`; RBAC would let it bind a role
+whose rules it holds, this one among them, so the policy
+agent-platform-organization-flux-writes pins the roleRef, and refuses a
+ServiceAccount token Secret). get, list and watch are what
+kustomize-controller reads before it applies and while it waits. Rendered
+with fluxNamespace, the only case in which the operator binds it.
+
+A `kustomization.yaml` in an organization's path can list another path's
+encrypted file, which the installation's key decrypts, and the members are
+files there. A Flux source or a SOPS key per organization, which closes
+this, is tracked in giantswarm/agent-platform-operator#15. Until then the
+control is platform review of every merge into an organization's path,
+through CODEOWNERS of the installation repository that an organization's
+admin cannot change, never that organization's admin alone:
+agent-manager#292 (slice 11, the repository layout) owns it. A CI check
+refusing `..` is giantswarm/giantswarm#39013. agent-platform-operator's
+README says the same. A file never takes over a binding
+people wrote (organization-admins among them), nor prunes one:
+agent-platform-organization-flux-writes. The path holds no ConfigMap (no configMapGenerator): the
+organization's kinds are its agents, models, connectors, egress and
+members, and a file of another kind fails the organization's apply, shown on
+its Kustomization.
+*/ -}}
+{{- if and (include "agent-platform.organizations.enabled" .) .Values.agentPlatformOrganizations.fluxNamespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agent-platform:organization-flux
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+rules:
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents", "agenttemplates", "modelconfigs", "remotemcpservers", "egresspolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
+{{- end }}

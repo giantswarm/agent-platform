@@ -210,6 +210,23 @@ the root schema rejects it already.
 {{- end -}}
 
 {{/*
+The kagent block takes any key (its schema skips properties), so a removed
+model key would pass the schema and render nothing in silence; refused here
+instead.
+*/}}
+{{- define "agent-platform.validateRemovedModelKeys" -}}
+{{- $found := list -}}
+{{- range list "providers" "modelConfigs" -}}
+{{- if hasKey ($.Values.kagent | default dict) . -}}
+{{- $found = append $found (printf "kagent.%s" .) -}}
+{{- end -}}
+{{- end -}}
+{{- with $found -}}
+{{- fail (printf "%s: removed, the chart declares no model. Declare each model as a ModelConfig object (api.kagent.dev/v1alpha3) in GitOps next to the agents, and annotate the namespace's default agent-platform.giantswarm.io/is-default-model-config: \"true\"; remove the keys from the values (see UPGRADE.md)" (join ", " .)) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Name of the AgentgatewayParameters CR — defaults to release name.
 */}}
 {{- define "agent-platform.parametersName" -}}
@@ -217,25 +234,24 @@ Name of the AgentgatewayParameters CR — defaults to release name.
 {{- end -}}
 
 {{/*
-Truthy (emits "true") when the request topology routes through agentgateway,
-i.e. ingress.mode is agentgateway-muster or agentgateway-direct and muster is
-on. A release without muster (a serving or runtime slice) has no ingress
-topology: it renders no data plane whatever the mode, which defaults to
-agentgateway-muster (#252). Otherwise emits nothing (empty string = falsy).
-Gated templates use:
+Truthy (emits "true") when the release serves the platform's ingress through
+agentgateway: muster is on. agentgateway in front of muster is the only
+topology (#252); a release without muster (a serving or runtime slice) has no
+ingress topology and renders no data plane. Otherwise emits nothing (empty
+string = falsy). Gated templates use:
   {{- if (include "agent-platform.ingress.agentgateway" .) }}
 */}}
 {{- define "agent-platform.ingress.agentgateway" -}}
-{{- if and (or (eq .Values.ingress.mode "agentgateway-muster") (eq .Values.ingress.mode "agentgateway-direct")) (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}true{{- end -}}
+{{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
-Truthy when the agentgateway controller runs in this release: an agentgateway-*
-ingress mode, or the component on with muster off — the serving slice on a
+Truthy when the agentgateway controller runs in this release: muster's ingress,
+or the component on with muster off — the serving slice on a
 workload cluster (components.agentgateway.enabled: true, muster off, no edge
 Gateway), whose controller serves the models
 Gateway and fetches its JWKS. The controller's network policies follow this,
-not the ingress mode: a controller without its policy has no egress rule for
+not muster's ingress: a controller without its policy has no egress rule for
 the issuer, and one with the edge's policy alone has no route to the public
 issuer either. Usage:
   {{- if (include "agent-platform.agentgateway.controller" .) }}
@@ -313,74 +329,44 @@ shared ingress.httpRoute.annotations). Emits nothing when both are empty.
 {{- end -}}
 
 {{/*
-Validate the ingress.mode selector and the dependent toggles it implies.
-Fails the render with an actionable message when the configuration is
-inconsistent. Rendered exactly once via templates/validate.yaml.
+Validate the ingress topology (agentgateway in front of muster) and the
+dependent toggles it implies. Fails the render with an actionable message when
+the configuration is inconsistent. Rendered exactly once via
+templates/validate.yaml.
 */}}
 {{- define "agent-platform.validateIngress" -}}
-{{- $mode := .Values.ingress.mode -}}
-{{- if not (or (eq $mode "muster-direct") (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct")) -}}
-{{- fail (printf "ingress.mode=%v is invalid; must be one of: muster-direct, agentgateway-muster, agentgateway-direct" $mode) -}}
-{{- end -}}
-{{- if eq $mode "agentgateway-direct" -}}
-{{- fail "ingress.mode=agentgateway-direct requires a DCR-capable IdP (RFC 7591/8707), e.g. Zitadel; not yet supported" -}}
-{{- end -}}
-{{- $isAgentgateway := or (eq $mode "agentgateway-muster") (eq $mode "agentgateway-direct") -}}
 {{- $musterEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") -}}
-{{- /* The muster `/` route needs a Gateway in every mode; the helper fails the
-render when neither ingress.parentRefs, the chart-owned edge nor
-global.gatewayApi.parentRefs names one — an empty result would render a route
-bound to no Gateway, leaving muster unreachable while install reports success.
-Only while muster is on: a release without muster (the serving slice,
-examples/serving-slice.yaml) renders no route that could be left unbound and
-has no edge of its own — its Gateway is the models Gateway (#490). */ -}}
+{{- /* The muster `/` route needs a Gateway; the helper fails the render when
+neither ingress.parentRefs, the chart-owned edge nor global.gatewayApi.parentRefs
+names one — an empty result would render a route bound to no Gateway, leaving
+muster unreachable while install reports success. Only while muster is on: a
+release without muster (the serving slice, examples/serving-slice.yaml) renders
+no route that could be left unbound and has no edge of its own — its Gateway is
+the models Gateway (#490). */ -}}
 {{- if $musterEnabled -}}
 {{- $_ := include "agent-platform.parentRefs" (dict "ctx" . "override" .Values.ingress.parentRefs "key" "ingress.parentRefs") -}}
 {{- end -}}
-{{- /* viaMuster only matters when the mcps sub-chart is installed; with no MCP
-servers there is nothing to route, so the consistency check is scoped to the
-agent-platform-mcps component. */ -}}
+{{- /* viaMuster is read by the agent-platform-mcps release, so the consistency
+check is scoped to that component. */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps")) -}}
 {{- $mcpsVals := index .Values "agent-platform-mcps" | default dict -}}
 {{- $viaMuster := dig "agentgateway" "viaMuster" false $mcpsVals -}}
-{{- if eq $mode "agentgateway-muster" -}}
 {{- if not (or (eq $viaMuster true) (eq (toString $viaMuster) "true")) -}}
-{{- fail "ingress.mode=agentgateway-muster requires agent-platform-mcps.agentgateway.viaMuster=true" -}}
-{{- end -}}
-{{- else if eq $mode "agentgateway-direct" -}}
-{{- if not (or (eq $viaMuster false) (eq (toString $viaMuster) "false")) -}}
-{{- fail "ingress.mode=agentgateway-direct requires agent-platform-mcps.agentgateway.viaMuster=false" -}}
+{{- fail "agentgateway in front of muster is the only ingress topology: it requires agent-platform-mcps.agentgateway.viaMuster=true" -}}
 {{- end -}}
 {{- end -}}
-{{- end -}}
-{{- $agentgatewayEnabled := include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway") -}}
 {{- /* Without muster there is no muster ingress the agentgateway toggle has to
-agree with, in either mode: the serving slice beside the platform's release
-runs no agentgateway (the installation's own serves it) and on a workload
-cluster runs it (the target has no controller of its own), both in the
-default mode. */ -}}
-{{- if and $isAgentgateway (not $agentgatewayEnabled) $musterEnabled -}}
-{{- fail "components.agentgateway.enabled must be true in agentgateway-* modes; the controller dependency condition must match ingress.mode" -}}
+agree with: the serving slice beside the platform's release runs no
+agentgateway (the installation's own serves it) and on a workload cluster runs
+it (the target has no controller of its own). */ -}}
+{{- if and $musterEnabled (not (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway"))) -}}
+{{- fail "components.agentgateway.enabled must be true while muster is on: agentgateway in front of muster is the only ingress topology" -}}
 {{- end -}}
-{{- if and (eq $mode "muster-direct") $agentgatewayEnabled $musterEnabled -}}
-{{- fail "components.agentgateway.enabled must be false in muster-direct mode (it defaults to true, with ingress.mode agentgateway-muster); the controller dependency condition must match ingress.mode" -}}
-{{- end -}}
-{{- /* muster-direct runs without the agentgateway component, so its CRDs are
-not on the cluster: anything that renders an agentgateway.dev object or attaches
-to the agentgateway Gateway must fail here, naming the knob, instead of shipping
-objects the API server rejects (the agent-manager route already
-guards itself the same way). */ -}}
-{{- if eq $mode "muster-direct" -}}
-{{- $mcpsValues := index .Values "agent-platform-mcps" | default dict -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps")) (dig "agentgateway" "enabled" false $mcpsValues) (dig "mcpServers" (list) $mcpsValues) -}}
-{{- fail "muster-direct mode cannot serve the agentgateway.dev resources agent-platform-mcps renders per MCP server; set agent-platform-mcps.agentgateway.enabled=false to reach the MCP servers through muster" -}}
-{{- end -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) .Values.kagent.controllerRoute.enabled -}}
-{{- fail "kagent.controllerRoute renders agentgateway.dev resources on the agentgateway Gateway; it requires an agentgateway-* ingress.mode" -}}
-{{- end -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) .Values.klausGateway.agentgatewayRoute.enabled -}}
-{{- fail "klausGateway.agentgatewayRoute renders agentgateway.dev resources on the agentgateway Gateway; it requires an agentgateway-* ingress.mode" -}}
-{{- end -}}
+{{- /* The public /mcp reaches the data plane, whose only route to muster is
+the agent-platform-mcps release's hostless HTTPRoute (viaMuster): without it
+/mcp reaches nothing. */ -}}
+{{- if and $musterEnabled (not (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-platform-mcps"))) -}}
+{{- fail "components.agent-platform-mcps.enabled must be true while muster is on: its HTTPRoute is the agentgateway data plane's only route to muster, so /mcp would reach nothing" -}}
 {{- end -}}
 {{- end -}}
 
@@ -690,7 +676,7 @@ Guards on the global.* contract. Rendered once via templates/validate.yaml.
 {{- define "agent-platform.validateGlobal" -}}
 {{- if .Values.gatewayApi.gateway.create -}}
 {{- if not (include "agent-platform.ingress.agentgateway" .) -}}
-{{- fail "gatewayApi.gateway.create is true but ingress.mode is muster-direct: the chart-owned edge is the agentgateway data-plane Gateway, so set ingress.mode: agentgateway-muster and components.agentgateway.enabled: true" -}}
+{{- fail "gatewayApi.gateway.create is true but muster is off: the chart-owned edge is the agentgateway data-plane Gateway in front of muster" -}}
 {{- end -}}
 {{- if not .Values.gatewayApi.gateway.tls.secretName -}}
 {{- fail "gatewayApi.gateway.create is true but gatewayApi.gateway.tls.secretName is empty: the HTTPS listener for *.<global.domain> needs the wildcard certificate Secret" -}}
@@ -758,7 +744,7 @@ provider. Otherwise emits nothing (empty string = falsy). Gated templates use:
 {{- end -}}
 
 {{/*
-Truthy when this chart routes the ModelConfigs it does not render, routing on
+Truthy when this chart routes ModelConfigs through the LLM listener, routing on
 or off: kagent is a component, the modelconfig-llm-routing policies are wanted
 (llmRouting.modelConfigPolicy) and the API server serves their GA group. With
 routing on the policies render (templates/llm/modelconfig-policy.yaml); either
@@ -863,9 +849,9 @@ validateLlmRouting holds it to exactly one.
 The providers whose ModelConfigs ride the LLM listener, as a JSON list: every
 llmRouting.models entry's provider that has a baseUrl in ModelConfigSpec
 (agent-platform.modelConfigBaseUrlKey), lower-cased, once each, in the entries'
-order (["anthropic","openai"]). kagent.modelConfigs entries and the
-MutatingAdmissionPolicies point a ModelConfig of such a provider at the
-listener; a ModelConfig of any other provider keeps its own path.
+order (["anthropic","openai"]). The MutatingAdmissionPolicies point a
+ModelConfig of such a provider at the listener; a ModelConfig of any other
+provider keeps its own path.
 Usage: include "agent-platform.llmRouting.providers" . | fromJsonArray
 */}}
 {{- define "agent-platform.llmRouting.providers" -}}
@@ -979,22 +965,6 @@ under the Gateway's own name.
 {{- end -}}
 
 {{/*
-The spec.provider of a kagent.modelConfigs[] entry, checked against the
-ModelConfig CRD's enum (api.kagent.dev/v1alpha3). The enum is case-sensitive and
-the API server refuses any other value at admission, after the render has said
-nothing; failing here names the entry and the eleven values instead. Takes the
-entry.
-*/}}
-{{- define "agent-platform.modelConfigProvider" -}}
-{{- $enum := list "Anthropic" "OpenAI" "AzureOpenAI" "Ollama" "Gemini" "GeminiVertexAI" "AnthropicVertexAI" "Bedrock" "SAPAICore" "Foundry" "Mistral" -}}
-{{- $provider := required "kagent.modelConfigs[].provider is required" .provider -}}
-{{- if not (has $provider $enum) -}}
-{{- fail (printf "kagent.modelConfigs[].provider %q on %q is not a ModelConfig provider; the CRD's enum is %s (case-sensitive)" $provider .name (join ", " $enum)) -}}
-{{- end -}}
-{{- $provider -}}
-{{- end -}}
-
-{{/*
 Key of the ModelConfigSpec provider block that carries baseUrl, for a
 spec.provider value in any case (the CRD's spelling from a catalog entry, the
 lower-cased provider of agent-platform.llmRouting.provider). The key is not
@@ -1007,43 +977,6 @@ Emits nothing for every other provider (empty string = falsy).
 {{- define "agent-platform.modelConfigBaseUrlKey" -}}
 {{- $keys := dict "anthropic" "anthropic" "mistral" "mistral" "openai" "openAI" "sapaicore" "sapAICore" -}}
 {{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
-{{- end -}}
-
-{{/*
-Key of the ModelConfigSpec provider block that carries promptCaching and
-cacheTTL, for a spec.provider value in any case: Anthropic (anthropic) and
-Bedrock (bedrock), the two providers whose adapters mark cache_control
-breakpoints (the kagent line's carried patch kagent-dev/kagent#2788). Emits nothing
-for every other provider (empty string = falsy): the API server would prune the
-fields at admission and the model would stay uncached in silence, so the
-template refuses them instead.
-*/}}
-{{- define "agent-platform.modelConfigCacheKey" -}}
-{{- $keys := dict "anthropic" "anthropic" "bedrock" "bedrock" -}}
-{{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
-{{- end -}}
-
-{{/*
-Key of the ModelConfigSpec provider block that carries maxTokens, for a
-spec.provider value in any case: Anthropic, AnthropicVertexAI, AzureOpenAI,
-Mistral and OpenAI. Emits nothing for every other provider (empty string =
-falsy): the API server would prune the field and the model would answer at
-kagent's own default in silence, so the template refuses it instead.
-*/}}
-{{- define "agent-platform.modelConfigMaxTokensKey" -}}
-{{- $keys := dict "anthropic" "anthropic" "anthropicvertexai" "anthropicVertexAI" "azureopenai" "azureOpenAI" "mistral" "mistral" "openai" "openAI" -}}
-{{- if hasKey $keys (lower .) -}}{{- index $keys (lower .) -}}{{- end -}}
-{{- end -}}
-
-{{/*
-Key of the ModelConfigSpec provider block that carries apiFormat (the OpenAI
-HTTP API the runtime speaks: chatCompletions, the CRD's default, or responses,
-which codex requires), for a spec.provider value in any case: OpenAI only.
-Emits nothing for every other provider (empty string = falsy), which the
-template refuses rather than letting the API server prune the field.
-*/}}
-{{- define "agent-platform.modelConfigApiFormatKey" -}}
-{{- if eq (lower .) "openai" -}}openAI{{- end -}}
 {{- end -}}
 
 {{/*
@@ -1067,14 +1000,14 @@ Validate the LLM routing block. Rendered exactly once via templates/validate.yam
 
 The feature has no data plane of its own: it adds a listener to the
 agentgateway Gateway and models the agentgateway controller reconciles. With
-the component off (which includes ingress.mode: muster-direct) the
+the component off, or no muster to front, the
 listener would exist in values only, kagent's base URL would point at nothing,
 and every agent would lose inference at the cutover. Fail the render instead.
 */}}
 {{- define "agent-platform.validateLlmRouting" -}}
 {{- if (include "agent-platform.llmRouting" .) -}}
 {{- if not (include "agent-platform.ingress.agentgateway" .) -}}
-{{- fail (printf "llmRouting.enabled requires the agentgateway data plane: ingress.mode is %s, set it to agentgateway-muster" .Values.ingress.mode) -}}
+{{- fail "llmRouting.enabled requires the agentgateway data plane, which runs in front of muster: muster is off" -}}
 {{- end -}}
 {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway")) -}}
 {{- fail "llmRouting.enabled requires components.agentgateway.enabled: true; the LLM listener is reconciled by the agentgateway controller" -}}
@@ -1220,20 +1153,52 @@ empty or has no host. Usage: include "agent-platform.urlHost" $url
 {{- end -}}
 
 {{/*
+Truthy ("true") when an issuer URL is Google's: its host is accounts.google.com
+in any case. Usage: include "agent-platform.idp.googleIssuer" $url
+*/}}
+{{- define "agent-platform.idp.googleIssuer" -}}
+{{- if eq (include "agent-platform.urlHost" . | lower) "accounts.google.com" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The JWKS endpoint an issuer publishes (its discovery document's jwks_uri), as
+JSON { "host": <host>, "port": <int>, "path": <path> }; empty while the URL is
+unset or has no host. Google serves its key set on www.googleapis.com:443 at
+/oauth2/v3/certs, not on the issuer host. Every other issuer (Dex) serves it
+from its own host and port (the URL's port, else 443); path is then empty and
+the caller keeps its own (Dex's /keys).
+Usage: include "agent-platform.idp.jwks" $url | fromJson
+*/}}
+{{- define "agent-platform.idp.jwks" -}}
+{{- if include "agent-platform.idp.googleIssuer" . -}}
+{{- dict "host" "www.googleapis.com" "port" 443 "path" "/oauth2/v3/certs" | toJson -}}
+{{- else if . -}}
+{{- $u := urlParse . -}}
+{{- $port := regexFind ":[0-9]+$" ($u.host | default "") | trimPrefix ":" | default "443" | int -}}
+{{- with $u.hostname -}}
+{{- dict "host" . "port" $port "path" "" | toJson -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The hosts a platform service that validates tokens itself (mcp-oauth) reaches
 at its login identity provider, as a JSON list: the discovery document, the
 JWKS (validating the id_tokens muster and the portal forward), userinfo and
 the token endpoint. The dex provider serves all of them from the issuer host.
-Google spreads them over three hosts, none of which its issuer URL
-(https://accounts.google.com) names: accounts.google.com (discovery,
-authorization), www.googleapis.com (JWKS /oauth2/v3/certs, userinfo) and
-oauth2.googleapis.com (token, revocation) — the endpoints mcp-oauth's google
-provider dials. Empty for the dex provider without an issuer.
+Google spreads them over four hosts: accounts.google.com (the issuer:
+discovery, authorization), www.googleapis.com (JWKS /oauth2/v3/certs),
+openidconnect.googleapis.com (userinfo, mcp-oauth's fallback when an ID token
+does not validate) and oauth2.googleapis.com (token, revocation). The Google
+list applies to the google provider and to any issuer on accounts.google.com,
+whatever provider the caller names: the issuer is what the service validates
+against, and a provider that defaults to dex must not narrow Google's egress
+to the issuer host. Empty for the dex provider without an issuer.
 Usage: include "agent-platform.idpHosts" (dict "provider" "dex" "issuerUrl" $url)
 */}}
 {{- define "agent-platform.idpHosts" -}}
-{{- if eq (.provider | default "dex") "google" -}}
-{{- list "accounts.google.com" "www.googleapis.com" "oauth2.googleapis.com" | toJson -}}
+{{- if or (eq (.provider | default "dex") "google") (include "agent-platform.idp.googleIssuer" .issuerUrl) -}}
+{{- list "accounts.google.com" "www.googleapis.com" "openidconnect.googleapis.com" "oauth2.googleapis.com" | toJson -}}
 {{- else -}}
 {{- $hosts := list -}}
 {{- with (include "agent-platform.urlHost" .issuerUrl) }}{{- $hosts = list . -}}{{- end -}}
@@ -1541,17 +1506,16 @@ aside. */ -}}
 
 {{/*
 The platform's identity provider as a JWKS target, { "host": "<host>", "port":
-<int> } from global.identity.issuerUrl (the URL's port, else 443 — the port the
-models Gateway's default JWKS source dials); empty while the URL is unset.
+<int> }: the JWKS endpoint global.identity.issuerUrl publishes
+(agent-platform.idp.jwks — www.googleapis.com:443 for Google, else the issuer's
+host on the URL's port or 443, the port the models Gateway's default JWKS
+source dials); empty while the URL is unset.
 Usage: include "agent-platform.jwks.issuerTarget" .
 */}}
 {{- define "agent-platform.jwks.issuerTarget" -}}
-{{- with .Values.global.identity.issuerUrl -}}
-{{- $u := urlParse . -}}
-{{- $port := regexFind ":[0-9]+$" ($u.host | default "") | trimPrefix ":" | default "443" | int -}}
-{{- with $u.hostname -}}
-{{- dict "host" . "port" $port | toJson -}}
-{{- end -}}
+{{- with (include "agent-platform.idp.jwks" .Values.global.identity.issuerUrl) -}}
+{{- $jwks := . | fromJson -}}
+{{- dict "host" $jwks.host "port" $jwks.port | toJson -}}
 {{- end -}}
 {{- end -}}
 
@@ -1985,6 +1949,44 @@ Usage: include "agent-platform.kagent.controllerHostname" .
 {{- end -}}
 
 {{/*
+The JWKS endpoint the kagent controller fetches to verify people's tokens, as
+{ "host": "<host>", "port": <int>, "inCluster": <bool> }: in the
+trusted-proxy mode (kagent.controller.auth.mode) with an issuer
+(kagent.controller.auth.issuer, kagent.controllerRoute.jwtAuthentication
+.issuer, else global.identity.issuerUrl), the host and port of
+kagent.controller.auth.jwksURL, else of
+kagent.controllerRoute.jwtAuthentication.jwks: the key set the meta chart
+derives onto the kagent release (agent-platform.kagent.authentication there).
+Emits {} otherwise and with kagent off.
+Usage: include "agent-platform.kagent.authenticationJwks" . | fromJson
+*/}}
+{{- define "agent-platform.kagent.authenticationJwks" -}}
+{{- $out := dict -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- $auth := dig "controller" "auth" dict $kagent | default dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) (eq (toString (dig "mode" "" $auth)) "trusted-proxy") -}}
+{{- $jwt := dig "controllerRoute" "jwtAuthentication" dict $kagent | default dict -}}
+{{- if $auth.issuer | default ($jwt.issuer | default (dig "identity" "issuerUrl" "" (.Values.global | default dict))) -}}
+{{- $host := "" -}}
+{{- $port := 0 -}}
+{{- if $auth.jwksURL -}}
+{{- $u := urlParse (toString $auth.jwksURL) -}}
+{{- $host = $u.hostname -}}
+{{- $port = regexFind ":[0-9]+$" ($u.host | default "") | trimPrefix ":" | default (ternary "80" "443" (eq $u.scheme "http")) | int -}}
+{{- else -}}
+{{- $host = dig "jwks" "host" "" $jwt -}}
+{{- $port = dig "jwks" "port" 443 $jwt | int -}}
+{{- end -}}
+{{- $host = include "agent-platform.jwks.normalizeHost" $host -}}
+{{- if $host -}}
+{{- $out = dict "host" $host "port" $port "inCluster" (eq (include "agent-platform.jwks.inCluster" $host) "true") -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
 The JWT claim the caller's identity is taken from — kagent.controller.auth.userIdClaim
 (default email), the ONE value both authentication layers read: the controller's
 KAGENT_AUTH_USER_ID_CLAIM (kagent chart) and the gateway's x-user-id transformation
@@ -2081,34 +2083,6 @@ Truthy when the platform runs Agent Substrate: the substrate component is on
 */}}
 {{- define "agent-platform.substrate.enabled" -}}
 {{- include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "substrate") -}}
-{{- end -}}
-
-{{/*
-kagent's built-in tool server: the kagent-tools subchart of the kagent chart
-(kagent.kagent-tools). The subchart renders its Deployment and Services into its
-own namespaceOverride, else its release namespace, and the kagent chart composes
-the kagent-tool-server RemoteMCPServer URL from the same two inputs
-(http://<tools fullname>.<that namespace>:<port>/mcp). The egress rules this
-chart opens to the server — the kagent controller's tool discovery
-(templates/kagent/netpol.yaml) and the actors' calls through Substrate's egress
-gateway (templates/substrate/netpol.yaml) — derive the namespace the same way,
-from the same values block and the same release namespace (every platform
-HelmRelease installs into gitops.targetNamespace), so a rule names the namespace
-the server is rendered into whether or not an installation pins the override.
-Never the kagent namespace by assumption: kagent.namespaceOverride moves the
-controller, not the subchart (#421). The port is the tools Service's targetPort.
-*/}}
-{{- define "agent-platform.kagentTools.enabled" -}}
-{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
-{{- if $tools.enabled }}true{{- end -}}
-{{- end -}}
-{{- define "agent-platform.kagentTools.namespace" -}}
-{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
-{{- $tools.namespaceOverride | default .Release.Namespace -}}
-{{- end -}}
-{{- define "agent-platform.kagentTools.port" -}}
-{{- $tools := index .Values.kagent "kagent-tools" | default dict -}}
-{{- dig "service" "ports" "tools" "targetPort" "8084" $tools | toString -}}
 {{- end -}}
 
 {{/*

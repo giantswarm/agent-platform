@@ -61,7 +61,7 @@ knowledge:
   omitKeys      — keys dropped from the forwarded block, top-level or dotted
       paths (agent-platform.omitPath; a parent emptied by the drop goes too).
       For a component whose block holds a key that belongs to THIS umbrella
-      rather than to the chart (e.g. kagent's controllerRoute/uiRoute/modelConfigs
+      rather than to the chart (e.g. kagent's controllerRoute/uiRoute
       and harness.snapshotStore, which only the connectivity chart reads), and
       whose chart validates values with additionalProperties: false and would
       reject it — or, without a schema, would carry a block it never reads
@@ -103,7 +103,9 @@ knowledge:
       flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName, the
       tenant identity the connectivity chart renders, and its muster.url from
       the muster Service (agent-platform.musterMcpUrl, the URL every agent's
-      own RemoteMCPServer targets). Never written back into
+      own RemoteMCPServer targets). A forwardAllValues release gets them too:
+      the connectivity release's workspaceManager.namespace, the namespace of
+      the workspace-manager release when it is not its own. Never written back into
       .Values, so the whole-tree forward stays what the operator wrote.
   injectGlobal  — inject `.Values.global` into the forwarded values (default
       true). Set false for components whose strict values.schema.json
@@ -173,9 +175,12 @@ knowledge:
       HelmRelease: the first install is reported successful as soon as the
       manifests are applied, without waiting for the workload to become ready.
       Upgrades keep waiting. For a component whose workload cannot start until a
-      dependant of the component has installed — kagent's controller mounts the
-      CNPG Secret the connectivity release renders, while connectivity dependsOn
-      kagent for its CRDs — so that the pair can bootstrap instead of deadlocking.
+      dependant of the component has installed, so that the pair can bootstrap
+      instead of deadlocking. muster's install AND upgrade skip the wait while
+      agent-platform.muster.awaitsSubstrate: it serves FetchSecret on Substrate's
+      pod certificates and the substrate release, behind it, is not Ready yet —
+      a fresh install and an in-place switch of workspaces and Substrate alike
+      (giantswarm/agent-platform#1107). Once Substrate is Ready both wait again.
   disableWaitForJobs — render `disableWaitForJobs: true` on the child
       HelmRelease's install and upgrade: helm-controller then does not wait for
       the release's plain Jobs to complete (hooks are unaffected). It does not
@@ -224,9 +229,13 @@ knowledge:
 {{- include "agent-platform.validateLegacyToggles" . -}}
 {{- include "agent-platform.validateRemovedComponents" . -}}
 {{- include "agent-platform.validateRemovedBackstageKeys" . -}}
+{{- include "agent-platform.validateRemovedModelKeys" . -}}
+{{- include "agent-platform.validateMusterRoute" . -}}
 {{- include "agent-platform.validateKagentCrds" . -}}
+{{- include "agent-platform.validateKagentSubcharts" . -}}
 {{- include "agent-platform.validateWorkspaces" . -}}
-{{- include "agent-platform.validateWorkspaceSignIn" . -}}
+{{- include "agent-platform.validateOrganizations" . -}}
+{{- include "agent-platform.validateWorkspaceAuth" . -}}
 {{- include "agent-platform.validateKagentLineCrossing" . -}}
 {{- include "agent-platform.validateKagentDatabase" . -}}
 {{- include "agent-platform.validateSubstrate" . -}}
@@ -265,6 +274,9 @@ engine on, the multi-tenancy lockdown makes a HelmRelease without one run as the
 rights-less default account, so the engine's agent-platform-flux is the default;
 the fleet (engine off, exempt namespace) keeps the key empty and renders none. */ -}}
 {{- $sa := $g.serviceAccountName | default (include "agent-platform.tenantServiceAccountName" $root) -}}
+{{- /* The air-gapped mirror (gitops.mirror.registry): every source below moves
+onto it — see "The mirror" in _helpers.tpl. */ -}}
+{{- $mirror := include "agent-platform.mirror.registry" $root -}}
 {{- /* The component roster, stripped to enablement, for a chart that renders
 another component's wiring. It carries the same key path this chart reads
 (components.<name>.enabled), so the two can never spell the answer differently.
@@ -301,6 +313,12 @@ connectivity chart's migrate Job read the same range and filter. */ -}}
 {{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
 {{- if and (index $roster $key).enabled (hasKey $c "chart") }}
 {{- $name := $c.chart }}
+{{- /* agent-platform-operator installs into the connectivity release's
+namespace, where the policies, bindings and the CA ConfigMap name its
+ServiceAccount (agent-platform.organizations.operatorServiceAccount). */ -}}
+{{- if and (eq $key "agent-platform-operator") (not $c.targetNamespace) }}
+{{- $c = set (deepCopy $c) "targetNamespace" (dig "agent-platform-connectivity" "targetNamespace" "" $root.Values.components) }}
+{{- end }}
 {{- $child := include "agent-platform.childName" (dict "root" $root "name" $name) }}
 {{- /* passthrough values */ -}}
 {{- $vals := dict }}
@@ -318,6 +336,8 @@ connectivity chart's migrate Job read the same range and filter. */ -}}
 {{- /* ...and so does its roster entry, with gatedRoster (see gatedValues above). */ -}}
 {{- if and $gc.gatedRoster (not (index $roster $gated).enabled) }}{{- $_ := set $vals "components" (omit $vals.components $gated) }}{{- end }}
 {{- end }}
+{{- /* Derived values reach a whole-tree release too (see derived values above). */ -}}
+{{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the
@@ -332,12 +352,55 @@ nest the forwarded block under that key so Helm hands it to the subchart. */ -}}
 {{- /* Derived values win over the block's own copy (the helper fails the
 render when the two disagree). */ -}}
 {{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
+{{- /* The kagent chart renders no default-model-config, and deletes the one
+it rendered: models are ModelConfig objects declared next to the agents.
+false, not null: Helm's upgrade patch turns a null into a delete, which brings
+back the kagent chart's own providers default, and {} merges that default back
+in. false wins over the chart's map in coalescing and fails its
+`if .Values.providers` gate. */ -}}
+{{- if eq $key "kagent" }}
+{{- $_ := set $vals "providers" false }}
+{{- end }}
+{{- end }}
+{{- /* On the mirror, every source reference of the release's values moves there.
+The connectivity chart's model-serving presets name their runtime and model
+images in files of the chart, not in values: their registry keys take the
+mirror (an own modelImages.registry stands). */ -}}
+{{- if $mirror }}
+{{- $vals = deepCopy $vals }}
+{{- if and (eq $key "agent-platform-connectivity") (kindIs "map" $vals.modelServing) }}
+{{- $_ := set $vals.modelServing "runtimeImages" (dict "registry" $mirror) }}
+{{- if not (dig "modelImages" "registry" "" $vals.modelServing) }}
+{{- $_ := set $vals.modelServing "modelImages" (mergeOverwrite (dig "modelImages" dict $vals.modelServing) (dict "registry" $mirror)) }}
+{{- end }}
+{{- end }}
+{{- /* model-manager's registry egress (the kserve backend's fit checks) follows
+the mirror while it still names gsoci.azurecr.io (the default): the mirror's
+host, without its port, as the one FQDN, and its port (443 when it names
+none). An installation's own list, without gsoci, stands. */ -}}
+{{- if eq $key "agent-platform-connectivity" }}
+{{- $reg := dig "modelManager" "networkPolicy" "registry" dict $vals }}
+{{- $onSource := false }}
+{{- range (get $reg "fqdns" | default list) }}
+{{- if and (kindIs "map" .) (eq (toString (get . "matchName")) (include "agent-platform.mirror.source" $root)) }}{{- $onSource = true }}{{- end }}
+{{- end }}
+{{- if $onSource }}
+{{- $hostPort := splitList ":" $mirror }}
+{{- $port := 443 }}
+{{- if gt (len $hostPort) 1 }}{{- $port = last $hostPort | int }}{{- end }}
+{{- $_ := set $reg "fqdns" (list (dict "matchName" (first $hostPort))) }}
+{{- $_ := set $reg "ports" (list $port) }}
+{{- end }}
+{{- end }}
+{{- include "agent-platform.mirror.values" (dict "values" $vals "mirror" $mirror) }}
 {{- end }}
 {{- /* Drop dependsOn references to components that are toggled off, so an
 always-on consumer (e.g. connectivity) does not block on a HelmRelease that was
 never rendered. With app-owned CRDs a consumer dependsOn the opt-in component
 that ships the CRD it needs; when that component is off it renders no CR for
 that CRD either, so the dependency is moot. */ -}}
+{{- $awaitsSubstrate := and (eq $key "muster") (include "agent-platform.muster.awaitsSubstrate" (dict "root" $root "values" $vals)) }}
+{{- $installDisableWait := or $c.installDisableWait $awaitsSubstrate }}
 {{- $deps := list }}
 {{- range ($c.dependsOn | default list) }}
 {{- if include "agent-platform.componentEnabled" (dict "root" $root "name" .) }}
@@ -379,10 +442,11 @@ metadata:
     {{- include "labels.common" $root | nindent 4 }}
 spec:
   interval: {{ $g.sourceInterval }}
-  url: {{ printf "%s/%s" (trimSuffix "/" $c.repository) $c.chart }}
+  url: {{ include "agent-platform.mirror.ref" (dict "ref" (printf "%s/%s" (trimSuffix "/" $c.repository) $c.chart) "mirror" $mirror) }}
   {{- if $c.insecure }}
   insecure: true
   {{- end }}
+  {{- with include "agent-platform.mirror.sourceAuth" $root }}{{ . | nindent 2 }}{{ end }}
   {{- include "agent-platform.chartLayerSelector" $root | nindent 2 }}
   ref:
     semver: {{ required (printf "components.%s.versionRange is required" $key) $semver | quote }}
@@ -430,7 +494,7 @@ spec:
     {{- with $c.crds }}
     crds: {{ . }}
     {{- end }}
-    {{- if $c.installDisableWait }}
+    {{- if $installDisableWait }}
     disableWait: true
     {{- end }}
     {{- if $c.disableWaitForJobs }}
@@ -441,6 +505,9 @@ spec:
   upgrade:
     {{- with $c.crds }}
     crds: {{ . }}
+    {{- end }}
+    {{- if $awaitsSubstrate }}
+    disableWait: true
     {{- end }}
     {{- if $c.disableWaitForJobs }}
     disableWaitForJobs: true

@@ -11,7 +11,7 @@ One `ServingPreset` per file, the file named after `metadata.name`. The schema i
 - **`spec.description`** names the hardware the recipe was tuned on (GPU, instance type), the context length, the concurrency and the thinking default.
 - **`spec.model`**: `id` is the Hugging Face repository, `storageUri` the signed model image (`oci://gsoci.azurecr.io/giantswarm/models/…`) or `hf://` for the Hub path; `capabilities` are informational tags (`chat`, `tools`, `reasoning`, `vision`, …); `tools` and `reasoning` are checked against the arguments' parsers.
 - **`spec.args`** are complete and literal. The runtime template re-parses every argument through a shell, so a JSON value is single-quoted inside one argument (`"--default-chat-template-kwargs='{\"enable_thinking\": false}'"`). `--tensor-parallel-size` equals `spec.resources.gpus`.
-- **`spec.requirements`**: `weightsGiB` is the checkpoint's size on the Hub, rounded up (at most 15 % above it); `residentWeightsGiB`, optional, the part of them held in memory when the runtime keeps the rest on disk (at most `weightsGiB`, which it defaults to); `overheadGiB` the KV cache, activations and runtime overhead at the preset's context and concurrency. On a unified-memory node the `--gpu-memory-utilization` claim must hold the resident weights plus the overhead.
+- **`spec.requirements`**: `weightsGiB` is the checkpoint's size on the Hub, rounded up (at most 15 % above it); `residentWeightsGiB`, optional, the part of them held in memory when the runtime keeps the rest on disk (at most `weightsGiB`, which it defaults to); `overheadGiB` the KV cache, activations and runtime overhead at the preset's context and concurrency; `minComputeCapability` the lowest CUDA compute capability the weights run natively on (FP8 or NVFP4 weights `8.9`, bf16 activations `8.0`, Blackwell kernels `10.0`), required on every shipped preset. On a unified-memory node the `--gpu-memory-utilization` claim must hold the resident weights plus the overhead.
 - **`spec.split.env`** is environment for a split placement only (one model tensor parallel across the nodes of a fast link): model-manager adds it to the leader and the workers over `modelServing.fastLinks[].env` (an entry of the same name replaces the link's), never to a single-node pod. It carries what was measured on a split alone, such as an all-reduce setting; environment for every placement goes in `spec.env`.
 - **The model family.** Tool-call and reasoning parsers are facts of the model's architecture. A preset of a family [`model-families.yaml`](../helm/agent-platform-connectivity/files/model-serving/model-families.yaml) lacks needs its row first.
 
@@ -19,8 +19,8 @@ One `ServingPreset` per file, the file named after `metadata.name`. The schema i
 
 ```sh
 make verify-serving-slice    # schema keys, parsers of the family, arguments through the template's eval, GPUs = tensor parallelism
-make verify-preset-weights   # weightsGiB against the Hub's size of spec.model.id (network)
-make verify-wiring           # the count of shipped presets: raise it with the new file
+make verify-preset-weights   # weightsGiB and minComputeCapability against the Hub's checkpoint of spec.model.id (network)
+make verify-wiring           # one preset ConfigMap per file under presets/ (the count follows the files)
 make verify-gpu-pool verify-model-images
 ```
 

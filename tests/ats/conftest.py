@@ -37,8 +37,8 @@ lab value, so a run that sets nothing behaves as the CI job does. See
 scenarios.py and README.md.
 
 Local run (a throwaway kind cluster; the lab URLs carry their ports, so the lab
-Dex port and the muster port must be free — ATS_MUSTER_BASE_URL moves muster's,
-see scenarios.py and lab-dex.yaml):
+Dex port, the muster port and the MCP port must be free — ATS_MUSTER_BASE_URL
+moves muster's, ATS_MCP_URL the MCP endpoint's, see scenarios.py and lab-dex.yaml):
 
   helm package helm/agent-platform --version 3.99.0-dev.local -d dist
   cd tests/ats && KUBECONFIG=… ATS_CHART_PATH=$PWD/../../dist/agent-platform-3.99.0-dev.local.tgz \
@@ -50,7 +50,6 @@ scenario against any cluster; see README.md.
 
 import base64
 import hashlib
-import html
 import json
 import logging
 import re
@@ -62,7 +61,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
-from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
 import requests
@@ -70,7 +69,8 @@ import yaml
 from pytest_helm_charts.clusters import Cluster
 
 import scenarios
-from scenarios import ATS_DIR, LOOPBACK, MUSTER_SERVICE_PORT, REPO_ROOT, Scenario
+from oauth_browser import follow_authorization
+from scenarios import AGENTGATEWAY_SERVICE, AGENTGATEWAY_SERVICE_PORT, ATS_DIR, LOOPBACK, MUSTER_SERVICE_PORT, REPO_ROOT, Scenario
 
 logger = logging.getLogger(__name__)
 
@@ -107,11 +107,14 @@ KEPT_CRDS = KAGENT_CRDS | SUBSTRATE_CRDS
 # The cluster-scoped SandboxConfig the substrate chart renders — the CR whose
 # vanished kind failed the substrate uninstall before the CRDs were kept.
 SANDBOX_CONFIG = "gvisor-default"
-# The chart's default ModelConfig every agent of the smoke starts from, and the
-# provider Secret it references: a placeholder key is enough for a template to
-# reach Ready (Ready means the Harness booted the actor's golden snapshot, not
-# that a model answered).
-MODEL_CONFIG = "default-model-config"
+# The ModelConfig every agent of the smoke binds: values-kagent.yaml's
+# kagent.modelConfigs entry marked default, and the provider Secret it
+# references: a placeholder key is enough for a template to reach Ready (Ready
+# means the Harness booted the actor's golden snapshot, not that a model
+# answered). kagent's own default-model-config is off there.
+MODEL_CONFIG = "ats-model"
+KAGENT_DEFAULT_MODEL_CONFIG = "default-model-config"
+DEFAULT_MODEL_ANNOTATION = "agent-platform.giantswarm.io/is-default-model-config"
 PLACEHOLDER_PROVIDER_SECRET = {"name": "kagent-anthropic", "key": "ANTHROPIC_API_KEY"}
 # The Generic agent chart, 1.x = kagent API v2 (0.x rendered the retired Agent).
 AGENT_CHART_URL = "oci://gsoci.azurecr.io/charts/giantswarm/agent"
@@ -160,6 +163,9 @@ LOGIN_SCOPES = f"openid profile email groups audience:server:client_id:{CROSS_CL
 # echoes it. Empty when the values files already carry that URL.
 MUSTER_BASE_URL = SCENARIO.muster_base_url
 MUSTER_BASE_URL_SETS = scenarios.base_url_sets(SCENARIO)
+# The MCP endpoint the tests call: agentgateway's /mcp in front of muster, the
+# platform's one ingress topology.
+MCP_URL = SCENARIO.mcp_url
 
 # The in-cluster registry (tests/ats/registry.yaml).
 REGISTRY_MANIFEST = ATS_DIR / "registry.yaml"
@@ -446,6 +452,26 @@ class Helm:
 
     def uninstall(self) -> float:
         started = time.monotonic()
+        kube = Kube(self.kubeconfig)
+        self_release = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=NAMESPACE)
+        if self_release is not None:
+            resumer = ["delete", "jobs.batch", f"{RELEASE}-self-resume", "-n", NAMESPACE, "--ignore-not-found", "--wait=true"]
+            kube.cmd(resumer)
+            kube.cmd(["patch", "helmreleases.helm.toolkit.fluxcd.io", RELEASE, "-n", NAMESPACE,
+                      "--type=merge", "-p", '{"spec":{"suspend":true}}'])
+
+            def quiescent() -> bool:
+                current = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=NAMESPACE)
+                if current is None or not current["spec"].get("suspend"):
+                    raise Abort("the self HelmRelease is no longer suspended; refusing a concurrent Helm uninstall")
+                if condition(current, "Reconciling").get("status") == "True":
+                    return False
+                return self.status()["info"]["status"] in ("deployed", "failed", "uninstalling")
+
+            wait_for("the suspended self HelmRelease's active reconciliation to finish", quiescent, UNINSTALL_BUDGET_S, interval=1)
+            kube.cmd(resumer)
+            current = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=NAMESPACE)
+            assert current and current["spec"].get("suspend"), "the self HelmRelease resumed before uninstall"
         r = run(self._cmd("uninstall", RELEASE, "--namespace", NAMESPACE, "--wait", "--timeout", UNINSTALL_TIMEOUT), timeout=10 * 60)
         elapsed = time.monotonic() - started
         assert r.returncode == 0, f"helm uninstall failed after {elapsed:.0f}s:\n{r.stdout}\n{r.stderr}"
@@ -578,7 +604,7 @@ class PortForward:
             err = (self._proc.stderr.read() if self._proc.stderr else "")[:500]
             raise AssertionError(
                 f"port-forward to {self.namespace}/{self.service} on local port {self.local_port} exited with {self._proc.returncode}: {err}\n"
-                f"(a process already listening on {self.local_port}? the scenario's URLs carry the port — free it, or move muster's with ATS_MUSTER_BASE_URL)")
+                f"(a process already listening on {self.local_port}? the scenario's URLs carry the port — free it, or move it with ATS_MUSTER_BASE_URL or ATS_MCP_URL)")
 
     def alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
@@ -726,7 +752,7 @@ def wait_for_namespaces_settled(kube: Kube, *namespaces: str, timeout: float = 3
 
 
 def apply_placeholder_provider_secret(kube: Kube) -> None:
-    """The Secret the chart's default ModelConfig references, with a placeholder
+    """The Secret the smoke's ModelConfig references, with a placeholder
     key: enough for the controller to resolve the ModelConfig and for a template
     to reach Ready (no model is called)."""
     kube.apply({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": PLACEHOLDER_PROVIDER_SECRET["name"], "namespace": KAGENT_NAMESPACE},
@@ -888,12 +914,13 @@ def parse_mcp_response(resp: requests.Response) -> Dict[str, Any]:
 
 
 class MusterSession:
-    """One MCP Streamable-HTTP session against muster with a bearer token —
-    the path every MCP client takes (Claude Code after its login, the portal,
+    """One MCP Streamable-HTTP session against muster with a bearer token, on
+    the MCP endpoint a client is given (agentgateway's /mcp in front of muster)
+    — the path every MCP client takes (Claude Code after its login, the portal,
     an agent's kagent runtime with the propagated user token)."""
 
-    def __init__(self, base_url: str, token: str, client_name: str = "ats") -> None:
-        self.url = f"{base_url}/mcp"
+    def __init__(self, mcp_url: str, token: str, client_name: str = "ats") -> None:
+        self.url = mcp_url
         self.token = token
         self.client_name = client_name
         self.session_id = ""
@@ -945,9 +972,18 @@ class MusterSession:
         and every connected server's x_<server>_<tool> — from the list_tools
         meta-tool. tools/list carries only the meta-tools (list_tools,
         describe_tool, filter_tools, call_tool, …); the aggregated tools are
-        called through call_tool."""
-        listing = json.loads(self.text_of(self.call("list_tools")))
-        return [t["name"] for t in (listing.get("tools", []) if isinstance(listing, dict) else listing)]
+        called through call_tool. list_tools answers one page (50 tools
+        unless a limit is given), so every page is read until truncated is
+        false."""
+        names: List[str] = []
+        while True:
+            listing = json.loads(self.text_of(self.call("list_tools", {"limit": 1000, "offset": len(names)})))
+            if not isinstance(listing, dict):
+                return names + [t["name"] for t in listing]
+            page = [t["name"] for t in listing.get("tools", [])]
+            names += page
+            if not listing.get("truncated") or not page:
+                return names
 
     @staticmethod
     def text_of(result: Dict[str, Any]) -> str:
@@ -984,14 +1020,19 @@ class MusterSession:
             raise AssertionError(f"{name} returned no JSON: {text[:300]}") from exc
 
 
-def unauthenticated_mcp_challenge(base_url: str) -> Dict[str, Any]:
-    """No token -> 401 with the RFC 9728 WWW-Authenticate discovery chain;
+def unauthenticated_initialize(mcp_url: str) -> requests.Response:
+    """A well-formed MCP initialize without a token (muster validates the
+    content type before the bearer: a bare POST is a 400, not the challenge)."""
+    return requests.post(mcp_url, headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+                         data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                             "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "ats", "version": "1"}}}), timeout=30)
+
+
+def unauthenticated_mcp_challenge(mcp_url: str, base_url: str) -> Dict[str, Any]:
+    """No token on the MCP endpoint -> muster's 401 with the RFC 9728
+    WWW-Authenticate discovery chain, which points at muster's base URL;
     returns the authorization-server metadata the chain leads to."""
-    # A well-formed initialize without a token (muster validates the content
-    # type before the bearer: a bare POST is a 400, not the challenge).
-    r = requests.post(f"{base_url}/mcp", headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
-                      data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-                          "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "ats", "version": "1"}}}), timeout=30)
+    r = unauthenticated_initialize(mcp_url)
     assert r.status_code == 401, f"expected 401, got {r.status_code}: {r.text[:300]}"
     challenge = r.headers.get("WWW-Authenticate", "")
     prm_url = f"{base_url}/.well-known/oauth-protected-resource"
@@ -1031,34 +1072,21 @@ def login_through_muster(base_url: str, ca_path: Optional[str]) -> str:
     state = secrets.token_urlsafe(24)  # muster rejects a state shorter than 24 characters
     session = requests.Session()
     session.verify = ca_path or True  # the issuer's CA when it has one, else the system store
+    metadata = session.get(f"{base_url}/.well-known/oauth-protected-resource", timeout=30)
+    assert metadata.status_code == 200, f"resource discovery failed: {metadata.status_code}"
+    resource = metadata.json()["resource"]
     url = f"{base_url}/oauth/authorize?" + urlencode({
         "response_type": "code", "client_id": client_id, "redirect_uri": callback, "state": state,
-        "code_challenge": challenge, "code_challenge_method": "S256", "scope": "openid profile email groups"})
-    # Walk the redirects by hand: muster -> the issuer -> login form ->
-    # (approval skipped) -> muster callback -> the redirect URI, never fetched.
-    for _ in range(15):
-        if url.startswith(callback):
-            break
-        r = session.get(url, allow_redirects=False, timeout=30)
-        if r.status_code in (301, 302, 303, 307, 308):
-            url = urljoin(url, r.headers["Location"])
-            continue
-        assert r.status_code == 200, f"{url} -> {r.status_code}: {r.text[:300]}"
-        action = re.search(r'action="([^"]+)"', r.text)
-        assert action, f"no form to submit on {url}: {r.text[:300]}"
-        post_url = urljoin(url, html.unescape(action.group(1)))
-        r = session.post(post_url, data={"login": SCENARIO.user, "password": SCENARIO.password}, allow_redirects=False, timeout=30)
-        assert r.status_code in (302, 303), f"the login form was refused: {r.status_code} {r.text[:300]}"
-        url = urljoin(post_url, r.headers["Location"])
-    else:
-        raise AssertionError(f"OAuth flow never reached the redirect URI: {url}")
+        "code_challenge": challenge, "code_challenge_method": "S256", "scope": "openid profile email groups",
+        "resource": resource})
+    url = follow_authorization(session, url, callback, base_url, SCENARIO.issuer_url, SCENARIO.user, SCENARIO.password)
     query = parse_qs(urlsplit(url).query)
     assert query.get("state") == [state], f"state mismatch in {url}"
     assert "code" in query, f"authorization did not yield a code: {url}"
     r = requests.post(
         f"{base_url}/oauth/token", auth=(client_id, client_secret),
         data={"grant_type": "authorization_code", "code": query["code"][0], "redirect_uri": callback,
-              "client_id": client_id, "code_verifier": verifier},
+              "client_id": client_id, "code_verifier": verifier, "resource": resource},
         timeout=30,
     )
     assert r.status_code == 200, f"token exchange failed: {r.status_code} {r.text[:300]}"
@@ -1073,6 +1101,19 @@ def wait_for_muster_healthy(base_url: str, timeout: Optional[float] = None) -> N
         r = requests.get(f"{base_url}/health", timeout=10)
         return r.ok and r.json().get("status") == "ok"
     wait_for("muster /health ok", ok, timeout, interval=5)
+
+
+def wait_for_mcp_route(mcp_url: str, timeout: Optional[float] = None) -> None:
+    """The MCP endpoint answers muster's challenge: on the data plane, the
+    agentgateway controller programs the route to muster after the releases are
+    Ready, and until then the data plane has no route for /mcp."""
+    timeout = READY_TIMEOUT_S if timeout is None else timeout
+    def challenged() -> bool:
+        try:
+            return unauthenticated_initialize(mcp_url).status_code == 401
+        except requests.RequestException:
+            return False
+    wait_for(f"{mcp_url} answers muster's 401", challenged, timeout, interval=5)
 
 
 # ---------------------------------------------------------------------------
@@ -1199,6 +1240,20 @@ def muster_forward(kube: Kube) -> Iterator[Optional[PortForward]]:
         return
     wait_for_endpoints(kube, NAMESPACE, "muster")
     pf = PortForward(kube.kubeconfig, NAMESPACE, "muster", SCENARIO.muster_port, MUSTER_SERVICE_PORT).start()
+    yield pf
+    pf.stop()
+
+
+@pytest.fixture(scope="module")
+def mcp_forward(kube: Kube) -> Iterator[Optional[PortForward]]:
+    """The MCP endpoint, answerable from the test: a port-forward to the
+    agentgateway data plane's Service on the port the MCP URL carries, or a real
+    hostname whose public /mcp route ends on the data plane, which needs none."""
+    if not SCENARIO.via_port_forward:
+        yield None
+        return
+    wait_for_endpoints(kube, NAMESPACE, AGENTGATEWAY_SERVICE)
+    pf = PortForward(kube.kubeconfig, NAMESPACE, AGENTGATEWAY_SERVICE, SCENARIO.mcp_port, AGENTGATEWAY_SERVICE_PORT).start()
     yield pf
     pf.stop()
 

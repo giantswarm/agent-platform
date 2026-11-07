@@ -7,7 +7,7 @@
 # their state in a Postgres the cloud provides (RDS, Azure Database, Cloud SQL,
 # with the pgvector extension available), the agents' snapshots in an object
 # store bucket. docs/install.md lists what the cluster needs first: Kubernetes
-# 1.35 with the Substrate feature gates, the Gateway with its certificate and
+# 1.36 with the Substrate feature gates, the Gateway with its certificate and
 # DNS record, the OIDC clients and their redirect URIs, the three Secrets named
 # below.
 #

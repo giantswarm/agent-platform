@@ -32,7 +32,7 @@ property the slice relies on:
 - with the target knob (ci/test-target-values.yaml) agentgateway is on and every
   HelmRelease carries the kubeConfig;
 - the controller policy of the slice on a workload cluster (components.agentgateway
-  on, no ingress mode): rendered in both flavours and admitting the issuer's JWKS
+  on, no ingress topology): rendered in both flavours and admitting the issuer's JWKS
   host on 443 — the agentgateway controller fetches the key set (#505); beside the
   platform's release none;
 - the connectivity chart, rendered with the values the profile forwards: the
@@ -240,15 +240,12 @@ def check_ingress_guard(connectivity: str, base: list[str]) -> None:
     if ("HTTPRoute", "muster") in documents(helm(connectivity, base)):
         sys.exit("FAIL: the slice renders a muster route")
     helm(connectivity, [*base, "--set", "components.muster.enabled=true"], expect_failure="no public Gateway for ingress.parentRefs")
-    helm(connectivity, [*base, "--set", "components.muster.enabled=true", "--set", "components.agentgateway.enabled=true", "--set", "ingress.parentRefs[0].name=x", "--set", "ingress.mode=muster-direct"],
-         expect_failure="components.agentgateway.enabled must be false in muster-direct mode")
-    helm(connectivity, [*base, "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster"])
-    # The slice's own default mode (agentgateway-muster, #252) with agentgateway
-    # off renders: without muster there is no ingress topology to agree with.
-    # With muster on the guard holds.
-    helm(connectivity, [*base, "--set", "ingress.mode=agentgateway-muster"])
-    helm(connectivity, [*base, "--set", "components.muster.enabled=true", "--set", "ingress.parentRefs[0].name=x", "--set", "ingress.mode=agentgateway-muster"], expect_failure="components.agentgateway.enabled must be true in agentgateway-* modes")
-    ok("ingress guard: the slice needs no edge Gateway; with muster on the Gateway and the mode/agentgateway agreement are still required; agentgateway-* modes still need the component")
+    helm(connectivity, [*base, "--set", "components.agentgateway.enabled=true"])
+    # The slice with agentgateway off renders: without muster there is no
+    # ingress topology to agree with. With muster on the guard holds.
+    helm(connectivity, base)
+    helm(connectivity, [*base, "--set", "components.muster.enabled=true", "--set", "ingress.parentRefs[0].name=x"], expect_failure="components.agentgateway.enabled must be true while muster is on")
+    ok("ingress guard: the slice needs no edge Gateway; with muster on the Gateway and the agentgateway component are still required")
 
 
 def check_policy_exception(connectivity: str, base: list[str]) -> None:
@@ -278,7 +275,7 @@ def check_policy_exception(connectivity: str, base: list[str]) -> None:
 
 def check_controller_xds(connectivity: str, base: list[str]) -> None:
     """The controller admits xDS from every data plane of its GatewayClass in any namespace (#495)."""
-    on = [*base, "--set", "components.agentgateway.enabled=true", "--set", "ingress.mode=agentgateway-muster", "--set", "ingress.parentRefs[0].name=x"]
+    on = [*base, "--set", "components.agentgateway.enabled=true", "--set", "ingress.parentRefs[0].name=x"]
     cil = documents(helm(connectivity, [*on, "--set", "networkPolicy.flavor=cilium"])).get(("CiliumNetworkPolicy", "agent-platform-connectivity-controller"))
     if not cil:
         sys.exit("FAIL: no CiliumNetworkPolicy agent-platform-connectivity-controller with agentgateway on")
@@ -297,7 +294,7 @@ def check_controller_jwks_egress(connectivity: str, base: list[str]) -> None:
     keys to the data plane over xDS; a fetch its network policy denies is an empty
     key set and `401 token uses the unknown key` for every caller. On a workload
     cluster the slice's own release runs the controller (components.agentgateway on,
-    ingress.mode at its default, no edge Gateway), so its controller
+    no muster, no edge Gateway), so its controller
     policy must render there and admit the issuer's host on 443: a toFQDNs matchName
     behind the DNS proxy clause in the cilium flavour, port 443 of the wide rule in
     the kubernetes flavour. Beside the platform's release (the component off) the
@@ -307,7 +304,7 @@ def check_controller_jwks_egress(connectivity: str, base: list[str]) -> None:
     on = [*base, "--set", "components.agentgateway.enabled=true"]
     cil = documents(helm(connectivity, [*on, "--set", "networkPolicy.flavor=cilium"])).get(("CiliumNetworkPolicy", "agent-platform-connectivity-controller"))
     if not cil:
-        sys.exit("FAIL: no CiliumNetworkPolicy agent-platform-connectivity-controller for the slice on a workload cluster (components.agentgateway on, ingress.mode at its default): the controller runs there without a policy that admits the issuer")
+        sys.exit("FAIL: no CiliumNetworkPolicy agent-platform-connectivity-controller for the slice on a workload cluster (components.agentgateway on, no muster): the controller runs there without a policy that admits the issuer")
     need(cil, '        - matchName: "dex.mc.example.com"\n      toPorts:\n        - ports:\n            - port: "443"', "the controller's egress to the issuer's JWKS (cilium)")
     need(cil, '          rules:\n            dns:\n              - matchPattern: "*"', "the DNS proxy clause the toFQDNs selector needs (cilium)")
     own = documents(helm(connectivity, [*on, "--set", "networkPolicy.flavor=cilium", "--set", "modelServing.modelsGateway.jwtAuthentication.jwks.host=keys.other.example.com"]))[("CiliumNetworkPolicy", "agent-platform-connectivity-controller")]
@@ -321,7 +318,34 @@ def check_controller_jwks_egress(connectivity: str, base: list[str]) -> None:
     for flavor, kind in (("cilium", "CiliumNetworkPolicy"), ("kubernetes", "NetworkPolicy")):
         if (kind, "agent-platform-connectivity-controller") in documents(helm(connectivity, [*base, "--set", f"networkPolicy.flavor={flavor}"])):
             sys.exit(f"FAIL: the slice beside the platform's release (components.agentgateway off) rendered a controller policy ({flavor}); the platform's release owns it")
-    ok("the slice on a workload cluster renders the controller policy without an ingress mode and admits the issuer's JWKS host on 443 (toFQDNs + DNS proxy; the wide rule's 443), an own jwks.host beside it; beside the platform none")
+    ok("the slice on a workload cluster renders the controller policy without an ingress topology and admits the issuer's JWKS host on 443 (toFQDNs + DNS proxy; the wide rule's 443), an own jwks.host beside it; beside the platform none")
+
+
+def check_google_issuer_jwks(connectivity: str, base: list[str]) -> None:
+    """A Google issuer publishes its key set on www.googleapis.com:443 at
+    /oauth2/v3/certs (its discovery document's jwks_uri), not on the issuer host
+    (giantswarm/agent-platform#1171). The models Gateway's JWKS backend, which
+    defaults to the platform issuer, dials that endpoint, and the controller's
+    egress opens www.googleapis.com on 443 and not accounts.google.com, which
+    serves no key set. An own jwks.host keeps the block's own port and path.
+    """
+    google = [*base, "--set", "components.agentgateway.enabled=true", "--set", "networkPolicy.flavor=cilium",
+              "--set", "global.identity.issuerUrl=https://accounts.google.com"]
+    docs = documents(helm(connectivity, google))
+    be = docs.get(("AgentgatewayBackend", "models-jwks"))
+    if not be:
+        sys.exit("FAIL: no AgentgatewayBackend models-jwks with a Google issuer")
+    for needle in ("    host: www.googleapis.com", "    port: 443", "    tls:"):
+        need(be, needle, "the JWKS backend with a Google issuer")
+    need(docs[("AgentgatewayPolicy", "models-jwt")], 'jwksPath: "/oauth2/v3/certs"', "the models policy with a Google issuer")
+    cil = docs[("CiliumNetworkPolicy", "agent-platform-connectivity-controller")]
+    need(cil, '        - matchName: "www.googleapis.com"\n      toPorts:\n        - ports:\n            - port: "443"', "the controller's egress to Google's JWKS")
+    if 'matchName: "accounts.google.com"' in cil:
+        sys.exit(f"FAIL: the controller's egress opens accounts.google.com, which serves no key set:\n{cil}")
+    own = documents(helm(connectivity, [*google, "--set", "modelServing.modelsGateway.jwtAuthentication.jwks.host=keys.other.example.com"]))
+    need(own[("AgentgatewayBackend", "models-jwks")], "    host: keys.other.example.com", "the JWKS backend with an own jwks.host")
+    need(own[("AgentgatewayPolicy", "models-jwt")], 'jwksPath: "/keys"', "the models policy with an own jwks.host")
+    ok("a Google issuer: the models JWKS backend dials www.googleapis.com:443 at /oauth2/v3/certs and the controller's egress opens www.googleapis.com, not accounts.google.com; an own jwks.host keeps its own path")
 
 
 def check_gateway(connectivity: str, base: list[str]) -> None:
@@ -1132,6 +1156,7 @@ def main(meta: str, connectivity: str) -> int:
         check_policy_exception(connectivity, base)
         check_controller_xds(connectivity, base)
         check_controller_jwks_egress(connectivity, base)
+        check_google_issuer_jwks(connectivity, base)
         check_gateway(connectivity, base)
         check_cache(connectivity, base)
         check_preset_args(connectivity, base)

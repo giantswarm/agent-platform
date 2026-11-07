@@ -118,9 +118,13 @@ NODE = "csi-companion-node"
 PROXY_CONFIG = "csi-companion-proxy"
 SOCKET_DIR = "/var/lib/kubelet/plugins/agent-platform-csi-companion"
 SUBSTRATE_DIR = "/var/lib/ate"
-PROXY_IMAGE = "gsoci.azurecr.io/giantswarm/envoy:v1.39.3"
-PROBE_IMAGE = "gsoci.azurecr.io/giantswarm/livenessprobe:v2.19.0"
+PROXY_REPOSITORY = "giantswarm/envoy"
+PROBE_REPOSITORY = "giantswarm/livenessprobe"
 CI = ["--set", "components.flux.enabled=false"]
+# muster's credential provider releases an instance while workspaces and Substrate are on
+# (agent-platform.validateWorkspaceAuth): the fixtures name no provider instance to pin,
+# so the meta chart's renders name the releasable themselves.
+RELEASABLE = ["--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]
 CONN = ["--namespace", NS, "--set", "ingress.parentRefs[0].name=x", "--set", "networkPolicy.enabled=true", "--set", "networkPolicy.flavor=cilium",
         "--set", "components.substrate.enabled=true", "--set", "kyvernoPolicies.enabled=true",
         "--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2"]
@@ -134,6 +138,20 @@ def fail(msg: str) -> None:
     sys.exit(f"FAIL: {msg}")
 
 
+def pinned(repository: str) -> str:
+    """The image both charts' values.yaml pin for repository (Renovate moves the tag), the same in both."""
+    images = set()
+    for chart in (META, CONNECTIVITY):
+        with open(os.path.join(chart, "values.yaml")) as f:
+            found = re.findall(rf"registry: (\S+)\n\s+repository: {re.escape(repository)}\n\s+tag: (\S+)\n", f.read())
+        if len(found) != 1:
+            fail(f"{chart}/values.yaml pins {repository} {len(found)} times, not once")
+        images.add(f"{found[0][0]}/{repository}:{found[0][1]}")
+    if len(images) != 1:
+        fail(f"the charts pin {repository} differently: {sorted(images)}")
+    return images.pop()
+
+
 def ok(msg: str) -> None:
     print(f"ok: {msg}")
 
@@ -142,6 +160,8 @@ def helm(chart: str, flags: list, expect_fail: bool = False, ci_values: bool = T
     cmd = [HELM, "template", "t", chart]
     if ci_values:
         cmd += ["-f", f"{chart}/ci/ci-values.yaml", *CI]
+        if os.path.basename(os.path.normpath(chart)) == "agent-platform":
+            cmd += RELEASABLE
     cmd += flags
     r = subprocess.run(cmd, capture_output=True, text=True)
     if expect_fail:
@@ -274,9 +294,9 @@ def preset(name: str) -> None:
     envoy = container(deploy, "envoy")
     if "- name: ENVOY_UID\n              value: \"0\"\n" not in envoy:
         fail(f"{name}: the Envoy sidecar lacks ENVOY_UID=0; its entrypoint would chown stdout and su-exec to its envoy user, which drop ALL forbids:\n{envoy}")
-    if f"image: {PROXY_IMAGE}\n" not in envoy or "runAsUser: 0\n" not in envoy or "containerPort: 10000\n" not in envoy:
+    if f"image: {pinned(PROXY_REPOSITORY)}\n" not in envoy or "runAsUser: 0\n" not in envoy or "containerPort: 10000\n" not in envoy:
         fail(f"{name}: the Envoy sidecar is not the pinned image as root on the proxy port:\n{envoy}")
-    if f"image: {PROBE_IMAGE}\n" not in container(deploy, "liveness-probe"):
+    if f"image: {pinned(PROBE_REPOSITORY)}\n" not in container(deploy, "liveness-probe"):
         fail(f"{name}: the controller's liveness probe is not the pinned image")
     for needle in ("signerName: servicedns.podcert.ate.dev/identity\n", "credentialBundlePath: credential-bundle.pem\n",
                    "signerName: podidentity.podcert.ate.dev/identity\n", "podcert.ate.dev/canarying: live\n", "emptyDir:\n"):

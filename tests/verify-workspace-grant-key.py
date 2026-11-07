@@ -41,6 +41,8 @@ import tempfile
 HELM = os.environ.get("HELM", "helm")
 NAME = "workspace-manager"
 FIXTURE = "tests/fixtures/workspaces-values.yaml"
+# The agents beside them: the meta chart refuses workspaces without kagent.
+AGENTS = "tests/fixtures/workspaces-agents-values.yaml"
 BASE = "https://workspaces.ci.example.com"
 IDENTITY = [
     "--set", "global.domain=ci.example.com",
@@ -50,7 +52,10 @@ IDENTITY = [
 ]
 CONN = ["--set", "ingress.parentRefs[0].name=edge", "--set", "ingress.parentRefs[0].namespace=envoy-gateway-system",
         "--set", f"components.{NAME}.enabled=true", "-f", FIXTURE, *IDENTITY]
-META = ["--set", "components.flux.enabled=false", "-f", FIXTURE]
+# Substrate follows kagent: without a provider pin (no providers, oauth off)
+# muster's releasable is the installation's own (agent-platform.validateWorkspaceAuth).
+META = ["--set", "components.flux.enabled=false", "-f", FIXTURE, "-f", AGENTS,
+        "--set", "muster.muster.credentialProvider.releasable.gitlab=https://gitlab.example.com"]
 # The fixture's own reference, and the chart's default once it is dropped.
 OWN, OWN_KEY = "workspace-manager-keys", "grant"
 DEF, DEF_KEY = "workspace-manager-grant-keys", "key-1"

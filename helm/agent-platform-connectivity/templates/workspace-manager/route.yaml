@@ -1,23 +1,17 @@
 {{- /*
-The browser's provider sign-in, the workspace-manager's only public surface.
-A provider redirects the browser back to <baseURL>/callback/<instance>, which
-carries no bearer token, so the manager first signs the browser in to Dex at
-<baseURL>/signin and starts a connect at <baseURL>/connect/<instance>. The
-grants the manager signs name the base URL as their issuer, so the key set that
-verifies them, <baseURL>/.well-known/jwks.json, is served on the host too: a key
-set is public by design. Those four paths, and only those, are routed on the
-base URL's host; MCP, the token exchange and the manager's own OAuth server
-(its /.well-known/oauth-* metadata included) are not, and stay reachable
-in-cluster only. Without a host (no workspace-manager.oauth.baseURL and no
-global.domain) nothing renders: a route without hostnames would take the paths
-on every host of the Gateway. validate.yaml fails a provider instance with an
-OAuth client that would then have no callback.
+The grants' key set, the workspace-manager's only public surface. The grants
+the manager signs name the base URL as their issuer, so the key set that
+verifies them, <baseURL>/.well-known/jwks.json, is served on its host: a key set
+is public by design. That path, and only it, is routed on the base URL's host;
+MCP and the manager's own OAuth server (its /.well-known/oauth-* metadata
+included) are not, and stay reachable in-cluster only. Without a host (no
+workspace-manager.oauth.baseURL and no global.domain) nothing renders: a route
+without hostnames would take the path on every host of the Gateway.
 */ -}}
 {{- $host := include "agent-platform.workspaceManager.routeHost" . }}
 {{- if $host }}
-# Proxies straight to the manager's Service: the paths carry no JWT for the
-# agentgateway policy, and the manager checks the browser's Dex sign-in and the
-# flow's sealed state itself.
+# Proxies straight to the manager's Service: the key set carries no JWT for the
+# agentgateway policy and is public.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -34,16 +28,7 @@ spec:
     - matches:
         - path:
             type: Exact
-            value: /signin
-        - path:
-            type: Exact
             value: /.well-known/jwks.json
-        - path:
-            type: PathPrefix
-            value: /connect
-        - path:
-            type: PathPrefix
-            value: /callback
       {{- with (include "agent-platform.routeTimeouts" .) }}
       {{- . | nindent 6 }}
       {{- end }}

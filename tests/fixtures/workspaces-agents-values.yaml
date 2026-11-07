@@ -1,0 +1,13 @@
+# The agents beside workspaces: the meta chart refuses workspaces.enabled
+# without components.kagent.enabled (agent-platform.validateWorkspaces), the
+# workspaces' namespace being kagent's. Layered after a workspaces fixture in the
+# meta chart's renders; the kagent keys are the CI shape's.
+components:
+  kagent:
+    enabled: true
+kagent:
+  database:
+    postgres:
+      urlFile: /etc/kagent-db/uri
+  harness:
+    snapshotLocation: s3://ci/agents

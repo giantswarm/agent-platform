@@ -4,9 +4,6 @@
 # node subnet, credentials from the Account's connection Secret. destinationPath
 # and azure.connectionString derive from crossplane.azure.
 components:
-  # muster-direct runs without the agentgateway component (on by default).
-  agentgateway:
-    enabled: false
   kagent:
     enabled: true
 
@@ -46,7 +43,6 @@ postgres:
         subscriptionId: 00000000-0000-0000-0000-000000000000
 
 ingress:
-  mode: muster-direct
   parentRefs:
     - name: giantswarm-default
       namespace: envoy-gateway-system

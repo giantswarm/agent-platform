@@ -55,7 +55,7 @@ The kubectl image the hooks run.
 */}}
 {{- define "agent-platform.hooks.image" -}}
 {{- $i := .Values.gitops.hooks.image -}}
-{{- printf "%s/%s:%s" $i.registry $i.repository $i.tag -}}
+{{- include "agent-platform.mirror.ref" (dict "ref" (printf "%s/%s:%s" $i.registry $i.repository $i.tag) "mirror" (include "agent-platform.mirror.registry" .)) -}}
 {{- end -}}
 
 {{/*

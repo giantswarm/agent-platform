@@ -36,7 +36,8 @@ FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2
               "--api-versions", "gateway.networking.k8s.io/v1"]
 # The installation's platform inputs the profile is layered over.
 INSTALLATION = ["--namespace", "org-acme", "--set", "global.domain=wc01.example.com", "--set", "global.identity.issuerUrl=https://dex.mc.example.com"]
-RUNTIME = {"kagent-crds", "substrate-crds", "substrate", "kagent", "cloudnative-pg", "agentgateway", "agent-platform-connectivity"}
+# google-access-token-credential-provider follows kagent like the Substrate entries.
+RUNTIME = {"kagent-crds", "substrate-crds", "substrate", "google-access-token-credential-provider", "kagent", "cloudnative-pg", "agentgateway", "agent-platform-connectivity"}
 KUBECONFIG = "wc01-kubeconfig"
 SNAPSHOTS = "s3://<bucket>/<cluster>"
 

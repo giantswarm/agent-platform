@@ -529,8 +529,37 @@ Usage: include "agent-platform.modelServing.resolvePreset" (dict "root" $ "name"
 {{- if $scheduling -}}
 {{- $_ := set $spec "scheduling" $scheduling -}}
 {{- end -}}
+{{- /* The runtime image of every container of spec.template on
+       gsoci.azurecr.io moves to the host of modelServing.runtimeImages.registry,
+       the path and tag or digest as written (an installation that serves the
+       images from a mirror). An image on any other registry, or a Docker Hub
+       short name, is left as written. */ -}}
+{{- $runtimeRegistry := include "agent-platform.modelServing.runtimeImages.registry" $root -}}
+{{- $template := get $spec "template" -}}
+{{- if and $runtimeRegistry (kindIs "map" $template) -}}
+{{- range $field := list "containers" "initContainers" -}}
+{{- range (get $template $field | default list) -}}
+{{- if and (kindIs "map" .) (hasPrefix "gsoci.azurecr.io/" (toString (get . "image"))) -}}
+{{- $_ := set . "image" (printf "%s/%s" $runtimeRegistry (trimPrefix "gsoci.azurecr.io/" (toString (get . "image")))) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $_ := set $doc "spec" $spec -}}
 {{- dict "preset" $doc "chatTemplate" $render | toJson -}}
+{{- end -}}
+
+{{/*
+The registry host of modelServing.runtimeImages.registry, validated like
+modelServing.modelImages.registry: a host with an optional port, no scheme, no
+path. Empty when unset: every preset's runtime image is published as written.
+*/}}
+{{- define "agent-platform.modelServing.runtimeImages.registry" -}}
+{{- $registry := toString (dig "runtimeImages" "registry" "" .Values.modelServing) -}}
+{{- if and $registry (not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?$" $registry)) -}}
+{{- fail (printf "modelServing.runtimeImages.registry %q must be a registry host — host or host:port, no scheme, no path; it replaces the host of every preset's runtime image, the path stays" $registry) -}}
+{{- end -}}
+{{- $registry -}}
 {{- end -}}
 
 {{/*
@@ -649,12 +678,19 @@ modelServing.modelsGateway.enabled.
 
 {{/*
 The models Gateway's JWKS block with the host resolved (JSON): the block's own
-host, else the issuer's hostname — the public issuer on 443.
+host, else the JWKS endpoint the issuer publishes (agent-platform.idp.jwks) —
+the public issuer's host on the block's port for Dex, and for Google
+www.googleapis.com:443 at /oauth2/v3/certs, its host, port and path together.
 */}}
 {{- define "agent-platform.modelServing.modelsGateway.jwks" -}}
 {{- $jwks := deepCopy .Values.modelServing.modelsGateway.jwtAuthentication.jwks -}}
 {{- if not $jwks.host -}}
-{{- $_ := set $jwks "host" (urlParse (include "agent-platform.modelServing.modelsGateway.issuer" .)).hostname -}}
+{{- $published := include "agent-platform.idp.jwks" (include "agent-platform.modelServing.modelsGateway.issuer" .) | fromJson -}}
+{{- $_ := set $jwks "host" ($published.host | default "") -}}
+{{- if $published.path -}}
+{{- $_ := set $jwks "port" $published.port -}}
+{{- $_ := set $jwks "path" $published.path -}}
+{{- end -}}
 {{- end -}}
 {{- $jwks | toJson -}}
 {{- end -}}

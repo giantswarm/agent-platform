@@ -1,7 +1,10 @@
 {{/*
 The hook Jobs of this release, and their one identity.
 
-Five hooks: the Agent Substrate bootstrap (templates/substrate/bootstrap.yaml,
+Seven hooks: the Substrate namespaces (templates/substrate/bootstrap.yaml,
+pre-install + pre-upgrade at weight -4 — creates the two namespaces the
+bootstrap writes into when they are missing, so its Roles have somewhere to
+be), the Agent Substrate bootstrap (templates/substrate/bootstrap.yaml,
 pre-install + pre-upgrade — mints the CA and JWT pools, the actor-identity trust
 anchor and ate-api-server's authentication config the Substrate pods mount and
 cannot start without, once, and keeps them), the derived Postgres connection
@@ -17,24 +20,29 @@ hook object outside Helm's wait, which an uninstall would otherwise leave
 behind; #563) and the ModelConfig reconcile of llmRouting
 (templates/llm/modelconfig-routing-hook.yaml, post-install + post-upgrade —
 takes the listener URL the policies wrote back off the ModelConfigs once
-routing is off, which Helm cannot: it never owned the baseUrl). All run under the
+routing is off, which Helm cannot: it never owned the baseUrl) and the sign-in
+keys cleanup (templates/workspace-manager/signin-keys-cleanup.yaml,
+post-install + post-upgrade — deletes the workspace-manager sign-in keys Secret
+an earlier release kept). All run under the
 restricted pod security profile (this chart's Jobs have to be admitted where
 restricted PSS is enforced — the hook pods themselves violate nothing) as the
 ServiceAccount <release>-hooks (templates/substrate/hooks-rbac.yaml): a
-ClusterRole on secrets, configmaps and namespaces (on persistentvolumeclaims,
-and get on storageclasses, while the cache claim is this chart's, on the
-pre-pull DaemonSet by name while
-it renders) — the bootstrap writes into two
-namespaces the substrate release has not created yet and the databases hook
-into the namespaces of postgres.databases.*.secretNamespaces, none of which
-exist when a pre-install hook's Roles would have to — created for each hook
-event the rendered Jobs use (agent-platform.hooks.events: the install and
-upgrade events for the first three, pre-delete for the cleanup) and removed with
-it (hook-succeeded). One more hook Job comes from this include with an
-identity of its own (identity below): the start of the agent-manager migrate
+ClusterRole on what is cluster-scoped or has no namespace of its own (the
+Substrate namespaces, the podcert ClusterTrustBundles, persistentvolumeclaims
+and get on storageclasses while the cache claim is this chart's, the pre-pull
+DaemonSet by name while it renders), created for each hook event the rendered
+Jobs use (agent-platform.hooks.events: the install and upgrade events for the
+first three, pre-delete for the cleanup) and removed with it (hook-succeeded),
+and no read of a Secret or ConfigMap: those are Roles, one per namespace a hook
+writes, at the events of that hook only, on the names it reads or writes (the
+bootstrap's create aside, which a POST leaves unnamed). The bootstrap
+writes into the two Substrate namespaces, which the substrate release has not
+created on a first install, so the substrate-namespaces Job creates them first.
+One more hook Job comes from this include with an identity of its own (identity below): the start of the agent-manager migrate
 run (templates/kagent/migrate-cronjob.yaml, post-install + post-upgrade).
 
-Weights: -5 the identity, 0 the Jobs. before-hook-creation clears a previous
+Weights: -5 the identity, -4 the substrate-namespaces Job, -3 the Roles, 0
+the other Jobs. before-hook-creation clears a previous
 run's Job (a failed one is left for inspection until the next attempt),
 hook-succeeded removes every hook object once all hooks of the event succeeded.
 Helm runs the hooks of one event in weight order and waits for a Job to finish
@@ -54,11 +62,12 @@ Usage of the Job include (a dict):
             template (the bootstrap: 256Mi). Every request stays 10m/32Mi, and
             the init container keeps 128Mi.
   timeout   optional activeDeadlineSeconds (default 600)
+  weight    optional helm.sh/hook-weight (default 0)
   identity  optional: a dict {namespace, serviceAccountName, component} — a
             hook that acts with an identity of the release instead of the
             hook identity, in that identity's namespace, under the network
             policy that selects that component label (the agent-manager
-            migrate start: the tenant identity in the kagent namespace,
+            migrate start: the migration's identity in the kagent namespace,
             templates/kagent/migrate-cronjob.yaml)
 */}}
 
@@ -88,14 +97,16 @@ The hook events the identity is created for, comma-separated for the
 helm.sh/hook annotation: the install and upgrade events while the bootstrap,
 the databases hook or the cache claim hook renders, pre-delete while the
 pre-pull DaemonSet does (its cleanup Job runs then), the post events alone
-while only the ModelConfig reconcile of llmRouting renders
-(templates/llm/modelconfig-routing-hook.yaml). Empty when no hook Job renders.
+while only the ModelConfig reconcile of llmRouting
+(templates/llm/modelconfig-routing-hook.yaml) or the sign-in keys cleanup
+(templates/workspace-manager/signin-keys-cleanup.yaml) renders. Empty when no
+hook Job renders.
 */}}
 {{- define "agent-platform.hooks.events" -}}
 {{- $events := list -}}
 {{- if or (include "agent-platform.substrate.enabled" .) (include "agent-platform.postgres.databases" . | fromJsonArray) (include "agent-platform.modelServing.cacheClaimManaged" .) -}}
 {{- $events = list "pre-install" "pre-upgrade" "post-install" "post-upgrade" -}}
-{{- else if include "agent-platform.llmRouting.modelConfigs" . -}}
+{{- else if or (include "agent-platform.llmRouting.modelConfigs" .) (include "agent-platform.workspaceManager.signinKeysOrphan" .) -}}
 {{- $events = list "post-install" "post-upgrade" -}}
 {{- end -}}
 {{- if include "agent-platform.modelServing.prepull.enabled" . -}}
@@ -126,7 +137,7 @@ metadata:
     app.kubernetes.io/component: {{ $identity.component }}
   annotations:
     helm.sh/hook: {{ .hook }}
-    helm.sh/hook-weight: "0"
+    helm.sh/hook-weight: {{ .weight | default 0 | quote }}
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
     agent-platform.giantswarm.io/about: {{ .about | quote }}
 spec:
@@ -232,4 +243,59 @@ spec:
             medium: Memory
             sizeLimit: 16Mi
         {{- end }}
+{{- end -}}
+
+{{/*
+The Secrets and ConfigMaps each hook Job reads or writes, by namespace: the
+Roles of the hook identity (templates/substrate/hooks-rbac.yaml). A JSON array
+of {purpose, namespace, events, rules: [{resource, names, verbs}]}. A rule
+without names is the bootstrap's create: a POST names no object, so RBAC cannot
+narrow it. A server-side apply authorizes the create it makes with the object's
+name, so the SSA-only databases hook holds create on its names alone.
+*/}}
+{{- define "agent-platform.hooks.secretGrants" -}}
+{{- $out := list -}}
+{{- $create := dict "resource" "secrets" "names" list "verbs" (list "create") -}}
+{{- if include "agent-platform.substrate.enabled" . -}}
+{{- $events := "pre-install,pre-upgrade" -}}
+{{- $out = append $out (dict "purpose" "substrate-bootstrap" "namespace" (include "agent-platform.substrate.podcertNamespace" .) "events" $events "rules" (list
+      (dict "resource" "secrets" "names" (list "service-dns-ca-pool" "pod-identity-ca-pool") "verbs" (list "get"))
+      $create)) -}}
+{{- $out = append $out (dict "purpose" "substrate-bootstrap" "namespace" (include "agent-platform.substrate.namespace" .) "events" $events "rules" (list
+      (dict "resource" "secrets" "names" (list "actor-id-jwt-pool" "actor-id-ca-pool" "egress-mitm-ca-pool") "verbs" (list "get"))
+      (dict "resource" "secrets" "names" (list "actor-id-ca-certs") "verbs" (list "get" "patch"))
+      $create
+      (dict "resource" "configmaps" "names" (list "ate-api-authentication") "verbs" (list "get"))
+      (dict "resource" "configmaps" "names" list "verbs" (list "create")))) -}}
+{{- end -}}
+{{- $databases := include "agent-platform.postgres.databases" . | fromJsonArray -}}
+{{- if $databases -}}
+{{- $source := printf "%s-app" (first $databases).cluster -}}
+{{- $sourceNs := (first $databases).namespace -}}
+{{- $targets := dict -}}
+{{- $order := list -}}
+{{- range $databases -}}
+{{- $derived := printf "%s-%s-app" .cluster .key -}}
+{{- range .secretNamespaces -}}
+{{- if not (hasKey $targets .) -}}{{- $order = append $order . -}}{{- end -}}
+{{- $_ := set $targets . (append (get $targets . | default list) $derived) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (hasKey $targets $sourceNs) -}}{{- $order = prepend $order $sourceNs -}}{{- $_ := set $targets $sourceNs list -}}{{- end -}}
+{{- range $ns := $order -}}
+{{- $rules := list -}}
+{{- if eq $ns $sourceNs -}}
+{{- $rules = append $rules (dict "resource" "secrets" "names" (list $source) "verbs" (list "get" "list" "watch")) -}}
+{{- end -}}
+{{- with get $targets $ns -}}
+{{- $rules = append $rules (dict "resource" "secrets" "names" (. | uniq) "verbs" (list "get" "create" "patch")) -}}
+{{- end -}}
+{{- $out = append $out (dict "purpose" "postgres-databases" "namespace" $ns "events" "post-install,post-upgrade" "rules" $rules) -}}
+{{- end -}}
+{{- end -}}
+{{- with include "agent-platform.workspaceManager.signinKeysOrphan" . -}}
+{{- $out = append $out (dict "purpose" "signin-keys-cleanup" "namespace" $.Release.Namespace "events" "post-install,post-upgrade" "rules" (list
+      (dict "resource" "secrets" "names" (list .) "verbs" (list "delete")))) -}}
+{{- end -}}
+{{- $out | toJson -}}
 {{- end -}}

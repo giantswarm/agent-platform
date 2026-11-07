@@ -1,8 +1,6 @@
-{{- /* Sends a ModelConfig this chart does not render through the LLM listener.
-The chart's own entries already carry the baseUrl, so this policy only reaches
-objects created elsewhere: Backstage, agent-manager, or kubectl. Without it such
-a model calls the provider directly and its usage never reaches the gateway's
-metrics.
+{{- /* Sends a ModelConfig through the LLM listener, whoever declares it:
+GitOps, Backstage, agent-manager or kubectl. Without it the model calls the
+provider directly and its usage never reaches the gateway's metrics.
 
 Rendered only where the API server serves the GA group. On a beta API server
 (1.34, 1.35) the object is accepted and the admission plugin stays off behind
@@ -14,10 +12,20 @@ is honest; a silent one is not. Confirm with:
 Every write marks the baseUrl it sets (agent-platform.llmRouting.baseUrlMark):
 turning routing off removes these policies and the listener, and the reconcile
 hook (modelconfig-routing-hook.yaml) takes exactly the marked baseUrls off
-again, which Helm cannot: it never owned them. */ -}}
+again, which Helm cannot: it never owned them.
+
+With agentPlatformOrganizations.enabled (agent-platform.tenants.modelConfigs)
+the policies also fill in the listener in every organization namespace
+(agent-platform.orgNamespaces.label: a second binding each; the reconcile hook
+still reads the kagent namespace only): an organization's ModelConfig may omit
+baseUrl. There an explicit baseUrl that is
+not the listener is refused by agent-platform-tenant-model-routing
+(templates/tenants/modelconfig-admission.yaml), and so is an empty one when
+this policy fails: Ignore here fails closed there. */ -}}
 {{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.llmRouting.modelConfigs" .) }}
 {{- $mark := include "agent-platform.llmRouting.baseUrlMark" . }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $organizations := include "agent-platform.tenants.modelConfigs" . }}
 {{- /* One policy per provider the listener serves
 (agent-platform.llmRouting.providers): the block that carries baseUrl and the
 URL differ by provider (an OpenAI ModelConfig's ends in /v1). The first keeps
@@ -45,20 +53,36 @@ spec:
         apiVersions: ["*"]
         operations: ["CREATE", "UPDATE"]
         resources: ["modelconfigs"]
+    {{- /* With the Organizations' namespaces, the bindings select. */}}
+    {{- if not $organizations }}
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: {{ $ns }}
+    {{- end }}
   matchConditions:
     - name: provider-matches
       expression: >-
         has(object.spec.provider) &&
         object.spec.provider.lowerAscii() == {{ $provider | quote }}
-    {{- /* An explicit baseUrl stays untouched. That is the escape hatch: a model
-    reaches the provider directly by naming the provider URL itself. */}}
+    {{- /* An explicit baseUrl stays untouched. In the kagent namespace that is
+    the escape hatch: a model reaches the provider directly by naming the
+    provider URL itself. In an Organization namespace there is no escape:
+    agent-platform-tenant-model-routing refuses a baseUrl that is not the
+    listener. */}}
     - name: base-url-absent
       expression: >-
         !has(object.spec.{{ $urlKey }}) ||
         !has(object.spec.{{ $urlKey }}.baseUrl)
+    {{- /* A ChatGPT login stays off the listener, whose OpenAI route serves the
+    OpenAI API: kagent sends the login to the baseUrl it finds, and without one
+    to the ChatGPT Codex backend. */}}
+    {{- if eq $urlKey "openAI" }}
+    - name: not-chatgpt-login
+      expression: >-
+        !has(object.spec.openAI) ||
+        !has(object.spec.openAI.credentialType) ||
+        object.spec.openAI.credentialType != "chatgptOAuth"
+    {{- end }}
   mutations:
     - patchType: ApplyConfiguration
       applyConfiguration:
@@ -81,5 +105,19 @@ spec:
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: {{ $ns }}
+{{- if $organizations }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: {{ $name }}-organizations
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+spec:
+  policyName: {{ $name }}
+  matchResources:
+    namespaceSelector:
+      {{- include "agent-platform.orgNamespaces.selector" $ | nindent 6 }}
+{{- end }}
 {{- end }}
 {{- end }}

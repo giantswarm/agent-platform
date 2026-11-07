@@ -8,7 +8,8 @@ module top to bottom; each one builds on the state the previous left):
      platform's identity Secret, a self-signed CA, the CoreDNS rewrite) and an
      in-cluster registry the candidate archive is pushed to;
   2. `helm install --wait` of the candidate with the quick start's shape —
-     helm/agent-platform/examples/kind-lab-dex.yaml (muster, dicebear, connectivity; the bundled Flux
+     helm/agent-platform/examples/kind-lab-dex.yaml (muster, dicebear, connectivity, and the
+     platform's one ingress topology: agentgateway in front of muster; the bundled Flux
      engine on) + values-kagent.yaml (the kagent runtime) + values-round-trips.yaml
      (the lab Dex as global.identity, muster's OAuth server on, agent-manager) —
      and self-management ON against the in-cluster registry: the chart's own
@@ -20,10 +21,12 @@ module top to bottom; each one builds on the state the previous left):
      agent-platform-flux, the engine objects, the operator managing the Flux CRDs;
   4. adoption: the bundled helm-controller takes the CLI's release over —
      `helm history` shows the install and one adoption revision;
-  5. the auth round trip: an unauthenticated /mcp is a 401 with the RFC 9728
-     discovery chain; a lab Dex user reaches /mcp with a token from the OAuth
-     password grant (a trusted audience) and with muster's own login flow (RFC 7591
-     registration, authorization code + PKCE, the Dex login form);
+  5. the auth round trip, every MCP call on agentgateway's /mcp in front of
+     muster (the data plane's Service; muster's OAuth endpoints on its own): an
+     unauthenticated /mcp is muster's 401 with the RFC 9728 discovery chain; a
+     lab Dex ID token is rejected at /mcp, and the user reaches it with an
+     access token from muster's own login flow (RFC 7591 registration,
+     authorization code + PKCE, consent and the Dex login form);
   6. the agent round trips on kagent API v2: Agent Substrate, installed by the
      chart under test, has its WorkerPool's gVisor worker Ready; a declarative
      Agent on the platform Harness, against the chart's
@@ -89,9 +92,12 @@ from conftest import (
     KAGENT_NAMESPACE,
     KEPT_CRDS,
     Kube,
+    DEFAULT_MODEL_ANNOTATION,
+    KAGENT_DEFAULT_MODEL_CONFIG,
     MODEL_CONFIG,
     MUSTER_BASE_URL,
     MUSTER_BASE_URL_SETS,
+    MCP_URL,
     MusterSession,
     NAMESPACE,
     OPERATOR_CRDS,
@@ -130,28 +136,32 @@ from conftest import (
     agent_state,
     unauthenticated_mcp_challenge,
     wait_for,
+    wait_for_mcp_route,
     wait_for_muster_healthy,
     wait_for_substrate,
     wait_for_agent_ready,
 )
-from scenarios import EXAMPLES_DIR, KIND_LAB_VALUES
+from scenarios import AGENTGATEWAY_SERVICE, EXAMPLES_DIR, KIND_LAB_VALUES, MODEL_CONFIG_MANIFEST
 
 logger = logging.getLogger(__name__)
 
 # The component HelmReleases the smoke values turn on: the quick start's three,
-# kagent with its CRD chart, Agent Substrate with its CRD chart (both follow
-# components.kagent), the CloudNativePG operator for kagent's and Substrate's
+# the ingress (agentgateway, and agent-platform-mcps with its route to muster),
+# kagent with its CRD chart, Agent Substrate with its CRD chart and the Google
+# access-token credential provider (all follow components.kagent), the CloudNativePG operator for kagent's and Substrate's
 # database, agent-manager, and model-manager — on by default with no backend
 # (giantswarm/agent-platform#329), nothing in the smoke values names it.
-COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "kagent", "kagent-crds", "substrate", "substrate-crds", "cloudnative-pg", "agent-manager", "model-manager")
+COMPONENTS = ("muster", "dicebear", "agent-platform-connectivity", "agentgateway", "agent-platform-mcps", "kagent", "kagent-crds", "substrate", "substrate-crds", "google-access-token-credential-provider", "cloudnative-pg", "agent-manager", "model-manager")
 # The platform's CloudNativePG Cluster, kagent's and Substrate's database: the
 # connectivity release renders it with helm.sh/resource-policy: keep, so the
 # conversations outlive an uninstall.
 POSTGRES_CLUSTER = "kagent-pg"
 # The Deployments `helm install --wait` leaves running in the release namespace
-# (the kagent controller runs in the kagent namespace and is waited for separately).
+# (the kagent controller runs in the kagent namespace and is waited for separately;
+# the agentgateway data plane is the controller's Deployment, created from the
+# connectivity release's Gateway, and is waited for with the MCP route).
 # model-manager Ready here is the zero-backend start-up: no backend registered.
-CORE_DEPLOYMENTS = ("flux-operator", "source-controller", "helm-controller", "muster", "agent-manager", "model-manager")
+CORE_DEPLOYMENTS = ("flux-operator", "source-controller", "helm-controller", "muster", "agentgateway-controller", "agent-manager", "model-manager")
 DECLARATIVE_AGENT = "ats-smoke-agent"
 MANAGED_AGENT = "ats-managed-agent"
 # The kagent release's own RemoteMCPServer: the controller's API as MCP tools
@@ -168,7 +178,7 @@ class State:
 
     adopted_at: float = 0.0
     history_after_adoption: List[Dict[str, Any]] = []
-    dex_token: str = ""
+    resource_token: str = ""
 
 
 STATE = State()
@@ -193,6 +203,7 @@ def dump_platform(kube: Kube) -> None:
 
 def dump_auth(kube: Kube) -> None:
     kube.dump([f"-n {NAMESPACE} logs deployment/muster --tail=120", f"-n {NAMESPACE} logs deployment/lab-dex --tail=60",
+               f"-n {NAMESPACE} logs deployment/{AGENTGATEWAY_SERVICE} --tail=60", f"-n {NAMESPACE} get gateways,httproutes -o wide",
                f"-n {NAMESPACE} logs deployment/agent-manager --tail=60"])
 
 
@@ -239,11 +250,15 @@ def app_deployment(kube: Kube, helm: Helm, prerequisites: None, chart_archive: P
 
 
 @pytest.fixture(scope="module")
-def muster(muster_forward: Optional[PortForward], app_deployment: float) -> Optional[PortForward]:
-    """muster reachable and healthy (its OAuth server discovers the issuer)."""
+def muster(muster_forward: Optional[PortForward], mcp_forward: Optional[PortForward], app_deployment: float) -> Optional[PortForward]:
+    """muster reachable and healthy (its OAuth server discovers the issuer), and
+    its MCP endpoint reachable through agentgateway."""
     started = time.monotonic()
     wait_for_muster_healthy(MUSTER_BASE_URL)
     TIMINGS.record("muster /health ok after the install", time.monotonic() - started)
+    started = time.monotonic()
+    wait_for_mcp_route(MCP_URL)
+    TIMINGS.record("agentgateway /mcp routed to muster after /health", time.monotonic() - started)
     return muster_forward
 
 
@@ -259,7 +274,7 @@ def kagent_controller(kube: Kube, app_deployment: float) -> None:
     """The kagent controller running (its HelmRelease is Ready before the pod is)."""
     started = time.monotonic()
     kube.wait_deployment(KAGENT_NAMESPACE, "kagent-controller", timeout=600)
-    wait_for(f"ModelConfig {MODEL_CONFIG}", lambda: kube.get("modelconfigs.api.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE), 120)
+    kube.apply_file(str(MODEL_CONFIG_MANIFEST))
     apply_placeholder_provider_secret(kube)
     TIMINGS.record("kagent controller Ready after the install returned", time.monotonic() - started)
 
@@ -382,7 +397,7 @@ def test_self_management_adopts_the_release(kube: Kube, helm: Helm, candidate_ve
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
 def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: Optional[PortForward]) -> None:
     try:
-        meta = unauthenticated_mcp_challenge(MUSTER_BASE_URL)
+        meta = unauthenticated_mcp_challenge(MCP_URL, MUSTER_BASE_URL)
     except AssertionError:
         dump_auth(kube)
         raise
@@ -392,10 +407,8 @@ def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: O
 @pytest.mark.smoke
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
 @REQUIRES_STATIC_USER
-def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: Optional[PortForward], dex: Optional[str]) -> None:
-    """The lab Dex's OAuth password grant issues an ID token for the platform
-    client (a trusted audience of muster) carrying the cross-client audience
-    agent-manager requires; muster accepts it as a bearer and lists its tools."""
+def test_dex_id_token_is_rejected_at_mcp(kube: Kube, muster: Optional[PortForward], dex: Optional[str]) -> None:
+    """An ID token remains invalid at MCP even with trusted identity audiences."""
     started = time.monotonic()
     try:
         token = dex_password_grant(dex)
@@ -403,17 +416,16 @@ def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: Optional
         assert claims.get("email") == SCENARIO.user, claims
         aud = claims.get("aud") if isinstance(claims.get("aud"), list) else [claims.get("aud")]
         assert CROSS_CLIENT_AUDIENCE in aud, f"the token lacks the {CROSS_CLIENT_AUDIENCE} audience: {aud}"
-        session = MusterSession(MUSTER_BASE_URL, token, "ats-password-grant").initialize()
-        tools = session.list_tools()
-        assert {"list_tools", "call_tool"} <= set(tools), f"muster's meta-tools missing from tools/list: {tools}"
-        aggregated = session.aggregated_tools()
-        assert any(t.startswith("core_") for t in aggregated), f"no core_ tool aggregated for the user: {aggregated[:20]}"
+        response = MusterSession(MCP_URL, token, "ats-id-token").post({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "ats-id-token", "version": "1"}}}, with_session=False)
+        assert response.status_code == 401, f"ID token accepted at /mcp: {response.status_code}"
+        assert 'error="invalid_token"' in response.headers.get("WWW-Authenticate", "")
     except AssertionError:
         dump_auth(kube)
         raise
-    STATE.dex_token = token
-    TIMINGS.record("auth round trip: password grant -> /mcp initialize -> tools/list -> list_tools", time.monotonic() - started)
-    logger.info("Dex user %s reached /mcp: %d meta-tools, %d aggregated tools", SCENARIO.user, len(tools), len(aggregated))
+    TIMINGS.record("auth boundary: Dex ID token -> /mcp 401 invalid_token", time.monotonic() - started)
 
 
 @pytest.mark.smoke
@@ -425,13 +437,15 @@ def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: Option
     started = time.monotonic()
     try:
         token = login_through_muster(MUSTER_BASE_URL, dex)
-        session = MusterSession(MUSTER_BASE_URL, token, "ats-login").initialize()
-        assert "call_tool" in session.list_tools()
+        session = MusterSession(MCP_URL, token, "ats-login").initialize()
+        tools = session.list_tools()
+        assert {"list_tools", "call_tool"} <= set(tools), f"muster's meta-tools missing from tools/list: {tools}"
         assert any(t.startswith("core_") for t in session.aggregated_tools())
     except AssertionError:
         dump_auth(kube)
         raise
-    TIMINGS.record("auth round trip: muster login flow (DCR, PKCE, Dex form) -> /mcp", time.monotonic() - started)
+    STATE.resource_token = token
+    TIMINGS.record("auth round trip: muster login flow (DCR, PKCE, consent, Dex form) -> /mcp", time.monotonic() - started)
 
 
 # ---------------------------------------------------------------------------
@@ -457,10 +471,21 @@ def test_substrate_runs_a_worker_for_the_platform_harness(kube: Kube, substrate:
 
 
 @pytest.mark.smoke
+def test_the_default_model_config_is_marked(kube: Kube, kagent_controller: None) -> None:
+    """The smoke's ModelConfig carries the default annotation, and kagent's own
+    default-model-config is not rendered (the meta chart writes providers:
+    false into the kagent release)."""
+    model = kube.get("modelconfigs.api.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE)
+    assert (model["metadata"].get("annotations") or {}).get(DEFAULT_MODEL_ANNOTATION) == "true", model["metadata"]
+    assert kube.get("modelconfigs.api.kagent.dev", KAGENT_DEFAULT_MODEL_CONFIG, namespace=KAGENT_NAMESPACE) is None, \
+        f"the kagent chart rendered {KAGENT_DEFAULT_MODEL_CONFIG}; the meta chart must write providers: false"
+
+
+@pytest.mark.smoke
 def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None, substrate: Dict[str, Any]) -> None:
     """A minimal declarative Agent on the platform Harness (spec.harnessRef)
-    with its template inline, against the chart's default ModelConfig (a
-    placeholder provider key): Ready means the controller compiled the template
+    with its template inline, against the smoke's ModelConfig (a placeholder
+    provider key): Ready means the controller compiled the template
     for the Harness and Substrate booted the actor's golden snapshot on the
     WorkerPool — not that a model call succeeded."""
     started = time.monotonic()
@@ -481,18 +506,18 @@ def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None, su
 @pytest.mark.smoke
 @REQUIRES_STATIC_USER
 def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, muster: Optional[PortForward], dex: Optional[str], kagent_controller: None, substrate: Dict[str, Any]) -> None:
-    """agent-manager's create_agent through muster, as the Dex user: muster
-    forwards the bearer to agent-manager (MCPServer auth.forwardToken; the
-    token carries the required cross-client audience), agent-manager validates
-    it against the lab Dex and writes the agent's HelmRelease of the Generic
+    """agent-manager's create_agent through muster, as the Dex user: a resource
+    access token authenticates the MCP caller; muster resolves the provider
+    identity for agent-manager (MCPServer auth.forwardToken). Agent-manager
+    validates it against the lab Dex and writes the agent's HelmRelease of the Generic
     chart (and the shared OCIRepository of the chart) into the kagent namespace
     with its own ServiceAccount; the bundled helm-controller executes the
     HelmRelease as kagent-flux, the chart renders the Agent naming the platform
     Harness (its template inline) and the agent's RemoteMCPServer, the
     controller compiles it and Substrate boots it."""
     started = time.monotonic()
-    token = STATE.dex_token or dex_password_grant(dex)
-    session = MusterSession(MUSTER_BASE_URL, token, "ats-agent-manager").initialize()
+    token = STATE.resource_token or login_through_muster(MUSTER_BASE_URL, dex)
+    session = MusterSession(MCP_URL, token, "ats-agent-manager").initialize()
     try:
         # muster connects to a forwardToken server per session, after the first
         # authenticated request; the tools appear once the SSO connection is up.
@@ -629,16 +654,19 @@ def test_edited_muster_object_is_reverted_on_the_next_reconcile(kube: Kube, must
     revision = hr["status"]["history"][0]["version"]
     before = kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)
     assert before, f"no PodDisruptionBudget muster in {NAMESPACE} to edit"
-    assert before["spec"].get("maxUnavailable") == 1, f"the muster PDB does not allow one eviction; pick another drift target: {before['spec']}"
+    # The chart's budget is minAvailable: 1 (giantswarm/agent-platform#1080; the
+    # smoke runs one replica, its OAuth state in memory, and drains no node); the
+    # hand edit lowers it to 0, which every replica count tolerates.
+    assert before["spec"].get("minAvailable") == 1, f"the muster PDB is not minAvailable: 1; pick another drift target: {before['spec']}"
     started = time.monotonic()
-    kube.cmd(["-n", NAMESPACE, "patch", "poddisruptionbudgets", "muster", "--type=merge", "-p", '{"spec":{"maxUnavailable":2}}'])
-    assert kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)["spec"]["maxUnavailable"] == 2, "the hand edit did not take"
+    kube.cmd(["-n", NAMESPACE, "patch", "poddisruptionbudgets", "muster", "--type=merge", "-p", '{"spec":{"minAvailable":0}}'])
+    assert kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)["spec"]["minAvailable"] == 0, "the hand edit did not take"
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     kube.cmd(["-n", NAMESPACE, "annotate", "helmreleases.helm.toolkit.fluxcd.io", "muster", f"reconcile.fluxcd.io/requestedAt={stamp}", "--overwrite"])
 
     def reverted() -> Any:
         pdb = kube.get("poddisruptionbudgets", "muster", namespace=NAMESPACE)
-        return pdb if pdb and pdb["spec"].get("maxUnavailable") == 1 else False
+        return pdb if pdb and pdb["spec"].get("minAvailable") == 1 else False
 
     try:
         wait_for("muster PDB reverted by the muster release's reconcile", reverted, 180)
@@ -724,8 +752,12 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     left = sorted(n for n in crds if n.endswith(FLUX_CRD_SUFFIX))
     assert not left, f"Flux CRDs left behind after the uninstall: {left}"
     assert OPERATOR_CRDS <= set(crds), "the operator CRDs must remain (Helm never deletes crds/)"
-    for name in ("flux-operator", "source-controller", "helm-controller", "muster", "agent-manager"):
+    for name in ("flux-operator", "source-controller", "helm-controller", "muster", "agentgateway-controller", "agent-manager"):
         assert kube.get("deployment", name, namespace=NAMESPACE) is None, f"Deployment {name} survived the uninstall"
+    # The data plane is the controller's object, owned by the connectivity
+    # release's Gateway: garbage-collected after it.
+    wait_for(f"the agentgateway data plane {AGENTGATEWAY_SERVICE} gone with its Gateway",
+             lambda: kube.get("deployment", AGENTGATEWAY_SERVICE, namespace=NAMESPACE) is None, 120, interval=3)
     # No Job of the release is left (the lab Dex's cert-gen Job is the prerequisite's, not the chart's).
     jobs = [j["metadata"]["name"] for j in kube.items("jobs", "-l", f"app.kubernetes.io/instance={RELEASE}", namespace=NAMESPACE)]
     assert not jobs, f"Jobs of the release left behind: {jobs}"
@@ -738,14 +770,15 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     # helm.sh/resource-policy: keep — survived it, so every Agent and
     # RemoteMCPServer is still there in the kept kagent namespace (the
     # agents' HelmRelease objects went with the Flux CRDs; the declarative Agent
-    # was never Helm's). The platform Harness goes with the kagent release:
+    # was never Helm's), and so is the smoke's ModelConfig, declared like the
+    # declarative Agent. The platform Harness goes with the kagent release:
     # from kagent 1.8.1 the release renders it (harness.create) without
     # helm.sh/resource-policy: keep, so an entry removed from the values is
     # deleted on the next upgrade (giantswarm/kagent-upstream#371). The keep
     # of giantswarm/agent-platform#406 served the 4.8.0 hand-over from the
     # connectivity release, long done; a reinstall renders the Harness again
     # and the kept Agents name it by spec.harnessRef. Nothing else of the agent
-    # runtime survives: the ModelConfig, the WorkerPool and its workers, the
+    # runtime survives: the WorkerPool and its workers, the
     # controller, the substrate release's SandboxConfig and Substrate's control
     # plane go. The database stays: the CloudNativePG Cluster (keep policy) with
     # its instance pods, which hold every Session. The
@@ -769,7 +802,8 @@ def test_uninstall_is_the_ordered_teardown(kube: Kube, helm: Helm, app_deploymen
     servers = sorted(s["metadata"]["name"] for s in kube.items("remotemcpservers.api.kagent.dev", namespace=KAGENT_NAMESPACE))
     assert servers == [MANAGED_AGENT], f"RemoteMCPServers after the uninstall {servers}: the agent's survives (keep policy), the kagent release's {KAGENT_API_SERVER} goes with the release"
     assert kube.get("harnesses.api.kagent.dev", HARNESS, namespace=KAGENT_NAMESPACE) is None, f"the platform Harness {HARNESS} survived the uninstall of the kagent release, whose object it is since kagent 1.8.1 (giantswarm/kagent-upstream#371)"
-    assert not kube.items("modelconfigs.api.kagent.dev", namespace=KAGENT_NAMESPACE), "ModelConfigs survived the uninstall of the kagent release"
+    models = sorted(m["metadata"]["name"] for m in kube.items("modelconfigs.api.kagent.dev", namespace=KAGENT_NAMESPACE))
+    assert models == [MODEL_CONFIG], f"ModelConfigs after the uninstall {models}: the declared {MODEL_CONFIG} survives (never Helm's), no release renders one"
     assert kube.get("sandboxconfigs.ate.dev", SANDBOX_CONFIG) is None, "the substrate release's SandboxConfig survived its uninstall"
     assert not kube.items("workerpools.ate.dev", all_namespaces=True), "a WorkerPool survived the kagent release's uninstall"
     assert kube.get("clusters.postgresql.cnpg.io", POSTGRES_CLUSTER, namespace=KAGENT_NAMESPACE), f"the CloudNativePG Cluster {POSTGRES_CLUSTER} went with the uninstall; it must be kept (it holds the Sessions)"

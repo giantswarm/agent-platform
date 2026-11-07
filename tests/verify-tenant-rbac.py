@@ -8,31 +8,32 @@ Each case pins one property of the render:
   each role holds every rule of the one before it; the user reads agents,
   templates, RemoteMCPServers, ModelConfigs, Harnesses, EgressPolicies and muster
   MCPServers and creates Sessions, and writes nothing; the editor writes
-  HelmReleases, OCIRepositories, Agents, AgentTemplates and RemoteMCPServers;
+  HelmReleases, Agents, AgentTemplates and RemoteMCPServers and reads the
+  agent chart's OCIRepository without writing it (giantswarm/agent-platform#1267);
   the admin also writes ModelConfigs, EgressPolicies and RoleBindings, places
   Secrets (create, update, patch, delete) and reads none, may `bind` the
   three roles only, and no role carries `escalate` or reads a Secret;
   agent-platform:platform-user holds the user's rules but the EgressPolicies;
 - the ValidatingAdmissionPolicy agent-platform-tenant-egress-credentials
   (Fail, bound with Deny) admits egresspolicies.api.kagent.dev of every
-  version in every namespace labelled giantswarm.io/organization but kagent,
+  version in every namespace labelled agent-platform.giantswarm.io/organization but kagent,
   and refuses a secretKeyRef without the tenant-credential- prefix; with
   kagent off it does not render; agent-platform-tenant-credentials (Fail,
   Deny) in the same namespaces refuses a Secret named tenant-credential-*
   of any type but Opaque (what the CEL decides is proven in the agentlab);
   agent-platform-tenant-model-credentials (Fail, Deny) in the same namespaces
-  refuses a ModelConfig whose apiKeySecret lacks the prefix, but from
-  agent-manager's ServiceAccount; agent-platform-tenant-credential-refs
+  refuses a ModelConfig whose apiKeySecret lacks the prefix, for every
+  requester; agent-platform-tenant-credential-refs
   (Fail, Deny) there refuses, for every requester, an Agent's or
   AgentTemplate's git credentialRef or a RemoteMCPServer's headersFrom Secret
-  without the prefix, but on an object being deleted;
-- with agent-manager on and tenants.organizations.enabled,
-  agent-platform-tenant-platform-secrets
-  (Fail, Deny) in the same namespaces lets only agent-manager's ServiceAccount
-  (and the namespace and garbage collectors' deletes) write a Secret labelled
-  agent-manager.giantswarm.io/tenant-object or named as the default
-  ModelConfig's key Secret; off, it does not render; a key Secret named with the tenant-credential- prefix fails the
-  render;
+  without the prefix, but a write that leaves the spec of an object being
+  deleted as it is;
+- agent-platform-platform-tenant-credential-refs (Fail, Deny) selects the
+  kagent namespace only, matches the six kinds of every version on create and
+  update, but an update that leaves the spec as it is, also on an object being
+  deleted, and asks the authorizer for `get` on each referenced Secret for
+  every requester; with kagent off it does not render; kagent.namespaceOverride
+  moves it;
 - the platform tenant: in the kagent namespace, agent-platform:platform-user
   is bound to tenants.platform.users (no agent-platform:user binding there,
   so no signed-in person reads its EgressPolicies) and agent-platform:editor to
@@ -74,8 +75,6 @@ TEAM = [
 ]
 ADMINS = ["giantswarm-ad:giantswarm-admins", "giantswarm-github:giantswarm:giantswarm-admins"]
 ROLES = ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
-ORGS = ["--set", "tenants.organizations.enabled=true"]
-RECONCILER = "system:serviceaccount:agent-platform:agent-manager"
 WRITES = {"create", "update", "patch", "delete"}
 
 
@@ -146,15 +145,18 @@ def check_roles(docs: list) -> None:
     if user_writes:
         fail(f"agent-platform:user writes {sorted(user_writes)}")
     ok("agent-platform:user reads the tenant's agents, servers and Harnesses, starts a Session, writes nothing")
-    for g, res in (("helm.toolkit.fluxcd.io", "helmreleases"), ("source.toolkit.fluxcd.io", "ocirepositories"),
+    for g, res in (("helm.toolkit.fluxcd.io", "helmreleases"),
                    ("api.kagent.dev", "agents"), ("api.kagent.dev", "agenttemplates"), ("api.kagent.dev", "remotemcpservers")):
         for v in WRITES:
             if (g, res, v, None) not in editor:
                 fail(f"agent-platform:editor cannot {v} {res}.{g}")
     for t in editor:
-        if t[1] in ("modelconfigs", "egresspolicies", "secrets", "rolebindings", "clusterroles") and t[2] in WRITES | {"bind"}:
+        if t[1] in ("modelconfigs", "egresspolicies", "secrets", "rolebindings", "clusterroles", "ocirepositories") and t[2] in WRITES | {"bind"}:
             fail(f"agent-platform:editor holds {t}")
-    ok("agent-platform:editor writes what agent-manager writes as the caller, and no ModelConfig, EgressPolicy, Secret or RoleBinding")
+    for v in ("get", "list", "watch"):
+        if ("source.toolkit.fluxcd.io", "ocirepositories", v, None) not in editor:
+            fail(f"agent-platform:editor cannot {v} ocirepositories.source.toolkit.fluxcd.io")
+    ok("agent-platform:editor writes what agent-manager writes as the caller, reads the agent chart's OCIRepository, and writes no OCIRepository, ModelConfig, EgressPolicy, Secret or RoleBinding")
     for g, res in (("api.kagent.dev", "modelconfigs"), ("api.kagent.dev", "egresspolicies"), ("", "secrets"),
                    ("rbac.authorization.k8s.io", "rolebindings")):
         for v in WRITES:
@@ -175,7 +177,7 @@ def check_roles(docs: list) -> None:
     ok("agent-platform:platform-user is agent-platform:user without the EgressPolicies")
 
 
-def check_egress_admission(docs: list) -> None:
+def check_egress_admission(docs: list, label: str) -> None:
     name = "agent-platform-tenant-egress-credentials"
     vap = find(docs, "ValidatingAdmissionPolicy", name)
     vapb = find(docs, "ValidatingAdmissionPolicyBinding", name)
@@ -186,7 +188,7 @@ def check_egress_admission(docs: list) -> None:
         fail(f"{name} failurePolicy is {spec.get('failurePolicy')}, want Fail")
     if vapb["spec"].get("policyName") != name or vapb["spec"].get("validationActions") != ["Deny"]:
         fail(f"{name}'s binding is {vapb['spec']}, want the policy with Deny")
-    want_ns = [{"key": "giantswarm.io/organization", "operator": "Exists"},
+    want_ns = [{"key": label, "operator": "Exists"},
                {"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": ["kagent"]}]
     if spec["matchConstraints"].get("namespaceSelector", {}).get("matchExpressions") != want_ns:
         fail(f"{name} selects {spec['matchConstraints'].get('namespaceSelector')}, want the Organizations' namespaces but kagent")
@@ -246,38 +248,56 @@ def check_egress_admission(docs: list) -> None:
         fail(f"{name} matches {spec['matchConstraints'].get('resourceRules')}, want Agent, AgentTemplate and RemoteMCPServer creates and updates")
     cel = " ".join(v["expression"] for v in spec.get("variables", []) + spec["validations"])
     for want in ("credentialRef", "headersFrom", "h.valueFrom.type == 'Secret'", "!n.startsWith('tenant-credential-')",
-                 "has(object.metadata.deletionTimestamp)"):
+                 "variables.releasing ||", "variables.spec == (has(oldObject.spec)"):
         if want not in cel:
             fail(f"{name} does not hold {want}: {cel}")
     if "userInfo.username ==" in cel:
         fail(f"{name} exempts a requester: {cel}")
     ok(f"{name} refuses, in the Organizations' namespaces but kagent and for every requester, a git credentialRef or a headersFrom Secret not named tenant-credential-*")
+    if " in [" in cel:
+        fail(f"{name} names an installation skills credential without agent-manager: {cel}")
 
 
-def check_platform_secrets(docs: list) -> None:
-    name = "agent-platform-tenant-platform-secrets"
+def check_platform_tenant_refs(docs: list, namespace: str) -> None:
+    name = "agent-platform-platform-tenant-credential-refs"
     vap = find(docs, "ValidatingAdmissionPolicy", name)
     vapb = find(docs, "ValidatingAdmissionPolicyBinding", name)
     if vap is None or vapb is None:
-        fail(f"ValidatingAdmissionPolicy {name} or its binding missing with tenants.organizations.enabled")
+        fail(f"ValidatingAdmissionPolicy {name} or its binding missing with kagent on")
     spec = vap["spec"]
-    if spec.get("failurePolicy") != "Fail" or vapb["spec"].get("validationActions") != ["Deny"]:
+    if spec.get("failurePolicy") != "Fail" or vapb["spec"].get("policyName") != name or vapb["spec"].get("validationActions") != ["Deny"]:
         fail(f"{name} does not fail closed and deny")
-    want_ns = [{"key": "giantswarm.io/organization", "operator": "Exists"},
-               {"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": ["kagent"]}]
-    if spec["matchConstraints"].get("namespaceSelector", {}).get("matchExpressions") != want_ns:
-        fail(f"{name} selects {spec['matchConstraints'].get('namespaceSelector')}, want the Organizations' namespaces but kagent")
-    if spec["matchConstraints"].get("resourceRules") != [{"apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE", "UPDATE", "DELETE"], "resources": ["secrets"]}]:
-        fail(f"{name} matches {spec['matchConstraints'].get('resourceRules')}, want Secret creates, updates and deletes")
+    if spec["matchConstraints"].get("namespaceSelector") != {"matchLabels": {"kubernetes.io/metadata.name": namespace}}:
+        fail(f"{name} selects {spec['matchConstraints'].get('namespaceSelector')}, want the {namespace} namespace only")
+    want_rules = [{"apiGroups": ["api.kagent.dev"], "apiVersions": ["*"], "operations": ["CREATE", "UPDATE"],
+                   "resources": ["agents", "agenttemplates", "remotemcpservers", "egresspolicies", "modelconfigs",
+                                 "modelproviderconfigs"]}]
+    if spec["matchConstraints"].get("resourceRules") != want_rules:
+        fail(f"{name} matches {spec['matchConstraints'].get('resourceRules')}, want {want_rules}")
     cond = " ".join(c["expression"] for c in spec.get("matchConditions", []))
-    for want in ("oldObject", "'agent-manager.giantswarm.io/tenant-object' in o.metadata.labels", "o.metadata.name == 'kagent-anthropic'"):
+    for want in ("request.operation == 'CREATE'", "!= (has(oldObject.spec)"):
         if want not in cond:
-            fail(f"{name} does not select the platform Secrets by {want}: {cond}")
-    val = " ".join(v["expression"] for v in spec["validations"])
-    for want in (f"'{RECONCILER}'", "namespace-controller", "generic-garbage-collector"):
-        if want not in val:
-            fail(f"{name} does not admit {want}: {val}")
-    ok(f"{name} lets only agent-manager write the platform Secrets of the Organizations' namespaces but kagent")
+            fail(f"{name} does not condition on {want}: {cond}")
+    if "deletionTimestamp" in cond:
+        fail(f"{name} admits a spec change to an object being deleted: {cond}")
+    cel = " ".join(v["expression"] for v in spec.get("variables", []) + spec["validations"])
+    for want in ("credentialRef", "h.valueFrom.type == 'Secret'", "d.authentication.secretKeyRef", "apiKeySecret", "variables.spec.secretRef.name",
+                 "authorizer.group('').resource('secrets').namespace(request.namespace).name(n).check('get').allowed()"):
+        if want not in cel:
+            fail(f"{name} does not hold {want}: {cel}")
+    if "userInfo.username ==" in cel or "startsWith(" in cel:
+        fail(f"{name} exempts a requester or a name prefix: {cel}")
+    ok(f"{name} refuses, in the {namespace} namespace only and for every requester, a Secret reference the requester may not get")
+
+
+def check_installation_credential(docs: list) -> None:
+    name = "agent-platform-tenant-credential-refs"
+    vap = find(docs, "ValidatingAdmissionPolicy", name)
+    cel = " ".join(v["expression"] for v in vap["spec"].get("variables", []))
+    want = "n in ['agent-manager-skills-token', 'tenant-credential-agent-manager-skills-token']"
+    if want not in cel:
+        fail(f"{name} does not refuse the installation's skills credential under its names ({want}): {cel}")
+    ok(f"{name} refuses the installation's skills credential, agent-manager-skills-token and its earlier tenant-credential- name, for every requester")
 
 
 def check_platform_tenant(docs: list, want_editors: list) -> None:
@@ -334,8 +354,8 @@ def main() -> None:
         if find(off, "RoleBinding", name):
             fail(f"RoleBinding {name} renders with kagent off")
     for name in ("agent-platform-tenant-egress-credentials", "agent-platform-tenant-credentials",
-                 "agent-platform-tenant-model-credentials", "agent-platform-tenant-platform-secrets",
-                 "agent-platform-tenant-credential-refs"):
+                 "agent-platform-tenant-model-credentials",
+                 "agent-platform-tenant-credential-refs", "agent-platform-platform-tenant-credential-refs"):
         if find(off, "ValidatingAdmissionPolicy", name):
             fail(f"{name} renders with kagent off")
     check_muster_viewer(off)
@@ -343,29 +363,23 @@ def main() -> None:
 
     on = render(conn, [*CONN, "--set", "components.kagent.enabled=true"])
     check_roles(on)
-    check_egress_admission(on)
+    # The organizations' namespaces carry agent-platform.giantswarm.io/organization
+    # (giantswarm/agent-platform#1268).
+    check_egress_admission(on, "agent-platform.giantswarm.io/organization")
+    check_platform_tenant_refs(on, "kagent")
+    check_platform_tenant_refs(render(conn, [*CONN, "--set", "components.kagent.enabled=true",
+                                             "--set", "kagent.namespaceOverride=agents",
+                                             "--set", "model-manager.kagent.namespace=agents"]), "agents")
     check_platform_tenant(on, ADMINS)
     check_muster_viewer(on)
-    if find(on, "ValidatingAdmissionPolicy", "agent-platform-tenant-platform-secrets"):
-        fail("agent-platform-tenant-platform-secrets renders without tenants.organizations.enabled")
     ok("the platform tenant: every signed-in person is a platform user, the admin groups are editors")
 
-    orgs = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "components.agent-manager.enabled=true", *ORGS])
-    check_platform_secrets(orgs)
-    model = find(orgs, "ValidatingAdmissionPolicy", "agent-platform-tenant-model-credentials")
-    if f"'{RECONCILER}'" not in " ".join(v["expression"] for v in model["spec"]["validations"]):
-        fail("agent-platform-tenant-model-credentials does not admit agent-manager's copy with its tenant reconciler on")
+    check_installation_credential(render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "components.agent-manager.enabled=true",
+                                                "--set", "agent-manager.skills.mintGitAuthSecret=true"]))
     model = find(on, "ValidatingAdmissionPolicy", "agent-platform-tenant-model-credentials")
     if "agent-manager" in yaml.safe_dump(model):
-        fail("agent-platform-tenant-model-credentials names agent-manager without its tenant reconciler")
-    ok("agent-platform-tenant-model-credentials admits agent-manager's copy only with its tenant reconciler on")
-    r = subprocess.run([HELM, "template", "t", conn, *CONN, "--set", "components.kagent.enabled=true",
-                        "--set", "components.agent-manager.enabled=true", *ORGS,
-                        "--set", "kagent.providers.anthropic.apiKeySecretRef=tenant-credential-model"],
-                       capture_output=True, text=True)
-    if r.returncode == 0 or "prefix of a tenant's own credentials" not in r.stderr:
-        fail(f"a model key Secret named tenant-credential-* renders: {r.stderr}")
-    ok("a model key Secret named with the tenant credential prefix fails the render")
+        fail("agent-platform-tenant-model-credentials names agent-manager")
+    ok("agent-platform-tenant-model-credentials excepts no writer")
 
     team = render(conn, [*CONN, "--set", "components.kagent.enabled=true", *TEAM])
     check_platform_tenant(team, ADMINS + ["acme:platform"])

@@ -3,17 +3,16 @@
 kagent line's CRDs, and assert that no render of the chart carries a
 kagent.dev/v1alpha2 object.
 
-The chart renders the platform's kagent catalog — `kagent.modelConfigs[]` as
-ModelConfigs, `kagent.remoteMcpServers[]` as RemoteMCPServers — at
-api.kagent.dev/v1alpha3, the only group and version the kagent line serves. `helm template`
+The chart renders the platform's kagent catalog (`kagent.remoteMcpServers[]` as
+RemoteMCPServers) at api.kagent.dev/v1alpha3, the only group and version the
+kagent line serves; it renders no ModelConfig. `helm template`
 cannot tell a field the CRD prunes from one it keeps, so this test checks the
 rendered objects against the CRDs' openAPIV3Schema the way the API server would
 at admission: every field known, every required field present, enums, types,
 lengths; plus the handful of the CRDs' CEL rules the rendered shapes can trip
-(a headersFrom entry carries exactly one of value / valueFrom; a provider block
-belongs to its provider; apiKeySecret and apiKeySecretKey come together; no
-spec.tls on an http:// url). A field the schema does not know is a failure — the
-API server would drop it silently and the object would lose that setting.
+(a headersFrom entry carries exactly one of value / valueFrom; no spec.tls on an
+http:// url). A field the schema does not know is a failure: the API server
+would drop it silently and the object would lose that setting.
 
 The CRDs are the kagent line's at its pinned release: the plain-YAML templates
 `helm/kagent-crds/templates/api.kagent.dev_*.yaml` of giantswarm/kagent-upstream at
@@ -24,15 +23,13 @@ Fetched into a temp dir by default; KAGENT_CRDS_DIR points at a directory
 holding them for an offline run.
 
 Shapes rendered: every helm/agent-platform-connectivity/ci/*.yaml as-is, and a
-catalog shape with kagent on, one ModelConfig routed through the LLM listener
-and two operator RemoteMCPServers (one with tokenSecret). Then one ModelConfig
-per provider of the CRD's `spec.provider` enum, with and without a baseUrl: the
-chart must accept every provider, a baseUrl must land under the block the CRD
-gives one to (`anthropic`, `mistral`, `openAI`, `sapAICore` — camel-cased, not the
-lower-cased provider), the render must refuse a baseUrl where the CRD's block
-has none, and a provider outside the enum must fail the render naming the enum.
-All of it is read from the CRD at KAGENT_LINE_REF, so a re-pin that moves the
-enum or a block's fields fails here, naming the helper to move with it. The
+catalog shape with kagent on and two operator RemoteMCPServers (one with
+tokenSecret). The LLM routing policies write a ModelConfig's baseUrl under the
+block agent-platform.modelConfigBaseUrlKey names: that map must be exactly the
+CRD's providers whose block has a baseUrl (`anthropic`, `mistral`, `openAI`,
+`sapAICore`, camel-cased, not the lower-cased provider), read from the CRD at
+KAGENT_LINE_REF, so a re-pin that moves the enum or a block's fields fails here,
+naming the helper to move with it. The
 pinned AgentTemplate CRD must serve `spec.skills[].source.git.credentialRef`
 and `spec.plugins[].source.git.credentialRef`, the per-source credential of a
 private repository (README "Private skill repositories"), as a Secret key
@@ -43,6 +40,7 @@ that accepts everything cannot pass.
 Usage: verify-kagent-crds.py <connectivity chart dir>
 """
 import glob
+import importlib.util
 import json
 import os
 import re
@@ -53,6 +51,11 @@ import urllib.request
 
 import yaml
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+_spec = importlib.util.spec_from_file_location("components_charts", os.path.join(HERE, "verify-components-charts.py"))
+cc = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(cc)
+KAGENT_CRDS_CHART = "oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent-crds"
 # The meta chart's values: the floor of components.kagent-crds.versionRange is
 # the kagent line's release the platform pins, so a re-pin moves this test too.
 META_VALUES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "helm", "agent-platform", "values.yaml")
@@ -76,7 +79,6 @@ CATALOG_SHAPE = [
     "--set", "ingress.parentRefs[0].name=x",
     "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
     "--set", "kagent.namespaceOverride=kagent",
-    "--set-json", 'kagent.modelConfigs=[{"name":"anthropic-sonnet","displayName":"Anthropic Sonnet 4.6","provider":"Anthropic","model":"claude-sonnet-4-6","apiKeySecret":"kagent-anthropic","baseUrl":"http://agentgateway.default.svc:8081","promptCaching":true,"cacheTTL":"1h","maxTokens":32000}]',
     "--set-json", 'kagent.remoteMcpServers=[{"name":"external","url":"https://external.example/mcp","tokenSecret":"external-token"},{"name":"open","url":"http://open.tools.svc:8080/mcp","description":"an MCP server reached with the propagated token"}]',
 ]
 
@@ -103,12 +105,17 @@ def fail(msg: str) -> None:
 
 
 def pinned_ref() -> str:
-    """The tag of the floor of the meta chart's components.kagent-crds range."""
+    """The tag of the floor of the meta chart's components.kagent-crds range;
+    while the floor is unpublished (UNRELEASED), the tag of the chart
+    verify-components-charts renders against."""
     rng = yaml.safe_load(open(META_VALUES))["components"]["kagent-crds"]["versionRange"]
     m = re.match(r">=\s*(\d+\.\d+\.\d+(?:-rc\.\d+)?)\s", rng)
     if not m:
         fail(f"components.kagent-crds.versionRange {rng!r} has no >=X.Y.Z or >=X.Y.Z-rc.N floor to read the pinned release from")
-    return "v" + m.group(1)
+    version = m.group(1)
+    if not os.environ.get("KAGENT_CRDS_DIR") and version == cc.UNRELEASED.get("kagent-crds"):
+        version = cc.floor_chart("kagent-crds", KAGENT_CRDS_CHART, rng)
+    return "v" + version
 
 
 KAGENT_LINE_REF = pinned_ref()
@@ -233,8 +240,13 @@ def check_rules(kind: str, spec: dict, path: str, errors: list[str]) -> None:
                 errors.append(f"{path}.{key}: the {owner} block on a {provider} ModelConfig (the CRD refuses it)")
         if "apiKeySecretKey" in spec and "apiKeySecret" not in spec:
             errors.append(f"{path}.apiKeySecretKey: set without apiKeySecret")
-        if "apiKeySecret" in spec and "apiKeySecretKey" not in spec and provider not in ("Bedrock", "SAPAICore"):
+        chatgpt = (spec.get("openAI") or {}).get("credentialType") == "chatgptOAuth"
+        if "apiKeySecret" in spec and "apiKeySecretKey" not in spec and provider not in ("Bedrock", "SAPAICore") and not chatgpt:
             errors.append(f"{path}.apiKeySecret: set without apiKeySecretKey")
+        # Without apiKeySecret it is the Session person's own login (the kagent line from
+        # 1.24.0, which agent-platform.validateChatGPTPersonalLogin holds the range to).
+        if chatgpt and "apiKeySecretKey" in spec:
+            errors.append(f"{path}: a ChatGPT login (openAI.credentialType chatgptOAuth) takes no apiKeySecretKey")
         if spec.get("apiKeyPassthrough") and spec.get("apiKeySecret"):
             errors.append(f"{path}: apiKeyPassthrough and apiKeySecret are mutually exclusive")
 
@@ -265,63 +277,43 @@ def render(chart: str, args: list[str]) -> list[dict]:
     return [d for d in yaml.safe_load_all(r.stdout) if isinstance(d, dict)]
 
 
-PROBE_URL = "http://probe.example:8081"
-
-
-def provider_shape(provider: str, base_url: str | None) -> list[str]:
-    """kagent on with one ModelConfig `probe` of the provider, with or without a baseUrl."""
-    entry = {"name": "probe", "provider": provider, "model": "m", "apiKeySecret": "s", "apiKeySecretKey": "k"}
-    if base_url:
-        entry["baseUrl"] = base_url
-    return ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
-            "--set", "kagent.namespaceOverride=kagent", "--set-json", f"kagent.modelConfigs={json.dumps([entry])}"]
+BASE_URL_KEY = re.compile(r'define "agent-platform.modelConfigBaseUrlKey" -}}\n\{\{- \$keys := dict ((?:"[^"]+" "[^"]+" ?)+)-}}')
 
 
 def check_providers(chart: str, crds: dict[str, dict]) -> None:
-    """Every provider of the CRD's enum, read from the CRD: the chart accepts it,
-    a baseUrl lands under the block the CRD gives one to and nowhere else, the
-    render refuses a baseUrl where the CRD's block has none, and a provider
-    outside the enum fails the render naming the enum."""
+    """agent-platform.modelConfigBaseUrlKey, the block the LLM routing policies
+    write a ModelConfig's baseUrl under, maps exactly the CRD's providers whose
+    block has a baseUrl, each to that block; and a policy renders for a served
+    provider, writing under its block."""
     spec = crds["ModelConfig"]["properties"]["spec"]
     enum = spec["properties"]["provider"]["enum"]
     blocks = {k.lower(): k for k, p in spec["properties"].items() if p.get("type") == "object" and "properties" in p}
-    with_url, without = [], []
+    want = {}
     for provider in enum:
         key = blocks.get(provider.lower())
         if key is None:
             fail(f"the CRD at {KAGENT_LINE_REF} has no provider block named after {provider}; PROVIDER_BLOCKS and the chart's helpers assume one per provider")
-        has_url = "baseUrl" in spec["properties"][key]["properties"]
-        mcs = [d for d in kagent_docs(render(chart, provider_shape(provider, None))) if d["kind"] == "ModelConfig"]
-        if len(mcs) != 1 or mcs[0]["spec"].get("provider") != provider:
-            fail(f"a {provider} ModelConfig without a baseUrl did not render as one object of that provider (the chart must accept every provider of the CRD's enum)")
-        if errors := validate(mcs[0], crds, f"provider {provider}"):
-            fail("\n  ".join([f"a {provider} ModelConfig the CRDs would refuse or prune:", *errors]))
-        r = template(chart, provider_shape(provider, PROBE_URL))
-        if has_url:
-            if r.returncode != 0:
-                fail(f"the render refused a baseUrl on a {provider} ModelConfig, but the CRD at {KAGENT_LINE_REF} gives spec.{key} a baseUrl — extend agent-platform.modelConfigBaseUrlKey:\n{r.stderr}")
-            mc = [d for d in kagent_docs([d for d in yaml.safe_load_all(r.stdout) if isinstance(d, dict)]) if d["kind"] == "ModelConfig"][0]
-            if errors := validate(mc, crds, f"provider {provider} with baseUrl"):
-                fail("\n  ".join([f"a {provider} ModelConfig with a baseUrl the CRDs would refuse or prune:", *errors]))
-            if (mc["spec"].get(key) or {}).get("baseUrl") != PROBE_URL:
-                fail(f"a {provider} ModelConfig's baseUrl is not under spec.{key} (the CRD's block): {json.dumps(mc['spec'])}")
-            if others := sorted(k for k in mc["spec"] if k in blocks.values() and k != key):
-                fail(f"a {provider} ModelConfig carries another provider's block {others}; the CRD refuses it")
-            with_url.append(f"{provider} → {key}.baseUrl")
-        else:
-            if r.returncode == 0:
-                fail(f"a baseUrl on a {provider} ModelConfig rendered, but the CRD at {KAGENT_LINE_REF} gives spec.{key} no baseUrl — the API server would prune the block and the model would stay direct in silence; the render must refuse it")
-            if "probe" not in r.stderr or provider not in r.stderr:
-                fail(f"the render refused a baseUrl on a {provider} ModelConfig without naming the entry and the provider:\n{r.stderr}")
-            without.append(provider)
-    print(f"ok: every provider of the CRD's enum renders; baseUrl under the CRD's block for {', '.join(with_url)}; refused for {', '.join(without)}")
-    for unknown in ("openai", "anthropic", "Foo"):
-        r = template(chart, provider_shape(unknown, None))
-        if r.returncode == 0:
-            fail(f"provider {unknown!r} rendered; the CRD's enum is {enum} (case-sensitive) and the API server refuses it at admission after the chart said nothing")
-        if "probe" not in r.stderr or any(p not in r.stderr for p in enum):
-            fail(f"the render refused provider {unknown!r} without naming the entry and every value of the CRD's enum:\n{r.stderr}")
-    print("ok: a provider outside the enum (a lower-cased spelling included) fails the render naming the entry and the enum")
+        if "baseUrl" in spec["properties"][key]["properties"]:
+            want[provider.lower()] = key
+    with open(os.path.join(chart, "templates", "_helpers.tpl"), encoding="utf-8") as f:
+        m = BASE_URL_KEY.search(f.read())
+    if not m:
+        fail("agent-platform.modelConfigBaseUrlKey is not one `$keys := dict ...` line; this check reads it")
+    words = re.findall(r'"([^"]+)"', m.group(1))
+    have = dict(zip(words[::2], words[1::2]))
+    if have != want:
+        fail(f"agent-platform.modelConfigBaseUrlKey maps {have}, but the CRD at {KAGENT_LINE_REF} gives a baseUrl to {want}; move the helper with the CRD")
+    print(f"ok: agent-platform.modelConfigBaseUrlKey matches the CRD's baseUrl blocks: {', '.join(f'{p} -> {k}' for p, k in sorted(want.items()))}")
+    for provider, url in (("Anthropic", "https://api.anthropic.com/v1"), ("OpenAI", "https://api.openai.com/v1"), ("Mistral", "https://api.mistral.ai/v1")):
+        models = json.dumps([{"name": provider.lower(), "provider": provider, "baseURL": url, "match": "*"}])
+        r = template(chart, ["-f", f"{chart}/ci/test-llm-routing-values.yaml", "-a", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy",
+                             "--set-json", f"llmRouting.models={models}"])
+        if r.returncode != 0:
+            fail(f"the LLM routing render for {provider} failed:\n{r.stderr}")
+        key = want[provider.lower()]
+        if f"Object.spec.{key}{{" not in r.stdout.replace(" ", ""):
+            fail(f"the routing policy for {provider} does not write under spec.{key}, the CRD's block")
+    print("ok: the routing policies write under the CRD's block for Anthropic, OpenAI and Mistral")
 
 
 def check_artifact_credential(crds: dict[str, dict]) -> None:
@@ -362,7 +354,7 @@ def main(chart: str) -> int:
     print(f"ok: CRDs {sorted(CRD_FILES)} of giantswarm/kagent-upstream at {KAGENT_LINE_REF} serve {API_VERSION}")
 
     shapes: list[tuple[str, list[str]]] = [(f"ci/{os.path.basename(f)}", ["-f", f]) for f in sorted(glob.glob(f"{chart}/ci/*.yaml"))]
-    shapes.append(("catalog (kagent on, one ModelConfig, two operator RemoteMCPServers)", CATALOG_SHAPE))
+    shapes.append(("catalog (kagent on, two operator RemoteMCPServers)", CATALOG_SHAPE))
     total = 0
     for where, args in shapes:
         docs = kagent_docs(render(chart, args))

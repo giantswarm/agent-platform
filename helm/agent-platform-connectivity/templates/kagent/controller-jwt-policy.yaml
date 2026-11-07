@@ -48,11 +48,12 @@ kagent-mcp-jwt is the same boundary in front of the controller's /mcp
 # the kagent controller (docs/authentication.md, "The kagent controller route").
 # On each route (the kagent-controller GRPCRoute, the kagent-mcp HTTPRoute) it
 # verifies the bearer JWT (signature, issuer, expiry) against the issuer,
-# refuses a token that carries no identity claim, and sets the identity header
+# refuses a token that carries no identity claim, sets the identity header
 # the controller reads — x-user-id — from that claim, replacing whatever the
-# client sent. The controller re-derives the identity from the same bearer
-# (trusted-proxy authenticator, unverified decode), which is why agentgateway
-# must stay the only path to it.
+# client sent, and removes the agent-call headers (x-agent-name,
+# x-user-groups). The controller re-derives the identity from the same bearer
+# and, with the meta chart's kagent.controller.auth derivation, verifies it
+# against the same issuer and key set.
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
@@ -101,10 +102,16 @@ spec:
     # then set, then remove — a remove of the same name would strip this value
     # again), so a client-supplied x-user-id never reaches the controller. JWT
     # authentication runs before transformations, so the claims are available.
+    # x-agent-name and x-user-groups are the controller's agent-call headers,
+    # which only an agent's runtime sends, from inside the cluster and never
+    # through this route: the identity contract through it is x-user-id alone.
     transformation:
       request:
         set:
           - name: x-user-id
             value: {{ printf "jwt.%s" $claim | quote }}
+        remove:
+          - x-agent-name
+          - x-user-groups
 {{- end }}
 {{- end }}

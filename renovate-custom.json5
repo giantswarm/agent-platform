@@ -55,6 +55,16 @@
       ],
       groupName: 'agentgateway line',
     },
+    {
+      // kagent.oauth2-proxy.image is the gsoci copy of the default image of
+      // the oauth2-proxy subchart that the kagent chart at the range's floor
+      // bundles (verify-kagent-oauth2-proxy-image): the kagent re-pin moves
+      // it, never a release of the image alone.
+      description: 'kagent oauth2-proxy follows the kagent re-pin',
+      matchDatasources: ['docker'],
+      matchPackageNames: ['gsoci.azurecr.io/giantswarm/oauth2-proxy'],
+      enabled: false,
+    },
   ],
   customManagers: [
     {

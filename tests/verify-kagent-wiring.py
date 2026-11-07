@@ -12,16 +12,15 @@ time, in the child HelmRelease or in the running controller:
     chart never reads;
   * forwarding an umbrella-only key, one the connectivity chart reads under
     `.Values.kagent` and the kagent chart does not define (controllerRoute,
-    uiRoute, harness, modelConfigs, remoteMcpServers, serviceMonitor,
+    uiRoute, harness, remoteMcpServers, serviceMonitor,
     oauth2ProxyIngress, ...), or the component toggle `enabled` — a chart
     without a schema carries them on silently. The list is derived from the
     connectivity templates, so a new wiring key must be added to
     `components.kagent.omitKeys` before this passes;
   * dropping `fullnameOverride` or `namespaceOverride`, which the chart AND the
     connectivity chart read, so the two would name different objects; or
-    `providers`, which the chart reads for the default ModelConfig (the LLM
-    cutover, `providers.<default>.config.baseUrl`) and the connectivity chart
-    reads for the provider key of its own ModelConfigs;
+    anything but `providers: false`, which keeps the chart from rendering its
+    own default-model-config;
   * a range that admits the line's dev builds, or upstream's next minor, or
     that Flux (Masterminds semver) would not match the line's stable releases against;
   * a kagent-crds source that differs from kagent's, a kagent release that does
@@ -76,7 +75,7 @@ CONNECTIVITY_TEMPLATES = pathlib.Path("helm/agent-platform-connectivity/template
 # chart's exporter configuration (the controller ConfigMap); the connectivity chart
 # reads the same endpoints for the OTLP egress of the controller and of the actors'
 # egress gateway (agent-platform.kagent.otlpTargets, giantswarm/agent-platform#456).
-UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "providers", "controller", "substrateWorkerPool", "harness", "harnesses", "otel"}
+UPSTREAM_KEYS = {"fullnameOverride", "namespaceOverride", "controller", "substrateWorkerPool", "harness", "harnesses", "otel"}
 KAGENT_READ = re.compile(r'\.Values\.kagent\.([A-Za-z0-9_-]+)|dig "([A-Za-z0-9_-]+)"[^\n]*\.Values\.kagent\b')
 
 LINE_REPOSITORY = "oci://gsoci.azurecr.io/giantswarm/kagent/helm"
@@ -217,8 +216,8 @@ def check_forwarded_block(values: dict[str, list[str]], omitted: set[str]) -> No
             fail(f"`{key}` forwarded to the kagent chart, which does not read it (an umbrella-only key)")
     if "fullnameOverride" not in values or "namespaceOverride" not in values:
         fail("kagent values lost fullnameOverride or namespaceOverride, which the connectivity chart also reads")
-    if "providers" not in values:
-        fail("kagent values lost providers (the chart's default ModelConfig, the connectivity chart's provider key)")
+    if scalar(values.get("providers", []), "providers") != "false":
+        fail("kagent values do not carry providers: false; the kagent chart would render its own default-model-config")
     print("ok: forwarded kagent values are flat, carry no umbrella-only key, keep the shared keys")
 
 
@@ -227,7 +226,9 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
         fail("kagent.registry is not gsoci.azurecr.io (the line's release images are copied under their upstream path, "
              "gsoci.azurecr.io/giantswarm/kagent/<image>, giantswarm/retagger#1229; giantswarm/agent-platform#580)")
     controller = values.get("controller", [])
-    for key, repo in (("image", "controller"), ("agentImage", "golang-adk")):
+    # The controller is the kagent-extensions binary the line publishes beside
+    # its own controller, from the same build.
+    for key, repo in (("image", "controller-extensions"), ("agentImage", "golang-adk")):
         if f"repository: {LINE_IMAGES}/{repo}" not in controller:
             fail(f"kagent.controller.{key}.repository is not {LINE_IMAGES}/{repo} (the line's image)")
     if f"repository: {LINE_IMAGES}/ui" not in values.get("ui", []):
@@ -255,9 +256,10 @@ def check_one_build(values: dict[str, list[str]], kagent_range: str, conn_kagent
         fail("kagent.harness.create is not true; since 4.8.0 the kagent chart renders the platform Harness")
     if re.search(r"^image:", harness, re.M):
         fail("kagent.harness.image forwarded by default; the chart's own Go ADK digest is the Harness image — an override travels only when set")
-    for needle, what in (("snapshotLocation: ", "the snapshot location"), ("- name: KAGENT_PROPAGATE_TOKEN", "KAGENT_PROPAGATE_TOKEN in env")):
-        if needle not in harness:
-            fail(f"kagent.harness forwarded without {what}: the meta chart owns the GS policy of the platform Harness\n{harness}")
+    if "snapshotLocation: " not in harness:
+        fail(f"kagent.harness forwarded without the snapshot location: the meta chart owns the GS policy of the platform Harness\n{harness}")
+    if "KAGENT_PROPAGATE_TOKEN" in harness:
+        fail(f"kagent.harness forwards KAGENT_PROPAGATE_TOKEN: a runtime re-emits the caller's token on every MCP call (giantswarm/giantswarm#38993)\n{harness}")
     if "allowedAgentTemplates" in harness:
         fail("kagent.harness.allowedAgentTemplates forwarded; the line's Harness has no admission selector (an Agent names its Harness by spec.harnessRef)")
     pool = scalar(values.get("substrateWorkerPool", []), "name")

@@ -5,8 +5,7 @@ The meta chart fills what a manager's oauth block and global.identity leave
 unset from muster.muster.oauth.server (agent-platform.identity.apply):
 oauth.dex.issuerURL, oauth.dex.clientID with oauth.trustedAudiences, and
 oauth.existingSecret for model-manager, agent-manager, vm-manager and
-cluster-manager; oauth.baseURL for the two routed managers under an
-agentgateway-* ingress.mode. The connectivity release receives the same filled
+cluster-manager; oauth.baseURL for the two routed managers. The connectivity release receives the same filled
 blocks, so each case renders the meta chart, then the connectivity chart with
 the values its HelmRelease carries — where the absence guard and the
 one-login guard fire.
@@ -33,13 +32,14 @@ def sets(*pairs: str) -> list[str]:
 
 
 # muster's login configured and nothing else: no global.identity, no manager oauth value.
+# Without an issuer the line's own controller runs, not the kagent-extensions binary.
 LOGIN = sets(
+    "kagent.controller.image.repository=giantswarm/kagent/controller",
     f"muster.muster.oauth.server.dex.issuerUrl={ISSUER}",
     f"muster.muster.oauth.server.dex.clientId={CLIENT}",
     f"muster.muster.oauth.server.existingSecret={SECRET}",
 )
 ALL_ON = sets(
-    "ingress.mode=agentgateway-muster",
     "components.agentgateway.enabled=true",
     "components.kagent.enabled=true",
     "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
@@ -162,9 +162,9 @@ def main() -> None:
     for what, extra, fragments in (
         ("no Secret", sets("muster.muster.oauth.server.existingSecret="), ("none of model-manager.oauth.existingSecret", "set muster.muster.oauth.server.existingSecret")),
         ("no client", sets("muster.muster.oauth.server.dex.clientId="), ("model-manager.oauth.dex.clientID is empty", "set muster.muster.oauth.server.dex.clientId")),
-        ("no base URL (muster-direct, no domain)", sets("ingress.mode=muster-direct", "global.domain="), ("model-manager.oauth.baseURL is empty", "set global.domain")),
+        ("no base URL (no domain)", sets("global.domain="), ("model-manager.oauth.baseURL is empty", "set global.domain")),
     ):
-        flags = [*base, *LOGIN, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "global.domain=ci.example.com", "ingress.mode=agentgateway-muster", "components.agentgateway.enabled=true"), *extra]
+        flags = [*base, *LOGIN, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "global.domain=ci.example.com", "components.agentgateway.enabled=true"), *extra]
         rels = releases(meta, flags)
         result = connectivity(conn, rels["agent-platform-connectivity"], base)
         if result.returncode == 0 or not all(f in result.stderr for f in fragments):
@@ -172,7 +172,8 @@ def main() -> None:
         print(f"ok: absent, {what}")
 
     print("--> no login named (muster's issuer unset): nothing filled, the guard stays silent")
-    rels = releases(meta, [*base, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri")])
+    rels = releases(meta, [*base, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
+                                        "kagent.controller.image.repository=giantswarm/kagent/controller")])
     expect("model-manager oauth.dex", oauth(rels, "model-manager").get("dex"), {"allowPrivateURLs": True})
     result = connectivity(conn, rels["agent-platform-connectivity"], base)
     if result.returncode != 0:

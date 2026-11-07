@@ -1,0 +1,51 @@
+{{- /* The avatars host answers 404 while nothing serves it. With the chart-owned
+agentgateway as the edge, the HTTPS listener takes every *.<global.domain>
+host, and a host no route names falls to the hostless agent-platform-mcps
+catch-all, whose MCP backend refuses a plain GET with 406 "client must accept
+text/event-stream". The avatars host is the portal's (its CSP names it), so
+without the DiceBear renderer's route (components.dicebear.enabled false, or
+dicebear.route.enabled resolved false: that route needs Envoy Gateway) this
+route claims the host and answers 404 from the gateway itself, through a
+directResponse policy on a backendless route. Its hostname outranks the
+catch-all. */ -}}
+{{- $dicebearRoute := and (include "agent-platform.componentEnabled" (dict "root" . "name" "dicebear")) (eq (toString (dig "route" "enabled" false (.Values.dicebear | default dict))) "true") }}
+{{- if and (include "agent-platform.ingress.agentgateway" .) (include "agent-platform.edgeIsDataPlane" .) (not $dicebearRoute) }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "name" . }}-avatars-notfound
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "agent-platform.parentRefs" (dict "ctx" . "key" "dicebear.route.parentRefs") | nindent 4 }}
+  hostnames:
+    {{- with (dig "route" "hostnames" (list) (.Values.dicebear | default dict)) }}
+    {{- toYaml . | nindent 4 }}
+    {{- else }}
+    - {{ include "agent-platform.hostname" (dict "ctx" . "prefix" "avatars" "key" "dicebear.route.hostnames") | quote }}
+    {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: {{ include "name" . }}-avatars-notfound
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: {{ include "name" . }}-avatars-notfound
+  traffic:
+    directResponse:
+      status: 404
+      body: not found
+{{- end }}

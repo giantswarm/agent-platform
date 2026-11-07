@@ -2,18 +2,13 @@
 # dependency gate plus a sample muster MCPServer rendered from the abstract
 # `mcpServers` list. The umbrella must still ship zero CRDs.
 #
-# Mode is muster-direct, so the agentgateway component is off and viaMuster is
-# false (both default the other way, with agentgateway-muster), and the sub-chart's
-# agentgateway.dev rendering is off: without the agentgateway component there
-# is no CRD for it (the ingress guard refuses the combination).
+# The default topology: agentgateway in front of muster, the servers reached
+# through muster (agent-platform-mcps.agentgateway.viaMuster).
 components:
-  agentgateway:
-    enabled: false
   agent-platform-mcps:
     enabled: true
 
 ingress:
-  mode: muster-direct
   parentRefs:
     - name: giantswarm-default
       namespace: envoy-gateway-system
@@ -31,9 +26,6 @@ muster:
           type: memory
 
 agent-platform-mcps:
-  agentgateway:
-    enabled: false
-    viaMuster: false
   mcpServers:
     - cluster: ci
       group: kubernetes

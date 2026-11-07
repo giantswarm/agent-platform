@@ -21,7 +21,7 @@ import sys
 import yaml
 
 BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
-        "--set", "components.kagent.enabled=true"]
+        "--set", "components.kagent.enabled=true", "--set", "global.identity.issuerUrl=https://dex.ci.example.com"]
 MESSAGE = "whose chart deploys no PostgreSQL: run kagent on the platform's CloudNativePG database, the supported shape"
 
 
@@ -65,7 +65,7 @@ def main(chart: str) -> int:
     for what, args in (
         ("an own urlFile", ["--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]),
         ("an own connectionStringSecretRef", ["--set", "kagent.database.postgres.connectionStringSecretRef.name=own-db"]),
-        ("a range below 1.11", ranged(">=1.10.0 <1.11.0")),
+        ("a range below 1.11", [*ranged(">=1.10.0 <1.11.0"), "--set", "kagent.controller.image.repository=giantswarm/kagent/controller", "--set", "global.identity.issuerUrl="]),
         ("kagent off", ["--set", "components.kagent.enabled=false"]),
     ):
         r = render(chart, args)

@@ -38,7 +38,7 @@ HELM = os.environ.get("HELM", "helm")
 HERE = pathlib.Path(__file__).resolve().parent
 RELEASE = "agent-platform"
 NAMESPACE = "agent-platform"
-COMPONENT, RANGE, WAITS_FOR = "agent-manager", ">=2.3.0 <3.0.0", "2.3.0"
+COMPONENT, RANGE, WAITS_FOR = "agent-manager", ">=2.9.0 <3.0.0", "2.9.0"
 DEV = "4.116.1-r7fb489f8t20261006135307h75833ed"
 JOB = f"{RELEASE}-waits-for-{COMPONENT}-{WAITS_FOR}"
 
@@ -121,7 +121,7 @@ def main(src: str) -> int:
             ("a release candidate", "4.116.0-rc.1", []),
             ("the engine off", DEV, ["--set", "components.flux.enabled=false"]),
             (f"{COMPONENT} off", DEV, ["--set", f"components.{COMPONENT}.enabled=false"]),
-            (f"{COMPONENT} on another range", DEV, ["--set", f"components.{COMPONENT}.versionRange=>=1.7.0 <2.0.0"]),
+            (f"{COMPONENT} on another range", DEV, ["--set", f"components.{COMPONENT}.versionRange=>=2.10.0 <3.0.0"]),
             (f"{COMPONENT} on a dev channel", DEV, ["--set", f"components.{COMPONENT}.semverFilter=.*-dev.*"]),
         ]:
             set_version(chart, version)

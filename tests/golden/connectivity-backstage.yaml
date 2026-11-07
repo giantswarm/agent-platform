@@ -55,12 +55,10 @@ data:
     app:
       title: Agent Platform
       baseUrl: https://backstage.ci.example.com
-      rootRedirect: /agent-platform
       portals:
         agentPlatform: true
       extensions:
         - page:agent-platform
-        - nav-item:agent-platform
         - page:gs/clusters: false
         - nav-item:gs/clusters: false
         - page:gs/deployments: false
@@ -124,6 +122,8 @@ data:
           url: https://muster.ci.example.com/mcp
           authProvider: oidc-agent-platform
     agentPlatform:
+      organizations:
+        enabled: false
       skills:
         repositories:
           - https://github.com/giantswarm/agent-skills
@@ -10894,7 +10894,7 @@ spec:
   image:
     registry: gsoci.azurecr.io
     repository: giantswarm/agentgateway-upstream/agentgateway
-    tag: 2.4.0
+    tag: 2.6.10
   service:
     spec:
       type: ClusterIP
@@ -10971,6 +10971,8 @@ spec:
         add:
           - name: agent_instance_id
             expression: '(source.unverifiedWorkload.namespace == "ate-system" && source.unverifiedWorkload.serviceAccount == "atenet-egress") ? request.headers["x-kagent-agent-instance-id"] : ""'
+          - name: request_id
+            expression: 'request.headers["x-request-id"]'
 ---
 # Source: agent-platform-connectivity/templates/agentgateway/healthz.yaml
 apiVersion: agentgateway.dev/v1alpha1
@@ -11887,7 +11889,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.1"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.2"
           command: ["kubectl"]
           args:
             - set
@@ -11896,7 +11898,8 @@ spec:
             - --namespace=agent-platform
             - --selector=app=backstage
             - --overwrite
-            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=5922d9131c090f246dfb28b32abbef09fd8bdb13d32b02f836291b5b9d8407bd
+            - --field-manager=agent-platform-config-reload
+            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=db131b80e8d4d85c37bebf93e300c0322370396305ac49797c920524c3c57529
           env:
             # kubectl keeps its discovery/http cache under $HOME; the root
             # filesystem is read-only.
