@@ -1,4 +1,4 @@
-"""Forms accepted by the ATS OAuth browser driver."""
+"""Headless authorization flow for ATS."""
 
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
@@ -45,3 +45,23 @@ def authorization_form(page, current_url, authorization_base, issuer_url, user, 
             assert origin(current_url) == origin(issuer_url) and origin(action) == origin(issuer_url), "unexpected password endpoint"
             return action, {"login": user, "password": password}
     raise AssertionError("OAuth page has no recognized consent or login form")
+
+
+def follow_authorization(session, url, callback, authorization_base, issuer_url, user, password):
+    response = None
+    for _ in range(15):
+        if urlsplit(url)._replace(query="", fragment="") == urlsplit(callback)._replace(query="", fragment=""):
+            return url
+        if response is None:
+            response = session.get(url, allow_redirects=False, timeout=30)
+        if response.status_code in (301, 302, 303, 307, 308):
+            url = urljoin(url, response.headers["Location"])
+            response = None
+            continue
+        assert response.status_code == 200, f"{url} -> {response.status_code}: {response.text[:300]}"
+        post_url, fields = authorization_form(response.text, url, authorization_base, issuer_url, user, password)
+        scheme, authority = origin(url)
+        response = session.post(post_url, data=fields, headers={"Origin": f"{scheme}://{authority}"},
+                                allow_redirects=False, timeout=30)
+        url = post_url
+    raise AssertionError(f"OAuth flow never reached the redirect URI: {url}")

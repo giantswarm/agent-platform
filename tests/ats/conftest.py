@@ -61,7 +61,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
-from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
 import requests
@@ -69,7 +69,7 @@ import yaml
 from pytest_helm_charts.clusters import Cluster
 
 import scenarios
-from oauth_browser import authorization_form, origin
+from oauth_browser import follow_authorization
 from scenarios import AGENTGATEWAY_SERVICE, AGENTGATEWAY_SERVICE_PORT, ATS_DIR, LOOPBACK, MUSTER_SERVICE_PORT, REPO_ROOT, Scenario
 
 logger = logging.getLogger(__name__)
@@ -1055,23 +1055,7 @@ def login_through_muster(base_url: str, ca_path: Optional[str]) -> str:
     url = f"{base_url}/oauth/authorize?" + urlencode({
         "response_type": "code", "client_id": client_id, "redirect_uri": callback, "state": state,
         "code_challenge": challenge, "code_challenge_method": "S256", "scope": "openid profile email groups"})
-    r = None
-    for _ in range(15):
-        if urlsplit(url)._replace(query="", fragment="") == urlsplit(callback)._replace(query="", fragment=""):
-            break
-        if r is None:
-            r = session.get(url, allow_redirects=False, timeout=30)
-        if r.status_code in (301, 302, 303, 307, 308):
-            url = urljoin(url, r.headers["Location"])
-            r = None
-            continue
-        assert r.status_code == 200, f"{url} -> {r.status_code}: {r.text[:300]}"
-        post_url, fields = authorization_form(r.text, url, base_url, SCENARIO.issuer_url, SCENARIO.user, SCENARIO.password)
-        scheme, authority = origin(url)
-        r = session.post(post_url, data=fields, headers={"Origin": f"{scheme}://{authority}"}, allow_redirects=False, timeout=30)
-        url = post_url
-    else:
-        raise AssertionError(f"OAuth flow never reached the redirect URI: {url}")
+    url = follow_authorization(session, url, callback, base_url, SCENARIO.issuer_url, SCENARIO.user, SCENARIO.password)
     query = parse_qs(urlsplit(url).query)
     assert query.get("state") == [state], f"state mismatch in {url}"
     assert "code" in query, f"authorization did not yield a code: {url}"
