@@ -97,8 +97,9 @@ One OIDC provider signs in every person, **Dex only today** (Keycloak and Entra 
 |---|---|---|
 | `global.identity.clientId` (e.g. `agent-platform`) | `https://muster.<domain>/oauth/callback` | always (muster's OAuth server) |
 | the same client | `https://backstage.<domain>/api/auth/oidc-agent-platform/handler/frame` | `components.backstage` |
+| the same client | `https://mcp-kubernetes.<domain>/oauth/callback` | `components.mcp-kubernetes`, which issues its own MCP access tokens |
 | a client of its own for the kagent UI's oauth2-proxy | `https://kagent.<domain>/oauth2/callback` | `kagent.uiRoute` with `kagent.oauth2-proxy` |
-| `dex-k8s-authenticator` (the audience your kube-apiserver trusts), `trustedPeers: [<global.identity.clientId>]`, no redirect URI | — | model-manager, agent-manager, cluster-manager, workspace-manager and mcp-kubernetes: muster forwards the person's token to them with this audience, and they act on the cluster as that person |
+| `dex-k8s-authenticator` (the audience your kube-apiserver trusts), `trustedPeers: [<global.identity.clientId>]`, no redirect URI | — | the upstream identity for Kubernetes RBAC, including mcp-kubernetes's own OAuth flow |
 
 In Dex's config:
 
@@ -109,6 +110,7 @@ staticClients:
     secret: <dex-client-secret>
     redirectURIs:
       - https://muster.platform.example.com/oauth/callback
+      - https://mcp-kubernetes.platform.example.com/oauth/callback
       - https://backstage.platform.example.com/api/auth/oidc-agent-platform/handler/frame
   - id: kagent-ui
     name: kagent UI
@@ -122,7 +124,9 @@ staticClients:
       - agent-platform
 ```
 
-The kube-apiserver has to trust the same issuer (`--oidc-issuer-url`, `--oidc-client-id=dex-k8s-authenticator`) for the forwarded tokens to carry a person's RBAC; a cluster whose apiserver trusts another audience sets it in `mcp-kubernetes.kubernetesAudience` and in each manager's `muster.mcpServer.auth.requiredAudiences`.
+The kube-apiserver has to trust the same issuer (`--oidc-issuer-url`, `--oidc-client-id=dex-k8s-authenticator`) for the upstream identity to carry a person's RBAC. A cluster whose apiserver trusts another audience sets it in `mcp-kubernetes.kubernetesAudience`. The Kubernetes MCP obtains that identity through its own authorization-code flow; its MCP endpoint requires its own resource access token. Other components' forwarded-token integrations need independent compatibility checks when their OAuth library changes.
+
+With the Kubernetes MCP enabled, the chart publishes its OAuth HTTPRoute through the platform's public Gateway and uses encrypted shared Valkey storage from the existing platform Secret. No consent flag or separate consent key is needed. Register the exact callback at the identity provider before upgrading. An installation that supplies its own public route can set `mcp-kubernetes.gatewayAPI` explicitly.
 
 The platform Secret, `global.identity.existingSecret`, in the release namespace:
 

@@ -60,6 +60,8 @@ def main() -> None:
     if len(default) != 1:
         fail(f"default: want one mcp-kubernetes MCPServer, got {len(default)}")
     single = default[0]
+    if single["spec"].get("auth", {}).get("forwardToken") is not False:
+        fail("OAuth registration must explicitly disable ID-token forwarding")
     if single["metadata"]["name"] != "mcp-kubernetes" or CLUSTER_LABEL in single["metadata"]["labels"] or "family" in single["spec"]:
         fail(f"default: want the family-less singleton mcp-kubernetes, got {single['metadata']} {single['spec']}")
     if single["metadata"]["labels"].get(TIER_LABEL) != "infrastructure":
@@ -100,10 +102,39 @@ def main() -> None:
     if "mcp-kubernetes.mcpServer.managementCluster" not in err:
         fail(f"a bad managementCluster: the failure does not name the key:\n{err}")
 
-    docs = render(meta, ["-f", f"{meta}/ci/ci-values.yaml", "--set", "components.flux.enabled=false", "--set", "components.mcp-kubernetes.enabled=true", "--set", "mcp-kubernetes.mcpServer.managementCluster=agentlab"])
+    docs = render(meta, ["-f", f"{meta}/ci/ci-values.yaml", "--set", "components.flux.enabled=false", "--set", "components.mcp-kubernetes.enabled=true", "--set", "global.domain=example.com", "--set", "ingress.parentRefs[0].name=x", "--set", "mcp-kubernetes.mcpServer.managementCluster=agentlab"])
     releases = {d["metadata"]["name"]: d for d in docs if d.get("kind") == "HelmRelease"}
     if "mcpServer" in releases["mcp-kubernetes"]["spec"].get("values", {}):
         fail("meta: mcp-kubernetes.mcpServer reaches the mcp-kubernetes release")
+    oauth = releases["mcp-kubernetes"]["spec"]["values"]["mcpKubernetes"]["oauth"]
+    if oauth.get("encryptionKey") is not True or oauth.get("storage", {}).get("type") != "valkey":
+        fail("OAuth must default to encrypted shared storage")
+    if oauth["storage"]["valkey"].get("url") != "muster-valkey:6379":
+        fail("OAuth must reuse the platform Valkey")
+    if oauth.get("dex", {}).get("kubernetesAuthenticatorClientID") != "dex-k8s-authenticator":
+        fail("OAuth must request the configured Kubernetes audience upstream")
+    route = releases["mcp-kubernetes"]["spec"]["values"]["gatewayAPI"]
+    if route.get("enabled") is not True or not route.get("httpRoute", {}).get("parentRefs"):
+        fail("OAuth must publish its browser endpoints through the public Gateway")
+    arguments = ["-f", f"{meta}/ci/ci-values.yaml", "--set", "components.flux.enabled=false", "--set", "components.mcp-kubernetes.enabled=true", "--set", "global.domain=example.com", "--set", "ingress.parentRefs[0].name=x"]
+    edge_docs = render(meta, arguments + ["--set", "gatewayApi.gateway.create=true", "--set", "gatewayApi.gateway.tls.secretName=tls", "--set", "ingress.parentRefs=null", "--set", "mcp-kubernetes.mcpKubernetes.oauth.baseURL=https://kubernetes.example.com:8443"])
+    edge = next(d["spec"]["values"] for d in edge_docs if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "mcp-kubernetes")
+    if edge["gatewayAPI"]["httpRoute"]["hostnames"] != ["kubernetes.example.com"]:
+        fail("the public route must match the issuer hostname without its port")
+    if edge["gatewayAPI"]["httpRoute"]["parentRefs"][0].get("sectionName") != "https":
+        fail("the chart-owned edge must publish OAuth on its HTTPS listener")
+    if not any(peer.get("matchLabels", {}).get("gateway.networking.k8s.io/gateway-name") == "agentgateway" for peer in edge["ciliumNetworkPolicy"]["ingress"]["gatewayPeers"]):
+        fail("the Kubernetes MCP must admit its Gateway's data plane")
+    own_docs = render(meta, arguments + ["--set", "mcp-kubernetes.gatewayAPI.enabled=false", "--set", "mcp-kubernetes.mcpKubernetes.oauth.storage.valkey.url=external:6379", "--set", "mcp-kubernetes.mcpKubernetes.oauth.storage.valkey.keyPrefix=own:", "--set", "mcp-kubernetes.mcpKubernetes.oauth.dex.kubernetesAuthenticatorClientID=own-audience"])
+    own = next(d["spec"]["values"] for d in own_docs if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "mcp-kubernetes")
+    if own["gatewayAPI"]["enabled"] is not False or own["mcpKubernetes"]["oauth"]["storage"]["valkey"]["url"] != "external:6379" or own["mcpKubernetes"]["oauth"]["storage"]["valkey"]["keyPrefix"] != "own:" or own["mcpKubernetes"]["oauth"]["dex"]["kubernetesAuthenticatorClientID"] != "own-audience":
+        fail("explicit route, store and Kubernetes audience values must remain effective")
+    error = render(meta, arguments + ["--set", "components.valkey.enabled=false"], expect_fail=True)
+    if "mcp-kubernetes OAuth needs shared storage" not in error:
+        fail("a missing shared store must fail the render")
+    readers = releases["valkey"]["spec"]["values"]["ciliumNetworkPolicy"]["ingress"]["clients"]
+    if not any(reader.get("matchLabels", {}).get("app.kubernetes.io/name") == "mcp-kubernetes" for reader in readers):
+        fail("the platform Valkey must admit the Kubernetes MCP")
     forwarded = releases["agent-platform-connectivity"]["spec"]["values"].get("mcp-kubernetes", {}).get("mcpServer")
     if forwarded != {"managementCluster": "agentlab"}:
         fail(f"meta: the connectivity release carries mcp-kubernetes.mcpServer {forwarded}")
