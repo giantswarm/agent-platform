@@ -14,3 +14,4 @@ Pending breaking changes are listed below.
 ### Fixed
 
 - Organization GitOps configuration in `agent-manager.tenants.commit` reaches compatible manager releases.
+- Organization namespace erasure admits bulk RoleBinding deletion while preserving admin bindings in active namespaces.
