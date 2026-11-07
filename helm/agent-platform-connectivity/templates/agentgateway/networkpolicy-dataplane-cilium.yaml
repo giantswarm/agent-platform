@@ -78,6 +78,17 @@ spec:
             - port: "8090"
               protocol: TCP
     {{- end }}
+    {{- $kubernetes := index .Values "mcp-kubernetes" | default dict }}
+    {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "mcp-kubernetes")) (dig "gatewayAPI" "enabled" (dig "mcpKubernetes" "oauth" "enabled" false $kubernetes) $kubernetes) }}
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: mcp-kubernetes
+            io.kubernetes.pod.namespace: {{ dig "mcp-kubernetes" "targetNamespace" "" .Values.components | default .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+    {{- end }}
     # xDS to the agentgateway controller. agentgateway runs as its own release
     # (separate from this connectivity release), so match on the controller-only
     # `agentgateway: agentgateway` label rather than a release-scoped instance.

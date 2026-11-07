@@ -97,7 +97,7 @@ When the engine is on, the chart also manages itself. `gitops.self.enabled: auto
 - **Update timing.** New patch and minor versions apply within `gitops.self.interval` (`10m`). Your values carry over.
 - **First adoption.** At install time the self `HelmRelease` is created suspended. A `<release>-self-resume` Job resumes it once the install is `deployed`. Because of this, `helm template` output shows `suspend: true`.
 
-**The Helm CLI is for day 0 only.** After the install, a `ValidatingAdmissionPolicy` (`<release>-self-managed-<namespace>`) refuses `helm upgrade` and `helm rollback`. The refusal happens before Helm writes a revision, and the error message says what to do instead. `helm uninstall` still works.
+**The Helm CLI is for day 0 only.** After the install, a `ValidatingAdmissionPolicy` (`<release>-self-managed-<namespace>`) refuses `helm upgrade` and `helm rollback`. The refusal happens before Helm writes a revision, and the error message says what to do instead. For `helm uninstall`, first suspend self-management as described in [Uninstalling](#uninstalling).
 
 **On day 2, change values through the Secret.** Secret `agent-platform-values` (key `values.yaml`) holds the release's user-supplied values. Rewrite it with your complete values file. A partial file resets everything it leaves out to the chart defaults.
 
@@ -110,6 +110,8 @@ kubectl -n agent-platform create secret generic agent-platform-values \
 To move to the next major version, set `gitops.self.versionRange` (for example `">=4.0.0 <5.0.0"`) in that file.
 
 **Escape hatch: hand the release back to the Helm CLI.**
+
+First suspend and drain the self HelmRelease using the maintenance preparation in [Uninstalling](#uninstalling). A CLI upgrade must not overlap an active controller reconciliation.
 
 ```bash
 kubectl annotate namespace agent-platform agent-platform.giantswarm.io/helm-cli=allow
@@ -172,9 +174,26 @@ The CRD charts keep their CRDs, so this order is safe. What survives is the same
 
 ### Uninstalling
 
+For a self-managed release, suspend its HelmRelease **before** invoking Helm. Flux suspension prevents new reconciliations but does not cancel one already running. Wait for any `Reconciling=True` condition to clear and the Helm release to leave a pending state. The pre-delete hook alone is too late: Helm marks the release `uninstalling` before running hooks, and Flux can recover that state by starting an upgrade. See the upstream [suspension API](https://fluxcd.io/flux/components/helm/api/v2/).
+
+Set `cluster_context` to the intended Kubernetes context. For a healthy self-managed release:
+
 ```bash
-helm uninstall agent-platform --namespace agent-platform --wait --timeout 5m
+set -euo pipefail
+kubectl --context "$cluster_context" -n agent-platform delete job agent-platform-self-resume --ignore-not-found --wait=true
+kubectl --context "$cluster_context" -n agent-platform patch helmrelease agent-platform --type=merge -p '{"spec":{"suspend":true}}'
+kubectl --context "$cluster_context" -n agent-platform wait helmrelease/agent-platform --for=condition=Ready --timeout=5m
+helm --kube-context "$cluster_context" status agent-platform --namespace agent-platform
 ```
+
+Confirm that the Helm release is `deployed`, no `Reconciling=True` condition remains, and `spec.suspend` is still `true`. A failed install may be `failed` instead; resolve an active reconciliation before proceeding. Remove any resumer created by that reconciliation, then uninstall:
+
+```bash
+kubectl --context "$cluster_context" -n agent-platform delete job agent-platform-self-resume --ignore-not-found --wait=true
+helm --kube-context "$cluster_context" uninstall agent-platform --namespace agent-platform --wait --timeout 5m
+```
+
+With self-management disabled, only the Helm uninstall command is needed. On a cluster running its own Flux, use [Uninstalling through that Flux](#clusters-that-run-flux).
 
 Hook Jobs tear the platform down in order, using `gitops.hooks.image` (`gsoci.azurecr.io/giantswarm/kubectl`) and `gitops.hooks.helmImage` (`gsoci.azurecr.io/giantswarm/alpine-k8s`):
 
@@ -497,7 +516,7 @@ You need:
 | Toggle | What the connectivity chart renders | Inputs |
 |---|---|---|
 | `components.backstage.enabled` | The app-config ConfigMap `agent-platform-backstage-app-config`, the `HTTPRoute` `backstage.<domain>`, and a config-reload hook that rolls the Deployment when the config changes. | `backstage.{hostname, parentRefs, installationName, extraScopes, startUrlSearchParams, enabledExtensions, disabledExtensions, skillsRepositories, configReload}`, dropped before the backstage chart (`components.backstage.omitKeys`). |
-| `components.mcp-kubernetes.enabled` | The `MCPServer` registering the server with muster, with the user's token forwarded and the label `agent-platform.giantswarm.io/tool-group: infrastructure`. Needs muster. `mcp-kubernetes.mcpServer.managementCluster: <name>` makes it a member of muster's `kubernetes` family; `enabled: false` renders no CR. | `mcp-kubernetes.kubernetesAudience` (default `dex-k8s-authenticator`, `""` for Google), `mcp-kubernetes.mcpServer`. |
+| `components.mcp-kubernetes.enabled` | The `MCPServer` registering the server with muster using per-server OAuth consent and an access token issued by mcp-kubernetes. OAuth uses the platform's existing Valkey and encryption Secret by default. Needs muster. `mcp-kubernetes.mcpServer.managementCluster: <name>` makes it a member of muster's `kubernetes` family; `enabled: false` renders no CR. | `mcp-kubernetes.kubernetesAudience` (default `dex-k8s-authenticator`, `""` for Google), `mcp-kubernetes.mcpServer`. |
 | `components.modelServing.enabled` (with the three kserve components) | The serving presets and the discovery ConfigMap `agent-platform-model-serving`, the serving `Namespace`, the cache claim, the Kyverno cache policies (`modelServing.policies.enabled: auto`) and the serving namespace's network policies. Fails without the kserve components or the `serving.kserve.io` API (`modelServing.kserve.requireApi`). | `modelServing.*` |
 | `components.kserve-llmisvc-resources.enabled` | The llm-d controller's network policy, and guards: `kserve.controller.deploymentMode: Standard`, `kserve.createSharedResources: true`. The removed `components.kserve-crd` / `components.kserve-resources` are refused. | the component's own block |
 
