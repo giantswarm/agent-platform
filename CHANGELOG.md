@@ -3,5 +3,14 @@
 The changes of each release are in its notes on GitHub Releases:
 https://github.com/giantswarm/agent-platform/releases
 
-This file is not updated any more: a pull request does not edit it. The
-pull request title is the release note.
+Pending breaking changes are listed below.
+
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** Organization credential UI configuration uses `agent-manager.credentials.uiURL` with an `{operation}` placeholder. `agent-manager.devPortal` is rejected.
+
+### Fixed
+
+- Organization GitOps configuration in `agent-manager.tenants.commit` reaches compatible manager releases.

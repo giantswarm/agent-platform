@@ -14,8 +14,8 @@ The meta chart's render:
   CA ConfigMap, the Flux namespace, and with the AWS store the IRSA role the
   connectivity chart renders); agent-manager's organization tools on
   (tenants.enabled, with an agent-manager floor of 2.20.0, whose chart leaves
-  agent-platform-tenant-flux to the connectivity chart) with devPortal.url from
-  the installed portal;
+  agent-platform-tenant-flux to the connectivity chart); credential UI URLs
+  are explicit client configuration;
   Substrate's credential provider reading
   the organization namespaces by the new label;
 - tenants.organizations is refused by the schema (the tenants mode is gone);
@@ -181,18 +181,28 @@ def check_meta(chart):
            "on with agent-manager on, the connectivity chart still renders agent-platform-tenant-flux: no other release takes it over")
     am = release(on, "agent-manager")["values"]
     expect(am.get("tenants") == {"enabled": True}, "on, agent-manager serves the organization tools (tenants.enabled true)")
-    expect("devPortal" not in am, "on with components.backstage off, no devPortal.url is derived")
-    expect(release(off, "agent-manager")["values"].get("tenants") == {"enabled": False} and "devPortal" not in release(off, "agent-manager")["values"],
-           "off, agent-manager's tenants.enabled is false and no devPortal.url is derived")
-    portal = ["--set", "components.backstage.enabled=true"]
-    for extra, url in (([], "https://backstage.ci.example.com"),
-                       (["--set", "backstage.hostname=portal.example.com"], "https://portal.example.com"),
-                       (["--set", "agent-manager.devPortal.url=https://backstage.ci.example.com/"], "https://backstage.ci.example.com")):
-        am = release(docs(meta(chart, *ON, *portal, *extra)), "agent-manager")["values"]
-        expect(am.get("devPortal") == {"url": url}, f"on with the portal installed ({extra}), agent-manager's devPortal.url is {url}")
-    am = release(docs(meta(chart, *ON, "--set", "agent-manager.devPortal.url=https://portal.elsewhere.example.com")), "agent-manager")["values"]
-    expect(am.get("devPortal") == {"url": "https://portal.elsewhere.example.com"},
-           "on with components.backstage off, an own devPortal.url (a portal installed apart) travels unchanged")
+    expect("devPortal" not in am, "no Dev Portal setting is derived")
+    expect(release(off, "agent-manager")["values"].get("tenants") == {"enabled": False},
+           "off, agent-manager's tenants.enabled is false")
+    for extra in ([], ["--set", "components.backstage.enabled=true"],
+                  ["--set", "components.backstage.enabled=true", "--set", "backstage.hostname=portal.example.com"]):
+        am = release(docs(meta(chart, *ON, *extra)), "agent-manager")["values"]
+        expect("devPortal" not in am and not am.get("credentials", {}).get("uiURL"),
+               "the portal does not implicitly configure credential UI routes")
+    ui_url = "https://portal.example.com/credential-operations/{operation}"
+    manager_commit = {"repository": "acme/management-clusters", "branch": "main",
+                      "objectsPath": "organizations", "contentPrefix": "agent-platform/organizations"}
+    am = release(docs(meta(chart, *ON, "--set", "components.agent-manager.versionRange=>=2.22.0-rc.3 <3.0.0",
+                           "--set-literal", f"agent-manager.credentials.uiURL={ui_url}",
+                           "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token",
+                           "--set", "agent-manager.githubTokenExchange.clientID=agent-manager",
+                           "--set-json", f"agent-manager.tenants.commit={json.dumps(manager_commit)}")), "agent-manager")["values"]
+    expect(am.get("credentials", {}).get("uiURL") == ui_url,
+           "the explicit client credential URL template travels unchanged")
+    expect(am.get("githubTokenExchange", {}).get("clientID") == "agent-manager",
+           "the configured confidential broker client travels unchanged")
+    expect(am.get("tenants") == {"enabled": True, "commit": manager_commit},
+           "organization GitOps configuration reaches the manager beside the derived organization switch")
     expect(v["commitMode"] == {"sourceRef": {"kind": "GitRepository", "name": "giantswarm-config"},
                                "path": "./agent-platform/organizations/{parent}/{name}", "decryptionSecret": "sops-keys"},
            f"with fluxNamespace, the operator's commit mode follows fluxSource, fluxPathPrefix and fluxDecryptionSecret ({v.get('commitMode')})")
@@ -259,9 +269,19 @@ def check_meta(chart):
     expect(r.returncode != 0 and "agent-manager.tenants.enabled (true) differs from agentPlatformOrganizations.enabled (false)" in r.stderr,
            "off with an own agent-manager.tenants.enabled true, the render fails naming the switch")
     r = meta(chart, "--set", "agent-manager.tenants.organizations.enabled=true")
-    expect(r.returncode != 0 and "agent-manager.tenants.organizations is set" in r.stderr,
-           "an own agent-manager.tenants key other than enabled fails the render naming it (agent-manager 2.19 refuses it)")
+    expect(r.returncode != 0 and "agent-manager.tenants.organizations is unsupported" in r.stderr,
+           "an unsupported agent-manager.tenants key fails the render naming it")
+    r = meta(chart, "--set", "components.agent-manager.versionRange=>=2.19.0 <3.0.0",
+             "--set", "agent-manager.tenants.commit.repository=acme/management-clusters")
+    expect(r.returncode != 0 and "agent-manager.tenants.commit needs" in r.stderr,
+           "organization GitOps configuration on an older manager fails the render naming its floor")
     for what, extra, needle in (
+            ("credential UI on an older manager", ["--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}"],
+             "agent-manager credential operations and GitHub token exchange need"),
+            ("token exchange on an older manager", ["--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token"],
+             "agent-manager credential operations and GitHub token exchange need"),
+            ("operation metadata on an older manager", ["--set", "agent-manager.credentials.operationsNamespace=credential-operations"],
+             "agent-manager credential operations and GitHub token exchange need"),
             ("components.agent-platform-operator.enabled false", ["--set", "components.agent-platform-operator.enabled=false"],
              "components.agent-platform-operator.enabled is false but agentPlatformOrganizations.enabled is true"),
             ("another targetNamespace", ["--set", "components.agent-platform-operator.targetNamespace=elsewhere"],
@@ -272,9 +292,9 @@ def check_meta(chart):
              "agent-manager.tenants.enabled (false) differs from agentPlatformOrganizations.enabled (true)"),
             ("agent-manager's downstream OAuth off", ["--set", "agent-manager.oauth.downstream.enabled=false"],
              "needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled"),
-            ("an own devPortal.url other than the installed portal's",
+            ("an unsupported devPortal block",
              ["--set", "components.backstage.enabled=true", "--set", "agent-manager.devPortal.url=https://other.example.com"],
-             "agent-manager.devPortal.url (https://other.example.com) differs from the Dev Portal this chart installs (https://backstage.ci.example.com"),
+             "agent-manager.devPortal is unsupported"),
             ("an own commit mode path that differs", ["--set", "agent-platform-operator.commitMode.path=./elsewhere/{name}"],
              "agent-platform-operator.commitMode.path (\"./elsewhere/{name}\") differs from what the chart derives"),
             ("an own commit mode source that differs", ["--set", "agent-platform-operator.commitMode.sourceRef.name=other"],
@@ -312,6 +332,46 @@ def connectivity(chart, flavor="kubernetes", *extra):
                 "--set", "kagent.fluxServiceAccountName=kagent-flux", "--set", "global.domain=ci.example.com",
                 "--set", "kagent.namespaceOverride=kagent", "--set", f"networkPolicy.flavor={flavor}",
                 "--api-versions", "kyverno.io/v2/PolicyException", *MAP_API, *extra])
+
+
+def check_broker_egress(chart):
+    flags = ["--set", "components.agent-manager.enabled=true", "--set", "agent-manager.oauth.enabled=true",
+             "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+             "--set", "global.identity.clientId=muster", "--set", "global.identity.existingSecret=platform-oauth"]
+    cases = [("https://broker.example.com/oauth/token", "broker.example.com", "", 443),
+             ("https://BROKER.example.com./oauth/token", "broker.example.com", "", 443),
+             ("https://broker.example.com:8443/oauth/token", "broker.example.com", "", 8443),
+             ("https://198.51.100.7:8443/token", "", "198.51.100.7/32", 8443),
+             ("https://[2001:db8::7]:8443/token", "", "2001:db8::7/128", 8443)]
+    for flavor in ("cilium", "kubernetes"):
+        kind = "CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy"
+        for endpoint, host, cidr, port in cases:
+            rendered = docs(connectivity(chart, flavor, *flags, "--set", f"agent-manager.githubTokenExchange.endpoint={endpoint}"))
+            policy = find(rendered, kind, "agent-platform-connectivity-agent-manager-egress")
+            expect(policy is not None, f"{flavor}: the manager's egress policy is rendered")
+            if flavor == "cilium":
+                target = {"toCIDR": [cidr]} if cidr else {"toFQDNs": [{"matchName": host}]}
+                target["toPorts"] = [{"ports": [{"port": str(port), "protocol": "TCP"}]}]
+                expect(target in policy["spec"]["egress"], f"{flavor}: the broker origin {endpoint} has an explicit rule")
+            else:
+                rules = [rule for rule in policy["spec"]["egress"] if rule.get("ports") == [{"port": port, "protocol": "TCP"}]]
+                expect(any(any(peer.get("ipBlock", {}).get("cidr") == (cidr or "0.0.0.0/0") for peer in rule.get("to", [])) for rule in rules),
+                       f"{flavor}: the broker address class and HTTPS port are admitted for {endpoint}")
+        for extra in ([], ["--set", "agent-manager.githubTokenExchange.endpoint=https://broker.example.com:8443/token",
+                          "--set", "agent-manager.oauth.enabled=false"]):
+            policy = find(docs(connectivity(chart, flavor, *flags, *extra)), kind, "agent-platform-connectivity-agent-manager-egress")
+            ports = [port["port"] for rule in policy["spec"]["egress"] for port in rule.get("ports", [])]
+            ports += [port["port"] for rule in policy["spec"]["egress"] for entry in rule.get("toPorts", []) for port in entry.get("ports", [])]
+            expect(8443 not in ports and "8443" not in ports, f"{flavor}: no broker port while it is unconfigured or OAuth is off")
+    private = docs(connectivity(chart, "kubernetes", *flags,
+                                "--set", "agent-manager.githubTokenExchange.endpoint=https://broker.example.com:8443/token",
+                                "--set", "agentManager.networkPolicy.egress.cidrs[0]=10.30.0.0/16",
+                                "--set", "networkPolicy.additionalEgressCIDRs[0]=10.20.0.0/16"))
+    policy = find(private, "NetworkPolicy", "agent-platform-connectivity-agent-manager-egress")
+    peers = [peer.get("ipBlock", {}).get("cidr") for rule in policy["spec"]["egress"]
+             if rule.get("ports") == [{"port": 8443, "protocol": "TCP"}] for peer in rule.get("to", [])]
+    expect("10.30.0.0/16" in peers and "10.20.0.0/16" in peers,
+           "kubernetes: private broker ranges follow both existing CIDR inputs on the broker's port")
 
 
 def check_default(chart):
@@ -651,6 +711,7 @@ def main():
     global API
     meta_chart, chart = sys.argv[1:3]
     check_meta(meta_chart)
+    check_broker_egress(chart)
     check_default(chart)
     k8s = check_egress(chart)
     policies = [d for d in k8s if d["kind"] in ("ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding",
