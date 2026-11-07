@@ -1323,7 +1323,9 @@ components:  # @schema additionalProperties: true
     # the meta chart derives: the credential providers' Secret readers bound
     # in every organization namespace (agent-platform-operator#23,
     # giantswarm/agent-platform#1269).
-    versionRange: ">=0.1.0 <0.2.0"
+    # Snapshot endpoints, path-style addressing and credential Secret
+    # references require 0.1.7 or later.
+    versionRange: ">=0.1.7 <0.2.0"
     valuesFrom: agent-platform-operator
     # App-owned CRD: the chart ships agentplatformorganizations in its crds/
     # dir. CreateReplace makes Flux upgrade it with the app on every release
