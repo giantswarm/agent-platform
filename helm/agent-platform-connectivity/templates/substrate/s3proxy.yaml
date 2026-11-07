@@ -46,7 +46,12 @@ netpol.yaml next to the bundled store's.
 {{- $endpoint := urlParse $az.endpoint }}
 {{- $backendPort := $endpoint.host | splitList ":" | last }}
 {{- if eq $backendPort $endpoint.host }}{{- $backendPort = ternary "443" "80" (eq $endpoint.scheme "https") }}{{- end }}
-{{- range $secretNs := list $ns $substrateNs | uniq }}
+{{- $namespaces := list $ns $substrateNs }}
+{{- if include "agent-platform.organizations.enabled" . }}
+{{- $operator := include "agent-platform.organizations.operatorServiceAccount" . | fromJson }}
+{{- $namespaces = append $namespaces $operator.namespace }}
+{{- end }}
+{{- range $secretNs := $namespaces | uniq }}
 ---
 # The S3 key pair the façade accepts and Substrate presents. Generated on the
 # first render, read back from the release namespace's copy on every later one

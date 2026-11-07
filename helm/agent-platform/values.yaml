@@ -5528,8 +5528,8 @@ tenants:
 #     an S3 snapshot location, S3 and STS); with the Crossplane AWS snapshot store
 #     the IAM role <store role>-operator, which deletes keys under an
 #     organization's UID prefix of the bucket only, named on the operator's
-#     ServiceAccount (IRSA). The capz and s3proxy stores give the operator no
-#     snapshot access yet: there the erasure stops at the snapshots' step;
+#     ServiceAccount (IRSA). RustFS and the s3proxy facade use path-style
+#     endpoints and a credential Secret in the operator namespace;
 #   - ate-api-server's serving roots, which the operator verifies it with:
 #     the ClusterTrustBundles of servicedns.podcert.ate.dev/identity
 #     labelled podcert.ate.dev/canarying: live, projected into its pod.
