@@ -1131,7 +1131,7 @@ components:  # @schema additionalProperties: true
     # agent-platform.giantswarm.io/is-default-model-config) as `default` on
     # list_model_configs and fills an omitted modelConfig on create_agent
     # from it (giantswarm/agent-manager#298). Its tenants.enabled serves the
-    # organization tools; this chart derives it and devPortal.url from
+    # organization tools; this chart derives it from
     # agentPlatformOrganizations.enabled (agent-platform.agentManager.organizations).
     # 2.20.0 is the floor agentPlatformOrganizations.enabled needs: its chart
     # leaves the ClusterRole agent-platform-tenant-flux to the connectivity
@@ -5535,10 +5535,10 @@ tenants:
 # The operator's own values are the agent-platform-operator block below.
 # With components.agent-manager on, agent-manager's tenants.enabled follows
 # this switch, so it serves the organization tools (the floor of
-# components.agent-manager.versionRange must be 2.20.0 or later), and with
-# components.backstage on its devPortal.url is the portal's
-# https://<backstage.hostname> (else backstage.<global.domain>), where the
-# tools link a missing credential. With components.muster on, muster serves
+# components.agent-manager.versionRange must be 2.20.0 or later). Credential
+# forms use an explicit agent-manager.credentials.uiURL template containing
+# {operation}; credentials and githubTokenExchange need a manager floor of
+# 2.22.0-rc.3 or later. With components.muster on, muster serves
 # the MCPServers of the namespaces labelled
 # agent-platform.giantswarm.io/organization (muster.mcpServerNamespaceSelector,
 # muster 5.58.0 or later), listed as the person: muster's OAuth server on the
