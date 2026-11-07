@@ -1072,9 +1072,13 @@ def login_through_muster(base_url: str, ca_path: Optional[str]) -> str:
     state = secrets.token_urlsafe(24)  # muster rejects a state shorter than 24 characters
     session = requests.Session()
     session.verify = ca_path or True  # the issuer's CA when it has one, else the system store
+    metadata = session.get(f"{base_url}/.well-known/oauth-protected-resource", timeout=30)
+    assert metadata.status_code == 200, f"resource discovery failed: {metadata.status_code}"
+    resource = metadata.json()["resource"]
     url = f"{base_url}/oauth/authorize?" + urlencode({
         "response_type": "code", "client_id": client_id, "redirect_uri": callback, "state": state,
-        "code_challenge": challenge, "code_challenge_method": "S256", "scope": "openid profile email groups"})
+        "code_challenge": challenge, "code_challenge_method": "S256", "scope": "openid profile email groups",
+        "resource": resource})
     url = follow_authorization(session, url, callback, base_url, SCENARIO.issuer_url, SCENARIO.user, SCENARIO.password)
     query = parse_qs(urlsplit(url).query)
     assert query.get("state") == [state], f"state mismatch in {url}"
@@ -1082,7 +1086,7 @@ def login_through_muster(base_url: str, ca_path: Optional[str]) -> str:
     r = requests.post(
         f"{base_url}/oauth/token", auth=(client_id, client_secret),
         data={"grant_type": "authorization_code", "code": query["code"][0], "redirect_uri": callback,
-              "client_id": client_id, "code_verifier": verifier},
+              "client_id": client_id, "code_verifier": verifier, "resource": resource},
         timeout=30,
     )
     assert r.status_code == 200, f"token exchange failed: {r.status_code} {r.text[:300]}"
