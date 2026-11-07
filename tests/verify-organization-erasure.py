@@ -201,6 +201,39 @@ def main():
         fail("off by default: the operator's policy renders")
     ok("the kagent controller's API port admits the operator's pods, both flavors; none with network policies off")
 
+    for flavor, kind in (("cilium", "CiliumNetworkPolicy"), ("kubernetes", "NetworkPolicy")):
+        for store, selectors, namespace, port, options in (
+            ("rustfs", {"app": "rustfs"}, "ate-system", 9000, ["-f", f"{CHART}/ci/test-substrate-values.yaml", "--set", "substrate.rustfs.enabled=true", "--set", "substrate.rustfs.accessKey=proof-access", "--set", "substrate.rustfs.secretKey=proof-secret"]),
+            ("s3proxy", {"app.kubernetes.io/name": "s3proxy", "app.kubernetes.io/component": "snapshot-store"}, NAMESPACE, 8080, ["-f", f"{CHART}/ci/test-substrate-store-capz-values.yaml"]),
+        ):
+            documents = render(*options, *ON, "--set", f"networkPolicy.flavor={flavor}")
+            ingress = find(documents, kind, "agent-platform-connectivity-operator-to-snapshot-store")
+            egress = find(documents, kind, "agent-platform-connectivity-operator-egress")["spec"]["egress"]
+            if not ingress or ingress["metadata"]["namespace"] != namespace:
+                fail(f"{store} {flavor}: missing store-side ingress")
+            if flavor == "cilium":
+                expected_rule = {"toEndpoints": [{"matchLabels": {**selectors, "io.kubernetes.pod.namespace": namespace}}], "toPorts": [{"ports": [{"port": str(port), "protocol": "TCP"}]}]}
+                expected_ingress = [{"fromEndpoints": [{"matchLabels": {**pods, "io.kubernetes.pod.namespace": NAMESPACE}}], "toPorts": [{"ports": [{"port": str(port), "protocol": "TCP"}]}]}]
+                if ingress["spec"]["endpointSelector"]["matchLabels"] != selectors or any("world" in rule.get("toEntities", []) for rule in egress):
+                    fail(f"{store} {flavor}: wrong store selector or world egress")
+            else:
+                expected_rule = {"to": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": namespace}}, "podSelector": {"matchLabels": selectors}}], "ports": [{"port": port, "protocol": "TCP"}]}
+                expected_ingress = [{"from": want_peer, "ports": [{"port": port, "protocol": "TCP"}]}]
+                if ingress["spec"]["podSelector"]["matchLabels"] != selectors or any(peer.get("ipBlock", {}).get("cidr") == "0.0.0.0/0" and peer["ipBlock"].get("except") for rule in egress if {"port": 443, "protocol": "TCP"} in rule.get("ports", []) for peer in rule.get("to", [])):
+                    fail(f"{store} {flavor}: wrong store selector or world egress")
+            if expected_rule not in egress or ingress["spec"]["ingress"] != expected_ingress:
+                fail(f"{store} {flavor}: wrong operator egress or store ingress")
+            secret_name = "substrate-rustfs-operator" if store == "rustfs" else "substrate-s3proxy"
+            secret = find(documents, "Secret", secret_name)
+            if not secret or secret["metadata"]["namespace"] != NAMESPACE:
+                fail(f"{store}: no credential Secret in the operator namespace")
+            if store == "rustfs" and secret.get("stringData") != {"accessKeyId": "proof-access", "secretAccessKey": "proof-secret"}:
+                fail("RustFS credential Secret differs from configured store")
+            disabled = render(*options, *ON, "--set", "networkPolicy.enabled=false")
+            if find(disabled, kind, "agent-platform-connectivity-operator-to-snapshot-store"):
+                fail(f"{store}: store ingress renders with policies disabled")
+            ok(f"{store} {flavor}: operator and store admit only the selected API port; credentials in operator namespace")
+
     nostore = render("-f", f"{CHART}/ci/test-substrate-values.yaml", *ON)
     if find(nostore, "Role", IAM_ROLE) or any(d.get("kind") == "Role" and d["apiVersion"].startswith("iam.aws") and d["metadata"]["name"].endswith("-operator") for d in nostore):
         fail("on with the snapshot store off: an IAM role renders")

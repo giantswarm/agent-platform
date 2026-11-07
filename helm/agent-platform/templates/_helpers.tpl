@@ -5360,7 +5360,8 @@ same bucket (or the container behind the s3proxy façade): s3://<bucket>/<uid>. 
 {{- if not $bucket -}}
 {{- fail "agentPlatformOrganizations.enabled needs the Harness snapshot location (kagent.harness.snapshotLocation, or kagent.harness.snapshotStore): an organization's Harness copies keep their snapshots under s3://<bucket>/<organization UID> in its bucket" -}}
 {{- end -}}
-{{- $snapshots := dict "bucket" $bucket -}}
+{{- $snapshots := include "agent-platform.operator.snapshots" . | fromJson -}}
+{{- $_ := set $snapshots "bucket" $bucket -}}
 {{- $aws := eq (include "agent-platform.substrateStore.crossplane" .) "aws" -}}
 {{- if $aws -}}
 {{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane -}}
@@ -5515,4 +5516,33 @@ secretRef:
 certSecretRef:
   name: {{ . }}
 {{- end }}
+{{- end -}}
+
+{{/* The operator uses the same endpoint and credential references as the snapshot store. */}}
+{{- define "agent-platform.operator.snapshots" -}}
+{{- $snapshots := dict -}}
+{{- $substrate := .Values.substrate | default dict -}}
+{{- $namespace := dig "substrate" "targetNamespace" "ate-system" .Values.components -}}
+{{- if include "agent-platform.substrateStore.s3proxy" . -}}
+{{- $_ := set $snapshots "endpoint" (include "agent-platform.substrateStore.s3proxyUrl" .) -}}
+{{- $_ := set $snapshots "usePathStyle" true -}}
+{{- $_ := set $snapshots "region" "us-east-1" -}}
+{{- $_ := set $snapshots "credentials" (dict "existingSecret" (include "agent-platform.substrateStore.s3proxyName" .)) -}}
+{{- else if dig "rustfs" "enabled" false $substrate -}}
+{{- $_ := set $snapshots "endpoint" (printf "http://rustfs.%s.svc:9000" $namespace) -}}
+{{- $_ := set $snapshots "usePathStyle" true -}}
+{{- $_ := set $snapshots "region" "us-east-1" -}}
+{{- $_ := set $snapshots "credentials" (dict "existingSecret" "substrate-rustfs-operator") -}}
+{{- else -}}
+{{- range dig "ateApiServer" "extraEnv" list $substrate -}}
+{{- if eq .name "AWS_ENDPOINT_URL" -}}
+{{- $_ := set $snapshots "endpoint" (required "substrate.ateApiServer.extraEnv AWS_ENDPOINT_URL needs a value" .value) -}}
+{{- else if eq .name "AWS_S3_USE_PATH_STYLE" -}}
+{{- $_ := set $snapshots "usePathStyle" (eq .value "true") -}}
+{{- else if eq .name "AWS_REGION" -}}
+{{- $_ := set $snapshots "region" .value -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $snapshots | toJson -}}
 {{- end -}}

@@ -29,11 +29,16 @@ this release's namespace.
 {{- $substrateNs := include "agent-platform.substrate.namespace" . }}
 {{- /* S3 (and STS for IRSA) whenever the snapshot location is an S3 bucket
 outside the cluster, whoever provisioned it: the Crossplane AWS store, or an
-existing bucket named in kagent.harness.snapshotLocation. The s3proxy façade
-(capz, or s3proxy alone) is in the cluster and gives the operator no access. */ -}}
+existing bucket named in kagent.harness.snapshotLocation. The configured in-cluster store gets a pod-scoped rule on its API port. */ -}}
 {{- $location := dig "harness" "snapshotLocation" "" (.Values.kagent | default dict) }}
 {{- if include "agent-platform.substrateStore.mode" . }}{{ $location = include "agent-platform.substrateStore.location" . }}{{ end }}
-{{- $s3 := and (hasPrefix "s3://" $location) (not (include "agent-platform.substrateStore.s3proxy" .)) }}
+{{- $store := dict }}
+{{- if include "agent-platform.substrateStore.s3proxy" . }}
+{{- $store = dict "namespace" .Release.Namespace "labels" (dict "app.kubernetes.io/name" "s3proxy" "app.kubernetes.io/component" "snapshot-store") "port" 8080 }}
+{{- else if dig "rustfs" "enabled" false (.Values.substrate | default dict) }}
+{{- $store = dict "namespace" $substrateNs "labels" (dict "app" "rustfs") "port" 9000 }}
+{{- end }}
+{{- $s3 := and (hasPrefix "s3://" $location) (not $store) }}
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
 apiVersion: cilium.io/v2
@@ -68,6 +73,16 @@ spec:
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+    {{- end }}
+    {{- with $store }}
+    - toEndpoints:
+        - matchLabels:
+            {{- toYaml .labels | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .namespace }}
+      toPorts:
+        - ports:
+            - port: {{ .port | quote }}
               protocol: TCP
     {{- end }}
     {{- if $s3 }}
@@ -170,6 +185,18 @@ spec:
         - port: 443
           protocol: TCP
     {{- end }}
+    {{- with $store }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .labels | nindent 14 }}
+      ports:
+        - port: {{ .port }}
+          protocol: TCP
+    {{- end }}
     {{- if $s3 }}
     - to:
         - ipBlock:
@@ -235,5 +262,46 @@ spec:
         - port: 443
           protocol: TCP
 {{- end }}
+{{- end }}
+{{- with $store }}
+---
+apiVersion: {{ ternary "cilium.io/v2" "networking.k8s.io/v1" (eq (include "agent-platform.networkPolicyFlavor" $) "cilium") }}
+kind: {{ ternary "CiliumNetworkPolicy" "NetworkPolicy" (eq (include "agent-platform.networkPolicyFlavor" $) "cilium") }}
+metadata:
+  name: {{ include "name" $ }}-operator-to-snapshot-store
+  namespace: {{ .namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+spec:
+  {{- if eq (include "agent-platform.networkPolicyFlavor" $) "cilium" }}
+  endpointSelector:
+    matchLabels:
+      {{- toYaml .labels | nindent 6 }}
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            {{- toYaml $pods | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ $sa.namespace }}
+      toPorts:
+        - ports:
+            - port: {{ .port | quote }}
+              protocol: TCP
+  {{- else }}
+  podSelector:
+    matchLabels:
+      {{- toYaml .labels | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $sa.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $pods | nindent 14 }}
+      ports:
+        - port: {{ .port }}
+          protocol: TCP
+  {{- end }}
 {{- end }}
 {{- end }}
