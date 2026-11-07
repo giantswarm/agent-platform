@@ -1165,6 +1165,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.workspace-manager.enabled | bool | `false` |  |
 | components.backstage.enabled | bool | `false` |  |
+| components.mcp-kubernetes-valkey.enabled | bool | `false` |  |
 | components.mcp-kubernetes.enabled | bool | `false` |  |
 | components.cloudnative-pg.enabled | bool | `false` |  |
 | components.kserve-llmisvc-crd.enabled | bool | `false` |  |
@@ -2049,3 +2050,4 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.modelsGateway.jwtAuthentication.jwks.path | string | `"/keys"` |  |
 | modelServing.modelsGateway.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | modelServing.modelsGateway.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
+| mcp-kubernetes-valkey | object | `{}` |  |

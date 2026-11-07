@@ -1,0 +1,23 @@
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "mcp-kubernetes-valkey")) .Values.networkPolicy.enabled (eq .Values.networkPolicy.flavor "kubernetes") }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mcp-kubernetes-valkey
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: valkey
+      app.kubernetes.io/instance: mcp-kubernetes-valkey
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mcp-kubernetes
+      ports:
+        - protocol: TCP
+          port: {{ dig "valkey" "service" "port" 6379 (index .Values "mcp-kubernetes-valkey") }}
+{{- end }}

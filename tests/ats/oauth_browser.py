@@ -47,7 +47,7 @@ def authorization_form(page, current_url, authorization_base, issuer_url, user, 
     raise AssertionError("OAuth page has no recognized consent or login form")
 
 
-def follow_authorization(session, url, callback, authorization_base, issuer_url, user, password):
+def follow_authorization(session, url, callback, authorization_base, issuer_url, user, password, before_consent=None):
     response = None
     for _ in range(15):
         if urlsplit(url)._replace(query="", fragment="") == urlsplit(callback)._replace(query="", fragment=""):
@@ -60,6 +60,8 @@ def follow_authorization(session, url, callback, authorization_base, issuer_url,
             continue
         assert response.status_code == 200, f"{url} -> {response.status_code}: {response.text[:300]}"
         post_url, fields = authorization_form(response.text, url, authorization_base, issuer_url, user, password)
+        if "consent_id" in fields and before_consent is not None:
+            before_consent()
         scheme, authority = origin(url)
         response = session.post(post_url, data=fields, headers={"Origin": f"{scheme}://{authority}"},
                                 allow_redirects=False, timeout=30)
