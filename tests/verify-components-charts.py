@@ -751,7 +751,7 @@ def main(meta: str) -> int:
     # The HelmRelease is named after the entry's chart, and its chartRef names the
     # OCIRepository (the chart's name; with the chart's version for one released
     # with it, agent-platform.sourceName).
-    charts = {n: c["chart"] for n, c in components.items()}
+    charts = {n: c.get("releaseName", c["chart"]) for n, c in components.items()}
     for shape, (w, _) in renders.items():
         rendered = {n for kind, n in w if kind == "OCIRepository" and n != RELEASE}
         refs = {c: chart_ref(w, c) for c in charts.values()}
@@ -786,7 +786,7 @@ def main(meta: str) -> int:
         if name in released:
             # One version matters, the working tree's: every distinct block of
             # both renders against it, once.
-            chart_dir = REPO_ROOT / "helm" / chart
+            chart_dir = REPO_ROOT / "helm" / components[name]["chart"]
             if not (chart_dir / "Chart.yaml").is_file():
                 fail(f"{name}: no chart at {chart_dir} — releasedWithChart names a chart this repository does not have")
             if rng != pin:
@@ -830,7 +830,7 @@ def main(meta: str) -> int:
             if version not in pulled:
                 flux_layer(name, url, version, oci(wide, chart))
                 pulled[version] = pull(url, version, chart_dir)
-            render_component(name, f"{chart_dir}/{chart}", values, f"{name} {pulled[version]} ({where(forwarded)})", tmp)
+            render_component(name, f"{chart_dir}/{components[name]['chart']}", values, f"{name} {pulled[version]} ({where(forwarded)})", tmp)
 
     sys.stdout = Lines(sys.stdout)
     try:

@@ -65,7 +65,7 @@ GSOCI = "oci://gsoci.azurecr.io/charts/giantswarm"
 # values.yaml's (tests/floors.py), the one place a range or floor is declared.
 NEW = {
     "backstage": (GSOCI, ["agent-platform-connectivity", "cloudnative-pg"], "configMapRef: agent-platform-backstage-app-config"),
-    "mcp-kubernetes": (GSOCI, [], "fullnameOverride: mcp-kubernetes"),
+    "mcp-kubernetes": (GSOCI, ["mcp-kubernetes-valkey"], "fullnameOverride: mcp-kubernetes"),
     "cloudnative-pg": ("oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts", [], "repository: gsoci.azurecr.io/giantswarm/cloudnative-pg"),
     "kserve-llmisvc-crd": (GSOCI, [], None),
     # The one KServe controller: it renders the control plane's shared objects

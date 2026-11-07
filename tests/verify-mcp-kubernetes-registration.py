@@ -109,8 +109,8 @@ def main() -> None:
     oauth = releases["mcp-kubernetes"]["spec"]["values"]["mcpKubernetes"]["oauth"]
     if oauth.get("encryptionKey") is not True or oauth.get("storage", {}).get("type") != "valkey":
         fail("OAuth must default to encrypted shared storage")
-    if oauth["storage"]["valkey"].get("url") != "muster-valkey:6379":
-        fail("OAuth must reuse the platform Valkey")
+    if oauth["storage"]["valkey"].get("url") != "mcp-kubernetes-valkey:6379":
+        fail("OAuth must use its isolated Valkey")
     if oauth.get("dex", {}).get("kubernetesAuthenticatorClientID") != "dex-k8s-authenticator":
         fail("OAuth must request the configured Kubernetes audience upstream")
     route = releases["mcp-kubernetes"]["spec"]["values"]["gatewayAPI"]
@@ -129,12 +129,39 @@ def main() -> None:
     own = next(d["spec"]["values"] for d in own_docs if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "mcp-kubernetes")
     if own["gatewayAPI"]["enabled"] is not False or own["mcpKubernetes"]["oauth"]["storage"]["valkey"]["url"] != "external:6379" or own["mcpKubernetes"]["oauth"]["storage"]["valkey"]["keyPrefix"] != "own:" or own["mcpKubernetes"]["oauth"]["dex"]["kubernetesAuthenticatorClientID"] != "own-audience":
         fail("explicit route, store and Kubernetes audience values must remain effective")
-    error = render(meta, arguments + ["--set", "components.valkey.enabled=false"], expect_fail=True)
+    error = render(meta, arguments + ["--set", "components.mcp-kubernetes-valkey.enabled=false"], expect_fail=True)
     if "mcp-kubernetes OAuth needs shared storage" not in error:
         fail("a missing shared store must fail the render")
-    readers = releases["valkey"]["spec"]["values"]["ciliumNetworkPolicy"]["ingress"]["clients"]
-    if not any(reader.get("matchLabels", {}).get("app.kubernetes.io/name") == "mcp-kubernetes" for reader in readers):
-        fail("the platform Valkey must admit the Kubernetes MCP")
+    store = releases["mcp-kubernetes-valkey"]["spec"]
+    assert store["releaseName"] == "mcp-kubernetes-valkey"
+    assert store["values"]["valkey"]["auth"]["usersExistingSecret"] == "mcp-kubernetes-oauth"
+    assert oauth["existingSecret"] == "mcp-kubernetes-oauth"
+    assert oauth["storage"]["valkey"]["existingSecret"] == "mcp-kubernetes-oauth"
+    readers = store["values"]["ciliumNetworkPolicy"]["ingress"]["clients"]
+    assert readers == [{"namespace": "", "matchLabels": {"app.kubernetes.io/name": "mcp-kubernetes"}}]
+    assert all(reader.get("matchLabels", {}).get("app.kubernetes.io/name") != "mcp-kubernetes"
+               for reader in releases["valkey"]["spec"]["values"]["ciliumNetworkPolicy"]["ingress"]["clients"])
+    rotated = render(meta, arguments + ["--set", "mcp-kubernetes-valkey.valkey.auth.usersExistingSecretChecksum=revision-2",
+                                        "--set", "mcp-kubernetes.mcpKubernetes.oauth.existingSecretChecksum=revision-2"])
+    rotated_values = next(d["spec"]["values"] for d in rotated if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "mcp-kubernetes")
+    assert rotated_values["mcpKubernetes"]["oauth"]["storage"]["valkey"]["existingSecretChecksum"] == "revision-2"
+    assert rotated_values["mcpKubernetes"]["oauth"]["existingSecretChecksum"] == "revision-2"
+    assert not any(d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "mcp-kubernetes-valkey" for d in own_docs)
+    independent = render(meta, arguments + ["--set", "components.valkey.enabled=false"])
+    assert any(d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "mcp-kubernetes-valkey" for d in independent)
+    store_policy = render(conn, CONN_BASE + ["--set", "components.mcp-kubernetes-valkey.enabled=true",
+                                               "--set", "networkPolicy.flavor=kubernetes"])
+    policy = next(d for d in store_policy if d.get("kind") == "NetworkPolicy" and d["metadata"]["name"] == "mcp-kubernetes-valkey")
+    assert policy["spec"]["podSelector"]["matchLabels"]["app.kubernetes.io/instance"] == "mcp-kubernetes-valkey"
+    assert policy["spec"]["ingress"] == [{"from": [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": "mcp-kubernetes"}}}],
+                                          "ports": [{"protocol": "TCP", "port": 6379}]}]
+    engine = render(meta, arguments + ["--set", "components.flux.enabled=true"])
+    teardown = next(d for d in engine if d.get("kind") == "Job" and d["metadata"]["name"].endswith("-teardown-releases"))
+    script = teardown["spec"]["template"]["spec"]["containers"][0]["args"][0]
+    waves = [line.split()[8:] for line in script.splitlines() if line.startswith("kubectl delete helmreleases.")]
+    wave_of = {name: index for index, wave in enumerate(waves) for name in wave}
+    assert wave_of["mcp-kubernetes"] < wave_of["mcp-kubernetes-valkey"]
+    assert "valkey" in wave_of, "teardown must retain both independent Valkey releases"
     forwarded = releases["agent-platform-connectivity"]["spec"]["values"].get("mcp-kubernetes", {}).get("mcpServer")
     if forwarded != {"managementCluster": "agentlab"}:
         fail(f"meta: the connectivity release carries mcp-kubernetes.mcpServer {forwarded}")
