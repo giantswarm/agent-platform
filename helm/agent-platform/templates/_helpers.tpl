@@ -5297,7 +5297,7 @@ Fail the render for an organizations setup that cannot work
     with the switch, or a targetNamespace other than the connectivity
     release's (the policies there name the operator's ServiceAccount in it);
   - the switch on without kagent or Agent Substrate: the operator copies the
-    curated kagent objects and the WorkerPool, and its erasure asks ate-api;
+    curated kagent objects and the WorkerPool, and its cleanup process asks ate-api;
     without kagent.fluxServiceAccountName, without the llm listener's routing
     of ModelConfigs (llmRouting.enabled, llmRouting.modelConfigPolicy.enabled),
     and without the installation's API hostnames (global.domain or
@@ -5320,7 +5320,7 @@ Fail the render for an organizations setup that cannot work
 {{- fail "agentPlatformOrganizations.enabled needs kagent (components.kagent.enabled): agent-platform-operator copies the curated kagent objects into every organization namespace" -}}
 {{- end -}}
 {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
-{{- fail "agentPlatformOrganizations.enabled needs Agent Substrate (components.substrate): an organization's agents run on its copy of the platform WorkerPool, and the erasure of a deleted organization asks ate-api until it has no actor left" -}}
+{{- fail "agentPlatformOrganizations.enabled needs Agent Substrate (components.substrate): an organization's agents run on its copy of the platform WorkerPool, and cleanup of a deleted organization asks ate-api until it has no actor left" -}}
 {{- end -}}
 {{- if not (include "agent-platform.kagent.fluxServiceAccountName" .) -}}
 {{- fail "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: it is the operator's helmReleaseServiceAccount, the ServiceAccount an organization's HelmReleases run as" -}}

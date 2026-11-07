@@ -686,7 +686,7 @@ components:  # @schema additionalProperties: true
     # Harness relays them too, through its MCP bridge
     # (giantswarm/kagent-upstream#927). From 1.31.0 ListSessions filters by
     # the Agent's namespace (giantswarm/kagent-upstream#958), which the
-    # operator's erasure asks for.
+    # operator's cleanup process asks for.
     versionRange: ">=1.31.0 <1.32.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
@@ -1306,7 +1306,7 @@ components:  # @schema additionalProperties: true
     # The Agent Platform organizations' operator
     # (giantswarm/agent-platform-operator, giantswarm/giantswarm#38891): it
     # reconciles each AgentPlatformOrganization (agent-platform.giantswarm.io)
-    # into its organization namespace, with the curated copies, and erases a
+    # into its organization namespace, with the curated copies, and cleans up a
     # deleted organization behind a finalizer. No `enabled` here: the
     # component follows the one switch agentPlatformOrganizations.enabled
     # (below), and an explicit value that disagrees with it fails the render
@@ -1318,7 +1318,7 @@ components:  # @schema additionalProperties: true
     # A 0.1.x release rolls in without a change here, its CRD with it
     # (CreateReplace); one that needs wiring of this chart is a minor
     # release, 0.2.0, outside the range. 0.1.0 carries the CRD, the curated
-    # copies, the erasure, the ate-api CA projected from ClusterTrustBundles
+    # copies, organization cleanup, the ate-api CA projected from ClusterTrustBundles
     # (agent-platform-operator#2, #3, #7, #21) and the serviceAccountBindings
     # the meta chart derives: the credential providers' Secret readers bound
     # in every organization namespace (agent-platform-operator#23,
@@ -5520,7 +5520,7 @@ tenants:
 #     llm listener's base-URL policy, the workers' network peers, and kagent's
 #     authorizer lists a person's agents there
 #     (kagent.controller.authorization.namespaceSelector);
-#   - the operator's access for the erasure of a deleted organization
+#   - the operator's access for cleanup of a deleted organization
 #     (giantswarm/giantswarm#38988): the kagent controller admits its
 #     ServiceAccount as a machine caller that lists and deletes every
 #     creator's Sessions; its network policies (the cluster DNS, the API
@@ -5551,9 +5551,9 @@ tenants:
 # kagent line carries giantswarm/kagent-extensions#27.
 # Before you turn this on in an installation: the kagent line must carry
 # giantswarm/kagent-extensions#27 (kagent reviews a delete of another
-# creator's Session as a cluster-wide `delete`); until it does, the erasure of
+# creator's Session as a cluster-wide `delete`); until it does, cleanup of
 # an organization that holds a person's Session stops at the Sessions' step,
-# with the reason, and erases nothing after it.
+# with the reason, and performs no further cleanup.
 agentPlatformOrganizations:
   # -- Install agent-platform-operator and render the organizations' role,
   # admission policies and access. Needs kagent (components.kagent.enabled),

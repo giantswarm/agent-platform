@@ -6,9 +6,9 @@ this release's namespace.
 
   * <name>-operator-egress: what the operator's pods reach, and nothing else:
     the cluster DNS, the API server, the kagent controller's API port (8083:
-    the erasure lists and deletes a deleted organization's Sessions there,
+    the operator lists and deletes a deleted organization's Sessions there,
     directly, as the operator's ServiceAccount; the route's JWT policy takes
-    people's tokens only), Substrate's ate-api-server on 443 (the erasure asks
+    people's tokens only), Substrate's ate-api-server on 443 (the operator asks
     it until a deleted organization has no actor left) and, with an S3
     snapshot location (the Crossplane AWS store or an existing bucket), the
     world on 443 (S3, where it deletes the organization's snapshots, and STS,
