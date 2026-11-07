@@ -452,6 +452,26 @@ class Helm:
 
     def uninstall(self) -> float:
         started = time.monotonic()
+        kube = Kube(self.kubeconfig)
+        self_release = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=NAMESPACE)
+        if self_release is not None:
+            resumer = ["delete", "jobs.batch", f"{RELEASE}-self-resume", "-n", NAMESPACE, "--ignore-not-found", "--wait=true"]
+            kube.cmd(resumer)
+            kube.cmd(["patch", "helmreleases.helm.toolkit.fluxcd.io", RELEASE, "-n", NAMESPACE,
+                      "--type=merge", "-p", '{"spec":{"suspend":true}}'])
+
+            def quiescent() -> bool:
+                current = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=NAMESPACE)
+                if current is None or not current["spec"].get("suspend"):
+                    raise Abort("the self HelmRelease is no longer suspended; refusing a concurrent Helm uninstall")
+                if condition(current, "Reconciling").get("status") == "True":
+                    return False
+                return self.status()["info"]["status"] in ("deployed", "failed", "uninstalling")
+
+            wait_for("the suspended self HelmRelease's active reconciliation to finish", quiescent, UNINSTALL_BUDGET_S, interval=1)
+            kube.cmd(resumer)
+            current = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=NAMESPACE)
+            assert current and current["spec"].get("suspend"), "the self HelmRelease resumed before uninstall"
         r = run(self._cmd("uninstall", RELEASE, "--namespace", NAMESPACE, "--wait", "--timeout", UNINSTALL_TIMEOUT), timeout=10 * 60)
         elapsed = time.monotonic() - started
         assert r.returncode == 0, f"helm uninstall failed after {elapsed:.0f}s:\n{r.stdout}\n{r.stderr}"

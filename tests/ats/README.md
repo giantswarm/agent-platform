@@ -51,6 +51,14 @@ prerelease version (`3.19.1-r<branch-hash>t<time>h<sha>`, stamped by abs), and
 Masterminds semver — Flux's — never matches a prerelease against a release-only
 bound. A released chart has no prerelease.
 
+Before the smoke invokes `helm uninstall`, the driver stops the detached resumer,
+suspends the self HelmRelease, and waits for its active reconciliation to finish.
+Flux suspension does not cancel an active reconciliation. This follows the
+documented operator workflow: the Helm CLI writes `uninstalling` before any
+pre-delete hook runs, so waiting until a hook suspends self-management allows
+Flux's pending-release recovery to start a concurrent upgrade. The teardown
+assertions and time budget include this preparation.
+
 ## The cluster: kind with Agent Substrate
 
 Substrate cannot start a worker on a stock kind cluster: it projects pod
