@@ -122,6 +122,8 @@ data:
           url: https://muster.ci.example.com/mcp
           authProvider: oidc-agent-platform
     agentPlatform:
+      organizations:
+        enabled: false
       skills:
         repositories:
           - https://github.com/giantswarm/agent-skills
@@ -11897,7 +11899,7 @@ spec:
             - --selector=app=backstage
             - --overwrite
             - --field-manager=agent-platform-config-reload
-            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=17dfed0c93c61330ee2942c868b67df5a07b24457ad3b08924e09bfbf86ccb14
+            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=db131b80e8d4d85c37bebf93e300c0322370396305ac49797c920524c3c57529
           env:
             # kubectl keeps its discovery/http cache under $HOME; the root
             # filesystem is read-only.

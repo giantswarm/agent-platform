@@ -167,8 +167,9 @@ data:
     signed-in person through muster (the x_model-manager_* tools of the
     muster.installations entry above; giantswarm/backstage#2294), and its
     backend has no model-manager client to configure. */}}
-    {{- if or $fluxSa $backstage.skillsRepositories $kagentRoute }}
     agentPlatform:
+      organizations:
+        enabled: {{ eq (include "agent-platform.organizations.enabled" .) "true" }}
       {{- with $fluxSa }}
       {{- /* The tenant identity of the agents' HelmReleases: the ONE value
       kagent.fluxServiceAccountName, rendered as ServiceAccount + RoleBinding by
@@ -200,5 +201,4 @@ data:
           {{ $installation }}:
             apiBaseUrl: https://{{ include "agent-platform.kagent.controllerHostname" . }}
       {{- end }}
-    {{- end }}
 {{- end }}

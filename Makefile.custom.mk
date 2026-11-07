@@ -2967,10 +2967,16 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@if grep -q 'musterMcpUrl' $(VERIFY_TMP)/vw-bs-cm.out; then echo "FAIL: agentPlatform.musterMcpUrl is back in the portal's app-config — the Dev Portal reads no such key (create_agent takes no muster argument); where muster is reaches agent-manager as muster.url (verify-identity)"; exit 1; fi
 	@grep -q 'configMapRef: agent-platform-backstage-app-config' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta chart's backstage: block no longer mounts the ConfigMap this chart renders"; exit 1; }
 	@echo "ok: app-config"
+	@echo "--> Organizations in the portal follow agentPlatformOrganizations.enabled"
+	@for enabled in false true; do \
+		$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set agentPlatformOrganizations.enabled=$$enabled >$(VERIFY_TMP)/vw-bs-orgs-$$enabled.out 2>&1 || { cat $(VERIFY_TMP)/vw-bs-orgs-$$enabled.out; exit 1; }; \
+		grep -A1 '^      organizations:$$' $(VERIFY_TMP)/vw-bs-orgs-$$enabled.out | grep -q "^        enabled: $$enabled$$" || { echo "FAIL: agentPlatform.organizations.enabled does not follow agentPlatformOrganizations.enabled=$$enabled"; exit 1; }; \
+	done
 	@echo "--> the one-value identity: renaming kagent.fluxServiceAccountName renames the portal's agentPlatform.fluxServiceAccountName; kagent off drops it"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.fluxServiceAccountName=tenant-x 2>/dev/null | grep -q 'fluxServiceAccountName: tenant-x' || { echo "FAIL: the app-config does not follow kagent.fluxServiceAccountName"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) >$(VERIFY_TMP)/vw-bs-nokagent.out 2>&1 || { cat $(VERIFY_TMP)/vw-bs-nokagent.out; exit 1; }
 	@if grep -q 'fluxServiceAccountName' $(VERIFY_TMP)/vw-bs-nokagent.out; then echo "FAIL: agentPlatform.fluxServiceAccountName rendered with kagent off"; exit 1; fi
+	@grep -A1 '^      organizations:$$' $(VERIFY_TMP)/vw-bs-nokagent.out | grep -q '^        enabled: false$$' || { echo "FAIL: the portal must disable Organizations with the switch off, including with kagent off"; exit 1; }
 	@echo "ok: one-value identity"
 	@echo "--> Backstage on: the route, the pg block, the installation name, the config-reload hook and its network policy in both flavors"
 	@awk '/^kind: HTTPRoute$$/,/^---/' $(VERIFY_TMP)/vw-bs.out | awk '/^  name: backstage$$/,/^---/' >$(VERIFY_TMP)/vw-bs-route.out
