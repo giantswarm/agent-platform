@@ -190,14 +190,19 @@ def check_meta(chart):
         expect("devPortal" not in am and not am.get("credentials", {}).get("uiURL"),
                "the portal does not implicitly configure credential UI routes")
     ui_url = "https://portal.example.com/credential-operations/{operation}"
+    manager_commit = {"repository": "acme/management-clusters", "branch": "main",
+                      "objectsPath": "organizations", "contentPrefix": "agent-platform/organizations"}
     am = release(docs(meta(chart, *ON, "--set", "components.agent-manager.versionRange=>=2.22.0-rc.3 <3.0.0",
                            "--set-literal", f"agent-manager.credentials.uiURL={ui_url}",
                            "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token",
-                           "--set", "agent-manager.githubTokenExchange.clientID=agent-manager")), "agent-manager")["values"]
+                           "--set", "agent-manager.githubTokenExchange.clientID=agent-manager",
+                           "--set-json", f"agent-manager.tenants.commit={json.dumps(manager_commit)}")), "agent-manager")["values"]
     expect(am.get("credentials", {}).get("uiURL") == ui_url,
            "the explicit client credential URL template travels unchanged")
     expect(am.get("githubTokenExchange", {}).get("clientID") == "agent-manager",
            "the configured confidential broker client travels unchanged")
+    expect(am.get("tenants") == {"enabled": True, "commit": manager_commit},
+           "organization GitOps configuration reaches the manager beside the derived organization switch")
     expect(v["commitMode"] == {"sourceRef": {"kind": "GitRepository", "name": "giantswarm-config"},
                                "path": "./agent-platform/organizations/{parent}/{name}", "decryptionSecret": "sops-keys"},
            f"with fluxNamespace, the operator's commit mode follows fluxSource, fluxPathPrefix and fluxDecryptionSecret ({v.get('commitMode')})")
@@ -264,8 +269,12 @@ def check_meta(chart):
     expect(r.returncode != 0 and "agent-manager.tenants.enabled (true) differs from agentPlatformOrganizations.enabled (false)" in r.stderr,
            "off with an own agent-manager.tenants.enabled true, the render fails naming the switch")
     r = meta(chart, "--set", "agent-manager.tenants.organizations.enabled=true")
-    expect(r.returncode != 0 and "agent-manager.tenants.organizations is set" in r.stderr,
-           "an own agent-manager.tenants key other than enabled fails the render naming it (agent-manager 2.19 refuses it)")
+    expect(r.returncode != 0 and "agent-manager.tenants.organizations is unsupported" in r.stderr,
+           "an unsupported agent-manager.tenants key fails the render naming it")
+    r = meta(chart, "--set", "components.agent-manager.versionRange=>=2.19.0 <3.0.0",
+             "--set", "agent-manager.tenants.commit.repository=acme/management-clusters")
+    expect(r.returncode != 0 and "agent-manager.tenants.commit needs" in r.stderr,
+           "organization GitOps configuration on an older manager fails the render naming its floor")
     for what, extra, needle in (
             ("credential UI on an older manager", ["--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}"],
              "agent-manager credential operations and GitHub token exchange need"),

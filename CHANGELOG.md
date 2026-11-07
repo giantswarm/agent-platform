@@ -10,3 +10,7 @@ Pending breaking changes are listed below.
 ### Changed
 
 - **Breaking:** Organization credential UI configuration uses `agent-manager.credentials.uiURL` with an `{operation}` placeholder. `agent-manager.devPortal` is rejected.
+
+### Fixed
+
+- Organization GitOps configuration in `agent-manager.tenants.commit` reaches compatible manager releases.

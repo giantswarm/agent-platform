@@ -4328,9 +4328,12 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- end -}}
 {{- $own := dig "tenants" dict $am | default dict -}}
 {{- range $k, $_ := $own -}}
-{{- if ne $k "enabled" -}}
-{{- fail (printf "agent-manager.tenants.%s is set: agent-manager's tenants block takes enabled only, which this chart derives from agentPlatformOrganizations.enabled — remove agent-manager.tenants.%s" $k $k) -}}
+{{- if not (has $k (list "enabled" "commit")) -}}
+{{- fail (printf "agent-manager.tenants.%s is unsupported: configure tenants.commit for organization GitOps writes; tenants.enabled follows agentPlatformOrganizations.enabled" $k) -}}
 {{- end -}}
+{{- end -}}
+{{- if and (hasKey $own "commit") (not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" "2.20.0"))) -}}
+{{- fail "agent-manager.tenants.commit needs components.agent-manager.versionRange with a floor of 2.20.0 or later" -}}
 {{- end -}}
 {{- if and (hasKey $own "enabled") (ne (toString $own.enabled) (toString $on)) -}}
 {{- fail (printf "agent-manager.tenants.enabled (%v) differs from agentPlatformOrganizations.enabled (%v): agent-manager serves the organization tools exactly while the operator keeps the organization namespaces — set agentPlatformOrganizations.enabled and leave agent-manager.tenants.enabled unset" $own.enabled $on) -}}
