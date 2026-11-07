@@ -4525,6 +4525,10 @@ verify-scenarios: ## Assert the ATS scenario inputs (tests/ats/scenarios.py) and
 	@python3 tests/verify-scenarios.py
 	@echo "the ATS scenario inputs verified."
 
+.PHONY: verify-oauth-browser
+verify-oauth-browser: ## Check ATS consent and password form handling without a cluster.
+	@python3 -m unittest discover -s tests/ats -p 'test_oauth_browser.py'
+
 # --- verify-all --------------------------------------------------------------
 # Every offline assertion of this repository in one target, which is what CI
 # runs. The list is read out of this file, so a new verify-* target reaches CI
