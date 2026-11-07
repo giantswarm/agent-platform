@@ -12,6 +12,13 @@ Configure organization GitOps writes through `agent-manager.tenants.commit`: `re
 
 The manager's network policy admits the configured `githubTokenExchange.endpoint` origin on its HTTPS port. Cilium gets an explicit DNS rule even when the broker and Dex share an ingress address. Native NetworkPolicy uses the public address exclusions for DNS origins; private broker ranges must be in `agentManager.networkPolicy.egress.cidrs` or `networkPolicy.additionalEgressCIDRs`. An IP literal is admitted as a single address. Verify a fresh pod can reach the broker before enabling the profile.
 
-Legacy MCP 2025-11-25 elicitation retains session capabilities and completion streams in one manager process. Use one manager replica for that client profile unless the deployment provides session routing that has been verified end to end. Shared credential-operation metadata does not share MCP sessions. MCP 2026-07-28 carries capabilities on each request and supports the tested two-replica credential flow.
+Legacy MCP 2025-11-25 elicitation retains session capabilities and completion streams in one manager process. Keep the released manager chart's single-replica default for that client profile:
+
+```yaml
+agent-manager:
+  replicaCount: 1
+```
+
+This topology supports URL elicitation, HTTPS save, completion notification and retry through the public gateway. Multiple unpinned replicas lose negotiated capabilities and are unsupported for legacy clients. Shared credential-operation metadata does not share MCP sessions or completion streams; reconnect and initialize a new session after a manager restart. Use multiple replicas with legacy clients only after independently verifying session routing and recovery. MCP 2026-07-28 carries capabilities on each request and supports the tested two-replica credential flow.
 
 For GitOps application, configure `agentPlatformOrganizations.fluxNamespace`, `fluxSource` and `fluxDecryptionSecret` so the operator creates each organization's Kustomization and restricted ServiceAccount. The bundled Flux engine needs `kustomize-controller` in `flux-engine.instance.components`; verify its image is available in the configured distribution registry. A synthetic GitHub fixture plus an OCI source proves encryption and Flux application separately from actual GitHub App consent, repository permissions and Git source access.
