@@ -1096,6 +1096,10 @@ Usage: include "agent-platform.kagent.authorization" . | fromJson
 {{- if $refusals -}}
 {{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" (include "agent-platform.klausGateway.namespace" .))) "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" (include "agent-platform.klausGateway.name" .)))) -}}
 {{- end -}}
+{{- if include "agent-platform.organizations.on" . -}}
+{{- $operator := include "agent-platform.organizations.operatorServiceAccount" . | fromJson -}}
+{{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $operator.namespace)) "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" $operator.name))) -}}
+{{- end -}}
 {{- range (dig "from" list $np) -}}
 {{- if not (has . $peers) -}}{{- $peers = append $peers . -}}{{- end -}}
 {{- end -}}
@@ -2216,7 +2220,8 @@ disagrees fails the render; with the façade alone, s3proxy.azure.* verbatim.
 
 {{/* The URL Substrate reaches the façade at: its Service in the release namespace, port 80. */}}
 {{- define "agent-platform.substrateStore.s3proxyUrl" -}}
-{{- printf "http://%s.%s.svc:80" (include "agent-platform.substrateStore.s3proxyName" .) .Release.Namespace -}}
+{{- $namespace := dig "agent-platform-connectivity" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- printf "http://%s.%s.svc:80" (include "agent-platform.substrateStore.s3proxyName" .) $namespace -}}
 {{- end -}}
 
 {{/*
