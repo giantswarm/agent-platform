@@ -3719,14 +3719,15 @@ verify-postgres-primary-update: ## Assert the CNPG Cluster updates its primary b
 
 .PHONY: verify-identity-migration
 verify-identity: verify-identity-migration
-verify-identity-migration: ## Assert the migration holds no cluster-scoped right without tenants: the 1.x -> 2.x run deletes no CRD, so no ClusterRole or ClusterRoleBinding renders with the migration on, off, or with agent-manager off; with agentPlatformOrganizations on (#1268) the run covers no organization namespace and holds no right there, and the credential-refs refusal names the fix; the per-GitOps-namespace Roles follow a renamed identity.
+verify-identity-migration: ## Assert the migration's one cluster-scoped right: with the migration on exactly the ClusterRole and ClusterRoleBinding $(MIGRATION_JOB)-crds render (get/delete on the nine 0.x kagent.dev CRDs, list on their objects, verify-flux-identity checks the rules), nothing else cluster-scoped, and none with the migration off or with agent-manager off; with agentPlatformOrganizations on (#1268) the run covers no organization namespace and holds no right there, and the credential-refs refusal names the fix; the per-GitOps-namespace Roles follow a renamed identity.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> migration on: no ClusterRole, no ClusterRoleBinding"
+	@echo "--> migration on: the -crds ClusterRole and ClusterRoleBinding (the 0.x CRD contract), nothing else cluster-scoped"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vim-on.out 2>&1 || { cat $(VERIFY_TMP)/vim-on.out; exit 1; }
-	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-on.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC)"
-	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: a cluster-scoped RBAC object renders with the migration on"; grep -n -A3 -E '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; exit 1; fi
-	@if grep -q 'customresourcedefinitions' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: the migration is granted rights on customresourcedefinitions"; exit 1; fi
-	@echo "ok: nothing cluster-scoped"
+	@python3 tests/verify-flux-identity.py $(VERIFY_TMP)/vim-on.out kagent-flux kagent --migration
+	@$(PICK) $(VERIFY_TMP)/vim-on.out ClusterRole $(MIGRATION_JOB)-crds >/dev/null || { echo "FAIL: no ClusterRole $(MIGRATION_JOB)-crds with the migration on"; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-on.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC) $(MIGRATION_JOB)-crds"
+	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: a cluster-scoped RBAC object other than $(MIGRATION_JOB)-crds renders with the migration on"; grep -n -A3 -E '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; exit 1; fi
+	@echo "ok: only the 0.x CRD contract is cluster-scoped"
 	@echo "--> agentPlatformOrganizations on (#1268): the run covers no organization namespace (no AGENT_MANAGER_MULTI_TENANT, no ClusterRole $(MIGRATION_JOB)-tenants); the organizations' credential-refs refusal names the fix"
 	@if $(PICK) $(VERIFY_TMP)/vim-on.out CronJob $(MIGRATION_JOB) kagent | grep -q 'AGENT_MANAGER_MULTI_TENANT'; then echo "FAIL: the run covers other namespaces than the kagent namespace"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) $(MIGRATION_TENANTS) >$(VERIFY_TMP)/vim-ten.out 2>&1 || { cat $(VERIFY_TMP)/vim-ten.out; exit 1; }
