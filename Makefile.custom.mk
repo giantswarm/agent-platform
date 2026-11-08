@@ -3883,7 +3883,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@grep -A1 'name: AGENT_MANAGER_SKILLS_GIT_AUTH_SECRET_NAME' $(VERIFY_TMP)/vmig-prov-job.out | grep -q 'value: tenant-credential-skills' || { echo "FAIL: the provisioned credential does not reach the Job"; exit 1; }
 	@grep -A1 'name: AGENT_MANAGER_SKILLS_GIT_AUTH_PREVIOUS_SECRET_NAMES' $(VERIFY_TMP)/vmig-prov-job.out | grep -q 'value: kagent-skills-token$$' || { echo "FAIL: the provisioned credential's earlier name does not reach the Job"; exit 1; }
 	@echo "ok: skills credential"
-	@echo "--> RBAC: nothing cluster-scoped (verify-identity-migration) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
+	@echo "--> RBAC: nothing cluster-scoped but the 0.x CRD contract (verify-identity-migration) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
 	@python3 -c 'import sys,yaml; sys.exit("FAIL: a GitOps-namespace Role renders with an empty gitopsNamespaces" if [d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d["kind"]=="Role" and d["metadata"]["name"]==sys.argv[2] and d["metadata"].get("namespace")!="kagent"] else 0)' $(VERIFY_TMP)/vmig-on.out $(MIGRATION_JOB)
 	@$(PICK) $(VERIFY_TMP)/vmig-on.out Role $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-role-kagent.out || { echo "FAIL: no Role of the migration's identity in the kagent namespace"; exit 1; }
 	@grep -A2 'apiGroups: \["helm.toolkit.fluxcd.io"\]' $(VERIFY_TMP)/vmig-role-kagent.out | grep -qF 'verbs: ["get", "list", "create", "update"]' || { echo "FAIL: the migration's identity may not create a HelmRelease in kagent, so the run's access review leaves the namespace out"; exit 1; }
@@ -3896,7 +3896,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 		[ "$$(grep -c 'verbs: \["get", "list"\]' $(VERIFY_TMP)/vmig-role-$$ns.out)" = "2" ] || { echo "FAIL: the Role in $$ns grants more than get, list"; exit 1; }; \
 		$(PICK) $(VERIFY_TMP)/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: $(MIGRATION_JOB)$$' || { echo "FAIL: the RoleBinding in $$ns does not bind the migration's identity"; exit 1; }; \
 	done
-	@$(GOLDEN_DROP) $(VERIFY_TMP)/vmig-gitops.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC)"
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vmig-gitops.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC) $(MIGRATION_JOB)-crds"
 	@if grep -q '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vmig-gitops.out; then echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; fi
 	@$(PICK) $(VERIFY_TMP)/vmig-gitops.out CronJob $(MIGRATION_JOB) kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
 	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-role-flux-giantswarm.out; then echo "FAIL: the GitOps-namespace Role is a hook resource"; exit 1; fi
