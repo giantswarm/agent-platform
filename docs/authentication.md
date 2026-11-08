@@ -21,6 +21,8 @@ With the chart-owned edge (`gatewayApi.gateway.create: true`) the agentgateway d
 
 muster validates every token itself. agentgateway on the MCP path passes the bearer through unverified.
 
+Muster also supports an explicit compatibility trust path: `muster.muster.oauth.server.trustedAudiences` admits signed ID tokens from the configured identity provider for the listed clients. Only include clients whose tokens may authenticate directly to MCP. This path coexists with Muster-issued resource access tokens; enabling it does not enforce a resource-token-only boundary. The ATS lab tests configured audience acceptance, rejection of an untrusted audience and invalid signatures, and the resource-token login flow separately.
+
 ## 2. OAuth discovery
 
 All of it happens on muster's hostname:

@@ -10,6 +10,7 @@ Pending breaking changes are listed below.
 ### Changed
 
 - **Breaking:** Organization credential UI configuration uses `agent-manager.credentials.uiURL` with an `{operation}` placeholder. `agent-manager.devPortal` is rejected.
+- Require Muster 5.59.5 or later, including configured Dex audience trust alongside resource access tokens.
 
 ### Fixed
 
