@@ -407,7 +407,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.21.1
+          tag: 2.22.0
       networkPolicy:
         egress:
           cidrs: []
