@@ -64,7 +64,7 @@ A link that opens **New session** with an agent preselected and the first messag
 person reads and sends it:
 
 ```text
-[Start a session with <Display name>](/?agent=<installation>%2F<namespace>%2F<name>&prompt=<url-encoded brief>)
+[Start a session with <Display name>](/?agent=<installation>%2F<namespace>%2F<name>#prompt=<url-encoded brief>)
 ```
 
 Format, checks and what never goes into the brief: `agent-platform-agent-routing`. The link works only

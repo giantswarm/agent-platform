@@ -68,15 +68,16 @@ A relative link to the portal's new-session screen (`/`, the home), same origin,
 the agent and prefills the composer:
 
 ```text
-[Start a session with <Display name>](/?agent=<agent id>&prompt=<brief>)
+[Start a session with <Display name>](/?agent=<agent id>#prompt=<brief>)
 ```
 
 - **`agent`**: the portal's agent id, `<installation>/<namespace>/<name>`, URL-encoded (`/` becomes
   `%2F`). `<installation>` is `installation` from `x_agent-manager_get_info`; `<namespace>` and
   `<name>` (the technical name) come from `x_agent-manager_list_agents`. No `installation` in
   `get_info`: name the agent instead of linking it.
-- **`prompt`**: optional. A short brief of the task in the person's terms, URL-encoded (space `%20`),
-  at most a few hundred characters. It prefills the composer; the person edits and sends it.
+- **`prompt`**: optional, after `#` so it stays out of server logs. A short brief of the task in the
+  person's terms, URL-encoded (space `%20`), at most a few hundred characters. It prefills the
+  composer; the person edits and sends it.
 - **Never in the brief**: conversation data — mail or message contents, logs, customer data, secrets,
   tokens. Name the task, not its material.
 - Display name, else technical name, in the link text.
@@ -84,7 +85,7 @@ the agent and prefills the composer:
 Example, for an agent `release-notes` in namespace `kagent` on the installation `gazelle`:
 
 ```text
-[Start a session with Release Notes](/?agent=gazelle%2Fkagent%2Frelease-notes&prompt=Draft%20the%20release%20notes%20for%20agent-platform%20v4.2.0)
+[Start a session with Release Notes](/?agent=gazelle%2Fkagent%2Frelease-notes#prompt=Draft%20the%20release%20notes%20for%20agent-platform%20v4.2.0)
 ```
 
 An unknown or not-startable `agent` falls back to the default agent in the portal: check readiness
