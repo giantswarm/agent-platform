@@ -5399,8 +5399,10 @@ skill-manager:  # @schema skipProperties: true; additionalProperties: true
 
 # === Default agent (components.default-agent) ===
 defaultAgent:
-  # ModelConfig in kagent the default agent runs on; empty: the agent chart's
-  # default-model-config.
+  # ModelConfig in kagent the default agent runs on; empty: the kagent
+  # namespace's default, the ModelConfig annotated
+  # agent-platform.giantswarm.io/is-default-model-config: "true", read at
+  # install and upgrade.
   modelConfig: ""
 
 # === Cluster manager (cluster-manager) ===

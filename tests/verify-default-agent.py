@@ -166,7 +166,8 @@ checks = {
     "toolset": (v["toolset"], ["preset:full"]),
     "systemMessage carries no installation name": ("this installation is" in v["agent"]["systemMessage"], False),
     "muster.url": (v["muster"]["url"], "http://muster.agent-platform.svc.cluster.local:8090/mcp"),
-    "modelConfig (unset: the chart's default)": (v.get("modelConfig"), None),
+    # Unset and no cluster to look the namespace's default up in (helm template).
+    "modelConfig (unset, no annotated default found)": (v.get("modelConfig"), None),
     "skills (the working tree is unstamped)": (v["skills"], []),
     "no global": ("global" in v, False),
 }

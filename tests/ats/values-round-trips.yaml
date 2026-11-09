@@ -39,6 +39,12 @@ components:
   skill-manager:
     enabled: false
 
+# The default agent runs on the smoke's model (tests/ats/model-config.yaml):
+# that model is applied after the install, after the ModelConfig CRD, so the
+# chart's lookup of the namespace's default finds none at install.
+defaultAgent:
+  modelConfig: ats-model
+
 muster:
   # One replica: the OAuth state is in memory (storage below), so a token muster
   # issued is known to the pod that issued it only. The MCP calls reach muster

@@ -508,13 +508,19 @@ def test_substrate_runs_a_worker_for_the_platform_harness(kube: Kube, substrate:
 
 @pytest.mark.smoke
 def test_the_default_model_config_is_marked(kube: Kube, kagent_controller: None) -> None:
-    """The smoke's ModelConfig carries the default annotation, and kagent's own
+    """The smoke's ModelConfig carries the default annotation, kagent's own
     default-model-config is not rendered (the meta chart writes providers:
-    false into the kagent release)."""
+    false into the kagent release), and the default agent runs on the
+    smoke's model."""
     model = kube.get("modelconfigs.api.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE)
     assert (model["metadata"].get("annotations") or {}).get(DEFAULT_MODEL_ANNOTATION) == "true", model["metadata"]
     assert kube.get("modelconfigs.api.kagent.dev", KAGENT_DEFAULT_MODEL_CONFIG, namespace=KAGENT_NAMESPACE) is None, \
         f"the kagent chart rendered {KAGENT_DEFAULT_MODEL_CONFIG}; the meta chart must write providers: false"
+    # The default agent runs on a model that exists (defaultAgent.modelConfig in
+    # values-round-trips.yaml), never on the default-model-config no chart renders.
+    agent = wait_for(f"the {DEFAULT_AGENT} Agent", lambda: kube.get("agents.api.kagent.dev", DEFAULT_AGENT, namespace=KAGENT_NAMESPACE), 300, interval=5)
+    model_name = ((agent["spec"].get("template") or {}).get("modelConfig") or {}).get("name")
+    assert model_name == MODEL_CONFIG, f"the {DEFAULT_AGENT} Agent runs on ModelConfig {model_name!r}, want {MODEL_CONFIG}"
 
 
 @pytest.mark.smoke

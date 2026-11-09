@@ -290,7 +290,7 @@ The default agent, "General Assistant", is `default-agent` in the kagent namespa
 | Value | Default | Effect |
 |---|---|---|
 | `components.default-agent.enabled` | `true` | Deploys the agent while kagent, muster and agent-manager are on. The portal's meta-agent features use it. |
-| `defaultAgent.modelConfig` | `""` | The `ModelConfig` it runs on. Empty uses `default-model-config`. |
+| `defaultAgent.modelConfig` | `""` | The `ModelConfig` it runs on. Empty: the kagent namespace's `ModelConfig` annotated `agent-platform.giantswarm.io/is-default-model-config: "true"`, read at install and upgrade. |
 | `backstage.metaAgents.<role>` | unset | The agent behind a portal role, as `<installation>/<namespace>/<name>`. Roles: `generalInformation`, `agentManagement`, `workflowManagement`, `platformOperations`, `skillEvaluation`, `skillCreation`. Unset roles use the default agent while it is on. |
 | `skillManager.sources` | `[giantswarm/agent-skills]` | Skill sources for the skill-manager and the portal, as URLs or `{url, ref, path, readOnly}`. |
 | `skills.platformSource.enabled` | `true` | Lists the platform's `skills/` first, read-only, at the release tag. Set `false` where GitHub is unreachable. |

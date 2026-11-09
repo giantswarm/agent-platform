@@ -4814,8 +4814,8 @@ muster URL every agent targets, its avatar on the DiceBear host (the route's
 first hostname, else avatars.<global.domain>; none without either), the
 toolset preset:full (it acts as the person), the managed-by label (agent-manager
 lists it read-only) and the default label (agent-manager reports it as the
-installation's default agent) on the Agent, and defaultAgent.modelConfig (empty: the agent
-chart's default).
+installation's default agent) on the Agent, and its model
+(agent-platform.defaultAgent.modelConfig).
 Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 */}}
 {{- define "agent-platform.defaultAgent.derived" -}}
@@ -4830,10 +4830,36 @@ Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 {{- end -}}
 {{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:full") "labels" (dict "agent-platform.giantswarm.io/managed-by" "agent-platform" "agent-platform.giantswarm.io/default" "true") -}}
 {{- with $agent }}{{- $_ := set $out "agent" . -}}{{- end -}}
-{{- with dig "modelConfig" "" (.Values.defaultAgent | default dict) -}}
+{{- with include "agent-platform.defaultAgent.modelConfig" . -}}
 {{- $_ := set $out "modelConfig" (dict "name" .) -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The ModelConfig the default agent runs on: defaultAgent.modelConfig, else the
+kagent namespace's default model, the ModelConfig annotated
+agent-platform.giantswarm.io/is-default-model-config: "true" (the first by
+name when several are; what agent-manager fills an omitted model from). The
+charts declare no model (no default-model-config), so the agent chart's
+default names none that exists. Empty when neither resolves: under `helm
+template`, on a first install before the ModelConfig CRD, and with gitops.target
+(the lookup sees the installation, not the target); the next upgrade picks
+the default up.
+Usage: include "agent-platform.defaultAgent.modelConfig" $
+*/}}
+{{- define "agent-platform.defaultAgent.modelConfig" -}}
+{{- $name := dig "modelConfig" "" (.Values.defaultAgent | default dict) -}}
+{{- if and (not $name) (not (include "agent-platform.targetSecretName" .)) -}}
+{{- $defaults := list -}}
+{{- range (lookup "api.kagent.dev/v1alpha3" "ModelConfig" (include "agent-platform.kagent.namespace" .) "").items | default list -}}
+{{- if eq (toString (dig "metadata" "annotations" "agent-platform.giantswarm.io/is-default-model-config" "" .)) "true" -}}
+{{- $defaults = append $defaults .metadata.name -}}
+{{- end -}}
+{{- end -}}
+{{- with $defaults }}{{ $name = first (sortAlpha .) }}{{ end -}}
+{{- end -}}
+{{- $name -}}
 {{- end -}}
 
 {{/*
