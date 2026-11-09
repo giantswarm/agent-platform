@@ -186,6 +186,16 @@ for what, args, want in (("below the floor", [*ON], None), ("from the floor", [*
     got = find(render(META, *args), "HelmRelease", "agent-manager")["spec"]["values"].get("installation")
     if got != want:
         fail(f"agent-manager, {what}: installation {got!r}, want {want!r}")
+# A bare Slack mention reaches the default agent (klausGateway.a2a.defaultAgent derived), an
+# own value wins, and nothing is derived while the default agent is off.
+KG = ["--set", "components.klaus-gateway.enabled=true"]
+for what, args, want in (("derived", [*ON, *KG], "kagent/default-agent"),
+                         ("kagent.namespaceOverride=agents", [*ON, *KG, "--set", "kagent.namespaceOverride=agents"], "agents/default-agent"),
+                         ("an own value", [*ON, *KG, "--set", "klausGateway.a2a.defaultAgent=sre-agent"], "sre-agent"),
+                         ("the default agent off", [*ON, *KG, "--set", "components.default-agent.enabled=false"], "")):
+    got = find(render(META, *args), "HelmRelease", "klaus-gateway")["spec"]["values"]["a2a"].get("defaultAgent")
+    if got != want:
+        fail(f"klaus-gateway, {what}: a2a.defaultAgent {got!r}, want {want!r}")
 hr = find(render(META, *ON, "--set", "kagent.namespaceOverride=agents"), "HelmRelease", NAME)
 if hr["spec"]["targetNamespace"] != "agents":
     fail(f"{NAME}: targetNamespace {hr['spec']['targetNamespace']!r} does not follow kagent.namespaceOverride=agents")

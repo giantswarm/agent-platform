@@ -4557,7 +4557,8 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
 
   # A2A client adapter. Routes channel turns to a kagent A2A endpoint.
   # defaultAgent is the fallback agentRef when the channel does not supply one.
-  # Omit defaultAgent to require callers to pass agentRef explicitly.
+  # Empty: the default agent (<kagent namespace>/default-agent) while
+  # components.default-agent is on, else callers pass agentRef explicitly.
   a2a:
     enabled: false
     defaultAgent: ""
