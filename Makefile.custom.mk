@@ -2860,6 +2860,9 @@ verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every
 # meta chart forwards, so the check reads the real schema and template of that
 # version, not a copy. Recursive (=), so it is read only when a recipe uses it.
 PRESETS_MUSTER_MIN := 5.12.0
+# agent-platform.muster.presetIconsFloor, and a release below it.
+PRESETS_ICONS_MUSTER_MIN := 5.61.0
+PRESETS_ICONS_MUSTER_BELOW := 5.60.1
 PRESETS_MUSTER_VERSION = $(shell $(FLOORS) floor muster)
 # The muster chart's own render guards want the OAuth inputs an installation
 # supplies; these are placeholders for the render, not part of the assertion.
@@ -2886,6 +2889,11 @@ verify-presets: ## Assert the infrastructure / agent-platform toolset presets re
 	elif ! grep -q "built into muster" $(VERIFY_TMP)/vp-builtin.out; then \
 		echo "FAIL: the built-in guard failed for the wrong reason"; cat $(VERIFY_TMP)/vp-builtin.out; exit 1; \
 	else echo "ok: built-in names refused"; fi
+	@echo "--> preset icons only from a muster floor of $(PRESETS_ICONS_MUSTER_MIN), which takes toolsetPresets.<name>.icon"
+	@for gate in "off:$(PRESETS_ICONS_MUSTER_BELOW)" "on:$(PRESETS_ICONS_MUSTER_MIN)-0"; do \
+		$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set "components.muster.versionRange=>=$${gate#*:} <6.0.0" >$(VERIFY_TMP)/vp-icons.out 2>&1 || { cat $(VERIFY_TMP)/vp-icons.out; exit 1; }; \
+		python3 tests/verify-toolset-presets.py icons $(VERIFY_TMP)/vp-icons.out $${gate%%:*} || exit 1; \
+	done
 	@echo "ok: presets reach muster's config"
 
 .PHONY: verify-mirror
@@ -3721,14 +3729,15 @@ verify-postgres-primary-update: ## Assert the CNPG Cluster updates its primary b
 
 .PHONY: verify-identity-migration
 verify-identity: verify-identity-migration
-verify-identity-migration: ## Assert the migration holds no cluster-scoped right without tenants: the 1.x -> 2.x run deletes no CRD, so no ClusterRole or ClusterRoleBinding renders with the migration on, off, or with agent-manager off; with agentPlatformOrganizations on (#1268) the run covers no organization namespace and holds no right there, and the credential-refs refusal names the fix; the per-GitOps-namespace Roles follow a renamed identity.
+verify-identity-migration: ## Assert the migration's one cluster-scoped right: with the migration on exactly the ClusterRole and ClusterRoleBinding $(MIGRATION_JOB)-crds render (get/delete on the nine 0.x kagent.dev CRDs, list on their objects, verify-flux-identity checks the rules), nothing else cluster-scoped, and none with the migration off or with agent-manager off; with agentPlatformOrganizations on (#1268) the run covers no organization namespace and holds no right there, and the credential-refs refusal names the fix; the per-GitOps-namespace Roles follow a renamed identity.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> migration on: no ClusterRole, no ClusterRoleBinding"
+	@echo "--> migration on: the -crds ClusterRole and ClusterRoleBinding (the 0.x CRD contract), nothing else cluster-scoped"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vim-on.out 2>&1 || { cat $(VERIFY_TMP)/vim-on.out; exit 1; }
-	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-on.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC)"
-	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: a cluster-scoped RBAC object renders with the migration on"; grep -n -A3 -E '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; exit 1; fi
-	@if grep -q 'customresourcedefinitions' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: the migration is granted rights on customresourcedefinitions"; exit 1; fi
-	@echo "ok: nothing cluster-scoped"
+	@python3 tests/verify-flux-identity.py $(VERIFY_TMP)/vim-on.out kagent-flux kagent --migration
+	@$(PICK) $(VERIFY_TMP)/vim-on.out ClusterRole $(MIGRATION_JOB)-crds >/dev/null || { echo "FAIL: no ClusterRole $(MIGRATION_JOB)-crds with the migration on"; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-on.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC) $(MIGRATION_JOB)-crds"
+	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: a cluster-scoped RBAC object other than $(MIGRATION_JOB)-crds renders with the migration on"; grep -n -A3 -E '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; exit 1; fi
+	@echo "ok: only the 0.x CRD contract is cluster-scoped"
 	@echo "--> agentPlatformOrganizations on (#1268): the run covers no organization namespace (no AGENT_MANAGER_MULTI_TENANT, no ClusterRole $(MIGRATION_JOB)-tenants); the organizations' credential-refs refusal names the fix"
 	@if $(PICK) $(VERIFY_TMP)/vim-on.out CronJob $(MIGRATION_JOB) kagent | grep -q 'AGENT_MANAGER_MULTI_TENANT'; then echo "FAIL: the run covers other namespaces than the kagent namespace"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) $(MIGRATION_TENANTS) >$(VERIFY_TMP)/vim-ten.out 2>&1 || { cat $(VERIFY_TMP)/vim-ten.out; exit 1; }
@@ -3884,7 +3893,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@grep -A1 'name: AGENT_MANAGER_SKILLS_GIT_AUTH_SECRET_NAME' $(VERIFY_TMP)/vmig-prov-job.out | grep -q 'value: tenant-credential-skills' || { echo "FAIL: the provisioned credential does not reach the Job"; exit 1; }
 	@grep -A1 'name: AGENT_MANAGER_SKILLS_GIT_AUTH_PREVIOUS_SECRET_NAMES' $(VERIFY_TMP)/vmig-prov-job.out | grep -q 'value: kagent-skills-token$$' || { echo "FAIL: the provisioned credential's earlier name does not reach the Job"; exit 1; }
 	@echo "ok: skills credential"
-	@echo "--> RBAC: nothing cluster-scoped (verify-identity-migration) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
+	@echo "--> RBAC: nothing cluster-scoped but the 0.x CRD contract (verify-identity-migration) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
 	@python3 -c 'import sys,yaml; sys.exit("FAIL: a GitOps-namespace Role renders with an empty gitopsNamespaces" if [d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d["kind"]=="Role" and d["metadata"]["name"]==sys.argv[2] and d["metadata"].get("namespace")!="kagent"] else 0)' $(VERIFY_TMP)/vmig-on.out $(MIGRATION_JOB)
 	@$(PICK) $(VERIFY_TMP)/vmig-on.out Role $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-role-kagent.out || { echo "FAIL: no Role of the migration's identity in the kagent namespace"; exit 1; }
 	@grep -A2 'apiGroups: \["helm.toolkit.fluxcd.io"\]' $(VERIFY_TMP)/vmig-role-kagent.out | grep -qF 'verbs: ["get", "list", "create", "update"]' || { echo "FAIL: the migration's identity may not create a HelmRelease in kagent, so the run's access review leaves the namespace out"; exit 1; }
@@ -3897,7 +3906,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 		[ "$$(grep -c 'verbs: \["get", "list"\]' $(VERIFY_TMP)/vmig-role-$$ns.out)" = "2" ] || { echo "FAIL: the Role in $$ns grants more than get, list"; exit 1; }; \
 		$(PICK) $(VERIFY_TMP)/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: $(MIGRATION_JOB)$$' || { echo "FAIL: the RoleBinding in $$ns does not bind the migration's identity"; exit 1; }; \
 	done
-	@$(GOLDEN_DROP) $(VERIFY_TMP)/vmig-gitops.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC)"
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vmig-gitops.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC) $(MIGRATION_JOB)-crds"
 	@if grep -q '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vmig-gitops.out; then echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; fi
 	@$(PICK) $(VERIFY_TMP)/vmig-gitops.out CronJob $(MIGRATION_JOB) kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
 	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-role-flux-giantswarm.out; then echo "FAIL: the GitOps-namespace Role is a hook resource"; exit 1; fi
