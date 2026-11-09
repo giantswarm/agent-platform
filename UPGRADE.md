@@ -22,7 +22,7 @@ giantswarm/agent-platform#1312: the chart no longer derives agent-manager's `dev
 ### Operator action
 
 - **Before the upgrade**, remove `agent-manager.devPortal` from the installation's values.
-- Set `agent-manager.credentials.uiURL` to the form of the client that serves it once that client ships it (the portal: giantswarm/backstage#3364). Until then a missing credential is answered without a form link.
+- Set `agent-manager.credentials.uiURL` to the form of the client that serves it once that client ships it (the portal: giantswarm/backstage#3364), and turn on `agentManager.route` for a client outside the cluster (see [organization credentials](docs/organization-credentials.md#credential-form)). Until then a missing credential is answered without a form link.
 - An installation that pins `components.agent-manager.versionRange` raises its floor to `2.22.0` before it sets `credentials` or `githubTokenExchange`.
 
 ## \<current\> → \<next\> (the charts declare no model)

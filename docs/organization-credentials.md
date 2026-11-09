@@ -4,7 +4,9 @@ agent-manager never takes a credential value in an MCP call. A missing or replac
 
 ## Credential form
 
-Set `agent-manager.credentials.uiURL` to the HTTPS URL template of the client that serves the form, with one `{operation}` placeholder. This chart derives no form URL. `agent-manager.devPortal` is refused.
+Set `agent-manager.credentials.uiURL` to the HTTPS URL template of the client that serves the form: it names the operation with one `{operation}` placeholder, and may name the organization with `{parent}` and `{organization}`. Which path the client serves is the client's own configuration. This chart derives no form URL. `agent-manager.devPortal` is refused.
+
+The form posts the value to agent-manager's REST API as the person. A client outside the cluster reaches that API through `agentManager.route` (`https://agentgateway.<global.domain>/agent-manager`, `agentManager.route.hostname` overrides the host): turn on `agentManager.route.enabled`, and `agentManager.route.jwtAuthentication.enabled` with the identity provider's issuer. agent-manager validates the token itself (`agent-manager.oauth`), so the audience of the ID token the client sends must be one it trusts (`agent-manager.oauth.trustedAudiences` and the muster audiences it accepts).
 
 Credential operations and `agent-manager.githubTokenExchange` need a floor of `2.22.0` or later in `components.agent-manager.versionRange`. The organization switch keeps its own `2.20.0` floor.
 
