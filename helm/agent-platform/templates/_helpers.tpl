@@ -4323,7 +4323,8 @@ the controller's kubernetes authorization mode needs (agent-platform.kagent.auth
 agent-manager's organization values, as JSON. tenants.enabled follows the
 organization switch. The 2.20.0 floor keeps the connectivity chart as the
 only owner of agent-platform-tenant-flux. Credential UI URLs are explicit
-client configuration; this chart does not derive them from Backstage.
+client configuration; this chart does not derive them from Backstage, and
+refuses one while the organization switch is off.
 Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 */}}
 {{- define "agent-platform.agentManager.organizations" -}}
@@ -4336,6 +4337,9 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" "2.22.0")) -}}
 {{- fail "agent-manager credential operations and GitHub token exchange need components.agent-manager.versionRange with a floor of 2.22.0 or later" -}}
 {{- end -}}
+{{- end -}}
+{{- if and (dig "credentials" "uiURL" "" $am) (not $on) -}}
+{{- fail "agent-manager.credentials.uiURL needs agentPlatformOrganizations.enabled: agent-manager links the credential form only beside its organization tools (tenants.enabled, which follows the switch)" -}}
 {{- end -}}
 {{- $own := dig "tenants" dict $am | default dict -}}
 {{- range $k, $_ := $own -}}

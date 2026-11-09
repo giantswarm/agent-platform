@@ -15,15 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
-## \<current\> → \<next\> (agent-manager's credential form is an explicit URL)
+## \<current\> → \<next\> (agent-manager 2.22 and muster 5.61: the credential form is an explicit URL)
 
-giantswarm/agent-platform#1312: the chart no longer derives agent-manager's `devPortal.url` from the portal's hostname, and an own `agent-manager.devPortal` fails the render. agent-manager 2.22.0 links a missing organization credential to `credentials.uiURL`, an HTTPS URL template with one `{operation}` placeholder, and its chart refuses `devPortal`. `credentials` and `githubTokenExchange` need a `components.agent-manager.versionRange` floor of `2.22.0` or later. See [organization credentials](docs/organization-credentials.md).
+giantswarm/agent-platform#1312: the chart no longer derives agent-manager's `devPortal.url` from the portal's hostname, and an own `agent-manager.devPortal` fails the render. agent-manager 2.22.0 links a missing organization credential to `credentials.uiURL`, an HTTPS URL template with one `{operation}` placeholder, and its chart refuses `devPortal`. `components.agent-manager.versionRange` is `>=2.22.0 <3.0.0`, and `credentials` and `githubTokenExchange` fail the render on a lower floor. `components.muster.versionRange` is `>=5.61.0 <6.0.0`: muster passes a backend's `input_required` through to the caller (giantswarm/muster#1812), which carries agent-manager's credential elicitation. See [organization credentials](docs/organization-credentials.md).
 
 ### Operator action
 
 - **Before the upgrade**, remove `agent-manager.devPortal` from the installation's values.
 - Set `agent-manager.credentials.uiURL` to the form of the client that serves it once that client ships it (the portal: giantswarm/backstage#3364), and turn on `agentManager.route` for a client outside the cluster (see [organization credentials](docs/organization-credentials.md#credential-form)). Until then a missing credential is answered without a form link.
-- An installation that pins `components.agent-manager.versionRange` raises its floor to `2.22.0` before it sets `credentials` or `githubTokenExchange`.
+- **An installation that pins the BOM**: move `agent-manager` to `2.22.0` and `muster` to `5.61.0`. A pinned agent-manager floor below `2.22.0` fails the render once `credentials` or `githubTokenExchange` is set.
 
 ## \<current\> → \<next\> (the charts declare no model)
 

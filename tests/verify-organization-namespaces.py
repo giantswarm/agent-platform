@@ -287,11 +287,14 @@ def check_meta(chart):
     expect(r.returncode != 0 and "agent-manager.tenants.commit needs" in r.stderr,
            "organization GitOps configuration on an older manager fails the render naming its floor")
     for what, extra, needle in (
-            ("credential UI on an older manager", ["--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}"],
+            ("credential UI on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
+                                                   "--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}"],
              "agent-manager credential operations and GitHub token exchange need"),
-            ("token exchange on an older manager", ["--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token"],
+            ("token exchange on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
+                                                    "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token"],
              "agent-manager credential operations and GitHub token exchange need"),
-            ("operation metadata on an older manager", ["--set", "agent-manager.credentials.operationsNamespace=credential-operations"],
+            ("operation metadata on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
+                                                        "--set", "agent-manager.credentials.operationsNamespace=credential-operations"],
              "agent-manager credential operations and GitHub token exchange need"),
             ("components.agent-platform-operator.enabled false", ["--set", "components.agent-platform-operator.enabled=false"],
              "components.agent-platform-operator.enabled is false but agentPlatformOrganizations.enabled is true"),
@@ -330,6 +333,9 @@ def check_meta(chart):
     r = meta(chart, *SWITCH, "--set", "agent-platform-operator.commitMode.sourceRef.name=flux")
     expect(r.returncode != 0 and "agent-platform-operator.commitMode.sourceRef.name is set but agentPlatformOrganizations.fluxNamespace is not" in r.stderr,
            "on without fluxNamespace, an own commit mode source fails the render naming fluxNamespace")
+    r = meta(chart, "--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}")
+    expect(r.returncode != 0 and "agent-manager.credentials.uiURL needs agentPlatformOrganizations.enabled" in r.stderr,
+           "off with a credential form URL, the render fails naming the organization switch")
     r = meta(chart, "--set", "components.agent-platform-operator.enabled=true")
     expect(r.returncode != 0 and "components.agent-platform-operator.enabled is true but agentPlatformOrganizations.enabled is false" in r.stderr,
            "off with components.agent-platform-operator.enabled true, the render fails naming it")
@@ -378,6 +384,10 @@ def check_broker_egress(chart):
         r = connectivity(chart, flavor, *flags, "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.agent-platform.svc.cluster.local/oauth/token")
         expect(r.returncode != 0 and "names an in-cluster Service" in r.stderr,
                f"{flavor}: an in-cluster broker Service fails the render naming the endpoint")
+        for endpoint in ("https://muster/oauth/token", "https://muster.agent-platform:8443/oauth/token"):
+            r = connectivity(chart, flavor, *flags, "--set", f"agent-manager.githubTokenExchange.endpoint={endpoint}")
+            expect(r.returncode != 0 and f"agent-manager.githubTokenExchange.endpoint ({endpoint}) names a host of fewer than three labels" in r.stderr,
+                   f"{flavor}: a broker host of fewer than three labels ({endpoint}) fails the render naming the endpoint")
     private = docs(connectivity(chart, "kubernetes", *flags,
                                 "--set", "agent-manager.githubTokenExchange.endpoint=https://broker.example.com:8443/token",
                                 "--set", "agentManager.networkPolicy.egress.cidrs[0]=10.30.0.0/16",

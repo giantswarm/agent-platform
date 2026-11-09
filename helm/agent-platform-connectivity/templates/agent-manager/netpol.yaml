@@ -14,6 +14,9 @@
 {{- if include "agent-platform.jwks.inCluster" $host }}
 {{- fail (printf "agent-manager.githubTokenExchange.endpoint (%s) names an in-cluster Service, which agent-manager's egress policy cannot select by name: use the broker's external hostname or address" $brokerURL) }}
 {{- end }}
+{{- if and (not (include "agent-platform.jwks.addrLiteral" $host)) (lt (len (splitList "." $host)) 3) }}
+{{- fail (printf "agent-manager.githubTokenExchange.endpoint (%s) names a host of fewer than three labels, which the cluster's DNS search path resolves to an in-cluster Service that agent-manager's egress policy cannot select by name: use the broker's external hostname or address" $brokerURL) }}
+{{- end }}
 {{- $port := regexFind ":[0-9]+$" ($parsed.host | default "") | trimPrefix ":" | default "443" | int }}
 {{- $broker = dict "host" $host "port" $port "cidr" "" }}
 {{- if include "agent-platform.jwks.addrLiteral" $host }}
