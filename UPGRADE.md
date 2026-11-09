@@ -90,7 +90,13 @@ giantswarm/agent-platform#1268: `tenants.organizations` is refused by both chart
 
 - **None** for an installation without `tenants.organizations.enabled`.
 - **An installation with `tenants.organizations.enabled: true`** (graveler), in this order:
-  1. Before the upgrade, hand the ClusterRole `agent-platform-tenant-flux` from the agent-manager release to the connectivity release. The connectivity release renders it now, and it upgrades before agent-manager (agent-manager waits for kagent, kagent for connectivity), so without this step its upgrade fails on the object's Helm ownership and never gets past it. `<release>` and `<namespace>` are those of the connectivity HelmRelease's Helm release (`kubectl get helmrelease -A | grep connectivity`, its `spec.releaseName` and `spec.targetNamespace`):
+  1. Before the upgrade, read which Helm release owns the ClusterRole `agent-platform-tenant-flux`:
+
+     ```sh
+     kubectl get clusterrole agent-platform-tenant-flux -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
+     ```
+
+     The connectivity release is the Helm release of the connectivity HelmRelease (`kubectl get helmrelease -A | grep connectivity`, its `spec.releaseName` in `spec.targetNamespace`). When the command prints the connectivity release, or the role is not found, skip the hand-over below: the connectivity release renders the role whenever kagent is on, and from agent-manager 2.20 on agent-manager's chart renders no such role, so nothing moves (giantswarm/agent-manager#305). When it prints the agent-manager release, or prints nothing, hand the role to the connectivity release. The connectivity release upgrades before agent-manager (agent-manager waits for kagent, kagent for connectivity), so without the hand-over its upgrade fails on the object's Helm ownership and never gets past it. `<release>` and `<namespace>` are the connectivity release's `spec.releaseName` and `spec.targetNamespace`:
 
      ```sh
      kubectl annotate clusterrole agent-platform-tenant-flux --overwrite \
@@ -106,11 +112,13 @@ giantswarm/agent-platform#1268: `tenants.organizations` is refused by both chart
      kubectl label clusterrole agent-platform-tenant-flux --overwrite app.kubernetes.io/managed-by=Helm
      ```
 
-     The connectivity release adopts it, and the agent-manager release keeps it when it drops it from its manifest. Then remove `tenants.organizations` and any `agent-manager.tenants` and `muster.muster.mcpServersInAllNamespaces` from the installation's values.
+     The connectivity release adopts it, and the agent-manager release keeps it when it drops it from its manifest.
+
+     Whether or not you handed the role over, remove `tenants.organizations` and any `agent-manager.tenants` and `muster.muster.mcpServersInAllNamespaces` from the installation's values.
   2. Turn `agentPlatformOrganizations.enabled` on with its prerequisites: kagent and Agent Substrate on, `kagent.fluxServiceAccountName`, `llmRouting.enabled` with a model whose provider the listener serves and `llmRouting.modelConfigPolicy.enabled` on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, `global.domain` (or `agentPlatformOrganizations.apiHostnames`), muster's OAuth server on the `dex` provider with `tenants.platform.users` (muster lists the MCP servers as the person), and the kagent line with giantswarm/kagent-extensions#27 for the erasure.
-  3. Create each organization through agent-manager's organization tools (`create_organization` in the parent `org-<name>`, then its members and its model). Two steps decide when they answer:
-     - With this release, `components.agent-manager.versionRange` is `>=2.16.0 <2.19.0` and agent-manager gets `tenants.enabled: false`: an agent-manager 2.18 with `tenants.enabled` would run the old tenant reconciler over every `giantswarm.io/organization` namespace. Its organization tools do not exist yet.
-     - The next agent-platform release whose CHANGELOG moves `components.agent-manager.versionRange` to the release with giantswarm/agent-manager#294 turns agent-manager's `tenants.enabled` on with `agentPlatformOrganizations.enabled` (and sets `devPortal.url`); without it the organization tools answer `unsupported`. That release also hands `agent-platform-tenant-flux` back: the connectivity chart drops it and agent-manager's chart renders it again. Its UPGRADE.md entry gives the same annotation step in the other direction (the agent-manager release's name and namespace), so the role is never missing. Upgrade graveler to that release before this step.
+  3. Create each organization through agent-manager's organization tools (`create_organization` in the parent `org-<name>`, then its members and its model). Two things decide when they answer:
+     - From agent-platform 4.175.0 on, `components.agent-manager.versionRange` is `>=2.20.0 <3.0.0` (giantswarm/agent-platform#1298): from 2.20.0 on, agent-manager's chart leaves `agent-platform-tenant-flux` to the connectivity chart (giantswarm/agent-manager#305) and its organization tools write in commit mode (giantswarm/agent-manager#300).
+     - That release turns agent-manager's `tenants.enabled` on with `agentPlatformOrganizations.enabled` (and sets `devPortal.url`); without it the organization tools answer `unsupported`. `agent-platform-tenant-flux` stays with the connectivity release: agent-manager's chart does not render it, so nothing moves and no hand-over is needed. graveler gets this range with this upgrade: no second upgrade is needed.
   4. Delete the old tenant agent objects in each `org-<name>` namespace: the agents' HelmReleases and the `agent` OCIRepository, the copies the reconciler kept (the Harness, the WorkerPool and its ServiceAccount, `default-model-config` and its key Secret, the workers' network policies, all labelled `agent-manager.giantswarm.io/tenant-object`), and the RoleBinding of the agents' Flux ServiceAccount. Their sessions do not move.
 
 ## \<current\> → \<next\> (the organization label, and the egress gateway reaches only muster's Gateway in the cluster)
