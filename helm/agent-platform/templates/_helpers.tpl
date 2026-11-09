@@ -262,7 +262,9 @@ overwrite would hide a values file that still spells the old key.
     private CA its OAuth server verifies the provider against. And
     rbac.mcpServerEditor.subjects and rbac.workflowEditor.subjects: the
     block's own subjects with tenants.platformTeam appended (each subject
-    once), while that list is not empty.
+    once), while that list is not empty. And toolsetPresets.<name>.icon for
+    the shipped presets left without one (agent-platform.muster.presetIcons),
+    from the muster floor that takes the key.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
                  tenants.enabled from agentPlatformOrganizations.enabled and,
                  with it on and components.backstage on, devPortal.url from
@@ -901,6 +903,10 @@ repeating the admin groups. */ -}}
 {{- $_ := set $rbac $role (dict "subjects" $subjects) -}}
 {{- end -}}
 {{- $_ := set $derived "rbac" $rbac -}}
+{{- end -}}
+{{- with (include "agent-platform.muster.presetIcons" .root | fromJson) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $derived "muster" (mergeOverwrite $muster (dict "toolsetPresets" .)) -}}
 {{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
@@ -4428,6 +4434,36 @@ The first muster release whose chart takes muster.mcpServerNamespaceSelector
 (giantswarm/muster#1783). One line, no comment inside the define.
 */}}
 {{- define "agent-platform.muster.organizationsFloor" -}}5.58.0{{- end -}}
+
+{{/*
+The first muster release that takes toolsetPresets.<name>.icon. One line, no
+comment inside the define.
+*/}}
+{{- define "agent-platform.muster.presetIconsFloor" -}}5.61.0{{- end -}}
+
+{{/*
+Icons of the shipped presets (infrastructure, agent-platform), for each one
+muster.muster.toolsetPresets still defines and leaves without an icon, while
+the floor of components.muster.versionRange is at least
+agent-platform.muster.presetIconsFloor. Emits JSON, {} otherwise.
+Usage: include "agent-platform.muster.presetIcons" $root | fromJson
+*/}}
+{{- define "agent-platform.muster.presetIcons" -}}
+{{- $out := dict -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.presetIconsFloor" .)) -}}
+{{- $icons := dict
+      "infrastructure" "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM5OTNDMUQiLz48ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSIxMCIgeT0iOSIgd2lkdGg9IjEyIiBoZWlnaHQ9IjYiIHJ4PSIxLjUiLz48cmVjdCB4PSIxMCIgeT0iMTciIHdpZHRoPSIxMiIgaGVpZ2h0PSI2IiByeD0iMS41Ii8+PHBhdGggZD0iTTEzIDEyaC4wMU0xMyAyMGguMDEiLz48L2c+PC9zdmc+"
+      "agent-platform" "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM1MzRBQjciLz48ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTYgOWwxLjggNS4yTDIzIDE2bC01LjIgMS44TDE2IDIzbC0xLjgtNS4yTDkgMTZsNS4yLTEuOHoiLz48L2c+PC9zdmc+" -}}
+{{- $presets := dig "muster" "toolsetPresets" dict (.Values.muster | default dict) -}}
+{{- range $name, $icon := $icons -}}
+{{- $p := get $presets $name -}}
+{{- if and (kindIs "map" $p) (not $p.icon) -}}
+{{- $_ := set $out $name (dict "icon" $icon) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
 
 {{/*
 A Go duration (time.ParseDuration: 720h, 1h30m, 0, 1.5h) in seconds, empty
