@@ -743,6 +743,9 @@ def prove_labels():
 
 
 def prove_admins_binding():
+    for namespace, denied in ((ORG, "agent-platform-organization-admins-binding"), (OLD, None)):
+        case(f"RoleBinding DELETE collection in {namespace}",
+             kubectl(["delete", "--raw", f"/apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/rolebindings?dryRun=All"], as_=NS_CONTROLLER), denied)
     case("organization-admins is not deleted while its namespace lives", delete("rolebinding", "organization-admins", ORG, as_=PERSON),
          "agent-platform-organization-admins-binding")
     case("organization-admins is not emptied while its namespace lives", patch("rolebinding", "organization-admins", ORG, {"subjects": []}, as_=PERSON),

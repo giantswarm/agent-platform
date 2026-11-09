@@ -146,6 +146,9 @@ def check_meta(chart):
     expect("agent-platform-operator" not in conn["components"], "off, the connectivity roster carries no agent-platform-operator entry")
 
     on = docs(meta(chart, *ON))
+    operator_peer = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": RELEASE_NS}}, "podSelector": {"matchLabels": {"app.kubernetes.io/name": "agent-platform-operator"}}}
+    expect(operator_peer in release(on, "kagent")["values"]["controller"]["networkPolicy"]["from"], "kagent admits the operator through controller.networkPolicy.from even with platform policies disabled")
+    expect(operator_peer not in release(off, "kagent")["values"]["controller"]["networkPolicy"]["from"], "organizations off: kagent admits no operator")
     op = release(on, "agent-platform-operator")
     expect(op is not None, "on, the agent-platform-operator release renders")
     expect(op["install"].get("crds") == "CreateReplace" and op["upgrade"].get("crds") == "CreateReplace",
@@ -236,6 +239,14 @@ def check_meta(chart):
            "with the connectivity release in another namespace, the operator installs there too")
 
     aws = docs(meta(chart, *ON, *AWS))
+    rustfs = docs(meta(chart, *ON, "--set", "substrate.rustfs.enabled=true", "--set", "substrate.rustfs.accessKey=proof-access", "--set", "substrate.rustfs.secretKey=proof-secret"))
+    snapshots = release(rustfs, "agent-platform-operator")["values"]["snapshots"]
+    expect(snapshots == {"bucket": "ci-agent-snapshots", "endpoint": "http://rustfs.ate-system.svc:9000", "usePathStyle": True, "region": "us-east-1", "credentials": {"existingSecret": "substrate-rustfs-operator"}}, "RustFS endpoint, path addressing, region and credential reference follow the configured store")
+    capz = docs(meta(chart, "-f", f"{chart}/../agent-platform-connectivity/ci/test-substrate-store-capz-values.yaml", *ON, "--set", "kagent.harness.snapshotLocation=", "--set", "muster.muster.oauth.server.enabled=true", "--set", "muster.muster.oauth.server.provider=dex"))
+    snapshots = release(capz, "agent-platform-operator")["values"]["snapshots"]
+    expect(snapshots["endpoint"] == f"http://substrate-s3proxy.{RELEASE_NS}.svc:80" and snapshots["usePathStyle"] is True and snapshots["region"] == "us-east-1" and snapshots["credentials"] == {"existingSecret": "substrate-s3proxy"}, "Azure s3proxy forwards endpoint, path addressing and Secret reference")
+    relocated_capz = docs(meta(chart, "-f", f"{chart}/../agent-platform-connectivity/ci/test-substrate-store-capz-values.yaml", *ON, "--set", "kagent.harness.snapshotLocation=", "--set", "muster.muster.oauth.server.enabled=true", "--set", "muster.muster.oauth.server.provider=dex", "--set", "components.agent-platform-connectivity.targetNamespace=apo"))
+    expect(release(relocated_capz, "agent-platform-operator")["values"]["snapshots"]["endpoint"] == "http://substrate-s3proxy.apo.svc:80", "s3proxy endpoint follows the connectivity namespace")
     arn = release(aws, "agent-platform-operator")["values"]["serviceAccount"]["annotations"]["eks.amazonaws.com/role-arn"]
     roles = [d for d in docs(run([HELM, "template", "t", f"{chart}/../agent-platform-connectivity", "-n", RELEASE_NS, "-f",
                                   f"{chart}/../agent-platform-connectivity/ci/test-substrate-store-aws-values.yaml",

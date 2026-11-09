@@ -60,7 +60,7 @@ import textwrap
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
@@ -871,14 +871,15 @@ def log_controller_events(kube: Kube, namespace: str, deployment: str, since: st
 
 
 def dex_password_grant(ca_path: Optional[str], scope: str = LOGIN_SCOPES,
-                       user: Optional[str] = None, password: Optional[str] = None) -> str:
+                       user: Optional[str] = None, password: Optional[str] = None,
+                       client: Optional[Tuple[str, str]] = None) -> str:
     """The OAuth password grant against the scenario's issuer (the lab Dex runs
     with oauth2.passwordConnector: local); returns the raw id_token — a headless
     login in one request. ca_path None means the system trust store, and a user
     or a password of None means the scenario's own."""
     r = requests.post(
         f"{SCENARIO.issuer_url}/token",
-        auth=(SCENARIO.client_id, SCENARIO.client_secret),
+        auth=client if client is not None else (SCENARIO.client_id, SCENARIO.client_secret),
         data={"grant_type": "password",
               "username": SCENARIO.user if user is None else user,
               "password": SCENARIO.password if password is None else password,

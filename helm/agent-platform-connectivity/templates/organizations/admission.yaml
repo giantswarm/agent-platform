@@ -455,7 +455,7 @@ spec:
         resources: ["rolebindings"]
   matchConditions:
     - name: organization-admins
-      expression: "request.name == 'organization-admins'"
+      expression: "has(request.name) ? request.name == 'organization-admins' : request.operation == 'DELETE'"
   validations:
     - expression: >-
         has(namespaceObject.metadata.deletionTimestamp) ||
