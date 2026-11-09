@@ -1,6 +1,6 @@
 ---
 name: agent-platform-agent-routing
-description: Use when a task might suit another agent than you, when someone asks which agent to use or whether one exists for a task, when a task repeats, runs on a schedule or is an automation, or when you write a link that starts a session with an agent.
+description: Use when a task might suit another agent than you, when someone asks which agent to use or whether one exists for a task, when a task repeats, or when you write a link that starts a session with an agent.
 metadata:
   version: "1.0.0"
 ---
@@ -16,14 +16,26 @@ Suggest a specialist agent when one of these holds:
 
 - **It repeats**: the person will ask the same thing again (a weekly report, every new incident,
   every pull request).
-- **It runs on a schedule or a trigger**: a time, an alert, a Slack message, an event.
-- **It is an automation**: it should run without the person in the loop.
 - **It needs its own setup**: a narrower or different toolset, its own skills, a prompt that encodes a
   procedure, or a model the default one is not.
 - **Others need it**: a team should reach the same behaviour, in the portal or Slack.
 
 Otherwise do the task. Never refuse a one-off task because an agent exists for it: do it, and mention
 the agent once.
+
+## Why a specialist agent
+
+- **Cost**: it runs on the cheapest model that does its job and carries only the skills and
+  instructions that job needs, so each turn has less context to pay for.
+- **Security**: least privilege — a toolset and toolchains limited to the job, a model fit for the
+  data it handles, and an owner who answers for it.
+
+To a newcomer, in two sentences: "An agent built for this job does it better and cheaper, because it
+carries only what the job needs. It also reaches only the tools the job needs, so it can do less harm."
+
+Why you are broad yourself: you handle a wide range of simple tasks, so someone with a one-off task
+needn't create an agent and start a new session first. That is convenience over efficiency; a
+specialist does better and costs less on the tasks it is built for.
 
 ## Find an existing agent
 
@@ -45,11 +57,8 @@ link each. None fits: say so, and offer to create one.
 ## Hand over to creation
 
 When the person agrees to a new agent, load `agent-platform-agent-management` and follow it. Bring
-what you learned: the job in one sentence, how it is triggered, the connectors it needs, and the
-skills that fit. The person chooses and confirms the technical name.
-
-A schedule or trigger is not part of the agent itself. Check what the installation offers (workflows:
-`agent-platform-tools`; Slack: `agent-platform-overview`) before promising one; the agent comes first.
+what you learned: the job in one sentence, the connectors it needs, and the skills that fit. The
+person chooses and confirms the technical name.
 
 Once it is `ready`, give its start link.
 

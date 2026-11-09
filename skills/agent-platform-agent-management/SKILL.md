@@ -71,11 +71,14 @@ never assume an argument. The order:
 - **Technical name**: DNS-1123, at most 63 characters, chosen by the person, never derived from the
   display name in silence. It names the release and the Agent; the display name and description are
   what the portal and Slack show.
-- **Model**: a config from the live list, never invented — an agent on a missing or not-accepted
-  config never boots. No suitable model: `agent-platform-tools` (model-manager).
+- **Model**: the cheapest config from the live list that can do the job, never invented — an agent
+  on a missing or not-accepted config never boots. No suitable model: `agent-platform-tools` (model-manager).
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only
   on an explicit request. An own-account (OAuth) connector without `grantScope: subject` needs a
   sign-in in each of the agent's conversations (`agent-platform-tools`); say so before choosing it.
+- **Toolchains and workspace**: `defaultToolchains` and `defaultWorkspace`, the smallest set the job
+  needs, and only where the installation offers them (both are opt-in: `x_toolchain-manager_*`,
+  `x_workspace-manager_*` in `filter_tools`); otherwise leave them out.
 - **Skills**: always pinned (the tools pin at write time); pins and private repositories:
   `agent-platform-skill-authoring`.
 - **Egress**: none unless the job needs an origin; a named `EgressPolicy` where one fits, raw origins otherwise.
