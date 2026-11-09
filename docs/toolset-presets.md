@@ -38,7 +38,7 @@ muster:
 | `infrastructure` | The mcp-kubernetes, mcp-capi and mcp-prometheus families — every management cluster's servers, one selector. | agent-platform-mcps ≥ 0.9.0 (`muster.families.<group>.toolGroup`, default `infrastructure`; per-entry `toolGroup` override) |
 | `agent-platform` | agent-manager, model-manager, vm-manager, cluster-manager, kagent's session tools (`x_kagent_list_sessions`, `x_kagent_invoke_session`, the checkpoint and fork tools: the person's other ready sessions, a message to one, a checkpoint or a fork of one) and muster's `core_*` tools — the meta agent's preset. | agent-manager ≥ 0.3.0, model-manager ≥ 0.18.0 (fixed `agent-platform`; `muster.mcpServer.labels` can override); the connectivity chart's `MCPServer kagent` (`kagent.controllerRoute.mcp`) |
 
-Each also gets an icon (`icon`, an svg `data:` URI) once the floor of `components.muster.versionRange` is 5.60.0 or later; an own `icon` wins.
+Each also gets an icon (`icon`, an svg `data:` URI) once the floor of `components.muster.versionRange` is 5.61.0 or later, the release expected to carry giantswarm/muster#1817; an own `icon` wins.
 
 `core_*` is what makes `agent-platform` the meta agent's preset. No other shipped preset reaches muster's core tools; an agent that needs one names it explicitly (`tool:core_workflow_list`) or uses `preset:full`.
 
@@ -49,7 +49,7 @@ Each also gets an icon (`icon`, an svg `data:` URI) once the floor of `component
 
 ## Adding an installation's own presets
 
-Add entries next to the shipped ones in the installation's gitops values. Helm merges the map, so the two platform presets stay and yours join them; `preset:<name>` is then valid for every agent on the installation, and the portal's Tools step lists it. Each preset has a `description`, an optional `icon` (a `data:` URI: svg, png, jpeg or webp, ≤ 65536 chars; muster ≥ 5.60.0), an `include` list and an optional `exclude` list; every rule sets exactly one key — `tool`, `pattern`, `server`, `workflow`, `readOnly: true`, `label`, or `preset` (composition, `include` only).
+Add entries next to the shipped ones in the installation's gitops values. Helm merges the map, so the two platform presets stay and yours join them; `preset:<name>` is then valid for every agent on the installation, and the portal's Tools step lists it. Each preset has a `description`, an optional `icon` (a `data:` URI: svg, png, jpeg or webp, ≤ 65536 chars; muster ≥ 5.61.0), an `include` list and an optional `exclude` list; every rule sets exactly one key — `tool`, `pattern`, `server`, `workflow`, `readOnly: true`, `label`, or `preset` (composition, `include` only).
 
 A preset for the test clusters' servers, by name:
 

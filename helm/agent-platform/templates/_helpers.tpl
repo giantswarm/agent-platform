@@ -4439,7 +4439,7 @@ The first muster release whose chart takes muster.mcpServerNamespaceSelector
 The first muster release that takes toolsetPresets.<name>.icon. One line, no
 comment inside the define.
 */}}
-{{- define "agent-platform.muster.presetIconsFloor" -}}5.60.0{{- end -}}
+{{- define "agent-platform.muster.presetIconsFloor" -}}5.61.0{{- end -}}
 
 {{/*
 Icons of the shipped presets (infrastructure, agent-platform), for each one

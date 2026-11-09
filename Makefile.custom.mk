@@ -2859,8 +2859,8 @@ verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every
 # version, not a copy. Recursive (=), so it is read only when a recipe uses it.
 PRESETS_MUSTER_MIN := 5.12.0
 # agent-platform.muster.presetIconsFloor, and a release below it.
-PRESETS_ICONS_MUSTER_MIN := 5.60.0
-PRESETS_ICONS_MUSTER_BELOW := 5.59.0
+PRESETS_ICONS_MUSTER_MIN := 5.61.0
+PRESETS_ICONS_MUSTER_BELOW := 5.60.1
 PRESETS_MUSTER_VERSION = $(shell $(FLOORS) floor muster)
 # The muster chart's own render guards want the OAuth inputs an installation
 # supplies; these are placeholders for the render, not part of the assertion.
