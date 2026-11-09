@@ -463,9 +463,14 @@ components:  # @schema additionalProperties: true
     # chart refuses the key.
     # Broker authorization uses opaque state handles within server state limits.
     # Resource access tokens authenticate callers independently of backend grants.
+    # Floor 5.60.0: muster accepts an ID token whose audience is listed in
+    # muster.muster.oauth.server.trustedAudiences on /mcp and on the
+    # person-only endpoints (giantswarm/muster#1807). From 5.59.0 an older
+    # muster answers it with 401: on /mcp the tokens agentgateway and the
+    # portal forward, on /session-bindings agent-manager's start_session.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.59.0 <6.0.0"
+    versionRange: ">=5.60.0 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
