@@ -109,8 +109,9 @@ spec:
     - --gpu-memory-utilization=0.90
     # Text only: no image per prompt, so vLLM skips the Pixtral processor the
     # v0.8.0 runtime's vLLM cannot run with its transformers (giantswarm/llm-d#37).
-    # The dotted form: the JSON form's quotes do not survive the llm-d
-    # container's shell wrapper.
+    # The dotted form needs no quoting. The well-known runtime template
+    # re-parses every argument through a shell (eval "… $@"), so the JSON
+    # form only survives single-quoted inside its argument, as in gemma-4-12b.
     - --limit-mm-per-prompt.image=0
   resources:
     gpus: 4
