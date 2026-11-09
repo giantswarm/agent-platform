@@ -1456,13 +1456,17 @@ Usage: include "agent-platform.toolchains.registries" $root | fromJson
 {{- end -}}
 
 {{/*
-Whether the floor of components.<name>.versionRange is at least version, a
-release candidate of it included: "true", else empty (a range without a floor
-too).
-Usage: include "agent-platform.componentFloorAtLeast" (dict "root" $root "name" "<component>" "version" "X.Y.Z")
+Whether the floor of components.<name>.versionRange is at least version:
+"true", else empty (a range without a floor too). For a release version a
+release candidate of it counts as the release; a release-candidate version is
+compared exactly, so a floor on an earlier candidate does not reach it.
+Usage: include "agent-platform.componentFloorAtLeast" (dict "root" $root "name" "<component>" "version" "X.Y.Z[-rc.N]")
 */}}
 {{- define "agent-platform.componentFloorAtLeast" -}}
-{{- $floor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig .name "versionRange" "" .root.Values.components)) "" -}}
+{{- $floor := include "agent-platform.semverRangeFloor" (dig .name "versionRange" "" .root.Values.components) -}}
+{{- if not (contains "-" .version) -}}
+{{- $floor = regexReplaceAll "-.*$" $floor "" -}}
+{{- end -}}
 {{- if and $floor (ge ((semver $floor).Compare (semver .version)) 0) -}}true{{- end -}}
 {{- end -}}
 

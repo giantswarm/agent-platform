@@ -454,6 +454,8 @@ spec:
         operations: ["CREATE", "UPDATE", "DELETE"]
         resources: ["rolebindings"]
   matchConditions:
+    # A collection DELETE carries no name, and CEL cannot see which bindings
+    # it removes, so every one is held to the namespace-terminating rule.
     - name: organization-admins
       expression: >-
         request.operation == 'DELETE'

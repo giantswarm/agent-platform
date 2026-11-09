@@ -289,6 +289,9 @@ def check_meta(chart):
     for what, extra, needle in (
             ("credential UI on an older manager", ["--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}"],
              "agent-manager credential operations and GitHub token exchange need"),
+            ("credential UI on an earlier release candidate", ["--set", "components.agent-manager.versionRange=>=2.22.0-rc.1 <3.0.0",
+                                                               "--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}"],
+             "agent-manager credential operations and GitHub token exchange need"),
             ("token exchange on an older manager", ["--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token"],
              "agent-manager credential operations and GitHub token exchange need"),
             ("operation metadata on an older manager", ["--set", "agent-manager.credentials.operationsNamespace=credential-operations"],
