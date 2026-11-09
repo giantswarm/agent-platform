@@ -455,7 +455,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.flux.enabled | bool | `true` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `">=5.58.0 <6.0.0"` |  |
+| components.muster.versionRange | string | `">=5.59.0 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.muster.dependsOn[0] | string | `"valkey"` |  |
@@ -639,7 +639,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.toolchain-manager.gatedRoster | bool | `true` |  |
 | components.agent-platform-operator.chart | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-operator.versionRange | string | `">=0.1.0 <0.2.0"` |  |
+| components.agent-platform-operator.versionRange | string | `">=0.1.7 <0.2.0"` |  |
 | components.agent-platform-operator.valuesFrom | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.crds | string | `"CreateReplace"` |  |
 | components.agent-platform-operator.ownedCrds[0] | string | `"agentplatformorganizations.agent-platform.giantswarm.io"` |  |
@@ -664,7 +664,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
 | components.mcp-kubernetes.chart | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.mcp-kubernetes.versionRange | string | `">=1.3.0 <2.0.0"` |  |
+| components.mcp-kubernetes.versionRange | string | `">=1.14.0 <2.0.0"` |  |
 | components.mcp-kubernetes.valuesFrom | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.omitKeys[0] | string | `"kubernetesAudience"` |  |
 | components.mcp-kubernetes.omitKeys[1] | string | `"mcpServer"` |  |
@@ -1459,7 +1459,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.20.4"` |  |
+| agentManager.migration.image.tag | string | `"2.21.1"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | skills.platformSource.enabled | bool | `true` |  |
@@ -1612,6 +1612,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaceManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| toolchain-manager.muster.mcpServer.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | toolchain-manager.owners.groups | list | `[]` |  |
 | toolchain-manager.owners.emails | list | `[]` |  |
 | toolchain-manager.sources[0].repository | string | `"giantswarm/agent-toolchains"` |  |

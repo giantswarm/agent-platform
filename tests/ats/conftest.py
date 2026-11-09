@@ -50,7 +50,6 @@ scenario against any cluster; see README.md.
 
 import base64
 import hashlib
-import html
 import json
 import logging
 import re
@@ -61,8 +60,8 @@ import textwrap
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence
-from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
 import requests
@@ -70,6 +69,7 @@ import yaml
 from pytest_helm_charts.clusters import Cluster
 
 import scenarios
+from oauth_browser import follow_authorization
 from scenarios import AGENTGATEWAY_SERVICE, AGENTGATEWAY_SERVICE_PORT, ATS_DIR, LOOPBACK, MUSTER_SERVICE_PORT, REPO_ROOT, Scenario
 
 logger = logging.getLogger(__name__)
@@ -452,6 +452,26 @@ class Helm:
 
     def uninstall(self) -> float:
         started = time.monotonic()
+        kube = Kube(self.kubeconfig)
+        self_release = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=NAMESPACE)
+        if self_release is not None:
+            resumer = ["delete", "jobs.batch", f"{RELEASE}-self-resume", "-n", NAMESPACE, "--ignore-not-found", "--wait=true"]
+            kube.cmd(resumer)
+            kube.cmd(["patch", "helmreleases.helm.toolkit.fluxcd.io", RELEASE, "-n", NAMESPACE,
+                      "--type=merge", "-p", '{"spec":{"suspend":true}}'])
+
+            def quiescent() -> bool:
+                current = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=NAMESPACE)
+                if current is None or not current["spec"].get("suspend"):
+                    raise Abort("the self HelmRelease is no longer suspended; refusing a concurrent Helm uninstall")
+                if condition(current, "Reconciling").get("status") == "True":
+                    return False
+                return self.status()["info"]["status"] in ("deployed", "failed", "uninstalling")
+
+            wait_for("the suspended self HelmRelease's active reconciliation to finish", quiescent, UNINSTALL_BUDGET_S, interval=1)
+            kube.cmd(resumer)
+            current = kube.get("helmreleases.helm.toolkit.fluxcd.io", RELEASE, namespace=NAMESPACE)
+            assert current and current["spec"].get("suspend"), "the self HelmRelease resumed before uninstall"
         r = run(self._cmd("uninstall", RELEASE, "--namespace", NAMESPACE, "--wait", "--timeout", UNINSTALL_TIMEOUT), timeout=10 * 60)
         elapsed = time.monotonic() - started
         assert r.returncode == 0, f"helm uninstall failed after {elapsed:.0f}s:\n{r.stdout}\n{r.stderr}"
@@ -851,14 +871,15 @@ def log_controller_events(kube: Kube, namespace: str, deployment: str, since: st
 
 
 def dex_password_grant(ca_path: Optional[str], scope: str = LOGIN_SCOPES,
-                       user: Optional[str] = None, password: Optional[str] = None) -> str:
+                       user: Optional[str] = None, password: Optional[str] = None,
+                       client: Optional[Tuple[str, str]] = None) -> str:
     """The OAuth password grant against the scenario's issuer (the lab Dex runs
     with oauth2.passwordConnector: local); returns the raw id_token — a headless
     login in one request. ca_path None means the system trust store, and a user
     or a password of None means the scenario's own."""
     r = requests.post(
         f"{SCENARIO.issuer_url}/token",
-        auth=(SCENARIO.client_id, SCENARIO.client_secret),
+        auth=client if client is not None else (SCENARIO.client_id, SCENARIO.client_secret),
         data={"grant_type": "password",
               "username": SCENARIO.user if user is None else user,
               "password": SCENARIO.password if password is None else password,
@@ -1052,34 +1073,21 @@ def login_through_muster(base_url: str, ca_path: Optional[str]) -> str:
     state = secrets.token_urlsafe(24)  # muster rejects a state shorter than 24 characters
     session = requests.Session()
     session.verify = ca_path or True  # the issuer's CA when it has one, else the system store
+    metadata = session.get(f"{base_url}/.well-known/oauth-protected-resource", timeout=30)
+    assert metadata.status_code == 200, f"resource discovery failed: {metadata.status_code}"
+    resource = metadata.json()["resource"]
     url = f"{base_url}/oauth/authorize?" + urlencode({
         "response_type": "code", "client_id": client_id, "redirect_uri": callback, "state": state,
-        "code_challenge": challenge, "code_challenge_method": "S256", "scope": "openid profile email groups"})
-    # Walk the redirects by hand: muster -> the issuer -> login form ->
-    # (approval skipped) -> muster callback -> the redirect URI, never fetched.
-    for _ in range(15):
-        if url.startswith(callback):
-            break
-        r = session.get(url, allow_redirects=False, timeout=30)
-        if r.status_code in (301, 302, 303, 307, 308):
-            url = urljoin(url, r.headers["Location"])
-            continue
-        assert r.status_code == 200, f"{url} -> {r.status_code}: {r.text[:300]}"
-        action = re.search(r'action="([^"]+)"', r.text)
-        assert action, f"no form to submit on {url}: {r.text[:300]}"
-        post_url = urljoin(url, html.unescape(action.group(1)))
-        r = session.post(post_url, data={"login": SCENARIO.user, "password": SCENARIO.password}, allow_redirects=False, timeout=30)
-        assert r.status_code in (302, 303), f"the login form was refused: {r.status_code} {r.text[:300]}"
-        url = urljoin(post_url, r.headers["Location"])
-    else:
-        raise AssertionError(f"OAuth flow never reached the redirect URI: {url}")
+        "code_challenge": challenge, "code_challenge_method": "S256", "scope": "openid profile email groups",
+        "resource": resource})
+    url = follow_authorization(session, url, callback, base_url, SCENARIO.issuer_url, SCENARIO.user, SCENARIO.password)
     query = parse_qs(urlsplit(url).query)
     assert query.get("state") == [state], f"state mismatch in {url}"
     assert "code" in query, f"authorization did not yield a code: {url}"
     r = requests.post(
         f"{base_url}/oauth/token", auth=(client_id, client_secret),
         data={"grant_type": "authorization_code", "code": query["code"][0], "redirect_uri": callback,
-              "client_id": client_id, "code_verifier": verifier},
+              "client_id": client_id, "code_verifier": verifier, "resource": resource},
         timeout=30,
     )
     assert r.status_code == 200, f"token exchange failed: {r.status_code} {r.text[:300]}"

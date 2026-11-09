@@ -461,9 +461,11 @@ components:  # @schema additionalProperties: true
     # organization namespaces with agentPlatformOrganizations.enabled
     # (giantswarm/muster#1783, agent-platform.muster.organizations); an older
     # chart refuses the key.
+    # Broker authorization uses opaque state handles within server state limits.
+    # Resource access tokens authenticate callers independently of backend grants.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.58.0 <6.0.0"
+    versionRange: ">=5.59.0 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -684,7 +686,7 @@ components:  # @schema additionalProperties: true
     # Harness relays them too, through its MCP bridge
     # (giantswarm/kagent-upstream#927). From 1.31.0 ListSessions filters by
     # the Agent's namespace (giantswarm/kagent-upstream#958), which the
-    # operator's erasure asks for.
+    # operator's cleanup process asks for.
     versionRange: ">=1.31.0 <1.32.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
@@ -1358,7 +1360,7 @@ components:  # @schema additionalProperties: true
     # The Agent Platform organizations' operator
     # (giantswarm/agent-platform-operator, giantswarm/giantswarm#38891): it
     # reconciles each AgentPlatformOrganization (agent-platform.giantswarm.io)
-    # into its organization namespace, with the curated copies, and erases a
+    # into its organization namespace, with the curated copies, and cleans up a
     # deleted organization behind a finalizer. No `enabled` here: the
     # component follows the one switch agentPlatformOrganizations.enabled
     # (below), and an explicit value that disagrees with it fails the render
@@ -1370,12 +1372,14 @@ components:  # @schema additionalProperties: true
     # A 0.1.x release rolls in without a change here, its CRD with it
     # (CreateReplace); one that needs wiring of this chart is a minor
     # release, 0.2.0, outside the range. 0.1.0 carries the CRD, the curated
-    # copies, the erasure, the ate-api CA projected from ClusterTrustBundles
+    # copies, organization cleanup, the ate-api CA projected from ClusterTrustBundles
     # (agent-platform-operator#2, #3, #7, #21) and the serviceAccountBindings
     # the meta chart derives: the credential providers' Secret readers bound
     # in every organization namespace (agent-platform-operator#23,
     # giantswarm/agent-platform#1269).
-    versionRange: ">=0.1.0 <0.2.0"
+    # Snapshot endpoints, path-style addressing and credential Secret
+    # references require 0.1.7 or later.
+    versionRange: ">=0.1.7 <0.2.0"
     valuesFrom: agent-platform-operator
     # App-owned CRD: the chart ships agentplatformorganizations in its crds/
     # dir. CreateReplace makes Flux upgrade it with the app on every release
@@ -1457,19 +1461,18 @@ components:  # @schema additionalProperties: true
   mcp-kubernetes:  # @schema additionalProperties: true
     chart: mcp-kubernetes
     # The Kubernetes MCP server (giantswarm/mcp-kubernetes), acting as the user:
-    # an OAuth 2.1 resource server against the platform identity provider,
-    # presenting the forwarded token to the kube-apiserver. Registered with
+    # an OAuth 2.1 resource server with its own access tokens and an upstream
+    # identity for kube-apiserver access. Registered with
     # muster through an MCPServer CR the connectivity chart renders.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # The mcp-kubernetes block below leaves the issuer, client, Secret and CA
-    # to the chart's global.identity fallbacks (from 1.1.1). The floor is
-    # 1.3.0: the chart takes mcpKubernetes.instrumentation.otlpProtocol and
-    # .otlpHeaders, so its traces reach the collector's gRPC endpoint with the
-    # tenant header (giantswarm/giantswarm#36711). The next major is the ceiling.
-    versionRange: ">=1.3.0 <2.0.0"
+    # to the chart's global.identity fallbacks. OAuth consent uses encrypted
+    # shared state, and MCP requests require resource access tokens.
+    # The next major is the ceiling.
+    versionRange: ">=1.14.0 <2.0.0"
     valuesFrom: mcp-kubernetes
     # The connectivity chart's keys, not the chart's (which validates strictly):
-    # the audience muster requests for the forwarded token and the shape of the
+    # the upstream Kubernetes audience and the shape of the
     # registration, read for the MCPServer CR
     # (templates/mcp-kubernetes/mcpserver.yaml there).
     omitKeys:
@@ -5328,7 +5331,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.20.4
+      tag: 2.21.1
     dryRun: false
     gitopsNamespaces: []
 
@@ -5651,7 +5654,7 @@ tenants:
 #     llm listener's base-URL policy, the workers' network peers, and kagent's
 #     authorizer lists a person's agents there
 #     (kagent.controller.authorization.namespaceSelector);
-#   - the operator's access for the erasure of a deleted organization
+#   - the operator's access for cleanup of a deleted organization
 #     (giantswarm/giantswarm#38988): the kagent controller admits its
 #     ServiceAccount as a machine caller that lists and deletes every
 #     creator's Sessions; its network policies (the cluster DNS, the API
@@ -5659,8 +5662,8 @@ tenants:
 #     an S3 snapshot location, S3 and STS); with the Crossplane AWS snapshot store
 #     the IAM role <store role>-operator, which deletes keys under an
 #     organization's UID prefix of the bucket only, named on the operator's
-#     ServiceAccount (IRSA). The capz and s3proxy stores give the operator no
-#     snapshot access yet: there the erasure stops at the snapshots' step;
+#     ServiceAccount (IRSA). RustFS and the s3proxy facade use path-style
+#     endpoints and a credential Secret in the operator namespace;
 #   - ate-api-server's serving roots, which the operator verifies it with:
 #     the ClusterTrustBundles of servicedns.podcert.ate.dev/identity
 #     labelled podcert.ate.dev/canarying: live, projected into its pod.
@@ -5682,9 +5685,9 @@ tenants:
 # kagent line carries giantswarm/kagent-extensions#27.
 # Before you turn this on in an installation: the kagent line must carry
 # giantswarm/kagent-extensions#27 (kagent reviews a delete of another
-# creator's Session as a cluster-wide `delete`); until it does, the erasure of
+# creator's Session as a cluster-wide `delete`); until it does, cleanup of
 # an organization that holds a person's Session stops at the Sessions' step,
-# with the reason, and erases nothing after it.
+# with the reason, and performs no further cleanup.
 agentPlatformOrganizations:
   # -- Install agent-platform-operator and render the organizations' role,
   # admission policies and access. Needs kagent (components.kagent.enabled),
@@ -6420,6 +6423,13 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
 # (networkPolicy.mcpBackends.toolchain-manager, derived while the component is
 # on).
 toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
+  muster:
+    mcpServer:
+      # Muster requests this cross-client audience at login. The manager's
+      # chart trusts it alongside auth.trustedAudiences so portal ID tokens
+      # are accepted when their Dex client differs from the platform's.
+      requiredAudiences:
+        - dex-k8s-authenticator
   # The installation's owners, who approve a source a person adds before its
   # toolchains are offered: Dex groups and verified emails. Without any, an
   # added source is never approved.
@@ -6657,11 +6667,9 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       organization: "Shared Org"
   # --- Wiring (read by the connectivity chart, not passed to the mcp-kubernetes chart) ---
-  # Audience the forwarded IdP id_token must carry on top of the platform
-  # client's so the kube-apiserver accepts it: muster requests this
-  # cross-client audience at login (the MCPServer CR's auth.requiredAudiences
-  # the connectivity chart renders) and mcp-kubernetes presents the token to
-  # the apiserver (enableDownstreamOAuth) — the user's RBAC governs.
+  # Audience the upstream IdP identity must carry for kube-apiserver access.
+  # The Kubernetes MCP requests this cross-client audience in its own OAuth
+  # flow and uses the identity at the apiserver (enableDownstreamOAuth).
   # dex-k8s-authenticator is the Dex client Giant Swarm apiservers trust; an
   # apiserver that trusts another client id names it here. Empty: no extra
   # audience (a Google IdP has no cross-client scopes and its client id IS the

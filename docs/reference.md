@@ -98,7 +98,7 @@ When the engine is on, the chart also manages itself. `gitops.self.enabled: auto
 - **Update timing.** New patch and minor versions apply within `gitops.self.interval` (`10m`). Your values carry over.
 - **First adoption.** At install time the self `HelmRelease` is created suspended. A `<release>-self-resume` Job resumes it once the install is `deployed`. Because of this, `helm template` output shows `suspend: true`.
 
-**The Helm CLI is for day 0 only.** After the install, a `ValidatingAdmissionPolicy` (`<release>-self-managed-<namespace>`) refuses `helm upgrade` and `helm rollback`. The refusal happens before Helm writes a revision, and the error message says what to do instead. `helm uninstall` still works.
+**The Helm CLI is for day 0 only.** After the install, a `ValidatingAdmissionPolicy` (`<release>-self-managed-<namespace>`) refuses `helm upgrade` and `helm rollback`. The refusal happens before Helm writes a revision, and the error message says what to do instead. For `helm uninstall`, first suspend self-management as described in [Uninstalling](#uninstalling).
 
 **On day 2, change values through the Secret.** Secret `agent-platform-values` (key `values.yaml`) holds the release's user-supplied values. Rewrite it with your complete values file. A partial file resets everything it leaves out to the chart defaults.
 
@@ -111,6 +111,8 @@ kubectl -n agent-platform create secret generic agent-platform-values \
 To move to the next major version, set `gitops.self.versionRange` (for example `">=4.0.0 <5.0.0"`) in that file.
 
 **Escape hatch: hand the release back to the Helm CLI.**
+
+First suspend and drain the self HelmRelease using the maintenance preparation in [Uninstalling](#uninstalling). A CLI upgrade must not overlap an active controller reconciliation.
 
 ```bash
 kubectl annotate namespace agent-platform agent-platform.giantswarm.io/helm-cli=allow
@@ -173,9 +175,26 @@ The CRD charts keep their CRDs, so this order is safe. What survives is the same
 
 ### Uninstalling
 
+For a self-managed release, suspend its HelmRelease **before** invoking Helm. Flux suspension prevents new reconciliations but does not cancel one already running. Wait for any `Reconciling=True` condition to clear and the Helm release to leave a pending state. The pre-delete hook alone is too late: Helm marks the release `uninstalling` before running hooks, and Flux can recover that state by starting an upgrade. See the upstream [suspension API](https://fluxcd.io/flux/components/helm/api/v2/).
+
+Set `cluster_context` to the intended Kubernetes context. For a healthy self-managed release:
+
 ```bash
-helm uninstall agent-platform --namespace agent-platform --wait --timeout 5m
+set -euo pipefail
+kubectl --context "$cluster_context" -n agent-platform delete job agent-platform-self-resume --ignore-not-found --wait=true
+kubectl --context "$cluster_context" -n agent-platform patch helmrelease agent-platform --type=merge -p '{"spec":{"suspend":true}}'
+kubectl --context "$cluster_context" -n agent-platform wait helmrelease/agent-platform --for=condition=Ready --timeout=5m
+helm --kube-context "$cluster_context" status agent-platform --namespace agent-platform
 ```
+
+Confirm that the Helm release is `deployed`, no `Reconciling=True` condition remains, and `spec.suspend` is still `true`. A failed install may be `failed` instead; resolve an active reconciliation before proceeding. Remove any resumer created by that reconciliation, then uninstall:
+
+```bash
+kubectl --context "$cluster_context" -n agent-platform delete job agent-platform-self-resume --ignore-not-found --wait=true
+helm --kube-context "$cluster_context" uninstall agent-platform --namespace agent-platform --wait --timeout 5m
+```
+
+With self-management disabled, only the Helm uninstall command is needed. On a cluster running its own Flux, use [Uninstalling through that Flux](#clusters-that-run-flux).
 
 Hook Jobs tear the platform down in order, using `gitops.hooks.image` (`gsoci.azurecr.io/giantswarm/kubectl`) and `gitops.hooks.helmImage` (`gsoci.azurecr.io/giantswarm/alpine-k8s`):
 
@@ -527,7 +546,7 @@ You need:
 | Toggle | What the connectivity chart renders | Inputs |
 |---|---|---|
 | `components.backstage.enabled` | The app-config ConfigMap `agent-platform-backstage-app-config`, the `HTTPRoute` `backstage.<domain>`, and a config-reload hook that rolls the Deployment when the config changes. | `backstage.{hostname, parentRefs, installationName, extraScopes, startUrlSearchParams, enabledExtensions, disabledExtensions, skillsRepositories, metaAgents, configReload}`, dropped before the backstage chart (`components.backstage.omitKeys`). |
-| `components.mcp-kubernetes.enabled` | The `MCPServer` registering the server with muster, with the user's token forwarded and the label `agent-platform.giantswarm.io/tool-group: infrastructure`. Needs muster. `mcp-kubernetes.mcpServer.managementCluster: <name>` makes it a member of muster's `kubernetes` family; `enabled: false` renders no CR. | `mcp-kubernetes.kubernetesAudience` (default `dex-k8s-authenticator`, `""` for Google), `mcp-kubernetes.mcpServer`. |
+| `components.mcp-kubernetes.enabled` | The `MCPServer` registering the server with muster using per-server OAuth consent and an access token issued by mcp-kubernetes. OAuth uses the platform's existing Valkey and encryption Secret by default. Needs muster. `mcp-kubernetes.mcpServer.managementCluster: <name>` makes it a member of muster's `kubernetes` family; `enabled: false` renders no CR. | `mcp-kubernetes.kubernetesAudience` (default `dex-k8s-authenticator`, `""` for Google), `mcp-kubernetes.mcpServer`. |
 | `components.modelServing.enabled` (with the three kserve components) | The serving presets and the discovery ConfigMap `agent-platform-model-serving`, the serving `Namespace`, the cache claim, the Kyverno cache policies (`modelServing.policies.enabled: auto`) and the serving namespace's network policies. Fails without the kserve components or the `serving.kserve.io` API (`modelServing.kserve.requireApi`). | `modelServing.*` |
 | `components.kserve-llmisvc-resources.enabled` | The llm-d controller's network policy, and guards: `kserve.controller.deploymentMode: Standard`, `kserve.createSharedResources: true`. The removed `components.kserve-crd` / `components.kserve-resources` are refused. | the component's own block |
 
@@ -599,15 +618,17 @@ spec:
 
 ### Agent Platform organizations
 
-`agentPlatformOrganizations.enabled` (off by default; [giantswarm/giantswarm#38891](https://github.com/giantswarm/giantswarm/issues/38891)) installs [agent-platform-operator](https://github.com/giantswarm/agent-platform-operator) (`components.agent-platform-operator`, which follows the switch) into the connectivity release's namespace. The operator reconciles each `AgentPlatformOrganization` (`agent-platform.giantswarm.io/v1alpha1`, its CRD under `crds: CreateReplace`) in a parent namespace into an organization namespace `agents-<name>-<random>`, labelled `agent-platform.giantswarm.io/organization`, with read-only copies of the curated objects of the kagent namespace, and erases a deleted organization behind a finalizer.
+With `components.backstage.enabled`, the connectivity chart writes `agentPlatform.organizations.enabled` in the portal's app-config from `agentPlatformOrganizations.enabled`. One switch controls the operator, agent-manager's organization tools and the portal's Organizations pages. The default `false` also overrides a saved browser opt-in. This needs the Backstage config bridge in [backstage#3393](https://github.com/giantswarm/backstage/pull/3393); earlier images ignore the key. A portal deployed separately needs its own `agentPlatform.organizations.enabled` configuration. Navigation still requires an installation that reports organization support.
 
-- **The label.** Every policy of the organizations' namespaces and kagent's authorizer select `agent-platform.giantswarm.io/organization`: Substrate's credential-provider grants, the workers' PolicyException, admission policies and network peers, the egress, credential and ModelConfig admission policies, the `llm` listener's base-URL policy, and the namespaces a person's agent list ranges over (`kagent.controller.authorization.namespaceSelector`, derived). Nothing selects the Giant Swarm Organization label `giantswarm.io/organization` for agents, and agent-manager's `tenants.enabled` stays off under its current range. The connectivity chart renders the ClusterRole `agent-platform-tenant-flux` the operator binds an organization's Helm ServiceAccount to.
+`agentPlatformOrganizations.enabled` (off by default; [giantswarm/giantswarm#38891](https://github.com/giantswarm/giantswarm/issues/38891)) installs [agent-platform-operator](https://github.com/giantswarm/agent-platform-operator) (`components.agent-platform-operator`, which follows the switch) into the connectivity release's namespace. The operator reconciles each `AgentPlatformOrganization` (`agent-platform.giantswarm.io/v1alpha1`, its CRD under `crds: CreateReplace`) in a parent namespace into an organization namespace `agents-<name>-<random>`, labelled `agent-platform.giantswarm.io/organization`, with read-only copies of the curated objects of the kagent namespace, and cleans up a deleted organization behind a finalizer. The operator's [glossary](https://github.com/giantswarm/agent-platform-operator/blob/main/GLOSSARY.md) defines deletion, cleanup and orphaning; existing `erasure.*` Helm keys retain their names for compatibility.
+
+- **The label.** Every policy of the organizations' namespaces and kagent's authorizer select `agent-platform.giantswarm.io/organization`: Substrate's credential-provider grants, the workers' PolicyException, admission policies and network peers, the egress, credential and ModelConfig admission policies, the `llm` listener's base-URL policy, and the namespaces a person's agent list ranges over (`kagent.controller.authorization.namespaceSelector`, derived). Nothing selects the Giant Swarm Organization label `giantswarm.io/organization` for agents, and agent-manager serves the organization tools only while the switch is on. The connectivity chart renders the ClusterRole `agent-platform-tenant-flux` the operator binds an organization's Helm ServiceAccount to.
 - **The rollout gate.** The switch is off by default for now. It turns on by default once the capz and s3proxy snapshot stores give the operator access, and the kagent line carries giantswarm/kagent-extensions#27.
-- **The wiring.** The chart derives the operator's values from the platform's (the `agent-platform-operator` block in `values.yaml` lists them; an own value that differs fails the render): the curated copies, the workers' policies of the network flavour, the agent chart line, the snapshot bucket, the erasure's kagent and ate-api targets with their audiences and the ClusterTrustBundles of `servicedns.podcert.ate.dev/identity` labelled `podcert.ate.dev/canarying: live` (ate-api-server's serving roots, projected into the operator's pod), `agentPlatformOrganizations.fluxNamespace`, and with the Crossplane AWS snapshot store the IRSA role `<store role>-operator`. The capz and s3proxy stores give the operator no snapshot access yet.
+- **The wiring.** The chart derives the operator's values from the platform's (the `agent-platform-operator` block in `values.yaml` lists them; an own value that differs fails the render): the curated copies, the workers' policies of the network flavour, the agent chart line, the snapshot bucket, the cleanup process's kagent and ate-api targets with their audiences and the ClusterTrustBundles of `servicedns.podcert.ate.dev/identity` labelled `podcert.ate.dev/canarying: live` (ate-api-server's serving roots, projected into the operator's pod), `agentPlatformOrganizations.fluxNamespace`, and with the Crossplane AWS snapshot store the IRSA role `<store role>-operator`. The snapshot endpoint, path addressing, signing region and credential Secret references follow the configured store. RustFS requires explicit `substrate.rustfs.accessKey` and `substrate.rustfs.secretKey` values when organizations are enabled; the connectivity chart places the pair in a Secret in the operator namespace. The s3proxy credential Secret is available there too. Network policies admit the operator to the selected store API in both flavors.
 - **The operator's reach.** RBAC cannot select namespaces by label, so `agent-platform-organization-operator-scope` holds the operator's writes of network policies, ResourceQuotas, OCIRepositories, HelmReleases, Agents, AgentTemplates, Harnesses, RemoteMCPServers and WorkerPools to namespaces labelled `agent-platform.giantswarm.io/organization`; the platform namespace is read-only to it.
 - **The API hostnames.** An organization's EgressPolicy may not name `api.<global.domain>` or an entry of `agentPlatformOrganizations.apiHostnames`.
 - **Curated objects.** The operator copies the curated Agents, AgentTemplates and RemoteMCPServers unchanged, and in an organization namespace a skill's `credentialRef` or a `headersFrom` Secret must be a `tenant-credential-*` Secret for every writer, the operator included (`agent-platform-tenant-credential-refs`). A curated object that names another Secret (the installation's skills credential, say) is refused there, and that organization's reconcile reports it: keep curated objects free of such references.
-- **Before you turn it on:** kagent, Agent Substrate, `kagent.fluxServiceAccountName`, `llmRouting.enabled` with a model whose provider the listener serves (Anthropic, Mistral or OpenAI), `llmRouting.modelConfigPolicy.enabled` on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, and `global.domain` or `agentPlatformOrganizations.apiHostnames`; and the kagent line must carry [giantswarm/kagent-extensions#27](https://github.com/giantswarm/kagent-extensions/issues/27), or the erasure of an organization that holds a person's Session stops at the Sessions' step and erases nothing after it.
+- **Before you turn it on:** kagent, Agent Substrate, `kagent.fluxServiceAccountName`, `llmRouting.enabled` with a model whose provider the listener serves (Anthropic, Mistral or OpenAI), `llmRouting.modelConfigPolicy.enabled` on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, and `global.domain` or `agentPlatformOrganizations.apiHostnames`; and the kagent line must carry [giantswarm/kagent-extensions#27](https://github.com/giantswarm/kagent-extensions/issues/27), or cleanup of an organization that holds a person's Session stops at the Sessions' step and performs no further cleanup.
 
 ### OAuth secrets
 

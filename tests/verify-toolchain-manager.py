@@ -143,6 +143,7 @@ def main(meta: str, connectivity: str) -> int:
     must_have(vals, (
         "auth:\n  dex:\n    issuerURL: https://dex.ci.example.com\n  trustedAudiences:\n  - platform\n",
         "  mcpServer:\n    enabled: true\n",
+        "    requiredAudiences:\n    - dex-k8s-authenticator\n",
         "sources:\n- registry: gsoci.azurecr.io/giantswarm/agent-toolchains\n  repository: giantswarm/agent-toolchains\n",
         "global:\n",
     ), "the release values")
@@ -208,6 +209,13 @@ def main(meta: str, connectivity: str) -> int:
                      "      issuer: https://github.com/apps/own\n", "    enabled: false\n"), "the release values with own keys")
     must_lack(vals, ("ci-agents", "  - platform\n"), "the release values with own keys")
     ok("own issuer, trusted audiences, pin and registration switch stand")
+
+    for audiences, expected in (('["portal"]', "    requiredAudiences:\n    - portal\n"), ("[]", "    requiredAudiences: []\n")):
+        _, vals, _ = release(meta, [*ON, *IDENTITY,
+                                    "--set-json", f"toolchain-manager.muster.mcpServer.requiredAudiences={audiences}"])
+        must_have(vals, (expected,), "the release values with own required audiences")
+        must_lack(vals, ("dex-k8s-authenticator",), "the release values with own required audiences")
+    ok("the registration requests the portal cross-client audience by default; an own audience list or empty list stands")
 
     # --- additionalSources ------------------------------------------------------
     _, vals, _ = release(meta, [*ON, *IDENTITY,

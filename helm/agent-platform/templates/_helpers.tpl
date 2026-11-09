@@ -400,6 +400,50 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
 {{- $derived := dict -}}
+{{- if eq .name "mcp-kubernetes" -}}
+{{- $oauth := dig "mcpKubernetes" "oauth" dict (index .root.Values "mcp-kubernetes" | default dict) -}}
+{{- if $oauth.enabled -}}
+{{- $oauthDerived := dict -}}
+{{- $kubernetes := index .root.Values "mcp-kubernetes" -}}
+{{- $gateway := $kubernetes.gatewayAPI | default dict -}}
+{{- if not (hasKey $gateway "enabled") -}}
+{{- $baseURL := $oauth.baseURL | default (printf "https://%s.%s" ($kubernetes.fullnameOverride | default "mcp-kubernetes") .root.Values.global.domain) -}}
+{{- $hostname := regexReplaceAll ":[0-9]+$" (urlParse $baseURL).host "" -}}
+{{- $parents := .root.Values.ingress.parentRefs | default .root.Values.global.gatewayApi.parentRefs -}}
+{{- if and (not .root.Values.ingress.parentRefs) .root.Values.gatewayApi.gateway.create -}}
+{{- $parents = list (dict "name" .root.Values.gateway.name "namespace" .root.Release.Namespace "group" "gateway.networking.k8s.io" "kind" "Gateway" "sectionName" "https") -}}
+{{- end -}}
+{{- $_ := set $derived "gatewayAPI" (dict "enabled" true "httpRoute" (dict "parentRefs" $parents "hostnames" (list $hostname))) -}}
+{{- end -}}
+{{- if and .root.Values.gatewayApi.gateway.create (dig "gatewayAPI" "enabled" true $kubernetes) -}}
+{{- $peers := dig "ciliumNetworkPolicy" "ingress" "gatewayPeers" list $kubernetes -}}
+{{- $namespace := dig "agent-platform-connectivity" "targetNamespace" "" .root.Values.components | default (include "agent-platform.targetNamespace" .root) -}}
+{{- $peer := dict "namespace" $namespace "matchLabels" (dict "gateway.networking.k8s.io/gateway-name" .root.Values.gateway.name) -}}
+{{- if not (has $peer $peers) -}}{{- $peers = append $peers $peer -}}{{- end -}}
+{{- $_ := set $derived "ciliumNetworkPolicy" (dict "ingress" (dict "gatewayPeers" $peers)) -}}
+{{- end -}}
+{{- $audience := $kubernetes.kubernetesAudience | default "" -}}
+{{- if and $audience (eq ($oauth.provider | default "dex") "dex") (not (dig "dex" "kubernetesAuthenticatorClientID" "" $oauth)) -}}
+{{- $_ := set $oauthDerived "dex" (dict "kubernetesAuthenticatorClientID" $audience) -}}
+{{- end -}}
+{{- $storage := $oauth.storage | default dict -}}
+{{- $type := $storage.type | default "valkey" -}}
+{{- if eq $type "valkey" -}}
+{{- $own := $storage.valkey | default dict -}}
+{{- $valkey := dict "keyPrefix" (printf "%s:mcp-kubernetes:" .root.Release.Namespace) -}}
+{{- range $key, $value := dict "url" (include "agent-platform.valkeyAddress" .root) "existingSecret" (include "agent-platform.valkeySecretName" .root) "secretKeyPassword" (include "agent-platform.valkeyPasswordKey" .root) -}}
+{{- if not (get $own $key) -}}{{- $_ := set $valkey $key $value -}}{{- end -}}
+{{- end -}}
+{{- if $own.keyPrefix -}}{{- $_ := set $valkey "keyPrefix" $own.keyPrefix -}}{{- end -}}
+{{- if and (not $own.url) (ne (include "agent-platform.componentEnabled" (dict "root" .root "name" "valkey")) "true") -}}
+{{- fail "mcp-kubernetes OAuth needs shared storage: enable the platform Valkey or set mcp-kubernetes.mcpKubernetes.oauth.storage.valkey.url" -}}
+{{- end -}}
+{{- $_ := set $oauthDerived "encryptionKey" true -}}
+{{- $_ := set $oauthDerived "storage" (dict "type" "valkey" "valkey" $valkey) -}}
+{{- end -}}
+{{- if $oauthDerived -}}{{- $_ := set $derived "mcpKubernetes" (dict "oauth" $oauthDerived) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if eq .name "google-access-token-credential-provider" -}}
 {{- /* The plugin resolves keys under the same atespace-to-namespace grants as
 Substrate's bundled provider: one list, Substrate's, with the entries the
@@ -757,6 +801,14 @@ the block otherwise: a klaus-gateway before 4.11.0 refuses it. */ -}}
 {{- $_ := set $out "aclUsers" (dict "default" (dict "passwordKey" (include "agent-platform.valkeyPasswordKey" .root))) -}}
 {{- end -}}
 {{- if $out -}}{{- $_ := set $derived "valkey" (dict "auth" $out) -}}{{- end -}}
+{{- $kubernetes := index .root.Values "mcp-kubernetes" | default dict -}}
+{{- $oauth := dig "mcpKubernetes" "oauth" dict $kubernetes -}}
+{{- if and (eq (include "agent-platform.componentEnabled" (dict "root" .root "name" "mcp-kubernetes")) "true") $oauth.enabled (eq (dig "storage" "type" "valkey" $oauth) "valkey") -}}
+{{- $clients := dig "ciliumNetworkPolicy" "ingress" "clients" list (.root.Values.valkey | default dict) -}}
+{{- $reader := dict "namespace" "" "matchLabels" (dict "app.kubernetes.io/name" "mcp-kubernetes") -}}
+{{- if not (has $reader $clients) -}}{{- $clients = append $clients $reader -}}{{- end -}}
+{{- $_ := set $derived "ciliumNetworkPolicy" (dict "ingress" (dict "clients" $clients)) -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
@@ -1123,6 +1175,10 @@ Usage: include "agent-platform.kagent.authorization" . | fromJson
 {{- end -}}
 {{- if $refusals -}}
 {{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" (include "agent-platform.klausGateway.namespace" .))) "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" (include "agent-platform.klausGateway.name" .)))) -}}
+{{- end -}}
+{{- if include "agent-platform.organizations.on" . -}}
+{{- $operator := include "agent-platform.organizations.operatorServiceAccount" . | fromJson -}}
+{{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $operator.namespace)) "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" $operator.name))) -}}
 {{- end -}}
 {{- range (dig "from" list $np) -}}
 {{- if not (has . $peers) -}}{{- $peers = append $peers . -}}{{- end -}}
@@ -2244,7 +2300,8 @@ disagrees fails the render; with the façade alone, s3proxy.azure.* verbatim.
 
 {{/* The URL Substrate reaches the façade at: its Service in the release namespace, port 80. */}}
 {{- define "agent-platform.substrateStore.s3proxyUrl" -}}
-{{- printf "http://%s.%s.svc:80" (include "agent-platform.substrateStore.s3proxyName" .) .Release.Namespace -}}
+{{- $namespace := dig "agent-platform-connectivity" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- printf "http://%s.%s.svc:80" (include "agent-platform.substrateStore.s3proxyName" .) $namespace -}}
 {{- end -}}
 
 {{/*
@@ -5577,7 +5634,7 @@ Fail the render for an organizations setup that cannot work
     with the switch, or a targetNamespace other than the connectivity
     release's (the policies there name the operator's ServiceAccount in it);
   - the switch on without kagent or Agent Substrate: the operator copies the
-    curated kagent objects and the WorkerPool, and its erasure asks ate-api;
+    curated kagent objects and the WorkerPool, and its cleanup process asks ate-api;
     without kagent.fluxServiceAccountName, without the llm listener's routing
     of ModelConfigs (llmRouting.enabled, llmRouting.modelConfigPolicy.enabled),
     and without the installation's API hostnames (global.domain or
@@ -5600,7 +5657,7 @@ Fail the render for an organizations setup that cannot work
 {{- fail "agentPlatformOrganizations.enabled needs kagent (components.kagent.enabled): agent-platform-operator copies the curated kagent objects into every organization namespace" -}}
 {{- end -}}
 {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
-{{- fail "agentPlatformOrganizations.enabled needs Agent Substrate (components.substrate): an organization's agents run on its copy of the platform WorkerPool, and the erasure of a deleted organization asks ate-api until it has no actor left" -}}
+{{- fail "agentPlatformOrganizations.enabled needs Agent Substrate (components.substrate): an organization's agents run on its copy of the platform WorkerPool, and cleanup of a deleted organization asks ate-api until it has no actor left" -}}
 {{- end -}}
 {{- if not (include "agent-platform.kagent.fluxServiceAccountName" .) -}}
 {{- fail "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: it is the operator's helmReleaseServiceAccount, the ServiceAccount an organization's HelmReleases run as" -}}
@@ -5645,7 +5702,8 @@ same bucket (or the container behind the s3proxy façade): s3://<bucket>/<uid>. 
 {{- if not $bucket -}}
 {{- fail "agentPlatformOrganizations.enabled needs the Harness snapshot location (kagent.harness.snapshotLocation, or kagent.harness.snapshotStore): an organization's Harness copies keep their snapshots under s3://<bucket>/<organization UID> in its bucket" -}}
 {{- end -}}
-{{- $snapshots := dict "bucket" $bucket -}}
+{{- $snapshots := include "agent-platform.operator.snapshots" . | fromJson -}}
+{{- $_ := set $snapshots "bucket" $bucket -}}
 {{- $aws := eq (include "agent-platform.substrateStore.crossplane" .) "aws" -}}
 {{- if $aws -}}
 {{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane -}}
@@ -5800,4 +5858,33 @@ secretRef:
 certSecretRef:
   name: {{ . }}
 {{- end }}
+{{- end -}}
+
+{{/* The operator uses the same endpoint and credential references as the snapshot store. */}}
+{{- define "agent-platform.operator.snapshots" -}}
+{{- $snapshots := dict -}}
+{{- $substrate := .Values.substrate | default dict -}}
+{{- $namespace := dig "substrate" "targetNamespace" "ate-system" .Values.components -}}
+{{- if include "agent-platform.substrateStore.s3proxy" . -}}
+{{- $_ := set $snapshots "endpoint" (include "agent-platform.substrateStore.s3proxyUrl" .) -}}
+{{- $_ := set $snapshots "usePathStyle" true -}}
+{{- $_ := set $snapshots "region" "us-east-1" -}}
+{{- $_ := set $snapshots "credentials" (dict "existingSecret" (include "agent-platform.substrateStore.s3proxyName" .)) -}}
+{{- else if dig "rustfs" "enabled" false $substrate -}}
+{{- $_ := set $snapshots "endpoint" (printf "http://rustfs.%s.svc:9000" $namespace) -}}
+{{- $_ := set $snapshots "usePathStyle" true -}}
+{{- $_ := set $snapshots "region" "us-east-1" -}}
+{{- $_ := set $snapshots "credentials" (dict "existingSecret" "substrate-rustfs-operator") -}}
+{{- else -}}
+{{- range dig "ateApiServer" "extraEnv" list $substrate -}}
+{{- if eq .name "AWS_ENDPOINT_URL" -}}
+{{- $_ := set $snapshots "endpoint" (required "substrate.ateApiServer.extraEnv AWS_ENDPOINT_URL needs a value" .value) -}}
+{{- else if eq .name "AWS_S3_USE_PATH_STYLE" -}}
+{{- $_ := set $snapshots "usePathStyle" (eq .value "true") -}}
+{{- else if eq .name "AWS_REGION" -}}
+{{- $_ := set $snapshots "region" .value -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $snapshots | toJson -}}
 {{- end -}}

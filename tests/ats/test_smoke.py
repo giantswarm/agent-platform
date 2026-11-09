@@ -24,9 +24,10 @@ module top to bottom; each one builds on the state the previous left):
   5. the auth round trip, every MCP call on agentgateway's /mcp in front of
      muster (the data plane's Service; muster's OAuth endpoints on its own): an
      unauthenticated /mcp is muster's 401 with the RFC 9728 discovery chain; a
-     lab Dex user reaches /mcp with a token from the OAuth password grant (a
-     trusted audience) and with muster's own login flow (RFC 7591 registration,
-     authorization code + PKCE, the Dex login form);
+     lab Dex ID token for an explicitly trusted client reaches /mcp, while
+     untrusted audiences and invalid signatures are refused; the user also
+     reaches it with an access token from muster's own login flow (RFC 7591 registration,
+     authorization code + PKCE, consent and the Dex login form);
   6. the agent round trips on kagent API v2: Agent Substrate, installed by the
      chart under test, has its WorkerPool's gVisor worker Ready; a declarative
      Agent on the platform Harness, against the chart's
@@ -181,7 +182,7 @@ class State:
 
     adopted_at: float = 0.0
     history_after_adoption: List[Dict[str, Any]] = []
-    dex_token: str = ""
+    resource_token: str = ""
 
 
 STATE = State()
@@ -410,10 +411,8 @@ def test_unauthenticated_mcp_gets_401_with_discovery_chain(kube: Kube, muster: O
 @pytest.mark.smoke
 @pytest.mark.flaky(reruns=2, reruns_delay=20)
 @REQUIRES_STATIC_USER
-def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: Optional[PortForward], dex: Optional[str]) -> None:
-    """The lab Dex's OAuth password grant issues an ID token for the platform
-    client (a trusted audience of muster) carrying the cross-client audience
-    agent-manager requires; muster accepts it as a bearer and lists its tools."""
+def test_configured_dex_id_token_reaches_mcp(kube: Kube, muster: Optional[PortForward], dex: Optional[str]) -> None:
+    """Explicit audience trust admits a signed Dex ID token at MCP."""
     started = time.monotonic()
     try:
         token = dex_password_grant(dex)
@@ -421,17 +420,48 @@ def test_dex_user_reaches_mcp_with_a_password_grant(kube: Kube, muster: Optional
         assert claims.get("email") == SCENARIO.user, claims
         aud = claims.get("aud") if isinstance(claims.get("aud"), list) else [claims.get("aud")]
         assert CROSS_CLIENT_AUDIENCE in aud, f"the token lacks the {CROSS_CLIENT_AUDIENCE} audience: {aud}"
-        session = MusterSession(MCP_URL, token, "ats-password-grant").initialize()
+        session = MusterSession(MCP_URL, token, "ats-trusted-id-token").initialize()
         tools = session.list_tools()
         assert {"list_tools", "call_tool"} <= set(tools), f"muster's meta-tools missing from tools/list: {tools}"
-        aggregated = session.aggregated_tools()
-        assert any(t.startswith("core_") for t in aggregated), f"no core_ tool aggregated for the user: {aggregated[:20]}"
     except AssertionError:
         dump_auth(kube)
         raise
-    STATE.dex_token = token
-    TIMINGS.record("auth round trip: password grant -> /mcp initialize -> tools/list -> list_tools", time.monotonic() - started)
-    logger.info("Dex user %s reached /mcp: %d meta-tools, %d aggregated tools", SCENARIO.user, len(tools), len(aggregated))
+    TIMINGS.record("auth compatibility: configured Dex audience -> /mcp initialize and tools/list", time.monotonic() - started)
+
+
+@pytest.mark.smoke
+@pytest.mark.parametrize("bearer_kind", ["untrusted-audience", "invalid-signature", "unknown-access-token"])
+@REQUIRES_STATIC_USER
+def test_untrusted_bearer_is_rejected_at_mcp(kube: Kube, muster: Optional[PortForward], dex: Optional[str], bearer_kind: str) -> None:
+    """Configured identity trust still requires an allowed audience and signature."""
+    started = time.monotonic()
+    try:
+        if bearer_kind == "untrusted-audience":
+            if not SCENARIO.install_lab_dex:
+                pytest.skip("the untrusted client belongs to the lab Dex fixture")
+            token = dex_password_grant(dex, scope="openid profile email groups",
+                                       client=("ats-untrusted", "lab-only-ats-untrusted-secret"))
+            claims = jwt_claims(token)
+            audience = claims.get("aud") if isinstance(claims.get("aud"), list) else [claims.get("aud")]
+            assert audience == ["ats-untrusted"], f"unexpected negative-test audience: {audience}"
+            assert claims.get("email") == SCENARIO.user, claims
+        elif bearer_kind == "invalid-signature":
+            token = dex_password_grant(dex)
+            header, payload, signature = token.split(".")
+            signature = ("B" if signature[0] == "A" else "A") + signature[1:]
+            token = ".".join((header, payload, signature))
+        else:
+            token = "ats-unknown-access-token"
+        response = MusterSession(MCP_URL, token, "ats-untrusted-bearer").post({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-06-18", "capabilities": {},
+                "clientInfo": {"name": "ats-untrusted-bearer", "version": "1"}}}, with_session=False)
+        assert response.status_code == 401, f"{bearer_kind} accepted at /mcp: {response.status_code}"
+        assert 'error="invalid_token"' in response.headers.get("WWW-Authenticate", "")
+    except AssertionError:
+        dump_auth(kube)
+        raise
+    TIMINGS.record(f"auth boundary: {bearer_kind} -> /mcp 401 invalid_token", time.monotonic() - started)
 
 
 @pytest.mark.smoke
@@ -444,12 +474,14 @@ def test_static_user_login_through_muster_reaches_mcp(kube: Kube, muster: Option
     try:
         token = login_through_muster(MUSTER_BASE_URL, dex)
         session = MusterSession(MCP_URL, token, "ats-login").initialize()
-        assert "call_tool" in session.list_tools()
+        tools = session.list_tools()
+        assert {"list_tools", "call_tool"} <= set(tools), f"muster's meta-tools missing from tools/list: {tools}"
         assert any(t.startswith("core_") for t in session.aggregated_tools())
     except AssertionError:
         dump_auth(kube)
         raise
-    TIMINGS.record("auth round trip: muster login flow (DCR, PKCE, Dex form) -> /mcp", time.monotonic() - started)
+    STATE.resource_token = token
+    TIMINGS.record("auth round trip: muster login flow (DCR, PKCE, consent, Dex form) -> /mcp", time.monotonic() - started)
 
 
 # ---------------------------------------------------------------------------
@@ -510,17 +542,17 @@ def test_declarative_agent_reaches_ready(kube: Kube, kagent_controller: None, su
 @pytest.mark.smoke
 @REQUIRES_STATIC_USER
 def test_agent_manager_create_agent_reaches_a_ready_helmrelease(kube: Kube, muster: Optional[PortForward], dex: Optional[str], kagent_controller: None, substrate: Dict[str, Any]) -> None:
-    """agent-manager's create_agent through muster, as the Dex user: muster
-    forwards the bearer to agent-manager (MCPServer auth.forwardToken; the
-    token carries the required cross-client audience), agent-manager validates
-    it against the lab Dex and writes the agent's HelmRelease of the Generic
+    """agent-manager's create_agent through muster, as the Dex user: a resource
+    access token authenticates the MCP caller; muster resolves the provider
+    identity for agent-manager (MCPServer auth.forwardToken). Agent-manager
+    validates it against the lab Dex and writes the agent's HelmRelease of the Generic
     chart (and the shared OCIRepository of the chart) into the kagent namespace
     with its own ServiceAccount; the bundled helm-controller executes the
     HelmRelease as kagent-flux, the chart renders the Agent naming the platform
     Harness (its template inline) and the agent's RemoteMCPServer, the
     controller compiles it and Substrate boots it."""
     started = time.monotonic()
-    token = STATE.dex_token or dex_password_grant(dex)
+    token = STATE.resource_token or login_through_muster(MUSTER_BASE_URL, dex)
     session = MusterSession(MCP_URL, token, "ats-agent-manager").initialize()
     try:
         # muster connects to a forwardToken server per session, after the first

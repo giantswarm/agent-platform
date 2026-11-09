@@ -56,9 +56,8 @@ muster:
         # No bundled Valkey in the smoke: sessions in memory.
         storage:
           type: memory
-        # Accept the lab Dex's ID tokens as bearer tokens (the password grant
-        # the smoke uses, and the token muster forwards to agent-manager with
-        # the cross-client audience its MCPServer requires).
+        # Explicit compatibility trust accepts signed Dex ID-token bearers.
+        # agent-manager requires the cross-client audience downstream.
         trustedAudiences:
           - agent-platform
           - dex-k8s-authenticator

@@ -13,7 +13,9 @@ their own.
 
 Usage: verify-flux-identity.py <render> <ServiceAccount> <kagent namespace> [--migration]
 <render> is a `helm template` output of the connectivity chart; --migration
-also asserts the migrate run's identity, which the render then carries.
+also asserts the migrate run's identity, which the render then carries: its
+one cluster-scoped binding is the ClusterRole <name>-crds, get and delete on
+exactly the nine 0.x kagent.dev CRDs and list on their resources, nothing else.
 """
 
 import sys
@@ -28,6 +30,10 @@ AGENT_CHART = {
 }
 EXPECTED = HELM_STORAGE | AGENT_CHART
 BINDING_KINDS = ("RoleBinding", "ClusterRoleBinding")
+LEGACY = ("agents", "sandboxagents", "agentharnesses", "memories", "toolservers", "modelconfigs", "remotemcpservers", "modelproviderconfigs", "mcpservers")
+MIGRATE_CLUSTER = {("apiextensions.k8s.io", "customresourcedefinitions", f"{r}.kagent.dev", v) for r in LEGACY for v in ("get", "delete")} | {
+    ("kagent.dev", r, "", "list") for r in LEGACY
+}
 
 
 def fail(msg: str) -> None:
@@ -104,6 +110,25 @@ def main() -> None:
             if pod_service_account(d) == sa:
                 fail(f"{d['kind']} {d['metadata']['name']} runs as {sa}; the migration has an identity of its own")
         print(f"ok: the migrate run and its start hook do not run as {sa}")
+        migrate_sa = pod_service_account(runs[0])
+        cluster = [d for d in docs if d["kind"] == "ClusterRoleBinding" and names_sa(d, migrate_sa, ns)]
+        if len(cluster) != 1:
+            fail(f"{migrate_sa} has {len(cluster)} ClusterRoleBindings; exactly one, to its -crds ClusterRole")
+        ref = cluster[0]["roleRef"]
+        role = next((d for d in docs if d["kind"] == "ClusterRole" and d["metadata"]["name"] == ref.get("name")), None)
+        if ref.get("kind") != "ClusterRole" or role is None or not ref["name"].endswith("-crds"):
+            fail(f"{migrate_sa}'s ClusterRoleBinding names {ref}, not a -crds ClusterRole of this chart")
+        granted = {
+            (g, r, n, v)
+            for rule in role.get("rules") or []
+            for g in rule.get("apiGroups") or []
+            for r in rule.get("resources") or []
+            for n in (rule.get("resourceNames") or [""])
+            for v in rule.get("verbs") or []
+        }
+        if granted != MIGRATE_CLUSTER:
+            fail(f"{migrate_sa}'s cluster rights are not the 0.x CRD contract's: missing {sorted(MIGRATE_CLUSTER - granted)}, extra {sorted(granted - MIGRATE_CLUSTER)}")
+        print(f"ok: {migrate_sa} holds cluster-wide only get/delete on the nine 0.x kagent.dev CRDs and list on their objects")
 
 
 if __name__ == "__main__":
