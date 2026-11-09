@@ -2858,6 +2858,9 @@ verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every
 # meta chart forwards, so the check reads the real schema and template of that
 # version, not a copy. Recursive (=), so it is read only when a recipe uses it.
 PRESETS_MUSTER_MIN := 5.12.0
+# agent-platform.muster.presetIconsFloor, and a release below it.
+PRESETS_ICONS_MUSTER_MIN := 5.60.0
+PRESETS_ICONS_MUSTER_BELOW := 5.59.0
 PRESETS_MUSTER_VERSION = $(shell $(FLOORS) floor muster)
 # The muster chart's own render guards want the OAuth inputs an installation
 # supplies; these are placeholders for the render, not part of the assertion.
@@ -2884,6 +2887,11 @@ verify-presets: ## Assert the infrastructure / agent-platform toolset presets re
 	elif ! grep -q "built into muster" $(VERIFY_TMP)/vp-builtin.out; then \
 		echo "FAIL: the built-in guard failed for the wrong reason"; cat $(VERIFY_TMP)/vp-builtin.out; exit 1; \
 	else echo "ok: built-in names refused"; fi
+	@echo "--> preset icons only from a muster floor of $(PRESETS_ICONS_MUSTER_MIN), which takes toolsetPresets.<name>.icon"
+	@for gate in "off:$(PRESETS_ICONS_MUSTER_BELOW)" "on:$(PRESETS_ICONS_MUSTER_MIN)-0"; do \
+		$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set "components.muster.versionRange=>=$${gate#*:} <6.0.0" >$(VERIFY_TMP)/vp-icons.out 2>&1 || { cat $(VERIFY_TMP)/vp-icons.out; exit 1; }; \
+		python3 tests/verify-toolset-presets.py icons $(VERIFY_TMP)/vp-icons.out $${gate%%:*} || exit 1; \
+	done
 	@echo "ok: presets reach muster's config"
 
 .PHONY: verify-mirror

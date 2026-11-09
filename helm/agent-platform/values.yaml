@@ -2661,6 +2661,10 @@ muster:  # @schema skipProperties: true; additionalProperties: true
     #
     # Requires muster ≥ 5.12.0 (the `label:` rule); a 5.11.0 muster refuses
     # to start on it, which is why components.muster.versionRange floors there.
+    #
+    # icon: optional `data:` URI (svg, png, jpeg, webp; ≤ 65536 chars), muster
+    # ≥ 5.60.0. The chart sets one on both presets below when they have none,
+    # once the range's floor is 5.60.0 or later.
     toolsetPresets:
       infrastructure:
         description: The servers for the infrastructure underneath the platform (Giant Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus.
