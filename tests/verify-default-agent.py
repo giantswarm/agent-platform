@@ -186,7 +186,7 @@ for what, args, want in (("below the floor", [*ON], None), ("from the floor", [*
     got = find(render(META, *args), "HelmRelease", "agent-manager")["spec"]["values"].get("installation")
     if got != want:
         fail(f"agent-manager, {what}: installation {got!r}, want {want!r}")
-# A bare Slack mention reaches the default agent (klausGateway.a2a.defaultAgent derived), an
+# Slack's agent picker preselects the default agent (klausGateway.a2a.defaultAgent derived), an
 # own value wins, and nothing is derived while the default agent is off.
 KG = ["--set", "components.klaus-gateway.enabled=true"]
 for what, args, want in (("derived", [*ON, *KG], "kagent/default-agent"),

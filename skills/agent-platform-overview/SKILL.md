@@ -49,8 +49,9 @@ a person. Groups, states and sign-in: the `agent-platform-tools` skill; the live
 - **Dev Portal**: the rail has **New session**, **Sessions**, **Customize** (tabs Agents, Skills,
   Connectors, Models, Workflows, Workspaces, Toolchains) and **Usage**. Sessions are private to the
   signed-in person; a session's page is `/sessions/<installation>/<session id>`.
-- **Slack**, where the installation runs klaus-gateway: one thread is one session; a bare mention
-  reaches the default agent unless the platform setting `klausGateway.a2a.defaultAgent` names another.
+- **Slack**, where the installation runs klaus-gateway: one thread is one session, opened
+  through the agent picker, which preselects the default agent unless the platform setting
+  `klausGateway.a2a.defaultAgent` names another (`agent-platform-slack`).
 - **IDE and CLI**: Claude Code, Cursor, VS Code, the `muster` CLI and any MCP client with remote OAuth
   connect to the installation's Muster `/mcp` endpoint, the one agents use
   (https://docs.giantswarm.io/getting-started/ai-agent-setup/).

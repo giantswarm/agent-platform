@@ -4556,9 +4556,9 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
       enabled: false
 
   # A2A client adapter. Routes channel turns to a kagent A2A endpoint.
-  # defaultAgent is the fallback agentRef when the channel does not supply one.
-  # Empty: the default agent (<kagent namespace>/default-agent) while
-  # components.default-agent is on, else callers pass agentRef explicitly.
+  # defaultAgent is the agent the Slack agent picker preselects. Empty: the
+  # default agent (<kagent namespace>/default-agent) while
+  # components.default-agent is on, else none.
   a2a:
     enabled: false
     defaultAgent: ""

@@ -735,7 +735,7 @@ receives the grants of each instance's App, side by side
 {{- end -}}
 {{- if eq .name "klaus-gateway" -}}
 {{- $kg := .root.Values.klausGateway | default dict -}}
-{{- /* A bare mention in Slack reaches the default agent, the portal's starting
+{{- /* Slack's agent picker preselects the default agent, the portal's starting
 point too, while it is on (components.default-agent): <kagent namespace>/default-agent.
 An own klausGateway.a2a.defaultAgent wins. */ -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" .root "name" "default-agent")) (not (dig "a2a" "defaultAgent" "" $kg)) -}}
