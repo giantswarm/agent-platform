@@ -74,7 +74,8 @@ never assume an argument. The order:
 - **Model**: a config from the live list, never invented — an agent on a missing or not-accepted
   config never boots. No suitable model: `agent-platform-tools` (model-manager).
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only
-  on an explicit request.
+  on an explicit request. An own-account (OAuth) connector without `grantScope: subject` needs a
+  sign-in in each of the agent's conversations (`agent-platform-tools`); say so before choosing it.
 - **Skills**: always pinned (the tools pin at write time); pins and private repositories:
   `agent-platform-skill-authoring`.
 - **Egress**: none unless the job needs an origin; a named `EgressPolicy` where one fits, raw origins otherwise.

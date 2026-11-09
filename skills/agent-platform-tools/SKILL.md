@@ -109,9 +109,13 @@ https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
 ## When a tool is missing or refused
 
 - `filter_tools` with a `pattern` names, under `servers_requiring_auth`, each connector whose tools
-  a sign-in would unlock, with its `auth_tool` (`core_auth_login` with that `server`). A person signs
-  in there, on the connector's page in the Dev Portal (Customize → Connectors, "Sign in needed"), or
-  with `muster auth login` on the CLI (`muster auth status` shows the state).
+  a sign-in would unlock, with its `auth_tool`: call `core_auth_login` with that `server` from this
+  conversation and give the person the sign-in link it returns.
+- A sign-in elsewhere (the Dev Portal's Customize → Connectors, `muster auth login` on the CLI)
+  reaches this conversation only for a connector with `grantScope: subject` (`core_mcpserver_get`:
+  `spec.auth.grantScope` or `spec.auth.authorizationServer.grantScope`). An own-account (OAuth)
+  connector without it signs in per session: the portal shows it as "Portal only", and every agent
+  conversation needs its own sign-in. Never send the person to the portal for such a connector.
 - `filter_tools {"include_presets": true, "toolset": [<the agent's selectors>]}`: `toolset_unmatched`
   names selectors that select nothing (a server not signed in to, a renamed tool, an empty preset).
 - An error **naming the toolset** on `call_tool` is composition — the tool is outside the toolset.
