@@ -82,6 +82,26 @@ skills:
     git:
       url: https://github.com/giantswarm/agent-platform
       commit: "[[ .SHA ]]"
+  - name: agent-platform-building-blocks
+    path: skills/agent-platform-building-blocks
+    git:
+      url: https://github.com/giantswarm/agent-platform
+      commit: "[[ .SHA ]]"
+  - name: agent-platform-portal
+    path: skills/agent-platform-portal
+    git:
+      url: https://github.com/giantswarm/agent-platform
+      commit: "[[ .SHA ]]"
+  - name: agent-platform-slack
+    path: skills/agent-platform-slack
+    git:
+      url: https://github.com/giantswarm/agent-platform
+      commit: "[[ .SHA ]]"
+  - name: agent-platform-organizations
+    path: skills/agent-platform-organizations
+    git:
+      url: https://github.com/giantswarm/agent-platform
+      commit: "[[ .SHA ]]"
   - name: agent-platform-agent-routing
     path: skills/agent-platform-agent-routing
     git:

@@ -14,6 +14,7 @@ paragraph first, then the layer the question needs — and link the page instead
 Tools, toolsets and connectors are the `agent-platform-tools` skill; agents and their building blocks
 are `agent-platform-agent-management`; which agent fits a task and start links are
 `agent-platform-agent-routing`; skills are `agent-platform-skill-authoring`.
+For newcomers: `agent-platform-building-blocks`, `agent-platform-portal`, `agent-platform-slack`, `agent-platform-organizations`.
 
 ## The platform in one paragraph
 
