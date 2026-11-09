@@ -21,8 +21,6 @@ With the chart-owned edge (`gatewayApi.gateway.create: true`) the agentgateway d
 
 muster validates every token itself. agentgateway on the MCP path passes the bearer through unverified.
 
-`muster.muster.oauth.server.trustedAudiences` is a compatibility exception: muster accepts a signed ID token of the configured identity provider whose audience is a listed client as an MCP bearer. This does not conform to the MCP authorization specification, which requires a token issued for the MCP server as its audience; muster's own access tokens from its login flow are the conforming path. List only clients whose ID tokens may call MCP directly, such as the portal and agentgateway's forwarded tokens. Whether to keep or remove this exception is decided in [giantswarm/mcp-oauth#677](https://github.com/giantswarm/mcp-oauth/issues/677) ([giantswarm/muster#1801](https://github.com/giantswarm/muster/pull/1801) restored it). The ATS smoke test checks that a listed audience is accepted and that an unlisted audience, an invalid signature and an unknown access token are refused.
-
 ## 2. OAuth discovery
 
 All of it happens on muster's hostname:

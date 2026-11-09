@@ -6,7 +6,7 @@ agent-manager never takes a credential value in an MCP call. A missing or replac
 
 Set `agent-manager.credentials.uiURL` to the HTTPS URL template of the client that serves the form, with one `{operation}` placeholder. This chart derives no form URL. `agent-manager.devPortal` is refused.
 
-Credential operations and `agent-manager.githubTokenExchange` need a floor of `2.22.0-rc.3` or later in `components.agent-manager.versionRange`; a floor on an earlier release candidate is refused. The organization switch keeps its own `2.20.0` floor.
+Credential operations and `agent-manager.githubTokenExchange` need a floor of `2.22.0` or later in `components.agent-manager.versionRange`. The organization switch keeps its own `2.20.0` floor.
 
 ## GitOps writes
 
@@ -21,6 +21,8 @@ Configure `agentPlatformOrganizations.fluxNamespace`, `fluxSource` and `fluxDecr
 The manager's egress policy admits the origin of `githubTokenExchange.endpoint` on its port:
 - Cilium: a rule for the host name, or for the address when the endpoint is an IP literal.
 - Native NetworkPolicy: public addresses on that port, or the single address of an IP literal. A broker on a private network needs its range in `agentManager.networkPolicy.egress.cidrs` or `networkPolicy.additionalEgressCIDRs`.
+
+An endpoint on an in-cluster Service name (`<service>.<namespace>.svc`) fails the render while network policies are on: neither flavour can select a Service by its DNS name. Use the broker's external hostname or address.
 
 ## Replicas
 

@@ -1456,17 +1456,13 @@ Usage: include "agent-platform.toolchains.registries" $root | fromJson
 {{- end -}}
 
 {{/*
-Whether the floor of components.<name>.versionRange is at least version:
-"true", else empty (a range without a floor too). For a release version a
-release candidate of it counts as the release; a release-candidate version is
-compared exactly, so a floor on an earlier candidate does not reach it.
-Usage: include "agent-platform.componentFloorAtLeast" (dict "root" $root "name" "<component>" "version" "X.Y.Z[-rc.N]")
+Whether the floor of components.<name>.versionRange is at least version, a
+release candidate of it included: "true", else empty (a range without a floor
+too).
+Usage: include "agent-platform.componentFloorAtLeast" (dict "root" $root "name" "<component>" "version" "X.Y.Z")
 */}}
 {{- define "agent-platform.componentFloorAtLeast" -}}
-{{- $floor := include "agent-platform.semverRangeFloor" (dig .name "versionRange" "" .root.Values.components) -}}
-{{- if not (contains "-" .version) -}}
-{{- $floor = regexReplaceAll "-.*$" $floor "" -}}
-{{- end -}}
+{{- $floor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig .name "versionRange" "" .root.Values.components)) "" -}}
 {{- if and $floor (ge ((semver $floor).Compare (semver .version)) 0) -}}true{{- end -}}
 {{- end -}}
 
@@ -4331,8 +4327,8 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- fail "agent-manager.devPortal is unsupported: configure agent-manager.credentials.uiURL with the client's HTTPS URL template containing {operation}" -}}
 {{- end -}}
 {{- if or (hasKey $am "credentials") (hasKey $am "githubTokenExchange") -}}
-{{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" "2.22.0-rc.3")) -}}
-{{- fail "agent-manager credential operations and GitHub token exchange need components.agent-manager.versionRange with a floor of 2.22.0-rc.3 or later" -}}
+{{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" "2.22.0")) -}}
+{{- fail "agent-manager credential operations and GitHub token exchange need components.agent-manager.versionRange with a floor of 2.22.0 or later" -}}
 {{- end -}}
 {{- end -}}
 {{- $own := dig "tenants" dict $am | default dict -}}

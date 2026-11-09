@@ -10,13 +10,14 @@
 {{- $brokerURL := dig "githubTokenExchange" "endpoint" "" $chart }}
 {{- if and $oauthOn (regexMatch "^https://[^/]+" $brokerURL) }}
 {{- $parsed := urlParse $brokerURL }}
-{{- $host := $parsed.hostname | default "" | lower | trimSuffix "." }}
+{{- $host := include "agent-platform.jwks.normalizeHost" ($parsed.hostname | default "") }}
+{{- if include "agent-platform.jwks.inCluster" $host }}
+{{- fail (printf "agent-manager.githubTokenExchange.endpoint (%s) names an in-cluster Service, which agent-manager's egress policy cannot select by name: use the broker's external hostname or address" $brokerURL) }}
+{{- end }}
 {{- $port := regexFind ":[0-9]+$" ($parsed.host | default "") | trimPrefix ":" | default "443" | int }}
 {{- $broker = dict "host" $host "port" $port "cidr" "" }}
-{{- if contains ":" $host }}
-{{- $_ := set $broker "cidr" (printf "%s/128" $host) }}
-{{- else if regexMatch `^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$` $host }}
-{{- $_ := set $broker "cidr" (printf "%s/32" $host) }}
+{{- if include "agent-platform.jwks.addrLiteral" $host }}
+{{- $_ := set $broker "cidr" (printf "%s/%s" $host (ternary "128" "32" (contains ":" $host))) }}
 {{- end }}
 {{- end }}
 {{- /* muster's filter_tools resolves a claude Harness agent's toolset as the

@@ -289,9 +289,6 @@ def check_meta(chart):
     for what, extra, needle in (
             ("credential UI on an older manager", ["--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}"],
              "agent-manager credential operations and GitHub token exchange need"),
-            ("credential UI on an earlier release candidate", ["--set", "components.agent-manager.versionRange=>=2.22.0-rc.1 <3.0.0",
-                                                               "--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}"],
-             "agent-manager credential operations and GitHub token exchange need"),
             ("token exchange on an older manager", ["--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token"],
              "agent-manager credential operations and GitHub token exchange need"),
             ("operation metadata on an older manager", ["--set", "agent-manager.credentials.operationsNamespace=credential-operations"],
@@ -377,6 +374,10 @@ def check_broker_egress(chart):
             ports = [port["port"] for rule in policy["spec"]["egress"] for port in rule.get("ports", [])]
             ports += [port["port"] for rule in policy["spec"]["egress"] for entry in rule.get("toPorts", []) for port in entry.get("ports", [])]
             expect(8443 not in ports and "8443" not in ports, f"{flavor}: no broker port while it is unconfigured or OAuth is off")
+    for flavor in ("cilium", "kubernetes"):
+        r = connectivity(chart, flavor, *flags, "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.agent-platform.svc.cluster.local/oauth/token")
+        expect(r.returncode != 0 and "names an in-cluster Service" in r.stderr,
+               f"{flavor}: an in-cluster broker Service fails the render naming the endpoint")
     private = docs(connectivity(chart, "kubernetes", *flags,
                                 "--set", "agent-manager.githubTokenExchange.endpoint=https://broker.example.com:8443/token",
                                 "--set", "agentManager.networkPolicy.egress.cidrs[0]=10.30.0.0/16",

@@ -270,11 +270,6 @@ def delete(kind, name, ns, as_=None, groups=("system:masters",)):
     return kubectl(args, None, as_, groups)
 
 
-def delete_rolebindings(namespace, as_=None, groups=("system:masters",)):
-    return kubectl(["delete", "--raw", f"/apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/rolebindings?dryRun=All"],
-                   None, as_, groups)
-
-
 def can_i(verb, resource, ns, as_):
     """The authorizer's answer (a SubjectAccessReview): "yes" or "no"."""
     rc, out = kubectl(["auth", "can-i", verb, resource, "-n", ns], None, as_, ())
@@ -748,11 +743,9 @@ def prove_labels():
 
 
 def prove_admins_binding():
-    case("bulk RoleBinding deletion is refused while its organization namespace lives",
-         delete_rolebindings(ORG, as_=NS_CONTROLLER, groups=()), "agent-platform-organization-admins-binding",
-         f"refused: DELETE in {ORG}")
-    case("the namespace controller bulk-deletes RoleBindings while the namespace terminates",
-         delete_rolebindings(OLD, as_=NS_CONTROLLER, groups=()))
+    for namespace, denied in ((ORG, "agent-platform-organization-admins-binding"), (OLD, None)):
+        case(f"RoleBinding DELETE collection in {namespace}",
+             kubectl(["delete", "--raw", f"/apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/rolebindings?dryRun=All"], as_=NS_CONTROLLER), denied)
     case("organization-admins is not deleted while its namespace lives", delete("rolebinding", "organization-admins", ORG, as_=PERSON),
          "agent-platform-organization-admins-binding")
     case("organization-admins is not emptied while its namespace lives", patch("rolebinding", "organization-admins", ORG, {"subjects": []}, as_=PERSON),

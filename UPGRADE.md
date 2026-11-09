@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (agent-manager's credential form is an explicit URL)
+
+giantswarm/agent-platform#1312: the chart no longer derives agent-manager's `devPortal.url` from the portal's hostname, and an own `agent-manager.devPortal` fails the render. agent-manager 2.22.0 links a missing organization credential to `credentials.uiURL`, an HTTPS URL template with one `{operation}` placeholder, and its chart refuses `devPortal`. `credentials` and `githubTokenExchange` need a `components.agent-manager.versionRange` floor of `2.22.0` or later. See [organization credentials](docs/organization-credentials.md).
+
+### Operator action
+
+- **Before the upgrade**, remove `agent-manager.devPortal` from the installation's values.
+- Set `agent-manager.credentials.uiURL` to the form of the client that serves it once that client ships it (the portal: giantswarm/backstage#3364). Until then a missing credential is answered without a form link.
+- An installation that pins `components.agent-manager.versionRange` raises its floor to `2.22.0` before it sets `credentials` or `githubTokenExchange`.
+
 ## \<current\> → \<next\> (the charts declare no model)
 
 giantswarm/giantswarm-platform-manager#789: `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` fail the render. The kagent release always carries `providers: false`, so the upgrade deletes `default-model-config` from the kagent namespace, and the connectivity release deletes every ModelConfig it rendered from `kagent.modelConfigs`.
@@ -110,7 +120,7 @@ giantswarm/agent-platform#1268: `tenants.organizations` is refused by both chart
   2. Turn `agentPlatformOrganizations.enabled` on with its prerequisites: kagent and Agent Substrate on, `kagent.fluxServiceAccountName`, `llmRouting.enabled` with a model whose provider the listener serves and `llmRouting.modelConfigPolicy.enabled` on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, `global.domain` (or `agentPlatformOrganizations.apiHostnames`), muster's OAuth server on the `dex` provider with `tenants.platform.users` (muster lists the MCP servers as the person), and the kagent line with giantswarm/kagent-extensions#27 for the erasure.
   3. Create each organization through agent-manager's organization tools (`create_organization` in the parent `org-<name>`, then its members and its model). Two steps decide when they answer:
      - With this release, `components.agent-manager.versionRange` is `>=2.16.0 <2.19.0` and agent-manager gets `tenants.enabled: false`: an agent-manager 2.18 with `tenants.enabled` would run the old tenant reconciler over every `giantswarm.io/organization` namespace. Its organization tools do not exist yet.
-     - The next agent-platform release whose CHANGELOG moves `components.agent-manager.versionRange` to the release with giantswarm/agent-manager#294 turns agent-manager's `tenants.enabled` on with `agentPlatformOrganizations.enabled` (and sets `devPortal.url`); without it the organization tools answer `unsupported`. That release also hands `agent-platform-tenant-flux` back: the connectivity chart drops it and agent-manager's chart renders it again. Its UPGRADE.md entry gives the same annotation step in the other direction (the agent-manager release's name and namespace), so the role is never missing. Upgrade graveler to that release before this step.
+     - The next agent-platform release whose CHANGELOG moves `components.agent-manager.versionRange` to the release with giantswarm/agent-manager#294 turns agent-manager's `tenants.enabled` on with `agentPlatformOrganizations.enabled`; without it the organization tools answer `unsupported`. That release also hands `agent-platform-tenant-flux` back: the connectivity chart drops it and agent-manager's chart renders it again. Its UPGRADE.md entry gives the same annotation step in the other direction (the agent-manager release's name and namespace), so the role is never missing. Upgrade graveler to that release before this step.
   4. Delete the old tenant agent objects in each `org-<name>` namespace: the agents' HelmReleases and the `agent` OCIRepository, the copies the reconciler kept (the Harness, the WorkerPool and its ServiceAccount, `default-model-config` and its key Secret, the workers' network policies, all labelled `agent-manager.giantswarm.io/tenant-object`), and the RoleBinding of the agents' Flux ServiceAccount. Their sessions do not move.
 
 ## \<current\> → \<next\> (the organization label, and the egress gateway reaches only muster's Gateway in the cluster)
