@@ -17,7 +17,9 @@ a scored review is `agent-platform-skill-review`.
 An installation offers skills from its **skill sources**, which skill-manager serves (tools
 `x_skill-manager_*`, as you): `x_skill-manager_list_skill_sources` lists them (`url`, `ref`, `path`,
 `readOnly`, the commit the ref resolves to), `x_skill-manager_list_skills` their skills (name,
-description, path, tags; `source` reads any other GitHub repository, `refresh` bypasses the cache).
+description, path, tags) and plugins (path, `format`; `source` reads any other GitHub repository,
+`refresh` bypasses the cache). `x_skill-manager_get_skill` reads one skill's SKILL.md and file list at a
+commit, `x_skill-manager_get_skill_file` one of its files.
 The first source is the platform's own, `giantswarm/agent-platform` (`skills/`), pinned to the
 platform release and **read-only**: the portal proposes no change to it and a fix goes upstream; the
 installation configures the rest (`skillManager.sources`). A skill outside every source — any other

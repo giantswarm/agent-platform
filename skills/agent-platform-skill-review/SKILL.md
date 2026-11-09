@@ -20,8 +20,10 @@ not changed from the installation, and a fix goes to its owners.
 - **Local path** (`skills/<name>` or `uploads/` in the session's scratch directory): read it with
   `read_file`.
 - **Git URL + path (+ commit)**: fetch every file under the path with the repository tool your
-  toolset offers (`filter_tools` to find it). `x_skill-manager_list_skill_sources` shows the offered
-  sources with their ref, the commit it resolves to, path and `readOnly`. With no repository tool, ask the user to upload the directory.
+  toolset offers (`filter_tools` to find it), or from an offered source with `x_skill-manager_get_skill`
+  (SKILL.md and the file list) and `x_skill-manager_get_skill_file` (each file).
+  `x_skill-manager_list_skill_sources` shows the offered sources with their ref, the commit it resolves
+  to, path and `readOnly`. Elsewhere, with no repository tool, ask the user to upload the directory.
 - **Changed skill**: also fetch the previously pinned commit — the `commit` of the skill in the
   agent's `x_agent-manager_get_agent`, else ask the person — and review the diff, but run every
   check on the whole skill.
