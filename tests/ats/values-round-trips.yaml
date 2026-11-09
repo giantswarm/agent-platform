@@ -31,6 +31,13 @@ components:
   # values-kagent.yaml.
   agent-manager:
     enabled: true
+  # Off until skill-manager 0.1.0 is published: the dev build refuses its
+  # install while components.skill-manager.versionRange admits no published
+  # chart (Chart.yaml's agent-platform.giantswarm.io/unreleased). Agent-manager
+  # falls back to its own skill discovery. The entry goes with the release,
+  # with UNRELEASED in tests/verify-components-charts.py.
+  skill-manager:
+    enabled: false
 
 muster:
   # One replica: the OAuth state is in memory (storage below), so a token muster
