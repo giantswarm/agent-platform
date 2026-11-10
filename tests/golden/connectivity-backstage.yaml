@@ -11389,7 +11389,8 @@ spec:
             - port: "10443"
               protocol: TCP
     # Skill discovery (backstage.skillsRepositories): the backend lists each
-    # repository's SKILL.md files through the GitHub API.
+    # repository's SKILL.md files through the GitHub API. Skill pull requests
+    # (backstage.skillPullRequests) go to the same API.
     - toFQDNs:
         - matchName: api.github.com
       toPorts:
