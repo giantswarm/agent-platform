@@ -43,7 +43,9 @@ Each case pins one property of the render:
   musterMcpServerViewers, or tenants.platform.users while it is unset, whether
   kagent is on or not; an own list binds the viewers and leaves
   agent-platform:platform-user alone, an empty one binds nobody, and with
-  tenants.platform unset only the viewers are bound
+  tenants.platform's lists empty in the meta chart (or tenants.platform unset
+  in the connectivity chart) only the viewers are bound, rendered from the
+  values the meta chart hands its connectivity release
   (giantswarm/agent-platform#1331);
 - the meta chart appends tenants.platformTeam to muster's mcpserver-editor and
   workflow-editor subjects (each subject once) and leaves them alone while the
@@ -55,6 +57,7 @@ Needs PyYAML. HELM selects the binary.
 import os
 import subprocess
 import sys
+import tempfile
 
 import yaml
 
@@ -333,6 +336,23 @@ def check_muster_viewer(docs: list, want: list = None) -> None:
         fail(f"agent-platform:mcpserver-viewer is bound to {subject_names(rb)}, want {want}")
 
 
+def render_from_meta(meta: str, conn: str, args: list) -> list:
+    """The connectivity chart rendered from the values of the connectivity
+    HelmRelease the meta chart renders with args."""
+    for d in render(meta, ["-f", f"{meta}/ci/ci-values.yaml", *args]):
+        if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "agent-platform-connectivity":
+            values = d["spec"]["values"]
+            break
+    else:
+        fail("no agent-platform-connectivity HelmRelease in the meta render")
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump(values, f)
+    try:
+        return render(conn, ["--namespace", "agent-platform", "-f", f.name])
+    finally:
+        os.unlink(f.name)
+
+
 def check_meta(chart: str) -> None:
     def muster_rbac(args):
         for d in render(chart, ["-f", f"{chart}/ci/ci-values.yaml", *args]):
@@ -409,12 +429,24 @@ def main() -> None:
     check_platform_tenant(none, ADMINS)
     ok("an empty musterMcpServerViewers binds no viewer and does not fall back to tenants.platform.users")
 
-    retired = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "tenants.platform=null", *viewers])
+    # The platform tenant's retirement goes through the meta chart: Helm drops a
+    # null override, and the connectivity chart's own defaults would come back
+    # on its release, so the retirement empties the lists. Render the
+    # connectivity chart from the values the meta chart hands its release.
+    retired = render_from_meta(meta, conn, [*CONN[2:], "--set", "components.kagent.enabled=true",
+                                            "--set-json", "tenants.platform.users=[]",
+                                            "--set-json", "tenants.platform.editors=[]", *viewers])
     for name in ("agent-platform:platform-user", "agent-platform:editor"):
         if find(retired, "RoleBinding", name, "kagent"):
-            fail(f"RoleBinding {name} renders in the kagent namespace with tenants.platform unset")
+            fail(f"RoleBinding {name} renders in the kagent namespace with tenants.platform's lists empty in the meta chart")
     check_muster_viewer(retired, ["acme:everyone"])
-    ok("tenants.platform unset: no platform tenant binding in kagent, muster's viewers still bound")
+    ok("tenants.platform's lists empty in the meta chart: its connectivity release binds no platform tenant in kagent, muster's viewers still bound")
+
+    unset = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "tenants.platform=null", *viewers])
+    if find(unset, "RoleBinding", "agent-platform:platform-user", "kagent"):
+        fail("RoleBinding agent-platform:platform-user renders with tenants.platform unset in the connectivity chart")
+    check_muster_viewer(unset, ["acme:everyone"])
+    ok("tenants.platform unset in the connectivity chart: it renders, without the platform tenant's bindings")
 
     check_meta(meta)
 

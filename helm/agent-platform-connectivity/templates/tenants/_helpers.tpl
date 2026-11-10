@@ -92,7 +92,10 @@ YAML list, each subject once: musterMcpServerViewers, or
 tenants.platform.users while musterMcpServerViewers is unset (null), so an
 installation's viewers stay as they are until it sets the key. An empty list
 binds nobody. giantswarm/agent-platform#1331: the platform tenant's
-tenants.platform.* can then go without muster's viewers.
+tenants.platform.* can then go without muster's viewers. The meta chart's
+guard (agent-platform.muster.organizations) resolves the viewers the same way:
+change both together, and drop the fallback in both when tenants.platform.*
+is retired (giantswarm/giantswarm#38990, giantswarm/agent-manager#166).
 */}}
 {{- define "agent-platform.muster.mcpServerViewers" -}}
 {{- $viewers := .Values.musterMcpServerViewers -}}

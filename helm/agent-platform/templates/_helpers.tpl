@@ -4388,7 +4388,9 @@ naming what is missing, when the switch is on and:
     tenants.platform.users while it is unset; giantswarm/agent-platform#1331):
     muster lists the servers of its own namespace as the person too, and with
     no subject the connectivity release binds nobody to list them
-    (agent-platform:mcpserver-viewer).
+    (agent-platform:mcpserver-viewer). The connectivity chart resolves the
+    viewers the same way (agent-platform.muster.mcpServerViewers): change
+    both together.
 Called from agent-platform.componentDerivedValues, i.e. only while
 components.muster is on.
 Usage: include "agent-platform.muster.organizations" $root | fromJson

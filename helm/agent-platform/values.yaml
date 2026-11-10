@@ -5536,7 +5536,8 @@ tenants:
 # agentPlatformOrganizations.enabled, so a person not bound here sees none of
 # them. Unset (null), the default, the viewers are tenants.platform.users, so
 # nothing changes until an installation sets this key. Set it before
-# tenants.platform.users goes: it does not bind anyone in the kagent namespace.
+# tenants.platform.users is emptied ([]; a null brings the default back): it
+# does not bind anyone in the kagent namespace.
 # An empty list binds nobody. A group is written as the API server sees it
 # (with the installation's OIDC groups prefix). system:authenticated also
 # binds every ServiceAccount.

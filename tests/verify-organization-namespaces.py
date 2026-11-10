@@ -323,7 +323,7 @@ def check_meta(chart):
              "muster.muster.mcpServerNamespaceSelector ({\"matchLabels\":{\"team\":\"a\"}}) differs from the one agentPlatformOrganizations.enabled derives"),
             ("muster's OAuth server off", ["--set", "muster.muster.oauth.server.enabled=false"],
              "needs muster.muster.oauth.server.enabled with the provider dex"),
-            ("no MCP-server viewers", ["--set", "tenants.platform.users=null"], "needs muster's MCP-server viewers, musterMcpServerViewers"),
+            ("no MCP-server viewers", ["--set-json", "tenants.platform.users=[]"], "needs muster's MCP-server viewers, musterMcpServerViewers"),
             ("an empty musterMcpServerViewers", ["--set-json", "musterMcpServerViewers=[]"],
              "needs muster's MCP-server viewers, musterMcpServerViewers"),
             ("llmRouting off", ["--set", "llmRouting.enabled=false"], "needs llmRouting.enabled"),
@@ -332,10 +332,10 @@ def check_meta(chart):
              "kagent.controller.authorization.namespaceSelector (giantswarm.io/organization) differs")):
         r = meta(chart, *ON, *extra)
         expect(r.returncode != 0 and needle in r.stderr, f"on with {what}, the render fails naming it")
-    viewers = docs(meta(chart, *ON, "--set", "tenants.platform=null", "--set-json",
+    viewers = docs(meta(chart, *ON, "--set-json", "tenants.platform.users=[]", "--set-json", "tenants.platform.editors=[]", "--set-json",
                         'musterMcpServerViewers=[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"acme:everyone"}]'))
     expect(release(viewers, "agent-platform-connectivity")["values"]["musterMcpServerViewers"][0]["name"] == "acme:everyone",
-           "on with tenants.platform unset and musterMcpServerViewers set, the render succeeds and hands the viewers to the connectivity release")
+           "on with tenants.platform's lists empty and musterMcpServerViewers set, the render succeeds and hands the viewers to the connectivity release")
     r = meta(chart, *SWITCH, "--set", "agent-platform-operator.commitMode.sourceRef.name=flux")
     expect(r.returncode != 0 and "agent-platform-operator.commitMode.sourceRef.name is set but agentPlatformOrganizations.fluxNamespace is not" in r.stderr,
            "on without fluxNamespace, an own commit mode source fails the render naming fluxNamespace")
