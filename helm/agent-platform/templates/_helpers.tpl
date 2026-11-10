@@ -271,11 +271,12 @@ overwrite would hide a values file that still spells the old key.
     private CA its OAuth server verifies the provider against. And
     rbac.mcpServerEditor.subjects and rbac.workflowEditor.subjects: the
     block's own subjects with tenants.platformTeam appended (each subject
-    once), while that list is not empty.
+    once), while that list is not empty. And toolsetPresets.<name>.icon for
+    the shipped presets left without one (agent-platform.muster.presetIcons),
+    from the muster floor that takes the key.
   agent-manager: flux.helmReleaseServiceAccount from kagent.fluxServiceAccountName;
-                 tenants.enabled from agentPlatformOrganizations.enabled and,
-                 with it on and components.backstage on, devPortal.url from
-                 the portal's hostname (agent-platform.agentManager.organizations);
+                 tenants.enabled from agentPlatformOrganizations.enabled
+                 (agent-platform.agentManager.organizations);
                  muster.url from the muster Service (agent-platform.musterMcpUrl);
                  kagent.controllerTarget, the kagent controller its session
                  tools call, from the agentgateway data plane
@@ -534,9 +535,6 @@ floor that takes the key (agent-platform.agentManager.registryConfigFloor). */ -
 {{- $_ := set $derived "kagent" (dict "controllerTarget" $target) -}}
 {{- $orgs := include "agent-platform.agentManager.organizations" .root | fromJson -}}
 {{- $_ := set $derived "tenants" $orgs.tenants -}}
-{{- with $orgs.devPortal -}}
-{{- $_ := set $derived "devPortal" . -}}
-{{- end -}}
 {{- /* Skills: through the skill-manager (skillManager.url) where it pins
 them (agent-platform.agentManager.viaSkillManager), else the deprecated
 in-process list of URLs (agent-platform.skills.repositories). */ -}}
@@ -987,6 +985,10 @@ repeating the admin groups. */ -}}
 {{- $_ := set $rbac $role (dict "subjects" $subjects) -}}
 {{- end -}}
 {{- $_ := set $derived "rbac" $rbac -}}
+{{- end -}}
+{{- with (include "agent-platform.muster.presetIcons" .root | fromJson) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $derived "muster" (mergeOverwrite $muster (dict "toolsetPresets" .)) -}}
 {{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
@@ -4404,33 +4406,35 @@ the controller's kubernetes authorization mode needs (agent-platform.kagent.auth
 {{- define "agent-platform.workspaceManager.tokenFloor" -}}0.10.0{{- end -}}
 
 {{/*
-agent-manager's organization values, as JSON: {"tenants": {"enabled": <bool>},
-"devPortal": {"url": <url>}}. tenants.enabled follows
-agentPlatformOrganizations.enabled: agent-manager then serves the organization
-tools. The switch needs the agent-manager floor
-agent-platform.agentManager.organizationsFloor, whose chart leaves the ClusterRole
-agent-platform-tenant-flux to the connectivity chart: an earlier chart renders
-it too, and the two releases' upgrades, in either order, end without it.
-devPortal.url, with the switch
-on and components.backstage on, is https://<backstage.hostname, else
-backstage.<global.domain>>: the organization tools link a missing credential
-to its form there. With components.backstage off an own devPortal.url (a Dev
-Portal installed apart) travels unchanged. The agent-manager line's tenants
-block takes `enabled` only: any other own tenants key, an own tenants.enabled
-or devPortal.url that disagrees, or the switch on without
-oauth.downstream.enabled (the tools run as the caller) fails the render.
-Called from agent-platform.componentDerivedValues, i.e. only while
-components.agent-manager is on.
+agent-manager's organization values, as JSON. tenants.enabled follows the
+organization switch. The 2.20.0 floor keeps the connectivity chart as the
+only owner of agent-platform-tenant-flux. Credential UI URLs are explicit
+client configuration; this chart does not derive them from Backstage, and
+refuses one while the organization switch is off.
 Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 */}}
 {{- define "agent-platform.agentManager.organizations" -}}
 {{- $am := index .Values "agent-manager" | default dict -}}
 {{- $on := eq (include "agent-platform.organizations.on" .) "true" -}}
+{{- if hasKey $am "devPortal" -}}
+{{- fail "agent-manager.devPortal is unsupported: configure agent-manager.credentials.uiURL with the client's HTTPS URL template containing {operation}" -}}
+{{- end -}}
+{{- if or (hasKey $am "credentials") (hasKey $am "githubTokenExchange") -}}
+{{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" "2.22.0")) -}}
+{{- fail "agent-manager credential operations and GitHub token exchange need components.agent-manager.versionRange with a floor of 2.22.0 or later" -}}
+{{- end -}}
+{{- end -}}
+{{- if and (dig "credentials" "uiURL" "" $am) (not $on) -}}
+{{- fail "agent-manager.credentials.uiURL needs agentPlatformOrganizations.enabled: agent-manager links the credential form only beside its organization tools (tenants.enabled, which follows the switch)" -}}
+{{- end -}}
 {{- $own := dig "tenants" dict $am | default dict -}}
 {{- range $k, $_ := $own -}}
-{{- if ne $k "enabled" -}}
-{{- fail (printf "agent-manager.tenants.%s is set: agent-manager's tenants block takes enabled only, which this chart derives from agentPlatformOrganizations.enabled — remove agent-manager.tenants.%s" $k $k) -}}
+{{- if not (has $k (list "enabled" "commit")) -}}
+{{- fail (printf "agent-manager.tenants.%s is unsupported: configure tenants.commit for organization GitOps writes; tenants.enabled follows agentPlatformOrganizations.enabled" $k) -}}
 {{- end -}}
+{{- end -}}
+{{- if and (hasKey $own "commit") (not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" "2.20.0"))) -}}
+{{- fail "agent-manager.tenants.commit needs components.agent-manager.versionRange with a floor of 2.20.0 or later" -}}
 {{- end -}}
 {{- if and (hasKey $own "enabled") (ne (toString $own.enabled) (toString $on)) -}}
 {{- fail (printf "agent-manager.tenants.enabled (%v) differs from agentPlatformOrganizations.enabled (%v): agent-manager serves the organization tools exactly while the operator keeps the organization namespaces — set agentPlatformOrganizations.enabled and leave agent-manager.tenants.enabled unset" $own.enabled $on) -}}
@@ -4443,17 +4447,6 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- end -}}
 {{- if not (and (dig "oauth" "enabled" false $am) (dig "oauth" "downstream" "enabled" false $am)) -}}
 {{- fail "agentPlatformOrganizations.enabled needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled: the organization tools run as the caller, whose RoleBindings in the organization namespace grant the writes" -}}
-{{- end -}}
-{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "backstage") -}}
-{{- $host := (.Values.backstage | default dict).hostname | default (and .Values.global.domain (printf "backstage.%s" .Values.global.domain)) -}}
-{{- if $host -}}
-{{- $url := printf "https://%s" $host -}}
-{{- $ownUrl := dig "devPortal" "url" "" $am -}}
-{{- if and $ownUrl (ne (trimSuffix "/" $ownUrl) $url) -}}
-{{- fail (printf "agent-manager.devPortal.url (%s) differs from the Dev Portal this chart installs (%s, from backstage.hostname or global.domain): the organization tools link a credential to its form there — leave agent-manager.devPortal.url unset" $ownUrl $url) -}}
-{{- end -}}
-{{- $_ := set $out "devPortal" (dict "url" $url) -}}
-{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
@@ -4514,6 +4507,36 @@ The first muster release whose chart takes muster.mcpServerNamespaceSelector
 (giantswarm/muster#1783). One line, no comment inside the define.
 */}}
 {{- define "agent-platform.muster.organizationsFloor" -}}5.58.0{{- end -}}
+
+{{/*
+The first muster release that takes toolsetPresets.<name>.icon. One line, no
+comment inside the define.
+*/}}
+{{- define "agent-platform.muster.presetIconsFloor" -}}5.61.0{{- end -}}
+
+{{/*
+Icons of the shipped presets (infrastructure, agent-platform), for each one
+muster.muster.toolsetPresets still defines and leaves without an icon, while
+the floor of components.muster.versionRange is at least
+agent-platform.muster.presetIconsFloor. Emits JSON, {} otherwise.
+Usage: include "agent-platform.muster.presetIcons" $root | fromJson
+*/}}
+{{- define "agent-platform.muster.presetIcons" -}}
+{{- $out := dict -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.presetIconsFloor" .)) -}}
+{{- $icons := dict
+      "infrastructure" "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM5OTNDMUQiLz48ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSIxMCIgeT0iOSIgd2lkdGg9IjEyIiBoZWlnaHQ9IjYiIHJ4PSIxLjUiLz48cmVjdCB4PSIxMCIgeT0iMTciIHdpZHRoPSIxMiIgaGVpZ2h0PSI2IiByeD0iMS41Ii8+PHBhdGggZD0iTTEzIDEyaC4wMU0xMyAyMGguMDEiLz48L2c+PC9zdmc+"
+      "agent-platform" "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM1MzRBQjciLz48ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTYgOWwxLjggNS4yTDIzIDE2bC01LjIgMS44TDE2IDIzbC0xLjgtNS4yTDkgMTZsNS4yLTEuOHoiLz48L2c+PC9zdmc+" -}}
+{{- $presets := dig "muster" "toolsetPresets" dict (.Values.muster | default dict) -}}
+{{- range $name, $icon := $icons -}}
+{{- $p := get $presets $name -}}
+{{- if and (kindIs "map" $p) (not $p.icon) -}}
+{{- $_ := set $out $name (dict "icon" $icon) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
 
 {{/*
 A Go duration (time.ParseDuration: 720h, 1h30m, 0, 1.5h) in seconds, empty
@@ -5919,4 +5942,55 @@ certSecretRef:
 {{- end -}}
 {{- end -}}
 {{- $snapshots | toJson -}}
+{{- end -}}
+
+{{/*
+agent-platform.driftDetection renders a component HelmRelease's
+spec.driftDetection from components.<name>.driftDetection (passed through)
+plus the ignore rules its pod-certificate workloads need
+(giantswarm/agent-platform#879). helm-controller before v1.4 (Flux 2.6, whose
+API types predate Kubernetes 1.35) decodes a Deployment through types without
+the projected volume source podCertificate: with drift detection on, its
+correction re-applies the pod template with that source emptied ({}), the next
+ReplicaSet's pods start without their Substrate identity and crash-loop. The
+rules leave /spec/template/spec/volumes of those workloads to Helm's own
+upgrades, which apply the chart's manifest as it is; every other field of them
+and every other object stays corrected. While drift detection is on (mode
+enabled or warn) the rules are appended to the entry's own ignore list, so an
+installation that sets one keeps them; mode disabled or no driftDetection key
+renders the entry unchanged.
+
+The table names the releases whose charts project podCertificate volumes:
+kagent's controller (its Substrate pod identity, service DNS and Postgres
+client certificates; its fullname follows the forwarded naming values) and
+every Substrate workload (ate-api-server, ate-controller, atenet, atelet, the
+bundled Postgres, the credential provider; Substrate carries no drift
+detection by default, the rules hold for the day it is turned on). A release
+whose chart starts projecting podCertificate gets its row here.
+*/}}
+{{- define "agent-platform.driftDetection" -}}
+{{- $volumes := list "/spec/template/spec/volumes" -}}
+{{- $kagent := .root.Values.kagent | default dict -}}
+{{- $fullname := "kagent" -}}
+{{- with $kagent.nameOverride }}{{ $fullname = printf "kagent-%s" . }}{{ end -}}
+{{- $fullname = $kagent.fullnameOverride | default $fullname | trunc 63 | trimSuffix "-" -}}
+{{- $carriers := dict
+  "kagent" (list (dict "kind" "Deployment" "name" (printf "%s-controller" $fullname)))
+  "substrate" (list (dict "kind" "Deployment") (dict "kind" "StatefulSet") (dict "kind" "DaemonSet"))
+-}}
+{{- $dd := deepCopy .spec -}}
+{{- $targets := get $carriers .name | default list -}}
+{{- if and $targets (ne (toString (get $dd "mode")) "disabled") -}}
+{{- $ignore := get $dd "ignore" | default list -}}
+{{- $present := list -}}
+{{- range $ignore }}{{ $present = append $present (toJson .) }}{{ end -}}
+{{- range $targets -}}
+{{- $rule := dict "paths" $volumes "target" . -}}
+{{- if not (has (toJson $rule) $present) -}}
+{{- $ignore = append $ignore $rule -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $dd "ignore" $ignore -}}
+{{- end -}}
+{{- toYaml $dd -}}
 {{- end -}}

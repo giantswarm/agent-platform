@@ -6,6 +6,23 @@
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.agentManager.oauthEnabled" . }}
+{{- $broker := dict }}
+{{- $brokerURL := dig "githubTokenExchange" "endpoint" "" $chart }}
+{{- if and $oauthOn (regexMatch "^https://[^/]+" $brokerURL) }}
+{{- $parsed := urlParse $brokerURL }}
+{{- $host := include "agent-platform.jwks.normalizeHost" ($parsed.hostname | default "") }}
+{{- if include "agent-platform.jwks.inCluster" $host }}
+{{- fail (printf "agent-manager.githubTokenExchange.endpoint (%s) names an in-cluster Service, which agent-manager's egress policy cannot select by name: use the broker's external hostname or address" $brokerURL) }}
+{{- end }}
+{{- if and (not (include "agent-platform.jwks.addrLiteral" $host)) (lt (len (splitList "." $host)) 3) }}
+{{- fail (printf "agent-manager.githubTokenExchange.endpoint (%s) names a host of fewer than three labels, which the cluster's DNS search path resolves to an in-cluster Service that agent-manager's egress policy cannot select by name: use the broker's external hostname or address" $brokerURL) }}
+{{- end }}
+{{- $port := regexFind ":[0-9]+$" ($parsed.host | default "") | trimPrefix ":" | default "443" | int }}
+{{- $broker = dict "host" $host "port" $port "cidr" "" }}
+{{- if include "agent-platform.jwks.addrLiteral" $host }}
+{{- $_ := set $broker "cidr" (printf "%s/%s" $host (ternary "128" "32" (contains ":" $host))) }}
+{{- end }}
+{{- end }}
 {{- /* muster's filter_tools resolves a claude Harness agent's toolset as the
 caller (the caller's IdP token as the bearer): only with OAuth on and muster in
 the release, on the port of the muster URL agent-manager composes
@@ -162,6 +179,19 @@ spec:
     {{- end }}
     {{- if $oauthOn }}
     {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.agentManager.oauthProvider" .) "issuerUrl" (include "agent-platform.agentManager.issuerUrl" .)) | trim | nindent 4 }}
+    {{- end }}
+    {{- with $broker }}
+    # The HTTPS grant broker needs an explicit origin rule even when it
+    # shares an ingress address with the identity provider.
+    - {{ if .cidr }}toCIDR:
+        - {{ .cidr | quote }}
+      {{- else }}toFQDNs:
+        - matchName: {{ .host | quote }}
+      {{- end }}
+      toPorts:
+        - ports:
+            - port: {{ .port | quote }}
+              protocol: TCP
     {{- end }}
     {{- include "agent-platform.agentManager.chartSourcesEgress.cilium" . | nindent 4 }}
     {{- with .Values.networkPolicy.additionalEgressCIDRs }}
@@ -368,6 +398,25 @@ spec:
           protocol: TCP
     {{- end }}
     {{- include "agent-platform.agentManager.chartSourcesEgress.kubernetes" . | nindent 4 }}
+    {{- with $broker }}
+    # Native NetworkPolicy cannot select a DNS origin. Private DNS origins
+    # use the component's cidrs or additionalEgressCIDRs.
+    - to:
+        - ipBlock:
+            {{- if .cidr }}
+            cidr: {{ .cidr | quote }}
+            {{- else }}
+            cidr: 0.0.0.0/0
+            except: {{ toYaml $.Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 14 }}
+        {{- range concat $egress.cidrs $.Values.networkPolicy.additionalEgressCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+            {{- end }}
+      ports:
+        - port: {{ .port | int }}
+          protocol: TCP
+    {{- end }}
     {{- if and $oauthOn $egress.cidrs }}
     # The identity provider: a narrowed chart egress still leaves the public
     # IdP reachable.
