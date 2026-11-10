@@ -147,16 +147,11 @@ KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
-UNRELEASED: dict[str, str] = {
-    "skill-manager": "0.1.0",  # giantswarm/giantswarm#38322, built in parallel
-}
+UNRELEASED: dict[str, str] = {}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
-RENDER_AGAINST: dict[str, str] = {
-    # A dev build of giantswarm/skill-manager#2 (7c37d35), until 0.1.0 is out.
-    "skill-manager": "0.0.0-r977abf58t20261109113954h7c37d35",
-}
+RENDER_AGAINST: dict[str, str] = {}
 # The layer every OCIRepository of the meta chart selects, and the manifest
 # types a Helm chart artifact is fetched as.
 HELM_CHART_LAYER = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
