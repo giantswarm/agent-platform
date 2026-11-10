@@ -40,7 +40,11 @@ Each case pins one property of the render:
   tenants.platform.editors plus tenants.platformTeam; an empty list renders no
   binding; with kagent off, none of the roles and bindings render;
 - muster's MCPServers: `list` (get, watch) in the release namespace for
-  tenants.platform.users, whether kagent is on or not;
+  musterMcpServerViewers, or tenants.platform.users while it is unset, whether
+  kagent is on or not; an own list binds the viewers and leaves
+  agent-platform:platform-user alone, an empty one binds nobody, and with
+  tenants.platform unset only the viewers are bound
+  (giantswarm/agent-platform#1331);
 - the meta chart appends tenants.platformTeam to muster's mcpserver-editor and
   workflow-editor subjects (each subject once) and leaves them alone while the
   list is empty.
@@ -317,15 +321,16 @@ def check_platform_tenant(docs: list, want_editors: list) -> None:
         fail(f"agent-platform:editor is bound to {subject_names(editor)}, want {want_editors}")
 
 
-def check_muster_viewer(docs: list) -> None:
+def check_muster_viewer(docs: list, want: list = None) -> None:
+    want = want or ["system:authenticated"]
     role = find(docs, "Role", "agent-platform:mcpserver-viewer", "agent-platform")
     rb = find(docs, "RoleBinding", "agent-platform:mcpserver-viewer", "agent-platform")
     if role is None or rb is None:
         fail("muster's MCPServers are not listed to every signed-in person in the release namespace")
     if grants(role["rules"]) != {("muster.giantswarm.io", "mcpservers", v, None) for v in ("get", "list", "watch")}:
         fail(f"Role agent-platform:mcpserver-viewer grants {role['rules']}")
-    if subject_names(rb) != ["system:authenticated"]:
-        fail(f"agent-platform:mcpserver-viewer is bound to {subject_names(rb)}")
+    if subject_names(rb) != want:
+        fail(f"agent-platform:mcpserver-viewer is bound to {subject_names(rb)}, want {want}")
 
 
 def check_meta(chart: str) -> None:
@@ -391,6 +396,25 @@ def main() -> None:
         if find(empty, "RoleBinding", name):
             fail(f"RoleBinding {name} renders with no subjects")
     ok("an empty subject list renders no binding")
+
+    viewers = ["--set-json", 'musterMcpServerViewers=[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"acme:everyone"}]']
+    own = render(conn, [*CONN, "--set", "components.kagent.enabled=true", *viewers])
+    check_muster_viewer(own, ["acme:everyone"])
+    check_platform_tenant(own, ADMINS)
+    ok("musterMcpServerViewers binds muster's viewers; agent-platform:platform-user stays with tenants.platform.users")
+
+    none = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set-json", "musterMcpServerViewers=[]"])
+    if find(none, "RoleBinding", "agent-platform:mcpserver-viewer"):
+        fail("RoleBinding agent-platform:mcpserver-viewer renders with musterMcpServerViewers empty")
+    check_platform_tenant(none, ADMINS)
+    ok("an empty musterMcpServerViewers binds no viewer and does not fall back to tenants.platform.users")
+
+    retired = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "tenants.platform=null", *viewers])
+    for name in ("agent-platform:platform-user", "agent-platform:editor"):
+        if find(retired, "RoleBinding", name, "kagent"):
+            fail(f"RoleBinding {name} renders in the kagent namespace with tenants.platform unset")
+    check_muster_viewer(retired, ["acme:everyone"])
+    ok("tenants.platform unset: no platform tenant binding in kagent, muster's viewers still bound")
 
     check_meta(meta)
 

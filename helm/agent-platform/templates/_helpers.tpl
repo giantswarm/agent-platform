@@ -4384,9 +4384,11 @@ naming what is missing, when the switch is on and:
     (an earlier chart refuses the key);
   * muster's OAuth server is off or not on the dex provider: muster lists the
     servers with the person's Dex token and refuses to start otherwise;
-  * tenants.platform.users is empty: muster lists the servers of its own
-    namespace as the person too, and with no subject the connectivity
-    release binds nobody to list them (agent-platform:mcpserver-viewer).
+  * muster's MCP-server viewers are empty (musterMcpServerViewers, or
+    tenants.platform.users while it is unset; giantswarm/agent-platform#1331):
+    muster lists the servers of its own namespace as the person too, and with
+    no subject the connectivity release binds nobody to list them
+    (agent-platform:mcpserver-viewer).
 Called from agent-platform.componentDerivedValues, i.e. only while
 components.muster is on.
 Usage: include "agent-platform.muster.organizations" $root | fromJson
@@ -4409,8 +4411,12 @@ Usage: include "agent-platform.muster.organizations" $root | fromJson
 {{- if not (and (dig "oauth" "server" "enabled" false $m) (eq (toString (dig "oauth" "server" "provider" "dex" $m)) "dex")) -}}
 {{- fail "agentPlatformOrganizations.enabled needs muster.muster.oauth.server.enabled with the provider dex: muster lists the organizations' MCP servers with the person's Dex token and refuses to start with mcpServerNamespaceSelector otherwise" -}}
 {{- end -}}
-{{- if not (dig "platform" "users" list (.Values.tenants | default dict)) -}}
-{{- fail "agentPlatformOrganizations.enabled needs tenants.platform.users: muster lists the MCP servers of its own namespace as the person, and with no subject there the connectivity release binds nobody to list them (agent-platform:mcpserver-viewer)" -}}
+{{- $viewers := .Values.musterMcpServerViewers -}}
+{{- if kindIs "invalid" $viewers -}}
+{{- $viewers = dig "platform" "users" list (.Values.tenants | default dict) -}}
+{{- end -}}
+{{- if not $viewers -}}
+{{- fail "agentPlatformOrganizations.enabled needs muster's MCP-server viewers, musterMcpServerViewers (or tenants.platform.users while musterMcpServerViewers is unset): muster lists the MCP servers of its own namespace as the person, and with no subject there the connectivity release binds nobody to list them (agent-platform:mcpserver-viewer)" -}}
 {{- end -}}
 {{- dict "mcpServerNamespaceSelector" $selector | toJson -}}
 {{- end -}}
