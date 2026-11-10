@@ -657,8 +657,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.omitKeys[5] | string | `"enabledExtensions"` |  |
 | components.backstage.omitKeys[6] | string | `"disabledExtensions"` |  |
 | components.backstage.omitKeys[7] | string | `"skillsRepositories"` |  |
-| components.backstage.omitKeys[8] | string | `"metaAgents"` |  |
-| components.backstage.omitKeys[9] | string | `"configReload"` |  |
+| components.backstage.omitKeys[8] | string | `"skillPullRequests"` |  |
+| components.backstage.omitKeys[9] | string | `"metaAgents"` |  |
+| components.backstage.omitKeys[10] | string | `"configReload"` |  |
 | components.backstage.enabled | bool | `false` |  |
 | components.backstage.dependsOn[0] | string | `"cloudnative-pg"` |  |
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |

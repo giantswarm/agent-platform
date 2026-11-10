@@ -97,7 +97,7 @@ function of its own (contract: the `agent-platform-tools` skill). Read each sche
 - **One agent's readiness**: `x_agent-manager_get_agent_status`.
 - **The connectors**: `core_mcpserver_list` — every MCP server with its state.
 - **The models**: `x_agent-manager_list_model_configs`; serving: the `agent-platform-tools` skill.
-- **The skills**: `x_skill-manager_list_skills`; their sources: `x_skill-manager_list_skill_sources`.
+- **The skills and plugins**: `x_skill-manager_list_skills`; their sources: `x_skill-manager_list_skill_sources`; one skill's SKILL.md and files: `x_skill-manager_get_skill`, `x_skill-manager_get_skill_file`.
 - **Capabilities**: `x_agent-manager_get_info`.
 - **Workflows** the installation offers for whole questions: `filter_tools {"pattern": "workflow_*"}`.
 - **Yourself**: `x_agent-manager_get_agent` with your **technical** name — the release name, not the

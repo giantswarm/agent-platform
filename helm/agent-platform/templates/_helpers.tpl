@@ -592,8 +592,18 @@ release generates (agent-platform.skillManager.serviceToken). */ -}}
 {{- end -}}
 {{- $_ := set $derived "agentManager" (dict "skillManager" $smRef) -}}
 {{- end -}}
-{{- /* The skill sources the portal offers (agent-platform.skills.repositories). */ -}}
+{{- /* The portal's skills: from the skill-manager, through muster as the
+person, where it reads them there (agent-platform.backstage.viaSkillManager);
+it then needs GitHub only for the skill pull requests it opens. Else the
+deprecated list it discovers itself (agent-platform.skills.repositories). */ -}}
+{{- if include "agent-platform.backstage.viaSkillManager" .root -}}
+{{- with dig "skillsRepositories" list (.root.Values.backstage | default dict) -}}
+{{- fail (printf "backstage.skillsRepositories (%v) is set, but the portal reads its skills from the skill-manager (components.skill-manager): move the list to skillManager.sources" .) -}}
+{{- end -}}
+{{- $_ := set $derived "backstage" (dict "skillsRepositories" list "skillPullRequests" true) -}}
+{{- else -}}
 {{- $_ := set $derived "backstage" (dict "skillsRepositories" (include "agent-platform.skills.repositories" (dict "root" .root "consumer" "backstage") | fromJson).list) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "toolchain-manager" -}}
 {{- $derived = include "agent-platform.toolchainManager.derived" .root | fromJson -}}
@@ -4655,6 +4665,26 @@ components.agent-manager.versionRange to it. One line, no comment inside the
 define.
 */}}
 {{- define "agent-platform.agentManager.skillManagerFloor" -}}2.24.0{{- end -}}
+
+{{/*
+PLACEHOLDER (giantswarm/giantswarm#38322): the first portal (backstage)
+release that reads skills from the skill-manager through muster as the person
+and checks a skill pull request against its sources. Set it to that release
+before raising components.backstage.versionRange to it. One line, no comment
+inside the define.
+*/}}
+{{- define "agent-platform.backstage.skillManagerFloor" -}}3.36.0{{- end -}}
+
+{{/*
+"true" when the portal reads skills from the skill-manager: both components
+on and the floor of components.backstage.versionRange at or above
+agent-platform.backstage.skillManagerFloor. The portal then gets no skill
+repositories of its own.
+Usage: include "agent-platform.backstage.viaSkillManager" $
+*/}}
+{{- define "agent-platform.backstage.viaSkillManager" -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "backstage")) (include "agent-platform.componentEnabled" (dict "root" . "name" "skill-manager")) (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "backstage" "version" (include "agent-platform.backstage.skillManagerFloor" .))) -}}true{{- end -}}
+{{- end -}}
 
 {{/*
 The installation's name in the portal: the key of its entries in the

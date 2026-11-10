@@ -1470,6 +1470,7 @@ components:  # @schema additionalProperties: true
       - enabledExtensions
       - disabledExtensions
       - skillsRepositories
+      - skillPullRequests
       - metaAgents
       - configReload
     enabled: false
@@ -5375,11 +5376,13 @@ skills:
 # The installation's skill sources, after the platform's own
 # (skills.platformSource): the skill-manager's sources and the portal's
 # agentPlatform.skills.repositories (backstage.skillsRepositories; URLs alone
-# and no platform source below agent-platform.backstage.skillSourcesFloor).
+# and no platform source below agent-platform.backstage.skillSourcesFloor;
+# none from agent-platform.backstage.skillManagerFloor on with the
+# skill-manager on, where the portal reads them from the skill-manager).
 # An entry is a GitHub repository URL or {url, ref, path, readOnly}: ref a
 # branch, tag or commit (empty: the default branch), path the directory
 # scanned, readOnly reported only. backstage.skillsRepositories, when set,
-# replaces these for the portal.
+# replaces these for the portal below that floor and fails the render from it on.
 skillManager:
   sources:  # @schema type: array; item: [string, object]; itemRef: files/skill-repository.schema.json
     - https://github.com/giantswarm/agent-skills
@@ -6537,7 +6540,8 @@ toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
 # renders (templates/backstage/ there) and which are dropped from the values
 # forwarded to the backstage chart (components.backstage.omitKeys): hostname,
 # parentRefs, installationName, extraScopes, startUrlSearchParams,
-# enabledExtensions, disabledExtensions, skillsRepositories, configReload. Their
+# enabledExtensions, disabledExtensions, skillsRepositories, skillPullRequests,
+# metaAgents, configReload. Their
 # meaning is documented in the connectivity chart's values.yaml; the defaults
 # are the standalone's.
 backstage:  # @schema skipProperties: true; additionalProperties: true
@@ -6586,7 +6590,9 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
     - api:ai-chat/service
     - api:ai-chat/drawer
     - app-root-element:ai-chat/drawer
-  # Deprecated: set skillManager.sources. When set, replaces it for the portal.
+  # Deprecated: set skillManager.sources. When set, replaces it for the portal;
+  # fails the render while the portal reads its skills from the skill-manager
+  # (agent-platform.backstage.skillManagerFloor).
   skillsRepositories: []
   # The agent behind a portal role (generalInformation, agentManagement,
   # workflowManagement, platformOperations, skillEvaluation, skillCreation), as

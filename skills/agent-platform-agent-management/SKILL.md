@@ -55,8 +55,10 @@ them with `filter_tools` (`pattern`) and read each schema with `describe_tool` b
 never assume an argument. The order:
 
 1. `x_agent-manager_get_info`, then the choices from live lists: `x_agent-manager_list_model_configs`,
-   `x_skill-manager_list_skills` (per source: ref, the commit it resolves to, path, readOnly, and each
-   skill's description — judge a skill from that listing; `load_skill` knows only your own skills),
+   `x_skill-manager_list_skills` (per source: ref, the commit it resolves to, path, readOnly, each
+   skill's description, and each plugin with its `format`: `agent-plugins` needs a `skills` selection
+   from its listed skills, `claude-code` loads whole — judge a skill from that listing, or read it with
+   `x_skill-manager_get_skill`; `load_skill` knows only your own skills),
    `x_agent-manager_list_egress_policies`, presets from `filter_tools {"include_presets": true}`.
 2. `x_agent-manager_validate_agent` → `x_agent-manager_create_agent` →
    `x_agent-manager_get_agent_status` until `ready` (about a minute; the golden snapshot is the long

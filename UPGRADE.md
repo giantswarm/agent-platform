@@ -25,7 +25,7 @@ giantswarm/giantswarm#38970, giantswarm/giantswarm#38322: the chart deploys the 
 - **An installation whose `default-model-config` does not resolve**: set `defaultAgent.modelConfig`.
 - **An installation that names the default agent differently**: set `defaultAgent.displayName` (and `defaultAgent.description`); its technical name stays `default-agent`.
 - **An installation that reads private skill repositories**: set `skill-manager.github` (`app.secretName` or `tokenSecret.name`), as for agent-manager's.
-- **An installation that sets `agent-manager.skills.repositories` or `backstage.skillsRepositories`**: these keys now default to `[]`. Move the list to `skillManager.sources`. A portal list still replaces the sources for the portal. An agent-manager list fails the render once agent-manager pins through the skill-manager.
+- **An installation that sets `agent-manager.skills.repositories` or `backstage.skillsRepositories`**: these keys now default to `[]`. Move the list to `skillManager.sources`. A portal list still replaces the sources for the portal below `agent-platform.backstage.skillManagerFloor`. An agent-manager list fails the render once agent-manager pins through the skill-manager, and a portal list once the portal reads its skills from the skill-manager.
 - **An installation that lists `https://github.com/giantswarm/agent-platform` itself**: the render fails. Remove the entry, or set `skills.platformSource.enabled: false`.
 - **An air-gapped installation**: set `skills.platformSource.enabled: false`.
 - **An installation that keeps agent-manager's own skill discovery**: set `components.skill-manager.enabled: false`.

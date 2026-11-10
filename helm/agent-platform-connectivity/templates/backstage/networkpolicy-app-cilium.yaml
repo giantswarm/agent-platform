@@ -92,9 +92,10 @@ spec:
             - port: "5432"
               protocol: TCP
     {{- end }}
-    {{- if $backstage.skillsRepositories }}
+    {{- if or $backstage.skillsRepositories $backstage.skillPullRequests }}
     # Skill discovery (backstage.skillsRepositories): the backend lists each
-    # repository's SKILL.md files through the GitHub API.
+    # repository's SKILL.md files through the GitHub API. Skill pull requests
+    # (backstage.skillPullRequests) go to the same API.
     - toFQDNs:
         - matchName: api.github.com
       toPorts:
