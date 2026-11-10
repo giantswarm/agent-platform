@@ -31,8 +31,7 @@ policy holds:
 - agent-platform:organization-flux, bound there, lets the organization's Flux
   ServiceAccount write the organization's kinds in its namespace only, and
   bind no role but user, editor and admin;
-- only the operator sets, changes or removes the organization labels and
-  the namespace's orphaned annotation;
+- only the operator sets, changes or removes the organization labels;
 - organization-admins is not deleted or emptied while its namespace lives;
 - a RoleBinding there binds no system: identity and no ServiceAccount of
   another namespace;
@@ -758,15 +757,6 @@ def prove_labels():
     case("a cluster-admin changes another label of an organization namespace",
          patch("namespace", ORG, None, {"metadata": {"labels": {"team": "payments"}}}, as_=PERSON))
     case("the operator changes an organization label", patch("namespace", ORG, None, {"metadata": {"labels": {"agent-platform.giantswarm.io/parent": "org-other"}}}, as_=OP))
-    orphaned = {"metadata": {"annotations": {"agent-platform.giantswarm.io/orphaned": "MissingFromGit"}}}
-    case("a cluster-admin sets no orphaned annotation on a namespace", patch("namespace", ORG, None, orphaned, as_=PERSON),
-         "agent-platform-organization-labels", "agent-platform.giantswarm.io/orphaned")
-    case("a cluster-admin creates no namespace with the orphaned annotation",
-         create({**ns("plain-orphaned"), "metadata": {"name": "plain-orphaned", "annotations": orphaned["metadata"]["annotations"]}}, as_=PERSON),
-         "agent-platform-organization-labels", "agent-platform.giantswarm.io/orphaned")
-    case("a cluster-admin sets another annotation of an organization namespace",
-         patch("namespace", ORG, None, {"metadata": {"annotations": {"team": "payments"}}}, as_=PERSON))
-    case("the operator sets the orphaned annotation", patch("namespace", ORG, None, orphaned, as_=OP))
 
 
 def prove_admins_binding():

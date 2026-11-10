@@ -38,9 +38,7 @@ these.
   * agent-platform-organization-labels: only the operator's ServiceAccount
     sets, changes or removes the three organization labels of a namespace, on
     CREATE and UPDATE. kagent's authorization, Substrate's credential grants
-    and these policies select on them. The same holds for the annotation
-    agent-platform.giantswarm.io/orphaned, the operator's copy of the
-    organization's Orphaned reason that agent-manager shows its members.
+    and these policies select on them.
   * agent-platform-organizations-admin-rolebindings: a requester who may
     create AgentPlatformOrganizations in a namespace that is no organization
     namespace (agent-platform:organizations-admin's own right) and may not
@@ -118,7 +116,6 @@ controllers) is the same pair of policies as a tenant's
 {{- $uidLabel := include "agent-platform.organizations.uidLabel" . }}
 {{- $objectLabel := include "agent-platform.organizations.objectLabel" . }}
 {{- $copiedFrom := include "agent-platform.organizations.copiedFromAnnotation" . }}
-{{- $orphaned := "agent-platform.giantswarm.io/orphaned" }}
 {{- $readers := include "agent-platform.organizations.secretReaders" . | fromJson }}
 {{- $readerEntries := list }}
 {{- range $sa, $role := $readers }}{{- $readerEntries = append $readerEntries (printf "'%s': '%s'" $sa $role) }}{{- end }}
@@ -388,18 +385,10 @@ spec:
         (request.operation == 'UPDATE' && has(oldObject.metadata.labels) && k in oldObject.metadata.labels) ||
         (has(object.metadata.labels) && k in object.metadata.labels &&
         object.metadata.labels[k] != oldObject.metadata.labels[k]))
-    # The operator's copy of the organization's Orphaned reason.
-    - name: orphanedChanged
-      expression: >-
-        (has(object.metadata.annotations) && {{ squote $orphaned }} in object.metadata.annotations ? object.metadata.annotations[{{ squote $orphaned }}] : '') !=
-        (request.operation == 'UPDATE' && has(oldObject.metadata.annotations) && {{ squote $orphaned }} in oldObject.metadata.annotations ? oldObject.metadata.annotations[{{ squote $orphaned }}] : '')
   validations:
     - expression: "size(variables.changed) == 0"
       reason: Forbidden
       messageExpression: {{ printf "'only the agent-platform-operator (%s) sets, changes or removes the organization labels of a namespace; refused for ' + request.userInfo.username + ': ' + variables.changed.join(', ')" $operator | quote }}
-    - expression: "!variables.orphanedChanged"
-      reason: Forbidden
-      messageExpression: {{ printf "'only the agent-platform-operator (%s) sets, changes or removes the annotation %s of a namespace; refused for ' + request.userInfo.username" $operator $orphaned | quote }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
