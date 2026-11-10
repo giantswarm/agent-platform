@@ -4654,7 +4654,7 @@ values schema refuses the keys. Set it to that release before raising
 components.agent-manager.versionRange to it. One line, no comment inside the
 define.
 */}}
-{{- define "agent-platform.agentManager.skillManagerFloor" -}}2.22.0{{- end -}}
+{{- define "agent-platform.agentManager.skillManagerFloor" -}}2.24.0{{- end -}}
 
 {{/*
 The installation's name in the portal: the key of its entries in the
