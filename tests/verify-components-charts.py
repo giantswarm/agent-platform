@@ -155,7 +155,7 @@ UNRELEASED: dict[str, str] = {
 # value the meta chart forwards. The entry goes with the release.
 RENDER_AGAINST: dict[str, str] = {
     # A dev build of giantswarm/agent#130, until 2.6.0 is out: 2.5.x refuses modelConfig.name "".
-    "default-agent": "2.5.2-r19e71a76t20261110113522hd448ca4",
+    "default-agent": "2.5.2-r2b9b7d2et20261110120232hd2e9c8a",
 }
 # The layer every OCIRepository of the meta chart selects, and the manifest
 # types a Helm chart artifact is fetched as.
