@@ -137,6 +137,9 @@ def check_roles(docs: list) -> None:
         if any(v == "escalate" for _, _, v, _ in sets[name]):
             fail(f"ClusterRole {name} carries escalate")
         # A patch answers with the stored object, data included: it reads.
+        # So does a delete with Orphan or Foreground propagation or of a
+        # Secret a finalizer holds; admission refuses that one
+        # (agent-platform-organization-secret-deletes), not RBAC.
         reads = {t for t in sets[name] if t[1] == "secrets" and t[2] in SECRET_READS}
         if reads:
             fail(f"ClusterRole {name} reads Secrets: {sorted(reads, key=str)}")

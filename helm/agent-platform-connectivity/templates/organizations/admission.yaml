@@ -73,6 +73,12 @@ these.
     only by that Kustomization's ServiceAccount: anyone else's replacement
     would be reverted at the next reconcile, and admission sees the labels the
     writer, who may not read Secrets, cannot.
+  * agent-platform-organization-secret-deletes: a Secret in an organization
+    namespace is deleted with an answer of the Secret itself (Orphan or
+    Foreground propagation, orphanDependents, or a finalizer already on it)
+    only by a requester that may get it: the API server answers such a delete
+    with the stored object, data included, also on a dry run, so a requester
+    holding delete without get would read the Secret.
   * agent-platform-organization-helmreleases: for every requester but the
     operator, an organization's Flux ServiceAccount included, a HelmRelease in
     an organization namespace installs the agent chart from the namespace's
@@ -665,6 +671,50 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   policyName: agent-platform-organization-git-secrets
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-secret-deletes
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      {{- include "agent-platform.organizations.namespaces" . | nindent 6 }}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["DELETE"]
+        resources: ["secrets"]
+  matchConditions:
+    # A delete the API server answers with the stored object: the garbage
+    # collector's finalizer is added (Orphan, Foreground), or a finalizer
+    # already holds the Secret; a background delete of a Secret without
+    # finalizers is answered with a Status.
+    - name: answered-with-the-secret
+      expression: >-
+        (has(oldObject.metadata.finalizers) && size(oldObject.metadata.finalizers) > 0) ||
+        (has(request.options.propagationPolicy) && request.options.propagationPolicy in ['Orphan', 'Foreground']) ||
+        (has(request.options.orphanDependents) && request.options.orphanDependents == true)
+  validations:
+    - expression: >-
+        authorizer.group('').resource('secrets').namespace(request.namespace).name(request.name).check('get').allowed()
+      reason: Forbidden
+      messageExpression: >-
+        'a delete answered with the Secret (Orphan or Foreground propagation, or a finalizer on it) is made only by a requester that may get it; refused: ' +
+        request.namespace + '/' + request.name
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-secret-deletes
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-secret-deletes
   validationActions: [Deny]
 {{- end }}
 ---
