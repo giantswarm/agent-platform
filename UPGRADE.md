@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (agent-platform-operator 0.3: the last revision of an organization's file)
+
+giantswarm/giantswarm#38891: `components.agent-platform-operator.versionRange` is `>=0.3.0 <0.4.0`. agent-platform-operator 0.3.0 records `status.lastAppliedRevision` on every AgentPlatformOrganization applied by the installation Kustomization: that Kustomization's `status.lastAppliedRevision` while the organization is in its settled inventory, kept while the organization is `Orphaned`. agent-manager 2.23.0, inside its current range, reports it on the organization tools as `lastAppliedRevision` and, in commit mode, `lastAppliedRevisionUrl`, the GitHub commit that last held the organization's file. The CRD gains the optional status field; nothing the chart renders changes otherwise: no value, no RBAC rule and no flag of the operator is new.
+
+### Operator action
+
+- **None.** An organization already missing from git when 0.3.0 starts has no `lastAppliedRevision`. To check one: `kubectl -n <parent> get agentplatformorganization <name> -o jsonpath='{.status.lastAppliedRevision}'`.
+- **An installation that pins the BOM at `0.2.x`**: move `agent-platform-operator` to `0.3.0`, since `0.2.x` is outside the range, and `agent-manager` to `2.23.0` for the commit link.
+
 ## \<current\> → \<next\> (muster's MCP-server viewers have their own value)
 
 giantswarm/agent-platform#1331: `musterMcpServerViewers` names muster's MCP-server viewers, the subjects of the Role and RoleBinding `agent-platform:mcpserver-viewer` in muster's namespace (`list`, `get` and `watch` on muster's MCPServers, the servers for everyone). Unset, the default, the viewers are `tenants.platform.users`, as before: nothing that renders changes. Set, the key alone binds the viewers, and `tenants.platform.users` binds only `agent-platform:platform-user` in the kagent namespace. An empty list binds nobody. With `agentPlatformOrganizations.enabled`, the render needs the viewers (the key, or `tenants.platform.users` while it is unset), no longer `tenants.platform.users` itself. With the key set and `tenants.platform.users` and `tenants.platform.editors` empty (`[]`), the render succeeds, and the connectivity release renders no `agent-platform:platform-user` RoleBinding in the kagent namespace. The `agent-platform:editor` RoleBinding there goes only when `tenants.platformTeam` is empty too; with `tenants.platformTeam` set, it stays, bound to the platform team only, on purpose.
