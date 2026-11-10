@@ -1193,7 +1193,7 @@ components:  # @schema additionalProperties: true
     # the component is on (see components.yaml, gatedRoster).
     gatedRoster: true
   default-agent:  # @schema additionalProperties: true
-    # The default agent, "General Assistant", where people start and the portal's meta
+    # The default agent (defaultAgent.displayName), where people start and the portal's meta
     # agent: one release of the Generic
     # agent chart in kagent with the values of agents/default-agent/values.yaml
     # and the platform's skills (skills/) pinned to the release's commit. Its
@@ -1213,8 +1213,8 @@ components:  # @schema additionalProperties: true
     # The Agent's readiness (its model, its skills) is reported on the Agent,
     # never a reason to hold the platform's install or upgrade.
     disableWait: true
-    # agent-manager lists it read-only (managed-by) and reports it as the
-    # installation's default agent (default).
+    # On the HelmRelease and the Agent: agent-manager lists it read-only
+    # (managed-by) and reports it as the installation's default agent (default).
     labels:
       agent-platform.giantswarm.io/managed-by: agent-platform
       agent-platform.giantswarm.io/default: "true"
@@ -5422,6 +5422,11 @@ skill-manager:  # @schema skipProperties: true; additionalProperties: true
 
 # === Default agent (components.default-agent) ===
 defaultAgent:
+  # The name people see for the default agent in the portal and Slack, and the
+  # name its system message gives it. Its technical name is always default-agent.
+  displayName: "General Assistant"  # @schema minLength: 1
+  # The default agent's one-line description in the portal's agent lists.
+  description: "Start here. Handles everyday tasks with your connectors and helps you find or create the right agent."
   # ModelConfig in kagent the default agent runs on; empty: the kagent
   # namespace's default, the ModelConfig annotated
   # agent-platform.giantswarm.io/is-default-model-config: "true", read at

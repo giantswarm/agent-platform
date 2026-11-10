@@ -4839,11 +4839,15 @@ Usage: include "agent-platform.skillManager.mcpBackend" . | fromJson
 {{/*
 The values the default agent's release (components.default-agent)
 takes from the platform, merged over agents/default-agent/values.yaml: the
-muster URL every agent targets, its avatar on the DiceBear host (the route's
-first hostname, else avatars.<global.domain>; none without either), the
-toolset preset:full (it acts as the person), the managed-by label (agent-manager
-lists it read-only) and the default label (agent-manager reports it as the
-installation's default agent) on the Agent, and its model
+muster URL every agent targets, its display name and description
+(defaultAgent.displayName, defaultAgent.description; the display name also
+replaces `[[ .DisplayName ]]` in the file's system message), its avatar on the
+DiceBear host (the route's first hostname, else avatars.<global.domain>; none
+without either), the
+toolset preset:full (it acts as the person), the component's labels on the
+Agent too (components.default-agent.labels: managed-by, which agent-manager
+lists read-only, and default, which it reports as the installation's default
+agent), and its model
 (agent-platform.defaultAgent.modelConfig).
 Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 */}}
@@ -4857,8 +4861,16 @@ Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 {{- with $host -}}
 {{- $_ := set $agent "iconUrl" (printf "https://%s/v1/default-agent.png" .) -}}
 {{- end -}}
-{{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:full") "labels" (dict "agent-platform.giantswarm.io/managed-by" "agent-platform" "agent-platform.giantswarm.io/default" "true") -}}
-{{- with $agent }}{{- $_ := set $out "agent" . -}}{{- end -}}
+{{- $da := .Values.defaultAgent | default dict -}}
+{{- $displayName := $da.displayName | default "General Assistant" -}}
+{{- $_ := set $agent "displayName" $displayName -}}
+{{- with $da.description }}{{- $_ := set $agent "description" . -}}{{- end -}}
+{{- $file := .Files.Get (index .Values.components "default-agent").valuesFile | fromYaml -}}
+{{- with dig "agent" "systemMessage" "" $file -}}
+{{- $_ := set $agent "systemMessage" (replace "[[ .DisplayName ]]" $displayName .) -}}
+{{- end -}}
+{{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:full") "labels" (index .Values.components "default-agent").labels -}}
+{{- $_ := set $out "agent" $agent -}}
 {{- with include "agent-platform.defaultAgent.modelConfig" . -}}
 {{- $_ := set $out "modelConfig" (dict "name" .) -}}
 {{- end -}}

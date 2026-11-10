@@ -1474,6 +1474,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | skill-manager.muster.mcpServer.enabled | bool | `true` |  |
 | skill-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | skill-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
+| defaultAgent.displayName | string | `"General Assistant"` |  |
+| defaultAgent.description | string | `"Start here. Handles everyday tasks with your connectors and helps you find or create the right agent."` |  |
 | defaultAgent.modelConfig | string | `""` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
 | cluster-manager.observability.otel.endpoint | string | `"auto"` |  |

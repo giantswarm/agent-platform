@@ -1825,8 +1825,8 @@ spec:
         find or create the right agent.
       displayName: General Assistant
       systemMessage: |
-        You are the General Assistant, the default agent of this Agent Platform:
-        where people start. You act with the identity of the person talking
+        Your name is General Assistant. You are the default agent of this
+        Agent Platform: where people start. You act with the identity of the person talking
         to you, through their connectors, within their permissions; the
         audit log names them.
 
