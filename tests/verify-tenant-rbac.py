@@ -44,9 +44,10 @@ Each case pins one property of the render:
   kagent is on or not; an own list binds the viewers and leaves
   agent-platform:platform-user alone, an empty one binds nobody, and with
   tenants.platform's lists empty in the meta chart (or tenants.platform unset
-  in the connectivity chart) only the viewers are bound, rendered from the
-  values the meta chart hands its connectivity release
-  (giantswarm/agent-platform#1331);
+  in the connectivity chart) agent-platform:platform-user is not bound in
+  kagent and agent-platform:editor is bound to tenants.platformTeam only, or
+  not at all while it is empty; rendered from the values the meta chart hands
+  its connectivity release (giantswarm/agent-platform#1331);
 - the meta chart appends tenants.platformTeam to muster's mcpserver-editor and
   workflow-editor subjects (each subject once) and leaves them alone while the
   list is empty.
@@ -441,6 +442,20 @@ def main() -> None:
             fail(f"RoleBinding {name} renders in the kagent namespace with tenants.platform's lists empty in the meta chart")
     check_muster_viewer(retired, ["acme:everyone"])
     ok("tenants.platform's lists empty in the meta chart: its connectivity release binds no platform tenant in kagent, muster's viewers still bound")
+
+    # With the platform team set, the retirement keeps its editor binding on
+    # purpose: agent-platform:editor in kagent, bound to the platform team only.
+    kept = render_from_meta(meta, conn, [*CONN[2:], "--set", "components.kagent.enabled=true",
+                                         "--set-json", "tenants.platform.users=[]",
+                                         "--set-json", "tenants.platform.editors=[]", *viewers, *TEAM])
+    if find(kept, "RoleBinding", "agent-platform:platform-user", "kagent"):
+        fail("RoleBinding agent-platform:platform-user renders in kagent with tenants.platform's lists empty and the platform team set")
+    editor = find(kept, "RoleBinding", "agent-platform:editor", "kagent")
+    if editor is None:
+        fail("RoleBinding agent-platform:editor is missing in kagent with tenants.platform's lists empty and tenants.platformTeam set: the platform team loses its editor binding")
+    if subject_names(editor) != ["acme:platform", "giantswarm-ad:giantswarm-admins"]:
+        fail(f"agent-platform:editor in kagent is bound to {subject_names(editor)}, want tenants.platformTeam only")
+    ok("tenants.platform's lists empty with tenants.platformTeam set: agent-platform:editor in kagent stays, bound to the platform team only")
 
     unset = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "tenants.platform=null", *viewers])
     if find(unset, "RoleBinding", "agent-platform:platform-user", "kagent"):
