@@ -271,8 +271,9 @@ def replace(obj, as_=None, groups=("system:masters",)):
     return kubectl(["replace", "-f", "-", "--dry-run=server"], yaml.safe_dump(obj), as_, groups)
 
 
-def delete(kind, name, ns, as_=None, groups=("system:masters",)):
+def delete(kind, name, ns, as_=None, groups=("system:masters",), cascade=None):
     args = ["delete", kind, name, "--dry-run=server", "--wait=false"] + (["-n", ns] if ns else [])
+    args += [f"--cascade={cascade}"] if cascade else []
     return kubectl(args, None, as_, groups)
 
 
@@ -720,6 +721,26 @@ def prove_flux_role():
          replace(secret("tenant-credential-by-people"), as_=admin[0], groups=admin[1]))
     case("the organization's Flux ServiceAccount changes a Secret its Kustomization applied",
          replace(secret("tenant-credential-from-git", from_git), as_=FLUX_SA, groups=()))
+    # A delete answered with the stored Secret reads it: the admin, who may
+    # not get Secrets, deletes only with background propagation and only a
+    # Secret no finalizer holds.
+    held = secret("tenant-credential-held")
+    held["metadata"]["finalizers"] = ["example.com/hold"]
+    must(create(held, dry=False), "create a Secret a finalizer holds")
+    policy = "agent-platform-organization-secret-deletes"
+    for cascade in ("orphan", "foreground"):
+        case(f"an organization admin deletes no Secret with {cascade} propagation",
+             delete("secret", "tenant-credential-by-people", ORG, as_=admin[0], groups=admin[1], cascade=cascade), policy,
+             f"refused: {ORG}/tenant-credential-by-people")
+    case("an organization admin deletes no Secret a finalizer holds",
+         delete("secret", "tenant-credential-held", ORG, as_=admin[0], groups=admin[1], cascade="background"), policy,
+         f"refused: {ORG}/tenant-credential-held")
+    case("an organization admin deletes a Secret with background propagation",
+         delete("secret", "tenant-credential-by-people", ORG, as_=admin[0], groups=admin[1], cascade="background"))
+    case("an organization admin deletes a Secret with no propagation policy (agent-manager's delete)",
+         kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG}/secrets/tenant-credential-by-people?dryRun=All"], None, admin[0], admin[1]))
+    case("a requester that may get the Secret deletes it with orphan propagation",
+         delete("secret", "tenant-credential-held", ORG, cascade="orphan"))
     # A Flux controller acting as itself (a platform Kustomization) is not an
     # organization's Flux ServiceAccount.
     case("kustomize-controller as itself is not held as an organization's Flux ServiceAccount",

@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (organization credential Secrets are write-only)
+
+giantswarm/agent-platform#1352 and this release: `agent-platform:admin` holds `create`, `update` and `delete` on Secrets, no longer `patch`, whose answer is the stored Secret. With `agentPlatformOrganizations.enabled`, two ValidatingAdmissionPolicies (Fail, Deny) hold Secrets in organization namespaces. `agent-platform-organization-git-secrets`: a Secret applied by an organization's Kustomization is updated only by that Kustomization's ServiceAccount, cluster-admin included. `agent-platform-organization-secret-deletes`: a delete the API server answers with the Secret (Orphan or Foreground propagation, or a Secret a finalizer holds) is made only by a requester that may `get` it.
+
+### Operator action
+
+- **None.** agent-manager writes credentials with `create`, `update` and a background delete.
+- An organization admin's `kubectl patch` or `kubectl apply` of a Secret is refused; `kubectl replace` and `kubectl delete` (background, the default) work. A Secret applied from an organization's path in git is changed in git.
+
 ## \<current\> → \<next\> (agent-platform-operator 0.3: the last revision of an organization's file)
 
 giantswarm/giantswarm#38891: `components.agent-platform-operator.versionRange` is `>=0.3.0 <0.4.0`. agent-platform-operator 0.3.0 records `status.lastAppliedRevision` on every AgentPlatformOrganization applied by the installation Kustomization: that Kustomization's `status.lastAppliedRevision` while the organization is in its settled inventory, kept while the organization is `Orphaned`. agent-manager 2.23.0, inside its current range, reports it on the organization tools as `lastAppliedRevision` and, in commit mode, `lastAppliedRevisionUrl`, the GitHub commit that last held the organization's file. The CRD gains the optional status field; nothing the chart renders changes otherwise: no value, no RBAC rule and no flag of the operator is new.

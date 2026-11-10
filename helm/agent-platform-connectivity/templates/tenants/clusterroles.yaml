@@ -20,8 +20,10 @@ deletes when a release leaves them behind, and the reads it reports on
 editor reads and never writes). The admin also owns the
 tenant's egress: it writes EgressPolicies and places the Secrets they name,
 which it may create, replace and delete but never read back (no get, list,
-watch or patch on Secrets, as a patch answers with the stored Secret);
-admission lets a tenant's EgressPolicy name only its `tenant-credential-`
+watch or patch on Secrets, as a patch answers with the stored Secret; a delete
+answered with it, by Orphan or Foreground propagation or on a Secret a
+finalizer holds, admission refuses in organization namespaces,
+agent-platform-organization-secret-deletes); admission lets a tenant's EgressPolicy name only its `tenant-credential-`
 Secrets (egress-policy-admission.yaml). No role carries
 `escalate`.
 */ -}}
@@ -67,7 +69,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["modelconfigs", "egresspolicies"]
     verbs: ["create", "update", "patch", "delete"]
-  # No patch: its response is the stored Secret, data included.
+  # No patch: its response is the stored Secret, data included. A delete
+  # answered with the Secret (Orphan or Foreground propagation, a finalizer
+  # on it) is refused in admission (agent-platform-organization-secret-deletes).
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "update", "delete"]
