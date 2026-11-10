@@ -3480,9 +3480,9 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # Skill repositories offered when an agent is created.
   skillsRepositories:
     - https://github.com/giantswarm/agent-skills
-  # The portal opens skill pull requests on GitHub (Add skill) while it reads
-  # its skills from the skill-manager and has no skillsRepositories of its own:
-  # its GitHub egress stays open for them.
+  # Keep the portal's GitHub egress (api.github.com) for the skill pull
+  # requests it opens while skillsRepositories is empty, because the portal
+  # reads its skills from the skill-manager. The meta chart derives it.
   skillPullRequests: false
   # The agent behind a portal role (generalInformation, agentManagement,
   # workflowManagement, platformOperations, skillEvaluation, skillCreation), as

@@ -321,6 +321,9 @@ if p.get("skillsRepositories") != [own, *installation] or "skillPullRequests" in
     fail(f"the skill-manager off: {p!r}; want the portal's own list")
 refused(META, "the portal reads its skills from the skill-manager", *ON, *PORTAL, *FLOORS,
         "--set", "backstage.skillsRepositories[0]=https://github.com/acme/more")
+docs = render(META, *ON, *PORTAL, *FLOORS, "--set", "backstage.skillPullRequests=true")
+if "skillPullRequests" in find(docs, "HelmRelease", "backstage")["spec"].get("values", {}):
+    fail("backstage.skillPullRequests reaches the backstage release, whose schema rejects it; add it to components.backstage.omitKeys")
 print("ok: the portal reads skills from the skill-manager from its floor on, with no list of its own")
 sm, _ = repos(render(META, *ON, "--set", "skills.platformSource.enabled=false", "--set", f"skillManager.sources[0].url={PLATFORM}", "--set", "skillManager.sources[0].path=skills"))
 if sm != [{"url": PLATFORM, "path": "skills"}]:
