@@ -19,9 +19,10 @@ deletes when a release leaves them behind, and the reads it reports on
 (Harnesses, events, the namespace's agent chart OCIRepository, which the
 editor reads and never writes). The admin also owns the
 tenant's egress: it writes EgressPolicies and places the Secrets they name,
-which it may create, replace and delete but never read back (no get, list or
-watch on Secrets); admission lets a tenant's EgressPolicy name only its
-`tenant-credential-` Secrets (egress-policy-admission.yaml). No role carries
+which it may create, replace and delete but never read back (no get, list,
+watch or patch on Secrets, as a patch answers with the stored Secret);
+admission lets a tenant's EgressPolicy name only its `tenant-credential-`
+Secrets (egress-policy-admission.yaml). No role carries
 `escalate`.
 */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
@@ -66,9 +67,10 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["modelconfigs", "egresspolicies"]
     verbs: ["create", "update", "patch", "delete"]
+  # No patch: its response is the stored Secret, data included.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create", "update", "patch", "delete"]
+    verbs: ["create", "update", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

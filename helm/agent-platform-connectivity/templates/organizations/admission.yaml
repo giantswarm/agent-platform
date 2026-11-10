@@ -67,6 +67,12 @@ these.
     or deletes only a RoleBinding its own Kustomization applied (labelled
     kustomize.toolkit.fluxcd.io/name with its name), never organization-admins
     or another binding people wrote; and a Secret is no ServiceAccount token.
+  * agent-platform-organization-git-secrets: a Secret in an organization
+    namespace that an organization's Kustomization applied (labelled
+    kustomize.toolkit.fluxcd.io/name and namespace fluxNamespace) is changed
+    only by that Kustomization's ServiceAccount: anyone else's replacement
+    would be reverted at the next reconcile, and admission sees the labels the
+    writer, who may not read Secrets, cannot.
   * agent-platform-organization-helmreleases: for every requester but the
     operator, an organization's Flux ServiceAccount included, a HelmRelease in
     an organization namespace installs the agent chart from the namespace's
@@ -613,6 +619,52 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   policyName: agent-platform-organization-flux-writes
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-git-secrets
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      {{- include "agent-platform.organizations.namespaces" . | nindent 6 }}
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["secrets"]
+  matchConditions:
+    # A Secret an organization's Kustomization applied, as
+    # kustomize-controller labels what it applies.
+    - name: applied-from-git
+      expression: >-
+        has(oldObject.metadata.labels) &&
+        'kustomize.toolkit.fluxcd.io/name' in oldObject.metadata.labels &&
+        'kustomize.toolkit.fluxcd.io/namespace' in oldObject.metadata.labels &&
+        oldObject.metadata.labels['kustomize.toolkit.fluxcd.io/namespace'] == {{ squote $fluxNs }}
+  validations:
+    # Only that Kustomization's ServiceAccount changes it: a replacement
+    # anyone else writes, who may not read the Secret to see its labels,
+    # would be reverted at the next reconcile.
+    - expression: >-
+        request.userInfo.username == {{ squote (printf "system:serviceaccount:%s:" $fluxNs) }} + oldObject.metadata.labels['kustomize.toolkit.fluxcd.io/name']
+      reason: Forbidden
+      messageExpression: >-
+        'a Secret applied from an organization path in git is changed in git; refused: ' +
+        request.namespace + '/' + oldObject.metadata.name
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-git-secrets
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-git-secrets
   validationActions: [Deny]
 {{- end }}
 ---
