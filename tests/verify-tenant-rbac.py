@@ -11,7 +11,8 @@ Each case pins one property of the render:
   HelmReleases, Agents, AgentTemplates and RemoteMCPServers and reads the
   agent chart's OCIRepository without writing it (giantswarm/agent-platform#1267);
   the admin also writes ModelConfigs, EgressPolicies and RoleBindings, places
-  Secrets (create, update, patch, delete) and reads none, may `bind` the
+  Secrets (create, update, delete) and reads none (a patch answers with the
+  stored Secret, so it reads too), may `bind` the
   three roles only, and no role carries `escalate` or reads a Secret;
   agent-platform:platform-user holds the user's rules but the EgressPolicies;
 - the ValidatingAdmissionPolicy agent-platform-tenant-egress-credentials
@@ -84,6 +85,7 @@ TEAM = [
 ADMINS = ["giantswarm-ad:giantswarm-admins", "giantswarm-github:giantswarm:giantswarm-admins"]
 ROLES = ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
 WRITES = {"create", "update", "patch", "delete"}
+SECRET_READS = {"get", "list", "watch", "patch"}
 
 
 def fail(msg: str) -> None:
@@ -134,7 +136,8 @@ def check_roles(docs: list) -> None:
         sets[name] = grants(role["rules"])
         if any(v == "escalate" for _, _, v, _ in sets[name]):
             fail(f"ClusterRole {name} carries escalate")
-        reads = {t for t in sets[name] if t[1] == "secrets" and t[2] in ("get", "list", "watch")}
+        # A patch answers with the stored object, data included: it reads.
+        reads = {t for t in sets[name] if t[1] == "secrets" and t[2] in SECRET_READS}
         if reads:
             fail(f"ClusterRole {name} reads Secrets: {sorted(reads, key=str)}")
     user, editor, admin = (sets[n] for n in ROLES)
@@ -167,7 +170,7 @@ def check_roles(docs: list) -> None:
     ok("agent-platform:editor writes what agent-manager writes as the caller, reads the agent chart's OCIRepository, and writes no OCIRepository, ModelConfig, EgressPolicy, Secret or RoleBinding")
     for g, res in (("api.kagent.dev", "modelconfigs"), ("api.kagent.dev", "egresspolicies"), ("", "secrets"),
                    ("rbac.authorization.k8s.io", "rolebindings")):
-        for v in WRITES:
+        for v in WRITES - (SECRET_READS if res == "secrets" else set()):
             if (g, res, v, None) not in admin:
                 fail(f"agent-platform:admin cannot {v} {res}.{g}")
     binds = {t[3] for t in admin if t[2] == "bind"}

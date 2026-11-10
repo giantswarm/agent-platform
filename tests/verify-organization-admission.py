@@ -266,6 +266,11 @@ def patch(kind, name, ns, body, as_=None, groups=("system:masters",)):
     return kubectl(args, None, as_, groups)
 
 
+def replace(obj, as_=None, groups=("system:masters",)):
+    """An update without a resourceVersion: what a writer who may not read the object sends."""
+    return kubectl(["replace", "-f", "-", "--dry-run=server"], yaml.safe_dump(obj), as_, groups)
+
+
 def delete(kind, name, ns, as_=None, groups=("system:masters",)):
     args = ["delete", kind, name, "--dry-run=server", "--wait=false"] + (["-n", ns] if ns else [])
     return kubectl(args, None, as_, groups)
@@ -697,6 +702,24 @@ def prove_flux_role():
              "metadata": {"name": "minted", "namespace": ORG, "annotations": {"kubernetes.io/service-account.name": "kagent-flux"}}}
     case("a merged Secret is no ServiceAccount token", create(token, as_=FLUX_SA, groups=()), "agent-platform-organization-flux-writes",
          f"is no ServiceAccount token; refused: {ORG}/minted")
+    # An organization admin (acme-devs, bound by organization-admins) replaces
+    # a credential Secret by an update it cannot read back; one git applied
+    # stays git's, which admission tells from the stored labels.
+    def secret(name, labels=None):
+        return {"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+                "metadata": {"name": name, "namespace": ORG, **({"labels": labels} if labels else {})},
+                "data": {"apiKey": "c3ludGhldGlj"}}
+    from_git = {"kustomize.toolkit.fluxcd.io/name": ORG, "kustomize.toolkit.fluxcd.io/namespace": FLUX_NS}
+    must(create(secret("tenant-credential-from-git", from_git), dry=False), "create a Secret git applied")
+    must(create(secret("tenant-credential-by-people"), dry=False), "create a Secret people wrote")
+    admin = ("dana", ("acme-devs",))
+    case("an organization admin replaces no Secret git applied",
+         replace(secret("tenant-credential-from-git"), as_=admin[0], groups=admin[1]), "agent-platform-organization-git-secrets",
+         f"is changed in git; refused: {ORG}/tenant-credential-from-git")
+    case("an organization admin replaces a Secret people wrote",
+         replace(secret("tenant-credential-by-people"), as_=admin[0], groups=admin[1]))
+    case("the organization's Flux ServiceAccount changes a Secret its Kustomization applied",
+         replace(secret("tenant-credential-from-git", from_git), as_=FLUX_SA, groups=()))
     # A Flux controller acting as itself (a platform Kustomization) is not an
     # organization's Flux ServiceAccount.
     case("kustomize-controller as itself is not held as an organization's Flux ServiceAccount",
