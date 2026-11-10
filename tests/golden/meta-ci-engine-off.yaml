@@ -1882,6 +1882,12 @@ spec:
     remediation:
       retries: 5
   driftDetection:
+    ignore:
+    - paths:
+      - /spec/template/spec/volumes
+      target:
+        kind: Deployment
+        name: kagent-controller
     mode: enabled
   dependsOn:
     - name: kagent-crds
@@ -2487,12 +2493,14 @@ spec:
         agent-platform:
           description: The platform's own management surface — agent-manager, model-manager,
             vm-manager, cluster-manager, kagent's session tools and muster's core tools.
+          icon: data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM1MzRBQjciLz48ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTYgOWwxLjggNS4yTDIzIDE2bC01LjIgMS44TDE2IDIzbC0xLjgtNS4yTDkgMTZsNS4yLTEuOHoiLz48L2c+PC9zdmc+
           include:
           - label: agent-platform.giantswarm.io/tool-group=agent-platform
           - pattern: core_*
         infrastructure:
           description: The servers for the infrastructure underneath the platform (Giant
             Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus.
+          icon: data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM5OTNDMUQiLz48ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSIxMCIgeT0iOSIgd2lkdGg9IjEyIiBoZWlnaHQ9IjYiIHJ4PSIxLjUiLz48cmVjdCB4PSIxMCIgeT0iMTciIHdpZHRoPSIxMiIgaGVpZ2h0PSI2IiByeD0iMS41Ii8+PHBhdGggZD0iTTEzIDEyaC4wMU0xMyAyMGguMDEiLz48L2c+PC9zdmc+
           include:
           - label: agent-platform.giantswarm.io/tool-group=infrastructure
     networkPolicy:
@@ -2901,7 +2909,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=2.20.0 <3.0.0"
+    semver: ">=2.22.0 <3.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3154,7 +3162,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=5.60.0 <6.0.0"
+    semver: ">=5.61.0 <6.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
