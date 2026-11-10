@@ -22,7 +22,7 @@ giantswarm/giantswarm#38891: `components.agent-platform-operator.versionRange` i
 ### Operator action
 
 - **None.** An organization already missing from git when 0.3.0 starts has no `lastAppliedRevision`. To check one: `kubectl -n <parent> get agentplatformorganization <name> -o jsonpath='{.status.lastAppliedRevision}'`.
-- **An installation that pins the BOM**: move `agent-platform-operator` to `0.3.0`, and `agent-manager` to `2.23.0` for the commit link.
+- **An installation that pins the BOM at `0.2.x`**: move `agent-platform-operator` to `0.3.0`, since `0.2.x` is outside the range, and `agent-manager` to `2.23.0` for the commit link.
 
 ## \<current\> → \<next\> (muster's MCP-server viewers have their own value)
 
