@@ -560,6 +560,8 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "ok: agentgateway 2.x wiring"
 	@echo "--> the kagent line's wiring: kagent + kagent-crds on the line's release range, one build (tag + Harness digest), flat forwarded values with no umbrella-only or retired key"
 	@./tests/verify-kagent-wiring.py $(VERIFY_TMP)/ap-flux.out
+	@echo "--> drift detection leaves the pod-certificate workloads' volumes to Helm (helm-controller before 1.4 strips podCertificate, giantswarm/agent-platform#879)"
+	@HELM="$(HELM)" ./tests/verify-drift-podcertificate.py $(CHART_DIR)
 	@if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent-crds.enabled=false >$(VERIFY_TMP)/ap-kag-crds.out 2>&1; then \
 		echo "FAIL: kagent on with kagent-crds off rendered; the controller would run without its CRDs"; exit 1; \
 	elif ! grep -q "components.kagent-crds.enabled is not" $(VERIFY_TMP)/ap-kag-crds.out; then \

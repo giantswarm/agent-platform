@@ -5574,3 +5574,54 @@ certSecretRef:
 {{- end -}}
 {{- $snapshots | toJson -}}
 {{- end -}}
+
+{{/*
+agent-platform.driftDetection renders a component HelmRelease's
+spec.driftDetection from components.<name>.driftDetection (passed through)
+plus the ignore rules its pod-certificate workloads need
+(giantswarm/agent-platform#879). helm-controller before v1.4 (Flux 2.6, whose
+API types predate Kubernetes 1.35) decodes a Deployment through types without
+the projected volume source podCertificate: with drift detection on, its
+correction re-applies the pod template with that source emptied ({}), the next
+ReplicaSet's pods start without their Substrate identity and crash-loop. The
+rules leave /spec/template/spec/volumes of those workloads to Helm's own
+upgrades, which apply the chart's manifest as it is; every other field of them
+and every other object stays corrected. While drift detection is on (mode
+enabled or warn) the rules are appended to the entry's own ignore list, so an
+installation that sets one keeps them; mode disabled or no driftDetection key
+renders the entry unchanged.
+
+The table names the releases whose charts project podCertificate volumes:
+kagent's controller (its Substrate pod identity, service DNS and Postgres
+client certificates; its fullname follows the forwarded naming values) and
+every Substrate workload (ate-api-server, ate-controller, atenet, atelet, the
+bundled Postgres, the credential provider; Substrate carries no drift
+detection by default, the rules hold for the day it is turned on). A release
+whose chart starts projecting podCertificate gets its row here.
+*/}}
+{{- define "agent-platform.driftDetection" -}}
+{{- $volumes := list "/spec/template/spec/volumes" -}}
+{{- $kagent := .root.Values.kagent | default dict -}}
+{{- $fullname := "kagent" -}}
+{{- with $kagent.nameOverride }}{{ $fullname = printf "kagent-%s" . }}{{ end -}}
+{{- $fullname = $kagent.fullnameOverride | default $fullname | trunc 63 | trimSuffix "-" -}}
+{{- $carriers := dict
+  "kagent" (list (dict "kind" "Deployment" "name" (printf "%s-controller" $fullname)))
+  "substrate" (list (dict "kind" "Deployment") (dict "kind" "StatefulSet") (dict "kind" "DaemonSet"))
+-}}
+{{- $dd := deepCopy .spec -}}
+{{- $targets := get $carriers .name | default list -}}
+{{- if and $targets (ne (toString (get $dd "mode")) "disabled") -}}
+{{- $ignore := get $dd "ignore" | default list -}}
+{{- $present := list -}}
+{{- range $ignore }}{{ $present = append $present (toJson .) }}{{ end -}}
+{{- range $targets -}}
+{{- $rule := dict "paths" $volumes "target" . -}}
+{{- if not (has (toJson $rule) $present) -}}
+{{- $ignore = append $ignore $rule -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $dd "ignore" $ignore -}}
+{{- end -}}
+{{- toYaml $dd -}}
+{{- end -}}
