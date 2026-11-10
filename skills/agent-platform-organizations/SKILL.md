@@ -18,7 +18,7 @@ Every agent lives in one namespace, and that namespace is its owner (agent-manag
 **tenant**; the portal says **Owner** and never "tenant"):
 
 - **Platform**: the installation's `kagent` namespace. Its agents are available to everyone signed in;
-  the portal shows "Owner: Platform", "Available to all organizations". The General Assistant is one.
+  the portal shows "Owner: Platform", "Available to all organizations". The default agent (`default-agent`) is one.
 - **An organization**: a team or customer with its own namespace, members, models, connectors and
   egress policies. Its agents are for its members only. The platform creates the namespace
   (`agents-<name>-<random>`); take it from the tools, never build it from the name.

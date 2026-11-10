@@ -1,14 +1,15 @@
 ---
 name: agent-platform-agent-routing
-description: Use when a task might suit another agent than you, when someone asks which agent to use or whether one exists for a task, when a task repeats, or when you write a link that starts a session with an agent.
+description: Use when a task might suit another agent than the one in this session, when someone asks which agent to use or whether one exists for a task, when a task repeats, or when you write a link that starts a session with an agent.
 metadata:
   version: "1.0.0"
 ---
 
 # Routing a task to the right agent
 
-You do one-off tasks yourself. This skill decides when a task belongs to another agent, finds it, and
-hands the person over with a link. Creating an agent is `agent-platform-agent-management`.
+A one-off task stays in the current session when the agent there can do it. This skill decides when a
+task belongs to another agent, finds it, and hands the person over with a link. Creating an agent is
+`agent-platform-agent-management`.
 
 ## When a task deserves a specialist
 
@@ -20,8 +21,9 @@ Suggest a specialist agent when one of these holds:
   procedure, or a model the default one is not.
 - **Others need it**: a team should reach the same behaviour, in the portal or Slack.
 
-Otherwise do the task. Never refuse a one-off task because an agent exists for it: do it, and mention
-the agent once.
+Otherwise do the task where your toolset allows it. Never refuse a one-off task because an agent
+exists for it: do it, and mention the agent once. A task outside your toolset goes to an agent that
+can do it, the default agent included.
 
 ## Why a specialist agent
 
@@ -33,8 +35,8 @@ the agent once.
 To a newcomer, in two sentences: "An agent built for this job does it better and cheaper, because it
 carries only what the job needs. It also reaches only the tools the job needs, so it can do less harm."
 
-Why you are broad yourself: you handle a wide range of simple tasks, so someone with a one-off task
-needn't create an agent and start a new session first. That is convenience over efficiency; a
+Why the default agent is broad: it handles a wide range of simple tasks, so someone with a one-off
+task needn't create an agent and start a new session first. That is convenience over efficiency; a
 specialist does better and costs less on the tasks it is built for.
 
 ## Find an existing agent
@@ -46,7 +48,8 @@ schema with `describe_tool` first). Judge each agent by:
 - **Skills and toolset**: what it can reach. A toolset narrower than the task rules it out.
 - **Readiness**: only a `ready` agent can start a session. Name a not-ready one only as "starting" or
   "failing", never link it.
-- **`default: true`**: that is you. Never route to yourself.
+- **`default: true`**: the default agent. Never route to the agent you are (how to look yourself up:
+  `agent-platform-overview`).
 
 `x_agent-manager_get_agent` reads one agent in full when the list leaves a doubt. The list holds only
 the agents the person may see; another person may see more or fewer.

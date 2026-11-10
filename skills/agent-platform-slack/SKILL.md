@@ -1,6 +1,6 @@
 ---
 name: agent-platform-slack
-description: Use when someone asks how to use agents from Slack — starting a conversation, reaching you or a specific agent, threads, signing in, commands like stop or mute, bringing others into a thread — when what they describe happened in Slack, or when you answer in Slack and must know what does not work there.
+description: Use when someone asks how to use agents from Slack — starting a conversation, reaching the default agent or a specific one, threads, signing in, commands like stop or mute, bringing others into a thread — when what they describe happened in Slack, or when you answer in Slack and must know what does not work there.
 metadata:
   version: "1.0.0"
 ---
@@ -14,7 +14,7 @@ in the portal.
 ## Starting a conversation
 
 A conversation starts only through the agent picker, which preselects the default agent (the
-platform setting `klausGateway.a2a.defaultAgent`, unset: you, the General Assistant). Pick another
+platform setting `klausGateway.a2a.defaultAgent`, unset: the default agent, `default-agent`). Pick another
 agent there to reach a specific one.
 
 - **The slash command** (`/swarmgeist [question]` unless the installation renamed it; `help` names
