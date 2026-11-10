@@ -1402,6 +1402,7 @@ spec:
             kind: Group
             name: giantswarm-github:giantswarm:giantswarm-admins
       replicaCount: 2
+    musterMcpServerViewers: null
     networkPolicy:
       additionalEgressCIDRs: []
       additionalEgressFQDNs: []
