@@ -41,7 +41,8 @@ policy holds:
   binds no provider there (giantswarm/agent-platform#1269);
 - the HelmRelease field lock, also for the organization's Flux ServiceAccount;
 - an organization is deleted only with prune: enabled or while its parent
-  terminates;
+  terminates, and one applied from git only once its delete pull request
+  merged (Orphaned, reason DeleteMerged);
 - the EgressPolicy floor;
 - the operator's copies are the operator's;
 - the sandbox shape holds with a Kyverno PolicyException for agents-* in place.
@@ -329,6 +330,19 @@ def apo(name, namespace, prune=None):
     return {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "AgentPlatformOrganization", "metadata": meta, "spec": {}}
 
 
+# The organizations the operator judges applied from git, by the status it
+# writes: name -> (Orphaned status, reason).
+ORPHANED = {"in-git": ("False", "InInventory"), "lost": ("True", "MissingFromGit"), "merged": ("True", "DeleteMerged")}
+
+
+def set_orphaned(name, status, reason):
+    condition = {"type": "Orphaned", "status": status, "reason": reason, "message": "test",
+                 "lastTransitionTime": "2026-01-01T00:00:00Z"}
+    args = ["patch", "agentplatformorganization", name, "-n", PARENT, "--subresource=status", "--type=merge",
+            "-p", json.dumps({"status": {"conditions": [condition]}})]
+    must(kubectl(args), f"set Orphaned {status}/{reason} on {PARENT}/{name}")
+
+
 def helmrelease(name, namespace, **spec_extra):
     spec = {"interval": "10m", "chartRef": {"kind": "OCIRepository", "name": "agent"}, "serviceAccountName": "kagent-flux",
             "values": {"agent": {"name": name}}}
@@ -391,6 +405,7 @@ def fixtures():
     objects = [
         workerpool("kagent", replicas=1),
         apo("payments", PARENT), apo("retired", PARENT, prune="enabled"), apo("kept", PARENT, prune="disabled"), apo("gone", GONE),
+        *(apo(n, PARENT, prune="enabled") for n in ORPHANED),
         rb("organization-admins", ORG, role="agent-platform:admin"), rb("organization-admins", OLD, role="agent-platform:admin"),
         rb("members", ORG),
         # organizations-admin: alice by ClusterRoleBinding; carol in her
@@ -410,6 +425,8 @@ def fixtures():
     ]
     for o in objects:
         must(create(o, dry=False), f"create {o['kind']} {o['metadata'].get('namespace', '')}/{o['metadata']['name']}")
+    for n, (status, reason) in ORPHANED.items():
+        set_orphaned(n, status, reason)
     for n in (OLD, GONE):
         must(kubectl(["delete", "namespace", n, "--wait=false"]), f"delete namespace {n}")
 
@@ -814,6 +831,12 @@ def prove_delete_intent():
          "agent-platform-organization-delete-intent")
     case("an organization with prune: enabled is deleted", delete("agentplatformorganization", "retired", PARENT, as_=PERSON))
     case("an organization is deleted while its parent terminates", delete("agentplatformorganization", "gone", GONE, as_=PERSON))
+    in_git = "erased only once its delete pull request merged"
+    case("an organization in git with prune: enabled is not deleted", delete("agentplatformorganization", "in-git", PARENT, as_=PERSON),
+         "agent-platform-organization-delete-intent", in_git)
+    case("an organization missing from git with prune: enabled is not deleted", delete("agentplatformorganization", "lost", PARENT, as_=PERSON),
+         "agent-platform-organization-delete-intent", in_git)
+    case("an organization whose delete pull request merged is deleted", delete("agentplatformorganization", "merged", PARENT, as_=PERSON))
 
 
 def prove_egress_floor():

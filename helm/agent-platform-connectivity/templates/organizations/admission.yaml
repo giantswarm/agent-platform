@@ -80,7 +80,12 @@ these.
   * agent-platform-organization-delete-intent: an AgentPlatformOrganization is
     deleted only when it carries kustomize.toolkit.fluxcd.io/prune: enabled,
     Flux's own marker of an intended prune, or while its namespace terminates
-    (the parent going erases its organizations).
+    (the parent going erases its organizations). One the operator judges
+    applied from git (it has an Orphaned condition) is deleted only once its
+    delete pull request merged (Orphaned True, reason DeleteMerged): while its
+    file is in git, or gone without a delete, the annotation alone would erase
+    it, and Flux would apply an empty one again. Only the operator writes its
+    status.
   * agent-platform-organization-egress-floor: an EgressPolicy in an
     organization namespace names no cluster-internal or host-local host
     (*.svc, *.cluster.local, kubernetes.default, localhost, *.localhost,
@@ -692,6 +697,14 @@ spec:
       messageExpression: >-
         'deleting an AgentPlatformOrganization erases its organization: set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on ' +
         request.namespace + '/' + request.name + ' first'
+    - expression: >-
+        has(namespaceObject.metadata.deletionTimestamp) ||
+        !(has(oldObject.status) && has(oldObject.status.conditions) && oldObject.status.conditions.exists(c, c.type == 'Orphaned')) ||
+        oldObject.status.conditions.exists(c, c.type == 'Orphaned' && c.status == 'True' && c.reason == 'DeleteMerged')
+      reason: Forbidden
+      messageExpression: >-
+        'an AgentPlatformOrganization applied from git is erased only once its delete pull request merged (Orphaned, reason DeleteMerged):
+        delete it with agent-manager in mode commit, then erase it; refused: ' + request.namespace + '/' + request.name
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
