@@ -9775,7 +9775,7 @@ data:
         license: apache-2.0
         storageUri: oci://gsoci.azurecr.io/giantswarm/models/mistral-small-4-nvfp4:45331841b631
       requirements:
-        minComputeCapability: "8.9"
+        minComputeCapability: "8.6"
         overheadGiB: 60
         weightsGiB: 66
       resources:
