@@ -8,8 +8,9 @@ label, never listed) except the kagent namespace, the platform tenant, for
 every requester:
 
 agent-platform-tenant-model-routing admits a ModelConfig only when the
-listener serves its provider (agent-platform.llmRouting.providers, from
-llmRouting.models) and its baseUrl is the listener URL for that provider
+listener serves its provider (agent-platform.tenants.providers: the providers
+of llmRouting.models, and OpenAI when model-manager serves models on the
+listener) and its baseUrl is the listener URL for that provider
 (agent-platform.llmListenerUrl). A ModelConfig of any other provider, Bedrock
 included (it has no baseUrl), is refused: it would reach the provider
 directly, unmetered. The chart's routing policy
@@ -40,9 +41,9 @@ ModelConfig without a baseUrl is refused.
 {{- if not (include "agent-platform.llmRouting" .) }}
 {{- fail (printf "%s needs llmRouting.enabled: a ModelConfig in an organization namespace must name the llm listener as its baseUrl, and with routing off there is no listener" $switch) }}
 {{- end }}
-{{- $providers := include "agent-platform.llmRouting.providers" . | fromJsonArray }}
+{{- $providers := include "agent-platform.tenants.providers" . | fromJsonArray }}
 {{- if not $providers }}
-{{- fail (printf "%s needs an llmRouting.models entry whose provider a ModelConfig can point at the listener (Anthropic, Mistral or OpenAI): no other ModelConfig is admitted in an organization namespace" $switch) }}
+{{- fail (printf "%s needs an llmRouting.models entry whose provider a ModelConfig can point at the listener (Anthropic, Mistral, OpenAI or SAP AI Core), or a model-manager that serves models there: no other ModelConfig is admitted in an organization namespace" $switch) }}
 {{- end }}
 {{- if not (include "agent-platform.llmRouting.modelConfigs" .) }}
 {{- fail (printf "%s needs the modelconfig-llm-routing MutatingAdmissionPolicy, which fills in the listener as the baseUrl of a ModelConfig in an organization namespace: set llmRouting.modelConfigPolicy.enabled, on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy" $switch) }}

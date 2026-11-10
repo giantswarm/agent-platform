@@ -21,16 +21,25 @@ still reads the kagent namespace only): an organization's ModelConfig may omit
 baseUrl. There an explicit baseUrl that is
 not the listener is refused by agent-platform-tenant-model-routing
 (templates/tenants/modelconfig-admission.yaml), and so is an empty one when
-this policy fails: Ignore here fails closed there. */ -}}
+this policy fails: Ignore here fails closed there. With a serving
+model-manager (agent-platform.modelManager.serves) the organizations' list
+(agent-platform.tenants.providers) adds OpenAI, the format its models are
+called in on the listener; a provider only that list has gets the
+organizations' binding alone, so an OpenAI ModelConfig in the kagent namespace
+keeps calling its provider directly. */ -}}
 {{- if and (include "agent-platform.llmRouting" .) (include "agent-platform.llmRouting.modelConfigs" .) }}
 {{- $mark := include "agent-platform.llmRouting.baseUrlMark" . }}
 {{- $ns := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $organizations := include "agent-platform.tenants.modelConfigs" . }}
-{{- /* One policy per provider the listener serves
-(agent-platform.llmRouting.providers): the block that carries baseUrl and the
-URL differ by provider (an OpenAI ModelConfig's ends in /v1). The first keeps
-the unsuffixed name. */}}
-{{- range $i, $provider := include "agent-platform.llmRouting.providers" . | fromJsonArray }}
+{{- $platform := include "agent-platform.llmRouting.providers" . | fromJsonArray }}
+{{- $providers := $platform }}
+{{- if $organizations }}
+{{- $providers = include "agent-platform.tenants.providers" . | fromJsonArray }}
+{{- end }}
+{{- /* One policy per provider the listener serves: the block that carries
+baseUrl and the URL differ by provider (an OpenAI ModelConfig's ends in /v1).
+The first keeps the unsuffixed name. */}}
+{{- range $i, $provider := $providers }}
 {{- $urlKey := include "agent-platform.modelConfigBaseUrlKey" $provider }}
 {{- $url := include "agent-platform.llmListenerUrl" (dict "root" $ "provider" $provider) }}
 {{- $name := printf "%s-modelconfig-llm-routing" (include "name" $) }}
@@ -92,6 +101,7 @@ spec:
             spec: Object.spec{ {{ $urlKey }}: Object.spec.{{ $urlKey }}{
               baseUrl: {{ $url | quote }}
             }}}
+{{- if has $provider $platform }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingAdmissionPolicyBinding
@@ -105,6 +115,7 @@ spec:
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: {{ $ns }}
+{{- end }}
 {{- if $organizations }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
