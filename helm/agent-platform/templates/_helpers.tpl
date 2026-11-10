@@ -5606,7 +5606,7 @@ renders the entry unchanged.
 
 The table names the releases whose charts project podCertificate volumes:
 kagent's controller (its Substrate pod identity, service DNS and Postgres
-client certificates; the chart's fullname is the release name, kagent) and
+client certificates; its fullname follows the forwarded naming values) and
 every Substrate workload (ate-api-server, ate-controller, atenet, atelet, the
 bundled Postgres, the credential provider; Substrate carries no drift
 detection by default, the rules hold for the day it is turned on). A release
@@ -5614,8 +5614,12 @@ whose chart starts projecting podCertificate gets its row here.
 */}}
 {{- define "agent-platform.driftDetection" -}}
 {{- $volumes := list "/spec/template/spec/volumes" -}}
+{{- $kagent := .root.Values.kagent | default dict -}}
+{{- $fullname := "kagent" -}}
+{{- with $kagent.nameOverride }}{{ $fullname = printf "kagent-%s" . }}{{ end -}}
+{{- $fullname = $kagent.fullnameOverride | default $fullname | trunc 63 | trimSuffix "-" -}}
 {{- $carriers := dict
-  "kagent" (list (dict "kind" "Deployment" "name" "kagent-controller"))
+  "kagent" (list (dict "kind" "Deployment" "name" (printf "%s-controller" $fullname)))
   "substrate" (list (dict "kind" "Deployment") (dict "kind" "StatefulSet") (dict "kind" "DaemonSet"))
 -}}
 {{- $dd := deepCopy .spec -}}

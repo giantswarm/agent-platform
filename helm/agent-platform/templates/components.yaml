@@ -523,7 +523,7 @@ spec:
       {{- toYaml $remediation | nindent 6 }}
   {{- with $c.driftDetection }}
   driftDetection:
-    {{- include "agent-platform.driftDetection" (dict "name" $name "spec" .) | nindent 4 }}
+    {{- include "agent-platform.driftDetection" (dict "root" $root "name" $name "spec" .) | nindent 4 }}
   {{- end }}
   {{- with $deps }}
   dependsOn:

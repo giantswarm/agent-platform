@@ -16,6 +16,7 @@ release. Asserted here:
   muster's block is unchanged (no pod-certificate workload); substrate has none;
 - an installation's own ignore list keeps its rules, the chart's rule is added
   once even when the list already carries it (the issue's bridge);
+- renamed kagent controllers keep the rule, including the chart naming fallbacks;
 - substrate with drift detection turned on (mode warn) gets its three rules;
 - mode disabled renders the entry's block unchanged, no rule.
 
@@ -128,6 +129,28 @@ def main(chart: str) -> int:
         name: kagent-ui
     mode: enabled
 """)
+
+    for naming, controller in (
+        ("fullnameOverride: custom-kagent", "custom-kagent-controller"),
+        ('fullnameOverride: ""\n  nameOverride: custom', "kagent-custom-controller"),
+        ('fullnameOverride: ""', "kagent-controller"),
+        ("fullnameOverride: " + "x" * 62 + "-extra", "x" * 62 + "-controller"),
+    ):
+        renamed = render(chart, "kagent:\n  " + naming + "\n")
+        expect("kagent naming: " + naming, renamed, "kagent",
+               "    ignore:\n" + KAGENT_RULE.replace("kagent-controller", controller) + "    mode: enabled\n")
+
+    added = render(chart, BRIDGE_AND_OWN.replace(
+        '        - paths: ["/spec/template/spec/volumes"]\n'
+        '          target: {kind: Deployment, name: kagent-controller}\n', ""))
+    expect("append beside an installation's rule", added, "kagent", """\
+    ignore:
+    - paths:
+      - /spec/replicas
+      target:
+        kind: Deployment
+        name: kagent-ui
+""" + KAGENT_RULE + "    mode: enabled\n")
 
     warn = render(chart, SUBSTRATE_WARN)
     expect("substrate mode warn", warn, "substrate", "    ignore:\n" + SUBSTRATE_RULES + "    mode: warn\n")
