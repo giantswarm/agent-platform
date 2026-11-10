@@ -1265,7 +1265,7 @@ components:  # @schema additionalProperties: true
     # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
     # minor: a workspace-manager minor rolls in with the chart release that
     # renders its values.
-    versionRange: ">=0.14.0 <0.15.0"
+    versionRange: ">=0.14.0 <0.16.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
