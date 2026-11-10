@@ -3025,8 +3025,9 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # documents every key and forwards it.
 tenants:
   platform:
-    # -- Every signed-in person: agent-platform:user in the kagent namespace,
-    # list (get, watch) on muster's MCPServers in muster's namespace. The
+    # -- Every signed-in person: agent-platform:platform-user in the kagent
+    # namespace, and, while musterMcpServerViewers is unset, list (get, watch)
+    # on muster's MCPServers in muster's namespace. The
     # default, system:authenticated, includes every ServiceAccount: every pod
     # with a token can read the platform tenant's Agents, RemoteMCPServer URLs
     # and muster's MCPServer specs. An installation can set its OIDC
@@ -3048,6 +3049,12 @@ tenants:
   # namespace beside platform.editors (the meta chart also adds it to muster's
   # editor bindings).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+
+# -- muster's MCP-server viewers (giantswarm/agent-platform#1331): list (get,
+# watch) on muster's MCPServers in muster's namespace
+# (agent-platform:mcpserver-viewer). Unset (null), they are
+# tenants.platform.users. An empty list binds nobody.
+musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
 
 # === Agent Platform organizations (giantswarm/giantswarm#38891) ===
 # An AgentPlatformOrganization (agent-platform.giantswarm.io/v1alpha1, the
