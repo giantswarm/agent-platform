@@ -109,7 +109,7 @@ components:  # @schema additionalProperties: true
     enabled: true
   agent-manager:  # @schema additionalProperties: true
     enabled: false
-  # The default agent (kagent/default-agent, "General Assistant"), the portal's meta agent.
+  # The default agent (kagent/default-agent), the portal's meta agent.
   # The meta chart forwards the entry only while it is on.
   default-agent:  # @schema additionalProperties: true
     enabled: false
@@ -2863,7 +2863,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.21.1
+      tag: 2.22.0
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false

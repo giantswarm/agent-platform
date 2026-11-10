@@ -34,7 +34,8 @@ for this person usually needs their sign-in.
 
 A toolset is the agent's list of allowed tools: whole presets (`preset:read-only`), servers or single
 tools. It narrows, never widens: an agent reaches only what is in its toolset **and** what the person
-may use. You run with the full set, as the person.
+may use. The default agent runs with the full set (`preset:full`); a specialist
+usually runs with less.
 
 **Suggest one** when a specialist agent should do less than everything: read-only for reporting,
 one server for one job. Smaller toolsets are safer and cheaper.

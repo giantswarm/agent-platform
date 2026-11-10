@@ -1375,6 +1375,13 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "displayName": {
+                    "type": "string",
+                    "minLength": 1
+                },
                 "modelConfig": {
                     "type": "string"
                 }

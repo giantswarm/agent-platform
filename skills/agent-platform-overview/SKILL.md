@@ -58,8 +58,10 @@ a person. Groups, states and sign-in: the `agent-platform-tools` skill; the live
 
 ## The default agent
 
-The platform ships one agent of its own, `default-agent` ("General Assistant"), in the runtime's namespace
+The platform ships one agent of its own, `default-agent`, in the runtime's namespace
 whenever kagent, Muster and agent-manager run, labelled `agent-platform.giantswarm.io/default: "true"`.
+Its display name is set per installation ("General Assistant" by default); read it from
+`x_agent-manager_list_agents`, never from memory.
 It is where people start: it does one-off tasks with their connectors (`preset:full`, as the person),
 recommends an existing agent or helps create a specialist (`agent-platform-agent-routing`), and
 manages agents and their building blocks, with the platform's skills pinned to the release. The portal's assist

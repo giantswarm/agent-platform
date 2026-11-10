@@ -1,6 +1,6 @@
 ---
 name: agent-platform-portal
-description: Use when someone asks where something is in the Dev Portal or how to do it there — starting a session, the rail, the Customize tabs (Agents, Skills, Connectors, Models, Workflows, Workspaces, Toolchains), Usage, Organizations, the assist buttons that open a session with you — or when you point a person to a portal page or give a start link.
+description: Use when someone asks where something is in the Dev Portal or how to do it there — starting a session, the rail, the Customize tabs (Agents, Skills, Connectors, Models, Workflows, Workspaces, Toolchains), Usage, Organizations, the assist buttons that open a session with the default agent — or when you point a person to a portal page or give a start link.
 metadata:
   version: "1.0.0"
 ---
@@ -46,8 +46,8 @@ An environment selector appears when the portal serves more than one installatio
 
 ## The assist buttons
 
-These open a session, or a side chat, with an agent already briefed; each names its agent, by
-default you.
+These open a session, or a side chat, with an agent already briefed; each names its agent, usually
+the default agent.
 
 - **Agents**: the banner "Not sure which agent fits?", **Ask … about agents**.
 - **New agent**: **Set up the agent with …** drafts the instructions and suggests skills in a side

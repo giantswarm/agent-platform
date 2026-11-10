@@ -8,7 +8,8 @@
   while it, kagent, muster and agent-manager are on; its range is
   agent-manager's agentChart.semver; its values are
   agents/default-agent/values.yaml with the derived muster.url, iconUrl,
-  toolset, labels and modelConfig.name.
+  displayName and description (defaultAgent; the display name also in the
+  system message), toolset, labels and modelConfig.name.
 - The working tree and a pre-release carry no skills; stamped by
   hack/stamp-release-commit.sh, the packaged chart pins every skill of skills/
   to that commit (the tag pipeline's step, simulated on a copy); a release
@@ -163,7 +164,8 @@ checks = {
     "chart": (oci["spec"]["url"], "oci://gsoci.azurecr.io/charts/giantswarm/agent"),
     "range": (oci["spec"]["ref"]["semver"], semver),
     "dependsOn": (sorted(d["name"] for d in spec["dependsOn"]), ["agent-manager", "kagent", "muster"]),
-    "displayName": (v["agent"]["displayName"], "General Assistant"),
+    "displayName (defaultAgent.displayName's default)": (v["agent"]["displayName"], "General Assistant"),
+    "systemMessage names the display name": (v["agent"]["systemMessage"].startswith("Your name is General Assistant. You are the default agent"), True),
     "iconUrl (the route's hostname)": (v["agent"]["iconUrl"], f"https://avatars.example.org/v1/{NAME}.png"),
     "toolset": (v["toolset"], ["preset:full"]),
     "systemMessage carries no installation name": ("this installation is" in v["agent"]["systemMessage"], False),
@@ -182,6 +184,10 @@ if v["agent"].get("iconUrl") != f"https://avatars.example.com/v1/{NAME}.png":
 v = find(render(META, *ON, "--set", "components.dicebear.enabled=false", "--set", "defaultAgent.modelConfig=claude-opus"), "HelmRelease", NAME)["spec"]["values"]
 if v.get("modelConfig") != {"name": "claude-opus"} or "iconUrl" in v["agent"]:
     fail(f"{NAME}: defaultAgent.modelConfig is not its modelConfig.name, or an iconUrl renders without DiceBear: {v.get('modelConfig')!r}, {v['agent']!r}")
+v = find(render(META, *ON, "--set", "defaultAgent.displayName=Swarmy", "--set", "defaultAgent.description=Ask me."), "HelmRelease", NAME)["spec"]["values"]
+if (v["agent"]["displayName"], v["agent"]["description"]) != ("Swarmy", "Ask me.") or "[[" in v["agent"]["systemMessage"] or not v["agent"]["systemMessage"].startswith("Your name is Swarmy. "):
+    fail(f"{NAME}: defaultAgent.displayName/description are not its agent.displayName/description and the system message's name: {v['agent']!r}")
+refused(META, "displayName", *ON, "--set", "defaultAgent.displayName=")
 # agent-manager reports the portal's installation name (get_info installation) from its floor on.
 for what, args, want in (("below the floor", [*ON], None), ("from the floor", [*ON, *FLOORS], "agent-platform"),
                          ("backstage.installationName=lab", [*ON, *FLOORS, "--set", "backstage.installationName=lab"], "lab")):

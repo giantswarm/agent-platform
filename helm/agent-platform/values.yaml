@@ -463,9 +463,19 @@ components:  # @schema additionalProperties: true
     # chart refuses the key.
     # Broker authorization uses opaque state handles within server state limits.
     # Resource access tokens authenticate callers independently of backend grants.
+    # Floor 5.60.0: muster accepts an ID token whose audience is listed in
+    # muster.muster.oauth.server.trustedAudiences on /mcp and on the
+    # person-only endpoints (giantswarm/muster#1807). From 5.59.0 an older
+    # muster answers it with 401: on /mcp the tokens agentgateway and the
+    # portal forward, on /session-bindings agent-manager's start_session.
+    # Floor 5.61.0: muster passes a backend's input_required through to the
+    # caller (giantswarm/muster#1812), which agent-manager's credential
+    # elicitations (agent-manager.credentials) reach the client by; an older
+    # muster relays a backend's URL elicitation only for an MCPServer with
+    # spec.urlElicitation: Relay.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.59.0 <6.0.0"
+    versionRange: ">=5.61.0 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -720,9 +730,13 @@ components:  # @schema additionalProperties: true
     # unchanged kagent release reports "in-sync" and never recreates it —
     # every template stays unadmitted until a values change or a forced
     # reconcile (#409; 600 s observed). With it the Harness is back within
-    # one interval and the templates are re-admitted. No ignore rule: nothing
-    # of the platform edits this release's objects in place (no HPA on its
-    # Deployments, no webhook-injected field, no hook). An object of the
+    # one interval and the templates are re-admitted. Nothing of the platform
+    # edits this release's objects in place (no HPA on its Deployments, no
+    # webhook-injected field, no hook); the chart itself appends one ignore
+    # rule, kagent-controller's /spec/template/spec/volumes, because
+    # helm-controller before 1.4 strips their podCertificate sources when it
+    # corrects them (#879; agent-platform.driftDetection in _helpers.tpl),
+    # also to an ignore list set here. An object of the
     # chart opts out with the annotation helm.toolkit.fluxcd.io/driftDetection:
     # disabled. kagent's, muster's and kserve-runtime-configs' only by
     # default — turning it on for another release is a decision per release,
@@ -1133,13 +1147,17 @@ components:  # @schema additionalProperties: true
     # agent-platform.giantswarm.io/is-default-model-config) as `default` on
     # list_model_configs and fills an omitted modelConfig on create_agent
     # from it (giantswarm/agent-manager#298). Its tenants.enabled serves the
-    # organization tools; this chart derives it and devPortal.url from
+    # organization tools; this chart derives it from
     # agentPlatformOrganizations.enabled (agent-platform.agentManager.organizations).
     # 2.20.0 is the floor agentPlatformOrganizations.enabled needs: its chart
     # leaves the ClusterRole agent-platform-tenant-flux to the connectivity
     # chart (giantswarm/agent-manager#305), and its organization tools write
     # in commit mode (giantswarm/agent-manager#300).
-    versionRange: ">=2.20.0 <3.0.0"
+    # 2.22.0 is the floor agent-manager.credentials and
+    # agent-manager.githubTokenExchange need: it answers a missing organization
+    # credential with the credentials.uiURL form and exchanges the person's
+    # identity for their GitHub App grant.
+    versionRange: ">=2.22.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -1175,7 +1193,7 @@ components:  # @schema additionalProperties: true
     # the component is on (see components.yaml, gatedRoster).
     gatedRoster: true
   default-agent:  # @schema additionalProperties: true
-    # The default agent, "General Assistant", where people start and the portal's meta
+    # The default agent (defaultAgent.displayName), where people start and the portal's meta
     # agent: one release of the Generic
     # agent chart in kagent with the values of agents/default-agent/values.yaml
     # and the platform's skills (skills/) pinned to the release's commit. Its
@@ -1195,8 +1213,8 @@ components:  # @schema additionalProperties: true
     # The Agent's readiness (its model, its skills) is reported on the Agent,
     # never a reason to hold the platform's install or upgrade.
     disableWait: true
-    # agent-manager lists it read-only (managed-by) and reports it as the
-    # installation's default agent (default).
+    # On the HelmRelease and the Agent: agent-manager lists it read-only
+    # (managed-by) and reports it as the installation's default agent (default).
     labels:
       agent-platform.giantswarm.io/managed-by: agent-platform
       agent-platform.giantswarm.io/default: "true"
@@ -1305,7 +1323,7 @@ components:  # @schema additionalProperties: true
     # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
     # minor: a workspace-manager minor rolls in with the chart release that
     # renders its values.
-    versionRange: ">=0.14.0 <0.15.0"
+    versionRange: ">=0.14.0 <0.16.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
@@ -2724,6 +2742,10 @@ muster:  # @schema skipProperties: true; additionalProperties: true
     #
     # Requires muster ≥ 5.12.0 (the `label:` rule); a 5.11.0 muster refuses
     # to start on it, which is why components.muster.versionRange floors there.
+    #
+    # icon: optional `data:` URI (svg, png, jpeg, webp; ≤ 65536 chars), muster
+    # ≥ 5.61.0 (giantswarm/muster#1817). The chart sets one on both presets
+    # below when they have none, once the range's floor is 5.61.0 or later.
     toolsetPresets:
       infrastructure:
         description: The servers for the infrastructure underneath the platform (Giant Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus.
@@ -5332,7 +5354,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.21.1
+      tag: 2.22.0
     dryRun: false
     gitopsNamespaces: []
 
@@ -5400,6 +5422,11 @@ skill-manager:  # @schema skipProperties: true; additionalProperties: true
 
 # === Default agent (components.default-agent) ===
 defaultAgent:
+  # The name people see for the default agent in the portal and Slack, and the
+  # name its system message gives it. Its technical name is always default-agent.
+  displayName: "General Assistant"  # @schema minLength: 1
+  # The default agent's one-line description in the portal's agent lists.
+  description: "Start here. Handles everyday tasks with your connectors and helps you find or create the right agent."
   # ModelConfig in kagent the default agent runs on; empty: the kagent
   # namespace's default, the ModelConfig annotated
   # agent-platform.giantswarm.io/is-default-model-config: "true", read at
@@ -5673,10 +5700,10 @@ tenants:
 # The operator's own values are the agent-platform-operator block below.
 # With components.agent-manager on, agent-manager's tenants.enabled follows
 # this switch, so it serves the organization tools (the floor of
-# components.agent-manager.versionRange must be 2.20.0 or later), and with
-# components.backstage on its devPortal.url is the portal's
-# https://<backstage.hostname> (else backstage.<global.domain>), where the
-# tools link a missing credential. With components.muster on, muster serves
+# components.agent-manager.versionRange must be 2.20.0 or later). Credential
+# forms use an explicit agent-manager.credentials.uiURL template containing
+# {operation}; credentials and githubTokenExchange need a manager floor of
+# 2.22.0 or later. With components.muster on, muster serves
 # the MCPServers of the namespaces labelled
 # agent-platform.giantswarm.io/organization (muster.mcpServerNamespaceSelector,
 # muster 5.58.0 or later), listed as the person: muster's OAuth server on the

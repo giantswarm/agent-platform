@@ -560,6 +560,8 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "ok: agentgateway 2.x wiring"
 	@echo "--> the kagent line's wiring: kagent + kagent-crds on the line's release range, one build (tag + Harness digest), flat forwarded values with no umbrella-only or retired key"
 	@./tests/verify-kagent-wiring.py $(VERIFY_TMP)/ap-flux.out
+	@echo "--> drift detection leaves the pod-certificate workloads' volumes to Helm (helm-controller before 1.4 strips podCertificate, giantswarm/agent-platform#879)"
+	@HELM="$(HELM)" ./tests/verify-drift-podcertificate.py $(CHART_DIR)
 	@if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent-crds.enabled=false >$(VERIFY_TMP)/ap-kag-crds.out 2>&1; then \
 		echo "FAIL: kagent on with kagent-crds off rendered; the controller would run without its CRDs"; exit 1; \
 	elif ! grep -q "components.kagent-crds.enabled is not" $(VERIFY_TMP)/ap-kag-crds.out; then \
@@ -2868,6 +2870,9 @@ verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every
 # meta chart forwards, so the check reads the real schema and template of that
 # version, not a copy. Recursive (=), so it is read only when a recipe uses it.
 PRESETS_MUSTER_MIN := 5.12.0
+# agent-platform.muster.presetIconsFloor, and a release below it.
+PRESETS_ICONS_MUSTER_MIN := 5.61.0
+PRESETS_ICONS_MUSTER_BELOW := 5.60.1
 PRESETS_MUSTER_VERSION = $(shell $(FLOORS) floor muster)
 # The muster chart's own render guards want the OAuth inputs an installation
 # supplies; these are placeholders for the render, not part of the assertion.
@@ -2894,6 +2899,11 @@ verify-presets: ## Assert the infrastructure / agent-platform toolset presets re
 	elif ! grep -q "built into muster" $(VERIFY_TMP)/vp-builtin.out; then \
 		echo "FAIL: the built-in guard failed for the wrong reason"; cat $(VERIFY_TMP)/vp-builtin.out; exit 1; \
 	else echo "ok: built-in names refused"; fi
+	@echo "--> preset icons only from a muster floor of $(PRESETS_ICONS_MUSTER_MIN), which takes toolsetPresets.<name>.icon"
+	@for gate in "off:$(PRESETS_ICONS_MUSTER_BELOW)" "on:$(PRESETS_ICONS_MUSTER_MIN)-0"; do \
+		$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set "components.muster.versionRange=>=$${gate#*:} <6.0.0" >$(VERIFY_TMP)/vp-icons.out 2>&1 || { cat $(VERIFY_TMP)/vp-icons.out; exit 1; }; \
+		python3 tests/verify-toolset-presets.py icons $(VERIFY_TMP)/vp-icons.out $${gate%%:*} || exit 1; \
+	done
 	@echo "ok: presets reach muster's config"
 
 .PHONY: verify-mirror
@@ -4416,7 +4426,7 @@ verify-kagent-oauth2-proxy-image: ## Assert kagent's oauth2-proxy runs the gsoci
 	@echo "ok: $@"
 
 .PHONY: verify-tenant-rbac
-verify-tenant-rbac: ## Assert the RBAC of agent tenants (giantswarm/agent-platform#706): with kagent on, the three ClusterRoles agent-platform:user, :editor and :admin nest, the user reads EgressPolicies and writes nothing, agent-platform:platform-user is the user without EgressPolicies, the editor writes what agent-manager writes as the caller and reads, never writes, the agent chart's OCIRepository, the admin writes ModelConfigs, EgressPolicies and RoleBindings, places Secrets it cannot read and binds the three roles only, none escalates or reads a Secret; the ValidatingAdmissionPolicy agent-platform-tenant-egress-credentials (Fail, Deny) holds an EgressPolicy's secretKeyRef to tenant-credential- Secrets in every Organization namespace but kagent, agent-platform-tenant-model-credentials holds a ModelConfig's apiKeySecret to them for every requester, agent-platform-tenant-credential-refs holds an Agent's or AgentTemplate's git credentialRef and a RemoteMCPServer's headersFrom Secret to them for every requester, and refuses the installation's skills credential under each of its names, and agent-platform-tenant-credentials keeps those Secrets of type Opaque; agent-platform-platform-tenant-credential-refs (Fail, Deny) refuses, in the kagent namespace only and for every requester, the six kinds' Secret references the requester may not get, on a create or a spec change, also of an object being deleted; the platform tenant's RoleBindings in the kagent namespace (agent-platform:platform-user to tenants.platform.users, tenants.platform.editors plus tenants.platformTeam; none for an empty list; none with kagent off); muster's MCPServers listed to tenants.platform.users in the release namespace; the meta chart appends tenants.platformTeam to muster's editor subjects. Needs PyYAML. HELM selects the binary.
+verify-tenant-rbac: ## Assert the RBAC of agent tenants (giantswarm/agent-platform#706): with kagent on, the three ClusterRoles agent-platform:user, :editor and :admin nest, the user reads Harnesses and EgressPolicies and writes nothing, agent-platform:platform-user is the user without EgressPolicies, the editor writes what agent-manager writes as the caller and reads, never writes, the agent chart's OCIRepository, the admin writes ModelConfigs, EgressPolicies and RoleBindings, places Secrets it cannot read and binds the three roles only, none escalates or reads a Secret; the ValidatingAdmissionPolicy agent-platform-tenant-egress-credentials (Fail, Deny) holds an EgressPolicy's secretKeyRef to tenant-credential- Secrets in every Organization namespace but kagent, agent-platform-tenant-model-credentials holds a ModelConfig's apiKeySecret to them for every requester, agent-platform-tenant-credential-refs holds an Agent's or AgentTemplate's git credentialRef and a RemoteMCPServer's headersFrom Secret to them for every requester, and refuses the installation's skills credential under each of its names, and agent-platform-tenant-credentials keeps those Secrets of type Opaque; agent-platform-platform-tenant-credential-refs (Fail, Deny) refuses, in the kagent namespace only and for every requester, the six kinds' Secret references the requester may not get, on a create or a spec change, also of an object being deleted; the platform tenant's RoleBindings in the kagent namespace (agent-platform:platform-user to tenants.platform.users, tenants.platform.editors plus tenants.platformTeam; none for an empty list; none with kagent off); muster's MCPServers listed to tenants.platform.users in the release namespace; the meta chart appends tenants.platformTeam to muster's editor subjects. Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-tenant-rbac.py $(CHART_DIR) $(CONNECTIVITY_DIR)

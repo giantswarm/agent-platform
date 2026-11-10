@@ -285,7 +285,7 @@ The OAuth issuer, client, secret and base URL come from the block, else from `gl
 
 ### Default agent and skills
 
-The default agent, "General Assistant", is `default-agent` in the kagent namespace, labelled `agent-platform.giantswarm.io/default: "true"`. It does one-off tasks with the person's connectors (`preset:full`), points to or helps create specialist agents, and serves every portal role. Its prompt is in [`agents/default-agent/values.yaml`](../agents/default-agent/values.yaml) and its skills are in [`skills/`](../skills).
+The default agent is `default-agent` in the kagent namespace, shown as `defaultAgent.displayName` ("General Assistant" by default) with `defaultAgent.description`, labelled `agent-platform.giantswarm.io/default: "true"`. It does one-off tasks with the person's connectors (`preset:full`), points to or helps create specialist agents, and serves every portal role. Its prompt is in [`agents/default-agent/values.yaml`](../agents/default-agent/values.yaml) and its skills are in [`skills/`](../skills).
 
 | Value | Default | Effect |
 |---|---|---|
@@ -618,6 +618,8 @@ spec:
 - An organization's key Secret is written by reference; agent-manager's organization tools, which come with the agent-platform release that moves agent-manager's range to giantswarm/agent-manager#294, write it this way, and the Dev Portal's credential form fills the Secret.
 
 ### Agent Platform organizations
+
+Credential forms use the explicit `agent-manager.credentials.uiURL` template containing `{operation}`; this chart derives no form URL. See [organization credentials](organization-credentials.md) for the release floor, GitOps writes and network policy.
 
 With `components.backstage.enabled`, the connectivity chart writes `agentPlatform.organizations.enabled` in the portal's app-config from `agentPlatformOrganizations.enabled`. One switch controls the operator, agent-manager's organization tools and the portal's Organizations pages. The default `false` also overrides a saved browser opt-in. This needs the Backstage config bridge in [backstage#3393](https://github.com/giantswarm/backstage/pull/3393); earlier images ignore the key. A portal deployed separately needs its own `agentPlatform.organizations.enabled` configuration. Navigation still requires an installation that reports organization support.
 
