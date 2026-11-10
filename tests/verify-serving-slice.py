@@ -126,6 +126,14 @@ MODEL_IMAGES = "oci://gsoci.azurecr.io/giantswarm/models/"
 G6_XLARGE_VCPU, G6_XLARGE_GIB = 4, 16
 USABLE_VCPU = G6_XLARGE_VCPU - 1.0
 USABLE_GIB = G6_XLARGE_GIB * 0.95 - 3.3
+# The host-side load peak (the predictor container's cgroup memory.peak, GiB)
+# measured per host class a 24 GB preset serves on; its memory limit holds the
+# largest. vLLM's --gpu-memory-utilization share is not charged to the pod, on
+# a unified-memory node (GB10) either, but the arm64 runtime there stages the
+# checkpoint in host memory while it loads the shards
+# (giantswarm/agent-platform#848: OOMKilled at 12 GiB on a GB10; on an L4 it
+# served within 12 GiB).
+LOAD_PEAK_GIB = {"qwen3-5-9b-fp8": {"GB10": 19.5}}
 AUDIENCE = "dex-k8s-authenticator"
 SCHEME = "service.beta.kubernetes.io/aws-load-balancer-scheme"
 
@@ -894,12 +902,16 @@ def check_presets(connectivity: str) -> None:
                      "after the kubelet's reservations and the daemonsets (giantswarm/agent-platform#502)")
         if "g6.xlarge" not in text:
             sys.exit(f"FAIL: preset {name}'s description does not name the instance it is sized for (g6.xlarge)")
+        peaks = LOAD_PEAK_GIB.get(name, {})
+        if peaks and resource_memory(text, name, "limits") < max(peaks.values()):
+            sys.exit(f"FAIL: preset {name}'s memory limit is below its measured load peak {peaks} GiB; the runtime is OOMKilled loading the weights")
     if "template" not in spec_keys:
         sys.exit("FAIL: the preset schema has no spec.template")
     if set(schema["properties"]["spec"]["properties"].get("router", {}).get("properties", {})) != {"scheduler"}:
         sys.exit("FAIL: the preset schema's spec.router does not carry exactly scheduler")
     ok(f"presets {', '.join(PRESETS)}: schema keys, a signed model image and no serving image, tools and reasoning on with their parsers, one GPU, <= 24 GiB, "
-       f"requests within a g6.xlarge's {USABLE_VCPU:g} vCPU / {USABLE_GIB:.1f} GiB; the schema knows spec.template")
+       f"requests within a g6.xlarge's {USABLE_VCPU:g} vCPU / {USABLE_GIB:.1f} GiB, memory limits at or above the measured load peaks {LOAD_PEAK_GIB}; "
+       f"the schema knows spec.template")
 
 
 def family_problems(preset: dict, families: list[dict], runtime: dict, templates: str) -> list[str]:
@@ -975,6 +987,16 @@ def check_model_families(connectivity: str) -> None:
     ok(f"{len(files)} shipped presets carry their family's parsers ({len(families)} rows of model-families.yaml, every parser registered by "
        f"vLLM {runtime['vllm']}): tools with --enable-auto-tool-choice and a family tool-call parser, reasoning with the family's reasoning parser, "
        f"every mounted chat template present; a foreign parser, a missing one and an unknown family fail naming preset, family and parser")
+
+
+def resource_memory(text: str, name: str, kind: str) -> float:
+    """The preset's resources.<kind>.memory (GiB), from the authoring form's `resources:` block."""
+    block = re.search(r"^  resources:\n((?:    .*\n)+)", text, re.M)
+    section = block and re.search(rf"^    {kind}:\n((?:      .*\n)+)", block.group(1), re.M)
+    mem = section and re.search(r"^      memory: ([\d.]+)(Gi|Mi)$", section.group(1), re.M)
+    if not mem:
+        sys.exit(f"FAIL: preset {name}'s resources.{kind} names no memory (Gi or Mi)")
+    return float(mem.group(1)) / (1024 if mem.group(2) == "Mi" else 1)
 
 
 def resource_requests(text: str, name: str) -> tuple:

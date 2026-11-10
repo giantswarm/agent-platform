@@ -37,10 +37,15 @@ spec:
     Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
     node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
     follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
-    requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
-    its host memory is the runtime and the weights passing through the page
-    cache; the KV cache lives on the GPU. A 16 GB T4 does not host it
-    (14 + 9 GiB, and the card has neither FP8 nor bf16).
+    requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU) — its
+    host memory is the runtime and the weights passing through the page
+    cache; the KV cache lives on the GPU. The same recipe serves on a GB10
+    (unified memory) without an override: vLLM's --gpu-memory-utilization
+    share is not charged to the pod there either, but the runtime loads the
+    weights through host memory, a 19.5 GiB peak (8 GiB once serving), so
+    the memory limit is 24 GiB; on a g6.xlarge the node bounds it first. A
+    16 GB T4 does not host it (14 + 9 GiB, and the card has neither FP8 nor
+    bf16).
   model:
     id: RedHatAI/Qwen3.5-9B-FP8-dynamic
     # The tag is the first 12 characters of the checkpoint revision
@@ -95,9 +100,14 @@ spec:
     requests:
       cpu: "2"
       memory: 10Gi
+    # The limit holds the load peak of every host class the recipe serves
+    # on, measured as the container's cgroup memory.peak: within 12 GiB on an
+    # L4, 19.5 GiB on a GB10, where the arm64 runtime stages the 13 GiB
+    # checkpoint in host memory (OOMKilled at 12 GiB while loading the
+    # shards). The requests stay a g6.xlarge's; scheduling reads only them.
     limits:
       cpu: "4"
-      memory: 12Gi
+      memory: 24Gi
   requirements:
     # The Hub's safetensors index sizes the checkpoint at 13.04 GiB, the MTP
     # head included (make verify-preset-weights: a preset declares at least

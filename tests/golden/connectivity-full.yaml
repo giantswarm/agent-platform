@@ -12508,10 +12508,15 @@ data:
         Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
         node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
         follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
-        requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
-        its host memory is the runtime and the weights passing through the page
-        cache; the KV cache lives on the GPU. A 16 GB T4 does not host it
-        (14 + 9 GiB, and the card has neither FP8 nor bf16).
+        requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU) — its
+        host memory is the runtime and the weights passing through the page
+        cache; the KV cache lives on the GPU. The same recipe serves on a GB10
+        (unified memory) without an override: vLLM's --gpu-memory-utilization
+        share is not charged to the pod there either, but the runtime loads the
+        weights through host memory, a 19.5 GiB peak (8 GiB once serving), so
+        the memory limit is 24 GiB; on a g6.xlarge the node bounds it first. A
+        16 GB T4 does not host it (14 + 9 GiB, and the card has neither FP8 nor
+        bf16).
       displayName: Qwen3.5 9B (FP8, one 24 GB GPU)
       env:
       - name: HOME
@@ -12545,7 +12550,7 @@ data:
         gpus: 1
         limits:
           cpu: "4"
-          memory: 12Gi
+          memory: 24Gi
         requests:
           cpu: "2"
           memory: 10Gi
