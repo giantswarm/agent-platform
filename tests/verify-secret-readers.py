@@ -62,7 +62,7 @@ HELM = os.environ.get("HELM", "helm")
 # (giantswarm/substrate#553 and #554, giantswarm/substrate-credential-providers#33).
 NARROWED = "1.18.0"
 NARROWED_PLUGIN = "0.3.0"
-OPERATOR = "0.1.0"
+OPERATOR = "0.2.0"
 # The control: a Substrate whose ate-controller and credential provider read
 # every Secret, rendered beside the narrowed one in a namespace of its own.
 BEFORE = "1.17.5"
