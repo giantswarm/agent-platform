@@ -202,7 +202,10 @@ knowledge:
       reconcile (reconcile.fluxcd.io/forceAt). Set per release, not fleet-wide:
       its objects must tolerate the re-apply (a field another controller owns
       needs an ignore rule; an object opts out with the annotation
-      helm.toolkit.fluxcd.io/driftDetection: disabled). kagent carries it for
+      helm.toolkit.fluxcd.io/driftDetection: disabled). While it is on, the
+      chart appends ignore rules for the release's pod-certificate workloads'
+      volumes (agent-platform.driftDetection in _helpers.tpl: helm-controller
+      before 1.4 strips the podCertificate source on correction, #879). kagent carries it for
       the platform Harness, the runtime of every agent (#409); muster for its
       own CiliumNetworkPolicy, whose egress selectors named the pre-rename
       namespace on a live cluster while the release manifest named the new one
@@ -520,7 +523,7 @@ spec:
       {{- toYaml $remediation | nindent 6 }}
   {{- with $c.driftDetection }}
   driftDetection:
-    {{- toYaml . | nindent 4 }}
+    {{- include "agent-platform.driftDetection" (dict "root" $root "name" $name "spec" .) | nindent 4 }}
   {{- end }}
   {{- with $deps }}
   dependsOn:
