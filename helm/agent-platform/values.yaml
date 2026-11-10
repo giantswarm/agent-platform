@@ -468,9 +468,14 @@ components:  # @schema additionalProperties: true
     # person-only endpoints (giantswarm/muster#1807). From 5.59.0 an older
     # muster answers it with 401: on /mcp the tokens agentgateway and the
     # portal forward, on /session-bindings agent-manager's start_session.
+    # Floor 5.61.0: muster passes a backend's input_required through to the
+    # caller (giantswarm/muster#1812), which agent-manager's credential
+    # elicitations (agent-manager.credentials) reach the client by; an older
+    # muster relays a backend's URL elicitation only for an MCPServer with
+    # spec.urlElicitation: Relay.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.60.0 <6.0.0"
+    versionRange: ">=5.61.0 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -1142,13 +1147,17 @@ components:  # @schema additionalProperties: true
     # agent-platform.giantswarm.io/is-default-model-config) as `default` on
     # list_model_configs and fills an omitted modelConfig on create_agent
     # from it (giantswarm/agent-manager#298). Its tenants.enabled serves the
-    # organization tools; this chart derives it and devPortal.url from
+    # organization tools; this chart derives it from
     # agentPlatformOrganizations.enabled (agent-platform.agentManager.organizations).
     # 2.20.0 is the floor agentPlatformOrganizations.enabled needs: its chart
     # leaves the ClusterRole agent-platform-tenant-flux to the connectivity
     # chart (giantswarm/agent-manager#305), and its organization tools write
     # in commit mode (giantswarm/agent-manager#300).
-    versionRange: ">=2.20.0 <3.0.0"
+    # 2.22.0 is the floor agent-manager.credentials and
+    # agent-manager.githubTokenExchange need: it answers a missing organization
+    # credential with the credentials.uiURL form and exchanges the person's
+    # identity for their GitHub App grant.
+    versionRange: ">=2.22.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -5551,10 +5560,10 @@ tenants:
 # The operator's own values are the agent-platform-operator block below.
 # With components.agent-manager on, agent-manager's tenants.enabled follows
 # this switch, so it serves the organization tools (the floor of
-# components.agent-manager.versionRange must be 2.20.0 or later), and with
-# components.backstage on its devPortal.url is the portal's
-# https://<backstage.hostname> (else backstage.<global.domain>), where the
-# tools link a missing credential. With components.muster on, muster serves
+# components.agent-manager.versionRange must be 2.20.0 or later). Credential
+# forms use an explicit agent-manager.credentials.uiURL template containing
+# {operation}; credentials and githubTokenExchange need a manager floor of
+# 2.22.0 or later. With components.muster on, muster serves
 # the MCPServers of the namespaces labelled
 # agent-platform.giantswarm.io/organization (muster.mcpServerNamespaceSelector,
 # muster 5.58.0 or later), listed as the person: muster's OAuth server on the
