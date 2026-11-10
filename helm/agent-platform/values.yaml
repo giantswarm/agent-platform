@@ -730,9 +730,13 @@ components:  # @schema additionalProperties: true
     # unchanged kagent release reports "in-sync" and never recreates it —
     # every template stays unadmitted until a values change or a forced
     # reconcile (#409; 600 s observed). With it the Harness is back within
-    # one interval and the templates are re-admitted. No ignore rule: nothing
-    # of the platform edits this release's objects in place (no HPA on its
-    # Deployments, no webhook-injected field, no hook). An object of the
+    # one interval and the templates are re-admitted. Nothing of the platform
+    # edits this release's objects in place (no HPA on its Deployments, no
+    # webhook-injected field, no hook); the chart itself appends one ignore
+    # rule, kagent-controller's /spec/template/spec/volumes, because
+    # helm-controller before 1.4 strips their podCertificate sources when it
+    # corrects them (#879; agent-platform.driftDetection in _helpers.tpl),
+    # also to an ignore list set here. An object of the
     # chart opts out with the annotation helm.toolkit.fluxcd.io/driftDetection:
     # disabled. kagent's, muster's and kserve-runtime-configs' only by
     # default — turning it on for another release is a decision per release,
@@ -1265,7 +1269,7 @@ components:  # @schema additionalProperties: true
     # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
     # minor: a workspace-manager minor rolls in with the chart release that
     # renders its values.
-    versionRange: ">=0.14.0 <0.15.0"
+    versionRange: ">=0.14.0 <0.16.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With

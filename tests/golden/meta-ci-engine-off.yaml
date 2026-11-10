@@ -1882,6 +1882,12 @@ spec:
     remediation:
       retries: 5
   driftDetection:
+    ignore:
+    - paths:
+      - /spec/template/spec/volumes
+      target:
+        kind: Deployment
+        name: kagent-controller
     mode: enabled
   dependsOn:
     - name: kagent-crds
