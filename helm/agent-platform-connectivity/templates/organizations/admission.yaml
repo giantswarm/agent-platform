@@ -38,7 +38,9 @@ these.
   * agent-platform-organization-labels: only the operator's ServiceAccount
     sets, changes or removes the three organization labels of a namespace, on
     CREATE and UPDATE. kagent's authorization, Substrate's credential grants
-    and these policies select on them.
+    and these policies select on them. The same holds for the annotation
+    agent-platform.giantswarm.io/orphaned, the operator's copy of the
+    organization's Orphaned reason that agent-manager shows its members.
   * agent-platform-organizations-admin-rolebindings: a requester who may
     create AgentPlatformOrganizations in a namespace that is no organization
     namespace (agent-platform:organizations-admin's own right) and may not
@@ -80,7 +82,12 @@ these.
   * agent-platform-organization-delete-intent: an AgentPlatformOrganization is
     deleted only when it carries kustomize.toolkit.fluxcd.io/prune: enabled,
     Flux's own marker of an intended prune, or while its namespace terminates
-    (the parent going erases its organizations).
+    (the parent going erases its organizations). One the operator judges
+    applied from git (it has an Orphaned condition) is deleted only once its
+    delete pull request merged (Orphaned True, reason DeleteMerged): while its
+    file is in git, or gone without a delete, the annotation alone would erase
+    it, and Flux would apply an empty one again. Only the operator writes its
+    status.
   * agent-platform-organization-egress-floor: an EgressPolicy in an
     organization namespace names no cluster-internal or host-local host
     (*.svc, *.cluster.local, kubernetes.default, localhost, *.localhost,
@@ -111,6 +118,7 @@ controllers) is the same pair of policies as a tenant's
 {{- $uidLabel := include "agent-platform.organizations.uidLabel" . }}
 {{- $objectLabel := include "agent-platform.organizations.objectLabel" . }}
 {{- $copiedFrom := include "agent-platform.organizations.copiedFromAnnotation" . }}
+{{- $orphaned := "agent-platform.giantswarm.io/orphaned" }}
 {{- $readers := include "agent-platform.organizations.secretReaders" . | fromJson }}
 {{- $readerEntries := list }}
 {{- range $sa, $role := $readers }}{{- $readerEntries = append $readerEntries (printf "'%s': '%s'" $sa $role) }}{{- end }}
@@ -380,10 +388,18 @@ spec:
         (request.operation == 'UPDATE' && has(oldObject.metadata.labels) && k in oldObject.metadata.labels) ||
         (has(object.metadata.labels) && k in object.metadata.labels &&
         object.metadata.labels[k] != oldObject.metadata.labels[k]))
+    # The operator's copy of the organization's Orphaned reason.
+    - name: orphanedChanged
+      expression: >-
+        (has(object.metadata.annotations) && {{ squote $orphaned }} in object.metadata.annotations ? object.metadata.annotations[{{ squote $orphaned }}] : '') !=
+        (request.operation == 'UPDATE' && has(oldObject.metadata.annotations) && {{ squote $orphaned }} in oldObject.metadata.annotations ? oldObject.metadata.annotations[{{ squote $orphaned }}] : '')
   validations:
     - expression: "size(variables.changed) == 0"
       reason: Forbidden
       messageExpression: {{ printf "'only the agent-platform-operator (%s) sets, changes or removes the organization labels of a namespace; refused for ' + request.userInfo.username + ': ' + variables.changed.join(', ')" $operator | quote }}
+    - expression: "!variables.orphanedChanged"
+      reason: Forbidden
+      messageExpression: {{ printf "'only the agent-platform-operator (%s) sets, changes or removes the annotation %s of a namespace; refused for ' + request.userInfo.username" $operator $orphaned | quote }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -692,6 +708,14 @@ spec:
       messageExpression: >-
         'deleting an AgentPlatformOrganization erases its organization: set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on ' +
         request.namespace + '/' + request.name + ' first'
+    - expression: >-
+        has(namespaceObject.metadata.deletionTimestamp) ||
+        !(has(oldObject.status) && has(oldObject.status.conditions) && oldObject.status.conditions.exists(c, c.type == 'Orphaned')) ||
+        oldObject.status.conditions.exists(c, c.type == 'Orphaned' && c.status == 'True' && c.reason == 'DeleteMerged')
+      reason: Forbidden
+      messageExpression: >-
+        'an AgentPlatformOrganization applied from git is erased only once its delete pull request merged (Orphaned, reason DeleteMerged):
+        delete it with agent-manager in mode commit, then erase it; refused: ' + request.namespace + '/' + request.name
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

@@ -31,7 +31,8 @@ policy holds:
 - agent-platform:organization-flux, bound there, lets the organization's Flux
   ServiceAccount write the organization's kinds in its namespace only, and
   bind no role but user, editor and admin;
-- only the operator sets, changes or removes the organization labels;
+- only the operator sets, changes or removes the organization labels and
+  the namespace's orphaned annotation;
 - organization-admins is not deleted or emptied while its namespace lives;
 - a RoleBinding there binds no system: identity and no ServiceAccount of
   another namespace;
@@ -41,7 +42,8 @@ policy holds:
   binds no provider there (giantswarm/agent-platform#1269);
 - the HelmRelease field lock, also for the organization's Flux ServiceAccount;
 - an organization is deleted only with prune: enabled or while its parent
-  terminates;
+  terminates, and one applied from git only once its delete pull request
+  merged (Orphaned, reason DeleteMerged);
 - the EgressPolicy floor;
 - the operator's copies are the operator's;
 - the sandbox shape holds with a Kyverno PolicyException for agents-* in place.
@@ -329,6 +331,19 @@ def apo(name, namespace, prune=None):
     return {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "AgentPlatformOrganization", "metadata": meta, "spec": {}}
 
 
+# The organizations the operator judges applied from git, by the status it
+# writes: name -> (Orphaned status, reason).
+ORPHANED = {"in-git": ("False", "InInventory"), "lost": ("True", "MissingFromGit"), "merged": ("True", "DeleteMerged")}
+
+
+def set_orphaned(name, status, reason):
+    condition = {"type": "Orphaned", "status": status, "reason": reason, "message": "test",
+                 "lastTransitionTime": "2026-01-01T00:00:00Z"}
+    args = ["patch", "agentplatformorganization", name, "-n", PARENT, "--subresource=status", "--type=merge",
+            "-p", json.dumps({"status": {"conditions": [condition]}})]
+    must(kubectl(args), f"set Orphaned {status}/{reason} on {PARENT}/{name}")
+
+
 def helmrelease(name, namespace, **spec_extra):
     spec = {"interval": "10m", "chartRef": {"kind": "OCIRepository", "name": "agent"}, "serviceAccountName": "kagent-flux",
             "values": {"agent": {"name": name}}}
@@ -391,6 +406,7 @@ def fixtures():
     objects = [
         workerpool("kagent", replicas=1),
         apo("payments", PARENT), apo("retired", PARENT, prune="enabled"), apo("kept", PARENT, prune="disabled"), apo("gone", GONE),
+        *(apo(n, PARENT, prune="enabled") for n in ORPHANED),
         rb("organization-admins", ORG, role="agent-platform:admin"), rb("organization-admins", OLD, role="agent-platform:admin"),
         rb("members", ORG),
         # organizations-admin: alice by ClusterRoleBinding; carol in her
@@ -410,6 +426,8 @@ def fixtures():
     ]
     for o in objects:
         must(create(o, dry=False), f"create {o['kind']} {o['metadata'].get('namespace', '')}/{o['metadata']['name']}")
+    for n, (status, reason) in ORPHANED.items():
+        set_orphaned(n, status, reason)
     for n in (OLD, GONE):
         must(kubectl(["delete", "namespace", n, "--wait=false"]), f"delete namespace {n}")
 
@@ -740,6 +758,15 @@ def prove_labels():
     case("a cluster-admin changes another label of an organization namespace",
          patch("namespace", ORG, None, {"metadata": {"labels": {"team": "payments"}}}, as_=PERSON))
     case("the operator changes an organization label", patch("namespace", ORG, None, {"metadata": {"labels": {"agent-platform.giantswarm.io/parent": "org-other"}}}, as_=OP))
+    orphaned = {"metadata": {"annotations": {"agent-platform.giantswarm.io/orphaned": "MissingFromGit"}}}
+    case("a cluster-admin sets no orphaned annotation on a namespace", patch("namespace", ORG, None, orphaned, as_=PERSON),
+         "agent-platform-organization-labels", "agent-platform.giantswarm.io/orphaned")
+    case("a cluster-admin creates no namespace with the orphaned annotation",
+         create({**ns("plain-orphaned"), "metadata": {"name": "plain-orphaned", "annotations": orphaned["metadata"]["annotations"]}}, as_=PERSON),
+         "agent-platform-organization-labels", "agent-platform.giantswarm.io/orphaned")
+    case("a cluster-admin sets another annotation of an organization namespace",
+         patch("namespace", ORG, None, {"metadata": {"annotations": {"team": "payments"}}}, as_=PERSON))
+    case("the operator sets the orphaned annotation", patch("namespace", ORG, None, orphaned, as_=OP))
 
 
 def prove_admins_binding():
@@ -814,6 +841,12 @@ def prove_delete_intent():
          "agent-platform-organization-delete-intent")
     case("an organization with prune: enabled is deleted", delete("agentplatformorganization", "retired", PARENT, as_=PERSON))
     case("an organization is deleted while its parent terminates", delete("agentplatformorganization", "gone", GONE, as_=PERSON))
+    in_git = "erased only once its delete pull request merged"
+    case("an organization in git with prune: enabled is not deleted", delete("agentplatformorganization", "in-git", PARENT, as_=PERSON),
+         "agent-platform-organization-delete-intent", in_git)
+    case("an organization missing from git with prune: enabled is not deleted", delete("agentplatformorganization", "lost", PARENT, as_=PERSON),
+         "agent-platform-organization-delete-intent", in_git)
+    case("an organization whose delete pull request merged is deleted", delete("agentplatformorganization", "merged", PARENT, as_=PERSON))
 
 
 def prove_egress_floor():
