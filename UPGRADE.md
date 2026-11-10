@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (agent-platform-operator 0.3: the last revision of an organization's file)
+
+giantswarm/giantswarm#38891: `components.agent-platform-operator.versionRange` is `>=0.3.0 <0.4.0`. agent-platform-operator 0.3.0 records `status.lastAppliedRevision` on every AgentPlatformOrganization applied by the installation Kustomization: that Kustomization's `status.lastAppliedRevision` while the organization is in its settled inventory, kept while the organization is `Orphaned`. agent-manager 2.23.0, inside its current range, reports it on the organization tools as `lastAppliedRevision` and, in commit mode, `lastAppliedRevisionUrl`, the GitHub commit that last held the organization's file. The CRD gains the optional status field; nothing the chart renders changes otherwise: no value, no RBAC rule and no flag of the operator is new.
+
+### Operator action
+
+- **None.** An organization already missing from git when 0.3.0 starts has no `lastAppliedRevision`. To check one: `kubectl -n <parent> get agentplatformorganization <name> -o jsonpath='{.status.lastAppliedRevision}'`.
+- **An installation that pins the BOM**: move `agent-platform-operator` to `0.3.0`, and `agent-manager` to `2.23.0` for the commit link.
+
 ## \<current\> → \<next\> (agent-platform-operator 0.2: rbac-operator's admins become organization admins)
 
 giantswarm/agent-platform#1336: `components.agent-platform-operator.versionRange` is `>=0.2.0 <0.3.0`. With `agentPlatformOrganizations.enabled`, agent-platform-operator 0.2.0 mirrors more parent bindings into each organization namespace: besides every RoleBinding to `agent-platform:organizations-admin`, every RoleBinding to `cluster-admin` labelled `giantswarm.io/managed-by: rbac-operator` (in a Giant Swarm Organization's namespace `org-<name>`: `write-all-customer-group`, the installation's customer admin groups, and rbac-operator's copy of each RoleBindingTemplate that selects the organization). The mirror always binds `agent-platform:organizations-admin`, never `cluster-admin`, and keeps the User and Group subjects whose names do not start with `system:`. A `cluster-admin` RoleBinding written by hand in the parent is not mirrored. A mirror now goes as soon as the deletion of its parent binding starts, also while a finalizer holds the binding. Nothing the chart renders changes: no value, no CRD schema, no RBAC rule and no flag of the operator is new.
