@@ -120,7 +120,7 @@ PLACEHOLDER_PROVIDER_SECRET = {"name": "kagent-anthropic", "key": "ANTHROPIC_API
 AGENT_CHART_URL = "oci://gsoci.azurecr.io/charts/giantswarm/agent"
 # agent-manager.agentChart.semver as the connectivity chart defaults it: the
 # Generic chart 2.x renders one api.kagent.dev/v1alpha3 Agent.
-AGENT_CHART_SEMVER = ">=2.0.0 <3.0.0"
+AGENT_CHART_SEMVER = ">=2.6.0 <3.0.0"
 # The toolset of the smoke's managed agents: a shipped muster preset, so the
 # agent chart renders the agent's own RemoteMCPServer — the toolset carrier,
 # the X-Muster-Toolset header on it; ["preset:none"] alone renders none.

@@ -580,7 +580,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.skill-manager.gatedRoster | bool | `true` |  |
 | components.default-agent.chart | string | `"agent"` |  |
 | components.default-agent.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.default-agent.versionRange | string | `">=2.0.0 <3.0.0"` |  |
+| components.default-agent.versionRange | string | `">=2.6.0 <3.0.0"` |  |
 | components.default-agent.valuesFile | string | `"agents/default-agent/values.yaml"` |  |
 | components.default-agent.injectGlobal | bool | `false` |  |
 | components.default-agent.inKagentNamespace | bool | `true` |  |
@@ -1420,7 +1420,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
 | agent-manager.harness.egress | object | `{}` | The origins a coding agent reaches, by the name of its Harness ({claude: [https://github.com, …], codex: […], omp: […]}): the installation's forge and git hosts plus the toolchain's registries; the model host is not listed (kagent adds the ModelConfig's destination). agent-manager writes the list into the Agent's spec.egress and the Substrate egress gate refuses any other origin with a 403; agent-manager refuses an agent on a coding Harness without an entry. Empty (the default) is not forwarded and the agent-manager chart's own list applies: GitHub for claude (and codex from agent-manager 2.2.0) plus the Go and npm registries for claude-go and claude-node. Each kagent.harnesses entry an installation adds gets its entry here; an installation whose forge is not GitHub sets every Harness it serves: Helm merges the map into the chart's, so a Harness left out keeps the GitHub list. Needs agent-manager 1.11.0 or later. |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
-| agent-manager.agentChart.semver | string | `">=2.0.0 <3.0.0"` |  |
+| agent-manager.agentChart.semver | string | `">=2.6.0 <3.0.0"` |  |
 | agent-manager.skills.repositories | list | `[]` |  |
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |

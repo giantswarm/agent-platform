@@ -1203,8 +1203,10 @@ components:  # @schema additionalProperties: true
     chart: agent
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # The agent chart line, moved with agent-manager.agentChart.semver
-    # (make verify-default-agent).
-    versionRange: ">=2.0.0 <3.0.0"
+    # (make verify-default-agent). PLACEHOLDER: 2.6.0, whose empty
+    # modelConfig.name renders no model (giantswarm/agent#130), is the floor
+    # once it is released.
+    versionRange: ">=2.6.0 <3.0.0"
     valuesFile: agents/default-agent/values.yaml
     injectGlobal: false
     # Installs where the agents live: the kagent component's namespace
@@ -1213,9 +1215,12 @@ components:  # @schema additionalProperties: true
     # The Agent's readiness (its model, its skills) is reported on the Agent,
     # never a reason to hold the platform's install or upgrade.
     disableWait: true
+    # No driftDetection: unpinned (defaultAgent.modelConfig), the Agent's
+    # model is agent-manager's.
     # On the HelmRelease and the Agent: agent-manager lists it read-only
     # (managed-by) and reports it as the installation's default agent (default).
-    labels:
+    # Labels set here add to these two on the Agent, never drop them.
+    labels:  # @schema additionalProperties: true
       agent-platform.giantswarm.io/managed-by: agent-platform
       agent-platform.giantswarm.io/default: "true"
     # Travels to the connectivity release only while on, which then wires the
@@ -5200,8 +5205,9 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # 1.x rendered the kagent.dev AgentTemplate of the 1.x kagent line, 0.x
     # the v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases
     # of the line reach the agents on their own; the major is the API boundary
-    # and moves only with this chart. The floor moves with components.kagent.
-    semver: ">=2.0.0 <3.0.0"
+    # and moves only with this chart. The floor moves with components.kagent
+    # and components.default-agent.versionRange.
+    semver: ">=2.6.0 <3.0.0"
   # Deprecated: set skillManager.sources. Read only while agent-manager does
   # not pin through the skill-manager (components.skill-manager off, or
   # agent-manager below agent-platform.agentManager.skillManagerFloor), as
@@ -5434,10 +5440,8 @@ defaultAgent:
   displayName: "General Assistant"  # @schema minLength: 1
   # The default agent's one-line description in the portal's agent lists.
   description: "Start here. Handles everyday tasks with your connectors and helps you find or create the right agent."
-  # ModelConfig in kagent the default agent runs on; empty: the kagent
-  # namespace's default, the ModelConfig annotated
-  # agent-platform.giantswarm.io/is-default-model-config: "true", read at
-  # install and upgrade.
+  # ModelConfig in kagent the default agent is pinned to. Empty: it follows
+  # the kagent namespace's default model at runtime (agent-manager sets it).
   modelConfig: ""
 
 # === Cluster manager (cluster-manager) ===

@@ -35,7 +35,7 @@ spec:
   values:
     agentChart:
       ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
-      semver: '>=2.0.0 <3.0.0'
+      semver: '>=2.6.0 <3.0.0'
     flux:
       helmReleaseServiceAccount: kagent-flux
     fullnameOverride: agent-manager
@@ -143,7 +143,7 @@ spec:
     agent-manager:
       agentChart:
         ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
-        semver: '>=2.0.0 <3.0.0'
+        semver: '>=2.6.0 <3.0.0'
       fullnameOverride: agent-manager
       harness:
         egress: {}
@@ -1894,7 +1894,10 @@ spec:
         contract is in `agent-platform-tools`.
     labels:
       agent-platform.giantswarm.io/default: "true"
+      agent-platform.giantswarm.io/follows-default-model: "true"
       agent-platform.giantswarm.io/managed-by: agent-platform
+    modelConfig:
+      name: ""
     muster:
       url: http://muster.default.svc.cluster.local:8090/mcp
     skills: []
@@ -3236,7 +3239,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=2.0.0 <3.0.0"
+    semver: ">=2.6.0 <3.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

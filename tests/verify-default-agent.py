@@ -9,7 +9,14 @@
   agent-manager's agentChart.semver; its values are
   agents/default-agent/values.yaml with the derived muster.url, iconUrl,
   displayName and description (defaultAgent; the display name also in the
-  system message), toolset, labels and modelConfig.name.
+  system message), toolset, labels and modelConfig.name. The range's floor is
+  at least 2.6.0, the agent chart whose empty modelConfig.name renders no model.
+- The model: defaultAgent.modelConfig as modelConfig.name; unset,
+  modelConfig.name "" and the label follows-default-model "true", and
+  agent-manager gets defaultAgentModel.agent default-agent from
+  agent-platform.agentManager.skillManagerFloor on, so it sets the namespace's
+  default model at runtime. No Helm lookup. components.default-agent.labels add
+  to managed-by and default on the Agent, never drop them.
 - The working tree and a pre-release carry no skills; stamped by
   hack/stamp-release-commit.sh, the packaged chart pins every skill of skills/
   to that commit (the tag pipeline's step, simulated on a copy); a release
@@ -53,6 +60,9 @@ HELM = os.environ.get("HELM") or "helm"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 NAME = "default-agent"
 LABEL = {"agent-platform.giantswarm.io/managed-by": "agent-platform", "agent-platform.giantswarm.io/default": "true"}
+FOLLOWS = {**LABEL, "agent-platform.giantswarm.io/follows-default-model": "true"}
+# The agent chart release whose empty modelConfig.name renders no model (giantswarm/agent#130).
+AGENT_CHART_FLOOR = (2, 6, 0)
 PLATFORM = "https://github.com/giantswarm/agent-platform"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 BASE = [
@@ -134,6 +144,14 @@ values = yaml.safe_load(open(f"{META}/values.yaml"))
 semver = values["agent-manager"]["agentChart"]["semver"]
 if values["components"][NAME]["versionRange"] != semver:
     fail(f"components.{NAME}.versionRange {values['components'][NAME]['versionRange']!r} is not agent-manager.agentChart.semver {semver!r}: the default agent runs the agent chart line agent-manager composes")
+floor = tuple(int(x) for x in semver.split()[0].lstrip(">=").split("-")[0].split("."))
+if not semver.startswith(">=") or floor < AGENT_CHART_FLOOR or not semver.endswith("<3.0.0"):
+    fail(f"agent-manager.agentChart.semver {semver!r}: want a 2.x range from {'.'.join(map(str, AGENT_CHART_FLOOR))}, whose empty modelConfig.name renders no model")
+helpers = (pathlib.Path(META) / "templates/_helpers.tpl").read_text()
+derived = helpers[helpers.index('{{- define "agent-platform.defaultAgent.derived" -}}'):]
+derived = derived[:derived.index("\n{{/*")]
+if "lookup" in derived or 'define "agent-platform.defaultAgent.modelConfig"' in helpers:
+    fail("the default agent's model is looked up at render: agent-manager follows the namespace's default model at runtime")
 skills = sorted(p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md"))
 installation = values["skillManager"]["sources"]
 
@@ -160,7 +178,7 @@ checks = {
     "install/upgrade disableWait": ((spec["install"].get("disableWait"), spec["upgrade"].get("disableWait")), (True, True)),
     "targetNamespace": (spec["targetNamespace"], "kagent"),
     "HelmRelease labels": ({k: hr["metadata"]["labels"].get(k) for k in LABEL}, LABEL),
-    "Agent labels": (v.get("labels"), LABEL),
+    "Agent labels (unpinned: follows the default model)": (v.get("labels"), FOLLOWS),
     "chart": (oci["spec"]["url"], "oci://gsoci.azurecr.io/charts/giantswarm/agent"),
     "range": (oci["spec"]["ref"]["semver"], semver),
     "dependsOn": (sorted(d["name"] for d in spec["dependsOn"]), ["agent-manager", "kagent", "muster"]),
@@ -170,8 +188,7 @@ checks = {
     "toolset": (v["toolset"], ["preset:full"]),
     "systemMessage carries no installation name": ("this installation is" in v["agent"]["systemMessage"], False),
     "muster.url": (v["muster"]["url"], "http://muster.agent-platform.svc.cluster.local:8090/mcp"),
-    # Unset and no cluster to look the namespace's default up in (helm template).
-    "modelConfig (unset, no annotated default found)": (v.get("modelConfig"), None),
+    "modelConfig (unset: none, agent-manager sets it)": (v.get("modelConfig"), {"name": ""}),
     "skills (the working tree is unstamped)": (v["skills"], []),
     "no global": ("global" in v, False),
 }
@@ -182,8 +199,18 @@ v = find(render(META, *ON), "HelmRelease", NAME)["spec"]["values"]
 if v["agent"].get("iconUrl") != f"https://avatars.example.com/v1/{NAME}.png":
     fail(f"{NAME}: without a route hostname the avatar is not on avatars.<global.domain>: {v['agent']!r}")
 v = find(render(META, *ON, "--set", "components.dicebear.enabled=false", "--set", "defaultAgent.modelConfig=claude-opus"), "HelmRelease", NAME)["spec"]["values"]
-if v.get("modelConfig") != {"name": "claude-opus"} or "iconUrl" in v["agent"]:
-    fail(f"{NAME}: defaultAgent.modelConfig is not its modelConfig.name, or an iconUrl renders without DiceBear: {v.get('modelConfig')!r}, {v['agent']!r}")
+if v.get("modelConfig") != {"name": "claude-opus"} or v.get("labels") != LABEL or "iconUrl" in v["agent"]:
+    fail(f"{NAME}: defaultAgent.modelConfig is not its modelConfig.name without the follow label, or an iconUrl renders without DiceBear: {v.get('modelConfig')!r}, {v.get('labels')!r}, {v['agent']!r}")
+v = find(render(META, *ON, "--set", f"components.{NAME}.labels.team=x", "--set-string", f"components.{NAME}.labels.agent-platform\\.giantswarm\\.io/default=false",
+                "--set", f"components.{NAME}.labels.agent-platform\\.giantswarm\\.io/managed-by=me"), "HelmRelease", NAME)["spec"]["values"]
+if v.get("labels") != {**FOLLOWS, "team": "x"}:
+    fail(f"{NAME}: components.{NAME}.labels drop or change managed-by/default on the Agent, or add nothing: {v.get('labels')!r}")
+# agent-manager follows the default model for the default agent from the release that takes the key.
+for what, args, want in (("below the floor", [*ON], None), ("from the floor", [*ON, *FLOORS], {"agent": NAME}),
+                         ("the default agent off", [*ON, *FLOORS, "--set", f"components.{NAME}.enabled=false"], None)):
+    got = find(render(META, *args), "HelmRelease", "agent-manager")["spec"]["values"].get("defaultAgentModel")
+    if got != want:
+        fail(f"agent-manager, {what}: defaultAgentModel {got!r}, want {want!r}")
 v = find(render(META, *ON, "--set", "defaultAgent.displayName=Swarmy", "--set", "defaultAgent.description=Ask me."), "HelmRelease", NAME)["spec"]["values"]
 if (v["agent"]["displayName"], v["agent"]["description"]) != ("Swarmy", "Ask me.") or "[[" in v["agent"]["systemMessage"] or not v["agent"]["systemMessage"].startswith("Your name is Swarmy. "):
     fail(f"{NAME}: defaultAgent.displayName/description are not its agent.displayName/description and the system message's name: {v['agent']!r}")
@@ -207,7 +234,7 @@ for what, args, want in (("derived", [*ON, *KG], "kagent/default-agent"),
 hr = find(render(META, *ON, "--set", "kagent.namespaceOverride=agents"), "HelmRelease", NAME)
 if hr["spec"]["targetNamespace"] != "agents":
     fail(f"{NAME}: targetNamespace {hr['spec']['targetNamespace']!r} does not follow kagent.namespaceOverride=agents")
-print(f"ok: {NAME} renders the agent chart into the kagent namespace with the derived values, no skills unstamped")
+print(f"ok: {NAME} renders the agent chart into the kagent namespace with the derived values, no skills unstamped; unpinned it follows the default model through agent-manager, no lookup")
 
 # The release pipeline's stamp, on copies of the chart, packaged as the pipeline packages them.
 with tempfile.TemporaryDirectory() as tmp:

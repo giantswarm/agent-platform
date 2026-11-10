@@ -291,7 +291,8 @@ The default agent is `default-agent` in the kagent namespace, shown as `defaultA
 |---|---|---|
 | `components.default-agent.enabled` | `true` | Deploys the agent while kagent, muster and agent-manager are on. The portal's meta-agent features use it. |
 | `klausGateway.a2a.defaultAgent` | `""` | The agent Slack's agent picker preselects. Empty: the default agent (`<kagent namespace>/default-agent`) while it is on. |
-| `defaultAgent.modelConfig` | `""` | The `ModelConfig` it runs on. Empty: the kagent namespace's `ModelConfig` annotated `agent-platform.giantswarm.io/is-default-model-config: "true"`, read at install and upgrade. |
+| `defaultAgent.modelConfig` | `""` | Pins the `ModelConfig` it runs on. Empty: it follows the kagent namespace's default model (annotated `agent-platform.giantswarm.io/is-default-model-config: "true"`) at runtime; agent-manager sets it. |
+| `components.default-agent.labels` | `managed-by`, `default` | Labels on its HelmRelease and Agent. Entries add to `managed-by` and `default` on the Agent, never drop them. |
 | `backstage.metaAgents.<role>` | unset | The agent behind a portal role, as `<installation>/<namespace>/<name>`. Roles: `generalInformation`, `agentManagement`, `workflowManagement`, `platformOperations`, `skillEvaluation`, `skillCreation`. Unset roles use the default agent while it is on. |
 | `skillManager.sources` | `[giantswarm/agent-skills]` | Skill sources for the skill-manager and the portal, as URLs or `{url, ref, path, readOnly}`. |
 | `skills.platformSource.enabled` | `true` | Lists the platform's `skills/` first, read-only, at the release tag. Set `false` where GitHub is unreachable. |
@@ -307,7 +308,7 @@ The default agent is `default-agent` in the kagent namespace, shown as `defaultA
 - `components.skill-manager` follows `components.agent-manager`. `enabled: false` leaves it out. `dependsOn: [muster]`; agent-manager depends on it.
 - Its `sources` are derived: the platform source, then `skillManager.sources`. An own `skill-manager.sources` fails the render.
 - GitHub access goes in `skill-manager.github` (`app.secretName` or `tokenSecret.name`). Empty reads public repositories anonymously.
-- agent-manager gets `skillManager.url`, the skill-manager's Service, from `agent-platform.agentManager.skillManagerFloor` on, and `installation` (`backstage.installationName`), which `get_info` reports for the default agent's start links. Below it, or with the skill-manager off, agent-manager gets `skills.repositories` as URLs, without the platform source. `agent-manager.skills.repositories` set while agent-manager uses the skill-manager fails the render.
+- agent-manager gets `skillManager.url`, the skill-manager's Service, from `agent-platform.agentManager.skillManagerFloor` on, `installation` (`backstage.installationName`), which `get_info` reports for the default agent's start links, and `defaultAgentModel.agent: default-agent` while the default agent is on. Below it, or with the skill-manager off, agent-manager gets `skills.repositories` as URLs, without the platform source. `agent-manager.skills.repositories` set while agent-manager uses the skill-manager fails the render.
 - Its NetworkPolicy admits its callers' namespaces (`networkPolicy.ingressNamespaces`, derived: muster's, the portal's, agent-manager's, the kagent namespace). The connectivity chart registers it as muster's MCP backend and opens agent-manager's and its migrate run's egress to it.
 - agent-manager's migrate run calls it with a service token: the connectivity chart generates the Secret `skill-manager-service-token` (skill-manager's and the kagent namespace) and the chart sets `skill-manager.serviceToken.secretName`.
 

@@ -551,6 +551,12 @@ in-process list of URLs (agent-platform.skills.repositories). */ -}}
 that takes the key (agent-platform.agentManager.skillManagerFloor). */ -}}
 {{- if include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "agent-manager" "version" (include "agent-platform.agentManager.skillManagerFloor" .root)) -}}
 {{- $_ := set $derived "installation" (include "agent-platform.portalInstallationName" .root) -}}
+{{- /* The default agent follows the namespace's default model while it
+carries the follows-default-model label (agent-platform.defaultAgent.derived):
+agent-manager sets its model, from the same release. */ -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "default-agent") -}}
+{{- $_ := set $derived "defaultAgentModel" (dict "agent" "default-agent") -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "default-agent" -}}
@@ -4659,9 +4665,9 @@ platform source. One line, no comment inside the define.
 {{/*
 PLACEHOLDER (giantswarm/giantswarm#38322): the first agent-manager release
 that takes skillManager.url and pins skills through the skill-manager, and
-takes installation (giantswarm/agent-manager#290); an earlier release's closed
-values schema refuses the keys. Set it to that release before raising
-components.agent-manager.versionRange to it. One line, no comment inside the
+takes installation and defaultAgentModel (giantswarm/agent-manager#290); an
+earlier release's closed values schema refuses the keys. Set it to that
+release before raising components.agent-manager.versionRange to it. One line, no comment inside the
 define.
 */}}
 {{- define "agent-platform.agentManager.skillManagerFloor" -}}2.24.0{{- end -}}
@@ -4875,10 +4881,12 @@ replaces `[[ .DisplayName ]]` in the file's system message), its avatar on the
 DiceBear host (the route's first hostname, else avatars.<global.domain>; none
 without either), the
 toolset preset:full (it acts as the person), the component's labels on the
-Agent too (components.default-agent.labels: managed-by, which agent-manager
-lists read-only, and default, which it reports as the installation's default
-agent), and its model
-(agent-platform.defaultAgent.modelConfig).
+Agent too (components.default-agent.labels) with managed-by, which
+agent-manager lists read-only, and default, which it reports as the
+installation's default agent, always set, and its model: defaultAgent.modelConfig,
+else modelConfig.name "" (no model) and the label
+agent-platform.giantswarm.io/follows-default-model: "true", by which
+agent-manager sets it to the kagent namespace's default model at runtime.
 Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 */}}
 {{- define "agent-platform.defaultAgent.derived" -}}
@@ -4899,38 +4907,14 @@ Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 {{- with dig "agent" "systemMessage" "" $file -}}
 {{- $_ := set $agent "systemMessage" (replace "[[ .DisplayName ]]" $displayName .) -}}
 {{- end -}}
-{{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:full") "labels" (index .Values.components "default-agent").labels -}}
+{{- $labels := mustMergeOverwrite (deepCopy ((index .Values.components "default-agent").labels | default dict)) (dict "agent-platform.giantswarm.io/default" "true" "agent-platform.giantswarm.io/managed-by" "agent-platform") -}}
+{{- $model := dig "modelConfig" "" $da | toString -}}
+{{- if not $model -}}
+{{- $_ := set $labels "agent-platform.giantswarm.io/follows-default-model" "true" -}}
+{{- end -}}
+{{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:full") "labels" $labels "modelConfig" (dict "name" $model) -}}
 {{- $_ := set $out "agent" $agent -}}
-{{- with include "agent-platform.defaultAgent.modelConfig" . -}}
-{{- $_ := set $out "modelConfig" (dict "name" .) -}}
-{{- end -}}
 {{- $out | toJson -}}
-{{- end -}}
-
-{{/*
-The ModelConfig the default agent runs on: defaultAgent.modelConfig, else the
-kagent namespace's default model, the ModelConfig annotated
-agent-platform.giantswarm.io/is-default-model-config: "true" (the first by
-name when several are; what agent-manager fills an omitted model from). The
-charts declare no model (no default-model-config), so the agent chart's
-default names none that exists. Empty when neither resolves: under `helm
-template`, on a first install before the ModelConfig CRD, and with gitops.target
-(the lookup sees the installation, not the target); the next upgrade picks
-the default up.
-Usage: include "agent-platform.defaultAgent.modelConfig" $
-*/}}
-{{- define "agent-platform.defaultAgent.modelConfig" -}}
-{{- $name := dig "modelConfig" "" (.Values.defaultAgent | default dict) -}}
-{{- if and (not $name) (not (include "agent-platform.targetSecretName" .)) -}}
-{{- $defaults := list -}}
-{{- range (lookup "api.kagent.dev/v1alpha3" "ModelConfig" (include "agent-platform.kagent.namespace" .) "").items | default list -}}
-{{- if eq (toString (dig "metadata" "annotations" "agent-platform.giantswarm.io/is-default-model-config" "" .)) "true" -}}
-{{- $defaults = append $defaults .metadata.name -}}
-{{- end -}}
-{{- end -}}
-{{- with $defaults }}{{ $name = first (sortAlpha .) }}{{ end -}}
-{{- end -}}
-{{- $name -}}
 {{- end -}}
 
 {{/*
