@@ -11,7 +11,10 @@ the policy agent-platform-organizations-admin-rolebindings refuses them
 everywhere else (admission.yaml). The chart binds it to nobody: platform staff
 get it by a ClusterRoleBinding, a customer's platform team by a RoleBinding in
 its parent namespace, which agent-platform-operator mirrors into that parent's
-organization namespaces. A cluster-admin already holds every right it grants.
+organization namespaces. From agent-platform-operator 0.2.0 the operator also
+mirrors, bound to this role, the Users and Groups of rbac-operator's
+cluster-admin RoleBindings in the parent namespace (the installation's
+customer admin groups). A cluster-admin already holds every right it grants.
 */ -}}
 {{- if include "agent-platform.organizations.enabled" . }}
 ---
