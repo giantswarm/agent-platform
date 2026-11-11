@@ -77,6 +77,24 @@ else empty.
 {{- end -}}
 
 {{/*
+The providers an organization's ModelConfig reaches the LLM listener with, as a
+JSON list: agent-platform.llmRouting.providers, plus openai when model-manager
+serves (agent-platform.modelManager.serves). Its models attach to the listener
+as AgentgatewayModels and are called in the OpenAI format, at the listener's
+/v1. The extra openai is the organizations' only: in the kagent namespace an
+OpenAI ModelConfig without a baseUrl keeps calling its provider directly, as
+the listener has no route to the OpenAI API unless llmRouting.models names it.
+Usage: include "agent-platform.tenants.providers" . | fromJsonArray
+*/}}
+{{- define "agent-platform.tenants.providers" -}}
+{{- $out := include "agent-platform.llmRouting.providers" . | fromJsonArray -}}
+{{- if and (include "agent-platform.modelManager.serves" .) (not (has "openai" $out)) -}}
+{{- $out = append $out "openai" -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
 The subjects of a binding, as a YAML list: the lists given, each subject once.
 Usage: include "agent-platform.tenants.subjects" (list .Values.tenants.platform.editors .Values.tenants.platformTeam)
 */}}
@@ -84,6 +102,25 @@ Usage: include "agent-platform.tenants.subjects" (list .Values.tenants.platform.
 {{- $subjects := list -}}
 {{- range . -}}{{- range . -}}{{- if not (has . $subjects) -}}{{- $subjects = append $subjects . -}}{{- end -}}{{- end -}}{{- end -}}
 {{- with $subjects }}{{ toYaml . }}{{ end -}}
+{{- end -}}
+
+{{/*
+The subjects of muster's MCP-server viewers (muster-mcpservers.yaml), as a
+YAML list, each subject once: musterMcpServerViewers, or
+tenants.platform.users while musterMcpServerViewers is unset (null), so an
+installation's viewers stay as they are until it sets the key. An empty list
+binds nobody. giantswarm/agent-platform#1331: the platform tenant's
+tenants.platform.* can then go without muster's viewers. The meta chart's
+guard (agent-platform.muster.organizations) resolves the viewers the same way:
+change both together, and drop the fallback in both when tenants.platform.*
+is retired (giantswarm/giantswarm#38990, giantswarm/agent-manager#166).
+*/}}
+{{- define "agent-platform.muster.mcpServerViewers" -}}
+{{- $viewers := .Values.musterMcpServerViewers -}}
+{{- if kindIs "invalid" $viewers -}}
+{{- $viewers = dig "platform" "users" list (.Values.tenants | default dict) -}}
+{{- end -}}
+{{- include "agent-platform.tenants.subjects" (list $viewers) -}}
 {{- end -}}
 
 {{/*

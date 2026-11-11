@@ -1443,6 +1443,35 @@
             "type": "object",
             "additionalProperties": true
         },
+        "musterMcpServerViewers": {
+            "type": [
+                "array",
+                "null"
+            ],
+            "description": "muster's MCP-server viewers (giantswarm/agent-platform#1331): list (get, watch) on muster's MCPServers in muster's namespace (agent-platform:mcpserver-viewer). Unset (null), they are tenants.platform.users. An empty list binds nobody.",
+            "items": {
+                "type": "object",
+                "required": [
+                    "kind",
+                    "name"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "apiGroup": {
+                        "type": "string"
+                    },
+                    "kind": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "namespace": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "networkPolicy": {
             "type": "object",
             "additionalProperties": false,
@@ -2036,6 +2065,9 @@
                 "instances": {
                     "type": "integer"
                 },
+                "maxSlotWalKeepSize": {
+                    "type": "string"
+                },
                 "namespace": {
                     "type": "string"
                 },
@@ -2150,7 +2182,7 @@
                         },
                         "users": {
                             "type": "array",
-                            "description": "Every signed-in person: agent-platform:user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC \"everyone\" group instead.",
+                            "description": "Every signed-in person: agent-platform:platform-user in the kagent namespace, and, while musterMcpServerViewers is unset, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC \"everyone\" group instead.",
                             "items": {
                                 "type": "object",
                                 "required": [

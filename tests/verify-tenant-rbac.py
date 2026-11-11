@@ -11,7 +11,8 @@ Each case pins one property of the render:
   HelmReleases, Agents, AgentTemplates and RemoteMCPServers and reads the
   agent chart's OCIRepository without writing it (giantswarm/agent-platform#1267);
   the admin also writes ModelConfigs, EgressPolicies and RoleBindings, places
-  Secrets (create, update, patch, delete) and reads none, may `bind` the
+  Secrets (create, update, delete) and reads none (a patch answers with the
+  stored Secret, so it reads too), may `bind` the
   three roles only, and no role carries `escalate` or reads a Secret;
   agent-platform:platform-user holds the user's rules but the EgressPolicies;
 - the ValidatingAdmissionPolicy agent-platform-tenant-egress-credentials
@@ -40,7 +41,14 @@ Each case pins one property of the render:
   tenants.platform.editors plus tenants.platformTeam; an empty list renders no
   binding; with kagent off, none of the roles and bindings render;
 - muster's MCPServers: `list` (get, watch) in the release namespace for
-  tenants.platform.users, whether kagent is on or not;
+  musterMcpServerViewers, or tenants.platform.users while it is unset, whether
+  kagent is on or not; an own list binds the viewers and leaves
+  agent-platform:platform-user alone, an empty one binds nobody, and with
+  tenants.platform's lists empty in the meta chart (or tenants.platform unset
+  in the connectivity chart) agent-platform:platform-user is not bound in
+  kagent and agent-platform:editor is bound to tenants.platformTeam only, or
+  not at all while it is empty; rendered from the values the meta chart hands
+  its connectivity release (giantswarm/agent-platform#1331);
 - the meta chart appends tenants.platformTeam to muster's mcpserver-editor and
   workflow-editor subjects (each subject once) and leaves them alone while the
   list is empty.
@@ -51,6 +59,7 @@ Needs PyYAML. HELM selects the binary.
 import os
 import subprocess
 import sys
+import tempfile
 
 import yaml
 
@@ -76,6 +85,7 @@ TEAM = [
 ADMINS = ["giantswarm-ad:giantswarm-admins", "giantswarm-github:giantswarm:giantswarm-admins"]
 ROLES = ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
 WRITES = {"create", "update", "patch", "delete"}
+SECRET_READS = {"get", "list", "watch", "patch"}
 
 
 def fail(msg: str) -> None:
@@ -126,7 +136,11 @@ def check_roles(docs: list) -> None:
         sets[name] = grants(role["rules"])
         if any(v == "escalate" for _, _, v, _ in sets[name]):
             fail(f"ClusterRole {name} carries escalate")
-        reads = {t for t in sets[name] if t[1] == "secrets" and t[2] in ("get", "list", "watch")}
+        # A patch answers with the stored object, data included: it reads.
+        # So does a delete with Orphan or Foreground propagation or of a
+        # Secret a finalizer holds; admission refuses that one
+        # (agent-platform-organization-secret-deletes), not RBAC.
+        reads = {t for t in sets[name] if t[1] == "secrets" and t[2] in SECRET_READS}
         if reads:
             fail(f"ClusterRole {name} reads Secrets: {sorted(reads, key=str)}")
     user, editor, admin = (sets[n] for n in ROLES)
@@ -159,7 +173,7 @@ def check_roles(docs: list) -> None:
     ok("agent-platform:editor writes what agent-manager writes as the caller, reads the agent chart's OCIRepository, and writes no OCIRepository, ModelConfig, EgressPolicy, Secret or RoleBinding")
     for g, res in (("api.kagent.dev", "modelconfigs"), ("api.kagent.dev", "egresspolicies"), ("", "secrets"),
                    ("rbac.authorization.k8s.io", "rolebindings")):
-        for v in WRITES:
+        for v in WRITES - (SECRET_READS if res == "secrets" else set()):
             if (g, res, v, None) not in admin:
                 fail(f"agent-platform:admin cannot {v} {res}.{g}")
     binds = {t[3] for t in admin if t[2] == "bind"}
@@ -317,15 +331,33 @@ def check_platform_tenant(docs: list, want_editors: list) -> None:
         fail(f"agent-platform:editor is bound to {subject_names(editor)}, want {want_editors}")
 
 
-def check_muster_viewer(docs: list) -> None:
+def check_muster_viewer(docs: list, want: list = None) -> None:
+    want = want or ["system:authenticated"]
     role = find(docs, "Role", "agent-platform:mcpserver-viewer", "agent-platform")
     rb = find(docs, "RoleBinding", "agent-platform:mcpserver-viewer", "agent-platform")
     if role is None or rb is None:
         fail("muster's MCPServers are not listed to every signed-in person in the release namespace")
     if grants(role["rules"]) != {("muster.giantswarm.io", "mcpservers", v, None) for v in ("get", "list", "watch")}:
         fail(f"Role agent-platform:mcpserver-viewer grants {role['rules']}")
-    if subject_names(rb) != ["system:authenticated"]:
-        fail(f"agent-platform:mcpserver-viewer is bound to {subject_names(rb)}")
+    if subject_names(rb) != want:
+        fail(f"agent-platform:mcpserver-viewer is bound to {subject_names(rb)}, want {want}")
+
+
+def render_from_meta(meta: str, conn: str, args: list) -> list:
+    """The connectivity chart rendered from the values of the connectivity
+    HelmRelease the meta chart renders with args."""
+    for d in render(meta, ["-f", f"{meta}/ci/ci-values.yaml", *args]):
+        if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "agent-platform-connectivity":
+            values = d["spec"]["values"]
+            break
+    else:
+        fail("no agent-platform-connectivity HelmRelease in the meta render")
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump(values, f)
+    try:
+        return render(conn, ["--namespace", "agent-platform", "-f", f.name])
+    finally:
+        os.unlink(f.name)
 
 
 def check_meta(chart: str) -> None:
@@ -391,6 +423,51 @@ def main() -> None:
         if find(empty, "RoleBinding", name):
             fail(f"RoleBinding {name} renders with no subjects")
     ok("an empty subject list renders no binding")
+
+    viewers = ["--set-json", 'musterMcpServerViewers=[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"acme:everyone"}]']
+    own = render(conn, [*CONN, "--set", "components.kagent.enabled=true", *viewers])
+    check_muster_viewer(own, ["acme:everyone"])
+    check_platform_tenant(own, ADMINS)
+    ok("musterMcpServerViewers binds muster's viewers; agent-platform:platform-user stays with tenants.platform.users")
+
+    none = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set-json", "musterMcpServerViewers=[]"])
+    if find(none, "RoleBinding", "agent-platform:mcpserver-viewer"):
+        fail("RoleBinding agent-platform:mcpserver-viewer renders with musterMcpServerViewers empty")
+    check_platform_tenant(none, ADMINS)
+    ok("an empty musterMcpServerViewers binds no viewer and does not fall back to tenants.platform.users")
+
+    # The platform tenant's retirement goes through the meta chart: Helm drops a
+    # null override, and the connectivity chart's own defaults would come back
+    # on its release, so the retirement empties the lists. Render the
+    # connectivity chart from the values the meta chart hands its release.
+    retired = render_from_meta(meta, conn, [*CONN[2:], "--set", "components.kagent.enabled=true",
+                                            "--set-json", "tenants.platform.users=[]",
+                                            "--set-json", "tenants.platform.editors=[]", *viewers])
+    for name in ("agent-platform:platform-user", "agent-platform:editor"):
+        if find(retired, "RoleBinding", name, "kagent"):
+            fail(f"RoleBinding {name} renders in the kagent namespace with tenants.platform's lists empty in the meta chart")
+    check_muster_viewer(retired, ["acme:everyone"])
+    ok("tenants.platform's lists empty in the meta chart: its connectivity release binds no platform tenant in kagent, muster's viewers still bound")
+
+    # With the platform team set, the retirement keeps its editor binding on
+    # purpose: agent-platform:editor in kagent, bound to the platform team only.
+    kept = render_from_meta(meta, conn, [*CONN[2:], "--set", "components.kagent.enabled=true",
+                                         "--set-json", "tenants.platform.users=[]",
+                                         "--set-json", "tenants.platform.editors=[]", *viewers, *TEAM])
+    if find(kept, "RoleBinding", "agent-platform:platform-user", "kagent"):
+        fail("RoleBinding agent-platform:platform-user renders in kagent with tenants.platform's lists empty and the platform team set")
+    editor = find(kept, "RoleBinding", "agent-platform:editor", "kagent")
+    if editor is None:
+        fail("RoleBinding agent-platform:editor is missing in kagent with tenants.platform's lists empty and tenants.platformTeam set: the platform team loses its editor binding")
+    if subject_names(editor) != ["acme:platform", "giantswarm-ad:giantswarm-admins"]:
+        fail(f"agent-platform:editor in kagent is bound to {subject_names(editor)}, want tenants.platformTeam only")
+    ok("tenants.platform's lists empty with tenants.platformTeam set: agent-platform:editor in kagent stays, bound to the platform team only")
+
+    unset = render(conn, [*CONN, "--set", "components.kagent.enabled=true", "--set", "tenants.platform=null", *viewers])
+    if find(unset, "RoleBinding", "agent-platform:platform-user", "kagent"):
+        fail("RoleBinding agent-platform:platform-user renders with tenants.platform unset in the connectivity chart")
+    check_muster_viewer(unset, ["acme:everyone"])
+    ok("tenants.platform unset in the connectivity chart: it renders, without the platform tenant's bindings")
 
     check_meta(meta)
 

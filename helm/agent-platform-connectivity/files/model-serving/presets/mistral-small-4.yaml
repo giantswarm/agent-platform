@@ -128,6 +128,7 @@ spec:
     # next to 16.5 GiB of weights.
     weightsGiB: 66
     overheadGiB: 60
-    # NVFP4 through vLLM's Marlin weight-only FP4 path: proven on the L40S (8.9), nothing below it
-    # is (giantswarm/agent-platform#832).
-    minComputeCapability: "8.9"
+    # NVFP4 weights run through vLLM's weight-only FP4 Marlin path from
+    # compute capability 8.6 (A10G). Memory, GPU count and the runtime
+    # recipe still decide which pool can host this preset.
+    minComputeCapability: "8.6"

@@ -1,13 +1,16 @@
 {{- /*
 muster's MCPServers are the servers for everyone (giantswarm/agent-platform#706;
-the agent-permissions plan, D9): every signed-in person (tenants.platform.users)
-may list them in muster's namespace, so none disappears once muster lists
-servers as the caller (giantswarm/muster#1494). Reading only: who writes them
-is muster's mcpserver-editor binding, which the meta chart extends with
-tenants.platformTeam.
+the agent-permissions plan, D9): muster's MCP-server viewers
+(musterMcpServerViewers, else tenants.platform.users; every signed-in person by
+default) may list them in muster's namespace, so none disappears once muster
+lists servers as the caller (giantswarm/muster#1494). The viewers are not the
+platform tenant's users (giantswarm/agent-platform#1331): this binding does not
+follow agent-platform:platform-user in the kagent namespace. Reading only: who
+writes them is muster's mcpserver-editor binding, which the meta chart extends
+with tenants.platformTeam.
 */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
-{{- with include "agent-platform.tenants.subjects" (list .Values.tenants.platform.users) }}
+{{- with include "agent-platform.muster.mcpServerViewers" . }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

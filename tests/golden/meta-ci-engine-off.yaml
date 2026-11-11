@@ -197,7 +197,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.22.0
+          tag: 2.23.2
       networkPolicy:
         egress:
           cidrs: []
@@ -1220,6 +1220,7 @@ spec:
             kind: Group
             name: giantswarm-github:giantswarm:giantswarm-admins
       replicaCount: 2
+    musterMcpServerViewers: null
     networkPolicy:
       additionalEgressCIDRs: []
       additionalEgressFQDNs: []
@@ -1367,6 +1368,7 @@ spec:
         name: ""
       imagePullSecrets: []
       instances: 3
+      maxSlotWalKeepSize: 4GB
       namespace: kagent
       primaryUpdateMethod: switchover
       resources:

@@ -1396,9 +1396,9 @@ components:  # @schema additionalProperties: true
     # (agent-platform-operator, its chart's name), and another targetNamespace
     # fails the render.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # A 0.2.x release rolls in without a change here, its CRD with it
+    # A 0.3.x release rolls in without a change here, its CRD with it
     # (CreateReplace); one that needs wiring of this chart is a minor
-    # release, 0.3.0, outside the range. 0.1.0 carries the CRD, the curated
+    # release, 0.4.0, outside the range. 0.1.0 carries the CRD, the curated
     # copies, organization cleanup, the ate-api CA projected from ClusterTrustBundles
     # (agent-platform-operator#2, #3, #7, #21) and the serviceAccountBindings
     # the meta chart derives: the credential providers' Secret readers bound
@@ -1409,8 +1409,12 @@ components:  # @schema additionalProperties: true
     # Group subjects of rbac-operator's cluster-admin RoleBindings of a parent
     # namespace as agent-platform:organizations-admin in its organization
     # namespaces (agent-platform-operator#38, giantswarm/agent-platform#1336);
-    # it needs no new wiring of this chart.
-    versionRange: ">=0.2.0 <0.3.0"
+    # it needs no new wiring of this chart. 0.3.0 records
+    # status.lastAppliedRevision, the last revision Flux applied an
+    # organization from, kept while it is Orphaned; agent-manager 2.23.0 links
+    # its commit (agent-platform-operator#37, #44, agent-manager#355). It
+    # needs no new wiring of this chart either.
+    versionRange: ">=0.3.0 <0.4.0"
     valuesFrom: agent-platform-operator
     # App-owned CRD: the chart ships agentplatformorganizations in its crds/
     # dir. CreateReplace makes Flux upgrade it with the app on every release
@@ -4141,6 +4145,13 @@ postgres:
   # restarts in place either way and writes fail for that time.
   # null renders neither field: the operator's defaults (restart) apply.
   primaryUpdateMethod: switchover  # @schema enum: [switchover, restart]
+  # Bound WAL retained by inactive HA replication slots on primaries and
+  # replicas. PostgreSQL enforces this at checkpoints; allow headroom for
+  # database growth and WAL bursts beyond this cap. A replica that exceeds
+  # the limit may need rebuilding from the primary or a verified backup.
+  # null or "-1" selects unlimited retention; size this with storage.size.
+  # The meta chart forwards null as "-1" to preserve it across both renders.
+  maxSlotWalKeepSize: 4GB
   storage:
     size: 20Gi
     # EKS: gp3. Azure: managed-premium. on-prem: rook-ceph or local-path.
@@ -5369,7 +5380,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.22.0
+      tag: 2.23.2
     dryRun: false
     gitopsNamespaces: []
 
@@ -5651,9 +5662,10 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # Sessions for the session directories' cleanup, which no tenant role grants.
 tenants:
   platform:
-    # -- Every signed-in person: bound to agent-platform:user in the kagent
-    # namespace, and to `list` (with get and watch) on muster's MCPServers in
-    # muster's namespace (the servers for everyone). RBAC subjects. The
+    # -- Every signed-in person: bound to agent-platform:platform-user in the
+    # kagent namespace, and, while musterMcpServerViewers is unset, to `list`
+    # (with get and watch) on muster's MCPServers in muster's namespace (the
+    # servers for everyone). RBAC subjects. The
     # default, system:authenticated, gives this to every user. It also gives
     # it to every ServiceAccount, so every pod in the cluster can read the
     # platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer
@@ -5681,6 +5693,21 @@ tenants:
   # release's values). Empty by default. A group is written as the API server
   # sees it (with the OIDC groups prefix of the installation).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+
+# -- muster's MCP-server viewers (giantswarm/agent-platform#1331): RBAC
+# subjects bound to `list` (with get and watch) on muster's MCPServers in
+# muster's namespace, the servers for everyone (the connectivity release's
+# Role and RoleBinding agent-platform:mcpserver-viewer). muster lists them as
+# the person once it lists as the caller, and always with
+# agentPlatformOrganizations.enabled, so a person not bound here sees none of
+# them. Unset (null), the default, the viewers are tenants.platform.users, so
+# nothing changes until an installation sets this key. Set it before
+# tenants.platform.users is emptied ([]; a null brings the default back): it
+# does not bind anyone in the kagent namespace.
+# An empty list binds nobody. A group is written as the API server sees it
+# (with the installation's OIDC groups prefix). system:authenticated also
+# binds every ServiceAccount.
+musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
 
 # === Agent Platform organizations (giantswarm/giantswarm#38891) ===
 # An AgentPlatformOrganization (agent-platform.giantswarm.io/v1alpha1, the
@@ -5726,7 +5753,8 @@ tenants:
 # the MCPServers of the namespaces labelled
 # agent-platform.giantswarm.io/organization (muster.mcpServerNamespaceSelector,
 # muster 5.58.0 or later), listed as the person: muster's OAuth server on the
-# dex provider and tenants.platform.users are then required. The
+# dex provider and muster's MCP-server viewers (musterMcpServerViewers, or
+# tenants.platform.users while it is unset) are then required. The
 # connectivity chart renders the ClusterRole agent-platform-tenant-flux the
 # operator binds.
 # The switch is the rollout gate, off by default for now: it turns on by default

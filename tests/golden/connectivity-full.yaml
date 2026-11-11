@@ -12016,7 +12016,7 @@ data:
         license: apache-2.0
         storageUri: oci://gsoci.azurecr.io/giantswarm/models/mistral-small-4-nvfp4:45331841b631
       requirements:
-        minComputeCapability: "8.9"
+        minComputeCapability: "8.6"
         overheadGiB: 60
         weightsGiB: 66
       resources:
@@ -13213,9 +13213,12 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["modelconfigs", "egresspolicies"]
     verbs: ["create", "update", "patch", "delete"]
+  # No patch: its response is the stored Secret, data included. A delete
+  # answered with the Secret (Orphan or Foreground propagation, a finalizer
+  # on it) is refused in admission (agent-platform-organization-secret-deletes).
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create", "update", "patch", "delete"]
+    verbs: ["create", "update", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

@@ -66,7 +66,7 @@ components:
   skill-manager:                 { versionRange: "0.1.0" }
   # The organizations' operator (components.agent-platform-operator, follows
   # agentPlatformOrganizations.enabled, off by default).
-  agent-platform-operator:       { versionRange: "0.2.0" }
+  agent-platform-operator:       { versionRange: "0.3.0" }
   # The standalone chart's extras (off by default; the pins apply when an
   # installation turns them on). Snapshot of the agent-platform-standalone
   # chart's tested pins on 2026-09-08; the kserve charts move together (one

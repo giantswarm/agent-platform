@@ -684,7 +684,10 @@ llmRouting:
   # in every organization namespace too (a second binding), where
   # agent-platform-tenant-model-routing refuses a baseUrl that is not the
   # listener; agentPlatformOrganizations.enabled fails the render without this
-  # policy. The hook reads the kagent namespace only.
+  # policy. With a serving model-manager, the organization namespaces also get
+  # an OpenAI policy (its models are called in the OpenAI format at the
+  # listener's /v1) when llmRouting.models names no OpenAI entry; the kagent
+  # namespace does not. The hook reads the kagent namespace only.
   #
   # Rendered only where the API server serves
   # admissionregistration.k8s.io/v1/MutatingAdmissionPolicy, which is Kubernetes
@@ -1880,6 +1883,13 @@ postgres:
   # restarts in place either way and writes fail for that time.
   # null renders neither field: the operator's defaults (restart) apply.
   primaryUpdateMethod: switchover  # @schema enum: [switchover, restart]
+  # Bound WAL retained by inactive HA replication slots on primaries and
+  # replicas. PostgreSQL enforces this at checkpoints; allow headroom for
+  # database growth and WAL bursts beyond this cap. A replica that exceeds
+  # the limit may need rebuilding from the primary or a verified backup.
+  # null or "-1" selects unlimited retention; size this with storage.size.
+  # The meta chart forwards null as "-1" to preserve it across both renders.
+  maxSlotWalKeepSize: 4GB
   storage:
     size: 20Gi
     # EKS: gp3. Azure: managed-premium. on-prem: rook-ceph or local-path.
@@ -2863,7 +2873,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.22.0
+      tag: 2.23.2
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
@@ -3029,8 +3039,9 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # documents every key and forwards it.
 tenants:
   platform:
-    # -- Every signed-in person: agent-platform:user in the kagent namespace,
-    # list (get, watch) on muster's MCPServers in muster's namespace. The
+    # -- Every signed-in person: agent-platform:platform-user in the kagent
+    # namespace, and, while musterMcpServerViewers is unset, list (get, watch)
+    # on muster's MCPServers in muster's namespace. The
     # default, system:authenticated, includes every ServiceAccount: every pod
     # with a token can read the platform tenant's Agents, RemoteMCPServer URLs
     # and muster's MCPServer specs. An installation can set its OIDC
@@ -3052,6 +3063,12 @@ tenants:
   # namespace beside platform.editors (the meta chart also adds it to muster's
   # editor bindings).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+
+# -- muster's MCP-server viewers (giantswarm/agent-platform#1331): list (get,
+# watch) on muster's MCPServers in muster's namespace
+# (agent-platform:mcpserver-viewer). Unset (null), they are
+# tenants.platform.users. An empty list binds nobody.
+musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
 
 # === Agent Platform organizations (giantswarm/giantswarm#38891) ===
 # An AgentPlatformOrganization (agent-platform.giantswarm.io/v1alpha1, the

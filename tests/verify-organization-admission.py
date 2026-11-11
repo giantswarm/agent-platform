@@ -41,7 +41,8 @@ policy holds:
   binds no provider there (giantswarm/agent-platform#1269);
 - the HelmRelease field lock, also for the organization's Flux ServiceAccount;
 - an organization is deleted only with prune: enabled or while its parent
-  terminates;
+  terminates, and one applied from git only once its delete pull request
+  merged (Orphaned, reason DeleteMerged);
 - the EgressPolicy floor;
 - the operator's copies are the operator's;
 - the sandbox shape holds with a Kyverno PolicyException for agents-* in place.
@@ -265,8 +266,14 @@ def patch(kind, name, ns, body, as_=None, groups=("system:masters",)):
     return kubectl(args, None, as_, groups)
 
 
-def delete(kind, name, ns, as_=None, groups=("system:masters",)):
+def replace(obj, as_=None, groups=("system:masters",)):
+    """An update without a resourceVersion: what a writer who may not read the object sends."""
+    return kubectl(["replace", "-f", "-", "--dry-run=server"], yaml.safe_dump(obj), as_, groups)
+
+
+def delete(kind, name, ns, as_=None, groups=("system:masters",), cascade=None):
     args = ["delete", kind, name, "--dry-run=server", "--wait=false"] + (["-n", ns] if ns else [])
+    args += [f"--cascade={cascade}"] if cascade else []
     return kubectl(args, None, as_, groups)
 
 
@@ -327,6 +334,19 @@ def apo(name, namespace, prune=None):
     if prune:
         meta["annotations"] = {"kustomize.toolkit.fluxcd.io/prune": prune}
     return {"apiVersion": "agent-platform.giantswarm.io/v1alpha1", "kind": "AgentPlatformOrganization", "metadata": meta, "spec": {}}
+
+
+# The organizations the operator judges applied from git, by the status it
+# writes: name -> (Orphaned status, reason).
+ORPHANED = {"in-git": ("False", "InInventory"), "lost": ("True", "MissingFromGit"), "merged": ("True", "DeleteMerged")}
+
+
+def set_orphaned(name, status, reason):
+    condition = {"type": "Orphaned", "status": status, "reason": reason, "message": "test",
+                 "lastTransitionTime": "2026-01-01T00:00:00Z"}
+    args = ["patch", "agentplatformorganization", name, "-n", PARENT, "--subresource=status", "--type=merge",
+            "-p", json.dumps({"status": {"conditions": [condition]}})]
+    must(kubectl(args), f"set Orphaned {status}/{reason} on {PARENT}/{name}")
 
 
 def helmrelease(name, namespace, **spec_extra):
@@ -391,6 +411,7 @@ def fixtures():
     objects = [
         workerpool("kagent", replicas=1),
         apo("payments", PARENT), apo("retired", PARENT, prune="enabled"), apo("kept", PARENT, prune="disabled"), apo("gone", GONE),
+        *(apo(n, PARENT, prune="enabled") for n in ORPHANED),
         rb("organization-admins", ORG, role="agent-platform:admin"), rb("organization-admins", OLD, role="agent-platform:admin"),
         rb("members", ORG),
         # organizations-admin: alice by ClusterRoleBinding; carol in her
@@ -410,6 +431,8 @@ def fixtures():
     ]
     for o in objects:
         must(create(o, dry=False), f"create {o['kind']} {o['metadata'].get('namespace', '')}/{o['metadata']['name']}")
+    for n, (status, reason) in ORPHANED.items():
+        set_orphaned(n, status, reason)
     for n in (OLD, GONE):
         must(kubectl(["delete", "namespace", n, "--wait=false"]), f"delete namespace {n}")
 
@@ -680,6 +703,44 @@ def prove_flux_role():
              "metadata": {"name": "minted", "namespace": ORG, "annotations": {"kubernetes.io/service-account.name": "kagent-flux"}}}
     case("a merged Secret is no ServiceAccount token", create(token, as_=FLUX_SA, groups=()), "agent-platform-organization-flux-writes",
          f"is no ServiceAccount token; refused: {ORG}/minted")
+    # An organization admin (acme-devs, bound by organization-admins) replaces
+    # a credential Secret by an update it cannot read back; one git applied
+    # stays git's, which admission tells from the stored labels.
+    def secret(name, labels=None):
+        return {"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+                "metadata": {"name": name, "namespace": ORG, **({"labels": labels} if labels else {})},
+                "data": {"apiKey": "c3ludGhldGlj"}}
+    from_git = {"kustomize.toolkit.fluxcd.io/name": ORG, "kustomize.toolkit.fluxcd.io/namespace": FLUX_NS}
+    must(create(secret("tenant-credential-from-git", from_git), dry=False), "create a Secret git applied")
+    must(create(secret("tenant-credential-by-people"), dry=False), "create a Secret people wrote")
+    admin = ("dana", ("acme-devs",))
+    case("an organization admin replaces no Secret git applied",
+         replace(secret("tenant-credential-from-git"), as_=admin[0], groups=admin[1]), "agent-platform-organization-git-secrets",
+         f"is changed in git; refused: {ORG}/tenant-credential-from-git")
+    case("an organization admin replaces a Secret people wrote",
+         replace(secret("tenant-credential-by-people"), as_=admin[0], groups=admin[1]))
+    case("the organization's Flux ServiceAccount changes a Secret its Kustomization applied",
+         replace(secret("tenant-credential-from-git", from_git), as_=FLUX_SA, groups=()))
+    # A delete answered with the stored Secret reads it: the admin, who may
+    # not get Secrets, deletes only with background propagation and only a
+    # Secret no finalizer holds.
+    held = secret("tenant-credential-held")
+    held["metadata"]["finalizers"] = ["example.com/hold"]
+    must(create(held, dry=False), "create a Secret a finalizer holds")
+    policy = "agent-platform-organization-secret-deletes"
+    for cascade in ("orphan", "foreground"):
+        case(f"an organization admin deletes no Secret with {cascade} propagation",
+             delete("secret", "tenant-credential-by-people", ORG, as_=admin[0], groups=admin[1], cascade=cascade), policy,
+             f"refused: {ORG}/tenant-credential-by-people")
+    case("an organization admin deletes no Secret a finalizer holds",
+         delete("secret", "tenant-credential-held", ORG, as_=admin[0], groups=admin[1], cascade="background"), policy,
+         f"refused: {ORG}/tenant-credential-held")
+    case("an organization admin deletes a Secret with background propagation",
+         delete("secret", "tenant-credential-by-people", ORG, as_=admin[0], groups=admin[1], cascade="background"))
+    case("an organization admin deletes a Secret with no propagation policy (agent-manager's delete)",
+         kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG}/secrets/tenant-credential-by-people?dryRun=All"], None, admin[0], admin[1]))
+    case("a requester that may get the Secret deletes it with orphan propagation",
+         delete("secret", "tenant-credential-held", ORG, cascade="orphan"))
     # A Flux controller acting as itself (a platform Kustomization) is not an
     # organization's Flux ServiceAccount.
     case("kustomize-controller as itself is not held as an organization's Flux ServiceAccount",
@@ -814,6 +875,12 @@ def prove_delete_intent():
          "agent-platform-organization-delete-intent")
     case("an organization with prune: enabled is deleted", delete("agentplatformorganization", "retired", PARENT, as_=PERSON))
     case("an organization is deleted while its parent terminates", delete("agentplatformorganization", "gone", GONE, as_=PERSON))
+    in_git = "erased only once its delete pull request merged"
+    case("an organization in git with prune: enabled is not deleted", delete("agentplatformorganization", "in-git", PARENT, as_=PERSON),
+         "agent-platform-organization-delete-intent", in_git)
+    case("an organization missing from git with prune: enabled is not deleted", delete("agentplatformorganization", "lost", PARENT, as_=PERSON),
+         "agent-platform-organization-delete-intent", in_git)
+    case("an organization whose delete pull request merged is deleted", delete("agentplatformorganization", "merged", PARENT, as_=PERSON))
 
 
 def prove_egress_floor():

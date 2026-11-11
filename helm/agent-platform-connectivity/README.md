@@ -1547,6 +1547,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | postgres.clusterName | string | `"kagent-pg"` |  |
 | postgres.instances | int | `3` |  |
 | postgres.primaryUpdateMethod | string | `"switchover"` |  |
+| postgres.maxSlotWalKeepSize | string | `"4GB"` |  |
 | postgres.storage.size | string | `"20Gi"` |  |
 | postgres.storage.storageClass | string | `""` |  |
 | postgres.image.name | string | `""` |  |
@@ -1784,7 +1785,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.22.0"` |  |
+| agentManager.migration.image.tag | string | `"2.23.2"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
@@ -1810,9 +1811,10 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
-| tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: agent-platform:user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC "everyone" group instead. |
+| tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: agent-platform:platform-user in the kagent namespace, and, while musterMcpServerViewers is unset, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC "everyone" group instead. |
 | tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: agent-platform:editor in the kagent namespace. |
 | tenants.platformTeam | list | `[]` | The customer's platform team: agent-platform:editor in the kagent namespace beside platform.editors (the meta chart also adds it to muster's editor bindings). |
+| musterMcpServerViewers | string | `nil` | muster's MCP-server viewers (giantswarm/agent-platform#1331): list (get, watch) on muster's MCPServers in muster's namespace (agent-platform:mcpserver-viewer). Unset (null), they are tenants.platform.users. An empty list binds nobody. |
 | agentPlatformOrganizations.enabled | bool | `false` | Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a model whose provider the listener serves (Anthropic, Mistral or OpenAI) and llmRouting.modelConfigPolicy.enabled on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain or apiHostnames: the render fails without them. The rollout gate: off by default for now (see above). |
 | agentPlatformOrganizations.fluxNamespace | string | `""` | The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace, and the operator's erasure.fluxNamespace (derived); set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces. |
 | agentPlatformOrganizations.fluxSource | object | `{"kind":"GitRepository","name":""}` | The installation's Flux source in fluxNamespace, which an organization's Kustomization applies from (agent-platform-operator's commitMode.sourceRef). The admission policy holds the operator's Kustomizations to this source. The name is required with fluxNamespace: the render fails without it. |
