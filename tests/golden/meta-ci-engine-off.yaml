@@ -31,7 +31,6 @@ spec:
   dependsOn:
     - name: muster
     - name: kagent
-    - name: skill-manager
   values:
     agentChart:
       ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
@@ -1816,9 +1815,7 @@ spec:
     remediation:
       retries: 5
   dependsOn:
-    - name: muster
     - name: kagent
-    - name: agent-manager
   values:
     agent:
       description: Start here. Handles everyday tasks with your connectors and helps you

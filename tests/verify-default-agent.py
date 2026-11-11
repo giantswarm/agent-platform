@@ -5,7 +5,8 @@
   named default-agent, into the kagent component's namespace,
   labelled managed-by agent-platform and default "true" (the HelmRelease and
   the Agent), only
-  while it, kagent, muster and agent-manager are on; its range is
+  while it, kagent, muster and agent-manager are on, after kagent alone (a
+  failed agent-manager or skill-manager never holds it); its range is
   agent-manager's agentChart.semver; its values are
   agents/default-agent/values.yaml with the derived muster.url, iconUrl,
   displayName and description (defaultAgent; the display name also in the
@@ -20,16 +21,18 @@
 - The working tree and a pre-release carry no skills; stamped by
   hack/stamp-release-commit.sh, the packaged chart pins every skill of skills/
   to that commit (the tag pipeline's step, simulated on a copy); a release
-  packaged unstamped fails its render.
+  packaged unstamped fails its render. skills.platformSource.ref (a full
+  commit id, nothing else) pins the default agent's skills and the platform
+  source to it, on a release and a pre-release alike.
 - components.skill-manager follows agent-manager (its own switch wins), one
   release from the catalog's skill-manager chart in the platform's namespace,
-  after muster, with agent-manager after it; the connectivity release gets its
+  after muster, with nothing after it; the connectivity release gets its
   roster entry and MCP backend entry only while it is on, and agent-manager's
   egress policy reaches it.
 - skillManager.sources feeds skill-manager.sources and
   backstage.skillsRepositories: the platform's source first (the portal: only
-  from its object-form floor), without a ref unless the chart is a published
-  release, off with skills.platformSource.enabled=false;
+  from its object-form floor), at v<version> on a published release, at the
+  h<sha> commit on a dev build, without a ref otherwise, off with skills.platformSource.enabled=false;
   backstage.skillsRepositories replaces skillManager.sources for the portal;
   one entry per url + ref + path; an entry for the platform's repository fails
   the render; an own skill-manager.sources fails. The schema takes URLs and
@@ -181,7 +184,7 @@ checks = {
     "Agent labels (unpinned: follows the default model)": (v.get("labels"), FOLLOWS),
     "chart": (oci["spec"]["url"], "oci://gsoci.azurecr.io/charts/giantswarm/agent"),
     "range": (oci["spec"]["ref"]["semver"], semver),
-    "dependsOn": (sorted(d["name"] for d in spec["dependsOn"]), ["agent-manager", "kagent", "muster"]),
+    "dependsOn (kagent alone)": (sorted(d["name"] for d in spec["dependsOn"]), ["kagent"]),
     "displayName (defaultAgent.displayName's default)": (v["agent"]["displayName"], "General Assistant"),
     "systemMessage names the display name": (v["agent"]["systemMessage"].startswith("Your name is General Assistant. You are the default agent"), True),
     "iconUrl (the route's hostname)": (v["agent"]["iconUrl"], f"https://avatars.example.org/v1/{NAME}.png"),
@@ -260,8 +263,23 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("a pre-release carries the unstamped skills")
     sm, _ = repos(docs)
     if sm[0] != {"url": PLATFORM, "path": "skills", "readOnly": True}:
-        fail(f"a pre-release's platform source is {sm[0]!r}, want it without a ref (the default branch)")
-print(f"ok: a stamped release pins the {len(skills)} skills of skills/ to its commit, an unstamped release fails, a pre-release carries none")
+        fail(f"a pre-release of no dev build shape: the platform source is {sm[0]!r}, want it without a ref (the default branch)")
+    # A dev build (gitsemver 3) reads the platform source at the commit it was built from.
+    sm, _ = repos(render(package(tmp, "9.9.9-r588f3d76t20261111120000ha6c12a3", stamp=False), *ON))
+    if sm[0] != {"url": PLATFORM, "ref": "a6c12a3", "path": "skills", "readOnly": True}:
+        fail(f"a dev build's platform source is {sm[0]!r}, want it at its h<sha> commit a6c12a3")
+    # skills.platformSource.ref wins over both, on the source and the default agent's pins.
+    REF = "fedcba9876543210fedcba9876543210fedcba98"
+    for what, chart in (("release 9.9.9", release), ("dev build", dev)):
+        docs = render(chart, *ON, "--set", f"skills.platformSource.ref={REF}")
+        got = sorted(find(docs, "HelmRelease", NAME)["spec"]["values"]["skills"], key=lambda e: e["name"])
+        want = [{"name": s, "path": f"skills/{s}", "git": {"url": PLATFORM, "commit": REF}} for s in skills]
+        sm, _ = repos(docs)
+        if got != want or sm[0] != {"url": PLATFORM, "ref": REF, "path": "skills", "readOnly": True}:
+            fail(f"{what}, skills.platformSource.ref={REF}: {NAME} skills {got!r}, platform source {sm[0]!r}; want both at {REF}")
+    for bad in ("main", "v1.2.3", "a6c12a3"):
+        refused(META, "skills.platformSource.ref", *ON, "--set", f"skills.platformSource.ref={bad}")
+print(f"ok: a stamped release pins the {len(skills)} skills of skills/ to its commit, an unstamped release fails, a pre-release carries none; a dev build reads its commit; skills.platformSource.ref pins both, a commit only")
 
 # The skill-manager component: on with agent-manager, its own switch wins.
 for what, args, want in (("agent-manager off (the default)", [], False), ("agent-manager on", ON, True),
@@ -283,7 +301,7 @@ checks = {
     "range": (oci["spec"]["ref"]["semver"], values["components"]["skill-manager"]["versionRange"]),
     "targetNamespace": (hr["spec"]["targetNamespace"], "agent-platform"),
     "dependsOn": ([d["name"] for d in hr["spec"]["dependsOn"]], ["muster"]),
-    "agent-manager dependsOn": ([d["name"] for d in find(docs, "HelmRelease", "agent-manager")["spec"]["dependsOn"]], ["muster", "kagent", "skill-manager"]),
+    "agent-manager dependsOn (no skill-manager)": ([d["name"] for d in find(docs, "HelmRelease", "agent-manager")["spec"]["dependsOn"]], ["muster", "kagent"]),
     "muster.mcpServer": (v["muster"]["mcpServer"], {"enabled": True, "auth": {"forwardToken": True, "requiredAudiences": ["dex-k8s-authenticator"]}}),
     "oauth.enabled": (v["oauth"]["enabled"], True),
     "MCP backend": (find(docs, "HelmRelease", "agent-platform-connectivity")["spec"]["values"]["networkPolicy"]["mcpBackends"]["skill-manager"],
@@ -306,7 +324,7 @@ for flavor, extra in (("kubernetes", []), ("cilium", ["--api-versions", "cilium.
         ingress = next((d for d in cdocs if d["kind"] == kind and d["metadata"]["name"].endswith("mcp-backend-skill-manager")), None)
         if not ingress:
             fail(f"no {flavor} ingress policy for the skill-manager's MCP backend")
-print("ok: skill-manager follows agent-manager, after muster and before agent-manager, muster and agent-manager admitted to it")
+print("ok: skill-manager follows agent-manager, after muster, nothing waits for it, muster and agent-manager admitted to it")
 
 # One skill source value: the skill-manager and the portal.
 # The working tree is no published release (appVersion is not its version): no ref, as on a pre-release.

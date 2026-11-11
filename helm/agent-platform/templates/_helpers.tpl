@@ -4713,15 +4713,38 @@ Usage: include "agent-platform.publishedRelease" $
 {{- end -}}
 
 {{/*
+The commit skills.platformSource.ref pins the platform's skills to: "" unset;
+anything but a full 40-hex commit id fails the render, since the default
+agent's pins take a commit only (the agent chart refuses a branch, a tag and a
+short SHA) and helm resolves nothing at render.
+Usage: include "agent-platform.skills.platformRef" $
+*/}}
+{{- define "agent-platform.skills.platformRef" -}}
+{{- $ref := dig "platformSource" "ref" "" (.Values.skills | default dict) | toString -}}
+{{- if and $ref (not (regexMatch "^[0-9a-f]{40}$" $ref)) -}}
+{{- fail (printf "skills.platformSource.ref %q: give a full 40-hex commit id; the default agent's skills pin a commit, never a branch, a tag or a short SHA" $ref) -}}
+{{- end -}}
+{{- $ref -}}
+{{- end -}}
+
+{{/*
 The platform's own skill source: skills/ of this repository, read-only, at
-this chart's release tag; a chart that is no published release
-(agent-platform.publishedRelease) names no ref (the default branch).
+skills.platformSource.ref when set, else this chart's release tag
+(agent-platform.publishedRelease), else the commit a dev build was built from
+(the h<sha> of X.Y.Z-r<branch-hash>t<time>h<sha>), else no ref (the default
+branch).
 Usage: include "agent-platform.skills.platformSource" $ | fromJson
 */}}
 {{- define "agent-platform.skills.platformSource" -}}
 {{- $source := dict "url" "https://github.com/giantswarm/agent-platform" "path" "skills" "readOnly" true -}}
-{{- if include "agent-platform.publishedRelease" . -}}
+{{- $pre := toString (semver .Chart.Version).Prerelease -}}
+{{- $ref := include "agent-platform.skills.platformRef" . -}}
+{{- if $ref -}}
+{{- $_ := set $source "ref" $ref -}}
+{{- else if include "agent-platform.publishedRelease" . -}}
 {{- $_ := set $source "ref" (printf "v%s" (include "agent-platform.chartVersion" .)) -}}
+{{- else if regexMatch "^r[0-9a-f]+t[0-9]{14}h[0-9a-f]{7,40}$" $pre -}}
+{{- $_ := set $source "ref" (regexReplaceAll "^.*h([0-9a-f]+)$" $pre "${1}") -}}
 {{- end -}}
 {{- $source | toJson -}}
 {{- end -}}
@@ -4920,7 +4943,9 @@ Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 {{/*
 A component's values file (components.<name>.valuesFile, a path in this chart),
 as JSON. The release pipeline stamps the tag's commit over the `[[ .SHA ]]`
-placeholder (hack/stamp-release-commit.sh). A skills[] entry still carrying it
+placeholder (hack/stamp-release-commit.sh). skills.platformSource.ref, when
+set, replaces the commit of every skills[] entry of the platform's repository,
+stamped or not. A skills[] entry still carrying the placeholder
 is dropped where the chart is no published release
 (agent-platform.publishedRelease), and fails the render of a published
 release: such a chart was packaged without the stamp.
@@ -4932,9 +4957,14 @@ Usage: include "agent-platform.componentValuesFile" (dict "root" $ "path" $c.val
 {{- fail (printf "%s is missing from the chart or empty" .path) -}}
 {{- end -}}
 {{- $released := include "agent-platform.publishedRelease" .root -}}
+{{- $ref := include "agent-platform.skills.platformRef" .root -}}
+{{- $platform := (include "agent-platform.skills.platformSource" .root | fromJson).url -}}
 {{- if hasKey $vals "skills" -}}
 {{- $pinned := list -}}
 {{- range $vals.skills -}}
+{{- if and $ref (kindIs "map" .) (kindIs "map" .git) (eq (trimSuffix ".git" (toString .git.url)) $platform) -}}
+{{- $_ := set .git "commit" $ref -}}
+{{- end -}}
 {{- if eq (toString (dig "git" "commit" "" (ternary . dict (kindIs "map" .)))) "[[ .SHA ]]" -}}
 {{- if $released -}}
 {{- fail (printf "%s: skill %s still carries the [[ .SHA ]] placeholder in release %s: the chart was published without hack/stamp-release-commit.sh" $.path .name $.root.Chart.Version) -}}

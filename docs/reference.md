@@ -295,7 +295,8 @@ The default agent is `default-agent` in the kagent namespace, shown as `defaultA
 | `components.default-agent.labels` | `managed-by`, `default` | Labels on its HelmRelease and Agent. Entries add to `managed-by` and `default` on the Agent, never drop them. |
 | `backstage.metaAgents.<role>` | unset | The agent behind a portal role, as `<installation>/<namespace>/<name>`. Roles: `generalInformation`, `agentManagement`, `workflowManagement`, `platformOperations`, `skillEvaluation`, `skillCreation`. Unset roles use the default agent while it is on. |
 | `skillManager.sources` | `[giantswarm/agent-skills]` | Skill sources for the skill-manager and the portal, as URLs or `{url, ref, path, readOnly}`. |
-| `skills.platformSource.enabled` | `true` | Lists the platform's `skills/` first, read-only, at the release tag. Set `false` where GitHub is unreachable. |
+| `skills.platformSource.enabled` | `true` | Lists the platform's `skills/` first, read-only, at the release tag (a dev build: its commit). Set `false` where GitHub is unreachable. |
+| `skills.platformSource.ref` | `""` | A full commit id of this repository, e.g. a skills branch's head. Pins the platform source and the default agent's skills to it. |
 | `agent-manager.skills.repositories`, `backstage.skillsRepositories` | `[]` | Deprecated. When set, replaces `skillManager.sources` for that consumer. From `agent-platform.backstage.skillManagerFloor` on, with the skill-manager on, the portal reads its skills from the skill-manager and a `backstage.skillsRepositories` fails the render. |
 
 - A release pins the skills to the tag's commit. A branch build deploys the agent without skills.
@@ -305,7 +306,7 @@ The default agent is `default-agent` in the kagent namespace, shown as `defaultA
 
 **[skill-manager](https://github.com/giantswarm/skill-manager)** owns the skill sources. It lists their skills and pins a skill to a commit as the person: MCP through muster (`x_skill-manager_*`), REST for agent-manager.
 
-- `components.skill-manager` follows `components.agent-manager`. `enabled: false` leaves it out. `dependsOn: [muster]`; agent-manager depends on it.
+- `components.skill-manager` follows `components.agent-manager`. `enabled: false` leaves it out. `dependsOn: [muster]`. Nothing waits for it: agent-manager and the default agent install while it fails.
 - Its `sources` are derived: the platform source, then `skillManager.sources`. An own `skill-manager.sources` fails the render.
 - GitHub access goes in `skill-manager.github` (`app.secretName` or `tokenSecret.name`). Empty reads public repositories anonymously.
 - agent-manager gets `skillManager.url`, the skill-manager's Service, from `agent-platform.agentManager.skillManagerFloor` on, `installation` (`backstage.installationName`), which `get_info` reports for the default agent's start links, and `defaultAgentModel.agent: default-agent` while the default agent is on. Below it, or with the skill-manager off, agent-manager gets `skills.repositories` as URLs, without the platform source. `agent-manager.skills.repositories` set while agent-manager uses the skill-manager fails the render.

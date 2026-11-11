@@ -3254,6 +3254,9 @@
                     "properties": {
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "ref": {
+                            "type": "string"
                         }
                     }
                 }

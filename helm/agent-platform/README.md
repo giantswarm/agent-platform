@@ -571,7 +571,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
-| components.agent-manager.dependsOn[2] | string | `"skill-manager"` |  |
 | components.skill-manager.chart | string | `"skill-manager"` |  |
 | components.skill-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.skill-manager.versionRange | string | `">=0.1.0 <0.2.0"` |  |
@@ -589,9 +588,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.default-agent.labels."agent-platform.giantswarm.io/default" | string | `"true"` |  |
 | components.default-agent.gatedRoster | bool | `true` |  |
 | components.default-agent.enabled | bool | `true` |  |
-| components.default-agent.dependsOn[0] | string | `"muster"` |  |
-| components.default-agent.dependsOn[1] | string | `"kagent"` |  |
-| components.default-agent.dependsOn[2] | string | `"agent-manager"` |  |
+| components.default-agent.dependsOn[0] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.vm-manager.versionRange | string | `">=0.24.0 <0.25.0"` |  |
@@ -1464,6 +1461,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | skills.platformSource.enabled | bool | `true` |  |
+| skills.platformSource.ref | string | `""` |  |
 | skillManager.sources[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
 | skill-manager.fullnameOverride | string | `"skill-manager"` |  |
 | skill-manager.observability.otel.endpoint | string | `"auto"` |  |

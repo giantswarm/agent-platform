@@ -1166,10 +1166,11 @@ components:  # @schema additionalProperties: true
       - harness.egress
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
-    # and manages agents in the kagent namespace; it pins skills through the
-    # skill-manager, which comes first. Each reference is dropped at render
-    # time when its component is off.
-    dependsOn: [muster, kagent, skill-manager]
+    # and manages agents in the kagent namespace. No skill-manager: it calls
+    # the skill-manager only when it pins a skill and answers that call
+    # unavailable while it is down, so a failed skill-manager never holds it.
+    # Each reference is dropped at render time when its component is off.
+    dependsOn: [muster, kagent]
   skill-manager:  # @schema additionalProperties: true
     chart: skill-manager
     # The skill sources of the Agent Platform (giantswarm/skill-manager,
@@ -1227,7 +1228,10 @@ components:  # @schema additionalProperties: true
     # portal's meta-agent features to it.
     gatedRoster: true
     enabled: true
-    dependsOn: [muster, kagent, agent-manager]
+    # Only kagent, which owns its CRs: its skills are pinned at render and
+    # its model is set here or later by agent-manager, so neither
+    # agent-manager nor muster holds its install.
+    dependsOn: [kagent]
   vm-manager:  # @schema additionalProperties: true
     chart: vm-manager
     # VM provisioning for the Agent Platform (giantswarm/vm-manager): KVM
@@ -5372,11 +5376,14 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
 # === Skill repositories ===
 # The platform's own skill source, which skill-manager and the portal list
 # first: {url: https://github.com/giantswarm/agent-platform, ref: v<chart
-# version>, path: skills, readOnly: true}; a pre-release names no ref. false
-# leaves it out (an air-gapped installation).
+# version>, path: skills, readOnly: true}; a dev build reads the commit it was
+# built from. false leaves it out (an air-gapped installation).
 skills:
   platformSource:
     enabled: true
+    # A full commit id of giantswarm/agent-platform (e.g. a skills branch's
+    # head): the source's ref and the default agent's skill pins. Empty: as above.
+    ref: ""
 
 # === Skill manager (components.skill-manager) ===
 # The installation's skill sources, after the platform's own

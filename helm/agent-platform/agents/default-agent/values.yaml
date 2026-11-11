@@ -75,6 +75,7 @@ agent:
 # The platform's skills from skills/ of this repository. The release pipeline
 # stamps the tag's commit over the placeholder (hack/stamp-release-commit.sh);
 # unstamped (a branch build), the component renders without skills.
+# skills.platformSource.ref replaces the commit of each.
 skills:
   - name: agent-platform-overview
     path: skills/agent-platform-overview
