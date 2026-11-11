@@ -46,7 +46,7 @@ Where the reference lives — fetch it, never quote it from memory:
   Never `force` a write onto it.
 - **`platform`** — ships with the Agent Platform (the default agent itself). Every update, re-pin and
   delete is refused; it changes only through the platform's configuration and releases. Say so.
-  With `followsDefaultModel` true, its model follows the namespace's default ModelConfig.
+  Its model is set once from the installation's default; `defaultAgent.modelConfig` pins or changes it.
 - **`none`** — a bare Agent without a release.
 
 ## Working with agent-manager

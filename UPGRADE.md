@@ -22,7 +22,7 @@ giantswarm/giantswarm#38970, giantswarm/giantswarm#38322: the chart deploys the 
 ### Operator action
 
 - **An installation that deploys its own meta agent (an Agent Manager) or `swarm-operator`**: remove it, or set `components.default-agent.enabled: false`.
-- **The default agent's model**: unset, it follows the kagent namespace's default model at runtime. To pin one, set `defaultAgent.modelConfig`.
+- **The default agent's model**: it gets the installation's default model once, when it has none. To pin or change it, set `defaultAgent.modelConfig`.
 - **An installation that sets `agent-manager.agentChart.semver` or `components.default-agent.versionRange`**: both need the agent chart `>=2.6.0 <3.0.0`; below 2.6.0 the default agent's release refuses an unset model.
 - **An installation that names the default agent differently**: set `defaultAgent.displayName` (and `defaultAgent.description`); its technical name stays `default-agent`.
 - **An installation that reads private skill repositories**: set `skill-manager.github` (`app.secretName` or `tokenSecret.name`), as for agent-manager's.

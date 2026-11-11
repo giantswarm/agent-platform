@@ -551,9 +551,9 @@ in-process list of URLs (agent-platform.skills.repositories). */ -}}
 that takes the key (agent-platform.agentManager.skillManagerFloor). */ -}}
 {{- if include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "agent-manager" "version" (include "agent-platform.agentManager.skillManagerFloor" .root)) -}}
 {{- $_ := set $derived "installation" (include "agent-platform.portalInstallationName" .root) -}}
-{{- /* The default agent follows the namespace's default model while it
-carries the follows-default-model label (agent-platform.defaultAgent.derived):
-agent-manager sets its model, from the same release. */ -}}
+{{- /* The default agent gets the installation's default model once, while
+its modelConfig.name is empty (agent-platform.defaultAgent.derived):
+agent-manager sets it, from the same release. */ -}}
 {{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "default-agent") -}}
 {{- $_ := set $derived "defaultAgentModel" (dict "agent" "default-agent") -}}
 {{- end -}}
@@ -4907,9 +4907,8 @@ toolset preset:full (it acts as the person), the component's labels on the
 Agent too (components.default-agent.labels) with managed-by, which
 agent-manager lists read-only, and default, which it reports as the
 installation's default agent, always set, and its model: defaultAgent.modelConfig,
-else modelConfig.name "" (no model) and the label
-agent-platform.giantswarm.io/follows-default-model: "true", by which
-agent-manager sets it to the kagent namespace's default model at runtime.
+else modelConfig.name "" (no model), which agent-manager fills once with the
+installation's default model.
 Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 */}}
 {{- define "agent-platform.defaultAgent.derived" -}}
@@ -4932,9 +4931,6 @@ Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 {{- end -}}
 {{- $labels := mustMergeOverwrite (deepCopy ((index .Values.components "default-agent").labels | default dict)) (dict "agent-platform.giantswarm.io/default" "true" "agent-platform.giantswarm.io/managed-by" "agent-platform") -}}
 {{- $model := dig "modelConfig" "" $da | toString -}}
-{{- if not $model -}}
-{{- $_ := set $labels "agent-platform.giantswarm.io/follows-default-model" "true" -}}
-{{- end -}}
 {{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:full") "labels" $labels "modelConfig" (dict "name" $model) -}}
 {{- $_ := set $out "agent" $agent -}}
 {{- $out | toJson -}}

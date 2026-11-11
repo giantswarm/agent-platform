@@ -291,7 +291,7 @@ The default agent is `default-agent` in the kagent namespace, shown as `defaultA
 |---|---|---|
 | `components.default-agent.enabled` | `true` | Deploys the agent while kagent, muster and agent-manager are on. The portal's meta-agent features use it. |
 | `klausGateway.a2a.defaultAgent` | `""` | The agent Slack's agent picker preselects. Empty: the default agent (`<kagent namespace>/default-agent`) while it is on. |
-| `defaultAgent.modelConfig` | `""` | Pins the `ModelConfig` it runs on. Empty: it follows the kagent namespace's default model (annotated `agent-platform.giantswarm.io/is-default-model-config: "true"`) at runtime; agent-manager sets it. |
+| `defaultAgent.modelConfig` | `""` | The `ModelConfig` it runs on. Empty: it gets the installation's default model (annotated `agent-platform.giantswarm.io/is-default-model-config: "true"`) once, when it has none; agent-manager sets it. Set it to pin or change the model. |
 | `components.default-agent.labels` | `managed-by`, `default` | Labels on its HelmRelease and Agent. Entries add to `managed-by` and `default` on the Agent, never drop them. |
 | `backstage.metaAgents.<role>` | unset | The agent behind a portal role, as `<installation>/<namespace>/<name>`. Roles: `generalInformation`, `agentManagement`, `workflowManagement`, `platformOperations`, `skillEvaluation`, `skillCreation`. Unset roles use the default agent while it is on. |
 | `skillManager.sources` | `[giantswarm/agent-skills]` | Skill sources for the skill-manager and the portal, as URLs or `{url, ref, path, readOnly}`. |

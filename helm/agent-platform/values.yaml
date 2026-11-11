@@ -5447,8 +5447,9 @@ defaultAgent:
   displayName: "General Assistant"  # @schema minLength: 1
   # The default agent's one-line description in the portal's agent lists.
   description: "Start here. Handles everyday tasks with your connectors and helps you find or create the right agent."
-  # ModelConfig in kagent the default agent is pinned to. Empty: it follows
-  # the kagent namespace's default model at runtime (agent-manager sets it).
+  # ModelConfig in kagent the default agent runs on. Empty: it gets the
+  # installation's default model once, when it has none (agent-manager sets it).
+  # Set it to pin or change the model.
   modelConfig: ""
 
 # === Cluster manager (cluster-manager) ===

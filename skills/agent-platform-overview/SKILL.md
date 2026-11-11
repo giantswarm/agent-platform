@@ -93,8 +93,7 @@ from the new one.
 Every `x_*`, `core_*` and `workflow_*` name is the `name` argument of Muster's `call_tool`, never a
 function of its own (contract: the `agent-platform-tools` skill). Read each schema with `describe_tool`.
 
-- **The agents**: `x_agent-manager_list_agents` — model, Harness, toolset, readiness, `managed` and
-  `followsDefaultModel` (the model follows the namespace's default).
+- **The agents**: `x_agent-manager_list_agents` — model, Harness, toolset, readiness and `managed`.
 - **One agent's readiness**: `x_agent-manager_get_agent_status`.
 - **The connectors**: `core_mcpserver_list` — every MCP server with its state.
 - **The models**: `x_agent-manager_list_model_configs`; serving: the `agent-platform-tools` skill.
