@@ -680,7 +680,10 @@ llmRouting:
   # in every organization namespace too (a second binding), where
   # agent-platform-tenant-model-routing refuses a baseUrl that is not the
   # listener; agentPlatformOrganizations.enabled fails the render without this
-  # policy. The hook reads the kagent namespace only.
+  # policy. With a serving model-manager, the organization namespaces also get
+  # an OpenAI policy (its models are called in the OpenAI format at the
+  # listener's /v1) when llmRouting.models names no OpenAI entry; the kagent
+  # namespace does not. The hook reads the kagent namespace only.
   #
   # Rendered only where the API server serves
   # admissionregistration.k8s.io/v1/MutatingAdmissionPolicy, which is Kubernetes

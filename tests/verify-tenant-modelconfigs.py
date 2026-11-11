@@ -21,6 +21,14 @@ chart renders:
   writer. Each modelconfig-llm-routing policy (Ignore) selects no namespace
   itself and gets a second binding for those namespaces, beside its kagent
   one;
+- with a serving model-manager (giantswarm/giantswarm#39175) and
+  llmRouting.models naming Anthropic only, the model routing policy also
+  serves OpenAI at the listener's /v1, the format model-manager's models are
+  called in, and a modelconfig-llm-routing-openai policy fills it in, bound
+  to the Organizations' namespaces only: the kagent namespace keeps today's
+  routing. With llmRouting.models naming OpenAI too, OpenAI is served once and
+  its policy keeps both bindings; with organizations off, model-manager adds
+  no policy;
 - on, the render fails, naming the key, with llmRouting off and without the
   modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled off, or
   MutatingAdmissionPolicy not served).
@@ -59,6 +67,10 @@ OPENAI = ["--set", "llmRouting.models[0].name=anthropic", "--set", "llmRouting.m
           "--set", "llmRouting.models[0].baseURL=https://api.anthropic.com/v1",
           "--set", "llmRouting.models[1].name=openai", "--set", "llmRouting.models[1].provider=OpenAI",
           "--set", "llmRouting.models[1].baseURL=https://api.openai.com/v1"]
+ANTHROPIC = ["--set", "llmRouting.models[0].name=anthropic", "--set", "llmRouting.models[0].provider=Anthropic",
+             "--set", "llmRouting.models[0].baseURL=https://api.anthropic.com/v1"]
+MODEL_MANAGER = ["--set", "components.model-manager.enabled=true", "--set", "components.modelServing.enabled=true",
+                 "--api-versions", "serving.kserve.io/v1alpha2"]
 NEW = ["agent-platform-tenant-model-routing", "agent-platform-tenant-secret-creation"]
 ORG_NS = [{"key": "agent-platform.giantswarm.io/organization", "operator": "Exists"},
           {"key": "kubernetes.io/metadata.name", "operator": "NotIn", "values": ["kagent"]}]
@@ -100,7 +112,7 @@ def credentials_exception(docs: list) -> str:
     return vap["spec"]["validations"][0]["expression"]
 
 
-def routing_policies(docs: list) -> dict:
+def routing_policies(docs: list, count: int = 2) -> dict:
     """Each modelconfig-llm-routing policy -> (its namespaceSelector, its bindings' namespaceSelectors)."""
     out = {}
     for d in docs:
@@ -109,8 +121,8 @@ def routing_policies(docs: list) -> dict:
     for d in docs:
         if d.get("kind") == "MutatingAdmissionPolicyBinding" and d["spec"]["policyName"] in out:
             out[d["spec"]["policyName"]][1].append(d["spec"].get("matchResources", {}).get("namespaceSelector"))
-    if len(out) != 2:
-        fail(f"want a modelconfig-llm-routing policy per listener provider (2), got {sorted(out)}")
+    if len(out) != count:
+        fail(f"want a modelconfig-llm-routing policy per listener provider ({count}), got {sorted(out)}")
     return out
 
 
@@ -169,10 +181,58 @@ def check_on(chart: str) -> None:
     ok("on, each modelconfig-llm-routing policy (Ignore) fills in the listener in the kagent and the Organizations' namespaces")
 
 
+def served(docs: list) -> str:
+    routing = find(docs, "ValidatingAdmissionPolicy", NEW[0])["spec"]
+    return next(v["expression"] for v in routing["variables"] if v["name"] == "served")
+
+
+def check_model_manager(chart: str) -> None:
+    kagent = {"matchLabels": {"kubernetes.io/metadata.name": "kagent"}}
+    org = {"matchExpressions": ORG_NS}
+    both = sorted([kagent, org], key=str)
+    openai = f"{ROUTING}-openai"
+
+    docs = render(chart, ON + ANTHROPIC + MODEL_MANAGER)
+    want = f"{{'anthropic': ['anthropic', '{LISTENER}'], 'openai': ['openAI', '{LISTENER}/v1']}}"
+    if served(docs) != want:
+        fail(f"anthropic-only with model-manager serving, {NEW[0]} serves {served(docs)}, want {want}")
+    policies = routing_policies(docs)
+    if sorted(policies[ROUTING][1], key=str) != both:
+        fail(f"anthropic-only with model-manager serving, {ROUTING} binds {policies[ROUTING][1]}, want the kagent and the Organizations' namespaces")
+    if openai not in policies or policies[openai] != (None, [org]):
+        fail(f"anthropic-only with model-manager serving, {openai} is {policies.get(openai)}, want no selector and the Organizations' binding only")
+    ok("with model-manager serving, an Organization's OpenAI ModelConfig is held to and filled in with the listener's /v1, in the Organizations' namespaces only")
+
+    docs = render(chart, ON + ANTHROPIC)
+    want = f"{{'anthropic': ['anthropic', '{LISTENER}']}}"
+    if served(docs) != want:
+        fail(f"anthropic-only without model-manager, {NEW[0]} serves {served(docs)}, want {want}")
+    routing_policies(docs, 1)
+    ok("without model-manager, the Organizations are served llmRouting.models' providers only")
+
+    docs = render(chart, ON + OPENAI + MODEL_MANAGER)
+    want = f"{{'anthropic': ['anthropic', '{LISTENER}'], 'openai': ['openAI', '{LISTENER}/v1']}}"
+    if served(docs) != want:
+        fail(f"OpenAI in llmRouting.models with model-manager serving, {NEW[0]} serves {served(docs)}, want {want}")
+    for name, (_, bindings) in routing_policies(docs).items():
+        if sorted(bindings, key=str) != both:
+            fail(f"OpenAI in llmRouting.models with model-manager serving, {name} binds {bindings}, want the kagent and the Organizations' namespaces")
+    ok("with OpenAI in llmRouting.models and model-manager serving, OpenAI is served once and filled in in both")
+
+    docs = render(chart, MAP + ANTHROPIC + MODEL_MANAGER)
+    if find(docs, "ValidatingAdmissionPolicy", NEW[0]) is not None:
+        fail(f"organizations off, {NEW[0]} renders")
+    policies = routing_policies(docs, 1)
+    if policies[ROUTING] != (kagent, [kagent]):
+        fail(f"organizations off with model-manager serving, {ROUTING} is {policies[ROUTING]}, want the kagent namespace only")
+    ok("organizations off, model-manager serving adds no modelconfig-llm-routing policy")
+
+
 def main() -> None:
     chart = sys.argv[1]
     check_off(chart)
     check_on(chart)
+    check_model_manager(chart)
     refused(chart, ["--set", "llmRouting.enabled=false"] + ON, ["agentPlatformOrganizations.enabled needs llmRouting.enabled"],
             "with llmRouting off the render fails")
     refused(chart, ORGS, ["agentPlatformOrganizations.enabled needs the modelconfig-llm-routing MutatingAdmissionPolicy", "admissionregistration.k8s.io/v1"],

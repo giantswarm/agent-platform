@@ -77,6 +77,24 @@ else empty.
 {{- end -}}
 
 {{/*
+The providers an organization's ModelConfig reaches the LLM listener with, as a
+JSON list: agent-platform.llmRouting.providers, plus openai when model-manager
+serves (agent-platform.modelManager.serves). Its models attach to the listener
+as AgentgatewayModels and are called in the OpenAI format, at the listener's
+/v1. The extra openai is the organizations' only: in the kagent namespace an
+OpenAI ModelConfig without a baseUrl keeps calling its provider directly, as
+the listener has no route to the OpenAI API unless llmRouting.models names it.
+Usage: include "agent-platform.tenants.providers" . | fromJsonArray
+*/}}
+{{- define "agent-platform.tenants.providers" -}}
+{{- $out := include "agent-platform.llmRouting.providers" . | fromJsonArray -}}
+{{- if and (include "agent-platform.modelManager.serves" .) (not (has "openai" $out)) -}}
+{{- $out = append $out "openai" -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
 The subjects of a binding, as a YAML list: the lists given, each subject once.
 Usage: include "agent-platform.tenants.subjects" (list .Values.tenants.platform.editors .Values.tenants.platformTeam)
 */}}

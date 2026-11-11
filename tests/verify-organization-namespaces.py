@@ -38,6 +38,13 @@ organization namespaces (agent-platform-organization-operator-scope); one labell
 giantswarm.io/organization gets none of them. Each refusal names its policy
 and has an admitted twin.
 
+With llmRouting.models naming Anthropic only and a serving model-manager
+(giantswarm/giantswarm#39175), the policies of that render applied in place:
+an organization's OpenAI ModelConfig at the listener's /v1 is admitted, one
+without a baseUrl gets the listener's /v1 filled in, one at the provider's own
+URL is still refused, and an OpenAI ModelConfig without a baseUrl in the
+kagent namespace is left as it is.
+
 The egress gateway: its Cilium policy has no kube-apiserver rule and reaches
 in-cluster endpoints on 443/10443 only at the pods of muster's public Gateway
 (Envoy Gateway's proxy in the edge's namespace, or the chart-owned data
@@ -738,6 +745,47 @@ def prove_render_check(chart):
          (0 if passed else 1, r.stderr.strip()[-200:]))
 
 
+def prove_model_manager(chart):
+    """Run last: it swaps the routing policies for those of another render."""
+    routing = lambda d: (d["kind"] in ("ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding") and d["metadata"]["name"] == "agent-platform-tenant-model-routing") or (
+        d["kind"] in ("MutatingAdmissionPolicy", "MutatingAdmissionPolicyBinding") and "modelconfig-llm-routing" in d["metadata"]["name"])
+    anthropic = '[{"name": "anthropic", "provider": "Anthropic", "baseURL": "https://api.anthropic.com/v1", "match": "claude-*"}]'
+    objs = [d for d in docs(connectivity(chart, "kubernetes", "--set-json", f"llmRouting.models={anthropic}",
+                                         "--set", "components.model-manager.enabled=true", "--set", "components.modelServing.enabled=true",
+                                         "--api-versions", "serving.kserve.io/v1alpha2")) if routing(d)]
+    keep = {(d["kind"], d["metadata"]["name"]) for d in objs}
+    for kind in ("MutatingAdmissionPolicyBinding", "MutatingAdmissionPolicy"):
+        for line in must(kubectl(["get", kind.lower(), "-o", "name"]), f"list the {kind}s").split():
+            name = line.split("/", 1)[1]
+            if "modelconfig-llm-routing" in name and (kind, name) not in keep:
+                must(kubectl(["delete", kind.lower(), name]), f"delete {kind} {name}")
+    for d in objs:
+        must(kubectl(["apply", "--server-side", "-f", "-"], yaml.safe_dump(d)), f"apply {d['kind']} {d['metadata']['name']}")
+
+    def base_url(ns):
+        rc, out = kubectl(["create", "-f", "-", "--dry-run=server", "-o", "json"], yaml.safe_dump(mc("filled", ns, None)))
+        return rc, (json.loads(out)["spec"].get("openAI", {}).get("baseUrl") if rc == 0 else out)
+
+    # The previous render fills in OpenAI in both namespaces too: only the
+    # kagent namespace left alone shows the swapped policies are in force.
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        if base_url(ORG_NS) == (0, f"{LISTENER}/v1") and base_url("kagent") == (0, None):
+            break
+        time.sleep(0.5)
+    else:
+        fail(f"the API server did not apply the model-manager render's policies within 60s: {base_url(ORG_NS)}, {base_url('kagent')}")
+    case(f"model-manager serving, anthropic-only: an OpenAI ModelConfig at the listener's /v1 in {ORG_NS}", create(mc("local", ORG_NS, f"{LISTENER}/v1")))
+    case(f"model-manager serving, anthropic-only: an OpenAI ModelConfig at the provider's URL in {ORG_NS}",
+         create(mc("direct", ORG_NS, "https://api.openai.com/v1")), "agent-platform-tenant-model-routing")
+    got = base_url(ORG_NS)
+    case(f"model-manager serving, anthropic-only: an OpenAI ModelConfig without a baseUrl in {ORG_NS} gets the listener's /v1 ({got[1]})",
+         (0 if got == (0, f"{LISTENER}/v1") else 1, str(got[1])))
+    got = base_url("kagent")
+    case(f"model-manager serving, anthropic-only: an OpenAI ModelConfig without a baseUrl in the kagent namespace keeps none ({got[1]})",
+         (0 if got == (0, None) else 1, str(got[1])))
+
+
 def main():
     global API
     meta_chart, chart = sys.argv[1:3]
@@ -770,6 +818,7 @@ def main():
         prove_operator_scope()
         prove_worker_access()
         prove_render_check(chart)
+        prove_model_manager(chart)
     finally:
         API.stop()
     failed = [n for ok, n in results if not ok]
