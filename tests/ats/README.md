@@ -1,5 +1,16 @@
 # The ATS of the agent-platform chart
 
+### Kubernetes MCP consent recovery
+
+`tests/prove-mcp-oauth-recovery.py` runs against a leased agentlab with the candidate
+chart, two MCP replicas, its isolated store and dedicated Secret. The registration
+token is brokered on stdin. Pass `--base-url` (the MCP OAuth issuer), `--issuer-url`
+(lab Dex), `--ca`, `--kubeconfig` and optionally `--namespace`. The public fixture
+`admin@lab.local` signs in. The proof holds an actual consent form, replaces all MCP
+pods before approving it, exchanges its code with S256 PKCE and a resource indicator,
+initializes MCP, then replaces the pods again and reuses the access token.
+Run `agentlab platform-test` alongside it and restore the lab configuration afterwards.
+
 [app-test-suite](https://github.com/giantswarm/app-test-suite) 1.x runs this
 directory on every PR (`execute-chart-tests`, a required check): the CI job
 creates one kind cluster (`gsoci.azurecr.io/giantswarm/kind-node`, configured

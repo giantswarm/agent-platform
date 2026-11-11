@@ -1429,6 +1429,15 @@ components:  # @schema additionalProperties: true
     # comes first (and its config-reload hook finds no Deployment to roll on a
     # first install, by design).
     dependsOn: [cloudnative-pg, agent-platform-connectivity]
+  mcp-kubernetes-valkey:  # @schema additionalProperties: true
+    # Isolated OAuth state; enabled automatically with the bundled Kubernetes MCP.
+    chart: valkey
+    releaseName: mcp-kubernetes-valkey
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    versionRange: "0.4.x"
+    valuesFrom: mcp-kubernetes-valkey
+    gatedRoster: true
+    gatedValues: [mcp-kubernetes-valkey]
   mcp-kubernetes:  # @schema additionalProperties: true
     chart: mcp-kubernetes
     # The Kubernetes MCP server (giantswarm/mcp-kubernetes), acting as the user:
@@ -1442,6 +1451,7 @@ components:  # @schema additionalProperties: true
     # The next major is the ceiling.
     versionRange: ">=1.14.0 <2.0.0"
     valuesFrom: mcp-kubernetes
+    dependsOn: [mcp-kubernetes-valkey]
     # The connectivity chart's keys, not the chart's (which validates strictly):
     # the upstream Kubernetes audience and the shape of the
     # registration, read for the MCPServer CR
@@ -2772,6 +2782,50 @@ muster:  # @schema skipProperties: true; additionalProperties: true
           # platform are the ones who need its boards. The chart's own default
           # is the staff organization.
           organization: "Shared Org"
+
+# Isolated shared state for the bundled Kubernetes MCP, never muster's grants.
+# Pre-create mcp-kubernetes-oauth with dex-client-secret, registration-token,
+# oauth-encryption-key and valkey-password. Rotate it with both revision marks:
+# mcp-kubernetes.mcpKubernetes.oauth.existingSecretChecksum and
+# mcp-kubernetes-valkey.valkey.auth.usersExistingSecretChecksum.
+mcp-kubernetes-valkey:  # @schema skipProperties: true; additionalProperties: true
+  ciliumNetworkPolicy:
+    enabled: auto
+    ingress:
+      clients:
+        - namespace: ""
+          matchLabels:
+            app.kubernetes.io/name: mcp-kubernetes
+  vpa:
+    enabled: false
+  valkey:
+    fullnameOverride: mcp-kubernetes-valkey
+    replicaCount: 1
+    deploymentStrategy: Recreate
+    auth:
+      enabled: true
+      usersExistingSecret: mcp-kubernetes-oauth
+      usersExistingSecretChecksum: ""
+      aclUsers:
+        default:
+          permissions: "~* &* +@all"
+          passwordKey: valkey-password
+    dataStorage:
+      enabled: true
+      requestedSize: 1Gi
+    valkeyConfig: |
+      maxmemory 64mb
+      maxmemory-policy noeviction
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+    metrics:
+      enabled: false
+      podMonitor:
+        enabled: false
 
 # Bundled giantswarm/valkey-app for muster's OAuth session storage.
 # Wrapper chart exposes three top-level blocks consumed here:
@@ -6534,9 +6588,10 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
 # runs as an OAuth 2.1 resource server (mcp-oauth) against the platform
 # identity provider; its issuer, client, Secret and CA fall back to
 # global.identity inside the chart (>= 1.1.1), the trusted audience to the
-# platform client — muster forwards the session's id_token and the server
-# validates it against the provider's JWKS. enableDownstreamOAuth presents
-# that token to the kube-apiserver, so every call runs with the user's RBAC
+# platform client. Muster obtains a resource access token through per-server
+# consent; the server stores OAuth transactions in its isolated Valkey.
+# enableDownstreamOAuth presents the upstream identity to the kube-apiserver,
+# so every call runs with the user's RBAC
 # (the chart then grants the ServiceAccount nothing). The two private-IP
 # relaxations are for an in-cluster identity provider whose discovery and JWKS
 # resolve to cluster addresses; a public provider needs neither and ignores

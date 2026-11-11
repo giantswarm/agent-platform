@@ -399,6 +399,38 @@ What it changes on a cluster, the Pod Security exceptions and the compensating c
 
 Upgrading: [UPGRADE.md](../UPGRADE.md).
 
+### Kubernetes MCP shared OAuth state
+
+Enabling `components.mcp-kubernetes.enabled` also enables a separate Valkey release,
+`mcp-kubernetes-valkey`, while OAuth uses its default shared backend. Its password,
+encryption key and pending consent transactions are separate from muster's provider grants.
+Two MCP replicas use the same store; replacing either replica preserves a pending consent.
+The store refuses writes at its memory bound rather than evicting live OAuth transactions.
+Its Cilium policy admits only the Kubernetes MCP; the Kubernetes policy provides the same
+store ingress boundary on clusters without Cilium.
+
+Pre-create `mcp-kubernetes-oauth` in the component namespace with `dex-client-secret`,
+`registration-token`, `oauth-encryption-key` (a base64-encoded 32-byte key) and
+`valkey-password`. The upstream Dex client secret must match the registered client;
+generate separate registration, encryption and storage credentials for this component.
+Do not point it at muster's Secret. Secrets are referenced by name and never embedded
+in HelmRelease values.
+
+For password or OAuth credential rotation, update the Secret and change both
+`mcp-kubernetes-valkey.valkey.auth.usersExistingSecretChecksum` and
+`mcp-kubernetes.mcpKubernetes.oauth.existingSecretChecksum` to a new revision string.
+The storage revision also reaches the MCP's `storage.valkey.existingSecretChecksum`,
+so both the store and its clients restart. Rotating the encryption key invalidates
+records encrypted with the previous key: drain pending sign-ins and require users to
+sign in again. Changing only pod replicas or replacing pods requires no key rotation.
+
+For an external store set `mcp-kubernetes.mcpKubernetes.oauth.storage.valkey.url`,
+`existingSecret` and `secretKeyPassword`; the bundled store then stays disabled.
+The component's OAuth `existingSecret` can name a separate pre-created Secret.
+An explicit `components.mcp-kubernetes-valkey.enabled: false` without an external
+store is refused while shared OAuth storage is needed. Turning the MCP or its OAuth
+off removes the automatically enabled store.
+
 ### Backstage, mcp-kubernetes, CloudNativePG and KServe
 
 Optional components for a cluster that has none of these. All are **off by default**: a management cluster runs them as its own apps. Each renders as one `OCIRepository` + `HelmRelease`. Its values block, named after the component, is forwarded with `global` injected. The current `versionRange` of each is in [`values.yaml`](../helm/agent-platform/values.yaml) under `components.<name>`.
@@ -516,7 +548,7 @@ You need:
 | Toggle | What the connectivity chart renders | Inputs |
 |---|---|---|
 | `components.backstage.enabled` | The app-config ConfigMap `agent-platform-backstage-app-config`, the `HTTPRoute` `backstage.<domain>`, and a config-reload hook that rolls the Deployment when the config changes. | `backstage.{hostname, parentRefs, installationName, extraScopes, startUrlSearchParams, enabledExtensions, disabledExtensions, skillsRepositories, configReload}`, dropped before the backstage chart (`components.backstage.omitKeys`). |
-| `components.mcp-kubernetes.enabled` | The `MCPServer` registering the server with muster using per-server OAuth consent and an access token issued by mcp-kubernetes. OAuth uses the platform's existing Valkey and encryption Secret by default. Needs muster. `mcp-kubernetes.mcpServer.managementCluster: <name>` makes it a member of muster's `kubernetes` family; `enabled: false` renders no CR. | `mcp-kubernetes.kubernetesAudience` (default `dex-k8s-authenticator`, `""` for Google), `mcp-kubernetes.mcpServer`. |
+| `components.mcp-kubernetes.enabled` | The `MCPServer` registering the server with muster using per-server OAuth consent and an access token issued by mcp-kubernetes. OAuth uses an isolated `mcp-kubernetes-valkey` release and the `mcp-kubernetes-oauth` Secret, separate from muster's provider grants. Needs muster. `mcp-kubernetes.mcpServer.managementCluster: <name>` makes it a member of muster's `kubernetes` family; `enabled: false` renders no CR. | `mcp-kubernetes.kubernetesAudience` (default `dex-k8s-authenticator`, `""` for Google), `mcp-kubernetes.mcpServer`. |
 | `components.modelServing.enabled` (with the three kserve components) | The serving presets and the discovery ConfigMap `agent-platform-model-serving`, the serving `Namespace`, the cache claim, the Kyverno cache policies (`modelServing.policies.enabled: auto`) and the serving namespace's network policies. Fails without the kserve components or the `serving.kserve.io` API (`modelServing.kserve.requireApi`). | `modelServing.*` |
 | `components.kserve-llmisvc-resources.enabled` | The llm-d controller's network policy, and guards: `kserve.controller.deploymentMode: Standard`, `kserve.createSharedResources: true`. The removed `components.kserve-crd` / `components.kserve-resources` are refused. | the component's own block |
 

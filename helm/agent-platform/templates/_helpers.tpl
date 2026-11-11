@@ -62,8 +62,8 @@ layerSelector:
 
 {{/*
 Whether a component is enabled — reads `components.<name>.enabled`, the single
-on/off switch. `name` is the components.<key> name, which equals the component's
-chart name and is therefore what a dependsOn entry references. A component with
+on/off switch. `name` is the components.<key> name, which a dependsOn entry
+references; releaseName distinguishes multiple instances of one chart. A component with
 no `enabled` key is force-enabled — except kagent-crds, which then follows
 components.kagent. Emits "true" when on, empty string otherwise.
 
@@ -97,6 +97,9 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- /* The data plane's route to muster: on whenever muster is on
        (agent-platform.validateMusterRoute refuses an explicit false then). */ -}}
 {{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "muster")) "true" }}
+{{- else if eq .name "mcp-kubernetes-valkey" }}
+{{- $oauth := dig "mcpKubernetes" "oauth" dict (index $root.Values "mcp-kubernetes" | default dict) -}}
+{{- $on = and (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "mcp-kubernetes")) "true") ($oauth.enabled | default false) (eq (dig "storage" "type" "valkey" $oauth) "valkey") (not (dig "storage" "valkey" "url" "" $oauth)) }}
 {{- else if eq .name "workspace-manager" }}
 {{- /* The workspace-manager follows the one switch workspaces.enabled
        (agent-platform.validateWorkspaces refuses an explicit value that
@@ -415,13 +418,20 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 {{- $type := $storage.type | default "valkey" -}}
 {{- if eq $type "valkey" -}}
 {{- $own := $storage.valkey | default dict -}}
+{{- $store := index .root.Values "mcp-kubernetes-valkey" -}}
+{{- $auth := dig "valkey" "auth" dict $store -}}
+{{- $address := printf "%s:%v" (dig "valkey" "fullnameOverride" "mcp-kubernetes-valkey" $store) (dig "valkey" "service" "port" 6379 $store) -}}
 {{- $valkey := dict "keyPrefix" (printf "%s:mcp-kubernetes:" .root.Release.Namespace) -}}
-{{- range $key, $value := dict "url" (include "agent-platform.valkeyAddress" .root) "existingSecret" (include "agent-platform.valkeySecretName" .root) "secretKeyPassword" (include "agent-platform.valkeyPasswordKey" .root) -}}
+{{- range $key, $value := dict "url" $address "existingSecret" ($auth.usersExistingSecret | default "mcp-kubernetes-oauth") "secretKeyPassword" (dig "aclUsers" "default" "passwordKey" "valkey-password" $auth) -}}
 {{- if not (get $own $key) -}}{{- $_ := set $valkey $key $value -}}{{- end -}}
 {{- end -}}
 {{- if $own.keyPrefix -}}{{- $_ := set $valkey "keyPrefix" $own.keyPrefix -}}{{- end -}}
-{{- if and (not $own.url) (ne (include "agent-platform.componentEnabled" (dict "root" .root "name" "valkey")) "true") -}}
-{{- fail "mcp-kubernetes OAuth needs shared storage: enable the platform Valkey or set mcp-kubernetes.mcpKubernetes.oauth.storage.valkey.url" -}}
+{{- if and (not $own.url) (ne (include "agent-platform.componentEnabled" (dict "root" .root "name" "mcp-kubernetes-valkey")) "true") -}}
+{{- fail "mcp-kubernetes OAuth needs shared storage: enable components.mcp-kubernetes-valkey or set mcp-kubernetes.mcpKubernetes.oauth.storage.valkey.url" -}}
+{{- end -}}
+{{- if not $oauth.existingSecret -}}{{- $_ := set $oauthDerived "existingSecret" "mcp-kubernetes-oauth" -}}{{- end -}}
+{{- if and (not $own.existingSecretChecksum) (not $own.existingSecret) -}}
+{{- $_ := set $valkey "existingSecretChecksum" ($auth.usersExistingSecretChecksum | default "") -}}
 {{- end -}}
 {{- $_ := set $oauthDerived "encryptionKey" true -}}
 {{- $_ := set $oauthDerived "storage" (dict "type" "valkey" "valkey" $valkey) -}}
@@ -725,14 +735,6 @@ the block otherwise: a klaus-gateway before 4.11.0 refuses it. */ -}}
 {{- $_ := set $out "aclUsers" (dict "default" (dict "passwordKey" (include "agent-platform.valkeyPasswordKey" .root))) -}}
 {{- end -}}
 {{- if $out -}}{{- $_ := set $derived "valkey" (dict "auth" $out) -}}{{- end -}}
-{{- $kubernetes := index .root.Values "mcp-kubernetes" | default dict -}}
-{{- $oauth := dig "mcpKubernetes" "oauth" dict $kubernetes -}}
-{{- if and (eq (include "agent-platform.componentEnabled" (dict "root" .root "name" "mcp-kubernetes")) "true") $oauth.enabled (eq (dig "storage" "type" "valkey" $oauth) "valkey") -}}
-{{- $clients := dig "ciliumNetworkPolicy" "ingress" "clients" list (.root.Values.valkey | default dict) -}}
-{{- $reader := dict "namespace" "" "matchLabels" (dict "app.kubernetes.io/name" "mcp-kubernetes") -}}
-{{- if not (has $reader $clients) -}}{{- $clients = append $clients $reader -}}{{- end -}}
-{{- $_ := set $derived "ciliumNetworkPolicy" (dict "ingress" (dict "clients" $clients)) -}}
-{{- end -}}
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
@@ -3868,6 +3870,7 @@ release opens the gateway's refusal egress exactly while the notices run. */ -}}
 {{- /* Derived component copies: only a leaf left at auto is written. */ -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "networkPolicy" "flavor") "value" $flavor) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "valkey" "ciliumNetworkPolicy" "enabled") "value" (eq $flavor "cilium")) -}}
+{{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "mcp-kubernetes-valkey" "ciliumNetworkPolicy" "enabled") "value" (eq $flavor "cilium")) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "metrics" "prometheus" "serviceMonitor" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "metrics" "prometheus" "prometheusRule" "enabled") "value" $monitors) -}}
 {{- include "agent-platform.shape.derive" (dict "values" $v "path" (list "muster" "muster" "observability" "grafanaDashboard" "enabled") "value" $monitors) -}}
@@ -4862,7 +4865,7 @@ under `helm template`, where this guard is therefore silent.
 {{- with (lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" .) -}}
 {{- $owner := dig "metadata" "labels" "helm.toolkit.fluxcd.io/name" "" . -}}
 {{- $ownerNs := dig "metadata" "labels" "helm.toolkit.fluxcd.io/namespace" "" . -}}
-{{- if and $owner (or (ne $owner $c.chart) (ne $ownerNs $ns)) -}}
+{{- if and $owner (or (ne $owner ($c.releaseName | default $c.chart)) (ne $ownerNs $ns)) -}}
 {{- $foreign = append $foreign (printf "%s (components.%s) belongs to HelmRelease %s/%s" .metadata.name $key $ownerNs $owner) -}}
 {{- end -}}
 {{- end -}}
@@ -4898,7 +4901,7 @@ show it (README, "The GPU operator").
 {{- $c := index .Values.components "gpu-operator" | default dict -}}
 {{- if and $c (eq (include "agent-platform.componentEnabled" (dict "root" . "name" "gpu-operator")) "true") (not (include "agent-platform.targetSecretName" .)) -}}
 {{- $ns := .Values.gitops.namespace | default .Release.Namespace -}}
-{{- $release := $c.chart -}}
+{{- $release := $c.releaseName | default $c.chart -}}
 {{- $releaseNs := $c.targetNamespace | default (include "agent-platform.targetNamespace" .) -}}
 {{- $foreign := list -}}
 {{- if .Capabilities.APIVersions.Has "nvidia.com/v1" -}}
@@ -4951,7 +4954,7 @@ Usage: include "agent-platform.platformReleaseNames" . | fromYamlArray
 {{- $names := list -}}
 {{- range $key, $c := .Values.components -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" $key)) (hasKey $c "chart") -}}
-{{- $names = append $names $c.chart -}}
+{{- $names = append $names ($c.releaseName | default $c.chart) -}}
 {{- end -}}
 {{- end -}}
 {{- toYaml $names -}}
@@ -4978,10 +4981,11 @@ Usage: include "agent-platform.teardownWaves" . | fromYamlArray  (a list of list
 {{- $on := list -}}
 {{- range ($c.dependsOn | default list) -}}
 {{- if and (hasKey $root.Values.components .) (include "agent-platform.componentEnabled" (dict "root" $root "name" .)) (hasKey (index $root.Values.components .) "chart") -}}
-{{- $on = append $on (index $root.Values.components .).chart -}}
+{{- $dependency := index $root.Values.components . -}}
+{{- $on = append $on ($dependency.releaseName | default $dependency.chart) -}}
 {{- end -}}
 {{- end -}}
-{{- $_ := set $deps $c.chart $on -}}
+{{- $_ := set $deps ($c.releaseName | default $c.chart) $on -}}
 {{- end -}}
 {{- end -}}
 {{- $waves := list -}}

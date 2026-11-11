@@ -13,6 +13,8 @@ knowledge:
       the flux-engine subchart): it is part of the roster forwarded to
       connectivity and of the enabled/disabled logic like every other entry, but
       this loop renders no release for it.
+  releaseName — optional instance name when two components use the same chart.
+      Defaults to chart; also names the Flux objects.
   releasedWithChart — the component's chart is published off THIS chart's git
       tag (agent-platform-connectivity: two charts, one commit, one version),
       so it has exactly one right version, this chart's own
@@ -315,7 +317,8 @@ connectivity chart's migrate Job read the same range and filter. */ -}}
 {{- range $key, $c := .Values.components }}
 {{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
 {{- if and (index $roster $key).enabled (hasKey $c "chart") }}
-{{- $name := $c.chart }}
+{{- /* A second instance of a chart needs its own release and source identity. */ -}}
+{{- $name := $c.releaseName | default $c.chart }}
 {{- /* agent-platform-operator installs into the connectivity release's
 namespace, where the policies, bindings and the CA ConfigMap name its
 ServiceAccount (agent-platform.organizations.operatorServiceAccount). */ -}}

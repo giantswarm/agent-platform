@@ -368,6 +368,15 @@
                         }
                     }
                 },
+                "mcp-kubernetes-valkey": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "model-manager": {
                     "type": "object",
                     "additionalProperties": true,
@@ -1415,6 +1424,10 @@
             "type": "string"
         },
         "mcp-kubernetes": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "mcp-kubernetes-valkey": {
             "type": "object",
             "additionalProperties": true
         },

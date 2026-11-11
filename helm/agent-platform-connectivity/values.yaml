@@ -123,6 +123,8 @@ components:  # @schema additionalProperties: true
   # route, the mcp-kubernetes MCPServer CR and the model serving objects.
   backstage:  # @schema additionalProperties: true
     enabled: false
+  mcp-kubernetes-valkey:  # @schema additionalProperties: true
+    enabled: false
   mcp-kubernetes:  # @schema additionalProperties: true
     enabled: false
   cloudnative-pg:  # @schema additionalProperties: true
@@ -4402,3 +4404,6 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
         tls:
           enabled: false
           caSecretName: ""
+
+# The isolated Kubernetes MCP OAuth store; forwarded only while its component is on.
+mcp-kubernetes-valkey: {}  # @schema skipProperties: true; additionalProperties: true

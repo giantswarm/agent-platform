@@ -93,6 +93,17 @@ class AuthorizationFlowTests(unittest.TestCase):
                     self.assertEqual(self.follow(session, initial, base), complete)
                     self.assertEqual(session.mock_calls, expected_calls)
 
+    def test_replacement_happens_after_pending_consent_and_before_approval(self):
+        session = Mock()
+        session.get.return_value = self.response(page="""<form method="post" action="/oauth/authorize">
+            <input name="consent_id" value="pending"></form>""")
+        session.post.return_value = self.response(303, location=self.callback + "?code=code")
+        replace = Mock(side_effect=lambda: session.post.assert_not_called())
+        follow_authorization(session, "https://muster.example/oauth/authorize", self.callback,
+                             "https://muster.example", self.issuer, "user", "password", before_consent=replace)
+        replace.assert_called_once_with()
+        session.post.assert_called_once()
+
     def test_processes_page_returned_by_post_without_fetching_it_again(self):
         session = Mock()
         session.get.return_value = self.response(page=self.login_page)

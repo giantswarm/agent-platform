@@ -640,10 +640,18 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.enabled | bool | `false` |  |
 | components.backstage.dependsOn[0] | string | `"cloudnative-pg"` |  |
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
+| components.mcp-kubernetes-valkey.chart | string | `"valkey"` |  |
+| components.mcp-kubernetes-valkey.releaseName | string | `"mcp-kubernetes-valkey"` |  |
+| components.mcp-kubernetes-valkey.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.mcp-kubernetes-valkey.versionRange | string | `"0.4.x"` |  |
+| components.mcp-kubernetes-valkey.valuesFrom | string | `"mcp-kubernetes-valkey"` |  |
+| components.mcp-kubernetes-valkey.gatedRoster | bool | `true` |  |
+| components.mcp-kubernetes-valkey.gatedValues[0] | string | `"mcp-kubernetes-valkey"` |  |
 | components.mcp-kubernetes.chart | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.mcp-kubernetes.versionRange | string | `">=1.14.0 <2.0.0"` |  |
 | components.mcp-kubernetes.valuesFrom | string | `"mcp-kubernetes"` |  |
+| components.mcp-kubernetes.dependsOn[0] | string | `"mcp-kubernetes-valkey"` |  |
 | components.mcp-kubernetes.omitKeys[0] | string | `"kubernetesAudience"` |  |
 | components.mcp-kubernetes.omitKeys[1] | string | `"mcpServer"` |  |
 | components.mcp-kubernetes.enabled | bool | `false` |  |
@@ -902,6 +910,26 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.muster.observability.grafanaDashboard.folder | string | `"Agent Platform"` |  |
 | muster.muster.observability.grafanaDashboard.giantswarm.enabled | bool | `true` |  |
 | muster.muster.observability.grafanaDashboard.giantswarm.organization | string | `"Shared Org"` |  |
+| mcp-kubernetes-valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
+| mcp-kubernetes-valkey.ciliumNetworkPolicy.ingress.clients[0].namespace | string | `""` |  |
+| mcp-kubernetes-valkey.ciliumNetworkPolicy.ingress.clients[0].matchLabels."app.kubernetes.io/name" | string | `"mcp-kubernetes"` |  |
+| mcp-kubernetes-valkey.vpa.enabled | bool | `false` |  |
+| mcp-kubernetes-valkey.valkey.fullnameOverride | string | `"mcp-kubernetes-valkey"` |  |
+| mcp-kubernetes-valkey.valkey.replicaCount | int | `1` |  |
+| mcp-kubernetes-valkey.valkey.deploymentStrategy | string | `"Recreate"` |  |
+| mcp-kubernetes-valkey.valkey.auth.enabled | bool | `true` |  |
+| mcp-kubernetes-valkey.valkey.auth.usersExistingSecret | string | `"mcp-kubernetes-oauth"` |  |
+| mcp-kubernetes-valkey.valkey.auth.usersExistingSecretChecksum | string | `""` |  |
+| mcp-kubernetes-valkey.valkey.auth.aclUsers.default.permissions | string | `"~* &* +@all"` |  |
+| mcp-kubernetes-valkey.valkey.auth.aclUsers.default.passwordKey | string | `"valkey-password"` |  |
+| mcp-kubernetes-valkey.valkey.dataStorage.enabled | bool | `true` |  |
+| mcp-kubernetes-valkey.valkey.dataStorage.requestedSize | string | `"1Gi"` |  |
+| mcp-kubernetes-valkey.valkey.valkeyConfig | string | `"maxmemory 64mb\nmaxmemory-policy noeviction\n"` |  |
+| mcp-kubernetes-valkey.valkey.resources.requests.cpu | string | `"25m"` |  |
+| mcp-kubernetes-valkey.valkey.resources.requests.memory | string | `"64Mi"` |  |
+| mcp-kubernetes-valkey.valkey.resources.limits.memory | string | `"128Mi"` |  |
+| mcp-kubernetes-valkey.valkey.metrics.enabled | bool | `false` |  |
+| mcp-kubernetes-valkey.valkey.metrics.podMonitor.enabled | bool | `false` |  |
 | valkey.ciliumNetworkPolicy.enabled | string | `"auto"` |  |
 | valkey.ciliumNetworkPolicy.ingress.clients[0].namespace | string | `""` |  |
 | valkey.ciliumNetworkPolicy.ingress.clients[0].matchLabels."app.kubernetes.io/name" | string | `"muster"` |  |
