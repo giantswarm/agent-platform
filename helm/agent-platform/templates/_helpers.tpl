@@ -521,6 +521,12 @@ floor that takes the key (agent-platform.agentManager.registryConfigFloor). */ -
 {{- $_ := set $derived "tenants" $orgs.tenants -}}
 {{- end -}}
 {{- if eq .name "agent-platform-connectivity" -}}
+{{- /* Helm coalescing removes a defaulted key overridden with null. Forward
+PostgreSQL's explicit unlimited sentinel so connectivity's own 4GB default
+cannot silently reinstate a cap on the second render. */ -}}
+{{- if not (hasKey (.root.Values.postgres | default dict) "maxSlotWalKeepSize") -}}
+{{- $_ := set $derived "postgres" (dict "maxSlotWalKeepSize" "-1") -}}
+{{- end -}}
 {{- /* The namespace the workspace-manager release installs into, when it is
 not the connectivity release's own: the connectivity release binds the
 manager's ServiceAccount there (workspace-manager/kagent-sessions-rbac.yaml). */ -}}
