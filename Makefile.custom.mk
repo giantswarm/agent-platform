@@ -4567,3 +4567,7 @@ verify-all: ## Run every verify-* target of this file, the set CI runs, each wit
 		echo "<==== $$target: $$(( ($$(date +%s%N) - start) / 1000000 )) ms"; \
 	done
 	@echo "all $(words $(VERIFY_TARGETS)) verify targets passed."
+
+.PHONY: verify-beekeeper
+verify-beekeeper: ## Assert the optional coordinator and its authenticated muster registration.
+	@python3 tests/verify-beekeeper.py $(CHART_DIR) $(CONNECTIVITY_DIR) $(VM)

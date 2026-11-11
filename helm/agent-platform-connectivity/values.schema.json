@@ -207,6 +207,40 @@
         "baseDomain": {
             "type": "string"
         },
+        "beekeeper": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+                "database": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "secretKey": {
+                            "type": "string"
+                        },
+                        "secretName": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "serve": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "organization": {
+                            "type": "string"
+                        },
+                        "teams": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "bootstrapMode": {
             "type": "object",
             "additionalProperties": true
@@ -288,6 +322,15 @@
                     }
                 },
                 "backstage": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "beekeeper": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {

@@ -25,6 +25,34 @@ README.
 |------------|------|---------|
 |  | flux-engine | 0.1.0 |
 
+## Optional Beekeeper coordinator
+
+Set `beekeeper.enabled: true` to install `beekeeper serve` and register its MCP
+tools with muster. It is off by default. Calls enter through the platform's
+agentgateway/muster endpoint as the signed-in person; muster forwards the token
+and beekeeper verifies it. The platform fills `serve.issuer`, `serve.clientIDs`
+and `serve.muster` from its identity settings and muster Service unless supplied.
+
+```yaml
+beekeeper:
+  enabled: true
+  database:
+    secretName: beekeeper-db-app # connection URI in key uri
+  serve:
+    organization: example-org
+    teams:
+      example-org:operators: operators
+```
+
+Provide a PostgreSQL database and its connection Secret; beekeeper requires it
+for durable mailboxes. A CloudNativePG cluster's application Secret works directly.
+Use the exact organization and team groups in the issuer's tokens. Other keys
+under `beekeeper` pass through to the component chart (for example `database`,
+`environments`, `lanes`, `extraVolumes` and `extraEnv`). For a private issuer CA,
+mount its certificate and set `SSL_CERT_FILE` with those chart keys.
+`components.beekeeper.versionRange` selects the release line; do not set a
+second enablement switch under `components`. No public beekeeper route is added.
+
 ## Air-gapped install from a mirror
 
 An installation without Internet access pulls every chart and image from a
@@ -579,6 +607,17 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |
 | components.vm-manager.gatedValues[0] | string | `"vm-manager"` |  |
 | components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
+| components.beekeeper.chart | string | `"beekeeper"` |  |
+| components.beekeeper.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.beekeeper.versionRange | string | `">=0.174.6 <0.175.0"` |  |
+| components.beekeeper.valuesFrom | string | `"beekeeper"` |  |
+| components.beekeeper.omitKeys[0] | string | `"enabled"` |  |
+| components.beekeeper.omitKeys[1] | string | `"namespace"` |  |
+| components.beekeeper.injectGlobal | bool | `false` |  |
+| components.beekeeper.crds | string | `"CreateReplace"` |  |
+| components.beekeeper.dependsOn[0] | string | `"muster"` |  |
+| components.beekeeper.gatedValues[0] | string | `"beekeeper"` |  |
+| components.beekeeper.gatedRoster | bool | `true` |  |
 | components.cluster-manager.chart | string | `"cluster-manager"` |  |
 | components.cluster-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.cluster-manager.versionRange | string | `">=0.22.0"` |  |
@@ -1436,6 +1475,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.image.tag | string | `"2.23.2"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
+| beekeeper.enabled | bool | `false` |  |
+| beekeeper.serve.organization | string | `""` |  |
+| beekeeper.serve.teams | object | `{}` |  |
+| beekeeper.database.secretName | string | `""` |  |
+| beekeeper.database.secretKey | string | `"uri"` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
 | cluster-manager.observability.otel.endpoint | string | `"auto"` |  |
 | cluster-manager.observability.otel.protocol | string | `"auto"` |  |

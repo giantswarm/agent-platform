@@ -85,6 +85,8 @@ global:
 # for; the meta chart forwards an entry for every component it knows, so the map
 # stays open. Set them directly only when you install this chart on its own.
 components:  # @schema additionalProperties: true
+  beekeeper:  # @schema additionalProperties: true
+    enabled: false
   # muster and dicebear are on unless the meta chart says otherwise: a slice
   # release of one target cluster turns them off (giantswarm/agent-platform#328),
   # and this chart then renders none of their wiring (muster's /mcp route and the
@@ -4395,3 +4397,16 @@ modelServing:  # @schema skipProperties: true; additionalProperties: true
         tls:
           enabled: false
           caSecretName: ""
+
+# Optional central coordinator. Other keys pass through to the beekeeper chart.
+# The platform supplies serve.issuer, serve.clientIDs and serve.muster when unset.
+# Organization and team mappings must name the exact groups in callers' tokens.
+beekeeper:  # @schema additionalProperties: true
+  enabled: false
+  serve:  # @schema additionalProperties: true
+    organization: ""
+    teams: {}  # @schema additionalProperties: true
+  # Required for mailboxes: a Secret containing the Postgres connection URI.
+  database:
+    secretName: ""
+    secretKey: uri

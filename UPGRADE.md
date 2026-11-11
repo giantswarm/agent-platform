@@ -2,6 +2,23 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## Optional Beekeeper component
+
+Existing installations are unchanged: `beekeeper.enabled` defaults to false.
+To enable it, configure the organization/team groups and the required PostgreSQL connection Secret
+under `beekeeper`, then set `beekeeper.enabled: true`. The issuer and audience
+inherit `global.identity`; the MCPServer forwards the person's token through
+muster. See the chart README for values and private issuer CA configuration.
+
+When migrating a standalone deployment, preserve the release name `beekeeper`,
+target/storage namespace, database reference and all serve settings. Transfer
+the existing HelmRelease to the meta chart without uninstalling it: disable
+pruning for the old GitOps owner before removing its manifest, reconcile the
+meta chart and verify the same Helm release and team namespaces remain. Remove
+the standalone MCPServer only once the connectivity-owned registration is
+Ready. Verify a tool call through muster as the person before removing the old
+source. The desk connection uses that same authenticated muster endpoint.
+
 ## CRDs on an upgrade, per install path
 
 Every component ships its own CRDs and upgrades them with its release; there is no CRD chart to upgrade first ([Reference: CRD lifecycle](docs/reference.md#crd-lifecycle)). Who applies a changed CRD, and what is left to the operator:

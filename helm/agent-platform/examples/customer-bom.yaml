@@ -37,6 +37,7 @@ gitops:
   interval: 30m
 
 components:
+  beekeeper: { versionRange: "0.174.6" }
   muster:                        { versionRange: "5.61.0" }
   agentgateway:                  { versionRange: "2.8.0" }
   valkey:                        { versionRange: "0.1.4" }

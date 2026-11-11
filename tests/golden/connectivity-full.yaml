@@ -13213,7 +13213,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["modelconfigs", "egresspolicies"]
     verbs: ["create", "update", "patch", "delete"]
-  # No patch: its response is the stored Secret, data included.
+  # No patch: its response is the stored Secret, data included. A delete
+  # answered with the Secret (Orphan or Foreground propagation, a finalizer
+  # on it) is refused in admission (agent-platform-organization-secret-deletes).
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "update", "delete"]
