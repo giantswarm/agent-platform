@@ -151,8 +151,10 @@ def main(meta: str, connectivity: str) -> int:
     conn = values(on_docs[("HelmRelease", "agent-platform-connectivity")])
     must_have(conn, (
         "  toolchain-manager:\n    enabled: true\n",
-        "  mcpBackends:\n    toolchain-manager:\n      namespace: default\n      podSelector:\n        app.kubernetes.io/name: toolchain-manager\n      ports:\n      - 8080\n",
     ), "the connectivity release values")
+    # Its entry among the MCP backends (the skill-manager's sorts before it).
+    if not re.search(r"^  mcpBackends:\n(    \S.*\n(      .*\n)*)*    toolchain-manager:\n      namespace: default\n      podSelector:\n        app\.kubernetes\.io/name: toolchain-manager\n      ports:\n      - 8080\n", conn, re.M):
+        fail(f"the connectivity release values lack networkPolicy.mcpBackends.toolchain-manager:\n{conn}")
     if re.search(r"^toolchain-manager:", conn, re.M):
         fail("the toolchain-manager block reached the connectivity release, whose root schema refuses it")
     ok(f"on: one OCIRepository ({REPOSITORY}/{NAME}, {rng}) and one HelmRelease after muster, the login derived from global.identity, the registration on, the agent-toolchains source; connectivity gets the roster and MCP backend entries")

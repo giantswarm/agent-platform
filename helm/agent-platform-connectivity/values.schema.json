@@ -314,6 +314,15 @@
                         }
                     }
                 },
+                "default-agent": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "dicebear": {
                     "type": "object",
                     "additionalProperties": true,

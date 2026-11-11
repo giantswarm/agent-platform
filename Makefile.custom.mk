@@ -553,7 +553,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@grep -qE '^    - name: agentgateway$$' $(VERIFY_TMP)/ap-flux.out || { echo "FAIL: a CR consumer no longer dependsOn its CRD-owning component (agentgateway)"; exit 1; }
 	@echo "--> kagent's first install does not wait for the controller (it mounts the CNPG Secret connectivity renders, and connectivity dependsOn kagent)"
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent.enabled=true >$(VERIFY_TMP)/ap-kag.out 2>&1 || { cat $(VERIFY_TMP)/ap-kag.out; exit 1; }
-	@python3 -c 'import re,sys; docs=open("$(VERIFY_TMP)/ap-kag.out").read().split("\n---\n"); hr=[d for d in docs if "kind: HelmRelease" in d and re.search(r"^  name: kagent$$", d, re.M)]; sys.exit("FAIL: kagent HelmRelease not rendered") if not hr else None; waived=[re.search(r"^  name: (.*)$$", d, re.M).group(1) for d in docs if "kind: HelmRelease" in d and "disableWait: true" in d and not (re.search(r"^  name: muster$$", d, re.M) and "gatewayIdentity:" in d)]; sys.exit("FAIL: a component install no longer waits for its workload: "+", ".join(waived)+" (kagent and substrate depend on the connectivity release, whose hooks mint what their pods start against, so every install waits)") if waived else print("ok: every component install waits for its workload (no install.disableWait), but muster while its credential provider mounts the certificates of a substrate release not Ready yet (giantswarm/agent-platform#1107)")'
+	@python3 -c 'import re,sys; docs=open("$(VERIFY_TMP)/ap-kag.out").read().split("\n---\n"); hr=[d for d in docs if "kind: HelmRelease" in d and re.search(r"^  name: kagent$$", d, re.M)]; sys.exit("FAIL: kagent HelmRelease not rendered") if not hr else None; waived=[re.search(r"^  name: (.*)$$", d, re.M).group(1) for d in docs if "kind: HelmRelease" in d and "disableWait: true" in d and not (re.search(r"^  name: muster$$", d, re.M) and "gatewayIdentity:" in d) and not re.search(r"^  name: default-agent$$", d, re.M)]; sys.exit("FAIL: a component install no longer waits for its workload: "+", ".join(waived)+" (kagent and substrate depend on the connectivity release, whose hooks mint what their pods start against, so every install waits)") if waived else print("ok: every component install waits for its workload (no install.disableWait), but the default agent'"'"'s, whose Agent reports its own readiness (components.default-agent.disableWait), and muster while its credential provider mounts the certificates of a substrate release not Ready yet (giantswarm/agent-platform#1107)")'
 	@echo "ok: flux render"
 	@echo "--> agentgateway 2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
 	@./tests/verify-agentgateway-wiring.py $(VERIFY_TMP)/ap-flux.out
@@ -1504,6 +1504,16 @@ verify-dashboards: ## Assert every PromQL expr of the connectivity chart's dashb
 verify-fast-links: ## Assert the fast-link input of the model serving layer (giantswarm/model-manager#190): modelServing.fastLinks published as the discovery ConfigMap's spec.fastLinks exactly as written (name, nodes, networks, resources, env) for model-manager's split placement; empty (the default) renders no key; both charts default it to [] and the meta chart forwards it with modelServing. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-fast-links.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+
+.PHONY: verify-default-agent
+verify-default-agent: ## Assert the default agent (components.default-agent, giantswarm/giantswarm#38970): one agent chart release in kagent while it, kagent and muster are on, with the derived values; no skills unstamped, every skill of skills/ pinned to the commit hack/stamp-release-commit.sh stamps into a packaged copy (the tag pipeline's step); the skill-manager (follows agent-manager, skillManager.sources with the platform source first, its MCP backend entry, agent-manager's egress) and skillManager.sources feeding the portal; agent-manager's skillManager.url from its floor, else the deprecated URL list; the portal's meta agents. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-default-agent.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+
+.PHONY: verify-skills
+verify-skills: ## Validate every skill of skills/ against what the agent runtime accepts, and that no SKILL.md lives elsewhere (scripts/validate_skills.py). Needs PyYAML.
+	@echo "====> $@"
+	@python3 scripts/validate_skills.py
 
 .PHONY: verify-gpu-pool
 verify-gpu-pool: ## Assert the GPU node pool input of the model serving layer (giantswarm/agent-platform#315): modelServing.gpuPool.taint tolerated by every published preset (the pool's entry first, a preset's equal entry once; Exists without a value, Equal with one), modelServing.gpuPool.nodeSelector merged under the presets' own (their keys win), both published as spec.gpuPool in the discovery ConfigMap model-manager >= 0.23.0 reads; an empty taint key renders no toleration and no taint, and the parsed serving render equals the default render with the pool's toleration taken out, object for object, but for the discovery block (both renders are the head's; a mismatch prints a unified diff); the guards (effect, key, string label values); the meta chart forwards the block. Fixture: ci/test-model-serving-gpu-pool-values.yaml. HELM selects the binary.
@@ -3189,11 +3199,13 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' $(VERIFY_TMP)/vw-bsnp-pin-$$flavor.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' && { echo "FAIL: the $$flavor Backstage policy still admits the data plane while the route is pinned elsewhere"; exit 1; }; \
 		true; \
 	done
-	@echo "--> skill discovery's egress follows backstage.skillsRepositories; the portal's database gets a leg on the postgresql engine"
+	@echo "--> skill discovery's egress follows backstage.skillsRepositories or backstage.skillPullRequests; the portal's database gets a leg on the postgresql engine"
 	@grep -q -- 'matchName: api.github.com' $(VERIFY_TMP)/vw-bsnp-cilium.out || { echo "FAIL: the cilium Backstage policy lacks api.github.com, so skill discovery is denied"; cat $(VERIFY_TMP)/vw-bsnp-cilium.out; exit 1; }
 	@if grep -qE 'matchName: (github.com|raw.githubusercontent.com)$$' $(VERIFY_TMP)/vw-bsnp-cilium.out; then echo "FAIL: the cilium Backstage policy opens github.com or raw.githubusercontent.com, which no portal call reaches"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set backstage.skillsRepositories=null --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-noskills.out
 	@if grep -q 'github' $(VERIFY_TMP)/vw-bsnp-noskills.out; then echo "FAIL: the cilium Backstage policy renders the GitHub egress with backstage.skillsRepositories empty"; exit 1; fi
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set backstage.skillsRepositories=null --set backstage.skillPullRequests=true --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-skillprs.out
+	@grep -q -- 'matchName: api.github.com' $(VERIFY_TMP)/vw-bsnp-skillprs.out || { echo "FAIL: the cilium Backstage policy lacks api.github.com with backstage.skillPullRequests on, so the portal cannot open skill pull requests"; exit 1; }
 	@if grep -q '5432' $(VERIFY_TMP)/vw-bsnp-cilium.out; then echo "FAIL: the cilium Backstage policy renders 5432 on the sqlite engine"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_FULL) --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-full.out
 	@for pattern in 'backstage-cnpg' 'backstage-cnpg-restore' 'port: "5432"'; do \

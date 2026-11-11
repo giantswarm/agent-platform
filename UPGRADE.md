@@ -15,6 +15,22 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the default agent, the skill-manager and `skillManager.sources`)
+
+giantswarm/giantswarm#38970, giantswarm/giantswarm#38322: the chart deploys the default agent (`default-agent` in the kagent namespace) wherever kagent, muster and agent-manager are on, and the skill-manager (`components.skill-manager`) wherever agent-manager is on. The skill-manager and the portal take their skill sources from `skillManager.sources`, with the platform's own `skills/` first. agent-manager pins skills through the skill-manager (`skillManager.url`) from `agent-platform.agentManager.skillManagerFloor` on. Platform HelmReleases are named after their `components` key, which is the chart name for every existing component, so no release is renamed.
+
+### Operator action
+
+- **An installation that deploys its own meta agent (an Agent Manager) or `swarm-operator`**: remove it, or set `components.default-agent.enabled: false`.
+- **The default agent's model**: it gets the installation's default model once, when it has none. To pin or change it, set `defaultAgent.modelConfig`.
+- **An installation that sets `agent-manager.agentChart.semver` or `components.default-agent.versionRange`**: both need the agent chart `>=2.6.0 <3.0.0`; below 2.6.0 the default agent's release refuses an unset model.
+- **An installation that names the default agent differently**: set `defaultAgent.displayName` (and `defaultAgent.description`); its technical name stays `default-agent`.
+- **An installation that reads private skill repositories**: set `skill-manager.github` (`app.secretName` or `tokenSecret.name`), as for agent-manager's.
+- **An installation that sets `agent-manager.skills.repositories` or `backstage.skillsRepositories`**: these keys now default to `[]`. Move the list to `skillManager.sources`. A portal list still replaces the sources for the portal below `agent-platform.backstage.skillManagerFloor`. An agent-manager list fails the render once agent-manager pins through the skill-manager, and a portal list once the portal reads its skills from the skill-manager.
+- **An installation that lists `https://github.com/giantswarm/agent-platform` itself**: the render fails. Remove the entry, or set `skills.platformSource.enabled: false`.
+- **An air-gapped installation**: set `skills.platformSource.enabled: false`.
+- **An installation that keeps agent-manager's own skill discovery**: set `components.skill-manager.enabled: false`.
+
 ## \<current\> → \<next\> (organization credential Secrets are write-only)
 
 giantswarm/agent-platform#1352 and this release: `agent-platform:admin` holds `create`, `update` and `delete` on Secrets, no longer `patch`, whose answer is the stored Secret. With `agentPlatformOrganizations.enabled`, two ValidatingAdmissionPolicies (Fail, Deny) hold Secrets in organization namespaces. `agent-platform-organization-git-secrets`: a Secret applied by an organization's Kustomization is updated only by that Kustomization's ServiceAccount, cluster-admin included. `agent-platform-organization-secret-deletes`: a delete the API server answers with the Secret (Orphan or Foreground propagation, or a Secret a finalizer holds) is made only by a requester that may `get` it.
