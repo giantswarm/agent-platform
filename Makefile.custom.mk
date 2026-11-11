@@ -4555,6 +4555,15 @@ verify-postgres-wal:
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm --set postgres.maxSlotWalKeepSize=null >$(VERIFY_TMP)/vpg-wal.yaml
 	@python3 tests/verify-postgres-wal.py $(VERIFY_TMP)/vpg-wal.yaml absent pgvector
 
+	@set -eu; for value in default 2GB null -1; do \
+	  override=""; expected="$$value"; \
+	  case "$$value" in default) expected=4GB ;; null) override="--set postgres.maxSlotWalKeepSize=null"; expected=-1 ;; *) override="--set-string postgres.maxSlotWalKeepSize=$$value" ;; esac; \
+	  $(HELM) template t $(CHART_DIR) $(WIRING_PG) $$override --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm >$(VERIFY_TMP)/vpg-wal-meta.yaml; \
+	  python3 tests/verify-postgres-wal.py --connectivity-values $(VERIFY_TMP)/vpg-wal-meta.yaml >$(VERIFY_TMP)/vpg-wal-values.yaml; \
+	  $(HELM) template t $(CONNECTIVITY_DIR) --namespace agent-platform $(FLEET_APIS) -f $(VERIFY_TMP)/vpg-wal-values.yaml >$(VERIFY_TMP)/vpg-wal.yaml; \
+	  python3 tests/verify-postgres-wal.py $(VERIFY_TMP)/vpg-wal.yaml "$$expected" pgvector; \
+	done
+
 # --- verify-all --------------------------------------------------------------
 # Every offline assertion of this repository in one target, which is what CI
 # runs. The list is read out of this file, so a new verify-* target reaches CI

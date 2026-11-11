@@ -4,6 +4,17 @@ import sys
 
 import yaml
 
+if sys.argv[1] == "--connectivity-values":
+    with open(sys.argv[2]) as stream:
+        releases = [
+            doc for doc in yaml.safe_load_all(stream)
+            if doc and doc.get("kind") == "HelmRelease"
+            and doc["metadata"]["name"] == "agent-platform-connectivity"
+        ]
+    assert len(releases) == 1, "expected exactly one connectivity release"
+    yaml.safe_dump(releases[0]["spec"]["values"], sys.stdout)
+    sys.exit(0)
+
 with open(sys.argv[1]) as stream:
     clusters = [
         doc for doc in yaml.safe_load_all(stream)

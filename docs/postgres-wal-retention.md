@@ -8,7 +8,11 @@ PostgreSQL's upstream default is unlimited, allowing a stalled slot to fill a PV
 Set the value for the installation's workload and `postgres.storage.size`.
 The limit is enforced at checkpoints, not as a hard disk quota: leave room for
 database growth, other WAL retention settings and WAL bursts. Setting the value
-to `null` omits the parameter and restores the unlimited upstream default.
+to `null` or the string `"-1"` selects unlimited retention. Helm removes a
+null-valued default key during coalescing, so the meta chart forwards that opt-out
+as `"-1"` to connectivity; otherwise connectivity would reapply its `4GB` default.
+When rendering connectivity directly, `null` omits the parameter and leaves
+PostgreSQL's unlimited upstream default.
 
 A replica whose required WAL exceeds the cap can lose its slot and need recovery
 from archived WAL or rebuilding from a healthy primary. Keep tested backups.
