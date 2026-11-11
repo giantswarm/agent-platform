@@ -1181,10 +1181,9 @@ components:  # @schema additionalProperties: true
     # false leaves it out, and agent-manager falls back to its own
     # (deprecated) skill discovery.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # PLACEHOLDER: set the floor to skill-manager's first release before this
-    # chart is released (giantswarm/giantswarm#38322). The ceiling is the next
-    # minor: a skill-manager minor rolls in with the chart release that
-    # renders its values.
+    # The floor is skill-manager's first release (giantswarm/giantswarm#38322).
+    # The ceiling is the next minor: a skill-manager minor rolls in with the
+    # chart release that renders its values.
     versionRange: ">=0.1.0 <0.2.0"
     valuesFrom: skill-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
@@ -1204,9 +1203,8 @@ components:  # @schema additionalProperties: true
     chart: agent
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # The agent chart line, moved with agent-manager.agentChart.semver
-    # (make verify-default-agent). PLACEHOLDER: 2.6.0, whose empty
-    # modelConfig.name renders no model (giantswarm/agent#130), is the floor
-    # once it is released.
+    # (make verify-default-agent). The floor is 2.6.0, whose empty
+    # modelConfig.name renders no model (giantswarm/agent#130).
     versionRange: ">=2.6.0 <3.0.0"
     valuesFile: agents/default-agent/values.yaml
     injectGlobal: false

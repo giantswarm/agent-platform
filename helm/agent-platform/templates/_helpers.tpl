@@ -4670,9 +4670,12 @@ toolchain-manager.registryPullSecret. One line, no comment inside the define.
 {{- define "agent-platform.agentManager.registryConfigFloor" -}}2.16.0{{- end -}}
 
 {{/*
-The first release of the portal (backstage) that takes a skill repository as
+PLACEHOLDER (giantswarm/backstage#3355, unreleased; 3.37.1 takes URLs alone):
+the first release of the portal (backstage) that takes a skill repository as
 {url, ref, path, readOnly}; below it the portal gets URLs alone and no
-platform source. One line, no comment inside the define.
+platform source. Set it to the backstage release that carries #3355 before
+raising components.backstage.versionRange to it. One line, no comment inside
+the define.
 */}}
 {{- define "agent-platform.backstage.skillSourcesFloor" -}}3.31.0{{- end -}}
 
@@ -4680,18 +4683,19 @@ platform source. One line, no comment inside the define.
 PLACEHOLDER (giantswarm/giantswarm#38322): the first agent-manager release
 that takes skillManager.url and pins skills through the skill-manager, and
 takes installation and defaultAgentModel (giantswarm/agent-manager#290); an
-earlier release's closed values schema refuses the keys. Set it to that
-release before raising components.agent-manager.versionRange to it. One line, no comment inside the
-define.
+earlier release's closed values schema refuses the keys. A release candidate
+of it counts (componentFloorAtLeast), so a range floor below the candidate
+that carries #290 (2.24.0-rc.6 and earlier) gets keys it refuses. Set it to
+that release before raising components.agent-manager.versionRange to it. One
+line, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.skillManagerFloor" -}}2.24.0{{- end -}}
 
 {{/*
-PLACEHOLDER (giantswarm/giantswarm#38322): the first portal (backstage)
-release that reads skills from the skill-manager through muster as the person
-and checks a skill pull request against its sources. Set it to that release
-before raising components.backstage.versionRange to it. One line, no comment
-inside the define.
+The first portal (backstage) release that reads skills from the skill-manager
+through muster as the person and checks a skill pull request against its
+sources (giantswarm/backstage#3432, giantswarm/giantswarm#38322). One line, no
+comment inside the define.
 */}}
 {{- define "agent-platform.backstage.skillManagerFloor" -}}3.36.0{{- end -}}
 
