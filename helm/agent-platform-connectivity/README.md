@@ -1546,6 +1546,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | postgres.clusterName | string | `"kagent-pg"` |  |
 | postgres.instances | int | `3` |  |
 | postgres.primaryUpdateMethod | string | `"switchover"` |  |
+| postgres.maxSlotWalKeepSize | string | `"4GB"` |  |
 | postgres.storage.size | string | `"20Gi"` |  |
 | postgres.storage.storageClass | string | `""` |  |
 | postgres.image.name | string | `""` |  |
