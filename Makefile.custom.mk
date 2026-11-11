@@ -181,8 +181,10 @@ WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valk
 # alone turns red the moment its change merges: origin/main then renders the key
 # and the held side does not (giantswarm/agent-platform#904's hold did, on the
 # merge commit's pipeline). Drop an entry once GOLDEN_REF carries it, so the
-# comparison covers the key again. Empty: GOLDEN_REF carries #904.
-WIRING_PG_GOLDEN_HOLD_NEW :=
+# comparison covers the key again.
+# The slot-retention cap intentionally changes the postgres render; hold it
+# absent for the baseline comparison. verify-postgres-wal covers the contract.
+WIRING_PG_GOLDEN_HOLD_NEW := --set postgres.maxSlotWalKeepSize=null
 # muster's kubernetes-flavour egress policy renders here (giantswarm/agent-platform#840)
 # and not on a golden from before; it is left out of both sides. Drop it once
 # GOLDEN_REF carries #840.
@@ -4540,6 +4542,18 @@ verify-scenarios: ## Assert the ATS scenario inputs (tests/ats/scenarios.py) and
 .PHONY: verify-oauth-browser
 verify-oauth-browser: ## Check ATS consent and password form handling without a cluster.
 	@python3 -m unittest discover -s tests/ats -p 'test_oauth_browser.py'
+
+# A cap must apply with and without image-volume extensions, and installations
+# must be able to size it independently or retain the upstream default.
+.PHONY: verify-postgres-wal
+verify-postgres-wal:
+	@mkdir -p $(VERIFY_TMP)
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) >$(VERIFY_TMP)/vpg-wal.yaml
+	@python3 tests/verify-postgres-wal.py $(VERIFY_TMP)/vpg-wal.yaml 4GB
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm --set postgres.maxSlotWalKeepSize=2GB >$(VERIFY_TMP)/vpg-wal.yaml
+	@python3 tests/verify-postgres-wal.py $(VERIFY_TMP)/vpg-wal.yaml 2GB pgvector
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm --set postgres.maxSlotWalKeepSize=null >$(VERIFY_TMP)/vpg-wal.yaml
+	@python3 tests/verify-postgres-wal.py $(VERIFY_TMP)/vpg-wal.yaml absent pgvector
 
 # --- verify-all --------------------------------------------------------------
 # Every offline assertion of this repository in one target, which is what CI

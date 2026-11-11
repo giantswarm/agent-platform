@@ -3038,6 +3038,9 @@
                 "instances": {
                     "type": "integer"
                 },
+                "maxSlotWalKeepSize": {
+                    "type": "string"
+                },
                 "namespace": {
                     "type": "string"
                 },
