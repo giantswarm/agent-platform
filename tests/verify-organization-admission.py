@@ -304,8 +304,9 @@ def sar(user, verb, group, resource, ns):
 def case(name, rc_out, by=None, msg=None):
     """by=None: admitted. by=<policy>: refused by that ValidatingAdmissionPolicy,
     with msg in its message when given. by='RBAC:<text>': refused by the
-    authorizer with that text; by='API:<text>': refused by the API server
-    itself (a registry check) with that text."""
+    authorizer with that text; by='API:<text>': refused with that text by the
+    API server itself (a registry check) or by a policy expression that fails
+    to evaluate."""
     rc, out = rc_out
     last = out.strip().splitlines()[-1] if out.strip() else ""
     if by is None:
@@ -744,10 +745,8 @@ def prove_flux_role():
     case("an organization admin deletes no Secret a finalizer holds",
          delete("secret", "tenant-credential-held", ORG, as_=admin[0], groups=admin[1], cascade="background"), policy,
          f"refused: {ORG}/tenant-credential-held")
-    case("an organization admin deletes a Secret with background propagation",
-         delete("secret", "tenant-credential-by-people", ORG, as_=admin[0], groups=admin[1], cascade="background"))
-    case("an organization admin deletes a Secret with no propagation policy (agent-manager's delete)",
-         kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG}/secrets/tenant-credential-by-people?dryRun=All"], None, admin[0], admin[1]))
+    # The admitted twins, background and no propagation policy (agent-manager's
+    # delete), with their answers: prove_secret_deletes.
     case("a requester that may get the Secret deletes it with orphan propagation",
          delete("secret", "tenant-credential-held", ORG, cascade="orphan"))
     # A Flux controller acting as itself (a platform Kustomization) is not an
@@ -773,7 +772,8 @@ def credential(name, finalizers=None, owner=None):
 def delete_secret(name, as_, groups=(), dry=True, query="", **options):
     """A DELETE of a Secret of ORG as a client sends it: DeleteOptions in the
     body (the API server reads the body, not the query, when there is one),
-    dryRun=All unless dry is False. options=None sends no body."""
+    dryRun=All unless dry is False. no_body=True sends no body (dryRun=All
+    in the query)."""
     url = f"/api/v1/namespaces/{ORG}/secrets/{name}{query}"
     if options.pop("no_body", False):
         return kubectl(["delete", "--raw", url + ("&" if "?" in url else "?") + "dryRun=All" if dry else url], None, as_, groups)
@@ -812,7 +812,7 @@ def prove_secret_deletes():
     or propagationPolicy Orphan adds orphan, 906-916; Foreground adds
     foregroundDeletion, 952-958), and returns the stored object, data
     included, when finalizers stay (1111-1112, 1196-1197), also on a dry run
-    (1105, 1208-1209). Admission runs on that stored object (1063). Graceful
+    (the update is a dry run, 1105, and returns at 1196-1197). Admission runs on that stored object (1063). Graceful
     deletion never applies to a Secret: rest.BeforeDelete returns not
     graceful for a strategy without CheckGracefulDelete
     (pkg/registry/rest/delete.go:101-106), and the Secret strategy has none
@@ -832,8 +832,6 @@ def prove_secret_deletes():
          delete_secret("tenant-credential-plain", *ADMIN, orphanDependents=True), policy, refused)
     case("an organization admin deletes no Secret with ?orphanDependents=true and no body",
          delete_secret("tenant-credential-plain", *ADMIN, query="?orphanDependents=true", no_body=True), policy, refused)
-    case("an organization admin deletes no Secret with Orphan propagation in the DeleteOptions body",
-         delete_secret("tenant-credential-plain", *ADMIN, propagationPolicy="Orphan"), policy, refused)
     # What is admitted is answered with a Status, dry run or not.
     for what, options in (("no DeleteOptions body (dry run in the query)", {"no_body": True}),
                           ("DeleteOptions without a propagation policy (controller-runtime's)", {}),
@@ -847,7 +845,7 @@ def prove_secret_deletes():
         must(create(credential(name), dry=False), f"create the Secret {name}")
         case(f"an organization admin's delete with {what} deletes and is answered with a Status, not the Secret",
              status_only(delete_secret(name, *ADMIN, dry=False, **options)))
-    case("a delete with a precondition that does not hold is refused with a Conflict, not the Secret",
+    case("a delete with a precondition that does not hold is refused with a Conflict before admission",
          delete_secret("tenant-credential-plain", *ADMIN, preconditions={"resourceVersion": "1"}),
          "API:the ResourceVersion in the precondition (1) does not match")
     case("an organization admin deletes no Secret ignoring store read errors",
@@ -893,9 +891,13 @@ def prove_secret_deletes():
          kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG2}/secrets", "-f", "-"], collection, NS_CONTROLLER, ()))
     # A defect, pinned until giantswarm/agent-platform#1362 fixes it: a
     # collection request has no name, so the policy's request.name fails to
-    # evaluate on an item it matches, and failurePolicy Fail refuses the whole
-    # DeleteCollection, for every requester. The namespace controller does
-    # not fall back to item deletes on that error.
+    # evaluate on an item it matches, and failurePolicy Fail stops the
+    # DeleteCollection at that item, for every requester (the items deleted
+    # before it stay deleted: store.go:1245-1290). The namespace controller
+    # deletes Secrets only by DeleteCollection and does not fall back to item
+    # deletes on that error (namespaced_resources_deleter.go:330-338), so the
+    # held Secret never gets a deletionTimestamp and the namespace stays
+    # Terminating, even when the finalizer's controller is healthy.
     case("DEFECT giantswarm/agent-platform#1362: the namespace controller's DeleteCollection fails while a finalizer holds one Secret",
          kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG}/secrets", "-f", "-"], collection, NS_CONTROLLER, ()),
          "API:agent-platform-organization-secret-deletes' with binding 'agent-platform-organization-secret-deletes' denied request: expression "
@@ -924,7 +926,8 @@ def prove_admin_mirrors():
     rbac-operator pkg/key WriteAllCustomerGroupRoleBindingName) into each of
     its organization namespaces: the same name, the roleRef
     agent-platform:organizations-admin, its User and Group subjects, labelled
-    as the operator's object and annotated with its source."""
+    as the operator's object and annotated with its source. Runs after
+    prove_roles, whose mirror makes carol organizations-admin in ORG."""
     mirror = rb("write-all-customer-group", ORG, role="agent-platform:organizations-admin",
                 subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "acme:platform-admins"}])
     mirror["metadata"]["labels"] = {OBJECT_LABEL: "organizations-admin-mirror", "app.kubernetes.io/managed-by": "agent-platform-operator"}
@@ -944,9 +947,10 @@ def prove_admin_mirrors():
     # Without the label, an organizations-admin bound in ORG holds every rule
     # of the role there, so RBAC lets it bind the role itself (no `bind`
     # needed), and no policy holds the roleRef of a person's RoleBinding in an
-    # organization namespace: admitted today. The subject gains no right in
-    # ORG beyond agent-platform:admin's, which the writer may grant; the
-    # operator does not remove a binding it did not label. Pinned as it is
+    # organization namespace: admitted today. The subject gets RoleBinding
+    # writes there and also AgentPlatformOrganization writes in ORG, which
+    # agent-platform:admin does not hold; the operator does not remove a
+    # binding it did not label. Pinned as it is
     # until giantswarm/agent-platform#1363 decides it.
     case("NOT HELD giantswarm/agent-platform#1363: an organizations-admin binds organizations-admin in an organization namespace without the operator's label",
          create(plain, as_=CAROL, groups=()))
