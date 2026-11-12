@@ -177,6 +177,9 @@ def check_roles(docs: list) -> None:
     for t in editor:
         if t[1] in ("modelconfigs", "egresspolicies", "secrets", "rolebindings", "clusterroles", "ocirepositories") and t[2] in WRITES | {"bind"}:
             fail(f"agent-platform:editor holds {t}")
+    editor_rb = {t[2] for t in editor if t[0] == "rbac.authorization.k8s.io" and t[1] == "rolebindings"}
+    if editor_rb != {"get", "list"}:
+        fail(f"agent-platform:editor holds {sorted(editor_rb)} on rolebindings, want get and list: it reads the members, as a user does")
     for v in ("get", "list", "watch"):
         if ("source.toolkit.fluxcd.io", "ocirepositories", v, None) not in editor:
             fail(f"agent-platform:editor cannot {v} ocirepositories.source.toolkit.fluxcd.io")
@@ -330,7 +333,7 @@ def check_platform_tenant(docs: list, want_editors: list) -> None:
     if user is None or editor is None:
         fail("the platform tenant's RoleBindings are missing from the kagent namespace")
     if find(docs, "RoleBinding", "agent-platform:user", "kagent"):
-        fail("RoleBinding agent-platform:user renders in the kagent namespace: every signed-in person reads its EgressPolicies")
+        fail("RoleBinding agent-platform:user renders in the kagent namespace: every signed-in person reads its EgressPolicies and RoleBindings")
     if user["roleRef"] != {"apiGroup": "rbac.authorization.k8s.io", "kind": "ClusterRole", "name": "agent-platform:platform-user"}:
         fail(f"RoleBinding agent-platform:platform-user refers to {user['roleRef']}")
     if subject_names(user) != ["system:authenticated"]:

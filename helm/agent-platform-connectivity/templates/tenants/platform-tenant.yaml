@@ -3,7 +3,8 @@ The platform tenant (giantswarm/agent-platform#706; the agent-permissions plan,
 D4): the kagent namespace keeps the platform's agents for everyone. Every
 signed-in person (tenants.platform.users) is agent-platform:platform-user
 there, agent-platform:user without the EgressPolicies, which name the
-platform's egress origins and the Secrets they authenticate with; the
+platform's egress origins and the Secrets they authenticate with, and without
+the RoleBindings, which name the platform's own identities; the
 platform's operators (tenants.platform.editors) and the customer's platform
 team (tenants.platformTeam) are agent-platform:editor. A list left empty, or
 tenants.platform unset, renders no binding. muster's MCP-server viewers are
