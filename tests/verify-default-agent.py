@@ -83,6 +83,8 @@ ON = ["--set", "components.kagent.enabled=true", "--set", "components.agent-mana
 FLOORS = ["--set", "components.agent-manager.versionRange=>=2.99.0 <3.0.0", "--set", "components.backstage.versionRange=>=3.99.0 <4.0.0"]
 # Below agent-platform.backstage.skillManagerFloor: the portal still gets its own list.
 LIST_FLOORS = ["--set", "components.agent-manager.versionRange=>=2.99.0 <3.0.0", "--set", "components.backstage.versionRange=>=3.31.0 <3.36.0"]
+# Below agent-platform.agentManager.skillManagerFloor, which the default range's floor now is.
+BELOW = ["--set", "components.agent-manager.versionRange=>=2.23.0 <3.0.0"]
 SM_OFF = ["--set", "components.skill-manager.enabled=false"]
 SM_URL = "http://skill-manager.agent-platform.svc.cluster.local:8080"
 PORTAL = ["--set", "components.backstage.enabled=true"]
@@ -208,7 +210,8 @@ v = find(render(META, *ON, "--set", f"components.{NAME}.labels.team=x", "--set-s
 if v.get("labels") != {**LABEL, "team": "x"}:
     fail(f"{NAME}: components.{NAME}.labels drop or change managed-by/default on the Agent, or add nothing: {v.get('labels')!r}")
 # agent-manager fills the default agent's empty model once, from the release that takes the key.
-for what, args, want in (("below the floor", [*ON], None), ("from the floor", [*ON, *FLOORS], {"agent": NAME}),
+for what, args, want in (("below the floor", [*ON, *BELOW], None), ("the default floor", [*ON], {"agent": NAME}),
+                         ("from the floor", [*ON, *FLOORS], {"agent": NAME}),
                          ("the default agent off", [*ON, *FLOORS, "--set", f"components.{NAME}.enabled=false"], None)):
     got = find(render(META, *args), "HelmRelease", "agent-manager")["spec"]["values"].get("defaultAgentModel")
     if got != want:
@@ -218,7 +221,8 @@ if (v["agent"]["displayName"], v["agent"]["description"]) != ("Swarmy", "Ask me.
     fail(f"{NAME}: defaultAgent.displayName/description are not its agent.displayName/description and the system message's name: {v['agent']!r}")
 refused(META, "displayName", *ON, "--set", "defaultAgent.displayName=")
 # agent-manager reports the portal's installation name (get_info installation) from its floor on.
-for what, args, want in (("below the floor", [*ON], None), ("from the floor", [*ON, *FLOORS], "agent-platform"),
+for what, args, want in (("below the floor", [*ON, *BELOW], None), ("the default floor", [*ON], "agent-platform"),
+                         ("from the floor", [*ON, *FLOORS], "agent-platform"),
                          ("backstage.installationName=lab", [*ON, *FLOORS, "--set", "backstage.installationName=lab"], "lab")):
     got = find(render(META, *args), "HelmRelease", "agent-manager")["spec"]["values"].get("installation")
     if got != want:
@@ -378,16 +382,17 @@ if sm != [{"url": PLATFORM, "path": "skills"}]:
 # agent-manager: through the skill-manager from its floor on, else the deprecated URL list.
 objs = ["--set", "skillManager.sources[0].url=https://github.com/acme/skills", "--set", "skillManager.sources[0].ref=v1",
         "--set", "skillManager.sources[1].url=https://github.com/acme/skills", "--set", "skillManager.sources[1].path=x"]
-for what, args in (("below agent-platform.agentManager.skillManagerFloor", [*ON, *objs]), ("the skill-manager off", [*ON, *FLOORS, *SM_OFF, *objs])):
+for what, args in (("below agent-platform.agentManager.skillManagerFloor", [*ON, *BELOW, *objs]), ("the skill-manager off", [*ON, *FLOORS, *SM_OFF, *objs])):
     repositories, smv = am_skills(render(META, *args))
     if repositories != ["https://github.com/acme/skills"] or smv is not None:
         fail(f"agent-manager, {what}: skills.repositories {repositories!r}, skillManager {smv!r}; want skillManager.sources as URLs, once, no platform source, no skillManager")
-repositories, _ = am_skills(render(META, *ON, "--set", "agent-manager.skills.repositories[0]=https://github.com/acme/own"))
+repositories, _ = am_skills(render(META, *ON, *BELOW, "--set", "agent-manager.skills.repositories[0]=https://github.com/acme/own"))
 if repositories != ["https://github.com/acme/own"]:
     fail(f"agent-manager below the floor: its deprecated list does not replace skillManager.sources: {repositories!r}")
-repositories, smv = am_skills(render(META, *ON, *FLOORS))
-if repositories != [] or smv != {"url": SM_URL}:
-    fail(f"agent-manager at the floor: skills.repositories {repositories!r}, skillManager {smv!r}; want none and {{'url': {SM_URL!r}}}")
+for what, args in (("at the default floor", [*ON]), ("above the floor", [*ON, *FLOORS])):
+    repositories, smv = am_skills(render(META, *args))
+    if repositories != [] or smv != {"url": SM_URL}:
+        fail(f"agent-manager {what}: skills.repositories {repositories!r}, skillManager {smv!r}; want none and {{'url': {SM_URL!r}}}")
 _, smv = am_skills(render(META, *ON, *FLOORS, "--set", "skill-manager.fullnameOverride=skills", "--set", "skill-manager.service.port=9090",
                           "--set", "components.skill-manager.targetNamespace=skills"))
 if smv != {"url": "http://skills.skills.svc.cluster.local:9090"}:
@@ -399,7 +404,7 @@ def sm_values(docs: list[dict]) -> dict:
     return find(docs, "HelmRelease", "skill-manager")["spec"]["values"]
 
 
-v = sm_values(render(META, *ON))
+v = sm_values(render(META, *ON, *BELOW))
 if v["networkPolicy"].get("ingressNamespaces") != [] or "serviceToken" in v:
     fail(f"skill-manager below agent-manager's floor, all in one namespace: ingressNamespaces {v['networkPolicy'].get('ingressNamespaces')!r}, serviceToken {v.get('serviceToken')!r}; want [] and none")
 docs = render(META, *ON, *FLOORS, *PORTAL, "--set", "components.backstage.targetNamespace=portal", "--set", "skill-manager.networkPolicy.ingressNamespaces[0]=monitoring")
