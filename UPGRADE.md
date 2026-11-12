@@ -17,11 +17,12 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## \<current\> → \<next\> (agent-manager 2.24: `list_organizations` and write-only organization credentials)
 
-giantswarm/backstage#3364: `components.agent-manager.versionRange` is `>=2.24.0 <3.0.0`. agent-manager 2.24.0 replaces the tool `list_my_organizations` with `list_organizations` (the organizations the person manages or belongs to), keeps organization credentials write-only, adds `replace_organization_credential`, and answers a save whose credential's consumers changed with `credential_consumers_changed`; the Dev Portal's organization pages need these. 2.24.0 is also `agent-platform.agentManager.skillManagerFloor`: with `components.skill-manager` on (it follows agent-manager), agent-manager now pins skills through the skill-manager (`skillManager.url`) and gets `installation` and, while the default agent is on, `defaultAgentModel`, as the earlier entry on the default agent and the skill-manager describes.
+giantswarm/backstage#3364: `components.agent-manager.versionRange` is `>=2.24.0 <3.0.0`. agent-manager 2.24.0 replaces the tool `list_my_organizations` with `list_organizations` (the organizations the person manages or belongs to), makes organization credentials write-only (it writes them without reading the Secret as the caller), adds `replace_organization_credential`, and answers a save whose credential's consumers changed with `credential_consumers_changed`; the Dev Portal's organization pages need these. 2.24.0 is also `agent-platform.agentManager.skillManagerFloor`: with `components.skill-manager` on (it follows agent-manager), agent-manager now pins skills through the skill-manager (`skillManager.url`) and gets `installation` and, while the default agent is on, `defaultAgentModel`, as the earlier entry on the default agent and the skill-manager describes. The agent-manager migrate run's image (`agentManager.migration.image.tag`) moves to `2.24.0` with it, so the migrate run pins skills the same way.
 
 ### Operator action
 
 - **A client or agent that calls `list_my_organizations`**: call `list_organizations`. The platform's `agent-platform-organizations` skill names the new tool.
+- **A Dev Portal before 3.38.0** (`components.backstage` pinned below it, or a portal installed apart): it still calls `list_my_organizations`, so its organization list fails. Move it to 3.38.0 with agent-manager 2.24.0.
 - **An installation that sets `agent-manager.skills.repositories`**: the render fails while the skill-manager is on. Move the list to `skillManager.sources`, or set `components.skill-manager.enabled: false`.
 - **An installation that pins the BOM**: move `agent-manager` to `2.24.0`.
 

@@ -221,7 +221,8 @@ if (v["agent"]["displayName"], v["agent"]["description"]) != ("Swarmy", "Ask me.
     fail(f"{NAME}: defaultAgent.displayName/description are not its agent.displayName/description and the system message's name: {v['agent']!r}")
 refused(META, "displayName", *ON, "--set", "defaultAgent.displayName=")
 # agent-manager reports the portal's installation name (get_info installation) from its floor on.
-for what, args, want in (("below the floor", [*ON, *BELOW], None), ("from the floor", [*ON, *FLOORS], "agent-platform"),
+for what, args, want in (("below the floor", [*ON, *BELOW], None), ("the default floor", [*ON], "agent-platform"),
+                         ("from the floor", [*ON, *FLOORS], "agent-platform"),
                          ("backstage.installationName=lab", [*ON, *FLOORS, "--set", "backstage.installationName=lab"], "lab")):
     got = find(render(META, *args), "HelmRelease", "agent-manager")["spec"]["values"].get("installation")
     if got != want:
