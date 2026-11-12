@@ -5637,8 +5637,9 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # kagent on, the connectivity release renders the three ClusterRoles a tenant's
 # RoleBindings refer to:
 #   - agent-platform:user: see the tenant's agents, templates, RemoteMCPServers,
-#     ModelConfigs, EgressPolicies and muster MCPServers, and start a Session
-#     with an agent;
+#     ModelConfigs, EgressPolicies and muster MCPServers, read the tenant's
+#     RoleBindings (its members; get and list), and start a Session with an
+#     agent;
 #   - agent-platform:editor: the above, plus the writes agent-manager performs
 #     as the caller (HelmReleases, OCIRepositories, Agents, AgentTemplates,
 #     RemoteMCPServers);

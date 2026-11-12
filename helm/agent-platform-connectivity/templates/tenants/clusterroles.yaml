@@ -6,7 +6,7 @@ agent-platform.giantswarm.io/organization. A tenant's
 RoleBindings bind groups to these ClusterRoles in its namespace; the chart
 binds the platform tenant only (platform-tenant.yaml), its signed-in people
 to agent-platform:platform-user, the user's role without the platform's
-EgressPolicies. The names are fixed:
+EgressPolicies and RoleBindings. The names are fixed:
 the bindings an installation declares refer to them, and the admin role's
 `bind` names them.
 
