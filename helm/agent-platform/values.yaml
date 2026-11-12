@@ -1166,7 +1166,14 @@ components:  # @schema additionalProperties: true
     # agent-platform.agentManager.skillManagerFloor: from it agent-manager pins
     # skills through the skill-manager and takes installation and
     # defaultAgentModel (giantswarm/agent-manager#290).
-    versionRange: ">=2.24.0 <3.0.0"
+    # The ceiling admits agent-manager 3.x: 3.0.0 removes replaceCredential
+    # from set_organization_model, set_organization_connector and
+    # set_organization_egress_policy (giantswarm/agent-manager#365; a call
+    # with it is refused invalid_request, replace_organization_credential
+    # replaces a credential), and its chart takes the same values as 2.24.0,
+    # so the range spans both majors and Flux moves to 3.x once it is
+    # published (with gitops.prereleases, to its newest release candidate).
+    versionRange: ">=2.24.0 <4.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
