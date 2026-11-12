@@ -1,5 +1,5 @@
 # Renders every component chart with the values the meta chart forwards to it,
-# against main and the latest patch of the last three minor releases, every six
+# against main and the latest patch of the last five minor releases, every six
 # hours. A component range floats within its major, so a component release
 # changes what an already published agent-platform release installs without an
 # agent-platform commit; the PR and tag pipelines never see that.
@@ -7,8 +7,8 @@
 # Each ref is judged by its own values and its own test code: main runs
 # `make verify-components-charts verify-examples`, a release tag runs
 # `make verify-release-floors verify-examples` (the strict run, no fallback for
-# an unreleased component). A red ref opens or comments on one issue per ref,
-# a green one closes it. docs/ci.md says how to respond.
+# an unreleased component). The report job keeps one issue per failing ref.
+# docs/ci.md says how to respond.
 name: component-render-schedule
 
 on:
@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       refs:
-        description: Refs to render, space-separated (default main and the latest patch of the last three minors)
+        description: Refs to render, space-separated (default main and the latest patch of the last five minors)
         required: false
   pull_request:
     paths:
@@ -26,8 +26,11 @@ on:
 permissions: {}
 
 concurrency:
-  group: component-render-schedule-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: component-render-schedule-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  MINORS: 5
 
 jobs:
   refs:
@@ -38,7 +41,7 @@ jobs:
     outputs:
       refs: ${{ steps.pick.outputs.refs }}
     steps:
-      - name: main and the latest patch of the last three minors
+      - name: main and the latest patch of the last minors
         id: pick
         env:
           REFS: ${{ inputs.refs }}
@@ -50,7 +53,7 @@ jobs:
           else
             tags="$(git ls-remote --tags --refs "https://github.com/$REPO" 'v*' \
               | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)"
-            mapfile -t releases < <(awk -F. '{ last[$1"."$2] = $0 } END { for (m in last) print last[m] }' <<<"$tags" | sort -V | tail -n 3)
+            mapfile -t releases < <(awk -F. '{ last[$1"."$2] = $0 } END { for (m in last) print last[m] }' <<<"$tags" | sort -V | tail -n "$MINORS")
             picked=(main "${releases[@]}")
           fi
           json="$(jq -cn '$ARGS.positional' --args "${picked[@]}")"
@@ -64,11 +67,14 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      issues: write
     strategy:
       fail-fast: false
       matrix:
         ref: ${{ fromJSON(needs.refs.outputs.refs) }}
+    env:
+      # The checks print `ok:` lines to stdout and their FAIL to stderr: unbuffered,
+      # the log keeps them in order.
+      PYTHONUNBUFFERED: "1"
     steps:
       - name: Check out ${{ matrix.ref }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -86,8 +92,11 @@ jobs:
           smoke_test: "${binary} version --short"
       - name: Install PyYAML
         run: |
-          sudo timeout 180 apt-get update -qq
-          sudo timeout 180 apt-get install -y -qq python3-yaml
+          for attempt in 1 2 3; do
+            python3 -c 'import yaml' 2>/dev/null && break
+            (sudo timeout 180 apt-get update -qq && sudo timeout 180 apt-get install -y -qq python3-yaml) && break
+            echo "apt attempt $attempt failed or stalled; retrying" >&2; sleep 15
+          done
           python3 -c 'import yaml'
       - name: Render every component with the forwarded values
         id: render
@@ -100,54 +109,132 @@ jobs:
           else
             targets=(verify-release-floors verify-examples)
           fi
-          make "${targets[@]}" 2>&1 | tee "$RUNNER_TEMP/render.log"
-      - name: Summarize the refusal
-        if: failure() && steps.render.outcome == 'failure'
-        run: |
-          {
-            echo '```'
-            sed -n '/^FAIL/,$p' "$RUNNER_TEMP/render.log" | head -n 60
-            echo '```'
-          } > "$RUNNER_TEMP/fail.md"
-          if [ "$(wc -l < "$RUNNER_TEMP/fail.md")" -le 2 ]; then
-            { echo '```'; tail -n 40 "$RUNNER_TEMP/render.log"; echo '```'; } > "$RUNNER_TEMP/fail.md"
-          fi
-          cat "$RUNNER_TEMP/fail.md" >> "$GITHUB_STEP_SUMMARY"
-      - name: Open, update or close the issue for ${{ matrix.ref }}
-        if: always() && github.event_name != 'pull_request' && (steps.render.outcome == 'success' || steps.render.outcome == 'failure')
+          # -k: every target reports, not only the first that fails.
+          make -k "${targets[@]}" 2>&1 | tee "$RUNNER_TEMP/render.log"
+      - name: Classify the result
+        if: always()
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           REF: ${{ matrix.ref }}
           OUTCOME: ${{ steps.render.outcome }}
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/render.log"
+          touch "$log"
+          mkdir -p result
+          # refused: a component chart refuses the forwarded values (what breaks
+          # installations); unreleased: main's Chart.yaml annotation is stale;
+          # failed: anything else (setup, the registry, the check itself).
+          if [ "$OUTCOME" = success ]; then
+            kind=success
+          elif grep -q -E 'rejects the values (the meta chart forwards to it|the example gives it)' "$log"; then
+            kind=refused
+          elif grep -q 'run `make sync-unreleased`' "$log"; then
+            kind=unreleased
+          else
+            kind=failed
+          fi
+          # The FAIL blocks, without the lines that change from run to run.
+          { grep -E -A6 '^FAIL' "$log" || tail -n 40 "$log"; } | head -n 80 > result/excerpt.txt
+          echo "$kind" > result/kind
+          echo "$REF" > result/ref
+          if [ "$kind" != success ]; then
+            { echo "### $REF: $kind"; echo '```'; cat result/excerpt.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Keep the result for the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: result-${{ strategy.job-index }}
+          path: result/
+          retention-days: 7
+
+  report:
+    name: Open, update or close the issues
+    needs: [refs, render]
+    if: always() && github.event_name != 'pull_request' && needs.refs.result == 'success'
+    runs-on: ubuntu-26.04
+    permissions:
+      issues: write
+    steps:
+      # An App token, unlike GITHUB_TOKEN, lets the issue's events start the
+      # board workflows and the team mention notify. The workflow token is the
+      # fallback when the App is not available or may not write issues.
+      - name: Generate giantswarm-release token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-issues: write
+      - name: Collect the results
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: result-*
+          path: results
+      - name: Report every ref
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          GH_REPO: ${{ github.repository }}
+          REFS: ${{ needs.refs.outputs.refs }}
+          SCHEDULED: ${{ github.event_name == 'schedule' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          if [ "$REF" = main ]; then
-            title="agent-platform main branch chart doesn't render"
-          else
-            title="agent-platform release $REF chart doesn't render"
-          fi
-          number="$(gh issue list --state open --label team/bumblebee --search "\"$title\" in:title" \
-            --json number,title --jq "map(select(.title == \"$title\"))[0].number // empty")"
-          if [ "$OUTCOME" = success ]; then
-            if [ -n "$number" ]; then
-              gh issue close "$number" --comment "Every component renders again on \`$REF\`: $RUN_URL"
+          title_of() {
+            if [ "$1" = main ]; then echo "agent-platform main branch chart doesn't render"
+            else echo "agent-platform release $1 chart doesn't render"; fi
+          }
+          open="$(gh issue list --state open --label team/bumblebee --limit 500 --json number,title)"
+          number_of() {
+            TITLE="$1" jq -r 'map(select(.title == env.TITLE))[0].number // empty' <<<"$open"
+          }
+
+          mapfile -t refs < <(jq -r '.[]' <<<"$REFS")
+          for ref in "${refs[@]}"; do
+            dir="$( (grep -l -x -F -- "$ref" results/*/ref 2>/dev/null || true) | head -n 1 | xargs -r dirname)"
+            if [ -n "$dir" ]; then
+              kind="$(cat "$dir/kind")"; excerpt="$(cat "$dir/excerpt.txt")"
+            else
+              kind=failed; excerpt="The render job reported no result: it failed before the render ran."
             fi
-            exit 0
-          fi
-          body="$(cat <<EOF
-          @giantswarm/team-bumblebee a component chart refuses the values agent-platform \`$REF\` forwards to it, so installations that reconcile this release now fail.
+            title="$(title_of "$ref")"
+            number="$(number_of "$title")"
+            if [ "$kind" = success ]; then
+              [ -z "$number" ] || gh issue close "$number" --comment "Every component renders again on \`$ref\`: $RUN_URL"
+              continue
+            fi
+            if [ "$ref" = main ]; then where="the next release"; else where="installations that reconcile \`$ref\`"; fi
+            case "$kind" in
+              refused) what="A component chart refuses the values agent-platform \`$ref\` forwards to it: $where now fail to install or upgrade that component." ;;
+              unreleased) what="\`main\`'s \`agent-platform.giantswarm.io/unreleased\` annotation no longer matches the registry: run \`make sync-unreleased\` on \`main\`. Installations are not affected." ;;
+              *) what="The render check for \`$ref\` could not finish (setup, the registry or the check itself). This does not say that installations fail; look at the run." ;;
+            esac
+            signature="$(printf '%s\n%s' "$kind" "$excerpt" | sha256sum | cut -c1-16)"
+            report="$(printf '%s\n\nRun: %s\n\n```\n%s\n```\n\nHow to respond: [docs/ci.md](https://github.com/%s/blob/main/docs/ci.md#scheduled-component-render).\n\n<!-- render-signature: %s -->' \
+              "$what" "$RUN_URL" "$excerpt" "$GH_REPO" "$signature")"
+            if [ -z "$number" ]; then
+              gh issue create --title "$title" --label team/bumblebee --body "$(printf '@giantswarm/team-bumblebee %s' "$report")"
+              continue
+            fi
+            # A new comment only when the failure changed: the same refusal
+            # every six hours says nothing new.
+            last="$(gh issue view "$number" --json body,comments \
+              --jq '[.body, (.comments[].body)] | map(select(contains("render-signature"))) | last // ""')"
+            if [[ "$last" != *"render-signature: $signature"* ]]; then
+              gh issue comment "$number" --body "$report"
+            fi
+          done
 
-          Run: $RUN_URL
-
-          $(cat "$RUNNER_TEMP/fail.md")
-
-          How to respond: [docs/ci.md](https://github.com/$GH_REPO/blob/main/docs/ci.md#scheduled-component-render).
-          EOF
-          )"
-          if [ -n "$number" ]; then
-            gh issue comment "$number" --body "$body"
-          else
-            gh issue create --title "$title" --label team/bumblebee --body "$body"
+          # A ref the schedule no longer renders (a newer patch or minor took its
+          # place, or it was rendered once by hand) never turns green: close its
+          # issue so the open ones are the refs that are still checked.
+          if [ "$SCHEDULED" = true ]; then
+            TITLES="$(for ref in "${refs[@]}"; do title_of "$ref"; done | jq -R . | jq -sc .)" \
+              jq -r '(env.TITLES | fromjson) as $t
+                | .[] | select(.title | test("^agent-platform (release v[0-9.]+|main branch) chart doesn.t render$"))
+                | select(.title as $x | $t | index($x) | not) | .number' <<<"$open" \
+              | while read -r stale; do
+                  gh issue close "$stale" --comment "The schedule no longer renders this ref (a newer patch or minor took its place): $RUN_URL. Reopen it if installations still run it."
+                done
           fi
