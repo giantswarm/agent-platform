@@ -211,6 +211,15 @@ def check_meta(chart):
            "the explicit client credential URL template travels unchanged")
     expect(am.get("githubTokenExchange", {}).get("clientID") == "agent-manager",
            "the configured confidential broker client travels unchanged")
+    exchange = {"tokenEndpoint": "https://muster.example.com/oauth/token", "audience": "agent-manager",
+                "existingSecret": "agent-manager-github-broker"}
+    next_manager = docs(meta(chart, *ON, "--set", "components.agent-manager.versionRange=>=3.0.0 <4.0.0",
+                             "--set", "agent-manager.github.enabled=true",
+                             "--set-json", f"agent-manager.github.tokenExchange={json.dumps(exchange)}"))
+    next_values = release(next_manager, "agent-manager")["values"]
+    expect(next_values.get("github", {}).get("tokenExchange") == exchange
+           and next_values["github"].get("enabled") is True and "githubTokenExchange" not in next_values,
+           "the 3.x manager receives the on-demand grant configuration without the removed top-level key")
     expect(am.get("tenants") == {"enabled": True, "commit": manager_commit},
            "organization GitOps configuration reaches the manager beside the derived organization switch")
     expect(v["commitMode"] == {"sourceRef": {"kind": "GitRepository", "name": "giantswarm-config"},

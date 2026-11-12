@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (agent-manager 3.x)
+
+`components.agent-manager.versionRange` admits `>=2.24.0 <4.0.0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).
+
+### Operator action
+
+- Before admitting agent-manager 3.x, upgrade every portal calling it to Backstage 3.38.2 or later and migrate other callers of `replaceCredential`.
+- Where `agent-manager.githubTokenExchange` is configured, keep an explicit `components.agent-manager.versionRange` below `3.0.0` until the installation's reviewed migration moves it to `agent-manager.github.tokenExchange`. Move `endpoint` to `tokenEndpoint` and `secretName` to `existingSecret`, remove `grantApp`, and set `github.enabled: true`. The audience must equal the muster provider App and broker grant target names. Apply the values and version range together after the agentlab proof (giantswarm/giantswarm#39239).
+- The on-demand exchange needs muster 5.63.0 or later. Installations still using the GitHub App pin keep it until their own rollout step.
+
 ## \<current\> → \<next\> (agent-manager 2.24: `list_organizations` and write-only organization credentials)
 
 giantswarm/backstage#3364: `components.agent-manager.versionRange` is `>=2.24.0 <3.0.0`. agent-manager 2.24.0 replaces the tool `list_my_organizations` with `list_organizations` (the organizations the person manages or belongs to), makes organization credentials write-only (it writes them without reading the Secret as the caller), adds `replace_organization_credential`, and answers a save whose credential's consumers changed with `credential_consumers_changed`; the Dev Portal 3.38.0 replaces a credential with `replace_organization_credential` and deletes one through its delete dialog (it lists organizations with `list_organizations` from 3.37.0, giantswarm/backstage#3467). 2.24.0 is also `agent-platform.agentManager.skillManagerFloor`: with `components.skill-manager` on (it follows agent-manager), agent-manager now pins skills through the skill-manager (`skillManager.url`) and gets `installation` and, while the default agent is on, `defaultAgentModel`, as the earlier entry on the default agent and the skill-manager describes. With `defaultAgentModel`, agent-manager gives the default agent (`default-agent` in the kagent namespace) the installation's default model once, while it has none: the ModelConfig in the kagent namespace annotated `agent-platform.giantswarm.io/is-default-model-config: "true"`. Below this floor the default agent gets no model and is not ready (`Compatible=False`, `kagent ModelConfig is required`). The agent-manager migrate run's image (`agentManager.migration.image.tag`) is already `2.24.0`, so the migrate run pins skills the same way. The range stays below 3.0.0: admitting agent-manager 3.x is a separate step.
