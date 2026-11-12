@@ -105,9 +105,13 @@ def roster_covered(meta: str) -> None:
     line = re.search(r"\{\{- range \$name, \$wiring := dict (.*?) -\}\}", helpers)
     if not line:
         sys.exit("FAIL: roster: the agent-platform.identity.apply list is not found in _helpers.tpl")
-    listed = set(re.findall(r'"([^"]*)"', line.group(1))[0::2])
+    pairs = line.group(1)
+    if re.sub(r'"[^"]+"\s+"[^"]*"', "", pairs).strip():
+        sys.exit(f"FAIL: roster: the agent-platform.identity.apply list is not pairs of quoted strings: {pairs}")
+    listed = set(re.findall(r'"([^"]+)"\s+"[^"]*"', pairs))
+    # The helper reads the top-level block (index $v $name): the component's valuesFrom key.
     with_oauth = {
-        key for key, c in values["components"].items()
+        c["valuesFrom"] for c in values["components"].values()
         if isinstance(values.get(c.get("valuesFrom") or ""), dict)
         and isinstance(values[c["valuesFrom"]].get("oauth"), dict)
     }
@@ -187,6 +191,19 @@ def main() -> None:
         expect(f"{name} oauth.existingSecret with global.identity set", o.get("existingSecret"), None)
         expect(f"{name} oauth.trustedAudiences with global.identity set", o.get("trustedAudiences"), None)
     print("ok: global.identity wins")
+
+    print("--> global.identity without a client (enigma's shape): each key is filled on its own, the client from muster's login")
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets(
+        f"global.identity.issuerUrl={ISSUER}",
+        f"global.identity.existingSecret={SECRET}",
+    )])
+    for name in MANAGERS:
+        o = oauth(rels, name)
+        expect(f"{name} oauth.dex.clientID without global.identity.clientId", o.get("dex", {}).get("clientID"), CLIENT)
+        expect(f"{name} oauth.trustedAudiences without global.identity.clientId", o.get("trustedAudiences"), [CLIENT])
+        expect(f"{name} oauth.dex.issuerURL with global.identity.issuerUrl set", o.get("dex", {}).get("issuerURL"), None)
+        expect(f"{name} oauth.existingSecret with global.identity.existingSecret set", o.get("existingSecret"), None)
+    print("ok: global.identity without a client")
 
     print("--> one login: a global.identity.clientId that differs from muster's fails the connectivity render")
     rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets(f"global.identity.issuerUrl={ISSUER}", "global.identity.clientId=platform")])
