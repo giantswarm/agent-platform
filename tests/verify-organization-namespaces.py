@@ -36,7 +36,8 @@ container to a worker there (a Pending pod is enough: admission runs before
 the node lookup); the operator writes its namespaced kinds only in
 organization namespaces (agent-platform-organization-operator-scope); one labelled only
 giantswarm.io/organization gets none of them. Each refusal names its policy
-and has an admitted twin.
+and has an admitted twin. No case runs before the API server has loaded every
+policy and binding applied (APIServer.settle, giantswarm/agent-platform#1291).
 
 With llmRouting.models naming Anthropic only and a serving model-manager
 (giantswarm/giantswarm#39175), the policies of that render applied in place:
@@ -65,7 +66,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import time
 
 import yaml
 
@@ -626,6 +626,23 @@ def workerpool(ns):
                      "template": {"labels": {"team": "x"}, "serviceAccountName": "workers"}}}
 
 
+def prove_settle():
+    """A policy that never loads fails the wait by name, before anything is
+    applied."""
+    for what, objs, want in (
+            ("a ValidatingAdmissionPolicy without a binding", [{"kind": "ValidatingAdmissionPolicy", "metadata": {"name": "never-bound"}}],
+             "ValidatingAdmissionPolicy never-bound (no binding)"),
+            ("a MutatingAdmissionPolicyBinding without its policy",
+             [{"kind": "MutatingAdmissionPolicyBinding", "metadata": {"name": "orphan"}, "spec": {"policyName": "missing"}}],
+             "MutatingAdmissionPolicyBinding orphan (its policy is not applied)")):
+        try:
+            API.settle(objs)
+            got = "settled"
+        except SystemExit as e:
+            got = str(e)
+        case(f"the wait for the policies fails naming {what}", (0 if want in got else 1, got))
+
+
 def prove_label(meta_chart, k8s):
     sel = {"matchExpressions": [{"key": NEW, "operator": "Exists"}]}
     grants = release(docs(meta(meta_chart, *ON)), "substrate")["values"]["credentialProvider"]["namespacePolicies"]
@@ -656,6 +673,7 @@ def prove_label(meta_chart, k8s):
     must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": {"name": "secret-writer", "namespace": ORG_NS},
                  "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "secret-writer"},
                  "subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": "writer"}]}, dry=False), "bind writer")
+    API.settle()
     case("a requester who may only create Secrets writes a Secret outside tenant-credential-*",
          kubectl(["create", "-f", "-", "--dry-run=server"], yaml.safe_dump(secret("platform-key")), "writer", ()), "agent-platform-tenant-secret-creation")
     case("a requester who may only create Secrets writes a tenant credential",
@@ -766,15 +784,9 @@ def prove_model_manager(chart):
         rc, out = kubectl(["create", "-f", "-", "--dry-run=server", "-o", "json"], yaml.safe_dump(mc("filled", ns, None)))
         return rc, (json.loads(out)["spec"].get("openAI", {}).get("baseUrl") if rc == 0 else out)
 
-    # The previous render fills in OpenAI in both namespaces too: only the
-    # kagent namespace left alone shows the swapped policies are in force.
-    deadline = time.time() + 60
-    while time.time() < deadline:
-        if base_url(ORG_NS) == (0, f"{LISTENER}/v1") and base_url("kagent") == (0, None):
-            break
-        time.sleep(0.5)
-    else:
-        fail(f"the API server did not apply the model-manager render's policies within 60s: {base_url(ORG_NS)}, {base_url('kagent')}")
+    # The swapped policies and the deletes, all in force (the previous render
+    # fills in OpenAI in both namespaces too: the kagent case below shows it).
+    API.settle(objs)
     case(f"model-manager serving, anthropic-only: an OpenAI ModelConfig at the listener's /v1 in {ORG_NS}", create(mc("local", ORG_NS, f"{LISTENER}/v1")))
     case(f"model-manager serving, anthropic-only: an OpenAI ModelConfig at the provider's URL in {ORG_NS}",
          create(mc("direct", ORG_NS, "https://api.openai.com/v1")), "agent-platform-tenant-model-routing")
@@ -805,14 +817,9 @@ def main():
         must(create(workerpool("kagent"), dry=False), "create the platform WorkerPool")
         for d in policies:
             must(kubectl(["apply", "--server-side", "-f", "-"], yaml.safe_dump(d)), f"apply {d['kind']} {d['metadata']['name']}")
-        deadline = time.time() + 60
-        while time.time() < deadline:
-            rc, out = create(mc("probe", ORG_NS, "https://api.openai.com/v1"))
-            if rc != 0 and "agent-platform-tenant-model-routing" in out:
-                break
-            time.sleep(0.5)
-        else:
-            fail("the API server did not apply the policies within 60s")
+        # Every policy and binding, not one of them (giantswarm/agent-platform#1291).
+        API.settle(policies)
+        prove_settle()
         prove_label(meta_chart, k8s)
         prove_netpol(k8s)
         prove_operator_scope()

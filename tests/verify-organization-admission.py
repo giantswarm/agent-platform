@@ -450,22 +450,12 @@ def fixtures():
 def install(roles, policies):
     for d in roles + policies:
         must(kubectl(["apply", "--server-side", "-f", "-"], yaml.safe_dump(d)), f"apply {d['kind']} {d['metadata']['name']}")
-    # The API server compiles a policy and its binding on its own time: wait
-    # for the refusals of two of them; the others load with them. No
-    # controller manager runs, so no policy gets a type-check status: an
-    # expression that does not fit its kind fails to evaluate, which case()
-    # tells from a refusal.
-    probe = egress("probe", ORG, "https://kubernetes.default")
-    deadline = time.time() + 60
-    while time.time() < deadline:
-        rc, out = create(probe)
-        ready = rc != 0 and "agent-platform-organization-egress-floor" in out
-        rc, out = create(workerpool(ORG, sandbox_class="microvm"), as_=OP)
-        if ready and rc != 0 and "agent-platform-organization-workerpool-copy" in out:
-            break
-        time.sleep(0.5)
-    else:
-        fail("the API server did not apply the policies within 60s")
+    # The API server loads a policy and its binding on its own time: wait for
+    # every one of them, the fixtures' RBAC and the namespaces deleted
+    # (giantswarm/agent-platform#1291). No controller manager runs, so no
+    # policy gets a type-check status: an expression that does not fit its
+    # kind fails to evaluate, which case() tells from a refusal.
+    API.settle([d for d in policies if d["kind"].endswith(("AdmissionPolicy", "AdmissionPolicyBinding"))])
 
 
 def prove_roles():
@@ -494,12 +484,14 @@ def prove_roles():
          "create the namespace admin Role of team-a")
     must(create(rb("alice-admin", PLAIN, role="namespace-admin", kind="Role",
                    subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": ALICE}]), dry=False), "bind alice as admin of team-a")
+    API.settle()
     case("organizations-admin who may create Roles in a namespace (its admin) writes RoleBindings there (not held)",
          create(rb("devs", PLAIN, role="namespace-admin", kind="Role"), as_=ALICE, groups=()))
     case("organizations-admin by RoleBinding in a parent writes no RoleBinding there", create(rb("devs", PARENT), as_=CAROL, groups=()),
          "agent-platform-organizations-admin-rolebindings")
     must(create(rb("carol-organizations-admin", ORG, role="agent-platform:organizations-admin",
                    subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": CAROL}]), as_=OP, dry=False), "mirror carol's binding")
+    API.settle()
     case("organizations-admin by RoleBinding, mirrored by the operator, binds members in the organization namespace",
          create(rb("devs", ORG), as_=CAROL, groups=()))
     answers = {f"{v} ocirepositories": can_i(v, "ocirepositories.source.toolkit.fluxcd.io", ORG, BOB) for v in ("create", "update", "delete", "get")}
@@ -652,6 +644,7 @@ def prove_flux_role():
     must(create(rb("organization-flux", ORG, role="agent-platform:organization-flux",
                    subjects=[{"kind": "ServiceAccount", "name": ORG, "namespace": FLUX_NS}]), as_=OP, dry=False),
          "bind the organization's Flux ServiceAccount")
+    API.settle()
     # kubectl auth can-i resolves only served kinds; of kagent's this API
     # server serves EgressPolicy, the others are asked by a
     # SubjectAccessReview.
@@ -707,6 +700,7 @@ def prove_flux_role():
         if kind == "Role":
             must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": role, "namespace": ORG},
                          "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["get", "list"]}]}, dry=False), "create a Role")
+            API.settle()
         case(f"a merged RoleBinding binds no {kind} {role}, whose rules it holds", create(rb("members-git", ORG, role=role, kind=kind), as_=FLUX_SA, groups=()),
              "agent-platform-organization-flux-writes", f"refused: {ORG}/members-git to {kind} {role}")
     token = {"apiVersion": "v1", "kind": "Secret", "type": "kubernetes.io/service-account-token",
@@ -967,6 +961,7 @@ def prove_git_admins():
     must(create(rb("organization-flux", ORG3, role="agent-platform:organization-flux",
                    subjects=[{"kind": "ServiceAccount", "name": ORG3, "namespace": FLUX_NS}]), as_=OP, dry=False),
          "bind ORG3's Flux ServiceAccount")
+    API.settle()
     admins = rb("organization-admins", ORG3, role="agent-platform:admin")
     admins["metadata"]["labels"] = {"kustomize.toolkit.fluxcd.io/name": ORG3, "kustomize.toolkit.fluxcd.io/namespace": FLUX_NS}
     policy = "agent-platform-organization-admins-binding"
@@ -988,12 +983,9 @@ def prove_git_admins():
          policy, f"refused: DELETE in {ORG3}")
     # The erasure's namespace step: the namespace controller removes it.
     must(kubectl(["delete", "namespace", ORG3, "--wait=false"]), f"delete namespace {ORG3}")
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        rc, out = kubectl(["get", "namespace", ORG3, "-o", "jsonpath={.metadata.deletionTimestamp}"])
-        if rc == 0 and out.strip():
-            break
-        time.sleep(0.5)
+    # The policy reads the namespace's deletionTimestamp from the API
+    # server's namespace cache, which settle() waits for.
+    API.settle()
     case("the namespace controller deletes the git-applied organization-admins once its namespace terminates",
          delete("rolebinding", "organization-admins", ORG3, as_=NS_CONTROLLER, groups=()))
 
