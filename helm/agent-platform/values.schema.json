@@ -532,6 +532,9 @@
                         "repository": {
                             "type": "string"
                         },
+                        "teamAnnotation": {
+                            "type": "boolean"
+                        },
                         "valuesFrom": {
                             "type": "string"
                         },
@@ -676,6 +679,9 @@
                         "targetNamespace": {
                             "type": "string"
                         },
+                        "teamAnnotation": {
+                            "type": "boolean"
+                        },
                         "versionRange": {
                             "type": "string"
                         }
@@ -738,6 +744,9 @@
                         },
                         "targetNamespace": {
                             "type": "string"
+                        },
+                        "teamAnnotation": {
+                            "type": "boolean"
                         },
                         "valuesFrom": {
                             "type": "string"

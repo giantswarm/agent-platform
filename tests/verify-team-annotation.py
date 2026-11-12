@@ -6,11 +6,14 @@ carries the annotation application.giantswarm.io/team with the chart's team
 kube-state-metrics reads the annotation off the Flux objects into the `team`
 label of gotk_resource_info, which routes the alerts on them. The team-stamper
 controller writes it only for the releases its apps-to-teams mapping lists, and
-substrate and substrate-crds are not there: the chart stamps every object.
+substrate and substrate-crds are not there: the chart stamps them. The charts
+that the mapping gives to another team (cloudnative-pg, gpu-operator,
+gateway-api-crds: components.<name>.teamAnnotation false) get no annotation
+from the chart, so team-stamper's mapped team stands.
 
-Two renders: the CI values with Substrate on and the bundled engine (the self
-release's OCIRepository and HelmRelease render too), and the engine off (no
-self release). Stdlib only, like the other render checks (the CI image has no
+Three renders: the CI values with Substrate on and the bundled engine (the self
+release's OCIRepository and HelmRelease render too), the engine off (no self
+release), and the engine off with the three other teams' charts on. Stdlib only, like the other render checks (the CI image has no
 PyYAML): the objects are the chart's own render, two-space indented.
 
 Usage: verify-team-annotation.py <meta chart dir>
@@ -58,14 +61,15 @@ def flux_objects(manifest: str) -> dict:
     return out
 
 
-def check(objects: dict, team: str, what: str, must: list) -> None:
+def check(objects: dict, team: str, what: str, must: list, unannotated: tuple = ()) -> None:
     missing = [f"{k} {n}" for k, n in must if (k, n) not in objects]
     if missing:
         sys.exit(f"FAIL: {what}: not rendered: {missing}")
-    bad = [f"{k} {n}: {v!r}" for (k, n), v in sorted(objects.items()) if v != team]
+    bad = [f"{k} {n}: {v!r}" for (k, n), v in sorted(objects.items()) if v != (None if n in unannotated else team)]
     if bad:
-        sys.exit(f"FAIL: {what}: {KEY} is not {team!r} on: {bad}")
-    print(f"ok: {what}: {len(objects)} HelmReleases and OCIRepositories carry {KEY}={team}")
+        sys.exit(f"FAIL: {what}: {KEY} is not {team!r} (none on {list(unannotated)}) on: {bad}")
+    skipped = sum(1 for _, n in objects if n in unannotated)
+    print(f"ok: {what}: {len(objects) - skipped} HelmReleases and OCIRepositories carry {KEY}={team}, {skipped} of another team's chart carry none")
 
 
 def main(chart_dir: str) -> int:
@@ -79,6 +83,14 @@ def main(chart_dir: str) -> int:
 
     engine_off = flux_objects(render(chart_dir, substrate + ["--set", "components.flux.enabled=false"]))
     check(engine_off, team, "engine off, Substrate on", pairs)
+
+    # The charts that the apps-to-teams mapping gives to another team: the chart
+    # writes no annotation, so team-stamper's mapped team stands.
+    other_team = ("cloudnative-pg", "gpu-operator", "gateway-api-crds")
+    on = [a for n in other_team for a in ("--set", f"components.{n}.enabled=true")]
+    foreign = flux_objects(render(chart_dir, substrate + ["--set", "components.flux.enabled=false"] + on))
+    check(foreign, team, "engine off, Substrate and the other teams' charts on",
+          pairs + [(k, n) for n in other_team for k in ("HelmRelease", "OCIRepository")], other_team)
     return 0
 
 

@@ -670,6 +670,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cloudnative-pg.chart | string | `"cloudnative-pg"` |  |
 | components.cloudnative-pg.repository | string | `"oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts"` |  |
 | components.cloudnative-pg.versionRange | string | `"0.29.x"` |  |
+| components.cloudnative-pg.teamAnnotation | bool | `false` |  |
 | components.cloudnative-pg.valuesFrom | string | `"cloudnative-pg"` |  |
 | components.cloudnative-pg.enabled | bool | `false` |  |
 | components.kserve-llmisvc-crd.chart | string | `"kserve-llmisvc-crd"` |  |
@@ -698,6 +699,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.gpu-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.gpu-operator.versionRange | string | `"1.x"` |  |
 | components.gpu-operator.valuesFrom | string | `"gpu-operator"` |  |
+| components.gpu-operator.teamAnnotation | bool | `false` |  |
 | components.gpu-operator.valuesKey | string | `"gpu-operator"` |  |
 | components.gpu-operator.injectGlobal | bool | `false` |  |
 | components.gpu-operator.enabled | bool | `false` |  |
@@ -707,6 +709,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.gateway-api-crds.chart | string | `"gateway-api-crds"` |  |
 | components.gateway-api-crds.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.gateway-api-crds.versionRange | string | `">=1.9.1 <2.0.0"` |  |
+| components.gateway-api-crds.teamAnnotation | bool | `false` |  |
 | components.gateway-api-crds.injectGlobal | bool | `false` |  |
 | components.gateway-api-crds.enabled | bool | `false` |  |
 | components.gateway-api-crds.targetNamespace | string | `"kube-system"` |  |

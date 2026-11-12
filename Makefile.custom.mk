@@ -1539,7 +1539,7 @@ verify-labels: ## Assert every label value stays valid at the versions the chart
 	@echo "label values verified."
 
 .PHONY: verify-team-annotation
-verify-team-annotation: ## Assert every HelmRelease and OCIRepository of the meta render carries the annotation application.giantswarm.io/team with the chart's team (Chart.yaml io.giantswarm.application.team), substrate and substrate-crds included, which team-stamper's mapping does not list: kube-state-metrics reads it into gotk_resource_info's team label, which routes the alerts on them. Engine on (the self release too) and off. HELM selects the binary.
+verify-team-annotation: ## Assert every HelmRelease and OCIRepository of the meta render carries the annotation application.giantswarm.io/team with the chart's team (Chart.yaml io.giantswarm.application.team), substrate and substrate-crds included, which team-stamper's mapping does not list: kube-state-metrics reads it into gotk_resource_info's team label, which routes the alerts on them. Engine on (the self release too) and off. The charts that apps-to-teams-mapping gives to another team (cloudnative-pg, gpu-operator, gateway-api-crds: components.<name>.teamAnnotation false) carry none from the chart when on, so team-stamper's mapped team stands. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
 	@HELM="$(HELM)" python3 tests/verify-team-annotation.py $(CHART_DIR)
 
