@@ -213,6 +213,14 @@ def main() -> None:
     expect("skill-manager identityProvider with its NetworkPolicy off", entry("skill-manager.networkPolicy.enabled=false"), None)
     print("ok: skill-manager's identity provider entry")
 
+    print("--> skill-manager's pod selector is its chart's name label: nameOverride, an empty one meaning the chart name, cut to 63 without a trailing hyphen")
+    long = "s" * 62 + "-x"
+    for override, want in (("", "skill-manager"), ("sm", "sm"), (long, "s" * 62)):
+        rels = releases(meta, [*base, *ALL_ON, *LOGIN, "--set-string", f"skill-manager.nameOverride={override}"])
+        got = rels["agent-platform-connectivity"]["networkPolicy"]["mcpBackends"]["skill-manager"].get("podSelector")
+        expect(f"skill-manager podSelector with nameOverride {override!r}", got, {"app.kubernetes.io/name": want})
+    print("ok: skill-manager's pod selector")
+
     print("--> agent-manager's route hostname override is its base URL's host; model-manager, which has no route, keeps agentgateway.<domain>")
     rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets("agentManager.route.hostname=agents.ci.example.com")])
     expect("agent-manager oauth.baseURL", oauth(rels, "agent-manager").get("baseURL"), "https://agents.ci.example.com/agent-manager")

@@ -4902,7 +4902,7 @@ Usage: include "agent-platform.skillManager.mcpBackend" . | fromJson
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "skill-manager") -}}
 {{- $sm := index .Values "skill-manager" | default dict -}}
 {{- $ns := dig "skill-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
-{{- $out = dict "namespace" $ns "ports" (list (int (dig "service" "port" 8080 $sm))) "podSelector" (dict "app.kubernetes.io/name" (dig "nameOverride" "skill-manager" $sm)) -}}
+{{- $out = dict "namespace" $ns "ports" (list (int (dig "service" "port" 8080 $sm))) "podSelector" (dict "app.kubernetes.io/name" (include "agent-platform.skillManager.name" $sm)) -}}
 {{- $amNs := dig "agent-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
 {{- if and (include "agent-platform.agentManager.viaSkillManager" .) (ne $amNs $ns) -}}
 {{- $_ := set $out "additionalPeers" (list (dict "namespace" $amNs "matchLabels" (dict "app.kubernetes.io/name" (dig "nameOverride" "agent-manager" (index .Values "agent-manager" | default dict))))) -}}
@@ -4917,6 +4917,17 @@ egress policy only adds to it, and alone it would deny the pods' other egress
 {{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The skill-manager pods' app.kubernetes.io/name label, as its chart's
+skill-manager.name renders it: nameOverride, an empty one meaning the chart
+name, cut to 63 characters without a trailing hyphen. The MCP backend entry's
+podSelector, so its ingress and egress policies select the running pods.
+Usage: include "agent-platform.skillManager.name" (index .Values "skill-manager" | default dict)
+*/}}
+{{- define "agent-platform.skillManager.name" -}}
+{{- dig "nameOverride" "" . | default "skill-manager" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
