@@ -177,8 +177,10 @@ class APIServer:
         ValidatingAdmissionPolicies, MutatingAdmissionPolicies and their
         bindings the caller applied: a binding without its policy, or a
         policy without a binding, never loads and fails by name; a
-        MutatingAdmissionPolicy among them adds its sentinel. Fails, naming
-        what it waits for, after timeout seconds."""
+        MutatingAdmissionPolicy among them adds its sentinel, and each
+        paramKind of a ValidatingAdmissionPolicy one that waits for the
+        informer of its params (those policies are named when it does not
+        sync). Fails, naming what it waits for, after timeout seconds."""
         kinds = {"ValidatingAdmissionPolicy": "ValidatingAdmissionPolicyBinding",
                  "MutatingAdmissionPolicy": "MutatingAdmissionPolicyBinding"}
         names = {k: {d["metadata"]["name"] for d in policies if d["kind"] == k} for k in (*kinds, *kinds.values())}
@@ -227,6 +229,30 @@ class APIServer:
                 {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "MutatingAdmissionPolicyBinding", "metadata": {"name": SETTLE_NAME},
                  "spec": {"policyName": SETTLE_NAME, "matchResources": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}}}}},
             ]
+        # A policy with a paramKind reads its params from an informer of that
+        # kind, which the policy source starts on its own and which refuses
+        # ("not yet synced") until it has listed. One sentinel per kind shares
+        # it: a binding that selects no param, with parameterNotFoundAction
+        # Deny, answers "no params found" only once the informer has synced.
+        params = {}
+        for d in policies:
+            kind = d["kind"] == "ValidatingAdmissionPolicy" and d["spec"].get("paramKind")
+            if kind:
+                params.setdefault((kind["apiVersion"], kind["kind"]), []).append(d["metadata"]["name"])
+        for n, (api_version, kind) in enumerate(sorted(params)):
+            name = f"{SETTLE_NAME}-params-{n}"
+            objs += [
+                {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy", "metadata": {"name": name},
+                 "spec": {"failurePolicy": "Fail", "paramKind": {"apiVersion": api_version, "kind": kind},
+                          "matchConstraints": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}},
+                                               "resourceRules": [{"apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE"], "resources": ["configmaps"]}]},
+                          "matchConditions": [{"name": "probe", "expression": f"object.metadata.name == '{probe}-p{n}'"}],
+                          "validations": [{"expression": "true"}]}},
+                {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicyBinding", "metadata": {"name": name},
+                 "spec": {"policyName": name, "validationActions": ["Deny"],
+                          "paramRef": {"selector": {"matchLabels": {SETTLE_NAME: "none"}}, "parameterNotFoundAction": "Deny"},
+                          "matchResources": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}}}}},
+            ]
         for o in objs:
             rc, out = self.kubectl(["apply", "--server-side", "--force-conflicts", "--field-manager", SETTLE_NAME, "-f", "-"], stdin=json.dumps(o))
             if rc != 0:
@@ -247,17 +273,26 @@ class APIServer:
         if mutating:
             def mutated():
                 rc, out = self.kubectl(["create", "--dry-run=server", "-o", "json", "-f", "-"], stdin=configmap(f"{probe}-m"))
-                return rc == 0 and (json.loads(out)["metadata"].get("annotations") or {}).get(SETTLE_NAME) == token
+                try:
+                    return rc == 0 and (json.loads(out)["metadata"].get("annotations") or {}).get(SETTLE_NAME) == token
+                except ValueError:
+                    return False
             waits["the MutatingAdmissionPolicies and their bindings"] = mutated
+
+        def no_params(n):
+            out = self.kubectl(["create", "--dry-run=server", "-f", "-"], stdin=configmap(f"{probe}-p{n}"))[1]
+            return f"{SETTLE_NAME}-params-{n}" in out and "no params found" in out
+
+        for n, key in enumerate(sorted(params)):
+            waits[f"the {key[1]} params of {', '.join(sorted(params[key]))}"] = lambda n=n: no_params(n)
         deadline = time.time() + timeout
         while waits and time.time() < deadline:
             waits = {what: ok for what, ok in waits.items() if not ok()}
             if waits:
                 time.sleep(0.5)
         if waits:
-            pending = sorted(n for k in names.values() for n in k)
-            self._settle_fail(f"the API server did not decide by {' or '.join(waits)} within {timeout}s"
-                              + (f"; not shown loaded: {', '.join(pending)}" if pending else ""))
+            self._settle_fail(f"the API server did not decide by {' or by '.join(waits)} within {timeout}s"
+                              + (f": one of the {len(policies)} applied policies and bindings is not in force" if policies else ""))
 
     @staticmethod
     def _settle_fail(msg):

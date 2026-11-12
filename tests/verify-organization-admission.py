@@ -962,7 +962,7 @@ def prove_git_admins():
                    subjects=[{"kind": "ServiceAccount", "name": ORG3, "namespace": FLUX_NS}]), as_=OP, dry=False),
          "bind ORG3's Flux ServiceAccount")
     API.settle()
-    admins =rb("organization-admins", ORG3, role="agent-platform:admin")
+    admins = rb("organization-admins", ORG3, role="agent-platform:admin")
     admins["metadata"]["labels"] = {"kustomize.toolkit.fluxcd.io/name": ORG3, "kustomize.toolkit.fluxcd.io/namespace": FLUX_NS}
     policy = "agent-platform-organization-admins-binding"
     keep = "applied from git carries kustomize.toolkit.fluxcd.io/prune: disabled, so the erasure of its organization never waits on its prune"
