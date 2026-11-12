@@ -4911,8 +4911,36 @@ Usage: include "agent-platform.skillManager.mcpBackend" . | fromJson
 {{- if and (include "agent-platform.agentManager.viaSkillManager" .) (ne $amNs $ns) -}}
 {{- $_ := set $out "additionalPeers" (list (dict "namespace" $amNs "matchLabels" (dict "app.kubernetes.io/name" (dig "nameOverride" "agent-manager" (index .Values "agent-manager" | default dict))))) -}}
 {{- end -}}
+{{- with include "agent-platform.skillManager.issuerUrl" . -}}
+{{- $_ := set $out "identityProvider" (dict "provider" "dex" "issuerUrl" .) -}}
+{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The issuer the skill-manager validates tokens of, while its OAuth is on: its
+own oauth.dex.issuerURL, else global.identity.issuerUrl, else muster's login
+(muster.muster.oauth.server.dex.issuerUrl, while that server is on with the dex
+provider) — the order its chart and agent-platform.identity.apply resolve it
+in. Its MCP backend entry carries it (identityProvider), so the connectivity
+chart opens the pods' egress to it as it does for the other managers
+(agent-platform.idpEgress.cilium): by name, and the cluster entity on 443 and
+10443 for an issuer served through an in-cluster Gateway — on Cilium the
+chart's own NetworkPolicy, an ipBlock on 443, matches no in-cluster endpoint.
+Empty with its OAuth off or no issuer named.
+Usage: include "agent-platform.skillManager.issuerUrl" .
+*/}}
+{{- define "agent-platform.skillManager.issuerUrl" -}}
+{{- $sm := index .Values "skill-manager" | default dict -}}
+{{- if dig "oauth" "enabled" false $sm -}}
+{{- $server := dig "muster" "oauth" "server" dict (.Values.muster | default dict) -}}
+{{- $login := "" -}}
+{{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
+{{- $login = dig "dex" "issuerUrl" "" $server -}}
+{{- end -}}
+{{- dig "oauth" "dex" "issuerURL" "" $sm | default (dig "identity" "issuerUrl" "" (.Values.global | default dict)) | default $login -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

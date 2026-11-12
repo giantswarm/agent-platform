@@ -807,7 +807,12 @@ networkPolicy:
   #             app.kubernetes.io/name: envoy
   # podSelector (a matchLabels map) narrows the policy to the backend's pods;
   # without it the policy selects every pod in the namespace.
-  mcpBackends: {}  # @schema type: object; additionalProperties: {"type": "object", "required": ["namespace", "ports"], "additionalProperties": false, "properties": {"namespace": {"type": "string", "minLength": 1}, "ports": {"type": "array", "minItems": 1, "items": {"type": "integer"}}, "podSelector": {"type": "object", "additionalProperties": {"type": "string"}}, "metrics": {"type": "boolean"}, "additionalPeers": {"type": "array", "items": {"type": "object", "required": ["namespace", "matchLabels"], "additionalProperties": false, "properties": {"namespace": {"type": "string", "minLength": 1}, "matchLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}}}}}}}; skipProperties: true
+  # identityProvider ({issuerUrl, provider: dex|google}, cilium flavour) opens
+  # the backend's egress to the login it validates tokens of, as the managers'
+  # egress policies do: the issuer's hosts by name on 443 and the cluster
+  # entity on 443 and 10443 (an issuer behind an in-cluster Gateway). Needs
+  # podSelector. The meta chart sets it for the skill-manager.
+  mcpBackends: {}  # @schema type: object; additionalProperties: {"type": "object", "required": ["namespace", "ports"], "additionalProperties": false, "properties": {"namespace": {"type": "string", "minLength": 1}, "ports": {"type": "array", "minItems": 1, "items": {"type": "integer"}}, "identityProvider": {"type": "object", "required": ["issuerUrl"], "additionalProperties": false, "properties": {"provider": {"type": "string", "enum": ["dex", "google"]}, "issuerUrl": {"type": "string", "minLength": 1}}}, "podSelector": {"type": "object", "additionalProperties": {"type": "string"}}, "metrics": {"type": "boolean"}, "additionalPeers": {"type": "array", "items": {"type": "object", "required": ["namespace", "matchLabels"], "additionalProperties": false, "properties": {"namespace": {"type": "string", "minLength": 1}, "matchLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}}}}}}}; skipProperties: true
   # The metrics collectors an mcpBackends entry with `metrics: true` admits on
   # its ports: the observability platform's alloy-metrics by default.
   mcpBackendScrapers:  # @schema item: object; itemRequired: [namespace, matchLabels]; itemProperties: {"namespace": {"type": "string", "minLength": 1}, "matchLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}}}

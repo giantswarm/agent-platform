@@ -1242,6 +1242,9 @@ spec:
         namespace: kube-system
       mcpBackends:
         skill-manager:
+          identityProvider:
+            issuerUrl: https://dex.ci.example.com
+            provider: dex
           namespace: default
           podSelector:
             app.kubernetes.io/name: skill-manager

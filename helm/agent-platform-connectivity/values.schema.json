@@ -1583,6 +1583,26 @@
                                     }
                                 }
                             },
+                            "identityProvider": {
+                                "type": "object",
+                                "required": [
+                                    "issuerUrl"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "issuerUrl": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "provider": {
+                                        "type": "string",
+                                        "enum": [
+                                            "dex",
+                                            "google"
+                                        ]
+                                    }
+                                }
+                            },
                             "metrics": {
                                 "type": "boolean"
                             },

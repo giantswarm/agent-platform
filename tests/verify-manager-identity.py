@@ -25,10 +25,18 @@ import yaml
 MANAGERS = ("model-manager", "agent-manager", "vm-manager", "cluster-manager", "skill-manager")
 # Blocks the connectivity release does not receive (components.agent-platform-connectivity.omitKeys).
 NOT_IN_CONNECTIVITY = ("skill-manager",)
+# Components with an oauth block that this script does not render, and where they are covered.
+EXEMPT = {"workspace-manager": "needs the workspaces fixture; verify-workspace-manager and verify-idp-egress cover it"}
 ROUTED = {"model-manager": "/model-manager", "agent-manager": "/agent-manager"}
 ISSUER = "https://dex.ci.example.com"
 CLIENT = "muster-acme"
 SECRET = "muster-oauth"
+# agent-platform.idpEgress.cilium for a Dex issuer: its host by name, and the cluster entity on the
+# ports an in-cluster Gateway serves it on (a private installation's Dex resolves there).
+IDP_EGRESS = [
+    {"toFQDNs": [{"matchName": "dex.ci.example.com"}], "toPorts": [{"ports": [{"port": "443", "protocol": "TCP"}]}]},
+    {"toEntities": ["cluster"], "toPorts": [{"ports": [{"port": "443", "protocol": "TCP"}, {"port": "10443", "protocol": "TCP"}]}]},
+]
 
 
 def sets(*pairs: str) -> list[str]:
@@ -120,6 +128,22 @@ def roster_covered(meta: str) -> None:
         sys.exit(f"FAIL: roster: {missing} forward an oauth block but are not in agent-platform.identity.apply's list")
     if not set(MANAGERS) <= with_oauth:
         sys.exit(f"FAIL: roster: {sorted(set(MANAGERS) - with_oauth)} have no oauth block in values.yaml")
+    # Every one of them is rendered below (its client and its identity-provider egress), or exempt with a reason.
+    unchecked = sorted(with_oauth - set(MANAGERS) - set(EXEMPT))
+    if unchecked:
+        sys.exit(f"FAIL: roster: {unchecked} forward an oauth block but are not in MANAGERS: add them, so their login and identity-provider egress are checked")
+
+
+def idp_rules(docs: list[dict], name: str) -> list[dict]:
+    """The identity-provider egress rules (toFQDNs, the cluster entity) of the Cilium policies selecting <name>'s pods."""
+    rules = []
+    for d in docs:
+        if d.get("kind") != "CiliumNetworkPolicy":
+            continue
+        if d["spec"].get("endpointSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/name") != name:
+            continue
+        rules += [r for r in d["spec"].get("egress", []) if "toFQDNs" in r or "cluster" in r.get("toEntities", [])]
+    return rules
 
 
 def main() -> None:
@@ -156,6 +180,25 @@ def main() -> None:
     if egress is None or "dex.ci.example.com" not in yaml.safe_dump(egress):
         sys.exit("FAIL: derived: model-manager's egress does not reach the derived issuer")
     print("ok: derived")
+
+    print("--> identity-provider egress: every manager's pods reach the login by name and through an in-cluster gateway (cluster on 443 and 10443)")
+    docs = [d for d in yaml.safe_load_all(result.stdout) if d]
+    for name in MANAGERS:
+        rules = idp_rules(docs, name)
+        for want in IDP_EGRESS:
+            if want not in rules:
+                sys.exit(f"FAIL: idp egress: no Cilium policy gives {name}'s pods {want}; it has {rules}")
+    print("ok: idp egress")
+
+    print("--> skill-manager off: no policy selects its pods")
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets("components.skill-manager.enabled=false")])
+    result = connectivity(conn, rels["agent-platform-connectivity"], base)
+    if result.returncode != 0:
+        sys.exit(f"FAIL: skill-manager off: the connectivity render failed\n{result.stderr}")
+    if any(d.get("kind") == "CiliumNetworkPolicy" and "skill-manager" in d["metadata"]["name"]
+           for d in yaml.safe_load_all(result.stdout) if d):
+        sys.exit("FAIL: skill-manager off: a skill-manager policy still renders")
+    print("ok: skill-manager off")
 
     print("--> agent-manager's route hostname override is its base URL's host; model-manager, which has no route, keeps agentgateway.<domain>")
     rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets("agentManager.route.hostname=agents.ci.example.com")])
