@@ -195,10 +195,23 @@ def main() -> None:
     result = connectivity(conn, rels["agent-platform-connectivity"], base)
     if result.returncode != 0:
         sys.exit(f"FAIL: skill-manager off: the connectivity render failed\n{result.stderr}")
-    if any(d.get("kind") == "CiliumNetworkPolicy" and "skill-manager" in d["metadata"]["name"]
-           for d in yaml.safe_load_all(result.stdout) if d):
-        sys.exit("FAIL: skill-manager off: a skill-manager policy still renders")
+    if idp_rules([d for d in yaml.safe_load_all(result.stdout) if d], "skill-manager"):
+        sys.exit("FAIL: skill-manager off: a policy still gives its pods identity-provider egress")
     print("ok: skill-manager off")
+
+    print("--> skill-manager's identity provider entry: the issuer it runs with, only while its OAuth and its own NetworkPolicy are on")
+    def entry(*extra: str) -> dict | None:
+        rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets(*extra)])
+        return rels["agent-platform-connectivity"]["networkPolicy"]["mcpBackends"]["skill-manager"].get("identityProvider")
+    for what, extra, want in (
+        ("muster's login", (), ISSUER),
+        ("global.identity wins over muster's", ("global.identity.issuerUrl=https://global.example.com",), "https://global.example.com"),
+        ("its own issuer wins", ("global.identity.issuerUrl=https://global.example.com", "skill-manager.oauth.dex.issuerURL=https://own.example.com"), "https://own.example.com"),
+    ):
+        expect(f"skill-manager identityProvider, {what}", entry(*extra), {"provider": "dex", "issuerUrl": want})
+    expect("skill-manager identityProvider with its OAuth off", entry("skill-manager.oauth.enabled=false"), None)
+    expect("skill-manager identityProvider with its NetworkPolicy off", entry("skill-manager.networkPolicy.enabled=false"), None)
+    print("ok: skill-manager's identity provider entry")
 
     print("--> agent-manager's route hostname override is its base URL's host; model-manager, which has no route, keeps agentgateway.<domain>")
     rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets("agentManager.route.hostname=agents.ci.example.com")])

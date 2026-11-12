@@ -1646,7 +1646,7 @@ verify-substrate-idp-netpol: ## Assert the path to Substrate's actor-JWT issuer 
 	@echo "substrate idp network path verified."
 
 .PHONY: verify-idp-egress
-verify-idp-egress: ## Assert the identity provider egress of the services that validate tokens themselves (giantswarm/agent-platform#1169), cilium flavour: the workspace-, cluster-, agent-, vm- and model-manager egress policies and the portal's open, for an issuer on accounts.google.com, exactly accounts.google.com, www.googleapis.com (JWKS), openidconnect.googleapis.com (userinfo) and oauth2.googleapis.com (token) on 443, whatever provider their block names; for a Dex issuer its host alone. HELM selects the binary.
+verify-idp-egress: ## Assert the identity provider egress of the services that validate tokens themselves (giantswarm/agent-platform#1169), cilium flavour: the workspace-, cluster-, agent-, vm- and model-manager egress policies and the portal's open, for an issuer on accounts.google.com, exactly accounts.google.com, www.googleapis.com (JWKS), openidconnect.googleapis.com (userinfo) and oauth2.googleapis.com (token) on 443, whatever provider their block names; for a Dex issuer its host alone. An MCP backend entry with identityProvider (the skill-manager's) gets the same rules for its pods, the cluster entity on 443 and 10443 included, fails the render without a podSelector, and renders nothing in the kubernetes flavour. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 tests/verify-idp-egress.py $(CONNECTIVITY_DIR)
 	@echo "identity provider egress verified."

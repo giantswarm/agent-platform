@@ -4327,11 +4327,7 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- $global := index $v "global" | default dict -}}
 {{- $identity := dig "identity" dict $global -}}
 {{- $domain := dig "domain" "" $global -}}
-{{- $server := dig "muster" "oauth" "server" dict (index $v "muster" | default dict) -}}
-{{- $login := dict -}}
-{{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
-{{- $login = dict "issuerURL" (dig "dex" "issuerUrl" "" $server) "clientID" (dig "dex" "clientId" "" $server) "existingSecret" (dig "existingSecret" "" $server) -}}
-{{- end -}}
+{{- $login := include "agent-platform.identity.musterLogin" $v | fromJson -}}
 {{- range $name, $wiring := dict "model-manager" "modelManager" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" "workspace-manager" "" "skill-manager" "" -}}
 {{- $block := index $v $name -}}
 {{- if and (kindIs "map" $block) (kindIs "map" (index $block "oauth")) (dig "oauth" "enabled" false $block) -}}
@@ -4906,13 +4902,18 @@ Usage: include "agent-platform.skillManager.mcpBackend" . | fromJson
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "skill-manager") -}}
 {{- $sm := index .Values "skill-manager" | default dict -}}
 {{- $ns := dig "skill-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
-{{- $out = dict "namespace" $ns "ports" (list (int (dig "service" "port" 8080 $sm))) "podSelector" (dict "app.kubernetes.io/name" "skill-manager") -}}
+{{- $out = dict "namespace" $ns "ports" (list (int (dig "service" "port" 8080 $sm))) "podSelector" (dict "app.kubernetes.io/name" (dig "nameOverride" "skill-manager" $sm)) -}}
 {{- $amNs := dig "agent-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
 {{- if and (include "agent-platform.agentManager.viaSkillManager" .) (ne $amNs $ns) -}}
 {{- $_ := set $out "additionalPeers" (list (dict "namespace" $amNs "matchLabels" (dict "app.kubernetes.io/name" (dig "nameOverride" "agent-manager" (index .Values "agent-manager" | default dict))))) -}}
 {{- end -}}
+{{- /* Only while the chart's own NetworkPolicy selects the pods: the entry's
+egress policy only adds to it, and alone it would deny the pods' other egress
+(GitHub, the registries, OTLP). */ -}}
+{{- if dig "networkPolicy" "enabled" true $sm -}}
 {{- with include "agent-platform.skillManager.issuerUrl" . -}}
 {{- $_ := set $out "identityProvider" (dict "provider" "dex" "issuerUrl" .) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
@@ -4934,13 +4935,26 @@ Usage: include "agent-platform.skillManager.issuerUrl" .
 {{- define "agent-platform.skillManager.issuerUrl" -}}
 {{- $sm := index .Values "skill-manager" | default dict -}}
 {{- if dig "oauth" "enabled" false $sm -}}
-{{- $server := dig "muster" "oauth" "server" dict (.Values.muster | default dict) -}}
-{{- $login := "" -}}
+{{- $login := include "agent-platform.identity.musterLogin" .Values | fromJson -}}
+{{- dig "oauth" "dex" "issuerURL" "" $sm | default (dig "identity" "issuerUrl" "" (.Values.global | default dict)) | default ($login.issuerURL | default "") -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+muster's login, the platform's one login, as the managers take it: the
+issuer, client and Secret of muster.muster.oauth.server while that server is on
+with the dex provider; {} otherwise. Read by agent-platform.identity.apply and
+agent-platform.skillManager.issuerUrl, so the issuer a manager runs with and the
+one its egress opens follow one rule.
+Usage: include "agent-platform.identity.musterLogin" $values | fromJson
+*/}}
+{{- define "agent-platform.identity.musterLogin" -}}
+{{- $server := dig "muster" "oauth" "server" dict (index . "muster" | default dict) -}}
+{{- $login := dict -}}
 {{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
-{{- $login = dig "dex" "issuerUrl" "" $server -}}
+{{- $login = dict "issuerURL" (dig "dex" "issuerUrl" "" $server) "clientID" (dig "dex" "clientId" "" $server) "existingSecret" (dig "existingSecret" "" $server) -}}
 {{- end -}}
-{{- dig "oauth" "dex" "issuerURL" "" $sm | default (dig "identity" "issuerUrl" "" (.Values.global | default dict)) | default $login -}}
-{{- end -}}
+{{- $login | toJson -}}
 {{- end -}}
 
 {{/*
