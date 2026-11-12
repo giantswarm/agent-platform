@@ -37,6 +37,21 @@ helm.sh/chart: {{ include "chart" . | quote }}
 {{- end -}}
 
 {{/*
+The owning team as an annotation, from the same chart annotation as the team
+label. kube-state-metrics reads it off the Flux objects into the `team` label of
+gotk_resource_info, so an alert on a HelmRelease or OCIRepository this chart
+renders names the team. The team-stamper controller writes the team from its
+apps-to-teams mapping (keyed by the chart name of the OCIRepository URL), which
+does not list every component (substrate, substrate-crds); the chart stamps
+them. A component whose chart the mapping gives to another team
+(cloudnative-pg, gpu-operator, gateway-api-crds) sets teamAnnotation: false and
+gets no annotation from the chart, so team-stamper's value stands.
+*/}}
+{{- define "annotations.team" -}}
+application.giantswarm.io/team: {{ index .Chart.Annotations "io.giantswarm.application.team" | quote }}
+{{- end -}}
+
+{{/*
 Selector labels
 */}}
 {{- define "labels.selector" -}}

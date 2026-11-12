@@ -56,6 +56,12 @@ knowledge:
       entry not pinned to a full commit is dropped, the unstamped release
       commit). Derived values win over it.
   labels        — extra labels on the child HelmRelease.
+  teamAnnotation — false leaves application.giantswarm.io/team off the
+      component's OCIRepository and HelmRelease (default: the chart's team,
+      annotations.team in _helpers.tpl). For a chart that the
+      apps-to-teams-mapping gives to another team (cloudnative-pg,
+      gpu-operator, gateway-api-crds): team-stamper then writes the mapped
+      team, and the chart's value does not take its place.
   inKagentNamespace — install into the kagent component's namespace
       (agent-platform.kagent.namespace), where agents live; wins over
       targetNamespace.
@@ -453,6 +459,8 @@ against such a range, the branch builds of the repository included. */ -}}
 {{- $filter = include "agent-platform.releaseTagFilter" $root }}
 {{- end }}
 {{- $source := include "agent-platform.sourceName" (dict "child" $child "entry" $c "semver" $semver) }}
+{{- /* The owning team's annotation (see teamAnnotation above). */ -}}
+{{- $teamAnnotation := ne (toString $c.teamAnnotation) "false" }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
@@ -461,6 +469,10 @@ metadata:
   namespace: {{ $ns }}
   labels:
     {{- include "labels.common" $root | nindent 4 }}
+  {{- if $teamAnnotation }}
+  annotations:
+    {{- include "annotations.team" $root | nindent 4 }}
+  {{- end }}
 spec:
   interval: {{ $g.sourceInterval }}
   url: {{ include "agent-platform.mirror.ref" (dict "ref" (printf "%s/%s" (trimSuffix "/" $c.repository) $c.chart) "mirror" $mirror) }}
@@ -485,6 +497,10 @@ metadata:
     {{- with $c.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  {{- if $teamAnnotation }}
+  annotations:
+    {{- include "annotations.team" $root | nindent 4 }}
+  {{- end }}
 spec:
   interval: {{ $g.interval }}
   {{- with $c.timeout }}

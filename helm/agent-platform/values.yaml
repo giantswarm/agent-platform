@@ -1528,6 +1528,9 @@ components:  # @schema additionalProperties: true
     # the minor: moving to the next CNPG line is a deliberate edit here, not a
     # reconcile.
     versionRange: "0.29.x"
+    # The chart of another team (apps-to-teams-mapping): the chart writes no
+    # application.giantswarm.io/team, so team-stamper keeps the mapped team.
+    teamAnnotation: false
     valuesFrom: cloudnative-pg
     enabled: false
   kserve-llmisvc-crd:  # @schema additionalProperties: true
@@ -1657,6 +1660,9 @@ components:  # @schema additionalProperties: true
     # wrapper moves the operator, the platform follows the line.
     versionRange: "1.x"
     valuesFrom: gpu-operator
+    # The chart of another team (apps-to-teams-mapping): the chart writes no
+    # application.giantswarm.io/team, so team-stamper keeps the mapped team.
+    teamAnnotation: false
     # The wrapper takes every value under its subchart's key.
     valuesKey: gpu-operator
     # The operator consumes nothing of the platform's global (the wrapper pins
@@ -1693,6 +1699,9 @@ components:  # @schema additionalProperties: true
     chart: gateway-api-crds
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: ">=1.9.1 <2.0.0"
+    # The chart of another team (apps-to-teams-mapping): the chart writes no
+    # application.giantswarm.io/team, so team-stamper keeps the mapped team.
+    teamAnnotation: false
     # The chart's own defaults are the fleet's (the standard channel, the
     # safe-upgrades admission policy); it reads nothing of the platform's.
     injectGlobal: false
