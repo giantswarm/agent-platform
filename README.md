@@ -134,6 +134,7 @@ Each component is developed in its own repository, linked above. This repository
 - **[`helm/agent-platform-connectivity`](helm/agent-platform-connectivity)** wires the components together: routes and gateways, network policies for Cilium and plain Kubernetes, Kyverno exceptions, the kagent model catalog, [serving presets](docs/serving-presets.md) and Grafana dashboards.
 - **[`skills`](skills)** holds the platform's own agent skills, pinned to each release. They follow the platform: a change to it updates them in the same pull request.
 - **[`tests`](tests)** holds the render assertions behind `make verify-*` and an end-to-end install on kind ([tests/ats](tests/ats/README.md)).
+- **[CI](docs/ci.md)** runs those assertions on every pull request and release, and renders the component charts against `main` and the latest releases every six hours.
 
 ```bash
 make verify-all   # the render assertions CI runs: Helm 3.17.3, no cluster needed

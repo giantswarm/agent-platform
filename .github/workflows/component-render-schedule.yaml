@@ -1,0 +1,153 @@
+# Renders every component chart with the values the meta chart forwards to it,
+# against main and the latest patch of the last three minor releases, every six
+# hours. A component range floats within its major, so a component release
+# changes what an already published agent-platform release installs without an
+# agent-platform commit; the PR and tag pipelines never see that.
+#
+# Each ref is judged by its own values and its own test code: main runs
+# `make verify-components-charts verify-examples`, a release tag runs
+# `make verify-release-floors verify-examples` (the strict run, no fallback for
+# an unreleased component). A red ref opens or comments on one issue per ref,
+# a green one closes it. docs/ci.md says how to respond.
+name: component-render-schedule
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      refs:
+        description: Refs to render, space-separated (default main and the latest patch of the last three minors)
+        required: false
+  pull_request:
+    paths:
+      - '.github/workflows/component-render-schedule.yaml'
+
+permissions: {}
+
+concurrency:
+  group: component-render-schedule-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refs:
+    name: Pick the refs to render
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    outputs:
+      refs: ${{ steps.pick.outputs.refs }}
+    steps:
+      - name: main and the latest patch of the last three minors
+        id: pick
+        env:
+          REFS: ${{ inputs.refs }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -n "${REFS:-}" ]; then
+            read -r -a picked <<<"$REFS"
+          else
+            tags="$(git ls-remote --tags --refs "https://github.com/$REPO" 'v*' \
+              | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V)"
+            mapfile -t releases < <(awk -F. '{ last[$1"."$2] = $0 } END { for (m in last) print last[m] }' <<<"$tags" | sort -V | tail -n 3)
+            picked=(main "${releases[@]}")
+          fi
+          json="$(jq -cn '$ARGS.positional' --args "${picked[@]}")"
+          echo "refs=$json" >> "$GITHUB_OUTPUT"
+          echo "rendering: ${picked[*]}"
+
+  render:
+    name: Render ${{ matrix.ref }}
+    needs: refs
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: ${{ fromJSON(needs.refs.outputs.refs) }}
+    steps:
+      - name: Check out ${{ matrix.ref }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.ref }}
+          persist-credentials: false
+      - name: Install helm
+        uses: giantswarm/install-binary-action@5bef88f65012037dd836117c8d344b21bb559854 # v4.1.0
+        with:
+          binary: helm
+          # The pin of .circleci/custom.yml's test-ingress-modes.
+          version: "3.17.3"
+          download_url: "https://get.helm.sh/helm-v${version}-linux-amd64.tar.gz"
+          tarball_binary_path: "linux-amd64/helm"
+          smoke_test: "${binary} version --short"
+      - name: Install PyYAML
+        run: |
+          sudo timeout 180 apt-get update -qq
+          sudo timeout 180 apt-get install -y -qq python3-yaml
+          python3 -c 'import yaml'
+      - name: Render every component with the forwarded values
+        id: render
+        env:
+          REF: ${{ matrix.ref }}
+        run: |
+          set -o pipefail
+          if [ "$REF" = main ]; then
+            targets=(verify-components-charts verify-examples)
+          else
+            targets=(verify-release-floors verify-examples)
+          fi
+          make "${targets[@]}" 2>&1 | tee "$RUNNER_TEMP/render.log"
+      - name: Summarize the refusal
+        if: failure() && steps.render.outcome == 'failure'
+        run: |
+          {
+            echo '```'
+            sed -n '/^FAIL/,$p' "$RUNNER_TEMP/render.log" | head -n 60
+            echo '```'
+          } > "$RUNNER_TEMP/fail.md"
+          if [ "$(wc -l < "$RUNNER_TEMP/fail.md")" -le 2 ]; then
+            { echo '```'; tail -n 40 "$RUNNER_TEMP/render.log"; echo '```'; } > "$RUNNER_TEMP/fail.md"
+          fi
+          cat "$RUNNER_TEMP/fail.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Open, update or close the issue for ${{ matrix.ref }}
+        if: always() && github.event_name != 'pull_request' && (steps.render.outcome == 'success' || steps.render.outcome == 'failure')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ matrix.ref }}
+          OUTCOME: ${{ steps.render.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ "$REF" = main ]; then
+            title="agent-platform main branch chart doesn't render"
+          else
+            title="agent-platform release $REF chart doesn't render"
+          fi
+          number="$(gh issue list --state open --label team/bumblebee --search "\"$title\" in:title" \
+            --json number,title --jq "map(select(.title == \"$title\"))[0].number // empty")"
+          if [ "$OUTCOME" = success ]; then
+            if [ -n "$number" ]; then
+              gh issue close "$number" --comment "Every component renders again on \`$REF\`: $RUN_URL"
+            fi
+            exit 0
+          fi
+          body="$(cat <<EOF
+          @giantswarm/team-bumblebee a component chart refuses the values agent-platform \`$REF\` forwards to it, so installations that reconcile this release now fail.
+
+          Run: $RUN_URL
+
+          $(cat "$RUNNER_TEMP/fail.md")
+
+          How to respond: [docs/ci.md](https://github.com/$GH_REPO/blob/main/docs/ci.md#scheduled-component-render).
+          EOF
+          )"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$title" --label team/bumblebee --body "$body"
+          fi

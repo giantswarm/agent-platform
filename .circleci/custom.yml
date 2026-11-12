@@ -35,6 +35,9 @@
 #     agent renders without skills; make verify-default-agent
 #     simulates the step.
 #
+# The same render on a schedule, against main and the latest releases, is the
+# GitHub Actions workflow component-render-schedule (docs/ci.md).
+#
 # The agent-platform-crds chart has been RETIRED — every component now ships
 # its own CRDs (app-owned CRDs), so there is no longer a CRD-bundle chart to
 # build/test/publish here.
