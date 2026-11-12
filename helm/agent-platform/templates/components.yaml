@@ -461,6 +461,8 @@ metadata:
   namespace: {{ $ns }}
   labels:
     {{- include "labels.common" $root | nindent 4 }}
+  annotations:
+    {{- include "annotations.team" $root | nindent 4 }}
 spec:
   interval: {{ $g.sourceInterval }}
   url: {{ include "agent-platform.mirror.ref" (dict "ref" (printf "%s/%s" (trimSuffix "/" $c.repository) $c.chart) "mirror" $mirror) }}
@@ -485,6 +487,8 @@ metadata:
     {{- with $c.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+  annotations:
+    {{- include "annotations.team" $root | nindent 4 }}
 spec:
   interval: {{ $g.interval }}
   {{- with $c.timeout }}

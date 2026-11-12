@@ -1538,6 +1538,11 @@ verify-labels: ## Assert every label value stays valid at the versions the chart
 	@python3 tests/verify-labels.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "label values verified."
 
+.PHONY: verify-team-annotation
+verify-team-annotation: ## Assert every HelmRelease and OCIRepository of the meta render carries the annotation application.giantswarm.io/team with the chart's team (Chart.yaml io.giantswarm.application.team), substrate and substrate-crds included, which team-stamper's mapping does not list: kube-state-metrics reads it into gotk_resource_info's team label, which routes the alerts on them. Engine on (the self release too) and off. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@HELM="$(HELM)" python3 tests/verify-team-annotation.py $(CHART_DIR)
+
 .PHONY: verify-components
 verify-components: ## Assert the roster: the standalone chart's extras (backstage, mcp-kubernetes, cloudnative-pg, the kserve charts) off by default, sources and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree validates against the connectivity schema; the kagent line and the managers on their ranges, the managers pinned to the line's kagent API version, kagent-crds following kagent; the connectivity range holds its own major.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
