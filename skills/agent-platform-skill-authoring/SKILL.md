@@ -19,7 +19,9 @@ An installation offers skills from its **skill sources**, which skill-manager se
 `readOnly`, the commit the ref resolves to), `x_skill-manager_list_skills` their skills (name,
 description, path, tags) and plugins (path, `format`; `source` reads any other GitHub repository,
 `refresh` bypasses the cache). `x_skill-manager_get_skill` reads one skill's SKILL.md and file list at a
-commit, `x_skill-manager_get_skill_file` one of its files.
+commit, `x_skill-manager_get_skill_file` one of its files. A private source you cannot read, or not
+yet (no GitHub grant), is left out of both lists, never named: `partial` and `withheld` count it, and
+`grantRequired.app` names the GitHub App whose grant would show it.
 The first source is the platform's own, `giantswarm/agent-platform` (`skills/`), pinned to the
 platform release and **read-only**: the portal proposes no change to it and a fix goes upstream; the
 installation configures the rest (`skillManager.sources`). A skill outside every source — any other
@@ -73,7 +75,8 @@ agent** until that agent is re-pinned — that makes an agent version reproducib
 fix is not live when it merges. Re-pinning belongs to the
 `agent-platform-agent-management` skill; the platform's own skills move with a platform release.
 
-A **private** repository needs the person's read access to pin it, and a credential Secret in the
+A **private** repository needs the person's read access to pin it (without their GitHub grant,
+pinning or reading it answers with the App's sign-in link), and a credential Secret in the
 agent's namespace to boot: the agent's `gitAuthSecretName`, else the installation's (`get_info`).
 Without the Secret the skill fetch fails and the agent never boots.
 

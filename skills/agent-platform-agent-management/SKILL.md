@@ -43,6 +43,7 @@ Where the reference lives — fetch it, never quote it from memory:
 - **`helmrelease`** — written live through agent-manager, as you.
 - **`gitops`** — applied by Flux from a repository. A live write is refused; with `mode: commit`
   (where `get_info` `capabilities.commit` is true) agent-manager opens the pull request as you.
+  Without your grant of its GitHub App, the commit answers with that App's sign-in link.
   Never `force` a write onto it.
 - **`platform`** — ships with the Agent Platform (the default agent itself). Every update, re-pin and
   delete is refused; it changes only through the platform's configuration and releases. Say so.

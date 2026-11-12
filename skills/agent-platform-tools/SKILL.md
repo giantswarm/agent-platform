@@ -122,6 +122,12 @@ https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
   names selectors that select nothing (a server not signed in to, a renamed tool, an empty preset).
 - An error **naming the toolset** on `call_tool` is composition — the tool is outside the toolset.
   Change the agent (`agent-platform-agent-management`), not the call.
+- `auth_required` naming a provider App (structured `apps`, each with its `authUrl`) answers a call
+  that needs the person's grant of that GitHub App: a commit (`mode: commit` on agent-manager,
+  cluster-manager or model-manager), or pinning or reading a private skill. Only that call asks;
+  everything else works without it. Give the person the link and call again once they signed in.
+- An agent acting for a person never receives the person's GitHub grant: its commit, and its pin or
+  read of a private skill, are refused (`forbidden`). The person does it in their own session.
 - `forbidden` or `Unauthorized` from a backend is the **person's** authorization (RBAC, the service's
   account); no toolset change affects it.
 - "tool `x_…` not found" from the runtime: a backend tool was emitted as a function — go through
