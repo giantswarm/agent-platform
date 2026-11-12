@@ -6,21 +6,31 @@ Helpers of the agent tenants' RBAC (templates/tenants/, giantswarm/agent-platfor
 {{/*
 The rules of agent-platform:user: see the tenant's agents, templates,
 RemoteMCPServers, ModelConfigs, Harnesses, EgressPolicies (what its Agents may
-select) and muster MCPServers; start a Session. The kagent namespace binds
-agent-platform:platform-user instead, without the EgressPolicies.
+select) and muster MCPServers; start a Session; read the tenant's members
+(giantswarm/agent-platform#1368): agent-manager's list_organization_members
+lists the namespace's RoleBindings as the caller and keeps those to the three
+roles. RBAC cannot narrow a list by roleRef, so a member reads every
+RoleBinding of the tenant namespace: its subjects and roleRefs, no credential.
+get and list only, no watch. The kagent namespace binds
+agent-platform:platform-user instead, without the EgressPolicies and the
+RoleBindings.
 */}}
 {{- define "agent-platform.tenants.userRules" -}}
 {{ include "agent-platform.tenants.platformUserRules" . }}
 - apiGroups: ["api.kagent.dev"]
   resources: ["egresspolicies"]
   verbs: ["get", "list", "watch"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["rolebindings"]
+  verbs: ["get", "list"]
 {{- end -}}
 
 {{/*
 The rules of agent-platform:platform-user, what every signed-in person holds
 in the kagent namespace (platform-tenant.yaml): agent-platform:user's but the
-EgressPolicies. The platform tenant's policies name the platform's egress
-origins and the Secrets they authenticate with; its editors read them.
+EgressPolicies and the RoleBindings. The platform tenant's policies name the
+platform's egress origins and the Secrets they authenticate with, and its
+RoleBindings the platform's own identities; its editors read them.
 */}}
 {{- define "agent-platform.tenants.platformUserRules" -}}
 - apiGroups: ["api.kagent.dev"]

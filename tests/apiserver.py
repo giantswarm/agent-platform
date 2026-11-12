@@ -9,6 +9,9 @@ namespace stays Terminating, which is what a policy that reads
 namespaceObject.metadata.deletionTimestamp needs. Authorization is RBAC; the
 admin token is in system:masters, and `kubectl(..., as_=...)` impersonates a
 user or ServiceAccount (with system:masters unless `groups` says otherwise).
+The API server applies admission policies, namespaces and RBAC from caches it
+fills on its own time: call `settle()` after writing them and before a case
+that depends on them.
 
 Needs openssl (the ServiceAccount signing key) and network access to
 github.com on the first run. ENVTEST_DIR points at an unpacked envtest release
@@ -16,6 +19,7 @@ instead (a directory holding etcd, kube-apiserver and kubectl).
 """
 import hashlib
 import io
+import json
 import os
 import platform
 import shutil
@@ -37,6 +41,10 @@ ENVTEST_SHA512 = {
     "darwin-arm64": "fb38cfacdd71b5e97a4d4cceac861af5f55069cf783f0e49cf181bfc32eb3e557c2091a534dc5d38f1b92c5ba142bc1979f215a5385b3630ea6a661be6fa161b",
 }
 ADMIN_TOKEN = "verify-admin"
+# APIServer.settle(): the name of its sentinels (and of their namespace), and
+# how long it waits for them.
+SETTLE_NAME = "verify-settled"
+SETTLE_TIMEOUT = 60
 
 
 def _platform() -> str:
@@ -132,7 +140,14 @@ class APIServer:
             rc, out = self.kubectl(["get", "--raw", "/readyz"])
             if rc == 0 and out.strip() == "ok":
                 # The default namespace and the bootstrap RBAC are written by
-                # post-start hooks /readyz already waits for.
+                # post-start hooks /readyz already waits for. settle()'s
+                # namespace exists before any object of a test: a namespace
+                # its cache misses is read live, so settle() changes the
+                # label of one the cache has long held.
+                rc, out = self.kubectl(["create", "namespace", SETTLE_NAME])
+                if rc != 0:
+                    self.stop(keep_log=True)
+                    raise SystemExit(f"FAIL: create namespace {SETTLE_NAME}:\n{out}")
                 return
             time.sleep(1)
         self.stop(keep_log=True)
@@ -144,6 +159,148 @@ class APIServer:
             cmd += [f"--as={as_}"] + [f"--as-group={g}" for g in groups]
         r = subprocess.run(cmd + list(args), input=stdin, capture_output=True, text=True)
         return r.returncode, r.stdout + r.stderr
+
+    def settle(self, policies=(), timeout=SETTLE_TIMEOUT):
+        """Wait until the API server decides by every object written so far:
+        each admission policy and binding, each namespace's labels and
+        deletion, and RBAC (giantswarm/agent-platform#1291).
+
+        The API server reads these objects from informer caches, one per kind,
+        and each cache sees the writes of its kind in order: the admission
+        plugins rebuild their policies from the policy and binding caches
+        (k8s.io/apiserver admission/plugin/policy/generic, policy_source.go),
+        match namespaces from the namespace cache, and RBAC authorizes from
+        the four RBAC caches. So settle() writes one sentinel of each of
+        these kinds, after everything else and with a new token, and waits
+        until the API server decides by all of them: then every earlier
+        object of their kinds is in force too. policies are the
+        ValidatingAdmissionPolicies, MutatingAdmissionPolicies and their
+        bindings the caller applied: a binding without its policy, or a
+        policy without a binding, never loads and fails by name; a
+        MutatingAdmissionPolicy among them adds its sentinel, and each
+        paramKind of a ValidatingAdmissionPolicy one that waits for the
+        informer of its params (those policies are named when it does not
+        sync). Fails, naming what it waits for, after timeout seconds."""
+        kinds = {"ValidatingAdmissionPolicy": "ValidatingAdmissionPolicyBinding",
+                 "MutatingAdmissionPolicy": "MutatingAdmissionPolicyBinding"}
+        names = {k: {d["metadata"]["name"] for d in policies if d["kind"] == k} for k in (*kinds, *kinds.values())}
+        unbound = []
+        for policy, binding in kinds.items():
+            bound = {d["spec"]["policyName"] for d in policies if d["kind"] == binding}
+            unbound += [f"{binding} {b} (its policy is not applied)" for d in policies if d["kind"] == binding
+                        for b in [d["metadata"]["name"]] if d["spec"]["policyName"] not in names[policy]]
+            unbound += [f"{policy} {p} (no binding)" for p in sorted(names[policy] - bound)]
+        if unbound:
+            self._settle_fail(f"these admission policies never load: {'; '.join(unbound)}")
+        token = f"t{time.time_ns()}"
+        ns, probe, user = SETTLE_NAME, SETTLE_NAME, f"{SETTLE_NAME}-{token}"
+        rbac = "rbac.authorization.k8s.io"
+        rules = [{"apiGroups": [""], "resources": ["configmaps"], "verbs": ["get"], "resourceNames": [token]}]
+        objs = [
+            {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": ns, "labels": {SETTLE_NAME: token}}},
+            {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy", "metadata": {"name": SETTLE_NAME},
+             "spec": {"failurePolicy": "Fail",
+                      "matchConstraints": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}},
+                                           "resourceRules": [{"apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE"], "resources": ["configmaps"]}]},
+                      "matchConditions": [{"name": "probe", "expression": f"object.metadata.name == '{probe}-v'"}],
+                      "validations": [{"expression": "false", "message": f"settled {token}"}]}},
+            {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicyBinding", "metadata": {"name": SETTLE_NAME},
+             "spec": {"policyName": SETTLE_NAME, "validationActions": ["Deny"],
+                      "matchResources": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}}}}},
+            {"apiVersion": f"{rbac}/v1", "kind": "Role", "metadata": {"name": SETTLE_NAME, "namespace": ns}, "rules": rules},
+            {"apiVersion": f"{rbac}/v1", "kind": "RoleBinding", "metadata": {"name": SETTLE_NAME, "namespace": ns},
+             "roleRef": {"apiGroup": rbac, "kind": "Role", "name": SETTLE_NAME},
+             "subjects": [{"apiGroup": rbac, "kind": "User", "name": f"{user}-role"}]},
+            {"apiVersion": f"{rbac}/v1", "kind": "ClusterRole", "metadata": {"name": SETTLE_NAME}, "rules": rules},
+            {"apiVersion": f"{rbac}/v1", "kind": "ClusterRoleBinding", "metadata": {"name": SETTLE_NAME},
+             "roleRef": {"apiGroup": rbac, "kind": "ClusterRole", "name": SETTLE_NAME},
+             "subjects": [{"apiGroup": rbac, "kind": "User", "name": f"{user}-cluster"}]},
+        ]
+        mutating = bool(names["MutatingAdmissionPolicy"])
+        if mutating:
+            objs += [
+                {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "MutatingAdmissionPolicy", "metadata": {"name": SETTLE_NAME},
+                 "spec": {"failurePolicy": "Fail", "reinvocationPolicy": "Never",
+                          "matchConstraints": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}},
+                                               "resourceRules": [{"apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE"], "resources": ["configmaps"]}]},
+                          "matchConditions": [{"name": "probe", "expression": f"object.metadata.name == '{probe}-m'"}],
+                          "mutations": [{"patchType": "ApplyConfiguration", "applyConfiguration": {
+                              "expression": f"Object{{metadata: Object.metadata{{annotations: {{'{SETTLE_NAME}': '{token}'}}}}}}"}}]}},
+                {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "MutatingAdmissionPolicyBinding", "metadata": {"name": SETTLE_NAME},
+                 "spec": {"policyName": SETTLE_NAME, "matchResources": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}}}}},
+            ]
+        # A policy with a paramKind reads its params from an informer of that
+        # kind, which the policy source starts on its own and which refuses
+        # ("not yet synced") until it has listed. One sentinel per kind shares
+        # it: a binding that selects no param, with parameterNotFoundAction
+        # Deny, answers "no params found" only once the informer has synced.
+        # The API server collects params before it evaluates matchConditions,
+        # so the binding's objectSelector, not a matchCondition, keeps the
+        # sentinel to its own probe.
+        params = {}
+        for d in policies:
+            kind = d["kind"] == "ValidatingAdmissionPolicy" and d["spec"].get("paramKind")
+            if kind:
+                params.setdefault((kind["apiVersion"], kind["kind"]), []).append(d["metadata"]["name"])
+        for n, (api_version, kind) in enumerate(sorted(params)):
+            name = f"{SETTLE_NAME}-params-{n}"
+            objs += [
+                {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicy", "metadata": {"name": name},
+                 "spec": {"failurePolicy": "Fail", "paramKind": {"apiVersion": api_version, "kind": kind},
+                          "matchConstraints": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}},
+                                               "resourceRules": [{"apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE"], "resources": ["configmaps"]}]},
+                          "validations": [{"expression": "true"}]}},
+                {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicyBinding", "metadata": {"name": name},
+                 "spec": {"policyName": name, "validationActions": ["Deny"],
+                          "paramRef": {"selector": {"matchLabels": {SETTLE_NAME: "none"}}, "parameterNotFoundAction": "Deny"},
+                          "matchResources": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}},
+                                             "objectSelector": {"matchLabels": {SETTLE_NAME: f"p{n}"}}}}},
+            ]
+        for o in objs:
+            rc, out = self.kubectl(["apply", "--server-side", "--force-conflicts", "--field-manager", SETTLE_NAME, "-f", "-"], stdin=json.dumps(o))
+            if rc != 0:
+                self._settle_fail(f"apply the sentinel {o['kind']} {SETTLE_NAME}:\n{out}")
+
+        def configmap(name, labels=None):
+            return json.dumps({"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": name, "namespace": ns, "labels": labels or {}}})
+
+        def can(as_, namespace):
+            return self.kubectl(["auth", "can-i", "get", f"configmaps/{token}", "-n", namespace], as_=as_, groups=())[0] == 0
+
+        waits = {
+            "the ValidatingAdmissionPolicies and their bindings, and the namespaces":
+                lambda: f"settled {token}" in self.kubectl(["create", "--dry-run=server", "-f", "-"], stdin=configmap(f"{probe}-v"))[1],
+            "the Roles and RoleBindings": lambda: can(f"{user}-role", ns),
+            "the ClusterRoles and ClusterRoleBindings": lambda: can(f"{user}-cluster", "default"),
+        }
+        if mutating:
+            def mutated():
+                rc, out = self.kubectl(["create", "--dry-run=server", "-o", "json", "-f", "-"], stdin=configmap(f"{probe}-m"))
+                try:
+                    return rc == 0 and (json.loads(out)["metadata"].get("annotations") or {}).get(SETTLE_NAME) == token
+                except ValueError:
+                    return False
+            waits["the MutatingAdmissionPolicies and their bindings"] = mutated
+
+        def no_params(n):
+            out = self.kubectl(["create", "--dry-run=server", "-f", "-"], stdin=configmap(f"{probe}-p{n}", {SETTLE_NAME: f"p{n}"}))[1]
+            return f"{SETTLE_NAME}-params-{n}" in out and "no params found" in out
+
+        for n, key in enumerate(sorted(params)):
+            waits[f"the {key[1]} params of {', '.join(sorted(params[key]))}"] = lambda n=n: no_params(n)
+        deadline = time.time() + timeout
+        while waits and time.time() < deadline:
+            waits = {what: ok for what, ok in waits.items() if not ok()}
+            if waits:
+                time.sleep(0.5)
+        if waits:
+            self._settle_fail(f"the API server did not decide by {' or by '.join(waits)} within {timeout}s"
+                              + (f": one of the {len(policies)} applied policies and bindings is not in force" if policies else ""))
+
+    @staticmethod
+    def _settle_fail(msg):
+        # The caller's `finally` stops the API server.
+        raise SystemExit(f"FAIL: {msg}")
 
     def stop(self, keep_log=False):
         for p in reversed(self.procs):

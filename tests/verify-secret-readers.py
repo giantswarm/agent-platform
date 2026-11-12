@@ -232,6 +232,9 @@ def main():
                              "subjects": [{"kind": "ServiceAccount", **b["serviceAccount"]}]})
             for d in objs:
                 kubectl(["create", "-f", "-"], yaml.safe_dump(d))
+            # RBAC authorizes from caches the API server fills on its own
+            # time (giantswarm/agent-platform#1291).
+            api.settle()
 
             def can(sa, verb, what, ns, home=ATE):
                 user = f"system:serviceaccount:{home}:{sa}"

@@ -5430,7 +5430,8 @@ skillManager:
 # muster forwards (its MCPServer CR, labelled for the agent-platform tool
 # group) and the one agent-manager forwards on its REST calls, acting as the
 # person; the issuer, client, secret and CA fall back to global.identity
-# inside the chart. GitHub is read with the App (github.app.secretName) or
+# inside the chart, and what both leave unset is filled from muster's login
+# (muster.muster.oauth.server, agent-platform.identity.apply). GitHub is read with the App (github.app.secretName) or
 # token Secret (github.tokenSecret.name) set here; empty: anonymous, public
 # repositories only. The connectivity chart registers it as muster's MCP
 # backend (networkPolicy.mcpBackends.skill-manager, derived) and opens
@@ -5646,8 +5647,9 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # kagent on, the connectivity release renders the three ClusterRoles a tenant's
 # RoleBindings refer to:
 #   - agent-platform:user: see the tenant's agents, templates, RemoteMCPServers,
-#     ModelConfigs, EgressPolicies and muster MCPServers, and start a Session
-#     with an agent;
+#     ModelConfigs, EgressPolicies and muster MCPServers, read the tenant's
+#     RoleBindings (its members; get and list), and start a Session with an
+#     agent;
 #   - agent-platform:editor: the above, plus the writes agent-manager performs
 #     as the caller (HelmReleases, OCIRepositories, Agents, AgentTemplates,
 #     RemoteMCPServers);
