@@ -1153,8 +1153,9 @@ components:  # @schema additionalProperties: true
     # leaves the ClusterRole agent-platform-tenant-flux to the connectivity
     # chart (giantswarm/agent-manager#305), and its organization tools write
     # in commit mode (giantswarm/agent-manager#300).
-    # 2.22.0 is the floor agent-manager.credentials and
-    # agent-manager.githubTokenExchange need: it answers a missing organization
+    # 2.22.0 is the floor agent-manager.credentials and the token exchange
+    # (agent-manager.github.tokenExchange, formerly
+    # agent-manager.githubTokenExchange) need: it answers a missing organization
     # credential with the credentials.uiURL form and exchanges the person's
     # identity for their GitHub App grant.
     # 2.24.0 is the floor the Dev Portal's organization pages need
@@ -5766,7 +5767,7 @@ musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemR
 # this switch, so it serves the organization tools (the floor of
 # components.agent-manager.versionRange must be 2.20.0 or later). Credential
 # forms use an explicit agent-manager.credentials.uiURL template containing
-# {operation}; credentials and githubTokenExchange need a manager floor of
+# {operation}; credentials and github.tokenExchange need a manager floor of
 # 2.22.0 or later. With components.muster on, muster serves
 # the MCPServers of the namespaces labelled
 # agent-platform.giantswarm.io/organization (muster.mcpServerNamespaceSelector,

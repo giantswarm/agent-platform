@@ -124,8 +124,10 @@ https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
   Change the agent (`agent-platform-agent-management`), not the call.
 - `auth_required` naming a provider App (structured `apps`, each with its `authUrl`) answers a call
   that needs the person's grant of that GitHub App: a commit (`mode: commit` on agent-manager,
-  cluster-manager or model-manager), or pinning or reading a private skill. Only that call asks;
-  everything else works without it. Give the person the link and call again once they signed in.
+  cluster-manager or model-manager), or pinning or reading a private skill. Where the manager
+  fetches the grant per call (its `github.tokenExchange`), only that call asks and everything else
+  works without it; a manager still pinned to its App asks at sign-in, before any call. Give the
+  person the link and call again once they signed in.
 - An agent acting for a person never receives the person's GitHub grant: its commit, and its pin or
   read of a private skill, are refused (`forbidden`). The person does it in their own session.
 - `forbidden` or `Unauthorized` from a backend is the **person's** authorization (RBAC, the service's
