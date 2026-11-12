@@ -234,6 +234,9 @@ class APIServer:
         # ("not yet synced") until it has listed. One sentinel per kind shares
         # it: a binding that selects no param, with parameterNotFoundAction
         # Deny, answers "no params found" only once the informer has synced.
+        # The API server collects params before it evaluates matchConditions,
+        # so the binding's objectSelector, not a matchCondition, keeps the
+        # sentinel to its own probe.
         params = {}
         for d in policies:
             kind = d["kind"] == "ValidatingAdmissionPolicy" and d["spec"].get("paramKind")
@@ -246,20 +249,20 @@ class APIServer:
                  "spec": {"failurePolicy": "Fail", "paramKind": {"apiVersion": api_version, "kind": kind},
                           "matchConstraints": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}},
                                                "resourceRules": [{"apiGroups": [""], "apiVersions": ["v1"], "operations": ["CREATE"], "resources": ["configmaps"]}]},
-                          "matchConditions": [{"name": "probe", "expression": f"object.metadata.name == '{probe}-p{n}'"}],
                           "validations": [{"expression": "true"}]}},
                 {"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingAdmissionPolicyBinding", "metadata": {"name": name},
                  "spec": {"policyName": name, "validationActions": ["Deny"],
                           "paramRef": {"selector": {"matchLabels": {SETTLE_NAME: "none"}}, "parameterNotFoundAction": "Deny"},
-                          "matchResources": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}}}}},
+                          "matchResources": {"namespaceSelector": {"matchLabels": {SETTLE_NAME: token}},
+                                             "objectSelector": {"matchLabels": {SETTLE_NAME: f"p{n}"}}}}},
             ]
         for o in objs:
             rc, out = self.kubectl(["apply", "--server-side", "--force-conflicts", "--field-manager", SETTLE_NAME, "-f", "-"], stdin=json.dumps(o))
             if rc != 0:
                 self._settle_fail(f"apply the sentinel {o['kind']} {SETTLE_NAME}:\n{out}")
 
-        def configmap(name):
-            return json.dumps({"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": name, "namespace": ns}})
+        def configmap(name, labels=None):
+            return json.dumps({"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": name, "namespace": ns, "labels": labels or {}}})
 
         def can(as_, namespace):
             return self.kubectl(["auth", "can-i", "get", f"configmaps/{token}", "-n", namespace], as_=as_, groups=())[0] == 0
@@ -280,7 +283,7 @@ class APIServer:
             waits["the MutatingAdmissionPolicies and their bindings"] = mutated
 
         def no_params(n):
-            out = self.kubectl(["create", "--dry-run=server", "-f", "-"], stdin=configmap(f"{probe}-p{n}"))[1]
+            out = self.kubectl(["create", "--dry-run=server", "-f", "-"], stdin=configmap(f"{probe}-p{n}", {SETTLE_NAME: f"p{n}"}))[1]
             return f"{SETTLE_NAME}-params-{n}" in out and "no params found" in out
 
         for n, key in enumerate(sorted(params)):
