@@ -1157,7 +1157,16 @@ components:  # @schema additionalProperties: true
     # agent-manager.githubTokenExchange need: it answers a missing organization
     # credential with the credentials.uiURL form and exchanges the person's
     # identity for their GitHub App grant.
-    versionRange: ">=2.22.0 <3.0.0"
+    # 2.24.0 is the floor the Dev Portal's organization pages need
+    # (giantswarm/backstage#3364): list_organizations replaces
+    # list_my_organizations, organization credentials are write-only,
+    # replace_organization_credential replaces one, and a save whose
+    # credential's consumers changed is answered credential_consumers_changed
+    # (giantswarm/agent-manager#360, #361, #364, #373). It is also
+    # agent-platform.agentManager.skillManagerFloor: from it agent-manager pins
+    # skills through the skill-manager and takes installation and
+    # defaultAgentModel (giantswarm/agent-manager#290).
+    versionRange: ">=2.24.0 <3.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the

@@ -127,18 +127,26 @@ def targeted(doc: str) -> str:
     release's values name for the platform's pods (the kagent controller's
     NetworkPolicy peers, controller.networkPolicy.from) is agent-platform too,
     and so is the namespace of a derived MCP backend entry
-    (networkPolicy.mcpBackends.<key>.namespace: the component's pods)."""
-    out, section, backends = [], "", -1
+    (networkPolicy.mcpBackends.<key>.namespace: the component's pods) and the
+    skill-manager's Service that agent-manager is pointed at (skillManager.url
+    and, on the connectivity release, agentManager.skillManager.namespace)."""
+    out, section, backends, skills = [], "", -1, -1
     for line in doc.split("\n"):
         if re.match(r"^  \S", line):
             section = line.strip()
         indent = len(line) - len(line.lstrip())
         if backends >= 0 and line.strip() and indent <= backends:
             backends = -1
+        if skills >= 0 and line.strip() and indent <= skills:
+            skills = -1
         if re.match(r"^ +mcpBackends:$", line):
             backends = indent
-        elif backends >= 0 and re.match(r"^ +namespace: default$", line):
+        elif re.match(r"^ +skillManager:$", line):
+            skills = indent
+        elif (backends >= 0 or skills >= 0) and re.match(r"^ +namespace: default$", line):
             line = line.replace(": default", ": agent-platform")
+        elif skills >= 0 and re.match(r"^ +url: http://[^.]+\.default\.svc\.cluster\.local[:/]", line):
+            line = line.replace(".default.svc.", ".agent-platform.svc.", 1)
         if re.match(r"^  name: ", line) and section.startswith("name:"):
             line = line.replace("name: ", "name: t-", 1)
         elif section in ("chartRef:", "dependsOn:") and re.match(r"^    (- )?name: ", line):

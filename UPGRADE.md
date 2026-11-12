@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (agent-manager 2.24: `list_organizations` and write-only organization credentials)
+
+giantswarm/backstage#3364: `components.agent-manager.versionRange` is `>=2.24.0 <3.0.0`. agent-manager 2.24.0 replaces the tool `list_my_organizations` with `list_organizations` (the organizations the person manages or belongs to), keeps organization credentials write-only, adds `replace_organization_credential`, and answers a save whose credential's consumers changed with `credential_consumers_changed`; the Dev Portal's organization pages need these. 2.24.0 is also `agent-platform.agentManager.skillManagerFloor`: with `components.skill-manager` on (it follows agent-manager), agent-manager now pins skills through the skill-manager (`skillManager.url`) and gets `installation` and, while the default agent is on, `defaultAgentModel`, as the earlier entry on the default agent and the skill-manager describes.
+
+### Operator action
+
+- **A client or agent that calls `list_my_organizations`**: call `list_organizations`. The platform's `agent-platform-organizations` skill names the new tool.
+- **An installation that sets `agent-manager.skills.repositories`**: the render fails while the skill-manager is on. Move the list to `skillManager.sources`, or set `components.skill-manager.enabled: false`.
+- **An installation that pins the BOM**: move `agent-manager` to `2.24.0`.
+
 ## \<current\> → \<next\> (the default agent, the skill-manager and `skillManager.sources`)
 
 giantswarm/giantswarm#38970, giantswarm/giantswarm#38322: the chart deploys the default agent (`default-agent` in the kagent namespace) wherever kagent, muster and agent-manager are on, and the skill-manager (`components.skill-manager`) wherever agent-manager is on. The skill-manager and the portal take their skill sources from `skillManager.sources`, with the platform's own `skills/` first. agent-manager pins skills through the skill-manager (`skillManager.url`) from `agent-platform.agentManager.skillManagerFloor` on. Platform HelmReleases are named after their `components` key, which is the chart name for every existing component, so no release is renamed.

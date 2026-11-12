@@ -50,7 +50,7 @@ components:
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "1.14.0" }
-  agent-manager:                 { versionRange: "2.22.0" }
+  agent-manager:                 { versionRange: "2.24.0" }
   # The default agent (components.default-agent): the agent chart.
   default-agent:       { versionRange: "2.6.0" }
   vm-manager:                    { versionRange: "0.24.0" }

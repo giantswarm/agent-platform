@@ -9,7 +9,7 @@ metadata:
 
 Kubernetes RBAC decides everything here; the portal and Slack only show the result. Read the live
 answer, never guess: `x_agent-manager_list_agents` and `x_agent-manager_get_agent` name each
-agent's namespace, `x_agent-manager_list_my_organizations` the organizations the person belongs to.
+agent's namespace, `x_agent-manager_list_organizations` the organizations the person manages or belongs to.
 Access set-up: https://docs.giantswarm.io/tutorials/agent-platform/access-control/.
 
 ## Owners
