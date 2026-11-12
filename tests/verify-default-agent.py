@@ -304,7 +304,9 @@ checks = {
     "muster.mcpServer": (v["muster"]["mcpServer"], {"enabled": True, "auth": {"forwardToken": True, "requiredAudiences": ["dex-k8s-authenticator"]}}),
     "oauth.enabled": (v["oauth"]["enabled"], True),
     "MCP backend": (find(docs, "HelmRelease", "agent-platform-connectivity")["spec"]["values"]["networkPolicy"]["mcpBackends"]["skill-manager"],
-                    {"namespace": "agent-platform", "ports": [8080], "podSelector": {"app.kubernetes.io/name": "skill-manager"}}),
+                    {"namespace": "agent-platform", "ports": [8080], "podSelector": {"app.kubernetes.io/name": "skill-manager"},
+                     # Its login, for its identity-provider egress (verify-managers pins the issuer order).
+                     "identityProvider": {"provider": "dex", "issuerUrl": "https://dex.example.com"}}),
 }
 for what, (got, want) in checks.items():
     if got != want:
