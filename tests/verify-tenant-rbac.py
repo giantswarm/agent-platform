@@ -7,14 +7,17 @@ Each case pins one property of the render:
   agent-platform:user, agent-platform:editor and agent-platform:admin:
   each role holds every rule of the one before it; the user reads agents,
   templates, RemoteMCPServers, ModelConfigs, Harnesses, EgressPolicies and muster
-  MCPServers and creates Sessions, and writes nothing; the editor writes
+  MCPServers, gets and lists the namespace's RoleBindings (its members,
+  giantswarm/agent-platform#1368) and creates Sessions, and writes nothing;
+  the editor writes
   HelmReleases, Agents, AgentTemplates and RemoteMCPServers and reads the
   agent chart's OCIRepository without writing it (giantswarm/agent-platform#1267);
   the admin also writes ModelConfigs, EgressPolicies and RoleBindings, places
   Secrets (create, update, delete) and reads none (a patch answers with the
   stored Secret, so it reads too), may `bind` the
   three roles only, and no role carries `escalate` or reads a Secret;
-  agent-platform:platform-user holds the user's rules but the EgressPolicies;
+  agent-platform:platform-user holds the user's rules but the EgressPolicies
+  and the RoleBindings;
 - the ValidatingAdmissionPolicy agent-platform-tenant-egress-credentials
   (Fail, bound with Deny) admits egresspolicies.api.kagent.dev of every
   version in every namespace labelled agent-platform.giantswarm.io/organization but kagent,
@@ -158,7 +161,14 @@ def check_roles(docs: list) -> None:
     user_writes = {t for t in user if t[2] in WRITES or t[2] == "bind"} - {("api.kagent.dev", "sessions", "create", None)}
     if user_writes:
         fail(f"agent-platform:user writes {sorted(user_writes)}")
-    ok("agent-platform:user reads the tenant's agents, servers and Harnesses, starts a Session, writes nothing")
+    # Every member reads the members (giantswarm/agent-platform#1368):
+    # agent-manager's list_organization_members lists the namespace's
+    # RoleBindings as the caller. get and list only: nothing watches them as
+    # a member.
+    user_rb = {t[2] for t in user if t[0] == "rbac.authorization.k8s.io" and t[1] == "rolebindings"}
+    if user_rb != {"get", "list"}:
+        fail(f"agent-platform:user holds {sorted(user_rb)} on rolebindings, want get and list: every member reads the members")
+    ok("agent-platform:user reads the tenant's agents, servers, Harnesses and members, starts a Session, writes nothing")
     for g, res in (("helm.toolkit.fluxcd.io", "helmreleases"),
                    ("api.kagent.dev", "agents"), ("api.kagent.dev", "agenttemplates"), ("api.kagent.dev", "remotemcpservers")):
         for v in WRITES:
@@ -185,10 +195,10 @@ def check_roles(docs: list) -> None:
     if role is None:
         fail("ClusterRole agent-platform:platform-user missing with kagent on")
     platform = grants(role["rules"])
-    want = {t for t in user if t[1] != "egresspolicies"}
+    want = {t for t in user if t[1] not in ("egresspolicies", "rolebindings")}
     if platform != want:
-        fail(f"agent-platform:platform-user grants {sorted(platform ^ want, key=str)} unlike agent-platform:user without EgressPolicies")
-    ok("agent-platform:platform-user is agent-platform:user without the EgressPolicies")
+        fail(f"agent-platform:platform-user grants {sorted(platform ^ want, key=str)} unlike agent-platform:user without EgressPolicies and RoleBindings")
+    ok("agent-platform:platform-user is agent-platform:user without the EgressPolicies and the RoleBindings")
 
 
 def check_egress_admission(docs: list, label: str) -> None:
