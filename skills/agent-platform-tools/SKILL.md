@@ -110,7 +110,9 @@ https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
 
 - `filter_tools` with a `pattern` names, under `servers_requiring_auth`, each connector whose tools
   a sign-in would unlock, with its `auth_tool`: call `core_auth_login` with that `server` from this
-  conversation and give the person the sign-in link it returns.
+  conversation and give the person the sign-in link it returns. An entry with an `error` and no
+  `auth_tool` cannot be signed in to from this session: tell the person its `error` as is and do
+  not call `core_auth_login`, which refuses it the same way.
 - A sign-in elsewhere (the Dev Portal's Customize → Connectors, `muster auth login` on the CLI)
   reaches this conversation only for a connector with `grantScope: subject` (`core_mcpserver_get`:
   `spec.auth.grantScope` or `spec.auth.authorizationServer.grantScope`). An own-account (OAuth)
