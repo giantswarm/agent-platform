@@ -1,0 +1,37 @@
+{{- /*
+Egress to the login identity provider for the in-cluster MCP backends that
+validate tokens themselves (networkPolicy.mcpBackends.<key>.identityProvider):
+the skill-manager's entry carries it from the meta chart. The same rules the
+managers' egress policies carry (agent-platform.idpEgress.cilium): the issuer's
+hosts by name on 443, and the cluster entity on 443 and 10443 — an issuer whose
+name resolves to an in-cluster Gateway (a private installation) is `cluster` at
+policy time, which a backend chart's own ipBlock rule never matches on Cilium.
+Cilium flavour only, and additive: a backend's own NetworkPolicy keeps its
+rules, this one allows more for its pods (podSelector, required). The vanilla
+flavour adds nothing: a backend's own ipBlock on 443 is what the managers get
+there.
+*/ -}}
+{{- if and .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
+{{- range $key, $b := .Values.networkPolicy.mcpBackends }}
+{{- with $b.identityProvider }}
+{{- if not $b.podSelector }}
+{{- fail (printf "networkPolicy.mcpBackends.%s.identityProvider needs the entry's podSelector: the egress policy selects the backend's pods, never its whole namespace" $key) }}
+{{- end }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" $ }}-mcp-backend-{{ $key }}-idp-egress
+  namespace: {{ $b.namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- toYaml $b.podSelector | nindent 6 }}
+  egress:
+    {{- include "agent-platform.dnsEgressWithProxy" $ | nindent 4 }}
+    {{- include "agent-platform.idpEgress.cilium" (dict "provider" (.provider | default "dex") "issuerUrl" .issuerUrl) | trim | nindent 4 }}
+{{- end }}
+{{- end }}
+{{- end }}
