@@ -475,7 +475,7 @@ components:  # @schema additionalProperties: true
     # spec.urlElicitation: Relay.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.61.0 <6.0.0"
+    versionRange: ">=5.63.2 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -1153,9 +1153,8 @@ components:  # @schema additionalProperties: true
     # leaves the ClusterRole agent-platform-tenant-flux to the connectivity
     # chart (giantswarm/agent-manager#305), and its organization tools write
     # in commit mode (giantswarm/agent-manager#300).
-    # 2.22.0 is the floor agent-manager.credentials and the token exchange
-    # (agent-manager.github.tokenExchange, formerly
-    # agent-manager.githubTokenExchange) need: it answers a missing organization
+    # 2.22.0 is the floor agent-manager.credentials and
+    # agent-manager.githubTokenExchange need: it answers a missing organization
     # credential with the credentials.uiURL form and exchanges the person's
     # identity for their GitHub App grant.
     # 2.24.0 is the floor the Dev Portal's organization pages need
@@ -1167,7 +1166,8 @@ components:  # @schema additionalProperties: true
     # agent-platform.agentManager.skillManagerFloor: from it agent-manager pins
     # skills through the skill-manager and takes installation and
     # defaultAgentModel (giantswarm/agent-manager#290).
-    versionRange: ">=2.24.0 <4.0.0"
+    # github.tokenExchange needs the on-demand grant contract and its schema.
+    versionRange: ">=3.0.0-rc.10 <4.0.0-0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the

@@ -4454,9 +4454,19 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- if hasKey $am "devPortal" -}}
 {{- fail "agent-manager.devPortal is unsupported: configure agent-manager.credentials.uiURL with the client's HTTPS URL template containing {operation}" -}}
 {{- end -}}
-{{- if or (hasKey $am "credentials") (hasKey $am "githubTokenExchange") (hasKey (dig "github" dict $am | default dict) "tokenExchange") -}}
+{{- if or (hasKey $am "credentials") (hasKey $am "githubTokenExchange") -}}
 {{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" "2.22.0")) -}}
 {{- fail "agent-manager credential operations and GitHub token exchange need components.agent-manager.versionRange with a floor of 2.22.0 or later" -}}
+{{- end -}}
+{{- end -}}
+{{- if hasKey (dig "github" dict $am | default dict) "tokenExchange" -}}
+{{- $managerFloor := include "agent-platform.semverRangeFloor" (dig "agent-manager" "versionRange" "" .Values.components) -}}
+{{- if or (not $managerFloor) (lt ((semver $managerFloor).Compare (semver "3.0.0-rc.10")) 0) -}}
+{{- fail "agent-manager.github.tokenExchange needs components.agent-manager.versionRange with a floor of 3.0.0-rc.10 or later" -}}
+{{- end -}}
+{{- $musterFloor := include "agent-platform.semverRangeFloor" (dig "muster" "versionRange" "" .Values.components) -}}
+{{- if or (not $musterFloor) (lt ((semver $musterFloor).Compare (semver "5.63.2")) 0) -}}
+{{- fail "agent-manager.github.tokenExchange needs components.muster.versionRange with a floor of 5.63.2 or later" -}}
 {{- end -}}
 {{- end -}}
 {{- if and (dig "credentials" "uiURL" "" $am) (not $on) -}}
