@@ -4,23 +4,27 @@
 The meta chart fills what a manager's oauth block and global.identity leave
 unset from muster.muster.oauth.server (agent-platform.identity.apply):
 oauth.dex.issuerURL, oauth.dex.clientID with oauth.trustedAudiences, and
-oauth.existingSecret for model-manager, agent-manager, vm-manager and
-cluster-manager; oauth.baseURL for the two routed managers. The connectivity release receives the same filled
-blocks, so each case renders the meta chart, then the connectivity chart with
-the values its HelmRelease carries — where the absence guard and the
-one-login guard fire.
+oauth.existingSecret for model-manager, agent-manager, vm-manager,
+cluster-manager and skill-manager; oauth.baseURL for the two routed managers.
+The connectivity release receives the same filled blocks (not skill-manager's,
+which only its own release reads), so each case renders the meta chart, then
+the connectivity chart with the values its HelmRelease carries — where the
+absence guard and the one-login guard fire.
 
 Usage: verify-manager-identity.py <meta chart> <connectivity chart> [helm flags...]
 The helm flags (the Makefile's VM: API versions, required inputs) go to both renders.
 """
 
+import re
 import subprocess
 import sys
 import tempfile
 
 import yaml
 
-MANAGERS = ("model-manager", "agent-manager", "vm-manager", "cluster-manager")
+MANAGERS = ("model-manager", "agent-manager", "vm-manager", "cluster-manager", "skill-manager")
+# Blocks the connectivity release does not receive (components.agent-platform-connectivity.omitKeys).
+NOT_IN_CONNECTIVITY = ("skill-manager",)
 ROUTED = {"model-manager": "/model-manager", "agent-manager": "/agent-manager"}
 ISSUER = "https://dex.ci.example.com"
 CLIENT = "muster-acme"
@@ -86,8 +90,40 @@ def expect(what: str, got, want) -> None:
         sys.exit(f"FAIL: {what}: got {got!r}, want {want!r}")
 
 
+def roster_covered(meta: str) -> None:
+    """Every roster component whose forwarded block has an oauth block is in the helper's list.
+
+    A manager that is an OAuth resource server and is not in the list gets no client
+    from muster's login, and its chart refuses to render where global.identity.clientId
+    is unset (skill-manager on enigma). A component that derives its login itself
+    (toolchain-manager.auth, agent-platform.toolchainManager.derived) has no oauth block.
+    """
+    with open(f"{meta}/values.yaml") as f:
+        values = yaml.safe_load(f)
+    with open(f"{meta}/templates/_helpers.tpl") as f:
+        helpers = f.read()
+    line = re.search(r"\{\{- range \$name, \$wiring := dict (.*?) -\}\}", helpers)
+    if not line:
+        sys.exit("FAIL: roster: the agent-platform.identity.apply list is not found in _helpers.tpl")
+    listed = set(re.findall(r'"([^"]*)"', line.group(1))[0::2])
+    with_oauth = {
+        key for key, c in values["components"].items()
+        if isinstance(values.get(c.get("valuesFrom") or ""), dict)
+        and isinstance(values[c["valuesFrom"]].get("oauth"), dict)
+    }
+    missing = sorted(with_oauth - listed)
+    if missing:
+        sys.exit(f"FAIL: roster: {missing} forward an oauth block but are not in agent-platform.identity.apply's list")
+    if not set(MANAGERS) <= with_oauth:
+        sys.exit(f"FAIL: roster: {sorted(set(MANAGERS) - with_oauth)} have no oauth block in values.yaml")
+
+
 def main() -> None:
     meta, conn, base = sys.argv[1], sys.argv[2], sys.argv[3:]
+
+    print("--> roster: every component that forwards an oauth block takes muster's login")
+    roster_covered(meta)
+    print("ok: roster")
 
     print("--> derived: muster's login fills every manager; the routed ones get the route's base URL")
     rels = releases(meta, [*base, *ALL_ON, *LOGIN])
@@ -102,7 +138,8 @@ def main() -> None:
         expect(f"{name} oauth.baseURL", o.get("baseURL"), want)
     cvals = rels["agent-platform-connectivity"]
     for name in MANAGERS:
-        expect(f"the connectivity release's {name}.oauth", cvals.get(name, {}).get("oauth"), oauth(rels, name))
+        if name not in NOT_IN_CONNECTIVITY:
+            expect(f"the connectivity release's {name}.oauth", cvals.get(name, {}).get("oauth"), oauth(rels, name))
     result = connectivity(conn, cvals, base)
     if result.returncode != 0:
         sys.exit(f"FAIL: derived: the connectivity render failed\n{result.stderr}")

@@ -4293,10 +4293,12 @@ Usage: include "agent-platform.scheduling.apply" (dict "values" $shaped)
 
 {{/*
 The platform's one login in the managers' OAuth blocks
-(giantswarm/agent-platform#484). model-manager, agent-manager, vm-manager and
-cluster-manager are OAuth resource servers of the login muster's OAuth server
-names. Each chart resolves its issuer, client, Secret and trusted audiences
-from its own oauth block, else global.identity; what both leave unset is filled
+(giantswarm/agent-platform#484). model-manager, agent-manager, vm-manager,
+cluster-manager, workspace-manager and skill-manager are OAuth resource servers
+of the login muster's OAuth server names (skill-manager's block does not reach
+the connectivity release: its own chart opens its identity-provider egress).
+Each chart resolves its issuer, client, Secret and trusted audiences from its
+own oauth block, else global.identity; what both leave unset is filled
 here from muster.muster.oauth.server — oauth.dex.issuerURL from dex.issuerUrl,
 oauth.dex.clientID from dex.clientId (and oauth.trustedAudiences [that client],
 the charts' own default from global.identity.clientId), oauth.existingSecret
@@ -4330,7 +4332,7 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- if and (dig "enabled" true $server) (eq (toString (dig "provider" "dex" $server)) "dex") -}}
 {{- $login = dict "issuerURL" (dig "dex" "issuerUrl" "" $server) "clientID" (dig "dex" "clientId" "" $server) "existingSecret" (dig "existingSecret" "" $server) -}}
 {{- end -}}
-{{- range $name, $wiring := dict "model-manager" "modelManager" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" "workspace-manager" "" -}}
+{{- range $name, $wiring := dict "model-manager" "modelManager" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" "workspace-manager" "" "skill-manager" "" -}}
 {{- $block := index $v $name -}}
 {{- if and (kindIs "map" $block) (kindIs "map" (index $block "oauth")) (dig "oauth" "enabled" false $block) -}}
 {{- $oauth := index $block "oauth" -}}
