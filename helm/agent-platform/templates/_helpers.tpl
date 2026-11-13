@@ -2881,7 +2881,9 @@ Usage: include "agent-platform.kagent.extensions" $root | fromJson
 {{- end -}}
 {{- /* agent-platform-operator, while agentPlatformOrganizations.enabled is on:
 it lists and deletes a deleted organization's Sessions as its own
-ServiceAccount (connectivity organization-erasure/kagent-sessions-rbac.yaml). */ -}}
+ServiceAccount (connectivity organization-erasure/kagent-sessions-rbac.yaml),
+and from 0.4.0 lists whether a live organization with a ModelConfig and no
+Agent has a session (its worker replica rule, agent-platform-operator#50). */ -}}
 {{- if include "agent-platform.organizations.on" . -}}
 {{- $op := include "agent-platform.organizations.operatorServiceAccount" . | fromJson -}}
 {{- $callers = append $callers (printf "%s/%s" $op.namespace $op.name) -}}
