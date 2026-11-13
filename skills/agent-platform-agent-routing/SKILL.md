@@ -2,7 +2,7 @@
 name: agent-platform-agent-routing
 description: Use when a task might suit another agent than the one in this session, when someone asks which agent to use or whether one exists for a task, when a task repeats, or when you write a link that starts a session with an agent.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # Routing a task to the right agent
@@ -53,6 +53,10 @@ schema with `describe_tool` first). Judge each agent by:
 
 `x_agent-manager_get_agent` reads one agent in full when the list leaves a doubt. The list holds only
 the agents the person may see; another person may see more or fewer.
+
+`releaseWithheld` means the Agent is readable but release details are unavailable. Use the Agent's
+actual readiness when deciding whether it can start a session; do not infer a missing release from
+`managed: unknown`, or describe the release as healthy from an Agent-only verdict.
 
 One agent fits: recommend it with a start link. Several fit: name at most three, one line each, and
 link each. None fits: say so, and offer to create one.

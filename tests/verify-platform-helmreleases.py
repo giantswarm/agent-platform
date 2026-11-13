@@ -40,7 +40,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 
 import yaml
 
@@ -250,13 +249,9 @@ def fixtures():
 def install(objs):
     for d in objs:
         apply(d)
-    deadline = time.time() + 60
-    while time.time() < deadline:
-        rc, out = create(helmrelease("probe", valuesFrom=[{"kind": "Secret", "name": "x"}]))
-        if rc != 0 and POLICY in out:
-            return
-        time.sleep(0.5)
-    fail("the API server did not apply the policy within 60s")
+    # The API server loads the policy, its binding and the fixtures' RBAC on
+    # its own time: wait for all of them (giantswarm/agent-platform#1372).
+    API.settle([d for d in objs if d["kind"].endswith(("AdmissionPolicy", "AdmissionPolicyBinding"))])
 
 
 def prove():

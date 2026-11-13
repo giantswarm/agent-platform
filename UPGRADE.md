@@ -36,7 +36,7 @@ The `substrate` component HelmRelease uses `spec.upgrade.strategy: {name: RetryO
 
 ## \<current\> → \<next\> (agent-manager 3.x)
 
-`components.agent-manager.versionRange` selects `>=3.0.0-rc.10 <4.0.0-0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).
+`components.agent-manager.versionRange` selects `>=3.0.0 <4.0.0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).
 
 ### Operator action
 
