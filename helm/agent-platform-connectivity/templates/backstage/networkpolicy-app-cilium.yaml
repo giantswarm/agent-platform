@@ -4,7 +4,7 @@
 {{- /* The backstage chart names its CNPG cluster <its chart name>-<suffix>, so
 the prefix is the literal chart name, not backstage.name. */}}
 {{- $cnpg := printf "backstage-%s" (dig "database" "postgresql" "clusterNameSuffix" "cnpg" $backstage) }}
-{{- $edgeNamespaces := include "agent-platform.backstage.edgeNamespaces" . | fromJsonArray }}
+{{- $edgeGateways := include "agent-platform.backstage.edgeGateways" . | fromJsonArray }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -35,15 +35,15 @@ spec:
     {{- else }}
     # The route attaches to the platform's front Gateway (the Envoy edge), which
     # proxies straight to the portal's Service: agentgateway is not in this path.
-    # The namespaces are the route's own parents (backstage.parentRefs, else
-    # global.gatewayApi.parentRefs); `app.kubernetes.io/name: envoy` is the
-    # label Envoy Gateway stamps on the proxy pods it runs for a Gateway, as
-    # the oauth2-proxy policy selects them.
+    # The peers are the proxy pods of the route's own parents
+    # (backstage.parentRefs, else global.gatewayApi.parentRefs), by the
+    # owning-Gateway labels Envoy Gateway stamps on them
+    # (agent-platform.route.envoyPeer), as the oauth2-proxy policy selects them.
     - fromEndpoints:
-        {{- range $ns := $edgeNamespaces }}
+        {{- range $edgeGateways }}
         - matchLabels:
-            app.kubernetes.io/name: envoy
-            io.kubernetes.pod.namespace: {{ $ns }}
+            {{- include "agent-platform.route.envoyPeer" . | fromJson | toYaml | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .namespace }}
         {{- end }}
       toPorts:
         - ports:

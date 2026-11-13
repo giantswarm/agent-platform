@@ -20,10 +20,7 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   parentRefs:
-    {{- $override := list }}
-    {{- if $uiRoute.parentRef.name }}
-    {{- $override = list (dict "name" $uiRoute.parentRef.name "namespace" $uiRoute.parentRef.namespace "group" "gateway.networking.k8s.io" "kind" "Gateway") }}
-    {{- end }}
+    {{- $override := include "agent-platform.kagent.uiRouteParentRefs" . | fromJsonArray }}
     {{- include "agent-platform.parentRefs" (dict "ctx" . "override" $override "key" "kagent.uiRoute.parentRef") | nindent 4 }}
   hostnames:
     - {{ include "agent-platform.hostname" (dict "ctx" . "prefix" "kagent" "override" $uiRoute.hostname "key" "kagent.uiRoute.hostname") | quote }}

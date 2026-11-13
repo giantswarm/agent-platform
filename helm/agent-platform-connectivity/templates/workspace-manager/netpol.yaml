@@ -13,11 +13,11 @@
 {{- $peers := $wm.networkPolicy.ingress.additionalPeers }}
 {{- /* The public key-set route's Gateway (route.yaml): the agentgateway data
        plane when the chart owns the edge and the route names no parent, else
-       the Envoy edge pods of the route's parents' namespaces. */ -}}
+       the proxy pods of the route's parents (agent-platform.route.envoyPeer). */ -}}
 {{- $routed := include "agent-platform.workspaceManager.routeHost" . }}
 {{- $routeRefs := include "agent-platform.workspaceManager.routeParentRefs" . | fromJsonArray }}
 {{- $edgeIsDataPlane := include "agent-platform.route.toDataPlane" (dict "ctx" . "parentRefs" $routeRefs) }}
-{{- $edgeNamespaces := include "agent-platform.route.edgeNamespaces" (dict "ctx" . "parentRefs" $routeRefs) | fromJsonArray }}
+{{- $edgeGateways := include "agent-platform.route.edgeGateways" (dict "ctx" . "parentRefs" $routeRefs) | fromJsonArray }}
 {{- $egress := $wm.networkPolicy.egress }}
 {{- /* The provider instances' hosts, grouped by port: one rule per port. */ -}}
 {{- $byPort := dict }}
@@ -81,10 +81,10 @@ spec:
             gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
             io.kubernetes.pod.namespace: {{ .Release.Namespace }}
         {{- else }}
-        {{- range $ns := $edgeNamespaces }}
+        {{- range $edgeGateways }}
         - matchLabels:
-            app.kubernetes.io/name: envoy
-            io.kubernetes.pod.namespace: {{ $ns }}
+            {{- include "agent-platform.route.envoyPeer" . | fromJson | toYaml | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .namespace }}
         {{- end }}
         {{- end }}
       toPorts:
@@ -328,13 +328,13 @@ spec:
             matchLabels:
               gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
         {{- else }}
-        {{- range $ns := $edgeNamespaces }}
+        {{- range $edgeGateways }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ $ns }}
+              kubernetes.io/metadata.name: {{ .namespace }}
           podSelector:
             matchLabels:
-              app.kubernetes.io/name: envoy
+              {{- include "agent-platform.route.envoyPeer" . | fromJson | toYaml | nindent 14 }}
         {{- end }}
         {{- end }}
       ports:
