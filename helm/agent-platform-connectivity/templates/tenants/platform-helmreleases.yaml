@@ -23,7 +23,11 @@ installation's skills credential (current or earlier name), or a Secret the
 requester may `get`, at most two distinct Secrets of the latter (the
 authorizer checks one expression may run).
 An update that leaves the spec as it is (a finalizer, a reconcile request)
-passes. The organization namespaces hold the same fields
+passes. kagent's own HelmRelease, where the installation's deployer places it
+in the kagent namespace, passes for its writers only
+(tenants.platform.kagentRelease, giantswarm/agent-platform#1387): that name
+from any other writer, and any other name from those writers, is held as
+above. The organization namespaces hold the same fields
 (organizations/admission.yaml). Rendered whenever
 kagent.fluxServiceAccountName is.
 */ -}}
@@ -31,6 +35,7 @@ kagent.fluxServiceAccountName is.
 {{- if $helmSA }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
 {{- $chartSource := include "agent-platform.organizations.chartSource" . }}
+{{- $kagentReleaseWrite := include "agent-platform.tenants.kagentReleaseWrite" . }}
 {{- $installationCredentials := list }}
 {{- if include "agent-platform.agentManager.enabled" . }}
 {{- $skillsAuth := include "agent-platform.agentManager.skillsGitAuth" . | fromJson }}
@@ -63,6 +68,12 @@ spec:
       expression: >-
         request.operation == 'CREATE' ||
         (has(object.spec) ? dyn(object.spec) : dyn({})) != (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
+    {{- with $kagentReleaseWrite }}
+    # kagent's own release, written by its deployer (tenants.platform.kagentRelease).
+    - name: not-kagent-release
+      expression: >-
+        !({{ . }})
+    {{- end }}
   # Read untyped: the policy admits every served version.
   variables:
     - name: spec

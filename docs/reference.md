@@ -589,6 +589,8 @@ Agents are Flux `HelmRelease`s in the kagent namespace. Under a Flux multi-tenan
 
 The platform's own component `HelmRelease`s need no tenant identity in an exempt namespace (`gitops.namespace: flux-giantswarm` on Giant Swarm management clusters). With the bundled Flux engine they run as `agent-platform-flux`.
 
+The admission policy `agent-platform-platform-helmreleases` holds every `HelmRelease` written into the kagent namespace to the shape of an agent release: the agent chart, run as `kagent-flux`, with no `valuesFrom`, `postRenderers` or `targetNamespace`. The meta chart keeps kagent's own `HelmRelease` in its own namespace with `targetNamespace: kagent`, so the policy never sees it. A deployer that puts each workload's `HelmRelease` in its target namespace puts kagent's in the kagent namespace, where the policy would refuse its upgrades. For that layout, set `tenants.platform.kagentRelease`: `name` is that `HelmRelease`'s name, and `writers` lists the identities that write it, as RBAC subjects of kind `User`, `Group` or `ServiceAccount`. The policy admits that one name from those writers. That name from anyone else, and any other `HelmRelease` from those writers, it still holds to an agent release's shape. Set both keys or neither; the render fails otherwise. `make verify-platform-helmreleases` asserts this.
+
 ### An organization's own model
 
 An organization brings its own model key: no ModelConfig of the platform is copied into an organization namespace. This comes with `agentPlatformOrganizations.enabled` (and kagent). It needs `llmRouting.enabled` and `llmRouting.modelConfigPolicy.enabled`; the render fails otherwise. In every organization namespace:
