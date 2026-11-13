@@ -1948,6 +1948,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | mcp-kubernetes.mcpServer.enabled | bool | `true` |  |
 | mcp-kubernetes.mcpServer.managementCluster | string | `""` |  |
 | mcp-kubernetes.mcpServer.displayName | string | `"Kubernetes"` |  |
+| mcp-kubernetes.mcpServer.description | string | `"Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"` |  |
 | cloudnative-pg | object | `{}` |  |
 | kagent-crds | object | `{}` |  |
 | substrate.createNamespace | bool | `false` |  |

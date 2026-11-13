@@ -32,6 +32,9 @@ route (the backend and the JWT policy are its objects).
 {{- if or (lt $timeout 1) (gt $timeout 300) }}
 {{- fail (printf "kagent.controllerRoute.mcp.timeout %v: want seconds from 1 to 300 (the MCPServer CRD's range)" $mcp.timeout) }}
 {{- end }}
+{{- if gt (len ($mcp.description | default "")) 500 }}
+{{- fail (printf "kagent.controllerRoute.mcp.description: %d characters, want at most 500 (the MCPServer CRD's maxLength)" (len $mcp.description)) }}
+{{- end }}
 {{- if or (not (regexMatch "^/[a-z0-9][-a-z0-9/]*[a-z0-9]$" $prefix)) (hasPrefix "/mcp" $prefix) }}
 {{- fail (printf "kagent.controllerRoute.mcp.pathPrefix %q: want an absolute path of lower-case alphanumerics, '-' and '/' outside /mcp (muster's MCP surface on the same data plane), e.g. /kagent/mcp" $prefix) }}
 {{- end }}

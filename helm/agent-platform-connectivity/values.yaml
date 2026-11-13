@@ -3599,6 +3599,9 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
     # ui.giantswarm.io/display-name annotation): agent-platform-mcps' kubernetes
     # family's, which a family member shares. Empty renders none.
     displayName: Kubernetes
+    # What the Dev Portal shows under the name (the MCPServer's
+    # spec.description), at most 500 characters. Empty renders none.
+    description: "Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"
 
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
 # The kagent-crds component's values (kagent main ships its CRDs as their own
