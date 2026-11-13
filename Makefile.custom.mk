@@ -2997,7 +2997,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@echo "ok: app-config"
 	@echo "--> Organizations in the portal follow agentPlatformOrganizations.enabled"
 	@for enabled in false true; do \
-		$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set agentPlatformOrganizations.enabled=$$enabled >$(VERIFY_TMP)/vw-bs-orgs-$$enabled.out 2>&1 || { cat $(VERIFY_TMP)/vw-bs-orgs-$$enabled.out; exit 1; }; \
+		$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -f $(OPERATOR_VALUES) --api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set agentPlatformOrganizations.enabled=$$enabled >$(VERIFY_TMP)/vw-bs-orgs-$$enabled.out 2>&1 || { cat $(VERIFY_TMP)/vw-bs-orgs-$$enabled.out; exit 1; }; \
 		grep -A1 '^      organizations:$$' $(VERIFY_TMP)/vw-bs-orgs-$$enabled.out | grep -q "^        enabled: $$enabled$$" || { echo "FAIL: agentPlatform.organizations.enabled does not follow agentPlatformOrganizations.enabled=$$enabled"; exit 1; }; \
 	done
 	@echo "--> the one-value identity: renaming kagent.fluxServiceAccountName renames the portal's agentPlatform.fluxServiceAccountName; kagent off drops it"
@@ -3435,8 +3435,10 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 PICK := python3 tests/pick-doc.py
 MIGRATION_ON := $(MANAGERS_MIN) --set components.agent-manager.enabled=true
 # agentPlatformOrganizations.enabled needs the llm listener and its routing policy,
-# the agents' Flux identity and the API hostname (giantswarm/agent-platform#759, #1268).
-MIGRATION_TENANTS := --set agentPlatformOrganizations.enabled=true --set kagent.fluxServiceAccountName=kagent-flux --set global.domain=ci.example.com --set llmRouting.enabled=true --api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy
+# the agents' Flux identity and the API hostname (giantswarm/agent-platform#759, #1268),
+# and the operator's names the meta chart derives (OPERATOR_VALUES, #1278).
+OPERATOR_VALUES := tests/fixtures/organizations-operator-values.yaml
+MIGRATION_TENANTS := --set agentPlatformOrganizations.enabled=true --set kagent.fluxServiceAccountName=kagent-flux --set global.domain=ci.example.com --set llmRouting.enabled=true --api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy -f $(OPERATOR_VALUES)
 # The migrate Job's image pin: agentManager.migration.image.tag — the meta chart's BOM pin for agent-manager,
 # mirrored as the connectivity chart's default. Read from the values (Renovate bumps both files), never a literal.
 MIGRATION_PIN = python3 -c "import yaml; print(yaml.safe_load(open('$(CHART_DIR)/values.yaml'))['agentManager']['migration']['image']['tag'])"
@@ -3452,7 +3454,7 @@ EGRESS_NAMES := grep -E '^ *-? ?(matchName|matchPattern): |^ *- [0-9]+(\.[0-9]+)
 EGRESS_BLOCKS := grep -E '^ *cidr: ' | sed -E "s/^ *//; s/['\"]//g" | sort
 
 .PHONY: verify-organization-erasure
-verify-organization-erasure: ## Assert agent-platform-operator's access for the erasure of deleted organizations (agentPlatformOrganizations.enabled, giantswarm/giantswarm#38988) in the connectivity chart: off by default nothing renders; on with kagent the ClusterRole agent-platform:organization-erasure holds exactly list and delete on sessions.api.kagent.dev, bound to the operator's ServiceAccount in the release namespace; with network policies on the kagent controller's API port admits the operator's pods in both flavors; on with the Crossplane snapshot store on AWS the IAM role <store role>-operator beside Substrate's, trusted for that ServiceAccount only, allows s3:ListBucket only with an s3:prefix that starts with a UID segment and s3:DeleteObject only under one, evaluated with IAM's wildcards against an organization's keys (pass) and the platform Harness's prefix, other first segments, other buckets and other actions (refused); a store role name with no room for -operator fails the render; the store off renders no IAM role, kagent off fails the render. The machine caller is verify-kagent-extensions'. Needs PyYAML. HELM selects the binary.
+verify-organization-erasure: ## Assert agent-platform-operator's access for the erasure of deleted organizations (agentPlatformOrganizations.enabled, giantswarm/giantswarm#38988) in the connectivity chart: off by default nothing renders; on with kagent the ClusterRole agent-platform:organization-erasure holds exactly list and delete on sessions.api.kagent.dev, bound to the operator's ServiceAccount in the release namespace; with network policies on the kagent controller's API port admits the operator's pods in both flavors; on with the Crossplane snapshot store on AWS the IAM role <store role>-operator beside Substrate's, trusted for that ServiceAccount only, allows s3:ListBucket only with an s3:prefix that starts with a UID segment and s3:DeleteObject only under one, evaluated with IAM's wildcards against an organization's keys (pass) and the platform Harness's prefix, other first segments, other buckets and other actions (refused); the role takes the name agentPlatformOrganizations.operator.awsRoleName gives and the render fails without it; the store off renders no IAM role, kagent off fails the render. The operator's names are the meta chart's (tests/fixtures/organizations-operator-values.yaml, verify-operator-names'); the machine caller is verify-kagent-extensions'. Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-organization-erasure.py $(CONNECTIVITY_DIR)
@@ -4508,6 +4510,13 @@ verify-organization-namespaces: ## Assert the deploy of agent-platform-operator 
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-organization-namespaces.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-operator-names
+verify-operator-names: ## Assert agent-platform-operator's names have one source and the two charts agree on every name they share for it (giantswarm/agent-platform#1278): the meta chart derives the operator's ServiceAccount and pod labels from its chart's name, with RustFS the Secret of RustFS's keys and with the Crossplane AWS store its IRSA role (agent-platform.organizations.operator), tells the operator and derives them onto the connectivity release (agentPlatformOrganizations.operator) only while the organizations are on; the operator chart at its floor names its ServiceAccount and pods so; tests/fixtures/organizations-operator-values.yaml equals the derivation; an own value, and a store role name with no room for -operator, fail the meta render; the connectivity chart without the derived names fails naming the key and its templates write none of them. Then, in both flavors, with the AWS store, RustFS and the connectivity release in another namespace, the meta render and the connectivity render of the values it hands that release agree on the operator's namespace, ServiceAccount, pod labels, RustFS Secret and IAM role, the workers' policies it copies, the Secret readers it binds, the ClusterTrustBundles it trusts, the kagent and ate-api ports it calls, the agent chart's OCIRepository, commit mode's source, path prefix and key, the Helm ServiceAccount and the organization label. Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io (the operator chart).
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-operator-names.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
 .PHONY: verify-policyexception-userinfo

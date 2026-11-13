@@ -14,7 +14,7 @@ It reads and writes nothing.
 {{- $roleName := include "agent-platform.organizationErasure.awsRoleName" . }}
 {{- $uid := include "agent-platform.organizationErasure.uidPattern" . }}
 {{- $sa := include "agent-platform.organizations.operatorServiceAccount" . | fromJson }}
-{{- $tags := include "agent-platform.crossplane.tags" (dict "xp" $xp "app" "agent-platform-operator" "name" $roleName) | fromYaml }}
+{{- $tags := include "agent-platform.crossplane.tags" (dict "xp" $xp "app" $sa.name "name" $roleName) | fromYaml }}
 ---
 apiVersion: iam.aws.upbound.io/v1beta1
 kind: Role
@@ -29,7 +29,7 @@ spec:
   managementPolicies:
     {{- include "agent-platform.crossplane.managementPolicies" (dict "xp" $xp) | nindent 4 }}
   forProvider:
-    description: {{ printf "agent-platform-operator's erasure of deleted organizations' snapshots in %s (agent-platform)" $bucket | quote }}
+    description: {{ printf "%s's erasure of deleted organizations' snapshots in %s (agent-platform)" $sa.name $bucket | quote }}
     assumeRolePolicy: |
       {
         "Version": "2012-10-17",

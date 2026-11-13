@@ -19,17 +19,22 @@ Each case pins one property:
   organization's keys and the ListObjectsV2 prefix the operator sends
   (<uid>/) pass, and the platform Harness's prefix (kagent/), a shorter or
   longer first segment, and the bucket's other keys do not;
-- on, a store role name that leaves no room for -operator in IAM's 64
-  characters fails the render naming the key (never a cut name, which could
-  be Substrate's role's);
+- on, the IAM role is the one agentPlatformOrganizations.operator.awsRoleName
+  names, and the render fails naming that key without it;
 - on, with network policies on: the kagent controller's API port (8083)
   admits the operator's pods (its chart's app.kubernetes.io/name) in the
   operator's namespace,
   in both flavors; none with network policies off;
 - on, with the store off: no IAM role; with kagent off the render fails.
 
-The meta chart's half, the operator's ServiceAccount among the kagent
-controller's machine callers, is asserted by verify-kagent-extensions.
+The operator's names (its ServiceAccount, pod labels, the RustFS Secret and
+the IAM role) are the meta chart's derivation
+(agentPlatformOrganizations.operator); these renders take them from
+tests/fixtures/organizations-operator-values.yaml, which verify-operator-names
+holds equal to it, and where the role name that leaves no room for -operator
+in IAM's 64 characters fails the meta chart's render. The meta chart's half,
+the operator's ServiceAccount among the kagent controller's machine callers,
+is asserted by verify-kagent-extensions.
 
 Usage: verify-organization-erasure.py CONNECTIVITY_CHART
 """
@@ -51,9 +56,11 @@ IAM_ROLE = "giantswarm-ci-substrate-operator"
 # agentPlatformOrganizations.enabled, with what its other policies need: the
 # agents' Flux identity, the API hostname (api.<global.domain>) and the llm
 # listener's routing of an organization's ModelConfigs.
+# The operator's names: what the meta chart derives onto this release.
+OPERATOR_VALUES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "organizations-operator-values.yaml")
 ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "kagent.fluxServiceAccountName=kagent-flux",
       "--set", "global.domain=ci.example.com", "-f", f"{CHART}/ci/test-llm-routing-values.yaml",
-      "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
+      "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy", "-f", OPERATOR_VALUES]
 BUCKET = "giantswarm-ci-substrate"
 UID = "0b3c5a47-7f6e-4c1d-9a8b-2f1e3d4c5b6a"
 
@@ -167,15 +174,13 @@ def main():
             fail(f"on: {IAM_ROLE} allows {action} {resource} prefix={prefix!r}")
     ok(f"on: {IAM_ROLE} lists and deletes under a UID prefix only, trusted for the operator only")
 
-    long_role = "r" * 56
+    if not find(render("-f", STORE, *ON, "--set", "agentPlatformOrganizations.operator.awsRoleName=derived-operator"), "Role", "derived-operator"):
+        fail("the IAM role does not take the name agentPlatformOrganizations.operator.awsRoleName gives")
     out = subprocess.run([HELM, "template", "t", CHART, "-n", NAMESPACE, "-f", STORE, *ON,
-                          "--set", f"kagent.harness.snapshotStore.crossplane.aws.roleName={long_role}"], capture_output=True, text=True)
-    if out.returncode == 0 or "kagent.harness.snapshotStore.crossplane.aws.roleName" not in out.stderr:
-        fail(f"a store role name of 56 characters did not fail the render naming the key: {out.stderr}")
-    if not find(render("-f", STORE, *ON,
-                       "--set", f"kagent.harness.snapshotStore.crossplane.aws.roleName={'r' * 55}"), "Role", "r" * 55 + "-operator"):
-        fail("a store role name of 55 characters does not give <name>-operator")
-    ok("a store role name with no room for -operator fails the render; 55 characters fit")
+                          "--set", "agentPlatformOrganizations.operator.awsRoleName="], capture_output=True, text=True)
+    if out.returncode == 0 or "agentPlatformOrganizations.operator.awsRoleName is required" not in out.stderr:
+        fail(f"the AWS store without agentPlatformOrganizations.operator.awsRoleName did not fail the render naming the key: {out.stderr}")
+    ok("the IAM role is the one agentPlatformOrganizations.operator.awsRoleName names; the render fails without it")
 
     policy = "agent-platform-connectivity-operator-to-kagent-controller"
     pods = {"app.kubernetes.io/name": "agent-platform-operator"}

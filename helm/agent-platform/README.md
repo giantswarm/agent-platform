@@ -735,6 +735,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.omitKeys[7] | string | `"skill-manager"` |  |
 | components.agent-platform-connectivity.omitKeys[8] | string | `"defaultAgent"` |  |
 | components.agent-platform-connectivity.omitKeys[9] | string | `"agent-platform-operator"` |  |
+| components.agent-platform-connectivity.omitKeys[10] | string | `"agentPlatformOrganizations.operator"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -1519,6 +1520,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentPlatformOrganizations.fluxPathPrefix | string | `"./agent-platform/organizations/"` | The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies exactly this prefix, its parent and its name, from the labels the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise. |
 | agentPlatformOrganizations.fluxDecryptionSecret | string | `"sops-keys"` | The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption. |
 | agentPlatformOrganizations.apiHostnames | list | `[]` | The installation's Kubernetes API hostnames beside api.<global.domain>, which is derived while global.domain is set: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. The render fails while both are empty. |
+| agentPlatformOrganizations.operator | object | `{"awsRoleName":"","podLabels":{},"serviceAccountName":"","snapshotSecret":""}` | agent-platform-operator's names, which this chart derives onto the connectivity release while the organizations are on (agent-platform.organizations.operator, giantswarm/agent-platform#1278). Declared for the connectivity chart's schema only: never forwarded as set here (components.agent-platform-connectivity.omitKeys), and an own value fails the render. Leave it unset. |
+| agentPlatformOrganizations.operator.serviceAccountName | string | `""` | Derived: the operator's ServiceAccount (its chart's name). |
+| agentPlatformOrganizations.operator.podLabels | object | `{}` | Derived: its pods' selector labels. |
+| agentPlatformOrganizations.operator.snapshotSecret | string | `""` | Derived, with substrate.rustfs.enabled: the Secret of RustFS's keys. |
+| agentPlatformOrganizations.operator.awsRoleName | string | `""` | Derived, with the Crossplane AWS snapshot store: its IRSA role. |
 | agent-platform-operator | object | `{}` |  |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |

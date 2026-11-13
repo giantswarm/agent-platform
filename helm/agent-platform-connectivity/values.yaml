@@ -3165,6 +3165,22 @@ agentPlatformOrganizations:
   # covers one, beside the cluster-internal and host-local names it never
   # names. The render fails while both are empty.
   apiHostnames: []  # @schema item: string
+  # -- agent-platform-operator's names, derived by the meta chart while the
+  # organizations are on (agent-platform.organizations.operator there): the
+  # meta chart installs the operator and tells it the same names, so this
+  # chart holds no copy of them (giantswarm/agent-platform#1278). Never set
+  # them yourself.
+  operator:
+    # -- Its ServiceAccount, in this release's namespace. Required while
+    # enabled.
+    serviceAccountName: ""
+    # -- Its pods' selector labels. Required while enabled.
+    podLabels: {}  # @schema additionalProperties: {"type": "string"}
+    # -- The Secret of RustFS's keys rendered for it. Required with
+    # substrate.rustfs.enabled.
+    snapshotSecret: ""
+    # -- Its IRSA role. Required with the Crossplane AWS snapshot store.
+    awsRoleName: ""
 
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories

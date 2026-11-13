@@ -52,15 +52,31 @@ agent-platform.giantswarm.io/copied-from
 {{- end -}}
 
 {{/*
-agent-platform-operator's ServiceAccount, as JSON {name, namespace}: the
-component the meta chart installs (components.agent-platform-operator), whose
-chart names its ServiceAccount after itself, in this release's namespace (the
-meta chart refuses another targetNamespace for the operator, so the two
-cannot disagree). Every policy, binding and role here names it from this one
-place.
+agent-platform-operator's names, as JSON: agentPlatformOrganizations.operator,
+which the meta chart derives onto this release while the organizations are on
+(agent-platform.organizations.operator there, giantswarm/agent-platform#1278).
+The meta chart installs the operator and tells it the same names, so this
+chart holds no copy of them. Fails the render while the name is missing.
+*/}}
+{{- define "agent-platform.organizations.operator" -}}
+{{- $op := dig "operator" dict (.Values.agentPlatformOrganizations | default dict) | default dict -}}
+{{- $_ := required "agentPlatformOrganizations.operator.serviceAccountName is required with agentPlatformOrganizations.enabled: the meta chart derives it (agent-platform.organizations.operator), the name of agent-platform-operator's ServiceAccount" $op.serviceAccountName -}}
+{{- if not $op.podLabels -}}
+{{- fail "agentPlatformOrganizations.operator.podLabels is required with agentPlatformOrganizations.enabled: the meta chart derives it (agent-platform.organizations.operator), the selector labels of agent-platform-operator's pods" -}}
+{{- end -}}
+{{- $op | toJson -}}
+{{- end -}}
+
+{{/*
+agent-platform-operator's ServiceAccount, as JSON {name, namespace}: the name
+the meta chart derives (agent-platform.organizations.operator), in this
+release's namespace (the meta chart refuses another targetNamespace for the
+operator, so the two cannot disagree). Every policy, binding and role here
+names it from this one place.
 */}}
 {{- define "agent-platform.organizations.operatorServiceAccount" -}}
-{{- dict "name" "agent-platform-operator" "namespace" .Release.Namespace | toJson -}}
+{{- $op := include "agent-platform.organizations.operator" . | fromJson -}}
+{{- dict "name" $op.serviceAccountName "namespace" .Release.Namespace | toJson -}}
 {{- end -}}
 
 {{/*
@@ -83,9 +99,9 @@ organization's credential Secrets, and nothing else may write them.
     | toJson -}}
 {{- end -}}
 
-{{/* The labels of agent-platform-operator's pods (the operator chart's selector labels). */}}
+{{/* The labels of agent-platform-operator's pods (the operator chart's selector labels), as YAML: the ones the meta chart derives. */}}
 {{- define "agent-platform.organizations.operatorPodLabels" -}}
-app.kubernetes.io/name: agent-platform-operator
+{{- (include "agent-platform.organizations.operator" . | fromJson).podLabels | toYaml -}}
 {{- end -}}
 
 {{/* The operator's ServiceAccount, as a username. */}}
