@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (agent-platform-operator 0.4: warm workers follow the models and the agents)
+
+giantswarm/giantswarm#39250: `components.agent-platform-operator.versionRange` is `>=0.4.0 <0.5.0`. With `agentPlatformOrganizations.enabled`, agent-platform-operator 0.4.0 sizes each organization's WorkerPool by a new rule (giantswarm/agent-platform-operator#50): the pool runs `spec.workers.replicas` warm workers while the organization namespace holds a ModelConfig and an Agent (a curated copy counts), or a ModelConfig and a kagent session, and 0 otherwise; an `Orphaned` organization stays at 0. `spec.workers.replicas` is optional now: the CRD defaults it to 1 (`crds: CreateReplace` upgrades the CRD with the release), and a 0 set on purpose stays 0. Under 0.3.x a new organization ran 0 workers, so its agents stayed `ActorTemplatePending` and never became ready. The operator now watches Agent metadata in every namespace and asks kagent whether an organization with a ModelConfig and no Agent has a session, through the kagent target the erasure already uses. Its ClusterRole, the `agent-platform:organization-erasure` binding and the network policies already allow both, so nothing the chart renders changes besides the range. kagent admits the session question as a machine caller only with its controller-extensions controller (`kagent.controller.image.repository: giantswarm/kagent/controller-extensions`, the default).
+
+### Operator action
+
+- **None before the upgrade.** At the upgrade, each organization with a ModelConfig and an Agent and no `spec.workers.replicas` gets one warm worker, and its pending agents become ready. Each organization with a ModelConfig, no Agent and no session goes to 0 workers, also when it ran some before; its first Agent brings them back. An organization with `spec.workers.replicas: 0` keeps 0. To check: `kubectl -n <organization namespace> get workerpools.ate.dev -o custom-columns=NAME:.metadata.name,REPLICAS:.spec.replicas`.
+- **An organization that keeps its workers with no Agent and is `Ready=False`**: the operator cannot read its Agents or ask kagent for its sessions (for one, the line's own kagent controller in place of controller-extensions), and keeps `spec.workers.replicas` until it can. Read the error: `kubectl -n <parent> get agentplatformorganization <name> -o jsonpath='{.status.conditions}'`.
+- **An installation that pins the BOM at `0.3.x`**: move `agent-platform-operator` to `0.4.0`, since `0.3.x` is outside the range.
+
 ## \<current\> → \<next\> (agent-manager 3.x)
 
 `components.agent-manager.versionRange` selects `>=3.0.0 <4.0.0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).

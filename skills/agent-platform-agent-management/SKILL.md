@@ -2,7 +2,7 @@
 name: agent-platform-agent-management
 description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.1.0"
+  version: "3.1.1"
 ---
 
 # Managing agents and their building blocks
@@ -49,6 +49,11 @@ Where the reference lives — fetch it, never quote it from memory:
   delete is refused; it changes only through the platform's configuration and releases. Say so.
   Its model is set once from the installation's default; `defaultAgent.modelConfig` pins or changes it.
 - **`none`** — a bare Agent without a release.
+- **`unknown`**: a required Flux read was forbidden, so management details are unavailable.
+  `releaseWithheld` explains which release namespace is involved. This is a successful partial
+  read, not a sign-in failure. It does not establish that the agent has no release. The editor
+  role grants Flux reads in the site's Flux namespace; it does not grant access to a release in
+  another namespace such as `flux-giantswarm`. A readable platform label keeps `managed: platform`.
 
 ## Working with agent-manager
 
@@ -117,6 +122,12 @@ skill fetch, a missing credential Secret — and gives up as `ActorTemplateFaile
 `status.conditions` (`Accepted`, `ResolvedRefs`, `Compatible`, `Ready`) and `x_agent-manager_get_agent`
 are the evidence; the portal shows the same conditions. Name the one fix, do it, call the status
 again, stop at `ready`.
+
+When `releaseWithheld` is present, the verdict comes from the Agent alone and the summary states
+that HelmRelease state was not read. Report that limitation: a ready Agent does not establish that
+its owning release is healthy or that a requested release update has completed. Use the readable
+conditions as evidence and leave unavailable release details unknown. Writes still require access
+to the owning release.
 
 ## Reading and evaluating a session
 
