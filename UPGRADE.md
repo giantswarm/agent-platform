@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the Substrate release retries a failed upgrade)
+
+The `substrate` component HelmRelease uses `spec.upgrade.strategy: {name: RetryOnFailure, retryInterval: 5m}` and renders no `spec.upgrade.remediation`. A failed upgrade is attempted again every 5 minutes instead of being rolled back. Under the old default, Flux's rollback remediation stalled the release for good when Helm's history held no deployed revision to return to, and kagent, agent-manager and every other release that depends on Substrate stalled with it until someone forced a reconcile ([#1367](https://github.com/giantswarm/agent-platform/issues/1367)). `components.<name>.upgradeStrategy` sets the same field for any component.
+
+### Operator action
+
+- With the cluster's own Flux (`components.flux.enabled: false`), run helm-controller v1.4 or later, the first version whose HelmRelease API has `spec.upgrade.strategy`. The bundled engine already has it.
+- An installation that set `components.substrate.upgradeRemediation` keeps that value in its values, but it no longer renders while `upgradeStrategy.name` is `RetryOnFailure`. To keep rollback remediation, set `components.substrate.upgradeStrategy: null`.
+
 ## \<current\> → \<next\> (agent-manager 3.x)
 
 `components.agent-manager.versionRange` selects `>=3.0.0-rc.10 <4.0.0-0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).

@@ -552,12 +552,22 @@ spec:
     {{- if $c.disableWaitForJobs }}
     disableWaitForJobs: true
     {{- end }}
+    {{- /* The entry's upgradeStrategy is spec.upgrade.strategy as written.
+    RetryOnFailure upgrades a failed release again every retryInterval and
+    never remediates, so no remediation block renders beside it: Flux would
+    ignore it. */ -}}
+    {{- with $c.upgradeStrategy }}
+    strategy:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- if ne (dig "name" "" ($c.upgradeStrategy | default dict)) "RetryOnFailure" }}
     {{- /* The entry's upgradeRemediation keys win over gitops.retries, key by
     key (a set, not a merge: retries 0 is a value, not an empty key). */ -}}
     {{- $remediation := dict "retries" $g.retries }}
     {{- range $k, $v := ($c.upgradeRemediation | default dict) }}{{ $_ := set $remediation $k $v }}{{ end }}
     remediation:
       {{- toYaml $remediation | nindent 6 }}
+    {{- end }}
   {{- with $c.driftDetection }}
   driftDetection:
     {{- include "agent-platform.driftDetection" (dict "root" $root "name" $name "spec" .) | nindent 4 }}

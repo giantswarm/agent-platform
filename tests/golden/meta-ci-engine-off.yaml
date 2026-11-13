@@ -2823,8 +2823,9 @@ spec:
     remediation:
       retries: 5
   upgrade:
-    remediation:
-      retries: 3
+    strategy:
+      name: RetryOnFailure
+      retryInterval: 5m
   dependsOn:
     - name: substrate-crds
     - name: agent-platform-connectivity
