@@ -62,8 +62,9 @@ To share with one team instead, create it in that team's organization.
   through a tool or chat.
   When the key already exists, Add model completes immediately and closes its dialog.
   Managed models do not offer Replace key. On the credential form, Check again refreshes
-  the request; a changed confirmation clears entered values before another attempt.
-  A saved or cancelled request keeps its receipt even if its follow-up read fails.
+  the request and clears entered values; Save and Cancel wait until the refresh finishes.
+  Opening another request starts a separate form with no earlier values or result.
+  A saved or cancelled request keeps its result without an extra confirmation read.
 - **Organizations themselves**: created and deleted by holders of
   `agent-platform:organizations-admin` (platform staff, or a customer's platform team).
 
