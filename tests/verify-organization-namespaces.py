@@ -705,6 +705,13 @@ def prove_label(meta_chart, k8s):
     bedrock = {"apiVersion": "api.kagent.dev/v1alpha3", "kind": "ModelConfig", "metadata": {"name": "bedrock", "namespace": ORG_NS},
                "spec": {"provider": "Bedrock", "model": "m", "bedrock": {"region": "eu-west-1"}}}
     case(f"a Bedrock ModelConfig in {ORG_NS} (no listener serves it)", create(bedrock), "agent-platform-tenant-model-routing")
+    for provider, block in (("AnthropicVertexAI", "anthropicVertexAI"), ("GeminiVertexAI", "geminiVertexAI")):
+        vertex = {"apiVersion": "api.kagent.dev/v1alpha3", "kind": "ModelConfig", "metadata": {"name": "vertex", "namespace": ORG_NS},
+                  "spec": {"provider": provider, "model": "model", "apiKeySecret": "tenant-credential-vertex", "apiKeySecretKey": "GOOGLE_APPLICATION_CREDENTIALS",
+                           block: {"projectID": "vertex-test", "location": "global"}}}
+        case(f"native {provider} with an organization credential", create(vertex))
+        vertex["spec"]["apiKeySecret"] = "platform-credential"
+        case(f"native {provider} with a platform credential", create(vertex), "agent-platform-tenant-model-credentials")
     secret = lambda name, type_="Opaque": {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": name, "namespace": ORG_NS},
                                            "type": type_, "stringData": {"k": "v"}}
     must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "secret-writer", "namespace": ORG_NS},

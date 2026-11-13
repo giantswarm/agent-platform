@@ -90,8 +90,11 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   what the portal and Slack show.
 - **Model**: the cheapest config from the live list that can do the job, never invented — an agent
   on a missing or not-accepted config never boots. No suitable model: a hosted API model with a key is
-  `x_agent-manager_set_organization_model` (organization admin; the key goes into the credential
-  form it links); a local or Hugging Face model is model-manager (`agent-platform-tools`); a
+  `x_agent-manager_set_organization_model` (organization admin, or cluster admin
+  for the installation namespace; the key goes into the credential form it
+  links). Native Vertex models also take nonsecret `projectID` and `location`;
+  upload their JSON only in that credential form. Direct Vertex calls are
+  unmetered by the LLM gateway. A local or Hugging Face model is model-manager (`agent-platform-tools`); a
   subscription (OAuth) model — `openAI.credentialType: chatgptOAuth`, `apiFormat: responses` — is the
   platform's configuration in git, which no tool writes.
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only

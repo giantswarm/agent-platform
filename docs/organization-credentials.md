@@ -12,6 +12,33 @@ Credential operations and `agent-manager.githubTokenExchange` need a floor of `2
 
 `agent-manager.credentials.uiURL` needs `agentPlatformOrganizations.enabled`: agent-manager serves the form link only with its organization tools and downstream OAuth on.
 
+## Vertex model credentials
+
+Native `AnthropicVertexAI` and `GeminiVertexAI` models use Substrate's existing
+Google access-token credential provider. Create the model with its Google project
+and location, then upload a service-account JSON file in the shared credential
+form. The API declares `inputFormat: google-service-account-json`; it validates
+the project and private key before writing `GOOGLE_APPLICATION_CREDENTIALS`.
+Neither the model form nor an MCP call takes the JSON. Organization credentials
+still require `tenant-credential-*` Secret names.
+
+These providers call Google directly and are unmetered by the LLM gateway.
+Admission exempts exactly these two native providers from the listener rule;
+other provider routing and credential-reference policies still apply. Gateway
+routing and credential ownership belong to giantswarm/giantswarm#38545. AWS
+Kubernetes to Google federation and identity isolation belong to
+giantswarm/giantswarm#39257; neither is required for JSON credentials.
+
+Installation model operations use the same manager and credential API, with
+cluster-admin authorization and an explicit `scope: platform` target. Configure
+`agent-manager.credentials.platformUIURL` to the portal's installation form,
+`https://<portal>/customize/models/credentials/<installation>/{namespace}/{operation}`,
+alongside the organization UI URL. Commit mode also requires an explicit
+`agent-manager.tenants.commit.platformModelsPath` in the trusted repository.
+Deploy the manager and portal versions exposing these fields together; the
+portal refuses an older tool schema rather than writing Secrets through its
+Kubernetes client.
+
 ## GitOps writes
 
 `agent-manager.tenants.commit` (`repository`, `branch`, `objectsPath`, `contentPrefix`) configures where organization changes are committed. It travels beside the derived `tenants.enabled` and does not control the organization switch. The repository needs a SOPS policy and review ownership.
