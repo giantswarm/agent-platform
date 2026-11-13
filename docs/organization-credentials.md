@@ -10,7 +10,11 @@ The form uses its client's authenticated backend path to post the value to agent
 
 Credential operations and `agent-manager.githubTokenExchange` need a floor of `2.22.0` or later in `components.agent-manager.versionRange`. The default floor, `2.24.0`, makes credentials write-only (agent-manager writes them without reading the Secret as the caller): `replace_organization_credential` replaces one, and a save whose credential's consumers changed is answered `credential_consumers_changed`. The Dev Portal's credential form needs it ([giantswarm/backstage#3364](https://github.com/giantswarm/backstage/issues/3364)). The organization switch keeps its own `2.20.0` floor. muster reaches the elicitation to the client from `5.61.0` (giantswarm/muster#1812), the floor of `components.muster.versionRange`.
 
-`agent-manager.credentials.uiURL` needs `agentPlatformOrganizations.enabled`: agent-manager serves the form link only with its organization tools and downstream OAuth on.
+`agent-manager.credentials.uiURL` needs `agentPlatformOrganizations.enabled`.
+Installation models use the independent `agent-manager.credentials.platformUIURL`
+with OAuth and downstream authorization, including when organizations are disabled.
+The organization switch stays false; organization management is disabled and
+discovery returns an empty list.
 
 ## Vertex model credentials
 
@@ -22,7 +26,8 @@ the project and private key before writing `GOOGLE_APPLICATION_CREDENTIALS`.
 Neither the model form nor an MCP call takes the JSON. Organization credentials
 still require `tenant-credential-*` Secret names.
 
-These providers call Google directly and are unmetered by the LLM gateway.
+These providers call Google directly. LLM gateway metering, rate limits and
+spend reporting are unavailable.
 Admission exempts exactly these two native providers from the listener rule;
 other provider routing and credential-reference policies still apply. Gateway
 routing and credential ownership belong to giantswarm/giantswarm#38545. AWS
@@ -33,7 +38,9 @@ Installation model operations use the same manager and credential API, with
 cluster-admin authorization and an explicit `scope: platform` target. Configure
 `agent-manager.credentials.platformUIURL` to the portal's installation form,
 `https://<portal>/customize/models/credentials/<installation>/{namespace}/{operation}`,
-alongside the organization UI URL. Commit mode also requires an explicit
+without requiring an organization UI URL. Enable the authenticated manager route
+described above when the portal backend reaches it from outside the cluster.
+Commit mode also requires an explicit
 `agent-manager.tenants.commit.platformModelsPath` in the trusted repository.
 Deploy the manager and portal versions exposing these fields together; the
 portal refuses an older tool schema rather than writing Secrets through its

@@ -58,6 +58,8 @@ To share with one team instead, create it in that team's organization.
 - **Platform models**: cluster admins use the same model and credential tools with
   the installation namespace, or the installation's configuration in git. The
   credential operation declares `scope: platform`; it is not an organization.
+  This also works with organizations disabled: the installation form uses
+  `agent-manager.credentials.platformUIURL` and downstream OAuth independently.
 - **An organization**: its admins, on the organization's **Models** and **Egress** tabs (or
   `x_agent-manager_set_organization_model`, `x_agent-manager_set_organization_egress_policy`). A
   model key or credential goes into the portal's credential form and is never shown back, nor passed
@@ -74,7 +76,8 @@ To share with one team instead, create it in that team's organization.
 - **Vertex models**: use native `AnthropicVertexAI` or `GeminiVertexAI` with
   nonsecret `projectID` and `location`. Upload the service-account JSON only in
   the linked credential form when it requests `google-service-account-json`.
-  Google calls are direct and unmetered by the LLM gateway. Never read, paste or
+  Google calls are direct; LLM gateway metering, rate limits and spend reporting
+  are unavailable. Never read, paste or
   send a person's credential file through an MCP tool.
 - **Organizations themselves**: created and deleted by holders of
   `agent-platform:organizations-admin` (platform staff, or a customer's platform team).
