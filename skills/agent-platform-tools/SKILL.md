@@ -2,7 +2,7 @@
 name: agent-platform-tools
 description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing or refused, connectors and signing in to one, workflows, or model-manager.
 metadata:
-  version: "3.0.0"
+  version: "3.1.0"
 ---
 
 # Tools on the Agent Platform
@@ -86,6 +86,19 @@ of those names select by it; no label means an installation or a person register
 Tools register live when a server connects. Adding connectors:
 https://docs.giantswarm.io/tutorials/agent-platform/managing-mcp-servers/ and
 https://docs.giantswarm.io/tutorials/agent-platform/connecting-custom-mcp-servers/.
+
+Muster owns connector definitions and their lifecycle. An organization-owned connector is a muster
+`MCPServer` in its organization namespace. A kagent `RemoteMCPServer` binds an agent to muster;
+do not create one pointing directly at an external MCP endpoint. Agent-manager owns organizations
+and agent configuration, rather than a second connector definition store.
+
+Read the installed `core_mcpserver_*` schemas before a write. Where they support namespaced server
+keys, `name: "<namespace>/<name>"` targets that selected namespace; a bare name targets muster's own.
+Use the namespace reported by organization discovery, never one inferred from a name. Kubernetes
+RBAC authorizes the caller's write. If the installed tools support only muster's namespace, report
+that limitation instead of using a direct kagent connector as a fallback. For a connector managed
+by Flux, change its source rather than applying a competing live write. Pass credential Secret
+references only; credential values never belong in MCP tool arguments.
 
 ## Workflows
 
