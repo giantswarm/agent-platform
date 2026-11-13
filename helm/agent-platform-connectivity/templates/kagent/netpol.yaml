@@ -311,7 +311,7 @@ namespace carries its own io.kubernetes.pod.namespace label. */ -}}
 {{- end }}
 {{- end }}
 ---
-# Ingress to oauth2-proxy: envoy (proxy port), the installation's extra callers
+# Ingress to oauth2-proxy: the kagent UI route's Gateway (proxy port), the installation's extra callers
 # (kagent.oauth2ProxyIngress.additionalPeers, proxy port) + Prometheus (metrics port).
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -325,14 +325,20 @@ spec:
     matchLabels:
       app.kubernetes.io/name: oauth2-proxy
   ingress:
+    {{- /* The pods of the Gateway the kagent UI route attaches to
+    (kagent.uiRoute.parentRef, resolved as the route resolves it). */}}
+    {{- with include "agent-platform.route.edgePeers" (dict "ctx" . "parentRefs" (include "agent-platform.kagent.routeParentRefs" (dict "ctx" . "route" "uiRoute") | fromJsonArray) "routeNamespace" $kagentNs) | fromJsonArray }}
     - fromEndpoints:
+        {{- range . }}
         - matchLabels:
-            app.kubernetes.io/name: envoy
-            io.kubernetes.pod.namespace: envoy-gateway-system
+            {{- toYaml .matchLabels | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .namespace }}
+        {{- end }}
       toPorts:
         - ports:
             - port: "4180"
               protocol: TCP
+    {{- end }}
     {{- range $o2pPeers }}
     - fromEndpoints:
         - matchLabels:
