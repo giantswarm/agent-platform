@@ -190,8 +190,18 @@ def job_scripts(job):
 
 
 def run_event(cluster, docs, event):
+    """Replay one event. The API server authorizes from RBAC caches it fills
+    on its own time (giantswarm/agent-platform#1412), so it settles after the
+    RBAC writes, before the next script and at the end: each script, and each
+    refusal after the last event, meets every grant written so far. settle()
+    writes only its own sentinels, bound to users of its own, so it grants
+    the hook identity nothing."""
+    rbac_written = False
     for d in hook_objects(docs, event):
         if d["kind"] == "Job":
+            if rbac_written:
+                cluster.api.settle()
+                rbac_written = False
             name = d["metadata"]["name"]
             init, main = job_scripts(d)
             if init:
@@ -202,6 +212,9 @@ def run_event(cluster, docs, event):
             cluster.run_script(f"{event} {name}", main)
         elif d["kind"] in ("ServiceAccount", "ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding"):
             cluster.apply(d)
+            rbac_written = True
+    if rbac_written:
+        cluster.api.settle()
 
 
 def main():
