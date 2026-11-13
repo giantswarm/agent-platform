@@ -18,6 +18,7 @@ github.com on the first run. ENVTEST_DIR points at an unpacked envtest release
 instead (a directory holding etcd, kube-apiserver and kubectl).
 """
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -68,7 +69,10 @@ def envtest_dir() -> str:
             with urllib.request.urlopen(url, timeout=120) as r:
                 data = r.read()
             break
-        except OSError as e:
+        # A connection closed before the end of the archive raises
+        # http.client.IncompleteRead, an HTTPException and no OSError
+        # (giantswarm/agent-platform#1374).
+        except (OSError, http.client.HTTPException) as e:
             if attempt == 2:
                 raise SystemExit(f"FAIL: download {url}: {e}")
             time.sleep(5)
