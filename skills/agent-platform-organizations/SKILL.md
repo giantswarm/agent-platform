@@ -60,6 +60,10 @@ To share with one team instead, create it in that team's organization.
   `x_agent-manager_set_organization_model`, `x_agent-manager_set_organization_egress_policy`). A
   model key or credential goes into the portal's credential form and is never shown back, nor passed
   through a tool or chat.
+  When the key already exists, Add model completes immediately and closes its dialog.
+  Managed models do not offer Replace key. On the credential form, Check again refreshes
+  the request; a changed confirmation clears entered values before another attempt.
+  A saved or cancelled request keeps its receipt even if its follow-up read fails.
 - **Organizations themselves**: created and deleted by holders of
   `agent-platform:organizations-admin` (platform staff, or a customer's platform team).
 
