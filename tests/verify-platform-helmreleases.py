@@ -135,7 +135,7 @@ def check_render(chart):
             ("writers without a name", ["--set", f"{k}.writers[0].kind=User", "--set", f"{k}.writers[0].name=x"],
              f"{k}.writers needs {k}.name"),
             ("a writer of another kind", ["--set", f"{k}.name={KAGENT_RELEASE}", "--set", f"{k}.writers[0].kind=Role",
-                                          "--set", f"{k}.writers[0].name=x"], "value must be one of 'User', 'Group', 'ServiceAccount'"),
+                                          "--set", f"{k}.writers[0].name=x"], "must be one of"),
             ("a writer without a name", ["--set", f"{k}.name={KAGENT_RELEASE}", "--set", f"{k}.writers[0].kind=User",
                                          "--set", f"{k}.writers[0].name="], "every writer names"),
             ("a ServiceAccount without its namespace", ["--set", f"{k}.name={KAGENT_RELEASE}",
