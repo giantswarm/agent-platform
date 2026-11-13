@@ -5,7 +5,7 @@
 {{- /* The backstage chart names its CNPG cluster <its chart name>-<suffix>, so
 the prefix is the literal chart name, not backstage.name. */}}
 {{- $cnpg := printf "backstage-%s" (dig "database" "postgresql" "clusterNameSuffix" "cnpg" $backstage) }}
-{{- $edgeNamespaces := include "agent-platform.backstage.edgeNamespaces" . | fromJsonArray }}
+{{- $edgeGateways := include "agent-platform.backstage.edgeGateways" . | fromJsonArray }}
 {{- $appConfigEdge := include "agent-platform.backstage.appConfigEdge" . | fromJson }}
 ---
 # Ingress to the portal: the Gateway that serves its public route.
@@ -36,17 +36,18 @@ spec:
     {{- else }}
     # The route attaches to the platform's front Gateway (the Envoy edge), which
     # proxies straight to the portal's Service: agentgateway is not in this path.
-    # The namespaces are the route's own parents (backstage.parentRefs, else
-    # global.gatewayApi.parentRefs); `app.kubernetes.io/name: envoy` is the
-    # label Envoy Gateway stamps on the proxy pods it runs for a Gateway.
+    # The peers are the proxy pods of the route's own parents
+    # (backstage.parentRefs, else global.gatewayApi.parentRefs), by the
+    # owning-Gateway labels Envoy Gateway stamps on them
+    # (agent-platform.route.envoyPeer).
     - from:
-        {{- range $ns := $edgeNamespaces }}
+        {{- range $edgeGateways }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ $ns }}
+              kubernetes.io/metadata.name: {{ .namespace }}
           podSelector:
             matchLabels:
-              app.kubernetes.io/name: envoy
+              {{- include "agent-platform.route.envoyPeer" . | fromJson | toYaml | nindent 14 }}
         {{- end }}
       ports:
         - port: {{ $port }}
@@ -121,19 +122,20 @@ spec:
         - port: 443
           protocol: TCP
     {{- end }}
-    {{- with $appConfigEdge.namespaces }}
-    # The front Gateway (the Envoy edge). Envoy Gateway gives a proxy the
+    {{- with $appConfigEdge.gateways }}
+    # The front Gateways (the Envoy edge): each one's proxy pods
+    # (agent-platform.route.envoyPeer). Envoy Gateway gives a proxy the
     # listener's port plus 10000 so the container binds no privileged port, so
     # the pod behind the LoadBalancer's 443 listens on 10443; 443 stays for a
     # Gateway whose proxy binds the listener port itself.
     - to:
-        {{- range $ns := . }}
+        {{- range . }}
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ $ns }}
+              kubernetes.io/metadata.name: {{ .namespace }}
           podSelector:
             matchLabels:
-              app.kubernetes.io/name: envoy
+              {{- include "agent-platform.route.envoyPeer" . | fromJson | toYaml | nindent 14 }}
         {{- end }}
       ports:
         - port: 443

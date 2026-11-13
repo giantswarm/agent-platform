@@ -167,6 +167,20 @@ data:
     signed-in person through muster (the x_model-manager_* tools of the
     muster.installations entry above; giantswarm/backstage#2294), and its
     backend has no model-manager client to configure. */}}
+    {{- /* The agent behind each of the portal's platform roles: the default
+    agent the meta chart installs (components.default-agent) for
+    every role while it is on; backstage.metaAgents.<role> points a role
+    elsewhere. backstage >= 3.0.0; an earlier portal ignores the key. */}}
+    {{- $metaAgents := dict }}
+    {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "default-agent")) (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) }}
+    {{- $assistant := printf "%s/%s/default-agent" $installation (.Values.kagent.namespaceOverride | default .Release.Namespace) }}
+    {{- range list "generalInformation" "agentManagement" "workflowManagement" "platformOperations" "skillEvaluation" "skillCreation" }}
+    {{- $_ := set $metaAgents . $assistant }}
+    {{- end }}
+    {{- end }}
+    {{- range $role, $agent := ($backstage.metaAgents | default dict) }}
+    {{- if $agent }}{{ $_ := set $metaAgents $role $agent }}{{ end }}
+    {{- end }}
     agentPlatform:
       organizations:
         enabled: {{ eq (include "agent-platform.organizations.enabled" .) "true" }}
@@ -186,6 +200,10 @@ data:
       skills:
         repositories:
           {{- toYaml . | nindent 10 }}
+      {{- end }}
+      {{- with $metaAgents }}
+      metaAgents:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- if $kagentRoute }}
       {{- /* The kagent controller of this installation, as the portal backend

@@ -32,6 +32,55 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (agent-manager 3.x)
+
+`components.agent-manager.versionRange` selects `>=3.0.0-rc.10 <4.0.0-0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).
+
+### Operator action
+
+- Before admitting agent-manager 3.x, upgrade every portal calling it to Backstage 3.38.2 or later and migrate other callers of `replaceCredential`.
+- Where `agent-manager.githubTokenExchange` is configured, keep an explicit `components.agent-manager.versionRange` below `3.0.0` until the installation's reviewed migration moves it to `agent-manager.github.tokenExchange`. Move `endpoint` to `tokenEndpoint` and `secretName` to `existingSecret`, remove `grantApp`, and set `github.enabled: true`. The audience must equal the muster provider App and broker grant target names. Apply the values and version range together after the agentlab proof (giantswarm/giantswarm#39239).
+- The on-demand exchange needs agent-manager 3.0.0-rc.10 and muster 5.63.2 or later, which the meta chart validates from their range floors. muster 5.63.2 includes the Basic credential decoding fix in mcp-oauth (giantswarm/mcp-oauth#700), required for broker client credentials containing reserved characters. Installations still using the GitHub App pin keep it until their own rollout step.
+- Cluster-manager and model-manager derive broker egress from `github.tokenExchange.tokenEndpoint`, on its HTTPS origin and port, for both policy flavors. Use an external fully qualified hostname or IP address; Service aliases are refused. Native Kubernetes policies use the component's existing egress CIDRs or `networkPolicy.additionalEgressCIDRs` for private broker addresses.
+
+## \<current\> → \<next\> (the Envoy peer of the network policies is the owning Gateway's proxy)
+
+giantswarm/agent-platform#1292: every network policy of the connectivity chart that admits or reaches the Envoy edge selects the proxy pods of the Gateway its route attaches to, by the labels Envoy Gateway stamps on them (`gateway.envoyproxy.io/owning-gateway-name` and `-namespace`), not every `app.kubernetes.io/name: envoy` pod of the namespace. The Gateway's name and namespace come from the values the routes attach with: the portal's ingress (`backstage.parentRefs`, else `global.gatewayApi.parentRefs`) and, in the kubernetes flavour, its egress to the app-config's hostnames (`ingress.parentRefs`, `kagent.controllerRoute.parentRef`); the actors' egress gateway to muster's hostname (`ingress.parentRefs`); kagent's oauth2-proxy (`kagent.uiRoute.parentRef`, which was the namespace `envoy-gateway-system` as a literal); the workspace manager's key-set route (`workspaceManager.route.parentRefs`, else `ingress.parentRefs`). A Gateway of another name moves the policies with it, so nothing changes for an installation whose values name the Gateways its routes use.
+
+### Operator action
+
+- **A caller that reaches one of these services through another Gateway than the one its route names** (for example a second Envoy Gateway in `envoy-gateway-system` with its own route to the same Service): pin the route to that Gateway, or, for kagent's UI, add that Gateway's proxy pods to `kagent.oauth2ProxyIngress.additionalPeers` (with their `io.kubernetes.pod.namespace`).
+- **An installation whose EnvoyProxy sets `mergeGateways: true`** (gateway-api-config's `gatewayClasses[].envoyProxy.mergeGateways`; off by default and on no fleet installation): one proxy then serves every Gateway of the class, and its pods carry `gateway.envoyproxy.io/owning-gatewayclass` instead of the owning Gateway's labels, so these policies select none of them and the portal, kagent's UI, the workspace key set and the actors' path to muster stop. Turn `mergeGateways` off before the upgrade, or admit the merged proxy with a policy of its own.
+- Otherwise nothing: Envoy Gateway labels every per-Gateway proxy pod with its owning Gateway (v1.9.3 on the fleet).
+
+## \<current\> → \<next\> (agent-manager 2.24: `list_organizations` and write-only organization credentials)
+
+giantswarm/backstage#3364: agent-manager 2.24.0 replaces the tool `list_my_organizations` with `list_organizations` (the organizations the person manages or belongs to), makes organization credentials write-only (it writes them without reading the Secret as the caller), adds `replace_organization_credential`, and answers a save whose credential's consumers changed with `credential_consumers_changed`; the Dev Portal 3.38.0 replaces a credential with `replace_organization_credential` and deletes one through its delete dialog (it lists organizations with `list_organizations` from 3.37.0, giantswarm/backstage#3467). 2.24.0 is also `agent-platform.agentManager.skillManagerFloor`: with `components.skill-manager` on (it follows agent-manager), agent-manager now pins skills through the skill-manager (`skillManager.url`) and gets `installation` and, while the default agent is on, `defaultAgentModel`, as the earlier entry on the default agent and the skill-manager describes. With `defaultAgentModel`, agent-manager gives the default agent (`default-agent` in the kagent namespace) the installation's default model once, while it has none: the ModelConfig in the kagent namespace annotated `agent-platform.giantswarm.io/is-default-model-config: "true"`. Below this floor the default agent gets no model and is not ready (`Compatible=False`, `kagent ModelConfig is required`). The agent-manager migrate run's image (`agentManager.migration.image.tag`) is already `2.24.0`, so the migrate run pins skills the same way.
+
+### Operator action
+
+- **A client or agent that calls `list_my_organizations`**: call `list_organizations`. The platform's `agent-platform-organizations` skill names the new tool.
+- **A Dev Portal before 3.37.0** (`components.backstage` pinned below it, or a portal installed apart): it still calls `list_my_organizations`, so its organization list fails. Move it to 3.37.0 or later; 3.38.0 or later to replace and delete credentials.
+- **An installation that sets `agent-manager.skills.repositories`**: the render fails while the skill-manager is on. **Before the upgrade**, move the list to `skillManager.sources`, or set `components.skill-manager.enabled: false`.
+- **The default agent's model**: annotate one ModelConfig in the kagent namespace with `agent-platform.giantswarm.io/is-default-model-config: "true"`, or set `defaultAgent.modelConfig`, or set `components.default-agent.enabled: false`. Without one of these the default agent stays without a model and is not ready.
+- **An installation that pins the BOM**: move `agent-manager` to `2.24.0`.
+
+## \<current\> → \<next\> (the default agent, the skill-manager and `skillManager.sources`)
+
+giantswarm/giantswarm#38970, giantswarm/giantswarm#38322: the chart deploys the default agent (`default-agent` in the kagent namespace) wherever kagent, muster and agent-manager are on, and the skill-manager (`components.skill-manager`) wherever agent-manager is on. The skill-manager and the portal take their skill sources from `skillManager.sources`, with the platform's own `skills/` first. agent-manager pins skills through the skill-manager (`skillManager.url`) from `agent-platform.agentManager.skillManagerFloor` on. Platform HelmReleases are named after their `components` key, which is the chart name for every existing component, so no release is renamed.
+
+### Operator action
+
+- **An installation that deploys its own meta agent (an Agent Manager) or `swarm-operator`**: remove it, or set `components.default-agent.enabled: false`.
+- **The default agent's model**: it gets the installation's default model once, when it has none. To pin or change it, set `defaultAgent.modelConfig`.
+- **An installation that sets `agent-manager.agentChart.semver` or `components.default-agent.versionRange`**: both need the agent chart `>=2.6.0 <3.0.0`; below 2.6.0 the default agent's release refuses an unset model.
+- **An installation that names the default agent differently**: set `defaultAgent.displayName` (and `defaultAgent.description`); its technical name stays `default-agent`.
+- **An installation that reads private skill repositories**: set `skill-manager.github.app.secretName`, as for agent-manager's (`tokenSecret.name`, a static token, still works and is deprecated).
+- **An installation that sets `agent-manager.skills.repositories` or `backstage.skillsRepositories`**: these keys now default to `[]`. Move the list to `skillManager.sources`. A portal list still replaces the sources for the portal below `agent-platform.backstage.skillManagerFloor`. An agent-manager list fails the render once agent-manager pins through the skill-manager, and a portal list once the portal reads its skills from the skill-manager.
+- **An installation that lists `https://github.com/giantswarm/agent-platform` itself**: the render fails. Remove the entry, or set `skills.platformSource.enabled: false`.
+- **An air-gapped installation**: set `skills.platformSource.enabled: false`.
+- **An installation that keeps agent-manager's own skill discovery**: set `components.skill-manager.enabled: false`.
+
 ## \<current\> → \<next\> (organization credential Secrets are write-only)
 
 giantswarm/agent-platform#1352 and this release: `agent-platform:admin` holds `create`, `update` and `delete` on Secrets, no longer `patch`, whose answer is the stored Secret. With `agentPlatformOrganizations.enabled`, two ValidatingAdmissionPolicies (Fail, Deny) hold Secrets in organization namespaces. `agent-platform-organization-git-secrets`: a Secret applied by an organization's Kustomization is updated only by that Kustomization's ServiceAccount, cluster-admin included. `agent-platform-organization-secret-deletes`: a delete the API server answers with the Secret (Orphan or Foreground propagation, or a Secret a finalizer holds) is made only by a requester that may `get` it.

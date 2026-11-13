@@ -42,6 +42,7 @@ By default there is no filter and no prerelease.
 | klaus-gateway | `components.klaus-gateway.enabled` | `false` |
 | agent-sandbox | `components.agent-sandbox.enabled` | `false` |
 | agent-manager | `components.agent-manager.enabled` | `false` |
+| skill-manager | `components.skill-manager.enabled` | follows `components.agent-manager` |
 | vm-manager | `components.vm-manager.enabled` | `false` |
 | cluster-manager | `components.cluster-manager.enabled` | `false` |
 | workspace-manager | `workspaces.enabled` (`components.workspace-manager` follows it) | `false` |
@@ -282,6 +283,40 @@ The OAuth issuer, client, secret and base URL come from the block, else from `gl
 
 `make verify-managers` covers the wiring and the guards.
 
+### Default agent and skills
+
+The default agent is `default-agent` in the kagent namespace, shown as `defaultAgent.displayName` ("General Assistant" by default) with `defaultAgent.description`, labelled `agent-platform.giantswarm.io/default: "true"`. It does one-off tasks with the person's connectors (`preset:full`), points to or helps create specialist agents, and serves every portal role. Its prompt is in [`agents/default-agent/values.yaml`](../agents/default-agent/values.yaml) and its skills are in [`skills/`](../skills).
+
+| Value | Default | Effect |
+|---|---|---|
+| `components.default-agent.enabled` | `true` | Deploys the agent while kagent, muster and agent-manager are on. The portal's meta-agent features use it. |
+| `klausGateway.a2a.defaultAgent` | `""` | The agent Slack's agent picker preselects. Empty: the default agent (`<kagent namespace>/default-agent`) while it is on. |
+| `defaultAgent.modelConfig` | `""` | The `ModelConfig` it runs on. Empty: it gets the installation's default model (annotated `agent-platform.giantswarm.io/is-default-model-config: "true"`) once, when it has none; agent-manager sets it. Set it to pin or change the model. |
+| `components.default-agent.labels` | `managed-by`, `default` | Labels on its HelmRelease and Agent. Entries add to `managed-by` and `default` on the Agent, never drop them. |
+| `backstage.metaAgents.<role>` | unset | The agent behind a portal role, as `<installation>/<namespace>/<name>`. Roles: `generalInformation`, `agentManagement`, `workflowManagement`, `platformOperations`, `skillEvaluation`, `skillCreation`. Unset roles use the default agent while it is on. |
+| `skillManager.sources` | `[giantswarm/agent-skills]` | Skill sources for the skill-manager and the portal, as URLs or `{url, ref, path, readOnly}`. |
+| `skills.platformSource.enabled` | `true` | Lists the platform's `skills/` first, read-only, at the release tag (a dev build: its commit). Set `false` where GitHub is unreachable. |
+| `skills.platformSource.ref` | `""` | A full commit id of this repository, e.g. a skills branch's head. Pins the platform source and the default agent's skills to it. |
+| `agent-manager.skills.repositories`, `backstage.skillsRepositories` | `[]` | Deprecated. When set, replaces `skillManager.sources` for that consumer. From `agent-platform.backstage.skillManagerFloor` on, with the skill-manager on, the portal reads its skills from the skill-manager and a `backstage.skillsRepositories` fails the render. |
+
+- A release pins the skills to the tag's commit. A branch build deploys the agent without skills.
+- The portal gets the platform source and object entries from `agent-platform.backstage.skillSourcesFloor` in `_helpers.tpl`. Below it, URLs only.
+
+### Skill manager
+
+**[skill-manager](https://github.com/giantswarm/skill-manager)** owns the skill sources. It lists their skills and pins a skill to a commit as the person: MCP through muster (`x_skill-manager_*`), REST for agent-manager.
+
+- `components.skill-manager` follows `components.agent-manager`. `enabled: false` leaves it out. `dependsOn: [muster]`. Nothing waits for it: agent-manager and the default agent install while it fails.
+- Its `sources` are derived: the platform source, then `skillManager.sources`. An own `skill-manager.sources` fails the render.
+- It is an OAuth resource server like the managers: the issuer, client, secret and CA come from `skill-manager.oauth`, else from `global.identity`. Anything still unset is filled from muster's OAuth server block (`muster.muster.oauth.server.dex.*`, `.existingSecret`).
+- Its egress to that login is the managers' (Cilium): its MCP backend entry carries the issuer (`networkPolicy.mcpBackends.skill-manager.identityProvider`), and the connectivity chart allows its pods the issuer's host by name on 443 and the `cluster` entity on 443 and 10443, the path to a Dex behind an in-cluster Gateway on a private installation.
+- GitHub access goes in `skill-manager.github`: `app.secretName`, a read-only GitHub App, or `tokenSecret.name`, a static token (deprecated). Empty reads public repositories anonymously. With `github.tokenExchange` a private repository is read with the person's grant of skill-manager's GitHub App, fetched from muster's broker for that call.
+- agent-manager gets `skillManager.url`, the skill-manager's Service, from `agent-platform.agentManager.skillManagerFloor` on, `installation` (`backstage.installationName`), which `get_info` reports for the default agent's start links, and `defaultAgentModel.agent: default-agent` while the default agent is on. Below it, or with the skill-manager off, agent-manager gets `skills.repositories` as URLs, without the platform source. `agent-manager.skills.repositories` set while agent-manager uses the skill-manager fails the render.
+- Its NetworkPolicy admits its callers' namespaces (`networkPolicy.ingressNamespaces`, derived: muster's, the portal's, agent-manager's, the kagent namespace). The connectivity chart registers it as muster's MCP backend and opens agent-manager's and its migrate run's egress to it.
+- agent-manager's migrate run calls it with a service token: the connectivity chart generates the Secret `skill-manager-service-token` (skill-manager's and the kagent namespace) and the chart sets `skill-manager.serviceToken.secretName`.
+
+`make verify-default-agent` covers it.
+
 ### Cluster manager
 
 **[cluster-manager](https://github.com/giantswarm/cluster-manager)** is the cluster write surface. It lists clusters and node pools, creates and deletes GPU node pools, and switches model serving on a cluster.
@@ -515,7 +550,7 @@ You need:
 
 | Toggle | What the connectivity chart renders | Inputs |
 |---|---|---|
-| `components.backstage.enabled` | The app-config ConfigMap `agent-platform-backstage-app-config`, the `HTTPRoute` `backstage.<domain>`, and a config-reload hook that rolls the Deployment when the config changes. | `backstage.{hostname, parentRefs, installationName, extraScopes, startUrlSearchParams, enabledExtensions, disabledExtensions, skillsRepositories, configReload}`, dropped before the backstage chart (`components.backstage.omitKeys`). |
+| `components.backstage.enabled` | The app-config ConfigMap `agent-platform-backstage-app-config`, the `HTTPRoute` `backstage.<domain>`, and a config-reload hook that rolls the Deployment when the config changes. | `backstage.{hostname, parentRefs, installationName, extraScopes, startUrlSearchParams, enabledExtensions, disabledExtensions, skillsRepositories, skillPullRequests, metaAgents, configReload}`, dropped before the backstage chart (`components.backstage.omitKeys`). |
 | `components.mcp-kubernetes.enabled` | The `MCPServer` registering the server with muster using per-server OAuth consent and an access token issued by mcp-kubernetes. OAuth uses the platform's existing Valkey and encryption Secret by default. Needs muster. `mcp-kubernetes.mcpServer.managementCluster: <name>` makes it a member of muster's `kubernetes` family; `enabled: false` renders no CR. | `mcp-kubernetes.kubernetesAudience` (default `dex-k8s-authenticator`, `""` for Google), `mcp-kubernetes.mcpServer`. |
 | `components.modelServing.enabled` (with the three kserve components) | The serving presets and the discovery ConfigMap `agent-platform-model-serving`, the serving `Namespace`, the cache claim, the Kyverno cache policies (`modelServing.policies.enabled: auto`) and the serving namespace's network policies. Fails without the kserve components or the `serving.kserve.io` API (`modelServing.kserve.requireApi`). | `modelServing.*` |
 | `components.kserve-llmisvc-resources.enabled` | The llm-d controller's network policy, and guards: `kserve.controller.deploymentMode: Standard`, `kserve.createSharedResources: true`. The removed `components.kserve-crd` / `components.kserve-resources` are refused. | the component's own block |
@@ -578,7 +613,7 @@ metadata:
   namespace: agents-acme-x7k2q
 spec:
   provider: Anthropic
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5-5
   apiKeySecret: tenant-credential-anthropic
   apiKeySecretKey: ANTHROPIC_API_KEY
 ```

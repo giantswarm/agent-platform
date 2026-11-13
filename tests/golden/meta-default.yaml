@@ -326,6 +326,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: agent-platform-connectivity
@@ -351,7 +353,7 @@ spec:
     agent-manager:
       agentChart:
         ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
-        semver: '>=2.0.0 <3.0.0'
+        semver: '>=2.6.0 <3.0.0'
       fullnameOverride: agent-manager
       harness:
         egress: {}
@@ -389,8 +391,7 @@ spec:
         labels:
           observability.giantswarm.io/tenant: giantswarm
       skills:
-        repositories:
-        - https://github.com/giantswarm/agent-skills
+        repositories: []
     agent-platform-mcps:
       agentgateway:
         enabled: true
@@ -407,7 +408,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.23.2
+          tag: 2.24.0
       networkPolicy:
         egress:
           cidrs: []
@@ -578,6 +579,7 @@ spec:
       ingress:
         enabled: false
       installationName: agent-platform
+      metaAgents: {}
       observability:
         otel:
           endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -889,6 +891,8 @@ spec:
               enabled: false
           mode: Strict
         mcp:
+          description: 'Your agent sessions on this installation, as the signed-in person:
+            list them, send one a message, and checkpoint or fork them'
           displayName: Kagent
           enabled: true
           pathPrefix: /kagent/mcp
@@ -1544,6 +1548,7 @@ spec:
         name: ""
       imagePullSecrets: []
       instances: 3
+      maxSlotWalKeepSize: 4GB
       namespace: kagent
       primaryUpdateMethod: switchover
       resources:
@@ -1746,6 +1751,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: agent-platform-mcps
@@ -1786,6 +1793,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: agentgateway
@@ -1894,6 +1903,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: dicebear
@@ -1930,6 +1941,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: model-manager
@@ -2030,6 +2043,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: muster
@@ -2185,6 +2200,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: valkey
@@ -2308,6 +2325,8 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
     app.kubernetes.io/component: self-management
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   # created suspended; the resumer Job resumes it once the release is deployed
@@ -2346,6 +2365,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-connectivity
@@ -2369,6 +2390,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-mcps
@@ -2392,6 +2415,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agentgateway
@@ -2415,6 +2440,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/dicebear
@@ -2438,6 +2465,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/model-manager
@@ -2461,6 +2490,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/muster
@@ -2468,7 +2499,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=5.61.0 <6.0.0"
+    semver: ">=5.63.2 <6.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2484,6 +2515,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/valkey
@@ -2508,6 +2541,8 @@ metadata:
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
     app.kubernetes.io/component: self-management
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform

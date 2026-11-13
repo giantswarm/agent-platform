@@ -13108,6 +13108,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["egresspolicies"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list"]
 ---
 # Source: agent-platform-connectivity/templates/tenants/clusterroles.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -13159,6 +13162,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["egresspolicies"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list"]
   - apiGroups: ["helm.toolkit.fluxcd.io"]
     resources: ["helmreleases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -13198,6 +13204,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["egresspolicies"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list"]
   - apiGroups: ["helm.toolkit.fluxcd.io"]
     resources: ["helmreleases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -14628,6 +14637,8 @@ spec:
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: envoy
+            gateway.envoyproxy.io/owning-gateway-name: x
+            gateway.envoyproxy.io/owning-gateway-namespace: default
             io.kubernetes.pod.namespace: default
       toPorts:
         - ports:

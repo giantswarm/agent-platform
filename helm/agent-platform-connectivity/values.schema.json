@@ -189,6 +189,32 @@
                             "type": "string"
                         }
                     }
+                },
+                "operator": {
+                    "type": "object",
+                    "description": "agent-platform-operator's names, derived by the meta chart while the organizations are on (agent-platform.organizations.operator there): the meta chart installs the operator and tells it the same names, so this chart holds no copy of them (giantswarm/agent-platform#1278). Never set them yourself.",
+                    "additionalProperties": false,
+                    "properties": {
+                        "awsRoleName": {
+                            "type": "string",
+                            "description": "Its IRSA role. Required with the Crossplane AWS snapshot store."
+                        },
+                        "podLabels": {
+                            "type": "object",
+                            "description": "Its pods' selector labels. Required while enabled.",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "serviceAccountName": {
+                            "type": "string",
+                            "description": "Its ServiceAccount, in this release's namespace. Required while enabled."
+                        },
+                        "snapshotSecret": {
+                            "type": "string",
+                            "description": "The Secret of RustFS's keys rendered for it. Required with substrate.rustfs.enabled."
+                        }
+                    }
                 }
             }
         },
@@ -349,6 +375,15 @@
                     }
                 },
                 "cluster-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "default-agent": {
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
@@ -1617,6 +1652,26 @@
                                     }
                                 }
                             },
+                            "identityProvider": {
+                                "type": "object",
+                                "required": [
+                                    "issuerUrl"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "issuerUrl": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "provider": {
+                                        "type": "string",
+                                        "enum": [
+                                            "dex",
+                                            "google"
+                                        ]
+                                    }
+                                }
+                            },
                             "metrics": {
                                 "type": "boolean"
                             },
@@ -2098,6 +2153,9 @@
                 },
                 "instances": {
                     "type": "integer"
+                },
+                "maxSlotWalKeepSize": {
+                    "type": "string"
                 },
                 "namespace": {
                     "type": "string"

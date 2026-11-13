@@ -26,6 +26,17 @@
 #     generator gates the release push on, the way image.preBuildJob gates the
 #     image). A release refused this way is recovered by rerunning the tag's
 #     workflow from failed once the component chart is out, without a new tag.
+#   - stamp-release-commit (tags only): hack/stamp-release-commit.sh writes the
+#     tag's commit into helm/agent-platform/agents/ (the default agent's skill
+#     pins; the agent chart refuses a tag) and persists it to the workspace,
+#     which the generated push-chart-release attaches over its checkout before
+#     packaging: it requires the stamp through verify-release-floors and
+#     push-connectivity-chart-release. Unstamped (branch builds) the default
+#     agent renders without skills; make verify-default-agent
+#     simulates the step.
+#
+# The same render on a schedule, against main and the latest releases, is the
+# GitHub Actions workflow component-render-schedule (docs/ci.md).
 #
 # The agent-platform-crds chart has been RETIRED — every component now ships
 # its own CRDs (app-owned CRDs), so there is no longer a CRD-bundle chart to
@@ -81,6 +92,24 @@ jobs:
         # `helm dependency build`.
         command: make verify-all
 
+  stamp-release-commit:
+    docker:
+    - image: cimg/base:current
+    resource_class: small
+    steps:
+    - checkout
+    - run:
+        name: stamp the tag's commit into the chart (hack/stamp-release-commit.sh)
+        command: |
+          commit=$(git rev-parse HEAD)
+          [ "$commit" = "$CIRCLE_SHA1" ] || { echo "checked out $commit, the pipeline's commit is $CIRCLE_SHA1" >&2; exit 1; }
+          hack/stamp-release-commit.sh "$commit"
+          grep -cF "commit: \"$commit\"" helm/agent-platform/agents/default-agent/values.yaml
+    - persist_to_workspace:
+        root: .
+        paths:
+        - helm/agent-platform/agents
+
   verify-release-floors:
     # The tag pipeline's gate (giantswarm/agent-platform#624). Same image and the
     # same bounded, retried installs as test-ingress-modes, without kyverno: the
@@ -118,7 +147,19 @@ workflows:
     #      pushes of the tag wait on it — the connectivity push below by its
     #      requires, the generated push-chart-release through the generator's
     #      chart release gate (gen.ci.chartReleaseGateJob).
+    - stamp-release-commit:
+        filters:
+          tags:
+            only: /^v.*/
+          branches:
+            ignore: /.*/
+
     - verify-release-floors:
+        # Carries the stamp to push-chart-release (through
+        # push-connectivity-chart-release): a chart pushed without it would pin
+        # no skills.
+        requires:
+        - stamp-release-commit
         filters:
           tags:
             only: /^v.*/

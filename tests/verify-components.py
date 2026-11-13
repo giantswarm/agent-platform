@@ -165,7 +165,8 @@ FOLLOW_KAGENT = ["kagent-crds", "substrate", "substrate-crds", "google-access-to
 WIRING_KEYS = {
     "backstage": [
         "hostname", "parentRefs", "installationName", "extraScopes", "startUrlSearchParams",
-        "enabledExtensions", "disabledExtensions", "skillsRepositories", "configReload",
+        "enabledExtensions", "disabledExtensions", "skillsRepositories", "skillPullRequests", "metaAgents",
+        "configReload",
     ],
     "mcp-kubernetes": ["kubernetesAudience"],
 }

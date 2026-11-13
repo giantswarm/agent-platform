@@ -645,9 +645,12 @@ the kagent controller with it.
 
 A private identity provider inside one of `worldExcludedCIDRs` needs its
 address in `networkPolicy.additionalEgressCIDRs`. The policy names the proxy
-pods as Envoy Gateway labels them (`app.kubernetes.io/name: envoy`), so a route
-pinned with `backstage.parentRefs` to a Gateway of another implementation needs
-that Gateway's pods admitted by a policy of its own.
+pods of each Gateway as Envoy Gateway labels them
+(`gateway.envoyproxy.io/owning-gateway-name` and `-namespace`, from the same
+parentRefs the routes attach with), so another Gateway's proxy in the same
+namespace is not admitted, and a route pinned with `backstage.parentRefs` to a
+Gateway of another implementation needs that Gateway's pods admitted by a
+policy of its own.
 
 The backstage chart's own CNPG policy is not this chart's: its missing DNS and
 operator legs, and the missing arm64 images, are filed against
@@ -1162,6 +1165,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | components.agent-sandbox.enabled | bool | `false` |  |
 | components.model-manager.enabled | bool | `true` |  |
 | components.agent-manager.enabled | bool | `false` |  |
+| components.default-agent.enabled | bool | `false` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.workspace-manager.enabled | bool | `false` |  |
@@ -1525,6 +1529,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controllerRoute.mcp.pathPrefix | string | `"/kagent/mcp"` |  |
 | kagent.controllerRoute.mcp.timeout | int | `300` |  |
 | kagent.controllerRoute.mcp.displayName | string | `"Kagent"` |  |
+| kagent.controllerRoute.mcp.description | string | `"Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
@@ -1547,6 +1552,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | postgres.clusterName | string | `"kagent-pg"` |  |
 | postgres.instances | int | `3` |  |
 | postgres.primaryUpdateMethod | string | `"switchover"` |  |
+| postgres.maxSlotWalKeepSize | string | `"4GB"` |  |
 | postgres.storage.size | string | `"20Gi"` |  |
 | postgres.storage.storageClass | string | `""` |  |
 | postgres.image.name | string | `""` |  |
@@ -1784,7 +1790,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.23.2"` |  |
+| agentManager.migration.image.tag | string | `"2.24.0"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
@@ -1820,6 +1826,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentPlatformOrganizations.fluxPathPrefix | string | `"./agent-platform/organizations/"` | The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies exactly this prefix, its parent and its name, from the labels the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise. |
 | agentPlatformOrganizations.fluxDecryptionSecret | string | `"sops-keys"` | The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption. |
 | agentPlatformOrganizations.apiHostnames | list | `[]` | The installation's Kubernetes API hostnames beside api.<global.domain>, which is derived while global.domain is set: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. The render fails while both are empty. |
+| agentPlatformOrganizations.operator | object | `{"awsRoleName":"","podLabels":{},"serviceAccountName":"","snapshotSecret":""}` | agent-platform-operator's names, derived by the meta chart while the organizations are on (agent-platform.organizations.operator there): the meta chart installs the operator and tells it the same names, so this chart holds no copy of them (giantswarm/agent-platform#1278). Never set them yourself. |
+| agentPlatformOrganizations.operator.serviceAccountName | string | `""` | Its ServiceAccount, in this release's namespace. Required while enabled. |
+| agentPlatformOrganizations.operator.podLabels | object | `{}` | Its pods' selector labels. Required while enabled. |
+| agentPlatformOrganizations.operator.snapshotSecret | string | `""` | The Secret of RustFS's keys rendered for it. Required with substrate.rustfs.enabled. |
+| agentPlatformOrganizations.operator.awsRoleName | string | `""` | Its IRSA role. Required with the Crossplane AWS snapshot store. |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |
@@ -1926,6 +1937,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | backstage.disabledExtensions[10] | string | `"api:ai-chat/drawer"` |  |
 | backstage.disabledExtensions[11] | string | `"app-root-element:ai-chat/drawer"` |  |
 | backstage.skillsRepositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| backstage.skillPullRequests | bool | `false` |  |
+| backstage.metaAgents | object | `{}` |  |
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |
@@ -1936,6 +1949,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | mcp-kubernetes.mcpServer.enabled | bool | `true` |  |
 | mcp-kubernetes.mcpServer.managementCluster | string | `""` |  |
 | mcp-kubernetes.mcpServer.displayName | string | `"Kubernetes"` |  |
+| mcp-kubernetes.mcpServer.description | string | `"Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"` |  |
 | cloudnative-pg | object | `{}` |  |
 | kagent-crds | object | `{}` |  |
 | substrate.createNamespace | bool | `false` |  |

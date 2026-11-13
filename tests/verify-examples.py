@@ -67,22 +67,22 @@ def main(meta: str) -> int:
     if missing := sorted(set(EXAMPLES) - present):
         cc.fail(f"examples/{', examples/'.join(missing)} is listed but absent")
     components = cc.roster(meta)
-    by_chart = {c["chart"]: n for n, c in components.items()}
     with tempfile.TemporaryDirectory() as tmp:
         for example, api_versions in EXAMPLES.items():
             print(f"--> examples/{example}")
             rendered = cc.docs(cc.render_meta(meta, ["-n", "agent-platform", "-f", str(examples / example), *api_versions]))
-            on = sorted(n for kind, n in rendered if kind == "HelmRelease" and n in by_chart)
+            # A component's HelmRelease and OCIRepository are named after its key.
+            on = sorted(n for kind, n in rendered if kind == "HelmRelease" and n in components)
             if not on:
                 cc.fail(f"examples/{example} renders no component HelmRelease")
-            for chart in on:
-                name = by_chart[chart]
-                values = cc.hr_values(rendered[("HelmRelease", chart)])
+            for name in on:
+                chart = components[name]["chart"]
+                values = cc.hr_values(rendered[("HelmRelease", name)])
                 what = f"{name} for examples/{example}"
                 if components[name].get("releasedWithChart"):
                     render(name, str(cc.REPO_ROOT / "helm" / chart), values, api_versions, f"{what} (working tree)", tmp)
                     continue
-                url, rng = cc.source(rendered[("OCIRepository", chart)])
+                url, rng = cc.source(rendered[("OCIRepository", name)])
                 tags = cc.registry_tags(url)
                 if not tags and name in cc.UNRELEASED:
                     print(f"NOTE: {what}: {url} publishes nothing yet (waits for {cc.UNRELEASED[name]}); rendered once a build exists")

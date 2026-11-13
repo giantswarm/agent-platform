@@ -8,7 +8,10 @@ resolved at reconcile time) — never from a Chart.yaml pin.
 
 Each entry is fully self-describing; this template has no per-component
 knowledge:
-  chart/repository/versionRange — where to pull and which versions. An entry
+  chart/repository/versionRange — where to pull and which versions. The
+      release, its HelmRelease and OCIRepository are named after the entry's
+      key, the chart's name except for a second release of a chart
+      (default-agent, a release of the agent chart). An entry
       WITHOUT a chart key is a feature switch (components.flux, the condition of
       the flux-engine subchart): it is part of the roster forwarded to
       connectivity and of the enabled/disabled logic like every other entry, but
@@ -48,6 +51,20 @@ knowledge:
       side by side (substrate: the WorkerPool's worker image).
   valuesFrom    — name of the TOP-LEVEL values block passed straight through to
       this release's values. Omit for components that take no values.
+  valuesFile    — a values file of this chart (.Files) taken as the release's
+      values instead of a block (agent-platform.componentValuesFile: a skills[]
+      entry not pinned to a full commit is dropped, the unstamped release
+      commit). Derived values win over it.
+  labels        — extra labels on the child HelmRelease.
+  teamAnnotation — false leaves application.giantswarm.io/team off the
+      component's OCIRepository and HelmRelease (default: the chart's team,
+      annotations.team in _helpers.tpl). For a chart that the
+      apps-to-teams-mapping gives to another team (cloudnative-pg,
+      gpu-operator, gateway-api-crds): team-stamper then writes the mapped
+      team, and the chart's value does not take its place.
+  inKagentNamespace — install into the kagent component's namespace
+      (agent-platform.kagent.namespace), where agents live; wins over
+      targetNamespace.
   valuesKey     — when set, the valuesFrom block is NESTED under this key before
       being forwarded (valuesKey: foo → {foo: {…block…}}). For a chart that
       vendors an upstream chart as a SUBCHART of the same name: Helm only passes
@@ -181,6 +198,10 @@ knowledge:
       pod certificates and the substrate release, behind it, is not Ready yet —
       a fresh install and an in-place switch of workspaces and Substrate alike
       (giantswarm/agent-platform#1107). Once Substrate is Ready both wait again.
+  disableWait   — render `disableWait: true` on install and upgrade: the release
+      is Ready once its objects are applied. For a release whose object's own
+      readiness is no condition of the platform's (the default agent's Agent,
+      Ready only once its model answers; its status says why).
   disableWaitForJobs — render `disableWaitForJobs: true` on the child
       HelmRelease's install and upgrade: helm-controller then does not wait for
       the release's plain Jobs to complete (hooks are unaffected). It does not
@@ -315,10 +336,11 @@ connectivity chart's migrate Job read the same range and filter. */ -}}
 {{- range $key, $c := .Values.components }}
 {{- /* An entry without a chart is a feature switch (components.flux, components.modelServing): in the roster, no release. */ -}}
 {{- if and (index $roster $key).enabled (hasKey $c "chart") }}
-{{- $name := $c.chart }}
+{{- $name := $key }}
+{{- if $c.inKagentNamespace }}{{- $c = merge (dict "targetNamespace" (include "agent-platform.kagent.namespace" $root)) (deepCopy $c) }}{{- end }}
 {{- /* agent-platform-operator installs into the connectivity release's
-namespace, where the policies, bindings and the CA ConfigMap name its
-ServiceAccount (agent-platform.organizations.operatorServiceAccount). */ -}}
+namespace, where the policies and bindings name its ServiceAccount
+(agent-platform.organizations.operatorServiceAccount). */ -}}
 {{- if and (eq $key "agent-platform-operator") (not $c.targetNamespace) }}
 {{- $c = set (deepCopy $c) "targetNamespace" (dig "agent-platform-connectivity" "targetNamespace" "" $root.Values.components) }}
 {{- end }}
@@ -343,6 +365,7 @@ ServiceAccount (agent-platform.organizations.operatorServiceAccount). */ -}}
 {{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.componentDerivedValues" (dict "root" $root "name" $key) | fromJson) }}
 {{- else }}
 {{- with $c.valuesFrom }}{{- $vals = index $shaped . | default dict }}{{- end }}
+{{- with $c.valuesFile }}{{- $vals = include "agent-platform.componentValuesFile" (dict "root" $root "path" .) | fromJson }}{{- end }}
 {{- /* Drop keys that belong to this umbrella and not to the chart, before the
 optional nesting so the list addresses the block's own keys. */ -}}
 {{- range $c.omitKeys }}{{- $vals = include "agent-platform.omitPath" (dict "vals" $vals "path" .) | fromJson }}{{- end }}
@@ -403,7 +426,8 @@ never rendered. With app-owned CRDs a consumer dependsOn the opt-in component
 that ships the CRD it needs; when that component is off it renders no CR for
 that CRD either, so the dependency is moot. */ -}}
 {{- $awaitsSubstrate := and (eq $key "muster") (include "agent-platform.muster.awaitsSubstrate" (dict "root" $root "values" $vals)) }}
-{{- $installDisableWait := or $c.installDisableWait $awaitsSubstrate }}
+{{- $installDisableWait := or $c.installDisableWait $awaitsSubstrate $c.disableWait }}
+{{- $upgradeDisableWait := or $awaitsSubstrate $c.disableWait }}
 {{- $deps := list }}
 {{- range ($c.dependsOn | default list) }}
 {{- if include "agent-platform.componentEnabled" (dict "root" $root "name" .) }}
@@ -435,6 +459,8 @@ against such a range, the branch builds of the repository included. */ -}}
 {{- $filter = include "agent-platform.releaseTagFilter" $root }}
 {{- end }}
 {{- $source := include "agent-platform.sourceName" (dict "child" $child "entry" $c "semver" $semver) }}
+{{- /* The owning team's annotation (see teamAnnotation above). */ -}}
+{{- $teamAnnotation := ne (toString $c.teamAnnotation) "false" }}
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
@@ -443,6 +469,10 @@ metadata:
   namespace: {{ $ns }}
   labels:
     {{- include "labels.common" $root | nindent 4 }}
+  {{- if $teamAnnotation }}
+  annotations:
+    {{- include "annotations.team" $root | nindent 4 }}
+  {{- end }}
 spec:
   interval: {{ $g.sourceInterval }}
   url: {{ include "agent-platform.mirror.ref" (dict "ref" (printf "%s/%s" (trimSuffix "/" $c.repository) $c.chart) "mirror" $mirror) }}
@@ -464,6 +494,13 @@ metadata:
   namespace: {{ $ns }}
   labels:
     {{- include "labels.common" $root | nindent 4 }}
+    {{- with $c.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if $teamAnnotation }}
+  annotations:
+    {{- include "annotations.team" $root | nindent 4 }}
+  {{- end }}
 spec:
   interval: {{ $g.interval }}
   {{- with $c.timeout }}
@@ -509,7 +546,7 @@ spec:
     {{- with $c.crds }}
     crds: {{ . }}
     {{- end }}
-    {{- if $awaitsSubstrate }}
+    {{- if $upgradeDisableWait }}
     disableWait: true
     {{- end }}
     {{- if $c.disableWaitForJobs }}

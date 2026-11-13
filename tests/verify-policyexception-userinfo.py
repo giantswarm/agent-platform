@@ -36,7 +36,10 @@ FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2
 KAGENT = ["--set", "components.kagent.enabled=true", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
           "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
 KYVERNO = ["--set", "kyvernoPolicies.enabled=true"]
-CONNECTIVITY = ["--namespace", "agent-platform", "--set", "ingress.parentRefs[0].name=x", *KAGENT, *KYVERNO, *FLEET_APIS]
+# The operator's names, which the meta chart derives onto the connectivity release.
+OPERATOR_VALUES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "organizations-operator-values.yaml")
+CONNECTIVITY = ["--namespace", "agent-platform", "--set", "ingress.parentRefs[0].name=x", *KAGENT, *KYVERNO, *FLEET_APIS,
+                "-f", OPERATOR_VALUES]
 SUBSTRATE = ["--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true"]
 # agentPlatformOrganizations.enabled needs the llm listener and its routing policy, the agents'
 # Flux identity and the API hostname (giantswarm/agent-platform#759, #1268).

@@ -111,6 +111,10 @@ components:  # @schema additionalProperties: true
     enabled: true
   agent-manager:  # @schema additionalProperties: true
     enabled: false
+  # The default agent (kagent/default-agent), the portal's meta agent.
+  # The meta chart forwards the entry only while it is on.
+  default-agent:  # @schema additionalProperties: true
+    enabled: false
   vm-manager:  # @schema additionalProperties: true
     enabled: false
   cluster-manager:  # @schema additionalProperties: true
@@ -805,7 +809,12 @@ networkPolicy:
   #             app.kubernetes.io/name: envoy
   # podSelector (a matchLabels map) narrows the policy to the backend's pods;
   # without it the policy selects every pod in the namespace.
-  mcpBackends: {}  # @schema type: object; additionalProperties: {"type": "object", "required": ["namespace", "ports"], "additionalProperties": false, "properties": {"namespace": {"type": "string", "minLength": 1}, "ports": {"type": "array", "minItems": 1, "items": {"type": "integer"}}, "podSelector": {"type": "object", "additionalProperties": {"type": "string"}}, "metrics": {"type": "boolean"}, "additionalPeers": {"type": "array", "items": {"type": "object", "required": ["namespace", "matchLabels"], "additionalProperties": false, "properties": {"namespace": {"type": "string", "minLength": 1}, "matchLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}}}}}}}; skipProperties: true
+  # identityProvider ({issuerUrl, provider: dex|google}, cilium flavour) opens
+  # the backend's egress to the login it validates tokens of, as the managers'
+  # egress policies do: the issuer's hosts by name on 443 and the cluster
+  # entity on 443 and 10443 (an issuer behind an in-cluster Gateway). Needs
+  # podSelector. The meta chart sets it for the skill-manager.
+  mcpBackends: {}  # @schema type: object; additionalProperties: {"type": "object", "required": ["namespace", "ports"], "additionalProperties": false, "properties": {"namespace": {"type": "string", "minLength": 1}, "ports": {"type": "array", "minItems": 1, "items": {"type": "integer"}}, "identityProvider": {"type": "object", "required": ["issuerUrl"], "additionalProperties": false, "properties": {"provider": {"type": "string", "enum": ["dex", "google"]}, "issuerUrl": {"type": "string", "minLength": 1}}}, "podSelector": {"type": "object", "additionalProperties": {"type": "string"}}, "metrics": {"type": "boolean"}, "additionalPeers": {"type": "array", "items": {"type": "object", "required": ["namespace", "matchLabels"], "additionalProperties": false, "properties": {"namespace": {"type": "string", "minLength": 1}, "matchLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}}}}}}}; skipProperties: true
   # The metrics collectors an mcpBackends entry with `metrics: true` admits on
   # its ports: the observability platform's alloy-metrics by default.
   mcpBackendScrapers:  # @schema item: object; itemRequired: [namespace, matchLabels]; itemProperties: {"namespace": {"type": "string", "minLength": 1}, "matchLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}}}
@@ -1756,6 +1765,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # The name the Dev Portal shows for the server (the MCPServer's
       # ui.giantswarm.io/display-name annotation); empty renders none.
       displayName: Kagent
+      # The line the Dev Portal shows under the server's name (the MCPServer's
+      # spec.description, at most 500 characters); empty renders none.
+      description: "Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
@@ -1881,6 +1893,13 @@ postgres:
   # restarts in place either way and writes fail for that time.
   # null renders neither field: the operator's defaults (restart) apply.
   primaryUpdateMethod: switchover  # @schema enum: [switchover, restart]
+  # Bound WAL retained by inactive HA replication slots on primaries and
+  # replicas. PostgreSQL enforces this at checkpoints; allow headroom for
+  # database growth and WAL bursts beyond this cap. A replica that exceeds
+  # the limit may need rebuilding from the primary or a verified backup.
+  # null or "-1" selects unlimited retention; size this with storage.size.
+  # The meta chart forwards null as "-1" to preserve it across both renders.
+  maxSlotWalKeepSize: 4GB
   storage:
     size: 20Gi
     # EKS: gp3. Azure: managed-premium. on-prem: rook-ceph or local-path.
@@ -2864,7 +2883,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.23.2
+      tag: 2.24.0
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
@@ -3151,6 +3170,22 @@ agentPlatformOrganizations:
   # covers one, beside the cluster-internal and host-local names it never
   # names. The render fails while both are empty.
   apiHostnames: []  # @schema item: string
+  # -- agent-platform-operator's names, derived by the meta chart while the
+  # organizations are on (agent-platform.organizations.operator there): the
+  # meta chart installs the operator and tells it the same names, so this
+  # chart holds no copy of them (giantswarm/agent-platform#1278). Never set
+  # them yourself.
+  operator:
+    # -- Its ServiceAccount, in this release's namespace. Required while
+    # enabled.
+    serviceAccountName: ""
+    # -- Its pods' selector labels. Required while enabled.
+    podLabels: {}  # @schema additionalProperties: {"type": "string"}
+    # -- The Secret of RustFS's keys rendered for it. Required with
+    # substrate.rustfs.enabled.
+    snapshotSecret: ""
+    # -- Its IRSA role. Required with the Crossplane AWS snapshot store.
+    awsRoleName: ""
 
 # === Workspaces (workspaces, workspace-manager) ===
 # The one switch of the platform's workspaces: an Organization's repositories
@@ -3488,6 +3523,15 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # Skill repositories offered when an agent is created.
   skillsRepositories:
     - https://github.com/giantswarm/agent-skills
+  # Keep the portal's GitHub egress (api.github.com) for the skill pull
+  # requests it opens while skillsRepositories is empty, because the portal
+  # reads its skills from the skill-manager. The meta chart derives it.
+  skillPullRequests: false
+  # The agent behind a portal role (generalInformation, agentManagement,
+  # workflowManagement, platformOperations, skillEvaluation, skillCreation), as
+  # <installation>/<namespace>/<name>. Unset roles take the default agent while
+  # components.default-agent is on.
+  metaAgents: {}
   # Roll the Backstage pod when this chart's app-config ConfigMap changes.
   # The backstage chart's own checksum annotations cover only its own
   # templates, so an app-config change (templates/backstage/app-config.yaml)
@@ -3557,6 +3601,9 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
     # ui.giantswarm.io/display-name annotation): agent-platform-mcps' kubernetes
     # family's, which a family member shares. Empty renders none.
     displayName: Kubernetes
+    # What the Dev Portal shows under the name (the MCPServer's
+    # spec.description), at most 500 characters. Empty renders none.
+    description: "Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"
 
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
 # The kagent-crds component's values (kagent main ships its CRDs as their own

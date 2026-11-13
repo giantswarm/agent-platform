@@ -133,6 +133,38 @@
                     ]
                 }
             ]
+        },
+        "skill-repository.schema.json": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$comment": "One entry of skillManager.sources: a repository URL, or {url, ref, path, readOnly}.",
+            "anyOf": [
+                {
+                    "type": "string",
+                    "pattern": "^https?://\\S+$"
+                },
+                {
+                    "type": "object",
+                    "required": [
+                        "url"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "path": {
+                            "type": "string"
+                        },
+                        "readOnly": {
+                            "type": "boolean"
+                        },
+                        "ref": {
+                            "type": "string"
+                        },
+                        "url": {
+                            "type": "string",
+                            "pattern": "^https?://\\S+$"
+                        }
+                    }
+                }
+            ]
         }
     },
     "type": "object",
@@ -191,6 +223,32 @@
                         },
                         "name": {
                             "type": "string"
+                        }
+                    }
+                },
+                "operator": {
+                    "type": "object",
+                    "description": "agent-platform-operator's names, which this chart derives onto the connectivity release while the organizations are on (agent-platform.organizations.operator, giantswarm/agent-platform#1278). Declared for the connectivity chart's schema only: never forwarded as set here (components.agent-platform-connectivity.omitKeys), and an own value fails the render. Leave it unset.",
+                    "additionalProperties": false,
+                    "properties": {
+                        "awsRoleName": {
+                            "type": "string",
+                            "description": "Derived, with the Crossplane AWS snapshot store: its IRSA role."
+                        },
+                        "podLabels": {
+                            "type": "object",
+                            "description": "Derived: its pods' selector labels.",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "serviceAccountName": {
+                            "type": "string",
+                            "description": "Derived: the operator's ServiceAccount (its chart's name)."
+                        },
+                        "snapshotSecret": {
+                            "type": "string",
+                            "description": "Derived, with substrate.rustfs.enabled: the Secret of RustFS's keys."
                         }
                     }
                 }
@@ -579,6 +637,9 @@
                         "repository": {
                             "type": "string"
                         },
+                        "teamAnnotation": {
+                            "type": "boolean"
+                        },
                         "valuesFrom": {
                             "type": "string"
                         },
@@ -613,6 +674,57 @@
                             "type": "string"
                         },
                         "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "default-agent": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "disableWait": {
+                            "type": "boolean"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
+                        },
+                        "inKagentNamespace": {
+                            "type": "boolean"
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "labels": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                                "agent-platform.giantswarm.io/default": {
+                                    "type": "string"
+                                },
+                                "agent-platform.giantswarm.io/managed-by": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFile": {
                             "type": "string"
                         },
                         "versionRange": {
@@ -671,6 +783,9 @@
                         },
                         "targetNamespace": {
                             "type": "string"
+                        },
+                        "teamAnnotation": {
+                            "type": "boolean"
                         },
                         "versionRange": {
                             "type": "string"
@@ -734,6 +849,9 @@
                         },
                         "targetNamespace": {
                             "type": "string"
+                        },
+                        "teamAnnotation": {
+                            "type": "boolean"
                         },
                         "valuesFrom": {
                             "type": "string"
@@ -1091,6 +1209,33 @@
                         }
                     }
                 },
+                "skill-manager": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "substrate": {
                     "type": "object",
                     "additionalProperties": true,
@@ -1336,6 +1481,22 @@
                     "type": "string"
                 },
                 "organization": {
+                    "type": "string"
+                }
+            }
+        },
+        "defaultAgent": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "displayName": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "modelConfig": {
                     "type": "string"
                 }
             }
@@ -3117,6 +3278,9 @@
                 "instances": {
                     "type": "integer"
                 },
+                "maxSlotWalKeepSize": {
+                    "type": "string"
+                },
                 "namespace": {
                     "type": "string"
                 },
@@ -3200,6 +3364,45 @@
                         "tolerations": {
                             "type": "array",
                             "description": "Tolerations appended to the four singletons' own, for a dedicated, tainted on-demand pool. The fleet's NodePools carry no taint."
+                        }
+                    }
+                }
+            }
+        },
+        "skill-manager": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "skillManager": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/skill-repository.schema.json",
+                        "type": [
+                            "string",
+                            "object"
+                        ],
+                        "unevaluatedProperties": false
+                    }
+                }
+            }
+        },
+        "skills": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "platformSource": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "ref": {
+                            "type": "string"
                         }
                     }
                 }

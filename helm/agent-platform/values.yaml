@@ -475,7 +475,7 @@ components:  # @schema additionalProperties: true
     # spec.urlElicitation: Relay.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.61.0 <6.0.0"
+    versionRange: ">=5.63.2 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -1106,7 +1106,7 @@ components:  # @schema additionalProperties: true
     # agents as Flux HelmReleases of the agent chart, as REST and MCP. Off by
     # default: it needs the kagent component and Flux on the cluster.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # agent-manager 1.x and 2.x are the kagent API v2 line (kagent.dev/v1alpha3
+    # agent-manager 1.x, 2.x and 3.x are the kagent API v2 line (kagent.dev/v1alpha3
     # AgentTemplates through the Generic agent chart 1.x, the agent unit); 0.x
     # composes agents for kagent 0.10 (v1alpha2) and never meets this chart.
     # Until 1.0.0 is published the range resolves nothing (the component is
@@ -1157,7 +1157,17 @@ components:  # @schema additionalProperties: true
     # agent-manager.githubTokenExchange need: it answers a missing organization
     # credential with the credentials.uiURL form and exchanges the person's
     # identity for their GitHub App grant.
-    versionRange: ">=2.22.0 <3.0.0"
+    # 2.24.0 is the floor the Dev Portal's organization pages need
+    # (giantswarm/backstage#3364): list_organizations replaces
+    # list_my_organizations, organization credentials are write-only,
+    # replace_organization_credential replaces one, and a save whose
+    # credential's consumers changed is answered credential_consumers_changed
+    # (giantswarm/agent-manager#360, #361, #364, #373). It is also
+    # agent-platform.agentManager.skillManagerFloor: from it agent-manager pins
+    # skills through the skill-manager and takes installation and
+    # defaultAgentModel (giantswarm/agent-manager#290).
+    # github.tokenExchange needs the on-demand grant contract and its schema.
+    versionRange: ">=3.0.0-rc.10 <4.0.0-0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -1166,9 +1176,70 @@ components:  # @schema additionalProperties: true
       - harness.egress
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
-    # and manages agents in the kagent namespace; both references are dropped
-    # at render time when the component is off.
+    # and manages agents in the kagent namespace. No skill-manager: it calls
+    # the skill-manager only when it pins a skill and answers that call
+    # unavailable while it is down, so a failed skill-manager never holds it.
+    # Each reference is dropped at render time when its component is off.
     dependsOn: [muster, kagent]
+  skill-manager:  # @schema additionalProperties: true
+    chart: skill-manager
+    # The skill sources of the Agent Platform (giantswarm/skill-manager,
+    # giantswarm/giantswarm#38322): lists the skills of every source and pins
+    # a skill to a commit as the person, MCP through muster (tools appear as
+    # x_skill-manager_<tool>, tool group agent-platform) and REST for
+    # agent-manager. No `enabled` here: on wherever agent-manager is on;
+    # false leaves it out, and agent-manager falls back to its own
+    # (deprecated) skill discovery.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # The floor is skill-manager's first release (giantswarm/giantswarm#38322).
+    # The ceiling is the next minor: a skill-manager minor rolls in with the
+    # chart release that renders its values.
+    versionRange: ">=0.1.0 <0.2.0"
+    valuesFrom: skill-manager
+    # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
+    # app); the reference is dropped at render time when muster is off.
+    dependsOn: [muster]
+    # The component's roster entry reaches the connectivity release only while
+    # the component is on (see components.yaml, gatedRoster).
+    gatedRoster: true
+  default-agent:  # @schema additionalProperties: true
+    # The default agent (defaultAgent.displayName), where people start and the portal's meta
+    # agent: one release of the Generic
+    # agent chart in kagent with the values of agents/default-agent/values.yaml
+    # and the platform's skills (skills/) pinned to the release's commit. Its
+    # muster.url, agent.iconUrl, toolset, labels and modelConfig.name are
+    # derived (defaultAgent). On while kagent, muster and agent-manager
+    # are on; false leaves it out.
+    chart: agent
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # The agent chart line, moved with agent-manager.agentChart.semver
+    # (make verify-default-agent). The floor is 2.6.0, whose empty
+    # modelConfig.name renders no model (giantswarm/agent#130).
+    versionRange: ">=2.6.0 <3.0.0"
+    valuesFile: agents/default-agent/values.yaml
+    injectGlobal: false
+    # Installs where the agents live: the kagent component's namespace
+    # (kagent.namespaceOverride).
+    inKagentNamespace: true
+    # The Agent's readiness (its model, its skills) is reported on the Agent,
+    # never a reason to hold the platform's install or upgrade.
+    disableWait: true
+    # No driftDetection: unpinned (defaultAgent.modelConfig), the Agent's
+    # model is agent-manager's.
+    # On the HelmRelease and the Agent: agent-manager lists it read-only
+    # (managed-by) and reports it as the installation's default agent (default).
+    # Labels set here add to these two on the Agent, never drop them.
+    labels:  # @schema additionalProperties: true
+      agent-platform.giantswarm.io/managed-by: agent-platform
+      agent-platform.giantswarm.io/default: "true"
+    # Travels to the connectivity release only while on, which then wires the
+    # portal's meta-agent features to it.
+    gatedRoster: true
+    enabled: true
+    # Only kagent, which owns its CRs: its skills are pinned at render and
+    # its model is set here or later by agent-manager, so neither
+    # agent-manager nor muster holds its install.
+    dependsOn: [kagent]
   vm-manager:  # @schema additionalProperties: true
     chart: vm-manager
     # VM provisioning for the Agent Platform (giantswarm/vm-manager): KVM
@@ -1432,6 +1503,8 @@ components:  # @schema additionalProperties: true
       - enabledExtensions
       - disabledExtensions
       - skillsRepositories
+      - skillPullRequests
+      - metaAgents
       - configReload
     enabled: false
     # Renders a CNPG Cluster for its database when backstage.database.engine is
@@ -1477,6 +1550,9 @@ components:  # @schema additionalProperties: true
     # the minor: moving to the next CNPG line is a deliberate edit here, not a
     # reconcile.
     versionRange: "0.29.x"
+    # The chart of another team (apps-to-teams-mapping): the chart writes no
+    # application.giantswarm.io/team, so team-stamper keeps the mapped team.
+    teamAnnotation: false
     valuesFrom: cloudnative-pg
     enabled: false
   kserve-llmisvc-crd:  # @schema additionalProperties: true
@@ -1606,6 +1682,9 @@ components:  # @schema additionalProperties: true
     # wrapper moves the operator, the platform follows the line.
     versionRange: "1.x"
     valuesFrom: gpu-operator
+    # The chart of another team (apps-to-teams-mapping): the chart writes no
+    # application.giantswarm.io/team, so team-stamper keeps the mapped team.
+    teamAnnotation: false
     # The wrapper takes every value under its subchart's key.
     valuesKey: gpu-operator
     # The operator consumes nothing of the platform's global (the wrapper pins
@@ -1642,6 +1721,9 @@ components:  # @schema additionalProperties: true
     chart: gateway-api-crds
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: ">=1.9.1 <2.0.0"
+    # The chart of another team (apps-to-teams-mapping): the chart writes no
+    # application.giantswarm.io/team, so team-stamper keeps the mapped team.
+    teamAnnotation: false
     # The chart's own defaults are the fleet's (the standard channel, the
     # safe-upgrades admission policy); it reads nothing of the platform's.
     injectGlobal: false
@@ -1720,10 +1802,21 @@ components:  # @schema additionalProperties: true
       # The well-known configs' values (components.kserve-runtime-configs); no
       # wiring reads them, so the connectivity chart never sees the block.
       - kserve-runtime-configs
+      # The skill sources reach the connectivity release derived
+      # (backstage.skillsRepositories, networkPolicy.mcpBackends.skill-manager),
+      # and the skill-manager's and the default agent's values their own
+      # releases only.
+      - skills
+      - skillManager
+      - skill-manager
+      - defaultAgent
       # agent-platform-operator's values (components.agent-platform-operator);
       # the connectivity chart reads agentPlatformOrganizations, never this
       # block.
       - agent-platform-operator
+      # The operator's names reach the connectivity release derived
+      # (agent-platform.organizations.operator), never as declared here.
+      - agentPlatformOrganizations.operator
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -3901,6 +3994,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # The name the Dev Portal shows for the server (the MCPServer's
       # ui.giantswarm.io/display-name annotation); empty renders none.
       displayName: Kagent
+      # The line the Dev Portal shows under the server's name (the MCPServer's
+      # spec.description, at most 500 characters); empty renders none.
+      description: "Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
@@ -4084,6 +4180,13 @@ postgres:
   # restarts in place either way and writes fail for that time.
   # null renders neither field: the operator's defaults (restart) apply.
   primaryUpdateMethod: switchover  # @schema enum: [switchover, restart]
+  # Bound WAL retained by inactive HA replication slots on primaries and
+  # replicas. PostgreSQL enforces this at checkpoints; allow headroom for
+  # database growth and WAL bursts beyond this cap. A replica that exceeds
+  # the limit may need rebuilding from the primary or a verified backup.
+  # null or "-1" selects unlimited retention; size this with storage.size.
+  # The meta chart forwards null as "-1" to preserve it across both renders.
+  maxSlotWalKeepSize: 4GB
   storage:
     size: 20Gi
     # EKS: gp3. Azure: managed-premium. on-prem: rook-ceph or local-path.
@@ -4535,8 +4638,9 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
       enabled: false
 
   # A2A client adapter. Routes channel turns to a kagent A2A endpoint.
-  # defaultAgent is the fallback agentRef when the channel does not supply one.
-  # Omit defaultAgent to require callers to pass agentRef explicitly.
+  # defaultAgent is the agent the Slack agent picker preselects. Empty: the
+  # default agent (<kagent namespace>/default-agent) while
+  # components.default-agent is on, else none.
   a2a:
     enabled: false
     defaultAgent: ""
@@ -5151,13 +5255,15 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # 1.x rendered the kagent.dev AgentTemplate of the 1.x kagent line, 0.x
     # the v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases
     # of the line reach the agents on their own; the major is the API boundary
-    # and moves only with this chart. The floor moves with components.kagent.
-    semver: ">=2.0.0 <3.0.0"
-  # The skill repositories list_skills offers — the same list the portal's
-  # create flow reads.
+    # and moves only with this chart. The floor moves with components.kagent
+    # and components.default-agent.versionRange.
+    semver: ">=2.6.0 <3.0.0"
+  # Deprecated: set skillManager.sources. Read only while agent-manager does
+  # not pin through the skill-manager (components.skill-manager off, or
+  # agent-manager below agent-platform.agentManager.skillManagerFloor), as
+  # URLs; when set, replaces skillManager.sources for agent-manager.
   skills:
-    repositories:
-      - https://github.com/giantswarm/agent-skills
+    repositories: []
   mcp:
     enabled: true
   oauth:
@@ -5309,9 +5415,89 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.23.2
+      tag: 2.24.0
     dryRun: false
     gitopsNamespaces: []
+
+# === Skill repositories ===
+# The platform's own skill source, which skill-manager and the portal list
+# first: {url: https://github.com/giantswarm/agent-platform, ref: v<chart
+# version>, path: skills, readOnly: true}; a dev build reads the commit it was
+# built from. false leaves it out (an air-gapped installation).
+skills:
+  platformSource:
+    enabled: true
+    # A full commit id of giantswarm/agent-platform (e.g. a skills branch's
+    # head): the source's ref and the default agent's skill pins. Empty: as above.
+    ref: ""
+
+# === Skill manager (components.skill-manager) ===
+# The installation's skill sources, after the platform's own
+# (skills.platformSource): the skill-manager's sources and the portal's
+# agentPlatform.skills.repositories (backstage.skillsRepositories; URLs alone
+# and no platform source below agent-platform.backstage.skillSourcesFloor;
+# none from agent-platform.backstage.skillManagerFloor on with the
+# skill-manager on, where the portal reads them from the skill-manager).
+# An entry is a GitHub repository URL or {url, ref, path, readOnly}: ref a
+# branch, tag or commit (empty: the default branch), path the directory
+# scanned, readOnly reported only. backstage.skillsRepositories, when set,
+# replaces these for the portal below that floor and fails the render from it on.
+skillManager:
+  sources:  # @schema type: array; item: [string, object]; itemRef: files/skill-repository.schema.json
+    - https://github.com/giantswarm/agent-skills
+
+# Values forwarded verbatim to the skill-manager component release
+# (giantswarm/skill-manager). Derived, not set here: sources (from
+# skills.platformSource and skillManager.sources; a list set here fails the
+# render), networkPolicy.ingressNamespaces (its callers' namespaces: muster's,
+# the portal's, agent-manager's and the kagent namespace of agent-manager's
+# migrate run, after the block's own) and serviceToken.secretName (the
+# platform's bearer for that run, a Secret the connectivity release generates,
+# while agent-manager pins through the skill-manager). Identity as for
+# model-manager: an OAuth 2.1 resource server validating the session's token
+# muster forwards (its MCPServer CR, labelled for the agent-platform tool
+# group) and the one agent-manager forwards on its REST calls, acting as the
+# person; the issuer, client, secret and CA fall back to global.identity
+# inside the chart, and what both leave unset is filled from muster's login
+# (muster.muster.oauth.server, agent-platform.identity.apply). GitHub is read with the App (github.app.secretName) or
+# token Secret (github.tokenSecret.name) set here; empty: anonymous, public
+# repositories only. The connectivity chart registers it as muster's MCP
+# backend (networkPolicy.mcpBackends.skill-manager, derived) and opens
+# agent-manager's egress to it.
+skill-manager:  # @schema skipProperties: true; additionalProperties: true
+  fullnameOverride: skill-manager
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
+  oauth:
+    enabled: true
+    dex:
+      allowPrivateURLs: true
+    sso:
+      allowPrivateIPs: true
+  muster:
+    mcpServer:
+      enabled: true
+      auth:
+        forwardToken: true
+        requiredAudiences:
+          - dex-k8s-authenticator
+
+# === Default agent (components.default-agent) ===
+defaultAgent:
+  # The name people see for the default agent in the portal and Slack, and the
+  # name its system message gives it. Its technical name is always default-agent.
+  displayName: "General Assistant"  # @schema minLength: 1
+  # The default agent's one-line description in the portal's agent lists.
+  description: "Start here. Handles everyday tasks with your connectors and helps you find or create the right agent."
+  # ModelConfig in kagent the default agent runs on. Empty: it gets the
+  # installation's default model once, when it has none (agent-manager sets it).
+  # Set it to pin or change the model.
+  modelConfig: ""
 
 # Optional central coordinator. Other keys pass through to the beekeeper chart.
 # The platform supplies serve.issuer, serve.clientIDs and serve.muster when unset.
@@ -5502,8 +5688,9 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # kagent on, the connectivity release renders the three ClusterRoles a tenant's
 # RoleBindings refer to:
 #   - agent-platform:user: see the tenant's agents, templates, RemoteMCPServers,
-#     ModelConfigs, EgressPolicies and muster MCPServers, and start a Session
-#     with an agent;
+#     ModelConfigs, EgressPolicies and muster MCPServers, read the tenant's
+#     RoleBindings (its members; get and list), and start a Session with an
+#     agent;
 #   - agent-platform:editor: the above, plus the writes agent-manager performs
 #     as the caller (HelmReleases, OCIRepositories, Agents, AgentTemplates,
 #     RemoteMCPServers);
@@ -5611,7 +5798,7 @@ musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemR
 # this switch, so it serves the organization tools (the floor of
 # components.agent-manager.versionRange must be 2.20.0 or later). Credential
 # forms use an explicit agent-manager.credentials.uiURL template containing
-# {operation}; credentials and githubTokenExchange need a manager floor of
+# {operation}; credentials and github.tokenExchange need a manager floor of
 # 2.22.0 or later. With components.muster on, muster serves
 # the MCPServers of the namespaces labelled
 # agent-platform.giantswarm.io/organization (muster.mcpServerNamespaceSelector,
@@ -5673,6 +5860,21 @@ agentPlatformOrganizations:
   # covers one, beside the cluster-internal and host-local names it never
   # names. The render fails while both are empty.
   apiHostnames: []  # @schema item: string
+  # -- agent-platform-operator's names, which this chart derives onto the
+  # connectivity release while the organizations are on
+  # (agent-platform.organizations.operator, giantswarm/agent-platform#1278).
+  # Declared for the connectivity chart's schema only: never forwarded as
+  # set here (components.agent-platform-connectivity.omitKeys), and an own
+  # value fails the render. Leave it unset.
+  operator:
+    # -- Derived: the operator's ServiceAccount (its chart's name).
+    serviceAccountName: ""
+    # -- Derived: its pods' selector labels.
+    podLabels: {}  # @schema additionalProperties: {"type": "string"}
+    # -- Derived, with substrate.rustfs.enabled: the Secret of RustFS's keys.
+    snapshotSecret: ""
+    # -- Derived, with the Crossplane AWS snapshot store: its IRSA role.
+    awsRoleName: ""
 
 # === agent-platform-operator (components.agent-platform-operator) ===
 # Values forwarded to the agent-platform-operator release (see its chart's
@@ -6443,7 +6645,8 @@ toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
 # renders (templates/backstage/ there) and which are dropped from the values
 # forwarded to the backstage chart (components.backstage.omitKeys): hostname,
 # parentRefs, installationName, extraScopes, startUrlSearchParams,
-# enabledExtensions, disabledExtensions, skillsRepositories, configReload. Their
+# enabledExtensions, disabledExtensions, skillsRepositories, skillPullRequests,
+# metaAgents, configReload. Their
 # meaning is documented in the connectivity chart's values.yaml; the defaults
 # are the standalone's.
 backstage:  # @schema skipProperties: true; additionalProperties: true
@@ -6492,9 +6695,15 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
     - api:ai-chat/service
     - api:ai-chat/drawer
     - app-root-element:ai-chat/drawer
-  # Skill repositories offered when an agent is created.
-  skillsRepositories:
-    - https://github.com/giantswarm/agent-skills
+  # Deprecated: set skillManager.sources. When set, replaces it for the portal;
+  # fails the render while the portal reads its skills from the skill-manager
+  # (agent-platform.backstage.skillManagerFloor).
+  skillsRepositories: []
+  # The agent behind a portal role (generalInformation, agentManagement,
+  # workflowManagement, platformOperations, skillEvaluation, skillCreation), as
+  # <installation>/<namespace>/<name>. Unset roles take the default agent while
+  # components.default-agent is on.
+  metaAgents: {}
   # Roll the Backstage pod when the app-config ConfigMap changes: a
   # post-install/post-upgrade hook Job of the connectivity release stamps the
   # rendered app-config's checksum into the Deployment's pod template (no-op

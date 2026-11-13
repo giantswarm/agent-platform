@@ -1,0 +1,16 @@
+# agentPlatformOrganizations.operator, agent-platform-operator's names, as the
+# meta chart derives them onto the connectivity release
+# (agent-platform.organizations.operator, giantswarm/agent-platform#1278), for
+# the tests that render the connectivity chart alone with
+# agentPlatformOrganizations.enabled. snapshotSecret is the derivation with
+# substrate.rustfs.enabled, awsRoleName the one with the Crossplane AWS store
+# of ci/test-substrate-store-aws-values.yaml; each is read only with its store.
+# make verify-operator-names fails while this file and the meta chart's
+# derivation differ.
+agentPlatformOrganizations:
+  operator:
+    serviceAccountName: agent-platform-operator
+    podLabels:
+      app.kubernetes.io/name: agent-platform-operator
+    snapshotSecret: substrate-rustfs-operator
+    awsRoleName: giantswarm-ci-substrate-operator
