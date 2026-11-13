@@ -27,9 +27,10 @@ the configured skill sources, a toolset (Muster selectors and presets), `EgressP
 it may reach), a Harness. agent-manager picks and pins them; it never writes model configs or egress
 policies.
 
-A toolset may contain at most 128 selectors and 8192 UTF-8 bytes joined with commas. The chart,
-agent-manager and muster enforce both limits. Use a preset for larger selections. Session binding
-requests must also fit their 16 KiB JSON body limit, including escaped names and other fields.
+A toolset may contain at most 128 selectors and 8192 UTF-8 bytes joined with commas. Muster enforces
+runtime limits; agent-manager reuses the chart's schema and render validation. Backstage reads the
+existing MCP schema and server validation responses. Use a preset for larger selections. The complete
+serialized Session binding must fit its 16 KiB JSON body limit, including escaped names and other fields.
 
 Where the reference lives — fetch it, never quote it from memory:
 
