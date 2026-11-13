@@ -48,7 +48,13 @@ def helmreleases(path):
 def main() -> int:
     path = sys.argv[1]
     retries = sys.argv[2] if len(sys.argv) > 2 else "5"
-    remediate = len(sys.argv) > 3 and sys.argv[3] == "remediate"
+    mode = sys.argv[3] if len(sys.argv) > 3 else ""
+    if len(sys.argv) > 4 or mode not in ("", "remediate"):
+        # A misspelt mode would otherwise silently check the RetryOnFailure
+        # default against a render that set upgradeStrategy=null.
+        print(f"usage: {sys.argv[0]} <render> [<retries> [remediate]]", file=sys.stderr)
+        return 2
+    remediate = mode == "remediate"
     releases = helmreleases(path)
     if "substrate" not in releases:
         print(f"FAIL: no substrate HelmRelease in {path}")
