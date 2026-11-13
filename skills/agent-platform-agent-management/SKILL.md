@@ -70,7 +70,7 @@ never assume an argument. The agent tools drop an unknown key without an error: 
    `x_agent-manager_get_agent_status` until `ready` (about a minute; the golden snapshot is the long
    part) → a first turn as the person (`x_agent-manager_start_session`, where offered). `valid: true`
    is not enough: `manifests.values` holds every field you meant to set, or a key was wrong. Poll the
-   status for up to about five minutes; still `progressing`, tell the person its summary and call it
+   status about every 30 s for up to about five minutes; still `progressing`, tell the person its summary and call it
    again at the start of your next turn.
 3. `x_agent-manager_update_agent` for follow-ups: only the fields passed change; `skills`, `plugins`,
    `egress` and `toolset` replace their whole list. `refreshSkills: true` re-pins every git skill and

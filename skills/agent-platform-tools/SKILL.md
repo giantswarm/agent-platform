@@ -86,8 +86,9 @@ of those names select by it; no label means an installation or a person register
 
 An organization's connector with a credential (`x_agent-manager_set_organization_connector`,
 organization admin): create it with a credential field — `credentialHeader` (default
-`Authorization`; Secret `tenant-credential-<name>`, key `token`). Without one it has no credential,
-and `x_agent-manager_replace_organization_credential` refuses it: nothing uses that Secret. The
+`Authorization`; Secret `tenant-credential-<name>`, key `token`). Without one it has no credential:
+`replaceCredential` on it does nothing and `x_agent-manager_replace_organization_credential` refuses
+it, as nothing uses that Secret — set `credentialHeader` with `set_organization_connector`. The
 answer is a URL elicitation of the credential form, link in `credentials[].next`; the connector is
 written once the person saves the form. No link: give the person the raw answer, never an
 explanation or a hand-made Secret. Check with `x_agent-manager_list_organization_connectors`
