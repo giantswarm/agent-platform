@@ -339,8 +339,8 @@ connectivity chart's migrate Job read the same range and filter. */ -}}
 {{- $name := $key }}
 {{- if $c.inKagentNamespace }}{{- $c = merge (dict "targetNamespace" (include "agent-platform.kagent.namespace" $root)) (deepCopy $c) }}{{- end }}
 {{- /* agent-platform-operator installs into the connectivity release's
-namespace, where the policies, bindings and the CA ConfigMap name its
-ServiceAccount (agent-platform.organizations.operatorServiceAccount). */ -}}
+namespace, where the policies and bindings name its ServiceAccount
+(agent-platform.organizations.operatorServiceAccount). */ -}}
 {{- if and (eq $key "agent-platform-operator") (not $c.targetNamespace) }}
 {{- $c = set (deepCopy $c) "targetNamespace" (dig "agent-platform-connectivity" "targetNamespace" "" $root.Values.components) }}
 {{- end }}

@@ -57,6 +57,8 @@ BASE = [
     "--set", "global.identity.clientId=platform",
     "--set", "global.identity.existingSecret=platform-oauth",
     "--set", "llmRouting.enabled=true",
+    # The operator's names, which the meta chart derives onto this release.
+    "-f", os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "organizations-operator-values.yaml"),
 ]
 ORGS = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "kagent.fluxServiceAccountName=kagent-flux",
         "--set", "global.domain=ci.example.com"]

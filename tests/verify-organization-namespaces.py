@@ -265,11 +265,14 @@ def check_meta(chart):
     relocated_capz = docs(meta(chart, "-f", f"{chart}/../agent-platform-connectivity/ci/test-substrate-store-capz-values.yaml", *ON, "--set", "kagent.harness.snapshotLocation=", "--set", "muster.muster.oauth.server.enabled=true", "--set", "muster.muster.oauth.server.provider=dex", "--set", "components.agent-platform-connectivity.targetNamespace=apo"))
     expect(release(relocated_capz, "agent-platform-operator")["values"]["snapshots"]["endpoint"] == "http://substrate-s3proxy.apo.svc:80", "s3proxy endpoint follows the connectivity namespace")
     arn = release(aws, "agent-platform-operator")["values"]["serviceAccount"]["annotations"]["eks.amazonaws.com/role-arn"]
+    # The connectivity chart, with the operator's names this meta render derives onto it.
+    derived = release(aws, "agent-platform-connectivity")["values"]["agentPlatformOrganizations"]["operator"]
     roles = [d for d in docs(run([HELM, "template", "t", f"{chart}/../agent-platform-connectivity", "-n", RELEASE_NS, "-f",
                                   f"{chart}/../agent-platform-connectivity/ci/test-substrate-store-aws-values.yaml",
                                   "--set", "agentPlatformOrganizations.enabled=true", "--set", "kagent.fluxServiceAccountName=kagent-flux",
                                   "--set", "global.domain=ci.example.com", "--set", "llmRouting.enabled=true", *MAP_API,
-                                  "-f", f"{chart}/../agent-platform-connectivity/ci/test-llm-routing-values.yaml"]))
+                                  "-f", f"{chart}/../agent-platform-connectivity/ci/test-llm-routing-values.yaml",
+                                  "--set-json", f"agentPlatformOrganizations.operator={json.dumps(derived)}"]))
              if d["kind"] == "Role" and d["apiVersion"].startswith("iam.aws")]
     role_names = {d["metadata"]["name"] for d in roles}
     expect(arn.split("/")[-1] in role_names and arn.startswith("arn:aws:iam::123456789012:role/"),
@@ -356,9 +359,13 @@ def check_meta(chart):
 
 # ---- the connectivity chart ---------------------------------------------------
 
+OPERATOR_VALUES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "organizations-operator-values.yaml")
+
+
 def connectivity(chart, flavor="kubernetes", *extra):
+    # The operator's names (OPERATOR_VALUES) are what the meta chart derives onto this release.
     return run([HELM, "template", "t", chart, "-n", RELEASE_NS, "-f", f"{chart}/ci/test-substrate-values.yaml",
-                "-f", f"{chart}/ci/test-llm-routing-values.yaml", "--set", "agentPlatformOrganizations.enabled=true",
+                "-f", f"{chart}/ci/test-llm-routing-values.yaml", "-f", OPERATOR_VALUES, "--set", "agentPlatformOrganizations.enabled=true",
                 "--set", "kagent.fluxServiceAccountName=kagent-flux", "--set", "global.domain=ci.example.com",
                 "--set", "kagent.namespaceOverride=kagent", "--set", f"networkPolicy.flavor={flavor}",
                 "--api-versions", "kyverno.io/v2/PolicyException", *MAP_API, *extra])

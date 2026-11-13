@@ -93,6 +93,8 @@ def render(chart):
                         "--set", "agentPlatformOrganizations.enabled=true", "--set", "agentPlatformOrganizations.fluxNamespace=flux-system",
                         "--set", "agentPlatformOrganizations.fluxSource.name=agent-platform-organizations",
                         "--set", "agentPlatformOrganizations.apiHostnames[0]=api.ci.example.com", "--set", "llmRouting.enabled=true",
+                        # The operator's names, which the meta chart derives onto this release.
+                        "-f", os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "organizations-operator-values.yaml"),
                         "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"], capture_output=True, text=True)
     if r.returncode != 0:
         raise SystemExit(f"FAIL: helm template:\n{r.stderr}")
