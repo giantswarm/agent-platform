@@ -1,8 +1,9 @@
 {{- /*
 A tenant's own ModelConfig (giantswarm/agent-platform#759): with kagent and
-agentPlatformOrganizations.enabled, an organization brings its own model key, and every model call of the
-organization still goes through the `llm` listener, so the gateway meters it
-under the organization's namespace. Two ValidatingAdmissionPolicies, in every
+agentPlatformOrganizations.enabled, an organization brings its own model credential.
+Listener-supported providers are metered through `llm`. Vertex AI uses the
+Google token credential provider and direct Substrate egress; it is unmetered.
+Two ValidatingAdmissionPolicies, in every
 organization namespace (agent-platform.orgNamespaces.label: selected by the
 label, never listed) except the kagent namespace, the platform tenant, for
 every requester:
@@ -11,7 +12,10 @@ agent-platform-tenant-model-routing admits a ModelConfig only when the
 listener serves its provider (agent-platform.tenants.providers: the providers
 of llmRouting.models, and OpenAI when model-manager serves models on the
 listener) and its baseUrl is the listener URL for that provider
-(agent-platform.llmListenerUrl). A ModelConfig of any other provider, Bedrock
+(agent-platform.llmListenerUrl). Native AnthropicVertexAI and GeminiVertexAI
+providers use their CRD-defined project and location, with namespace-local
+credential references checked by agent-platform-tenant-credentials.
+A ModelConfig of any other provider, Bedrock
 included (it has no baseUrl), is refused: it would reach the provider
 directly, unmetered. The chart's routing policy
 (templates/llm/modelconfig-policy.yaml) runs first, in these namespaces too,
@@ -78,6 +82,8 @@ spec:
       expression: "has(object.spec) ? dyn(object.spec) : dyn({})"
     - name: provider
       expression: "'provider' in variables.spec ? string(variables.spec.provider) : ''"
+    - name: directVertex
+      expression: "variables.provider in ['AnthropicVertexAI', 'GeminiVertexAI']"
     - name: served
       expression: {{ printf "{%s}" (join ", " $served) | quote }}
     # [block, listener URL] of a served provider, else [].
@@ -97,7 +103,7 @@ spec:
         has(object.metadata.deletionTimestamp) && request.operation == 'UPDATE' &&
         variables.spec == (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
   validations:
-    - expression: "variables.releasing || size(variables.route) == 2"
+    - expression: "variables.releasing || variables.directVertex || size(variables.route) == 2"
       reason: Forbidden
       messageExpression: >-
         {{ printf "'in an Organization namespace a ModelConfig goes through the platform\\'s LLM listener, which meters every model call; it serves the providers %s, and provider ' + (variables.provider == '' ? '<none>' : variables.provider) + ' is not one of them (a Bedrock ModelConfig has no baseUrl and would bypass the listener). Use a served provider (its spec.<provider>.baseUrl is the listener, filled in when you leave it out), or ask the platform team to add the provider to llmRouting.models. Refused for ' + request.userInfo.username + ': ' + request.name" (join ", " $providers) }}
