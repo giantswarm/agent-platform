@@ -41,8 +41,8 @@
   skill sources from agent-platform.agentManager.skillManagerFloor on, with
   the skill-manager on; else skills.repositories as URLs, no platform source,
   replaced by its own deprecated list. From the same floor agent-manager gets
-  installation (backstage.installationName), which get_info reports for the
-  default agent's start links. The deprecated list fails the render while
+  installation (backstage.installationName), which get_info reports; start
+  links leave it out. The deprecated list fails the render while
   agent-manager pins through the skill-manager.
 - The connectivity chart wires the portal's meta agents to it while it is on.
 

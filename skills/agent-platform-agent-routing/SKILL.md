@@ -2,7 +2,7 @@
 name: agent-platform-agent-routing
 description: Use when a task might suit another agent than the one in this session, when someone asks which agent to use or whether one exists for a task, when a task repeats, or when you write a link that starts a session with an agent.
 metadata:
-  version: "1.0.1"
+  version: "1.1.0"
 ---
 
 # Routing a task to the right agent
@@ -71,30 +71,36 @@ Once it is `ready`, give its start link.
 
 ## The start link
 
-A relative link to the portal's new-session screen (`/`, the home), same origin, which preselects
-the agent and prefills the composer:
+A link to the portal's new-session screen (`/`, the home), which preselects the agent and prefills
+the composer:
 
 ```text
-[Start a session with <Display name>](/?agent=<agent id>#prompt=<brief>)
+[Start a session with <Display name>](/?agent=<namespace>%2F<name>#prompt=<brief>)
 ```
 
-- **`agent`**: the portal's agent id, `<installation>/<namespace>/<name>`, URL-encoded (`/` becomes
-  `%2F`). `<installation>` is `installation` from `x_agent-manager_get_info`; `<namespace>` and
-  `<name>` (the technical name) come from `x_agent-manager_list_agents`. No `installation` in
-  `get_info`: name the agent instead of linking it.
+- **`agent`**: `<namespace>/<name>`, URL-encoded (`/` becomes `%2F`). Both come from
+  `x_agent-manager_list_agents`; `<name>` is the technical name. Leave the installation out: the
+  portal finds the agent by namespace and name across its installations, and the installation name
+  it uses is not one agent-manager reports.
 - **`prompt`**: optional, after `#` so it stays out of server logs. A short brief of the task in the
-  person's terms, URL-encoded (space `%20`), at most a few hundred characters. It prefills the
-  composer; the person edits and sends it.
+  person's terms, URL-encoded as a URI component (space `%20`, `#` `%23`, `&` `%26`), at most a few
+  hundred characters; the portal keeps 2000. It prefills the composer; the person edits and sends it.
 - **Never in the brief**: conversation data — mail or message contents, logs, customer data, secrets,
   tokens. Name the task, not its material.
 - Display name, else technical name, in the link text.
+- **Base URL**: keep the link relative, so it opens in the portal the person is reading. When it must
+  be absolute, prefix the portal address the person uses; never guess one or take another
+  installation's portal.
 
-Example, for an agent `release-notes` in namespace `kagent` on the installation `gazelle`:
+Example, for an agent `release-notes` in namespace `kagent`:
 
 ```text
-[Start a session with Release Notes](/?agent=gazelle%2Fkagent%2Frelease-notes#prompt=Draft%20the%20release%20notes%20for%20agent-platform%20v4.2.0)
+[Start a session with Release Notes](/?agent=kagent%2Frelease-notes#prompt=Draft%20the%20release%20notes%20for%20agent-platform%20v4.2.0)
 ```
 
-An unknown or not-startable `agent` falls back to the default agent in the portal: check readiness
-before linking. Outside the portal (Slack, an IDE) the link does not resolve; name the agent and where
-to find it instead (Dev Portal, **New session**).
+When the link names no agent the portal can start (unknown, not ready, its environment unreachable),
+the portal keeps its default agent preselected and the person may not notice: check readiness before
+linking. When the same namespace and name exist in more than one of the portal's installations, the
+portal may pick another one than meant, or none and ask the person to choose; say which environment
+the agent runs in next to the link then. Outside the portal (Slack, an IDE) a relative link does not
+resolve; name the agent and where to find it instead (Dev Portal, **New session**).
