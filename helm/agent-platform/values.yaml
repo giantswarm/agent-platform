@@ -3982,6 +3982,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # The name the Dev Portal shows for the server (the MCPServer's
       # ui.giantswarm.io/display-name annotation); empty renders none.
       displayName: Kagent
+      # The line the Dev Portal shows under the server's name (the MCPServer's
+      # spec.description, at most 500 characters); empty renders none.
+      description: "Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
