@@ -13,6 +13,7 @@ renders whenever components.cluster-manager is on (#494). */ -}}
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.modelManager.oauthEnabled" . }}
+{{- $broker := include "agent-platform.managerGrantBroker" (dict "chart" $chart "oauthOn" $oauthOn "component" "model-manager") | fromJson }}
 {{- /* Commit mode (model-manager.github.enabled) calls GitHub's API: GET /user
 for the person's App token and the pull request. */ -}}
 {{- $commitOn := dig "github" "enabled" false $chart }}
@@ -138,6 +139,9 @@ spec:
       {{- include "agent-platform.modelManager.podSelector" . | nindent 6 }}
   egress:
     {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- with $broker }}
+    {{- include "agent-platform.managerGrantBroker.egress" (dict "root" $ "broker" . "cidrs" $egress.cidrs) | nindent 4 }}
+    {{- end }}
     {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "model-manager's traces go to" "flavor" "cilium") }}
     {{- . | nindent 4 }}
     {{- end }}
@@ -419,6 +423,9 @@ spec:
       {{- include "agent-platform.modelManager.podSelector" . | nindent 6 }}
   policyTypes: [Egress]
   egress:
+    {{- with $broker }}
+    {{- include "agent-platform.managerGrantBroker.egress" (dict "root" $ "broker" . "cidrs" $egress.cidrs) | nindent 4 }}
+    {{- end }}
     {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "model-manager's traces go to" "flavor" "kubernetes") }}
     {{- . | nindent 4 }}
     {{- end }}
