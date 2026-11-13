@@ -2,7 +2,7 @@
 #
 #    devctl
 #
-#    https://github.com/giantswarm/devctl/blob/c370873410de970a09ddbfb5ee72adf11259d8f4/pkg/gen/input/workflows/internal/file/helm-docs-regen.yaml.template
+#    https://github.com/giantswarm/devctl/blob/94f140ade1dcd00efd77282aa6806d83c0f17a35/pkg/gen/input/workflows/internal/file/helm-docs-regen.yaml.template
 #
 # Regenerates the files the generated pre-commit hooks derive from a chart's
 # values.yaml -- the helm-docs README and values.schema.json -- on Renovate and
@@ -142,7 +142,7 @@ jobs:
           tarball_binary_path: "helm-docs"
           smoke_test: "${binary} --version"
       - name: Set up Python environment
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       - name: Install pre-commit
         run: python -m pip install pre-commit
       - name: Cache the pre-commit hook environments
