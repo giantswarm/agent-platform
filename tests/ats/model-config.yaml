@@ -12,6 +12,6 @@ metadata:
     agent-platform.giantswarm.io/is-default-model-config: "true"
 spec:
   provider: Anthropic
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5-5
   apiKeySecret: kagent-anthropic
   apiKeySecretKey: ANTHROPIC_API_KEY
