@@ -1404,9 +1404,9 @@ components:  # @schema additionalProperties: true
     # (agent-platform-operator, its chart's name), and another targetNamespace
     # fails the render.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # A 0.3.x release rolls in without a change here, its CRD with it
+    # A 0.4.x release rolls in without a change here, its CRD with it
     # (CreateReplace); one that needs wiring of this chart is a minor
-    # release, 0.4.0, outside the range. 0.1.0 carries the CRD, the curated
+    # release, 0.5.0, outside the range. 0.1.0 carries the CRD, the curated
     # copies, organization cleanup, the ate-api CA projected from ClusterTrustBundles
     # (agent-platform-operator#2, #3, #7, #21) and the serviceAccountBindings
     # the meta chart derives: the credential providers' Secret readers bound
@@ -1421,8 +1421,18 @@ components:  # @schema additionalProperties: true
     # status.lastAppliedRevision, the last revision Flux applied an
     # organization from, kept while it is Orphaned; agent-manager 2.23.0 links
     # its commit (agent-platform-operator#37, #44, agent-manager#355). It
-    # needs no new wiring of this chart either.
-    versionRange: ">=0.3.0 <0.4.0"
+    # needs no new wiring of this chart either. 0.4.0 is the floor: an
+    # organization runs spec.workers.replicas warm workers (1 when not set,
+    # the CRD's new default; 0 set on purpose stays 0) while its namespace
+    # holds a ModelConfig and an Agent (a curated copy counts) or a
+    # ModelConfig and a kagent session, and 0 otherwise; below it a new
+    # organization runs 0 workers and its agents never become ready
+    # (agent-platform-operator#50, giantswarm/giantswarm#39250). It watches
+    # Agent metadata in every namespace, which its ClusterRole already
+    # grants, and asks for the sessions through the erasure's kagent target,
+    # which this chart already derives, binds (organization-erasure) and
+    # opens in the network policies: no new wiring here.
+    versionRange: ">=0.4.0 <0.5.0"
     valuesFrom: agent-platform-operator
     # App-owned CRD: the chart ships agentplatformorganizations in its crds/
     # dir. CreateReplace makes Flux upgrade it with the app on every release
