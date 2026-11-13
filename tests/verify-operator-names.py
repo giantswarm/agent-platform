@@ -170,8 +170,8 @@ def operator_chart(meta_chart):
     floor = floors.floor("agent-platform-operator", meta_chart)
     objs = docs(run([HELM, "template", "operator", f"{c['repository']}/{c['chart']}", "--version", floor, "-n", RELEASE_NS]),
                 f"the operator chart {floor}")
-    dep = next(d for d in objs if d["kind"] == "Deployment")
-    sa = next(d for d in objs if d["kind"] == "ServiceAccount")
+    dep = next(d for d in objs if d.get("kind") == "Deployment")
+    sa = next(d for d in objs if d.get("kind") == "ServiceAccount")
     return floor, sa["metadata"]["name"], dep["spec"]["template"]["spec"]["serviceAccountName"], dep["spec"]["selector"]["matchLabels"], dep["spec"]["template"]["metadata"]["labels"]
 
 
