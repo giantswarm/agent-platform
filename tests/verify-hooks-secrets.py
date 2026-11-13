@@ -191,8 +191,9 @@ def job_scripts(job):
 
 def run_event(cluster, docs, event):
     """Replay one event. The API server authorizes from RBAC caches it fills
-    on its own time (giantswarm/agent-platform#1412), so it settles after the
-    RBAC writes, before the next script and at the end: each script, and each
+    on its own time (giantswarm/agent-platform#1412), so run_event() settles
+    the API server after the RBAC writes, before the next script and at the
+    end of the event: each script, and each
     refusal after the last event, meets every grant written so far. settle()
     writes only its own sentinels, bound to users of its own, so it grants
     the hook identity nothing."""
@@ -311,7 +312,12 @@ def main():
             else:
                 ok(f"the hook identity is refused {what}")
     finally:
-        api.stop(keep_log=bool(failures))
+        # A SystemExit on the way (a kubectl the setup needs, or a settle()
+        # that timed out) keeps the API server log too.
+        exiting = sys.exc_info()[0] is not None
+        api.stop(keep_log=bool(failures) or exiting)
+        if exiting:
+            print(f"the API server log is kept: {api.log.name}")
         shutil.rmtree(work, ignore_errors=True)
 
     if failures:
