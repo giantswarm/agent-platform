@@ -264,6 +264,12 @@ def check_meta(chart):
     expect(conn["components"].get("agent-platform-operator") == {"enabled": True} and "agent-platform-operator" not in conn,
            "the connectivity release sees the operator in the roster, never its values block")
 
+    erasure = release(docs(meta(chart, *ON, "--set", "components.substrate.targetNamespace=ate-system")), "agent-platform-operator")["values"]["erasure"]["substrate"]
+    expect(erasure["target"] == "grpcs://api.ate-system.svc:443" and erasure["audience"] == "api.ate-system.svc",
+           "on with components.substrate.targetNamespace ate-system, the render succeeds and the operator calls ate-api in ate-system, where the connectivity chart's operator policies point")
+    off_moved = meta(chart, "--set", "components.substrate.targetNamespace=ate-x")
+    expect(off_moved.returncode == 0, f"off, another components.substrate.targetNamespace is not refused by the organizations check:\n{off_moved.stderr}")
+
     moved = docs(meta(chart, *ON, "--set", "components.agent-platform-connectivity.targetNamespace=apo"))
     expect(release(moved, "agent-platform-operator")["targetNamespace"] == "apo",
            "with the connectivity release in another namespace, the operator installs there too")
@@ -338,6 +344,10 @@ def check_meta(chart):
              "components.agent-platform-operator.enabled is false but agentPlatformOrganizations.enabled is true"),
             ("another targetNamespace", ["--set", "components.agent-platform-operator.targetNamespace=elsewhere"],
              "components.agent-platform-operator.targetNamespace (elsewhere) differs"),
+            ("Substrate outside ate-system", ["--set", "components.substrate.targetNamespace=ate-x"],
+             "components.substrate.targetNamespace (ate-x) is not ate-system"),
+            ("an empty Substrate namespace", ["--set", "components.substrate.targetNamespace="],
+             "components.substrate.targetNamespace () is not ate-system"),
             ("an agent-manager floor below 2.20.0", ["--set", "components.agent-manager.versionRange=>=2.19.0 <3.0.0"],
              "agentPlatformOrganizations.enabled needs agent-manager 2.20.0 or later: components.agent-manager.versionRange (>=2.19.0 <3.0.0)"),
             ("an own agent-manager.tenants.enabled false", ["--set", "agent-manager.tenants.enabled=false"],

@@ -5904,7 +5904,11 @@ Fail the render for an organizations setup that cannot work
     without kagent.fluxServiceAccountName, without the llm listener's routing
     of ModelConfigs (llmRouting.enabled, llmRouting.modelConfigPolicy.enabled),
     and without the installation's API hostnames (global.domain or
-    agentPlatformOrganizations.apiHostnames).
+    agentPlatformOrganizations.apiHostnames);
+  - components.substrate.targetNamespace other than ate-system: the operator
+    calls ate-api there, but the connectivity chart's operator egress rule
+    and operator-to-ate-api ingress policy name ate-system
+    (agent-platform.substrate.namespace there), so the call is dropped.
 */}}
 {{- define "agent-platform.validateOrganizations" -}}
 {{- $on := include "agent-platform.organizations.on" . -}}
@@ -5929,6 +5933,10 @@ Fail the render for an organizations setup that cannot work
 {{- end -}}
 {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
 {{- fail "agentPlatformOrganizations.enabled needs Agent Substrate (components.substrate): an organization's agents run on its copy of the platform WorkerPool, and cleanup of a deleted organization asks ate-api until it has no actor left" -}}
+{{- end -}}
+{{- $ateNs := toString (dig "substrate" "targetNamespace" "ate-system" .Values.components) -}}
+{{- if ne $ateNs "ate-system" -}}
+{{- fail (printf "components.substrate.targetNamespace (%s) is not ate-system: with agentPlatformOrganizations.enabled the operator calls ate-api in that namespace, but the connectivity chart's operator egress rule and the operator-to-ate-api ingress policy name ate-system, so the call is dropped and the erasure of a deleted organization stops at the ate-api step — leave components.substrate.targetNamespace at ate-system" $ateNs) -}}
 {{- end -}}
 {{- if not (include "agent-platform.kagent.fluxServiceAccountName" .) -}}
 {{- fail "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: it is the operator's helmReleaseServiceAccount, the ServiceAccount an organization's HelmReleases run as" -}}
