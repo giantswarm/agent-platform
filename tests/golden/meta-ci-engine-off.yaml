@@ -718,6 +718,8 @@ spec:
               enabled: false
           mode: Strict
         mcp:
+          description: 'Your agent sessions on this installation, as the signed-in person:
+            list them, send one a message, and checkpoint or fork them'
           displayName: Kagent
           enabled: true
           pathPrefix: /kagent/mcp
