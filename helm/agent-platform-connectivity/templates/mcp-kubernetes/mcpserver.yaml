@@ -20,7 +20,8 @@ next to the platform's own management surface (agent-manager, model-manager:
 agent-platform, stamped by their charts) and the servers an installation
 registers (no label). The portal's MCP servers page, the toolset presets and
 the docs group servers by it; it names the server by mcpServer.displayName
-(the ui.giantswarm.io/display-name annotation) when set.
+(the ui.giantswarm.io/display-name annotation) when set, and shows
+mcpServer.description (spec.description) under the name when set.
 
 mcp-kubernetes.mcpServer picks one of three shapes:
   - enabled: false renders no CR; the registration is agent-platform-mcps'
@@ -41,6 +42,10 @@ mcp-kubernetes.mcpServer picks one of three shapes:
 {{- if and $cluster (not (regexMatch "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" $cluster)) }}
 {{- fail (printf "mcp-kubernetes.mcpServer.managementCluster %q: want a DNS label (lower-case alphanumerics and '-')" $cluster) }}
 {{- end }}
+{{- $description := dig "description" "" $reg }}
+{{- if gt (len $description) 500 }}
+{{- fail (printf "mcp-kubernetes.mcpServer.description: %d characters, want at most 500 (the MCPServer CRD's maxLength)" (len $description)) }}
+{{- end }}
 apiVersion: muster.giantswarm.io/v1alpha1
 kind: MCPServer
 metadata:
@@ -58,6 +63,9 @@ metadata:
     ui.giantswarm.io/display-name: {{ . | quote }}
   {{- end }}
 spec:
+  {{- with $description }}
+  description: {{ . | quote }}
+  {{- end }}
   autoStart: true
   type: streamable-http
   url: http://{{ dig "fullnameOverride" "mcp-kubernetes" $mcpk }}.{{ .Release.Namespace }}.svc.cluster.local:{{ dig "service" "port" 8080 $mcpk }}/mcp
