@@ -225,6 +225,32 @@
                             "type": "string"
                         }
                     }
+                },
+                "operator": {
+                    "type": "object",
+                    "description": "agent-platform-operator's names, which this chart derives onto the connectivity release while the organizations are on (agent-platform.organizations.operator, giantswarm/agent-platform#1278). Declared for the connectivity chart's schema only: never forwarded as set here (components.agent-platform-connectivity.omitKeys), and an own value fails the render. Leave it unset.",
+                    "additionalProperties": false,
+                    "properties": {
+                        "awsRoleName": {
+                            "type": "string",
+                            "description": "Derived, with the Crossplane AWS snapshot store: its IRSA role."
+                        },
+                        "podLabels": {
+                            "type": "object",
+                            "description": "Derived: its pods' selector labels.",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        },
+                        "serviceAccountName": {
+                            "type": "string",
+                            "description": "Derived: the operator's ServiceAccount (its chart's name)."
+                        },
+                        "snapshotSecret": {
+                            "type": "string",
+                            "description": "Derived, with substrate.rustfs.enabled: the Secret of RustFS's keys."
+                        }
+                    }
                 }
             }
         },

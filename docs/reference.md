@@ -613,7 +613,7 @@ metadata:
   namespace: agents-acme-x7k2q
 spec:
   provider: Anthropic
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5-5
   apiKeySecret: tenant-credential-anthropic
   apiKeySecretKey: ANTHROPIC_API_KEY
 ```

@@ -1802,6 +1802,9 @@ components:  # @schema additionalProperties: true
       # the connectivity chart reads agentPlatformOrganizations, never this
       # block.
       - agent-platform-operator
+      # The operator's names reach the connectivity release derived
+      # (agent-platform.organizations.operator), never as declared here.
+      - agentPlatformOrganizations.operator
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -5829,6 +5832,21 @@ agentPlatformOrganizations:
   # covers one, beside the cluster-internal and host-local names it never
   # names. The render fails while both are empty.
   apiHostnames: []  # @schema item: string
+  # -- agent-platform-operator's names, which this chart derives onto the
+  # connectivity release while the organizations are on
+  # (agent-platform.organizations.operator, giantswarm/agent-platform#1278).
+  # Declared for the connectivity chart's schema only: never forwarded as
+  # set here (components.agent-platform-connectivity.omitKeys), and an own
+  # value fails the render. Leave it unset.
+  operator:
+    # -- Derived: the operator's ServiceAccount (its chart's name).
+    serviceAccountName: ""
+    # -- Derived: its pods' selector labels.
+    podLabels: {}  # @schema additionalProperties: {"type": "string"}
+    # -- Derived, with substrate.rustfs.enabled: the Secret of RustFS's keys.
+    snapshotSecret: ""
+    # -- Derived, with the Crossplane AWS snapshot store: its IRSA role.
+    awsRoleName: ""
 
 # === agent-platform-operator (components.agent-platform-operator) ===
 # Values forwarded to the agent-platform-operator release (see its chart's

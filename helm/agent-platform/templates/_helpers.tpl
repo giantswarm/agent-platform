@@ -631,6 +631,13 @@ deprecated list it discovers itself (agent-platform.skills.repositories). */ -}}
 {{- else -}}
 {{- $_ := set $derived "backstage" (dict "skillsRepositories" (include "agent-platform.skills.repositories" (dict "root" .root "consumer" "backstage") | fromJson).list) -}}
 {{- end -}}
+{{- /* agent-platform-operator's names, while the organizations are on: the
+connectivity chart's policies, bindings and objects for the operator read
+them from here (agent-platform.organizations.operator). Off, nothing: the
+connectivity release's values stay those of a chart without the operator. */ -}}
+{{- if include "agent-platform.organizations.on" .root -}}
+{{- $_ := set $derived "agentPlatformOrganizations" (dict "operator" (include "agent-platform.organizations.operator" .root | fromJson)) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "toolchain-manager" -}}
 {{- $derived = include "agent-platform.toolchainManager.derived" .root | fromJson -}}
@@ -1223,7 +1230,7 @@ Usage: include "agent-platform.kagent.authorization" . | fromJson
 {{- end -}}
 {{- if include "agent-platform.organizations.on" . -}}
 {{- $operator := include "agent-platform.organizations.operatorServiceAccount" . | fromJson -}}
-{{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $operator.namespace)) "podSelector" (dict "matchLabels" (dict "app.kubernetes.io/name" $operator.name))) -}}
+{{- $peers = append $peers (dict "namespaceSelector" (dict "matchLabels" (dict "kubernetes.io/metadata.name" $operator.namespace)) "podSelector" (dict "matchLabels" (include "agent-platform.organizations.operator" . | fromJson).podLabels)) -}}
 {{- end -}}
 {{- range (dig "from" list $np) -}}
 {{- if not (has . $peers) -}}{{- $peers = append $peers . -}}{{- end -}}
@@ -2460,14 +2467,29 @@ snapshotLocation agreeing with the derived one.
 {{- end -}}
 {{- end -}}
 
-{{/* The role's ARN: arn:aws (arn:aws-cn in the China partition), the account, aws.roleName or the bucket name. */}}
+{{/* The store's role name: aws.roleName or the bucket name. */}}
+{{- define "agent-platform.substrateStore.awsRoleName" -}}
+{{- $aws := (include "agent-platform.substrateStore.block" . | fromJson).crossplane.aws -}}
+{{- $aws.roleName | default $aws.bucketName -}}
+{{- end -}}
+
+{{/* The role's ARN: arn:aws (arn:aws-cn in the China partition), the account, the store's role name. */}}
 {{- define "agent-platform.substrateStore.awsRoleArn" -}}
-{{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane -}}
+{{- include "agent-platform.substrateStore.awsRoleArnOf" (dict "root" . "role" (include "agent-platform.substrateStore.awsRoleName" .)) -}}
+{{- end -}}
+
+{{/*
+The ARN of a role in the store's account: arn:aws (arn:aws-cn in the China
+partition), the account, the role name given.
+Usage: include "agent-platform.substrateStore.awsRoleArnOf" (dict "root" $ "role" $name)
+*/}}
+{{- define "agent-platform.substrateStore.awsRoleArnOf" -}}
+{{- $xp := (include "agent-platform.substrateStore.block" .root | fromJson).crossplane -}}
 {{- if not (regexMatch "^[0-9]{12}$" (toString $xp.aws.accountId)) -}}
 {{- fail (printf "kagent.harness.snapshotStore.crossplane.aws.accountId (%v) must be the 12-digit AWS account id, quoted as a string" $xp.aws.accountId) -}}
 {{- end -}}
 {{- $partition := "arn:aws" -}}{{- if hasPrefix "cn-" $xp.region }}{{- $partition = "arn:aws-cn" }}{{- end -}}
-{{- printf "%s:iam::%s:role/%s" $partition $xp.aws.accountId ($xp.aws.roleName | default $xp.aws.bucketName) -}}
+{{- printf "%s:iam::%s:role/%s" $partition $xp.aws.accountId .role -}}
 {{- end -}}
 
 {{/*
@@ -5821,15 +5843,51 @@ Usage: include "agent-platform.workerPolicyNames" (dict "flavor" $flavor) | from
 {{- end -}}
 
 {{/*
-agent-platform-operator's ServiceAccount, as JSON {name, namespace}: its
-chart names it after itself, and the component installs into the
-connectivity release's namespace (agent-platform.validateOrganizations
-refuses another), where the connectivity chart names it from the same two
-facts (agent-platform.organizations.operatorServiceAccount there).
+agent-platform-operator's names, as JSON, made in this one place
+(giantswarm/agent-platform#1278). This chart installs the operator and tells
+it these names; it derives them onto the connectivity release too
+(agentPlatformOrganizations.operator), whose policies, bindings, network
+policies and objects for the operator read them there and hold no copy:
+  - serviceAccountName: the operator's chart names its ServiceAccount after
+    itself (.Chart.Name), the chart components.agent-platform-operator
+    installs;
+  - podLabels: its pods' selector label app.kubernetes.io/name, the same name;
+  - snapshotSecret, with RustFS (substrate.rustfs.enabled): the Secret of
+    RustFS's keys the connectivity chart renders beside the operator, its
+    snapshots.credentials.existingSecret;
+  - awsRoleName, with the Crossplane AWS snapshot store: the IAM role the
+    connectivity chart renders for the operator beside Substrate's, the
+    store's role name and -operator, named on the operator's ServiceAccount
+    (IRSA). IAM takes 64 characters; a longer name fails the render rather
+    than be cut, which could give it Substrate's role's name.
+Usage: include "agent-platform.organizations.operator" . | fromJson
+*/}}
+{{- define "agent-platform.organizations.operator" -}}
+{{- $name := (index .Values.components "agent-platform-operator").chart -}}
+{{- $out := dict "serviceAccountName" $name "podLabels" (dict "app.kubernetes.io/name" $name) -}}
+{{- if dig "rustfs" "enabled" false (.Values.substrate | default dict) -}}
+{{- $_ := set $out "snapshotSecret" "substrate-rustfs-operator" -}}
+{{- end -}}
+{{- if eq (include "agent-platform.substrateStore.crossplane" .) "aws" -}}
+{{- $role := printf "%s-operator" (include "agent-platform.substrateStore.awsRoleName" .) -}}
+{{- if gt (len $role) 64 -}}
+{{- fail (printf "agentPlatformOrganizations: the operator's IAM role %s is longer than 64 characters: set a shorter kagent.harness.snapshotStore.crossplane.aws.roleName (at most 55)" $role) -}}
+{{- end -}}
+{{- $_ := set $out "awsRoleName" $role -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+agent-platform-operator's ServiceAccount, as JSON {name, namespace}: the name
+of agent-platform.organizations.operator, in the connectivity release's
+namespace, where the component installs (agent-platform.validateOrganizations
+refuses another) and where the connectivity chart names it with the name this
+chart derives (agent-platform.organizations.operatorServiceAccount there).
 */}}
 {{- define "agent-platform.organizations.operatorServiceAccount" -}}
 {{- $connNs := dig "agent-platform-connectivity" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
-{{- dict "name" "agent-platform-operator" "namespace" $connNs | toJson -}}
+{{- dict "name" (include "agent-platform.organizations.operator" . | fromJson).serviceAccountName "namespace" $connNs | toJson -}}
 {{- end -}}
 
 {{/*
@@ -5838,6 +5896,7 @@ Fail the render for an organizations setup that cannot work
   - an explicit components.agent-platform-operator.enabled that disagrees
     with the switch, or a targetNamespace other than the connectivity
     release's (the policies there name the operator's ServiceAccount in it);
+  - an own agentPlatformOrganizations.operator value: the chart derives it;
   - the switch on without kagent or Agent Substrate: the operator copies the
     curated kagent objects and the WorkerPool, and its cleanup process asks ate-api;
     without kagent.fluxServiceAccountName, without the llm listener's routing
@@ -5850,6 +5909,11 @@ Fail the render for an organizations setup that cannot work
 {{- $c := index .Values.components "agent-platform-operator" | default dict -}}
 {{- if and (hasKey $c "enabled") (not (kindIs "invalid" $c.enabled)) (ne (toString $c.enabled) (toString (eq $on "true"))) -}}
 {{- fail (printf "components.agent-platform-operator.enabled is %v but agentPlatformOrganizations.enabled is %v: the operator follows the one switch — set agentPlatformOrganizations.enabled and leave components.agent-platform-operator.enabled unset" $c.enabled (eq $on "true")) -}}
+{{- end -}}
+{{- range $k, $v := dig "operator" dict (.Values.agentPlatformOrganizations | default dict) | default dict -}}
+{{- if $v -}}
+{{- fail (printf "agentPlatformOrganizations.operator.%s is set: the chart derives agent-platform-operator's names (agent-platform.organizations.operator) — leave agentPlatformOrganizations.operator unset" $k) -}}
+{{- end -}}
 {{- end -}}
 {{- if $on -}}
 {{- $op := include "agent-platform.organizations.operatorServiceAccount" . | fromJson -}}
@@ -5913,9 +5977,11 @@ same bucket (or the container behind the s3proxy façade): s3://<bucket>/<uid>. 
 {{- if $aws -}}
 {{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane -}}
 {{- with $xp.region }}{{- $_ := set $snapshots "region" . -}}{{- end -}}
-{{- /* The role the connectivity chart renders beside Substrate's: the store's
-role name and -operator (organization-erasure/crossplane-aws.yaml). */ -}}
-{{- $_ := set $derived "serviceAccount" (dict "annotations" (dict "eks.amazonaws.com/role-arn" (printf "%s-operator" (include "agent-platform.substrateStore.awsRoleArn" .)))) -}}
+{{- /* The role the connectivity chart renders beside Substrate's
+(organization-erasure/crossplane-aws.yaml), named by
+agent-platform.organizations.operator, in the store's account. */ -}}
+{{- $role := (include "agent-platform.organizations.operator" . | fromJson).awsRoleName -}}
+{{- $_ := set $derived "serviceAccount" (dict "annotations" (dict "eks.amazonaws.com/role-arn" (include "agent-platform.substrateStore.awsRoleArnOf" (dict "root" . "role" $role)))) -}}
 {{- end -}}
 {{- $_ := set $derived "snapshots" $snapshots -}}
 {{- $ateNs := dig "substrate" "targetNamespace" "ate-system" .Values.components -}}
@@ -6079,7 +6145,7 @@ certSecretRef:
 {{- $_ := set $snapshots "endpoint" (printf "http://rustfs.%s.svc:9000" $namespace) -}}
 {{- $_ := set $snapshots "usePathStyle" true -}}
 {{- $_ := set $snapshots "region" "us-east-1" -}}
-{{- $_ := set $snapshots "credentials" (dict "existingSecret" "substrate-rustfs-operator") -}}
+{{- $_ := set $snapshots "credentials" (dict "existingSecret" (include "agent-platform.organizations.operator" . | fromJson).snapshotSecret) -}}
 {{- else -}}
 {{- range dig "ateApiServer" "extraEnv" list $substrate -}}
 {{- if eq .name "AWS_ENDPOINT_URL" -}}

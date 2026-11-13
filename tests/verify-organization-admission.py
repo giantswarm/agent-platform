@@ -131,10 +131,12 @@ def run(cmd):
 # ---- the render --------------------------------------------------------------
 
 def render(chart, *extra):
+    # The operator's names, which the meta chart derives onto this release.
+    operator = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "organizations-operator-values.yaml")
     return run([HELM, "template", "t", chart, "--namespace", RELEASE_NS,
                 "--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://a/b",
                 "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "--set", "kagent.namespaceOverride=kagent",
-                "--set", "components.kagent.enabled=true", *extra])
+                "--set", "components.kagent.enabled=true", "-f", operator, *extra])
 
 
 ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", f"agentPlatformOrganizations.fluxNamespace={FLUX_NS}",
