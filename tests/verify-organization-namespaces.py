@@ -83,6 +83,10 @@ POOL = "kagent-default"
 PERSON = "jose"
 LISTENER = "http://agentgateway.agent-platform.svc:8081"
 MAP_API = ["--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
+# The proxy pods of muster's Gateway (ci/test-substrate-values.yaml's ingress.parentRefs), as
+# Envoy Gateway labels them and agent-platform.route.envoyPeer selects them.
+ENVOY_PEER = {"app.kubernetes.io/name": "envoy", "gateway.envoyproxy.io/owning-gateway-name": "giantswarm-default",
+              "gateway.envoyproxy.io/owning-gateway-namespace": "envoy-gateway-system"}
 
 API = None
 results = []
@@ -474,7 +478,7 @@ def check_egress(chart):
     objs = docs(connectivity(chart, "cilium"))
     gw = find(objs, "CiliumNetworkPolicy", "substrate-atenet-egress")
     edge = [r for r in gw["spec"]["egress"] if any(p["port"] == "10443" for tp in r.get("toPorts", []) for p in tp["ports"])]
-    expect(len(edge) == 1 and edge[0]["toEndpoints"] == [{"matchLabels": {"app.kubernetes.io/name": "envoy", "io.kubernetes.pod.namespace": "envoy-gateway-system"}}],
+    expect(len(edge) == 1 and edge[0]["toEndpoints"] == [{"matchLabels": {**ENVOY_PEER, "io.kubernetes.pod.namespace": "envoy-gateway-system"}}],
            "the egress gateway reaches in-cluster 443/10443 only at the Envoy pods of muster's Gateway, and no kube-apiserver")
     own = docs(connectivity(chart, "cilium", "--set", "gatewayApi.gateway.create=true", "--set", "gatewayApi.gateway.tls.secretName=wildcard",
                             "--set", "ingress.parentRefs=null", "--set", "global.gatewayApi.parentRefs=null"))
@@ -490,7 +494,7 @@ def check_egress(chart):
     gw = find(k8s, "NetworkPolicy", "substrate-atenet-egress-egress")
     edge = [r for r in gw["spec"]["egress"] if any(p["port"] == 10443 for p in r.get("ports", []))]
     expect(len(edge) == 1 and edge[0]["to"] == [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "envoy-gateway-system"}},
-                                                  "podSelector": {"matchLabels": {"app.kubernetes.io/name": "envoy"}}}],
+                                                  "podSelector": {"matchLabels": ENVOY_PEER}}],
            "the kubernetes flavour reaches in-cluster 443/10443 only at the Envoy pods of muster's Gateway")
     world = [r for r in gw["spec"]["egress"] if any(t.get("ipBlock", {}).get("cidr") == "0.0.0.0/0" for t in r["to"])]
     excepted = world[0]["to"][0]["ipBlock"]["except"] if world else []
@@ -780,7 +784,7 @@ def prove_render_check(chart):
         if host_network:
             spec["hostNetwork"] = True
         return {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "envoy-edge", "namespace": "envoy-gateway-system",
-                                                                "labels": {"app.kubernetes.io/name": "envoy"}}, "spec": spec}
+                                                                "labels": ENVOY_PEER}, "spec": spec}
     server = ["--dry-run=server", "--kubeconfig", API.kubeconfig, "--kube-context", "verify"]
     must(create(envoy(True), dry=False), "create an Envoy pod on host networking")
     r = connectivity(chart, "cilium", *server)

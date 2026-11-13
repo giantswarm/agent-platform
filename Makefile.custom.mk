@@ -1644,6 +1644,12 @@ verify-mcp-backend-netpol: ## Assert the in-cluster MCP backends' ingress (netwo
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) -f tests/fixtures/mcp-backends-values.yaml --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vmbn-muster.out 2>&1 || { cat $(VERIFY_TMP)/vmbn-muster.out; exit 1; }
 	@python3 tests/verify-mcp-backend-netpol.py --muster-egress $(VERIFY_TMP)/vmbn-muster.out
 
+.PHONY: verify-envoy-peers
+verify-envoy-peers: ## Assert every network policy that admits or reaches the Envoy edge names the owning Gateway of its pods (giantswarm/agent-platform#1292): over the portal (its own route, and in the kubernetes flavour the app-config's hostnames), the actors' egress gateway, kagent's oauth2-proxy and the workspace manager's key-set route, in both flavours, every selector of app.kubernetes.io/name: envoy carries gateway.envoyproxy.io/owning-gateway-name and -namespace and looks for the pods in the owning Gateway's namespace, and each policy selects exactly the Gateways its route's values name (global.gatewayApi.parentRefs, ingress.parentRefs, backstage.parentRefs, kagent.uiRoute.parentRef, kagent.controllerRoute.parentRef, workspaceManager.route.parentRefs), a Gateway of another name included. A policy that falls back to every Envoy pod of a namespace fails. Needs PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@HELM="$(HELM)" python3 tests/verify-envoy-peers.py $(CONNECTIVITY_DIR)
+	@echo "Envoy peers verified."
+
 .PHONY: verify-substrate-idp-netpol
 verify-substrate-idp-netpol: ## Assert the path to Substrate's actor-JWT issuer (giantswarm/muster#1572), in both flavours: with Substrate and muster on ate-idp-server (8443, behind the Service idp) admits muster from the release namespace and the kubelet's probes only, and muster's egress reaches it by muster-to-substrate-idp whatever networkPolicy.musterInClusterMcpPorts opens; with muster off no muster is admitted and no egress policy renders; with Substrate off neither renders. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"

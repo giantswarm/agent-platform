@@ -11327,13 +11327,15 @@ spec:
   ingress:
     # The route attaches to the platform's front Gateway (the Envoy edge), which
     # proxies straight to the portal's Service: agentgateway is not in this path.
-    # The namespaces are the route's own parents (backstage.parentRefs, else
-    # global.gatewayApi.parentRefs); `app.kubernetes.io/name: envoy` is the
-    # label Envoy Gateway stamps on the proxy pods it runs for a Gateway, as
-    # the oauth2-proxy policy selects them.
+    # The peers are the proxy pods of the route's own parents
+    # (backstage.parentRefs, else global.gatewayApi.parentRefs), by the
+    # owning-Gateway labels Envoy Gateway stamps on them
+    # (agent-platform.route.envoyPeer), as the oauth2-proxy policy selects them.
     - fromEndpoints:
         - matchLabels:
             app.kubernetes.io/name: envoy
+            gateway.envoyproxy.io/owning-gateway-name: giantswarm-default
+            gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
             io.kubernetes.pod.namespace: envoy-gateway-system
       toPorts:
         - ports:

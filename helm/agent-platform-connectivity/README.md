@@ -645,9 +645,12 @@ the kagent controller with it.
 
 A private identity provider inside one of `worldExcludedCIDRs` needs its
 address in `networkPolicy.additionalEgressCIDRs`. The policy names the proxy
-pods as Envoy Gateway labels them (`app.kubernetes.io/name: envoy`), so a route
-pinned with `backstage.parentRefs` to a Gateway of another implementation needs
-that Gateway's pods admitted by a policy of its own.
+pods of each Gateway as Envoy Gateway labels them
+(`gateway.envoyproxy.io/owning-gateway-name` and `-namespace`, from the same
+parentRefs the routes attach with), so another Gateway's proxy in the same
+namespace is not admitted, and a route pinned with `backstage.parentRefs` to a
+Gateway of another implementation needs that Gateway's pods admitted by a
+policy of its own.
 
 The backstage chart's own CNPG policy is not this chart's: its missing DNS and
 operator legs, and the missing arm64 images, are filed against
