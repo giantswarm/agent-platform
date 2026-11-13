@@ -1167,7 +1167,7 @@ components:  # @schema additionalProperties: true
     # skills through the skill-manager and takes installation and
     # defaultAgentModel (giantswarm/agent-manager#290).
     # github.tokenExchange needs the on-demand grant contract and its schema.
-    versionRange: ">=3.0.0-rc.10 <4.0.0-0"
+    versionRange: ">=3.0.0 <4.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
