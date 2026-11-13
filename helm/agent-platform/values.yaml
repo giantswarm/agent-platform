@@ -1431,7 +1431,11 @@ components:  # @schema additionalProperties: true
     # Agent metadata in every namespace, which its ClusterRole already
     # grants, and asks for the sessions through the erasure's kagent target,
     # which this chart already derives, binds (organization-erasure) and
-    # opens in the network policies: no new wiring here.
+    # opens in the network policies: no new wiring here. kagent admits that
+    # call as a machine caller only with its controller-extensions controller
+    # (kagent.controller.image.repository, the default); with the line's own
+    # controller an organization with a ModelConfig and no Agent keeps its
+    # workers and is Ready=False.
     versionRange: ">=0.4.0 <0.5.0"
     valuesFrom: agent-platform-operator
     # App-owned CRD: the chart ships agentplatformorganizations in its crds/
