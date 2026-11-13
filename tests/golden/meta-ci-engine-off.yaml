@@ -64,7 +64,6 @@ spec:
             protocol: grpc
             tenant: giantswarm
       registry: gsoci.azurecr.io
-    installation: agent-platform
     kagent:
       apiVersion: v1alpha3
       controllerTarget: ""
@@ -391,6 +390,9 @@ spec:
         verticalPodAutoscaler:
           enabled: false
       skillsRepositories:
+      - path: skills
+        readOnly: true
+        url: https://github.com/giantswarm/agent-platform
       - https://github.com/giantswarm/agent-skills
       startUrlSearchParams: {}
     cloudnative-pg:

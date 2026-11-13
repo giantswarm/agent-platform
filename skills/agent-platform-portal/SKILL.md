@@ -2,7 +2,7 @@
 name: agent-platform-portal
 description: Use when someone asks where something is in the Dev Portal or how to do it there — starting a session, the rail, the Customize tabs (Agents, Skills, Connectors, Models, Workflows, Workspaces, Toolchains), Usage, Organizations, the assist buttons that open a session with the default agent — or when you point a person to a portal page or give a start link.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # The Dev Portal
@@ -64,8 +64,10 @@ A link that opens **New session** with an agent preselected and the first messag
 person reads and sends it:
 
 ```text
-[Start a session with <Display name>](/?agent=<installation>%2F<namespace>%2F<name>#prompt=<url-encoded brief>)
+[Start a session with <Display name>](/?agent=<namespace>%2F<name>#prompt=<url-encoded brief>)
 ```
 
-Format, checks and what never goes into the brief: `agent-platform-agent-routing`. The link works only
-inside the portal; in Slack or an IDE, name the agent and say where to find it.
+No installation in `agent`; the portal finds the agent by namespace and name. Format, encoding,
+checks and what never goes into the brief: `agent-platform-agent-routing`. The link stays relative,
+so it opens in the portal the person uses; in Slack or an IDE, say it is relative to their Dev Portal
+or name the agent and say where to find it, never guess the portal's address.

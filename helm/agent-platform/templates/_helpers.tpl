@@ -561,11 +561,7 @@ in-process list of URLs (agent-platform.skills.repositories). */ -}}
 {{- else -}}
 {{- $_ := set $derived "skills" (dict "repositories" (include "agent-platform.skills.repositories" (dict "root" .root "consumer" "agent-manager") | fromJson).list) -}}
 {{- end -}}
-{{- /* The installation's name in the portal (agent ids are
-<installation>/<namespace>/<name>), which get_info reports: from the release
-that takes the key (agent-platform.agentManager.skillManagerFloor). */ -}}
 {{- if include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "agent-manager" "version" (include "agent-platform.agentManager.skillManagerFloor" .root)) -}}
-{{- $_ := set $derived "installation" (include "agent-platform.portalInstallationName" .root) -}}
 {{- /* The default agent gets the installation's default model once, while
 its modelConfig.name is empty (agent-platform.defaultAgent.derived):
 agent-manager sets it, from the same release. */ -}}
@@ -4755,15 +4751,6 @@ Usage: include "agent-platform.backstage.viaSkillManager" $
 */}}
 {{- define "agent-platform.backstage.viaSkillManager" -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "backstage")) (include "agent-platform.componentEnabled" (dict "root" . "name" "skill-manager")) (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "backstage" "version" (include "agent-platform.backstage.skillManagerFloor" .))) -}}true{{- end -}}
-{{- end -}}
-
-{{/*
-The installation's name in the portal: the key of its entries in the
-app-config the connectivity chart renders (backstage.installationName).
-Usage: include "agent-platform.portalInstallationName" $
-*/}}
-{{- define "agent-platform.portalInstallationName" -}}
-{{- dig "installationName" "" (.Values.backstage | default dict) | default "agent-platform" -}}
 {{- end -}}
 
 {{/*

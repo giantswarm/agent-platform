@@ -590,6 +590,9 @@ spec:
         verticalPodAutoscaler:
           enabled: false
       skillsRepositories:
+      - path: skills
+        readOnly: true
+        url: https://github.com/giantswarm/agent-platform
       - https://github.com/giantswarm/agent-skills
       startUrlSearchParams: {}
     cloudnative-pg:
