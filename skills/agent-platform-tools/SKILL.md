@@ -2,7 +2,7 @@
 name: agent-platform-tools
 description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing or refused, connectors and signing in to one, workflows, or model-manager.
 metadata:
-  version: "3.1.0"
+  version: "3.2.0"
 ---
 
 # Tools on the Agent Platform
@@ -38,7 +38,8 @@ The reverse holds too: the meta-tools and the runtime's built-ins (`load_skill`,
 name; `core_<area>_<tool>` is one of Muster's own; `workflow_<name>` is a workflow. Servers of a
 **family** (one instance per cluster or region) appear once under the family name and take an
 instance argument (for example `management_cluster`); its valid values are the `enum` on the tool's
-schema — take them from `describe_tool`, never guess or shorten them.
+schema — take them from `describe_tool`, never guess or shorten them. Another installation's
+management cluster is reachable only when it is in that `enum`; otherwise say so.
 
 ## What you see: the catalogue, filtered per request
 
@@ -82,6 +83,16 @@ of those names select by it; no label means an installation or a person register
   `Connected` when a session calls it with its own token; a call that still fails is the person's
   token or access — sign in to the platform again, then check `status.conditions`.
 - **`Failed`** is the outage; `status.lastError` says why.
+
+An organization's connector with a credential (`x_agent-manager_set_organization_connector`,
+organization admin): create it with a credential field — `credentialHeader` (default
+`Authorization`; Secret `tenant-credential-<name>`, key `token`). Without one it has no credential:
+`replaceCredential` on it does nothing and `x_agent-manager_replace_organization_credential` refuses
+it, as nothing uses that Secret — set `credentialHeader` with `set_organization_connector`. The
+answer is a URL elicitation of the credential form, link in `credentials[].next`; the connector is
+written once the person saves the form. No link: give the person the raw answer, never an
+explanation or a hand-made Secret. Check with `x_agent-manager_list_organization_connectors`
+(non-empty `credentials`); `core_mcpserver_detect` probes the URL.
 
 Tools register live when a server connects. Adding connectors:
 https://docs.giantswarm.io/tutorials/agent-platform/managing-mcp-servers/ and
@@ -135,8 +146,18 @@ https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
   names selectors that select nothing (a server not signed in to, a renamed tool, an empty preset).
 - An error **naming the toolset** on `call_tool` is composition — the tool is outside the toolset.
   Change the agent (`agent-platform-agent-management`), not the call.
-- `forbidden` or `Unauthorized` from a backend is the **person's** authorization (RBAC, the service's
-  account); no toolset change affects it.
+- `auth_required` naming a provider App (structured `apps`, each with its `authUrl`) answers a call
+  that needs the person's grant of that GitHub App: a commit (`mode: commit` on agent-manager,
+  cluster-manager or model-manager), or pinning or reading a private skill. Where the manager
+  fetches the grant per call (its `github.tokenExchange`), only that call asks and everything else
+  works without it; a manager still pinned to its App asks at sign-in, before any call. Give the
+  person the link and call again once they signed in.
+- An agent acting for a person never receives the person's GitHub grant: its commit, and its pin or
+  read of a private skill, are refused (`forbidden`). The person does it in their own session.
+- `forbidden` or `Unauthorized` from a backend concerns its authorization; a toolset change cannot
+  grant backend permissions. A successful agent-manager read with `releaseWithheld` is a partial
+  answer, not an error: use the readable Agent data and explain which release details are unavailable.
+  Do not send an authenticated person through sign-in again or blame them for this platform limit.
 - "tool `x_…` not found" from the runtime: a backend tool was emitted as a function — go through
   `call_tool`.
 - Everything else: https://docs.giantswarm.io/tutorials/agent-platform/troubleshooting/.

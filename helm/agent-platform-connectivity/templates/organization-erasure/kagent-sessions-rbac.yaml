@@ -11,7 +11,10 @@ sessions for any caller but its control plane today, so the operator's
 erasure stops at that step until kagent reviews such a delete as a
 cluster-wide `delete` here: giantswarm/kagent-extensions#27. The erasure of
 an organization with a person's session works once that change ships in the
-kagent line.
+kagent line. From agent-platform-operator 0.4.0 the worker replica rule lists
+the same way whether an organization with a ModelConfig and no Agent has a
+session (agent-platform-operator#50), so live organizations need the `list`
+too.
 */ -}}
 {{- if include "agent-platform.organizations.enabled" . }}
 {{- $sa := include "agent-platform.organizations.operatorServiceAccount" . | fromJson }}

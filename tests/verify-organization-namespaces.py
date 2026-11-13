@@ -83,6 +83,10 @@ POOL = "kagent-default"
 PERSON = "jose"
 LISTENER = "http://agentgateway.agent-platform.svc:8081"
 MAP_API = ["--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
+# The proxy pods of muster's Gateway (ci/test-substrate-values.yaml's ingress.parentRefs), as
+# Envoy Gateway labels them and agent-platform.route.envoyPeer selects them.
+ENVOY_PEER = {"app.kubernetes.io/name": "envoy", "gateway.envoyproxy.io/owning-gateway-name": "giantswarm-default",
+              "gateway.envoyproxy.io/owning-gateway-namespace": "envoy-gateway-system"}
 
 API = None
 results = []
@@ -211,6 +215,15 @@ def check_meta(chart):
            "the explicit client credential URL template travels unchanged")
     expect(am.get("githubTokenExchange", {}).get("clientID") == "agent-manager",
            "the configured confidential broker client travels unchanged")
+    exchange = {"tokenEndpoint": "https://muster.example.com/oauth/token", "audience": "agent-manager",
+                "existingSecret": "agent-manager-github-broker"}
+    next_manager = docs(meta(chart, *ON, "--set", "components.agent-manager.versionRange=>=3.0.0 <4.0.0",
+                             "--set", "agent-manager.github.enabled=true",
+                             "--set-json", f"agent-manager.github.tokenExchange={json.dumps(exchange)}"))
+    next_values = release(next_manager, "agent-manager")["values"]
+    expect(next_values.get("github", {}).get("tokenExchange") == exchange
+           and next_values["github"].get("enabled") is True and "githubTokenExchange" not in next_values,
+           "the 3.x manager receives the on-demand grant configuration without the removed top-level key")
     expect(am.get("tenants") == {"enabled": True, "commit": manager_commit},
            "organization GitOps configuration reaches the manager beside the derived organization switch")
     expect(v["commitMode"] == {"sourceRef": {"kind": "GitRepository", "name": "giantswarm-config"},
@@ -301,8 +314,23 @@ def check_meta(chart):
                                                    "--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}"],
              "agent-manager credential operations and GitHub token exchange need"),
             ("token exchange on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
-                                                    "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token"],
+                                                    "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.agent-manager.versionRange"),
+            ("the former token exchange on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
+                                                               "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token"],
              "agent-manager credential operations and GitHub token exchange need"),
+            ("token exchange before its schema", ["--set", "components.agent-manager.versionRange=>=3.0.0-rc.9 <4.0.0-0",
+                                                  "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.agent-manager.versionRange"),
+            ("token exchange before provider App grant release", ["--set", "components.muster.versionRange=>=5.62.0 <6.0.0",
+                                                                  "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.muster.versionRange"),
+            ("token exchange before the released broker", ["--set", "components.muster.versionRange=>=5.63.0-rc.1 <6.0.0-0",
+                                                           "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.muster.versionRange"),
+            ("token exchange before Basic credential decoding", ["--set", "components.muster.versionRange=>=5.63.1 <6.0.0",
+                                                                  "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.muster.versionRange"),
             ("operation metadata on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
                                                         "--set", "agent-manager.credentials.operationsNamespace=credential-operations"],
              "agent-manager credential operations and GitHub token exchange need"),
@@ -383,17 +411,18 @@ def check_broker_egress(chart):
     for flavor in ("cilium", "kubernetes"):
         kind = "CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy"
         for endpoint, host, cidr, port in cases:
-            rendered = docs(connectivity(chart, flavor, *flags, "--set", f"agent-manager.githubTokenExchange.endpoint={endpoint}"))
-            policy = find(rendered, kind, "agent-platform-connectivity-agent-manager-egress")
-            expect(policy is not None, f"{flavor}: the manager's egress policy is rendered")
-            if flavor == "cilium":
-                target = {"toCIDR": [cidr]} if cidr else {"toFQDNs": [{"matchName": host}]}
-                target["toPorts"] = [{"ports": [{"port": str(port), "protocol": "TCP"}]}]
-                expect(target in policy["spec"]["egress"], f"{flavor}: the broker origin {endpoint} has an explicit rule")
-            else:
-                rules = [rule for rule in policy["spec"]["egress"] if rule.get("ports") == [{"port": port, "protocol": "TCP"}]]
-                expect(any(any(peer.get("ipBlock", {}).get("cidr") == (cidr or "0.0.0.0/0") for peer in rule.get("to", [])) for rule in rules),
-                       f"{flavor}: the broker address class and HTTPS port are admitted for {endpoint}")
+            for key in ("agent-manager.github.tokenExchange.tokenEndpoint", "agent-manager.githubTokenExchange.endpoint"):
+                rendered = docs(connectivity(chart, flavor, *flags, "--set", f"{key}={endpoint}"))
+                policy = find(rendered, kind, "agent-platform-connectivity-agent-manager-egress")
+                expect(policy is not None, f"{flavor}: the manager's egress policy is rendered")
+                if flavor == "cilium":
+                    target = {"toCIDR": [cidr]} if cidr else {"toFQDNs": [{"matchName": host}]}
+                    target["toPorts"] = [{"ports": [{"port": str(port), "protocol": "TCP"}]}]
+                    expect(target in policy["spec"]["egress"], f"{flavor}: the broker origin {endpoint} ({key}) has an explicit rule")
+                else:
+                    rules = [rule for rule in policy["spec"]["egress"] if rule.get("ports") == [{"port": port, "protocol": "TCP"}]]
+                    expect(any(any(peer.get("ipBlock", {}).get("cidr") == (cidr or "0.0.0.0/0") for peer in rule.get("to", [])) for rule in rules),
+                           f"{flavor}: the broker address class and HTTPS port are admitted for {endpoint} ({key})")
         for extra in ([], ["--set", "agent-manager.githubTokenExchange.endpoint=https://broker.example.com:8443/token",
                           "--set", "agent-manager.oauth.enabled=false"]):
             policy = find(docs(connectivity(chart, flavor, *flags, *extra)), kind, "agent-platform-connectivity-agent-manager-egress")
@@ -401,9 +430,12 @@ def check_broker_egress(chart):
             ports += [port["port"] for rule in policy["spec"]["egress"] for entry in rule.get("toPorts", []) for port in entry.get("ports", [])]
             expect(8443 not in ports and "8443" not in ports, f"{flavor}: no broker port while it is unconfigured or OAuth is off")
     for flavor in ("cilium", "kubernetes"):
-        r = connectivity(chart, flavor, *flags, "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.agent-platform.svc.cluster.local/oauth/token")
-        expect(r.returncode != 0 and "names an in-cluster Service" in r.stderr,
+        r = connectivity(chart, flavor, *flags, "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.agent-platform.svc.cluster.local/oauth/token")
+        expect(r.returncode != 0 and "agent-manager.github.tokenExchange.tokenEndpoint (https://muster.agent-platform.svc.cluster.local/oauth/token) names an in-cluster Service" in r.stderr,
                f"{flavor}: an in-cluster broker Service fails the render naming the endpoint")
+        r = connectivity(chart, flavor, *flags, "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.agent-platform.svc.cluster.local/oauth/token")
+        expect(r.returncode != 0 and "agent-manager.githubTokenExchange.endpoint (https://muster.agent-platform.svc.cluster.local/oauth/token) names an in-cluster Service" in r.stderr,
+               f"{flavor}: an in-cluster broker Service under the former key fails the render naming it")
         for endpoint in ("https://muster/oauth/token", "https://muster.agent-platform:8443/oauth/token"):
             r = connectivity(chart, flavor, *flags, "--set", f"agent-manager.githubTokenExchange.endpoint={endpoint}")
             expect(r.returncode != 0 and f"agent-manager.githubTokenExchange.endpoint ({endpoint}) names a host of fewer than three labels" in r.stderr,
@@ -446,7 +478,7 @@ def check_egress(chart):
     objs = docs(connectivity(chart, "cilium"))
     gw = find(objs, "CiliumNetworkPolicy", "substrate-atenet-egress")
     edge = [r for r in gw["spec"]["egress"] if any(p["port"] == "10443" for tp in r.get("toPorts", []) for p in tp["ports"])]
-    expect(len(edge) == 1 and edge[0]["toEndpoints"] == [{"matchLabels": {"app.kubernetes.io/name": "envoy", "io.kubernetes.pod.namespace": "envoy-gateway-system"}}],
+    expect(len(edge) == 1 and edge[0]["toEndpoints"] == [{"matchLabels": {**ENVOY_PEER, "io.kubernetes.pod.namespace": "envoy-gateway-system"}}],
            "the egress gateway reaches in-cluster 443/10443 only at the Envoy pods of muster's Gateway, and no kube-apiserver")
     own = docs(connectivity(chart, "cilium", "--set", "gatewayApi.gateway.create=true", "--set", "gatewayApi.gateway.tls.secretName=wildcard",
                             "--set", "ingress.parentRefs=null", "--set", "global.gatewayApi.parentRefs=null"))
@@ -462,7 +494,7 @@ def check_egress(chart):
     gw = find(k8s, "NetworkPolicy", "substrate-atenet-egress-egress")
     edge = [r for r in gw["spec"]["egress"] if any(p["port"] == 10443 for p in r.get("ports", []))]
     expect(len(edge) == 1 and edge[0]["to"] == [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "envoy-gateway-system"}},
-                                                  "podSelector": {"matchLabels": {"app.kubernetes.io/name": "envoy"}}}],
+                                                  "podSelector": {"matchLabels": ENVOY_PEER}}],
            "the kubernetes flavour reaches in-cluster 443/10443 only at the Envoy pods of muster's Gateway")
     world = [r for r in gw["spec"]["egress"] if any(t.get("ipBlock", {}).get("cidr") == "0.0.0.0/0" for t in r["to"])]
     excepted = world[0]["to"][0]["ipBlock"]["except"] if world else []
@@ -752,7 +784,7 @@ def prove_render_check(chart):
         if host_network:
             spec["hostNetwork"] = True
         return {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "envoy-edge", "namespace": "envoy-gateway-system",
-                                                                "labels": {"app.kubernetes.io/name": "envoy"}}, "spec": spec}
+                                                                "labels": ENVOY_PEER}, "spec": spec}
     server = ["--dry-run=server", "--kubeconfig", API.kubeconfig, "--kube-context", "verify"]
     must(create(envoy(True), dry=False), "create an Envoy pod on host networking")
     r = connectivity(chart, "cilium", *server)

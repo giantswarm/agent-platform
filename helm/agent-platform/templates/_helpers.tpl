@@ -2881,7 +2881,9 @@ Usage: include "agent-platform.kagent.extensions" $root | fromJson
 {{- end -}}
 {{- /* agent-platform-operator, while agentPlatformOrganizations.enabled is on:
 it lists and deletes a deleted organization's Sessions as its own
-ServiceAccount (connectivity organization-erasure/kagent-sessions-rbac.yaml). */ -}}
+ServiceAccount (connectivity organization-erasure/kagent-sessions-rbac.yaml),
+and from 0.4.0 lists whether a live organization with a ModelConfig and no
+Agent has a session (its worker replica rule, agent-platform-operator#50). */ -}}
 {{- if include "agent-platform.organizations.on" . -}}
 {{- $op := include "agent-platform.organizations.operatorServiceAccount" . | fromJson -}}
 {{- $callers = append $callers (printf "%s/%s" $op.namespace $op.name) -}}
@@ -4479,6 +4481,16 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- if or (hasKey $am "credentials") (hasKey $am "githubTokenExchange") -}}
 {{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" "2.22.0")) -}}
 {{- fail "agent-manager credential operations and GitHub token exchange need components.agent-manager.versionRange with a floor of 2.22.0 or later" -}}
+{{- end -}}
+{{- end -}}
+{{- if hasKey (dig "github" dict $am | default dict) "tokenExchange" -}}
+{{- $managerFloor := include "agent-platform.semverRangeFloor" (dig "agent-manager" "versionRange" "" .Values.components) -}}
+{{- if or (not $managerFloor) (lt ((semver $managerFloor).Compare (semver "3.0.0-rc.10")) 0) -}}
+{{- fail "agent-manager.github.tokenExchange needs components.agent-manager.versionRange with a floor of 3.0.0-rc.10 or later" -}}
+{{- end -}}
+{{- $musterFloor := include "agent-platform.semverRangeFloor" (dig "muster" "versionRange" "" .Values.components) -}}
+{{- if or (not $musterFloor) (lt ((semver $musterFloor).Compare (semver "5.63.2")) 0) -}}
+{{- fail "agent-manager.github.tokenExchange needs components.muster.versionRange with a floor of 5.63.2 or later" -}}
 {{- end -}}
 {{- end -}}
 {{- if and (dig "credentials" "uiURL" "" $am) (not $on) -}}

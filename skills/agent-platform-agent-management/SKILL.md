@@ -2,7 +2,7 @@
 name: agent-platform-agent-management
 description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.0.0"
+  version: "3.1.1"
 ---
 
 # Managing agents and their building blocks
@@ -43,27 +43,41 @@ Where the reference lives — fetch it, never quote it from memory:
 - **`helmrelease`** — written live through agent-manager, as you.
 - **`gitops`** — applied by Flux from a repository. A live write is refused; with `mode: commit`
   (where `get_info` `capabilities.commit` is true) agent-manager opens the pull request as you.
+  Without your grant of its GitHub App, the commit answers with that App's sign-in link.
   Never `force` a write onto it.
 - **`platform`** — ships with the Agent Platform (the default agent itself). Every update, re-pin and
   delete is refused; it changes only through the platform's configuration and releases. Say so.
   Its model is set once from the installation's default; `defaultAgent.modelConfig` pins or changes it.
 - **`none`** — a bare Agent without a release.
+- **`unknown`**: a required Flux read was forbidden, so management details are unavailable.
+  `releaseWithheld` explains which release namespace is involved. This is a successful partial
+  read, not a sign-in failure. It does not establish that the agent has no release. The editor
+  role grants Flux reads in the site's Flux namespace; it does not grant access to a release in
+  another namespace such as `flux-giantswarm`. A readable platform label keeps `managed: platform`.
 
 ## Working with agent-manager
 
 agent-manager's tools are `x_agent-manager_*` through `call_tool`, acting as the person. Discover
 them with `filter_tools` (`pattern`) and read each schema with `describe_tool` before its first call;
-never assume an argument. The order:
+never assume an argument. The agent tools drop an unknown key without an error: the prompt is
+`systemMessage`, a skill is `{name, path, git: {url, ref}}`, never a bare name. The order:
 
-1. `x_agent-manager_get_info`, then the choices from live lists: `x_agent-manager_list_model_configs`,
-   `x_skill-manager_list_skills` (per source: ref, the commit it resolves to, path, readOnly, each
-   skill's description, and each plugin with its `format`: `agent-plugins` needs a `skills` selection
-   from its listed skills, `claude-code` loads whole — judge a skill from that listing, or read it with
-   `x_skill-manager_get_skill`; `load_skill` knows only your own skills),
-   `x_agent-manager_list_egress_policies`, presets from `filter_tools {"include_presets": true}`.
+1. `x_agent-manager_get_info` and the owner (`x_agent-manager_list_organizations`: each
+   organization's `namespace`), then the choices from live lists: `x_agent-manager_list_model_configs`
+   for that `namespace` and for `kagent` (without `namespace` it lists `kagent` only),
+   `x_skill-manager_list_skills` before any prompt is drafted (per source: ref, the commit it resolves
+   to, path, readOnly, each skill's description, and each plugin with its `format`: `agent-plugins`
+   needs a `skills` selection from its listed skills, `claude-code` loads whole — judge a skill from
+   that listing, or read it with `x_skill-manager_get_skill`; `load_skill` knows only your own skills),
+   `x_agent-manager_list_egress_policies`, presets from `filter_tools {"include_presets": true}`. A
+   skill whose name or description matches the agent's purpose settles what the purpose means:
+   propose pinning it.
 2. `x_agent-manager_validate_agent` → `x_agent-manager_create_agent` →
    `x_agent-manager_get_agent_status` until `ready` (about a minute; the golden snapshot is the long
-   part) → a first turn as the person (`x_agent-manager_start_session`, where offered).
+   part) → a first turn as the person (`x_agent-manager_start_session`, where offered). `valid: true`
+   is not enough: `manifests.values` holds every field you meant to set, or a key was wrong. Poll the
+   status about every 30 s for up to about five minutes; still `progressing`, tell the person its summary and call it
+   again at the start of your next turn.
 3. `x_agent-manager_update_agent` for follow-ups: only the fields passed change; `skills`, `plugins`,
    `egress` and `toolset` replace their whole list. `refreshSkills: true` re-pins every git skill and
    plugin to the head of its ref, as you: it fails when you cannot read one of the agent's
@@ -75,7 +89,11 @@ never assume an argument. The order:
   display name in silence. It names the release and the Agent; the display name and description are
   what the portal and Slack show.
 - **Model**: the cheapest config from the live list that can do the job, never invented — an agent
-  on a missing or not-accepted config never boots. No suitable model: `agent-platform-tools` (model-manager).
+  on a missing or not-accepted config never boots. No suitable model: a hosted API model with a key is
+  `x_agent-manager_set_organization_model` (organization admin; the key goes into the credential
+  form it links); a local or Hugging Face model is model-manager (`agent-platform-tools`); a
+  subscription (OAuth) model — `openAI.credentialType: chatgptOAuth`, `apiFormat: responses` — is the
+  platform's configuration in git, which no tool writes.
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only
   on an explicit request. An own-account (OAuth) connector without `grantScope: subject` needs a
   sign-in in each of the agent's conversations (`agent-platform-tools`); say so before choosing it.
@@ -89,7 +107,9 @@ never assume an argument. The order:
 - **System prompt**: role, voice and rules; knowledge goes into skills. Every agent with tools carries
   the meta-tool paragraph from `references/system-prompt.md`.
 - **Icon**: `iconUrl` only where the installation serves avatars; omit it otherwise.
-- **Confirm every choice you made for the person** — the technical name above all — before writing.
+- **Confirm every choice you made for the person** — the technical name above all, and the display
+  name, description and system prompt verbatim — and wait for a yes before writing. When a tool cannot
+  express what the person confirmed, stop and say so; never run a different write instead.
   Delete only on an explicit request that names the agent, one at a time.
 
 ## Status and troubleshooting
@@ -102,6 +122,12 @@ skill fetch, a missing credential Secret — and gives up as `ActorTemplateFaile
 `status.conditions` (`Accepted`, `ResolvedRefs`, `Compatible`, `Ready`) and `x_agent-manager_get_agent`
 are the evidence; the portal shows the same conditions. Name the one fix, do it, call the status
 again, stop at `ready`.
+
+When `releaseWithheld` is present, the verdict comes from the Agent alone and the summary states
+that HelmRelease state was not read. Report that limitation: a ready Agent does not establish that
+its owning release is healthy or that a requested release update has completed. Use the readable
+conditions as evidence and leave unavailable release details unknown. Writes still require access
+to the owning release.
 
 ## Reading and evaluating a session
 
