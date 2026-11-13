@@ -21,7 +21,15 @@ Each case pins one property:
   refused, for a cluster-admin too; a HelmRelease written before the
   policy takes an annotation but no spec change; a HelmRelease outside the
   kagent namespace is not held. Every refusal names the policy with its own
-  message, never an evaluation error.
+  message, never an evaluation error;
+- kagent's own HelmRelease (tenants.platform.kagentRelease,
+  giantswarm/agent-platform#1387): unset, the policy has no exemption; a name
+  without writers, writers without a name, a writer of another kind, without a
+  name or a ServiceAccount without its namespace fail the render; set, kagent's
+  release as a deployer places it (its own OCIRepository, no ServiceAccount,
+  valuesFrom) is created and upgraded by each writer (a user, a group, a
+  ServiceAccount), and refused for an editor and for a cluster-admin who is no
+  writer; any other HelmRelease from a writer is held as before.
 
 Needs helm, openssl, PyYAML and github.com on the first run (the envtest
 binaries). HELM selects the binary.
@@ -49,6 +57,18 @@ SKILLS_OLD = "old-skills-token"
 READABLE = "bob-readable"  # a Secret bob may get
 READABLE_MORE = ["bob-readable-2", "bob-readable-3"]  # two more he may get
 PLATFORM_SECRET = "kagent-postgres"  # one he may not
+KAGENT_RELEASE = "kagent-kagent"  # kagent's own HelmRelease, as a deployer places it
+DEPLOYER = "admin"  # a writer of it by user name (a cluster's admin kubeconfig)
+DEPLOYERS = "fog-deployers"  # a writer of it by group
+FLUX_SA = ("flux-system", "kustomize-controller")  # a writer of it by ServiceAccount
+RELEASE_FLAGS = ["--set", f"tenants.platform.kagentRelease.name={KAGENT_RELEASE}",
+                 "--set", "tenants.platform.kagentRelease.writers[0].kind=User",
+                 "--set", f"tenants.platform.kagentRelease.writers[0].name={DEPLOYER}",
+                 "--set", "tenants.platform.kagentRelease.writers[1].kind=Group",
+                 "--set", f"tenants.platform.kagentRelease.writers[1].name={DEPLOYERS}",
+                 "--set", "tenants.platform.kagentRelease.writers[2].kind=ServiceAccount",
+                 "--set", f"tenants.platform.kagentRelease.writers[2].name={FLUX_SA[1]}",
+                 "--set", f"tenants.platform.kagentRelease.writers[2].namespace={FLUX_SA[0]}"]
 
 API = None
 results = []
@@ -58,7 +78,8 @@ def fail(msg):
     sys.exit(f"FAIL: {msg}")
 
 
-def render(chart, *extra):
+def render(chart, *extra, fails=None):
+    """fails: the render must fail with this text in its error."""
     r = subprocess.run([HELM, "template", "t", chart, "--namespace", "agent-platform",
                         "--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://a/b",
                         "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
@@ -66,6 +87,10 @@ def render(chart, *extra):
                         "--set", f"agent-manager.skills.gitAuthSecretName={SKILLS}",
                         "--set", f"agent-manager.skills.previousGitAuthSecretNames[0]={SKILLS_OLD}", *extra],
                        capture_output=True, text=True)
+    if fails is not None:
+        if r.returncode == 0 or fails not in r.stderr:
+            fail(f"the render does not fail with {fails!r}:\n{r.stderr}")
+        return []
     if r.returncode != 0:
         fail(f"the render failed:\n{r.stderr}")
     return [d for d in yaml.safe_load_all(r.stdout) if d]
@@ -100,6 +125,29 @@ def check_render(chart):
         if d["kind"] == "ValidatingAdmissionPolicyBinding" and d["spec"].get("validationActions") != ["Deny"]:
             fail(f"validationActions {d['spec'].get('validationActions')}, not [Deny]")
     print("ok:  the policy and its binding render (Fail, Deny)")
+    conds = [c["name"] for d in objs if d["kind"] == "ValidatingAdmissionPolicy" for c in d["spec"]["matchConditions"]]
+    if "not-kagent-release" in conds:
+        fail(f"tenants.platform.kagentRelease unset renders an exemption: {conds}")
+    print("ok:  tenants.platform.kagentRelease unset, no exemption renders")
+    k = "tenants.platform.kagentRelease"
+    for what, flags, err in (
+            ("a name without writers", ["--set", f"{k}.name={KAGENT_RELEASE}"], f"{k}.name needs {k}.writers"),
+            ("writers without a name", ["--set", f"{k}.writers[0].kind=User", "--set", f"{k}.writers[0].name=x"],
+             f"{k}.writers needs {k}.name"),
+            ("a writer of another kind", ["--set", f"{k}.name={KAGENT_RELEASE}", "--set", f"{k}.writers[0].kind=Role",
+                                          "--set", f"{k}.writers[0].name=x"], "must be one of"),
+            ("a writer without a name", ["--set", f"{k}.name={KAGENT_RELEASE}", "--set", f"{k}.writers[0].kind=User",
+                                         "--set", f"{k}.writers[0].name="], "every writer names"),
+            ("a ServiceAccount without its namespace", ["--set", f"{k}.name={KAGENT_RELEASE}",
+                                                        "--set", f"{k}.writers[0].kind=ServiceAccount",
+                                                        "--set", f"{k}.writers[0].name=x"], "needs its namespace")):
+        render(chart, *on, *flags, fails=err)
+        print(f"ok:  {what} fails the render")
+    objs = named(render(chart, *on, *RELEASE_FLAGS), POLICY)
+    conds = {c["name"]: c["expression"] for d in objs if d["kind"] == "ValidatingAdmissionPolicy" for c in d["spec"]["matchConditions"]}
+    if "not-kagent-release" not in conds:
+        fail(f"tenants.platform.kagentRelease set renders no exemption: {sorted(conds)}")
+    print("ok:  tenants.platform.kagentRelease set renders the exemption |", conds["not-kagent-release"])
     editor = [d for d in render(chart, *on) if d["kind"] == "ClusterRole" and d["metadata"]["name"] == "agent-platform:editor"]
     if not editor:
         fail("agent-platform:editor does not render")
@@ -134,8 +182,9 @@ def create(obj, as_=EDITOR, groups=(), dry=True):
     return kubectl(["create", "-f", "-"] + (["--dry-run=server"] if dry else []), yaml.safe_dump(obj), as_, groups)
 
 
-def patch(name, ns, body, as_=EDITOR, groups=()):
-    return kubectl(["patch", "helmrelease", name, "-n", ns, "--type=merge", "-p", json.dumps(body), "--dry-run=server"], None, as_, groups)
+def patch(name, ns, body, as_=EDITOR, groups=(), dry=True):
+    return kubectl(["patch", "helmrelease", name, "-n", ns, "--type=merge", "-p", json.dumps(body)] + (["--dry-run=server"] if dry else []),
+                   None, as_, groups)
 
 
 def case(name, rc_out, refused=False):
@@ -171,6 +220,16 @@ def helmrelease(name, namespace=KAGENT, skills=None, extra_agent_spec=None, **sp
     spec.update(spec_extra)
     return {"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease", "metadata": {"name": name, "namespace": namespace},
             "spec": {k: v for k, v in spec.items() if v is not None}}
+
+
+def kagent_release():
+    """kagent's own HelmRelease as a deployer that places each workload's
+    HelmRelease in its target namespace writes it: its own OCIRepository,
+    helm-controller's identity, values from a Secret."""
+    return {"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
+            "metadata": {"name": KAGENT_RELEASE, "namespace": KAGENT},
+            "spec": {"interval": "10m", "chartRef": {"kind": "OCIRepository", "name": KAGENT_RELEASE},
+                     "valuesFrom": [{"kind": "Secret", "name": "kagent-values"}], "values": {"controller": {"replicas": 1}}}}
 
 
 def fixtures():
@@ -252,6 +311,32 @@ def prove():
          patch("legacy", KAGENT, {"spec": {"serviceAccountName": "kagent-flux"}}, as_="jose", groups=("system:masters",)))
     case("a HelmRelease outside the kagent namespace is not held",
          create(helmrelease("a", OTHER, valuesFrom=[{"kind": "Secret", "name": "x"}], serviceAccountName="x")))
+    # kagent's own release (tenants.platform.kagentRelease). The writers are
+    # cluster-admins as well, so RBAC lets each write; the policy decides.
+    sa = f"system:serviceaccount:{FLUX_SA[0]}:{FLUX_SA[1]}"
+    writers = ((f"the user {DEPLOYER}", DEPLOYER, ("system:masters",)),
+               (f"the group {DEPLOYERS}", "carol", ("system:masters", DEPLOYERS)),
+               (f"the ServiceAccount {FLUX_SA[0]}/{FLUX_SA[1]}", sa, ("system:masters", "system:serviceaccounts")))
+    for what, user, groups in writers:
+        case(f"{what} creates kagent's own HelmRelease", create(kagent_release(), as_=user, groups=groups))
+    case("kagent's own HelmRelease is placed by its deployer", create(kagent_release(), as_=DEPLOYER, groups=("system:masters",), dry=False))
+    for what, user, groups in writers:
+        case(f"{what} upgrades kagent's own HelmRelease",
+             patch(KAGENT_RELEASE, KAGENT, {"spec": {"values": {"controller": {"replicas": 2}}}}, as_=user, groups=groups))
+    case("kagent's own HelmRelease is upgraded with the binding in place",
+         patch(KAGENT_RELEASE, KAGENT, {"spec": {"values": {"controller": {"replicas": 2}}}}, as_=DEPLOYER, groups=("system:masters",), dry=False))
+    case("an editor writes no kagent release", create(dict(kagent_release(), metadata={"name": "evil", "namespace": KAGENT})), refused=True)
+    case("an editor does not upgrade kagent's own HelmRelease",
+         patch(KAGENT_RELEASE, KAGENT, {"spec": {"values": {"controller": {"replicas": 3}}}}), refused=True)
+    case("a cluster-admin who is no writer does not upgrade kagent's own HelmRelease",
+         patch(KAGENT_RELEASE, KAGENT, {"spec": {"values": {"controller": {"replicas": 3}}}}, as_="jose", groups=("system:masters",)),
+         refused=True)
+    case("a cluster-admin who is no writer writes no HelmRelease of kagent's shape",
+         create(dict(kagent_release(), metadata={"name": "kagent-other", "namespace": KAGENT}), as_="jose", groups=("system:masters",)),
+         refused=True)
+    for what, user, groups in writers:
+        case(f"{what} writes no other HelmRelease of kagent's shape",
+             create(dict(kagent_release(), metadata={"name": "kagent-other", "namespace": KAGENT}), as_=user, groups=groups), refused=True)
 
 
 def main():

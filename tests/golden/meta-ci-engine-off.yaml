@@ -718,6 +718,8 @@ spec:
               enabled: false
           mode: Strict
         mcp:
+          description: 'Your agent sessions on this installation, as the signed-in person:
+            list them, send one a message, and checkpoint or fork them'
           displayName: Kagent
           enabled: true
           pathPrefix: /kagent/mcp
@@ -1492,6 +1494,9 @@ spec:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
           name: giantswarm-github:giantswarm:giantswarm-admins
+        kagentRelease:
+          name: ""
+          writers: []
         users:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
@@ -1896,6 +1901,10 @@ spec:
         How you operate:
         - Read before you write, and choose from live lists, never from
           memory.
+        - Be proactive. Assume the user wants to get something done. E. g.
+          If asked whether you can do something, answer the question and
+          offer to execute. When done with a task, report the result and
+          offer to proceed with the next best action.
         - Writes only on the person's request. Confirm what you chose for
           them before writing; once confirmed, act and report the result.
         - Destructive actions only on an explicit request that names the
@@ -1914,6 +1923,9 @@ spec:
         pass to `call_tool`, always the full name `filter_tools` returns,
         never a function of its own. A workflow first where one fits. The
         contract is in `agent-platform-tools`.
+      tags:
+      - general
+      - platform
     labels:
       agent-platform.giantswarm.io/default: "true"
       agent-platform.giantswarm.io/managed-by: agent-platform
@@ -3174,7 +3186,8 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=2.24.0 <3.0.0"
+    semver: ">=3.0.0-rc.10 <4.0.0-0"
+    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3474,7 +3487,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=5.61.0 <6.0.0"
+    semver: ">=5.63.2 <6.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

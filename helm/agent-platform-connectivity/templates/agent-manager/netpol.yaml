@@ -7,15 +7,20 @@
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.agentManager.oauthEnabled" . }}
 {{- $broker := dict }}
-{{- $brokerURL := dig "githubTokenExchange" "endpoint" "" $chart }}
+{{- $brokerKey := "agent-manager.github.tokenExchange.tokenEndpoint" }}
+{{- $brokerURL := dig "github" "tokenExchange" "tokenEndpoint" "" $chart }}
+{{- if not $brokerURL }}
+{{- $brokerKey = "agent-manager.githubTokenExchange.endpoint" }}
+{{- $brokerURL = dig "githubTokenExchange" "endpoint" "" $chart }}
+{{- end }}
 {{- if and $oauthOn (regexMatch "^https://[^/]+" $brokerURL) }}
 {{- $parsed := urlParse $brokerURL }}
 {{- $host := include "agent-platform.jwks.normalizeHost" ($parsed.hostname | default "") }}
 {{- if include "agent-platform.jwks.inCluster" $host }}
-{{- fail (printf "agent-manager.githubTokenExchange.endpoint (%s) names an in-cluster Service, which agent-manager's egress policy cannot select by name: use the broker's external hostname or address" $brokerURL) }}
+{{- fail (printf "%s (%s) names an in-cluster Service, which agent-manager's egress policy cannot select by name: use the broker's external hostname or address" $brokerKey $brokerURL) }}
 {{- end }}
 {{- if and (not (include "agent-platform.jwks.addrLiteral" $host)) (lt (len (splitList "." $host)) 3) }}
-{{- fail (printf "agent-manager.githubTokenExchange.endpoint (%s) names a host of fewer than three labels, which the cluster's DNS search path resolves to an in-cluster Service that agent-manager's egress policy cannot select by name: use the broker's external hostname or address" $brokerURL) }}
+{{- fail (printf "%s (%s) names a host of fewer than three labels, which the cluster's DNS search path resolves to an in-cluster Service that agent-manager's egress policy cannot select by name: use the broker's external hostname or address" $brokerKey $brokerURL) }}
 {{- end }}
 {{- $port := regexFind ":[0-9]+$" ($parsed.host | default "") | trimPrefix ":" | default "443" | int }}
 {{- $broker = dict "host" $host "port" $port "cidr" "" }}

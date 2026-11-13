@@ -891,6 +891,8 @@ spec:
               enabled: false
           mode: Strict
         mcp:
+          description: 'Your agent sessions on this installation, as the signed-in person:
+            list them, send one a message, and checkpoint or fork them'
           displayName: Kagent
           enabled: true
           pathPrefix: /kagent/mcp
@@ -1655,6 +1657,9 @@ spec:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
           name: giantswarm-github:giantswarm:giantswarm-admins
+        kagentRelease:
+          name: ""
+          writers: []
         users:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
@@ -2497,7 +2502,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=5.61.0 <6.0.0"
+    semver: ">=5.63.2 <6.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

@@ -12,6 +12,8 @@ The connectivity chart registers the bundled mcp-kubernetes with muster
   - enabled: false: no MCPServer;
   - displayName (default Kubernetes, the kubernetes family's in agent-platform-mcps)
     is the ui.giantswarm.io/display-name annotation of either shape; empty renders none;
+  - description is spec.description of either shape; empty renders none; one over the
+    MCPServer CRD's 500 characters fails the render naming the key;
   - a managementCluster that is not a DNS label fails the render naming the key;
   - with the component or muster off nothing renders, whatever the block says;
   - the meta chart forwards the block to the connectivity release and drops it from
@@ -92,6 +94,18 @@ def main() -> None:
     if len(unnamed) != 1 or "annotations" in unnamed[0]["metadata"]:
         fail(f"displayName empty: want no annotations, got {[d['metadata'].get('annotations') for d in unnamed]}")
 
+    if not single["spec"].get("description") or single["spec"].get("description") != m["spec"].get("description"):
+        fail(f"description: want the default on both shapes, got {single['spec'].get('description')!r} and {m['spec'].get('description')!r}")
+    described = mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.description=Probe: resources"]))
+    if len(described) != 1 or described[0]["spec"].get("description") != "Probe: resources":
+        fail(f"description set: want spec.description 'Probe: resources', got {[d['spec'].get('description') for d in described]}")
+    undescribed = mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.description="]))
+    if len(undescribed) != 1 or "description" in undescribed[0]["spec"]:
+        fail(f"description empty: want no spec.description, got {[d['spec'].get('description') for d in undescribed]}")
+    err = render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.description=" + "x" * 501], expect_fail=True)
+    if "mcp-kubernetes.mcpServer.description: 501 characters, want at most 500" not in err:
+        fail(f"a 501-character description: the failure does not name the key and the limit:\n{err}")
+
     if mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.enabled=false"])):
         fail("enabled=false: an mcp-kubernetes MCPServer rendered")
     for off in ("components.mcp-kubernetes.enabled=false", "components.muster.enabled=false"):
@@ -139,7 +153,7 @@ def main() -> None:
     if forwarded != {"managementCluster": "agentlab"}:
         fail(f"meta: the connectivity release carries mcp-kubernetes.mcpServer {forwarded}")
 
-    print("ok: singleton by default, family member with managementCluster, none with enabled=false; the display name on both shapes, none when empty; the guard; the meta chart forwards and omits the block")
+    print("ok: singleton by default, family member with managementCluster, none with enabled=false; the display name and description on both shapes, none when empty; the guards; the meta chart forwards and omits the block")
 
 
 if __name__ == "__main__":

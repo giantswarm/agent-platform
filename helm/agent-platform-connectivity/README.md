@@ -1528,6 +1528,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controllerRoute.mcp.pathPrefix | string | `"/kagent/mcp"` |  |
 | kagent.controllerRoute.mcp.timeout | int | `300` |  |
 | kagent.controllerRoute.mcp.displayName | string | `"Kagent"` |  |
+| kagent.controllerRoute.mcp.description | string | `"Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
@@ -1816,6 +1817,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
 | tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: agent-platform:platform-user in the kagent namespace, and, while musterMcpServerViewers is unset, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC "everyone" group instead. |
 | tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: agent-platform:editor in the kagent namespace. |
+| tenants.platform.kagentRelease.name | string | `""` | The name of kagent's HelmRelease in the kagent namespace. Empty, the default, admits none. |
+| tenants.platform.kagentRelease.writers | list | `[]` | The identities that write it: RBAC-style subjects of kind User, Group or ServiceAccount (with its namespace). |
 | tenants.platformTeam | list | `[]` | The customer's platform team: agent-platform:editor in the kagent namespace beside platform.editors (the meta chart also adds it to muster's editor bindings). |
 | musterMcpServerViewers | string | `nil` | muster's MCP-server viewers (giantswarm/agent-platform#1331): list (get, watch) on muster's MCPServers in muster's namespace (agent-platform:mcpserver-viewer). Unset (null), they are tenants.platform.users. An empty list binds nobody. |
 | agentPlatformOrganizations.enabled | bool | `false` | Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a model whose provider the listener serves (Anthropic, Mistral or OpenAI) and llmRouting.modelConfigPolicy.enabled on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain or apiHostnames: the render fails without them. The rollout gate: off by default for now (see above). |
@@ -1947,6 +1950,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | mcp-kubernetes.mcpServer.enabled | bool | `true` |  |
 | mcp-kubernetes.mcpServer.managementCluster | string | `""` |  |
 | mcp-kubernetes.mcpServer.displayName | string | `"Kubernetes"` |  |
+| mcp-kubernetes.mcpServer.description | string | `"Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"` |  |
 | cloudnative-pg | object | `{}` |  |
 | kagent-crds | object | `{}` |  |
 | substrate.createNamespace | bool | `false` |  |

@@ -1763,6 +1763,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # The name the Dev Portal shows for the server (the MCPServer's
       # ui.giantswarm.io/display-name annotation); empty renders none.
       displayName: Kagent
+      # The line the Dev Portal shows under the server's name (the MCPServer's
+      # spec.description, at most 500 characters); empty renders none.
+      description: "Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
@@ -3064,6 +3067,18 @@ tenants:
       - apiGroup: rbac.authorization.k8s.io
         kind: Group
         name: giantswarm-github:giantswarm:giantswarm-admins
+    # kagent's own HelmRelease, where the installation's deployer places it in
+    # the kagent namespace (giantswarm/agent-platform#1387): the
+    # policy agent-platform-platform-helmreleases admits a write of the
+    # HelmRelease `name` by one of `writers` and holds every other
+    # HelmRelease there to an agent's shape. Both keys or neither.
+    kagentRelease:
+      # -- The name of kagent's HelmRelease in the kagent namespace. Empty,
+      # the default, admits none.
+      name: ""
+      # -- The identities that write it: RBAC-style subjects of kind User,
+      # Group or ServiceAccount (with its namespace).
+      writers: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"kind": {"type": "string", "enum": ["User", "Group", "ServiceAccount"]}, "name": {"type": "string"}, "namespace": {"type": "string"}}
   # -- The customer's platform team: agent-platform:editor in the kagent
   # namespace beside platform.editors (the meta chart also adds it to muster's
   # editor bindings).
@@ -3596,6 +3611,9 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
     # ui.giantswarm.io/display-name annotation): agent-platform-mcps' kubernetes
     # family's, which a family member shares. Empty renders none.
     displayName: Kubernetes
+    # What the Dev Portal shows under the name (the MCPServer's
+    # spec.description), at most 500 characters. Empty renders none.
+    description: "Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"
 
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
 # The kagent-crds component's values (kagent main ships its CRDs as their own
