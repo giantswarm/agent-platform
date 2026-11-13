@@ -71,8 +71,9 @@ Once it is `ready`, give its start link.
 
 ## The start link
 
-A link to the portal's new-session screen (`/`, the home), which preselects the agent and prefills
-the composer:
+A relative link to the portal's new-session screen (`/`, the home), which preselects the agent and
+prefills the composer. It needs a portal that resolves an agent by namespace and name (Dev Portal
+3.38.0 or later):
 
 ```text
 [Start a session with <Display name>](/?agent=<namespace>%2F<name>#prompt=<brief>)
@@ -81,16 +82,14 @@ the composer:
 - **`agent`**: `<namespace>/<name>`, URL-encoded (`/` becomes `%2F`). Both come from
   `x_agent-manager_list_agents`; `<name>` is the technical name. Leave the installation out: the
   portal finds the agent by namespace and name across its installations, and the installation name
-  it uses is not one agent-manager reports.
+  it uses may not be the one agent-manager reports.
 - **`prompt`**: optional, after `#` so it stays out of server logs. A short brief of the task in the
   person's terms, URL-encoded as a URI component (space `%20`, `#` `%23`, `&` `%26`), at most a few
   hundred characters; the portal keeps 2000. It prefills the composer; the person edits and sends it.
 - **Never in the brief**: conversation data — mail or message contents, logs, customer data, secrets,
   tokens. Name the task, not its material.
 - Display name, else technical name, in the link text.
-- **Base URL**: keep the link relative, so it opens in the portal the person is reading. When it must
-  be absolute, prefix the portal address the person uses; never guess one or take another
-  installation's portal.
+- **Relative, never a guessed host**: the link opens in the portal the person is reading it in.
 
 Example, for an agent `release-notes` in namespace `kagent`:
 
@@ -98,9 +97,10 @@ Example, for an agent `release-notes` in namespace `kagent`:
 [Start a session with Release Notes](/?agent=kagent%2Frelease-notes#prompt=Draft%20the%20release%20notes%20for%20agent-platform%20v4.2.0)
 ```
 
-When the link names no agent the portal can start (unknown, not ready, its environment unreachable),
-the portal keeps its default agent preselected and the person may not notice: check readiness before
-linking. When the same namespace and name exist in more than one of the portal's installations, the
-portal may pick another one than meant, or none and ask the person to choose; say which environment
-the agent runs in next to the link then. Outside the portal (Slack, an IDE) a relative link does not
-resolve; name the agent and where to find it instead (Dev Portal, **New session**).
+When the portal cannot select the linked agent (not found, several agents with that namespace and
+name, cannot start, or its environment unreachable), it keeps its default agent, says above the
+composer why, and the person picks one. Check readiness before linking.
+
+Outside the portal (Slack, an IDE) a relative link does not resolve. Give the path and say it is
+relative to the person's Dev Portal, or name the agent and where to find it (**New session**);
+never guess the portal's address.

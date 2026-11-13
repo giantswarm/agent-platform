@@ -68,5 +68,6 @@ person reads and sends it:
 ```
 
 No installation in `agent`; the portal finds the agent by namespace and name. Format, encoding,
-checks and what never goes into the brief: `agent-platform-agent-routing`. Keep the link relative so
-it opens in the portal the person uses; in Slack or an IDE, name the agent and say where to find it.
+checks and what never goes into the brief: `agent-platform-agent-routing`. The link stays relative,
+so it opens in the portal the person uses; in Slack or an IDE, say it is relative to their Dev Portal
+or name the agent and say where to find it, never guess the portal's address.
