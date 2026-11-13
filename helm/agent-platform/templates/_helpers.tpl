@@ -2467,14 +2467,29 @@ snapshotLocation agreeing with the derived one.
 {{- end -}}
 {{- end -}}
 
-{{/* The role's ARN: arn:aws (arn:aws-cn in the China partition), the account, aws.roleName or the bucket name. */}}
+{{/* The store's role name: aws.roleName or the bucket name. */}}
+{{- define "agent-platform.substrateStore.awsRoleName" -}}
+{{- $aws := (include "agent-platform.substrateStore.block" . | fromJson).crossplane.aws -}}
+{{- $aws.roleName | default $aws.bucketName -}}
+{{- end -}}
+
+{{/* The role's ARN: arn:aws (arn:aws-cn in the China partition), the account, the store's role name. */}}
 {{- define "agent-platform.substrateStore.awsRoleArn" -}}
-{{- $xp := (include "agent-platform.substrateStore.block" . | fromJson).crossplane -}}
+{{- include "agent-platform.substrateStore.awsRoleArnOf" (dict "root" . "role" (include "agent-platform.substrateStore.awsRoleName" .)) -}}
+{{- end -}}
+
+{{/*
+The ARN of a role in the store's account: arn:aws (arn:aws-cn in the China
+partition), the account, the role name given.
+Usage: include "agent-platform.substrateStore.awsRoleArnOf" (dict "root" $ "role" $name)
+*/}}
+{{- define "agent-platform.substrateStore.awsRoleArnOf" -}}
+{{- $xp := (include "agent-platform.substrateStore.block" .root | fromJson).crossplane -}}
 {{- if not (regexMatch "^[0-9]{12}$" (toString $xp.aws.accountId)) -}}
 {{- fail (printf "kagent.harness.snapshotStore.crossplane.aws.accountId (%v) must be the 12-digit AWS account id, quoted as a string" $xp.aws.accountId) -}}
 {{- end -}}
 {{- $partition := "arn:aws" -}}{{- if hasPrefix "cn-" $xp.region }}{{- $partition = "arn:aws-cn" }}{{- end -}}
-{{- printf "%s:iam::%s:role/%s" $partition $xp.aws.accountId ($xp.aws.roleName | default $xp.aws.bucketName) -}}
+{{- printf "%s:iam::%s:role/%s" $partition $xp.aws.accountId .role -}}
 {{- end -}}
 
 {{/*
@@ -5844,8 +5859,7 @@ Usage: include "agent-platform.organizations.operator" . | fromJson
 {{- $_ := set $out "snapshotSecret" "substrate-rustfs-operator" -}}
 {{- end -}}
 {{- if eq (include "agent-platform.substrateStore.crossplane" .) "aws" -}}
-{{- $aws := (include "agent-platform.substrateStore.block" . | fromJson).crossplane.aws -}}
-{{- $role := printf "%s-operator" ($aws.roleName | default $aws.bucketName) -}}
+{{- $role := printf "%s-operator" (include "agent-platform.substrateStore.awsRoleName" .) -}}
 {{- if gt (len $role) 64 -}}
 {{- fail (printf "agentPlatformOrganizations: the operator's IAM role %s is longer than 64 characters: set a shorter kagent.harness.snapshotStore.crossplane.aws.roleName (at most 55)" $role) -}}
 {{- end -}}
@@ -5955,10 +5969,9 @@ same bucket (or the container behind the s3proxy façade): s3://<bucket>/<uid>. 
 {{- with $xp.region }}{{- $_ := set $snapshots "region" . -}}{{- end -}}
 {{- /* The role the connectivity chart renders beside Substrate's
 (organization-erasure/crossplane-aws.yaml), named by
-agent-platform.organizations.operator: Substrate's role's ARN with the
-operator's role name in place of the store's. */ -}}
+agent-platform.organizations.operator, in the store's account. */ -}}
 {{- $role := (include "agent-platform.organizations.operator" . | fromJson).awsRoleName -}}
-{{- $_ := set $derived "serviceAccount" (dict "annotations" (dict "eks.amazonaws.com/role-arn" (regexReplaceAll "[^/]+$" (include "agent-platform.substrateStore.awsRoleArn" .) $role))) -}}
+{{- $_ := set $derived "serviceAccount" (dict "annotations" (dict "eks.amazonaws.com/role-arn" (include "agent-platform.substrateStore.awsRoleArnOf" (dict "root" . "role" $role)))) -}}
 {{- end -}}
 {{- $_ := set $derived "snapshots" $snapshots -}}
 {{- $ateNs := dig "substrate" "targetNamespace" "ate-system" .Values.components -}}

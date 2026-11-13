@@ -61,6 +61,11 @@ must agree on:
   names;
 - the organization label kagent's authorizer selects namespaces by is the
   label the connectivity chart's policies select them by.
+Each check reads the one object that must match (the named policy, rule or
+CEL variable), never a string anywhere in the render. Teeth: on a copy of the
+kubernetes shape's connectivity render, a changed ate-api-server egress port,
+ingress namespace, swapped Secret-reader roles, a renamed workers' policy,
+other operator pod labels and another commit-mode source each fail it.
 
 Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io (the operator
 chart).
@@ -68,7 +73,7 @@ chart).
 Usage: verify-operator-names.py META_CHART CONNECTIVITY_CHART
 """
 
-import json
+import copy
 import os
 import re
 import subprocess
@@ -77,8 +82,11 @@ import tempfile
 
 import yaml
 
-HELM = os.environ.get("HELM", "helm")
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import floors  # noqa: E402
+
+HELM = os.environ.get("HELM", "helm")
 FIXTURE = os.path.join(HERE, "fixtures", "organizations-operator-values.yaml")
 RELEASE_NS = "agent-platform"
 MAP_API = ["--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
@@ -159,7 +167,7 @@ def operator_chart(meta_chart):
     """The operator chart at the floor of its range: its ServiceAccount's name and its pods' selector labels."""
     values = yaml.safe_load(open(os.path.join(meta_chart, "values.yaml")))
     c = values["components"]["agent-platform-operator"]
-    floor = re.match(r"^(?:>=\s*)?(\S+)", c["versionRange"]).group(1)
+    floor = floors.floor("agent-platform-operator", meta_chart)
     objs = docs(run([HELM, "template", "operator", f"{c['repository']}/{c['chart']}", "--version", floor, "-n", RELEASE_NS]),
                 f"the operator chart {floor}")
     dep = next(d for d in objs if d["kind"] == "Deployment")
@@ -240,88 +248,186 @@ def policies(objs, namespace):
 def check_shape(chart, conn, what, extra):
     m = docs(meta(chart, *ON, *extra), f"meta ({what})")
     c = connectivity_of(conn, m, what)
+    results = agreement(m, c)
+    for good, msg in results:
+        expect(good, f"{what}: {msg}")
+    return m, c
+
+
+def flat(obj):
+    """An object as YAML on one line, one space between words: the CEL of folded scalars compares as written."""
+    return " ".join(yaml.safe_dump(obj, width=1 << 20).split())
+
+
+def peers(rule, key, flavor):
+    """The (namespace, labels) peers and the ports of a network-policy rule, in either flavor."""
+    out = set()
+    if flavor == "cilium":
+        for e in rule.get(f"{key}Endpoints", []):
+            labels = dict(e["matchLabels"])
+            out.add((labels.pop("io.kubernetes.pod.namespace", None), frozenset(labels.items())))
+        ports = {str(p["port"]) for tp in rule.get("toPorts", []) for p in tp.get("ports", [])}
+    else:
+        for e in rule.get(key, []):
+            ns = (e.get("namespaceSelector") or {}).get("matchLabels", {}).get("kubernetes.io/metadata.name")
+            if "podSelector" in e:
+                out.add((ns, frozenset(e["podSelector"].get("matchLabels", {}).items())))
+        ports = {str(p["port"]) for p in rule.get("ports", [])}
+    return out, ports
+
+
+def target(url):
+    """grpc(s)://<service>.<namespace>.svc:<port> -> (namespace, port)."""
+    host, port = re.match(r"^\w+://([^/:]+):(\d+)$", url).groups()
+    return host.split(".")[1], port
+
+
+def agreement(m, c):
+    """(holds, what) for every name the meta render tells the operator and the connectivity render must match."""
+    out = []
     op = release(m, "agent-platform-operator")
     ov = op["values"]
     names = derived(m)
     ns = op["targetNamespace"]
-    expect(ns == release(m, "agent-platform-connectivity")["targetNamespace"],
-           f"{what}: the operator installs into the connectivity release's namespace ({ns})")
+    out.append((ns == release(m, "agent-platform-connectivity")["targetNamespace"],
+                f"the operator installs into the connectivity release's namespace ({ns})"))
     user = f"system:serviceaccount:{ns}:{names['serviceAccountName']}"
     erasure = find(c, "ClusterRoleBinding", "agent-platform:organization-erasure")
-    expect(erasure and erasure["subjects"] == [{"kind": "ServiceAccount", "name": names["serviceAccountName"], "namespace": ns}],
-           f"{what}: the erasure binding names the operator's ServiceAccount in its namespace")
-    text = yaml.safe_dump_all(c)
-    expect(f"'{user}'" in text or f"\"{user}\"" in text or user in text,
-           f"{what}: the admission policies name the operator as {user}")
+    out.append((bool(erasure) and erasure["subjects"] == [{"kind": "ServiceAccount", "name": names["serviceAccountName"], "namespace": ns}],
+                "the erasure binding names the operator's ServiceAccount in its namespace"))
+    vaps = {d["metadata"]["name"]: d for d in c if d["kind"] == "ValidatingAdmissionPolicy"}
+    for name in ("agent-platform-organization-operator-scope", "agent-platform-organization-operator-objects",
+                 "agent-platform-organization-labels", "agent-platform-organization-copies"):
+        out.append((name in vaps and f"'{user}'" in flat(vaps[name]), f"{name} names the operator as {user}"))
 
     peer = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": ns}}, "podSelector": {"matchLabels": names["podLabels"]}}
-    expect(peer in release(m, "kagent")["values"]["controller"]["networkPolicy"]["from"],
-           f"{what}: the kagent release admits the operator's pods by podLabels in its namespace")
+    out.append((peer in release(m, "kagent")["values"]["controller"]["networkPolicy"]["from"],
+                "the kagent release admits the operator's pods by podLabels in its namespace"))
     flavor = ov["networkPolicy"]["flavor"] or "kubernetes"
-    egress = find(c, "CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy", "agent-platform-connectivity-operator-egress")
-    selector = egress["spec"]["endpointSelector"]["matchLabels"] if flavor == "cilium" else egress["spec"]["podSelector"]["matchLabels"]
-    expect(egress["metadata"]["namespace"] == ns and selector == names["podLabels"],
-           f"{what}: the connectivity chart's operator egress policy selects podLabels in its namespace")
-
-    kagent_port = ov["erasure"]["kagent"]["target"].rsplit(":", 1)[1]
-    ate_port = ov["erasure"]["substrate"]["target"].rsplit(":", 1)[1]
-    rules = yaml.safe_dump(egress["spec"])
-    for port, whom in ((kagent_port, "the kagent controller"), (ate_port, "ate-api-server")):
-        expect(re.search(rf"port: '?\"?{port}'?\"?\n", rules), f"{what}: the operator's egress opens {whom}'s port {port}, the one it calls")
+    kind = "CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy"
+    egress = find(c, kind, "agent-platform-connectivity-operator-egress")
+    selector = (egress or {}).get("spec", {}).get("endpointSelector" if flavor == "cilium" else "podSelector", {}).get("matchLabels")
+    out.append((bool(egress) and egress["metadata"]["namespace"] == ns and selector == names["podLabels"],
+                "the connectivity chart's operator egress policy selects podLabels in its namespace"))
+    operator = (ns, frozenset(names["podLabels"].items()))
+    for call, policy, whom in ((ov["erasure"]["kagent"]["target"], "operator-to-kagent-controller", "the kagent controller"),
+                               (ov["erasure"]["substrate"]["target"], "operator-to-ate-api", "ate-api-server")):
+        callee_ns, port = target(call)
+        ingress = find(c, kind, f"agent-platform-connectivity-{policy}")
+        callee = None
+        admitted = False
+        if ingress and ingress["metadata"]["namespace"] == callee_ns:
+            callee = (callee_ns, frozenset(ingress["spec"]["endpointSelector" if flavor == "cilium" else "podSelector"]["matchLabels"].items()))
+            for rule in ingress["spec"].get("ingress", []):
+                p, ports = peers(rule, "from", flavor)
+                admitted |= operator in p and ports == {port}
+        out.append((admitted, f"{whom}'s ingress in {callee_ns} admits the operator's pods on {port}, where it calls ({call})"))
+        opened = any(callee in p and port in ports for p, ports in (peers(r, "to", flavor) for r in (egress or {}).get("spec", {}).get("egress", [])))
+        out.append((callee is not None and opened, f"the operator's egress opens {whom} in {callee_ns} on {port}, where it calls"))
 
     kagent_ns = ov["platformNamespace"]
-    missing = set(ov["networkPolicy"]["names"]) - policies(c, kagent_ns)
-    expect(ov["networkPolicy"]["names"] and not missing,
-           f"{what}: the workers' policies the operator copies ({ov['networkPolicy']['names']}) render in {kagent_ns}")
+    copied = ov["networkPolicy"]["names"]
+    out.append((bool(copied) and not set(copied) - policies(c, kagent_ns),
+                f"the workers' policies the operator copies ({copied}) render in {kagent_ns}"))
 
+    readers = next((v["expression"] for v in vaps.get("agent-platform-organization-operator-objects", {}).get("spec", {}).get("variables", [])
+                    if v["name"] == "readers"), "")
+    admitted = dict(re.findall(r"'([^']+)':\s*'([^']+)'", readers))
     for b in ov.get("serviceAccountBindings") or []:
         pair = f"{b['serviceAccount']['namespace']}/{b['serviceAccount']['name']}"
-        expect(pair in text and b["clusterRole"] in text, f"{what}: the admission policy admits the operator's binding {pair} -> {b['clusterRole']}")
+        out.append((admitted.get(pair) == b["clusterRole"], f"the admission policy admits the operator's binding {pair} -> {b['clusterRole']}"))
 
     ctb = ov["erasure"]["substrate"]["caClusterTrustBundle"]
     script = "\n".join(a for d in c if d["kind"] == "Job" and "substrate-bootstrap" in d["metadata"]["name"]
                        for ct in d["spec"]["template"]["spec"]["containers"] for a in ct.get("command", []) + ct.get("args", []))
     labels = "".join(f'"{k}": "{v}"' for k, v in ctb["matchLabels"].items())
-    expect(f" {ctb['signerName']}\n" in script + "\n" and labels in script,
-           f"{what}: the bootstrap publishes ClusterTrustBundles of {ctb['signerName']} labelled {ctb['matchLabels']}, the ones the operator trusts")
+    out.append((f" {ctb['signerName']}\n" in script + "\n" and f"labels: {{{labels}}}" in script,
+                f"the bootstrap publishes ClusterTrustBundles of {ctb['signerName']} labelled {ctb['matchLabels']}, the ones the operator trusts"))
 
+    helmreleases = flat(vaps.get("agent-platform-organization-helmreleases", {}))
     source = ov["agentChart"]["ociUrl"].rsplit("/", 1)[1]
-    flat = " ".join(text.split())  # the CEL of folded scalars, one space between words
-    expect(f"variables.chartRef.name == '{source}'" in flat, f"{what}: the admission policy admits the agent chart's OCIRepository {source}")
+    out.append((f"variables.chartRef.name == '{source}'" in helmreleases, f"the HelmRelease policy admits the agent chart's OCIRepository {source}"))
     helm_sa = ov["helmReleaseServiceAccount"]
-    expect(helm_sa and f"'{helm_sa}'" in text, f"{what}: the HelmRelease lock names the Helm ServiceAccount {helm_sa}")
+    out.append((f"variables.spec.serviceAccountName == '{helm_sa}'" in helmreleases, f"the HelmRelease policy names the Helm ServiceAccount {helm_sa}"))
     cm = ov.get("commitMode")
     if cm:
+        objects = flat(vaps.get("agent-platform-organization-operator-objects", {}))
         prefix = cm["path"].split("{parent}")[0]
-        for value, which in ((cm["sourceRef"]["kind"], "source kind"), (cm["sourceRef"]["name"], "source name"),
-                             (prefix, "path prefix"), (cm["decryptionSecret"], "SOPS key Secret")):
-            expect(f"'{value}'" in text or f" {value} " in text, f"{what}: the admission policy holds the Kustomizations to the {which} {value}")
+        for cel, which in ((f"object.spec.sourceRef.kind == '{cm['sourceRef']['kind']}'", "source kind"),
+                           (f"object.spec.sourceRef.name == '{cm['sourceRef']['name']}'", "source name"),
+                           (f"object.spec.path == '{prefix}' +", "path prefix"),
+                           (f"object.spec.decryption.secretRef.name == '{cm['decryptionSecret']}'", "SOPS key Secret")):
+            out.append((cel in objects, f"the admission policy holds the operator's Kustomizations to its {which} ({cel})"))
 
     label = release(m, "kagent")["values"]["controller"]["authorization"]["namespaceSelector"]
-    expect(f"key: {label}\n" in text, f"{what}: the connectivity chart selects organization namespaces by {label}, kagent's authorizer's label")
+    held = vaps.get("agent-platform-organization-copies", {}).get("spec", {}).get("matchConstraints", {}).get("namespaceSelector", {})
+    out.append(({"key": label, "operator": "Exists"} in held.get("matchExpressions", []),
+                f"the connectivity chart selects organization namespaces by {label}, kagent's authorizer's label"))
 
-    secret = (ov.get("snapshots", {}).get("credentials") or {}).get("existingSecret")
     if names.get("snapshotSecret"):
+        secret = (ov.get("snapshots", {}).get("credentials") or {}).get("existingSecret")
         s = find(c, "Secret", secret)
-        expect(secret == names["snapshotSecret"] and s and s["metadata"]["namespace"] == ns,
-               f"{what}: the RustFS Secret the operator reads ({secret}) renders in its namespace")
-    arn = ov.get("serviceAccount", {}).get("annotations", {}).get("eks.amazonaws.com/role-arn")
+        out.append((secret == names["snapshotSecret"] and bool(s) and s["metadata"]["namespace"] == ns,
+                    f"the RustFS Secret the operator reads ({secret}) renders in its namespace"))
     if names.get("awsRoleName"):
+        arn = ov.get("serviceAccount", {}).get("annotations", {}).get("eks.amazonaws.com/role-arn") or ""
         role = find(c, "Role", names["awsRoleName"])
-        expect(arn and arn.endswith(f"/{names['awsRoleName']}") and role and role["apiVersion"].startswith("iam.aws"),
-               f"{what}: the IRSA role the operator's ServiceAccount names ({arn}) is the IAM Role the connectivity chart renders")
-        expect(f'"{user}"' in role["spec"]["forProvider"]["assumeRolePolicy"], f"{what}: the IAM role trusts the operator's ServiceAccount only")
+        out.append((arn.endswith(f":role/{names['awsRoleName']}") and bool(role) and role["apiVersion"].startswith("iam.aws"),
+                    f"the IRSA role the operator's ServiceAccount names ({arn}) is the IAM Role the connectivity chart renders"))
+        out.append((bool(role) and f'"{user}"' in role["spec"]["forProvider"]["assumeRolePolicy"], "the IAM role trusts the operator's ServiceAccount"))
+    return out
+
+
+def check_teeth(m, c):
+    """Each disagreement, made on a copy of the kubernetes shape's connectivity render, fails the cross-check."""
+    def mutated(edit):
+        objs = copy.deepcopy(c)
+        edit(objs)
+        return [msg for good, msg in agreement(m, objs) if not good]
+
+    def ate_egress_port(objs):
+        for r in find(objs, "NetworkPolicy", "agent-platform-connectivity-operator-egress")["spec"]["egress"]:
+            if any(p.get("podSelector", {}).get("matchLabels") == {"app": "ate-api-server"} for p in r.get("to", [])):
+                r["ports"] = [{"port": 8443, "protocol": "TCP"}]
+
+    def ate_ingress_namespace(objs):
+        find(objs, "NetworkPolicy", "agent-platform-connectivity-operator-to-ate-api")["metadata"]["namespace"] = "ate-x"
+
+    def swapped_readers(objs):
+        for v in find(objs, "ValidatingAdmissionPolicy", "agent-platform-organization-operator-objects")["spec"]["variables"]:
+            if v["name"] == "readers":
+                roles = re.findall(r":\s*'([^']+)'", v["expression"])
+                v["expression"] = re.sub(r":\s*'([^']+)'", lambda mt, it=iter(reversed(roles)): f": '{next(it)}'", v["expression"])
+
+    def renamed_worker_policy(objs):
+        next(d for d in objs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == "substrate-workers-egress")["metadata"]["name"] = "workers-egress"
+
+    def other_pod_labels(objs):
+        find(objs, "NetworkPolicy", "agent-platform-connectivity-operator-egress")["spec"]["podSelector"]["matchLabels"] = {"app": "operator"}
+
+    def other_source(objs):
+        for v in find(objs, "ValidatingAdmissionPolicy", "agent-platform-organization-operator-objects")["spec"]["validations"]:
+            v["expression"] = v["expression"].replace("'giantswarm-config'", "'other'")
+
+    for what, edit in (("ate-api-server's egress port", ate_egress_port), ("ate-api-server's ingress namespace", ate_ingress_namespace),
+                       ("the Secret readers' roles swapped", swapped_readers), ("a worker policy renamed", renamed_worker_policy),
+                       ("the operator egress policy's pod labels", other_pod_labels), ("commit mode's source", other_source)):
+        failed = mutated(edit)
+        expect(failed, f"teeth: {what} changed in the connectivity render fails the cross-check ({failed[:1]})")
 
 
 def main():
     chart, conn = sys.argv[1:3]
     check_source(chart, conn)
+    first = None
     for what, extra in (("kubernetes", []),
                         ("cilium", ["--set", "networkPolicy.flavor=cilium"]),
                         ("AWS store", aws_store(conn)),
                         ("RustFS", RUSTFS),
                         ("connectivity in apo", ["--set", "components.agent-platform-connectivity.targetNamespace=apo"])):
-        check_shape(chart, conn, what, extra)
+        shape = check_shape(chart, conn, what, extra)
+        first = first or shape
+    check_teeth(*first)
 
 
 if __name__ == "__main__":
