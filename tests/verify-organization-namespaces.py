@@ -213,6 +213,25 @@ def check_meta(chart):
                            "--set-json", f"agent-manager.tenants.commit={json.dumps(manager_commit)}")), "agent-manager")["values"]
     expect(am.get("credentials", {}).get("uiURL") == ui_url,
            "the explicit client credential URL template travels unchanged")
+    platform_url = "https://portal.example.com/customize/models/credentials/test/{namespace}/{operation}"
+    installation_forms = ["--set-literal", f"agent-manager.credentials.platformUIURL={platform_url}",
+                          "--set", "agent-manager.oauth.enabled=true",
+                          "--set", "agent-manager.oauth.downstream.enabled=true",
+                          "--set", "agentManager.route.enabled=true",
+                          "--set", "agentManager.route.jwtAuthentication.enabled=true"]
+    standalone = docs(meta(chart, *installation_forms))
+    standalone_manager = release(standalone, "agent-manager")["values"]
+    expect(standalone_manager["tenants"]["enabled"] is False
+           and standalone_manager["credentials"]["platformUIURL"] == platform_url
+           and not standalone_manager["credentials"].get("uiURL"),
+           "installation credentials preserve disabled tenancy and need no organization form")
+    standalone_route = release(standalone, "agent-platform-connectivity")["values"]["agentManager"]["route"]
+    expect(standalone_route["enabled"] is True and standalone_route["jwtAuthentication"]["enabled"] is True,
+           "the protected manager route is independent of the organization switch")
+    for setting in ("agent-manager.oauth.enabled", "agent-manager.oauth.downstream.enabled"):
+        refused = meta(chart, *installation_forms, "--set", f"{setting}=false")
+        expect(refused.returncode != 0 and "credentials.platformUIURL needs" in refused.stderr,
+               f"installation credentials require {setting}")
     expect(am.get("githubTokenExchange", {}).get("clientID") == "agent-manager",
            "the configured confidential broker client travels unchanged")
     exchange = {"tokenEndpoint": "https://muster.example.com/oauth/token", "audience": "agent-manager",
