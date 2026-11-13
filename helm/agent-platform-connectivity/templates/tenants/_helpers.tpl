@@ -221,3 +221,47 @@ namespace (platform-helmreleases.yaml) and in the organization namespaces
 {{- define "agent-platform.helmReleases.forbiddenFields" -}}
 ['chart', 'valuesFrom', 'postRenderers', 'kubeConfig', 'targetNamespace', 'storageNamespace']
 {{- end -}}
+
+{{/*
+kagent's own HelmRelease in the kagent namespace
+(tenants.platform.kagentRelease, giantswarm/agent-platform#1387), as a CEL
+expression that is true for a write of it by one of its writers; empty while
+it is unset. A deployer that places each workload's HelmRelease in its target
+namespace puts kagent's in the kagent namespace, where
+agent-platform-platform-helmreleases holds every HelmRelease to an agent's
+shape. The meta chart keeps it in its own namespace and needs none of this.
+Both keys or neither: a name without writers admits no one, writers without
+a name would admit every release they write.
+*/}}
+{{- define "agent-platform.tenants.kagentReleaseWrite" -}}
+{{- $release := dig "platform" "kagentRelease" dict (.Values.tenants | default dict) | default dict -}}
+{{- $name := $release.name | default "" -}}
+{{- $writers := $release.writers | default list -}}
+{{- if and $name (not $writers) -}}
+{{- fail "tenants.platform.kagentRelease.name needs tenants.platform.kagentRelease.writers: the identities that write kagent's own HelmRelease (fogctl's kubeconfig user or group, a Flux ServiceAccount)" -}}
+{{- end -}}
+{{- if and $writers (not $name) -}}
+{{- fail "tenants.platform.kagentRelease.writers needs tenants.platform.kagentRelease.name: the writers are admitted for that one HelmRelease only" -}}
+{{- end -}}
+{{- if $name -}}
+{{- $checks := list -}}
+{{- range $writers -}}
+{{- if not .name -}}
+{{- fail "tenants.platform.kagentRelease.writers: every writer names its user, group or ServiceAccount (name)" -}}
+{{- end -}}
+{{- if eq .kind "User" -}}
+{{- $checks = append $checks (printf "request.userInfo.username == %s" (squote .name)) -}}
+{{- else if eq .kind "Group" -}}
+{{- $checks = append $checks (printf "(has(request.userInfo.groups) && %s in request.userInfo.groups)" (squote .name)) -}}
+{{- else if eq .kind "ServiceAccount" -}}
+{{- if not .namespace -}}
+{{- fail (printf "tenants.platform.kagentRelease.writers: the ServiceAccount %s needs its namespace" .name) -}}
+{{- end -}}
+{{- $checks = append $checks (printf "request.userInfo.username == %s" (squote (printf "system:serviceaccount:%s:%s" .namespace .name))) -}}
+{{- else -}}
+{{- fail (printf "tenants.platform.kagentRelease.writers: kind %q is none of User, Group and ServiceAccount" (.kind | default "")) -}}
+{{- end -}}
+{{- end -}}
+request.name == {{ squote $name }} && ({{ join " || " (uniq $checks) }})
+{{- end -}}
+{{- end -}}

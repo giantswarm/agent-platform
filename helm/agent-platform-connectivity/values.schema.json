@@ -2226,6 +2226,44 @@
                                 }
                             }
                         },
+                        "kagentRelease": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "The name of kagent's HelmRelease in the kagent namespace. Empty, the default, admits none."
+                                },
+                                "writers": {
+                                    "type": "array",
+                                    "description": "The identities that write it: RBAC-style subjects of kind User, Group or ServiceAccount (with its namespace).",
+                                    "items": {
+                                        "type": "object",
+                                        "required": [
+                                            "kind",
+                                            "name"
+                                        ],
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "kind": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "User",
+                                                    "Group",
+                                                    "ServiceAccount"
+                                                ]
+                                            },
+                                            "name": {
+                                                "type": "string"
+                                            },
+                                            "namespace": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
                         "users": {
                             "type": "array",
                             "description": "Every signed-in person: agent-platform:platform-user in the kagent namespace, and, while musterMcpServerViewers is unset, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC \"everyone\" group instead.",

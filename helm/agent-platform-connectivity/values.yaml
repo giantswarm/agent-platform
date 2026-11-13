@@ -3067,6 +3067,18 @@ tenants:
       - apiGroup: rbac.authorization.k8s.io
         kind: Group
         name: giantswarm-github:giantswarm:giantswarm-admins
+    # kagent's own HelmRelease, where the installation's deployer places it in
+    # the kagent namespace (giantswarm/agent-platform#1387): the
+    # policy agent-platform-platform-helmreleases admits a write of the
+    # HelmRelease `name` by one of `writers` and holds every other
+    # HelmRelease there to an agent's shape. Both keys or neither.
+    kagentRelease:
+      # -- The name of kagent's HelmRelease in the kagent namespace. Empty,
+      # the default, admits none.
+      name: ""
+      # -- The identities that write it: RBAC-style subjects of kind User,
+      # Group or ServiceAccount (with its namespace).
+      writers: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"kind": {"type": "string", "enum": ["User", "Group", "ServiceAccount"]}, "name": {"type": "string"}, "namespace": {"type": "string"}}
   # -- The customer's platform team: agent-platform:editor in the kagent
   # namespace beside platform.editors (the meta chart also adds it to muster's
   # editor bindings).
