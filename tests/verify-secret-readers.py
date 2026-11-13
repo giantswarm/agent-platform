@@ -169,10 +169,11 @@ def render_checks(meta, tmp):
     # (agent-platform.validateOrganizations, giantswarm/agent-platform#1388);
     # the plugin outside ate-system still renders.
     r = helm("template", "t", meta, *BASE, *ON, *PINS, "--set", "components.substrate.targetNamespace=substrate")
-    check(r.returncode != 0 and "components.substrate.targetNamespace (substrate) is not ate-system" in r.stderr,
+    check(r.returncode != 0 and "components.substrate.targetNamespace: Agent Substrate installs into substrate, not ate-system" in r.stderr,
           f"on, Substrate outside ate-system: the render fails naming components.substrate.targetNamespace: {r.stderr.strip()[-300:]}")
     moved = releases(meta, *ON, *PINS, "--set", f"components.{PLUGIN}.targetNamespace=substrate")
-    check(bound(moved)[2] is None, f"the plugin outside ate-system: no binding the admission policy would refuse: {bound(moved)}")
+    check(bound(moved) == (None, None, None),
+          f"the plugin outside ate-system: no binding the admission policy would refuse, the readers stay cluster-wide: {bound(moved)}")
     with open(path, "w", encoding="utf-8") as f:
         yaml.safe_dump({"substrate": {"credentialProvider": {"namespacePolicies": [
             {"atespace": "team-a", "allowedNamespaces": ["team-a", KAGENT]}]}}}, f)

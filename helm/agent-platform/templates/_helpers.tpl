@@ -228,7 +228,9 @@ Usage: include "agent-platform.operator.serviceAccountBindings" . | fromJsonArra
 {{- $pns := dig "google-access-token-credential-provider" "targetNamespace" "ate-system" .Values.components -}}
 {{- /* The connectivity chart's admission policy admits the operator's binding
 of a provider's ServiceAccount of ate-system only: another namespace binds
-nothing, and the readers stay cluster-wide. */ -}}
+nothing, and the readers stay cluster-wide. Substrate itself outside
+ate-system fails the render first (agent-platform.validateOrganizations); its
+test here is defence in depth, the plugin's is live. */ -}}
 {{- if and (eq $ns "ate-system") (or (not $plugin) (eq $pns "ate-system")) -}}
 {{- $out = append $out (dict "clusterRole" "k8s-credential-provider-secret-reader" "serviceAccount" (dict "namespace" $ns "name" "k8s-credential-provider")) -}}
 {{- if $plugin -}}
@@ -5934,9 +5936,14 @@ Fail the render for an organizations setup that cannot work
 {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
 {{- fail "agentPlatformOrganizations.enabled needs Agent Substrate (components.substrate): an organization's agents run on its copy of the platform WorkerPool, and cleanup of a deleted organization asks ate-api until it has no actor left" -}}
 {{- end -}}
-{{- $ateNs := toString (dig "substrate" "targetNamespace" "ate-system" .Values.components) -}}
+{{- /* The namespace the substrate HelmRelease installs into, as
+components.yaml derives it: the kagent namespace with inKagentNamespace,
+else targetNamespace, else the platform's. */ -}}
+{{- $sc := index .Values.components "substrate" | default dict -}}
+{{- $ateNs := toString ($sc.targetNamespace | default (include "agent-platform.targetNamespace" .)) -}}
+{{- if $sc.inKagentNamespace -}}{{- $ateNs = include "agent-platform.kagent.namespace" . -}}{{- end -}}
 {{- if ne $ateNs "ate-system" -}}
-{{- fail (printf "components.substrate.targetNamespace (%s) is not ate-system: with agentPlatformOrganizations.enabled the operator calls ate-api in that namespace, but the connectivity chart's operator egress rule and the operator-to-ate-api ingress policy name ate-system, so the call is dropped and the erasure of a deleted organization stops at the ate-api step — leave components.substrate.targetNamespace at ate-system" $ateNs) -}}
+{{- fail (printf "components.substrate.targetNamespace: Agent Substrate installs into %s, not ate-system: with agentPlatformOrganizations.enabled the operator calls ate-api in Substrate's namespace, but the connectivity chart's operator egress rule and the operator-to-ate-api ingress policy name ate-system, so the call is dropped and the erasure of a deleted organization stops at the ate-api step — set components.substrate.targetNamespace to ate-system and leave components.substrate.inKagentNamespace unset" $ateNs) -}}
 {{- end -}}
 {{- if not (include "agent-platform.kagent.fluxServiceAccountName" .) -}}
 {{- fail "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: it is the operator's helmReleaseServiceAccount, the ServiceAccount an organization's HelmReleases run as" -}}
