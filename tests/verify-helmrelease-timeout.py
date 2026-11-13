@@ -6,12 +6,14 @@ plus the WorkerPool exceeds helm-controller's 5m default) and the upgrade
 strategy RetryOnFailure every 5m with no remediation block: Flux's rollback
 remediation stalls a release whose rollback target is gone, and every
 dependant with it (giantswarm/agent-platform#1367). Every other child keeps
-helm-controller's default timeout, no strategy and gitops.retries.
+helm-controller's default timeout, no strategy and gitops.retries. With
+"remediate", the render set components.substrate.upgradeStrategy=null and
+substrate is expected back on rollback remediation with gitops.retries.
 
 Stdlib only, like the other render checks (the CI image has no PyYAML): the
 HelmReleases are the chart's own render, two-space indented.
 
-Usage: verify-helmrelease-timeout.py <render> [<retries>]
+Usage: verify-helmrelease-timeout.py <render> [<retries> [remediate]]
 """
 
 import re
@@ -46,13 +48,16 @@ def helmreleases(path):
 def main() -> int:
     path = sys.argv[1]
     retries = sys.argv[2] if len(sys.argv) > 2 else "5"
+    remediate = len(sys.argv) > 3 and sys.argv[3] == "remediate"
     releases = helmreleases(path)
     if "substrate" not in releases:
         print(f"FAIL: no substrate HelmRelease in {path}")
         return 1
     failures = []
     for name, got in sorted(releases.items()):
-        if name == "substrate":
+        if name == "substrate" and remediate:
+            want = ("15m", None, {"retries": retries})
+        elif name == "substrate":
             want = ("15m", {"name": "RetryOnFailure", "retryInterval": "5m"}, None)
         else:
             want = (None, None, {"retries": retries})
@@ -64,8 +69,9 @@ def main() -> int:
     if failures:
         print("FAIL: child HelmRelease timeout/upgrade strategy:\n  " + "\n  ".join(failures))
         return 1
+    substrate = f"no strategy and retries {retries}" if remediate else "upgrade RetryOnFailure every 5m and no remediation"
     print(
-        "ok: substrate timeout 15m, upgrade RetryOnFailure every 5m and no remediation; "
+        f"ok: substrate timeout 15m, {substrate}; "
         f"{len(releases) - 1} other children on the default timeout and retries {retries}"
     )
     return 0
