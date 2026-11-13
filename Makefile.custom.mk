@@ -4599,6 +4599,28 @@ verify-postgres-wal:
 	  python3 tests/verify-postgres-wal.py $(VERIFY_TMP)/vpg-wal.yaml "$$expected" pgvector; \
 	done
 
+.PHONY: verify-manager-grant-broker-egress
+verify-manager-grant-broker-egress: ## Assert cluster/model manager grant brokers are reachable on their HTTPS origin and port in both policy flavors, and reject Service aliases.
+	@mkdir -p $(VERIFY_TMP)
+	@set -eu; for component in cluster-manager model-manager; do \
+	  for flavor in cilium kubernetes; do \
+	    for endpoint in 'https://muster.ci.example.com:8443/oauth/token' 'https://203.0.113.10:8443/oauth/token' 'https://[2001:db8::10]:8443/oauth/token'; do \
+	      $(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set components.cluster-manager.enabled=true --set networkPolicy.flavor=$$flavor --set $$component.github.enabled=true --set-string "$$component.github.tokenExchange.tokenEndpoint=$$endpoint" >$(VERIFY_TMP)/manager-grant-egress.yaml; \
+	      awk "/^  name: agent-platform-connectivity-$$component-egress$$/,/^---/" $(VERIFY_TMP)/manager-grant-egress.yaml >$(VERIFY_TMP)/manager-grant-policy.yaml; \
+	      grep -q '8443' $(VERIFY_TMP)/manager-grant-policy.yaml || { cat $(VERIFY_TMP)/manager-grant-policy.yaml; exit 1; }; \
+	      case "$$endpoint" in \
+	        *muster.ci*) if [ "$$flavor" = cilium ]; then grep -q 'matchName: "muster.ci.example.com"' $(VERIFY_TMP)/manager-grant-policy.yaml; else grep -q 'cidr: 0.0.0.0/0' $(VERIFY_TMP)/manager-grant-policy.yaml; fi ;; \
+	        *203.0.113*) grep -q '203.0.113.10/32' $(VERIFY_TMP)/manager-grant-policy.yaml ;; \
+	        *2001:db8*) grep -q '2001:db8::10/128' $(VERIFY_TMP)/manager-grant-policy.yaml ;; \
+	      esac; \
+	    done; \
+	  done; \
+	  for endpoint in 'http://muster.ci.example.com/oauth/token' 'https://muster/oauth/token' 'https://muster.agent-platform.svc.cluster.local/oauth/token'; do \
+	    if $(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set components.cluster-manager.enabled=true --set-string "$$component.github.tokenExchange.tokenEndpoint=$$endpoint" >$(VERIFY_TMP)/manager-grant-refused.log 2>&1; then echo "FAIL: $$component accepts $$endpoint"; exit 1; fi; \
+	    grep -q "$$component.github.tokenExchange.tokenEndpoint" $(VERIFY_TMP)/manager-grant-refused.log; \
+	  done; \
+	done
+
 # --- verify-all --------------------------------------------------------------
 # Every offline assertion of this repository in one target, which is what CI
 # runs. The list is read out of this file, so a new verify-* target reaches CI

@@ -215,6 +215,15 @@ def check_meta(chart):
            "the explicit client credential URL template travels unchanged")
     expect(am.get("githubTokenExchange", {}).get("clientID") == "agent-manager",
            "the configured confidential broker client travels unchanged")
+    exchange = {"tokenEndpoint": "https://muster.example.com/oauth/token", "audience": "agent-manager",
+                "existingSecret": "agent-manager-github-broker"}
+    next_manager = docs(meta(chart, *ON, "--set", "components.agent-manager.versionRange=>=3.0.0 <4.0.0",
+                             "--set", "agent-manager.github.enabled=true",
+                             "--set-json", f"agent-manager.github.tokenExchange={json.dumps(exchange)}"))
+    next_values = release(next_manager, "agent-manager")["values"]
+    expect(next_values.get("github", {}).get("tokenExchange") == exchange
+           and next_values["github"].get("enabled") is True and "githubTokenExchange" not in next_values,
+           "the 3.x manager receives the on-demand grant configuration without the removed top-level key")
     expect(am.get("tenants") == {"enabled": True, "commit": manager_commit},
            "organization GitOps configuration reaches the manager beside the derived organization switch")
     expect(v["commitMode"] == {"sourceRef": {"kind": "GitRepository", "name": "giantswarm-config"},
@@ -305,8 +314,23 @@ def check_meta(chart):
                                                    "--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}"],
              "agent-manager credential operations and GitHub token exchange need"),
             ("token exchange on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
-                                                    "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token"],
+                                                    "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.agent-manager.versionRange"),
+            ("the former token exchange on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
+                                                               "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token"],
              "agent-manager credential operations and GitHub token exchange need"),
+            ("token exchange before its schema", ["--set", "components.agent-manager.versionRange=>=3.0.0-rc.9 <4.0.0-0",
+                                                  "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.agent-manager.versionRange"),
+            ("token exchange before provider App grant release", ["--set", "components.muster.versionRange=>=5.62.0 <6.0.0",
+                                                                  "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.muster.versionRange"),
+            ("token exchange before the released broker", ["--set", "components.muster.versionRange=>=5.63.0-rc.1 <6.0.0-0",
+                                                           "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.muster.versionRange"),
+            ("token exchange before Basic credential decoding", ["--set", "components.muster.versionRange=>=5.63.1 <6.0.0",
+                                                                  "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.muster.versionRange"),
             ("operation metadata on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
                                                         "--set", "agent-manager.credentials.operationsNamespace=credential-operations"],
              "agent-manager credential operations and GitHub token exchange need"),
@@ -387,17 +411,18 @@ def check_broker_egress(chart):
     for flavor in ("cilium", "kubernetes"):
         kind = "CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy"
         for endpoint, host, cidr, port in cases:
-            rendered = docs(connectivity(chart, flavor, *flags, "--set", f"agent-manager.githubTokenExchange.endpoint={endpoint}"))
-            policy = find(rendered, kind, "agent-platform-connectivity-agent-manager-egress")
-            expect(policy is not None, f"{flavor}: the manager's egress policy is rendered")
-            if flavor == "cilium":
-                target = {"toCIDR": [cidr]} if cidr else {"toFQDNs": [{"matchName": host}]}
-                target["toPorts"] = [{"ports": [{"port": str(port), "protocol": "TCP"}]}]
-                expect(target in policy["spec"]["egress"], f"{flavor}: the broker origin {endpoint} has an explicit rule")
-            else:
-                rules = [rule for rule in policy["spec"]["egress"] if rule.get("ports") == [{"port": port, "protocol": "TCP"}]]
-                expect(any(any(peer.get("ipBlock", {}).get("cidr") == (cidr or "0.0.0.0/0") for peer in rule.get("to", [])) for rule in rules),
-                       f"{flavor}: the broker address class and HTTPS port are admitted for {endpoint}")
+            for key in ("agent-manager.github.tokenExchange.tokenEndpoint", "agent-manager.githubTokenExchange.endpoint"):
+                rendered = docs(connectivity(chart, flavor, *flags, "--set", f"{key}={endpoint}"))
+                policy = find(rendered, kind, "agent-platform-connectivity-agent-manager-egress")
+                expect(policy is not None, f"{flavor}: the manager's egress policy is rendered")
+                if flavor == "cilium":
+                    target = {"toCIDR": [cidr]} if cidr else {"toFQDNs": [{"matchName": host}]}
+                    target["toPorts"] = [{"ports": [{"port": str(port), "protocol": "TCP"}]}]
+                    expect(target in policy["spec"]["egress"], f"{flavor}: the broker origin {endpoint} ({key}) has an explicit rule")
+                else:
+                    rules = [rule for rule in policy["spec"]["egress"] if rule.get("ports") == [{"port": port, "protocol": "TCP"}]]
+                    expect(any(any(peer.get("ipBlock", {}).get("cidr") == (cidr or "0.0.0.0/0") for peer in rule.get("to", [])) for rule in rules),
+                           f"{flavor}: the broker address class and HTTPS port are admitted for {endpoint} ({key})")
         for extra in ([], ["--set", "agent-manager.githubTokenExchange.endpoint=https://broker.example.com:8443/token",
                           "--set", "agent-manager.oauth.enabled=false"]):
             policy = find(docs(connectivity(chart, flavor, *flags, *extra)), kind, "agent-platform-connectivity-agent-manager-egress")
@@ -405,9 +430,12 @@ def check_broker_egress(chart):
             ports += [port["port"] for rule in policy["spec"]["egress"] for entry in rule.get("toPorts", []) for port in entry.get("ports", [])]
             expect(8443 not in ports and "8443" not in ports, f"{flavor}: no broker port while it is unconfigured or OAuth is off")
     for flavor in ("cilium", "kubernetes"):
-        r = connectivity(chart, flavor, *flags, "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.agent-platform.svc.cluster.local/oauth/token")
-        expect(r.returncode != 0 and "names an in-cluster Service" in r.stderr,
+        r = connectivity(chart, flavor, *flags, "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.agent-platform.svc.cluster.local/oauth/token")
+        expect(r.returncode != 0 and "agent-manager.github.tokenExchange.tokenEndpoint (https://muster.agent-platform.svc.cluster.local/oauth/token) names an in-cluster Service" in r.stderr,
                f"{flavor}: an in-cluster broker Service fails the render naming the endpoint")
+        r = connectivity(chart, flavor, *flags, "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.agent-platform.svc.cluster.local/oauth/token")
+        expect(r.returncode != 0 and "agent-manager.githubTokenExchange.endpoint (https://muster.agent-platform.svc.cluster.local/oauth/token) names an in-cluster Service" in r.stderr,
+               f"{flavor}: an in-cluster broker Service under the former key fails the render naming it")
         for endpoint in ("https://muster/oauth/token", "https://muster.agent-platform:8443/oauth/token"):
             r = connectivity(chart, flavor, *flags, "--set", f"agent-manager.githubTokenExchange.endpoint={endpoint}")
             expect(r.returncode != 0 and f"agent-manager.githubTokenExchange.endpoint ({endpoint}) names a host of fewer than three labels" in r.stderr,
