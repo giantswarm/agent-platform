@@ -11,11 +11,13 @@ Over the shapes below, in both flavours, every NetworkPolicy and
 CiliumNetworkPolicy of the connectivity chart is read:
 
 - every selector (matchLabels) that selects Envoy pods carries both owning
-  labels, and a selector with one owning label carries the other;
+  labels, a selector with one owning label carries the other, and the
+  namespace it looks for the pods in is the owning Gateway's;
 - each shape's policies select exactly the Gateways the routes they follow
   attach to: the values the chart attaches the routes with
   (global.gatewayApi.parentRefs, ingress.parentRefs, backstage.parentRefs,
-  kagent.uiRoute.parentRef, workspaceManager.route.parentRefs), so a policy
+  kagent.uiRoute.parentRef, kagent.controllerRoute.parentRef,
+  workspaceManager.route.parentRefs), so a policy
   cannot pass by selecting nothing.
 
 Usage: verify-envoy-peers.py CONNECTIVITY_CHART. Needs PyYAML. HELM selects the binary.
@@ -50,6 +52,8 @@ IDENTITY = [
 EG = "envoy-gateway-system"
 PUBLIC = ("giantswarm-default", EG)
 INTERNAL = ("giantswarm-internal", EG)
+# A third Gateway, of a name the fleet does not use: the policies follow the values, not a literal.
+CONTROLLER = ("kagent-edge", EG)
 # The fleet's two Gateways: the public one is the platform's default parent,
 # muster's route sits on the internal one (a private installation).
 GATEWAYS = [
@@ -73,14 +77,21 @@ SHAPES = [
       "--set", f"backstage.parentRefs[0].name={INTERNAL[0]}", "--set", f"backstage.parentRefs[0].namespace={EG}"],
      {"cilium": {"backstage": {INTERNAL}},
       "kubernetes": {"backstage": {INTERNAL}, "backstage-egress": {INTERNAL}}}),
+    ("the portal's egress to the kagent controller's route on a Gateway of its own (kagent.controllerRoute.parentRef)",
+     [*VM, *IDENTITY, *GATEWAYS, "--set", "components.backstage.enabled=true", "--set", "components.kagent.enabled=true",
+      "--set", "kagent.controllerRoute.enabled=true", "--set", "kagent.controllerRoute.jwtAuthentication.enabled=false",
+      "--set", "kagent.controllerRoute.hostname=agentgateway.ci.example.com",
+      "--set", f"kagent.controllerRoute.parentRef.name={CONTROLLER[0]}", "--set", f"kagent.controllerRoute.parentRef.namespace={EG}"],
+     {"cilium": {"backstage": {PUBLIC}},
+      "kubernetes": {"backstage": {PUBLIC}, "backstage-egress": {INTERNAL, CONTROLLER}}}),
     ("the actors' egress gateway: muster's route on the internal Gateway",
      [*VM, *IDENTITY, *GATEWAYS, *SUBSTRATE],
      {"cilium": {"substrate-atenet-egress": {INTERNAL}},
       "kubernetes": {"substrate-atenet-egress-egress": {INTERNAL}}}),
     ("the actors' egress gateway: muster's route on a Gateway of another name",
-     [*VM, *IDENTITY, *SUBSTRATE, "--set", "ingress.parentRefs[0].name=edge", "--set", "ingress.parentRefs[0].namespace=edge-system"],
-     {"cilium": {"substrate-atenet-egress": {("edge", "edge-system")}},
-      "kubernetes": {"substrate-atenet-egress-egress": {("edge", "edge-system")}}}),
+     [*VM, *IDENTITY, *SUBSTRATE, "--set", "ingress.parentRefs[0].name=edge", "--set", f"ingress.parentRefs[0].namespace={EG}"],
+     {"cilium": {"substrate-atenet-egress": {("edge", EG)}},
+      "kubernetes": {"substrate-atenet-egress-egress": {("edge", EG)}}}),
     ("kagent's UI: oauth2-proxy behind the UI route's Gateway (kagent.uiRoute.parentRef)",
      [*VM, *IDENTITY, *GATEWAYS, *KAGENT_UI, "--set", "kagent.uiRoute.hostname=kagent.ci.example.com"],
      {"cilium": {"oauth2-proxy-ingress": {PUBLIC}}}),
@@ -115,28 +126,47 @@ def render(chart: str, flags: list) -> list:
     return [d for d in yaml.safe_load_all(result.stdout) if d]
 
 
-def selectors(node):
-    """Every matchLabels map under node."""
+def selectors(node, own_namespace):
+    """Every pod selector under node, with the namespace its pods are selected in.
+
+    A NetworkPolicy peer is {namespaceSelector, podSelector}: the namespace is
+    the namespaceSelector's kubernetes.io/metadata.name, the policy's own
+    without one (None for a namespaceSelector that names no single namespace).
+    A Cilium endpoint selector carries its namespace as io.kubernetes.pod.namespace,
+    the policy's own without it.
+    """
     if isinstance(node, dict):
+        if isinstance(node.get("podSelector"), dict) and "matchLabels" in node["podSelector"]:
+            namespace = own_namespace
+            if "namespaceSelector" in node:
+                namespace = ((node["namespaceSelector"] or {}).get("matchLabels") or {}).get("kubernetes.io/metadata.name")
+            yield node["podSelector"]["matchLabels"] or {}, namespace
+            return
         for key, value in node.items():
             if key == "matchLabels" and isinstance(value, dict):
-                yield value
-            else:
-                yield from selectors(value)
+                yield value, value.get("io.kubernetes.pod.namespace", own_namespace)
+            elif key != "namespaceSelector":
+                yield from selectors(value, own_namespace)
     elif isinstance(node, list):
         for item in node:
-            yield from selectors(item)
+            yield from selectors(item, own_namespace)
 
 
 def envoy_gateways(policy: dict, where: str) -> set:
-    """The owning Gateways a policy selects Envoy pods of; fails on a selector without its owner."""
+    """The owning Gateways a policy selects Envoy pods of; fails on a selector without its owner,
+    or one that looks for the pods in another namespace than the owning Gateway's."""
     found = set()
-    for labels in selectors(policy.get("spec", {})):
+    # The rules' peers; the policy's own subject (podSelector, endpointSelector) is not a peer.
+    rules = {k: v for k, v in (policy.get("spec") or {}).items() if k not in ("podSelector", "endpointSelector")}
+    for labels, namespace in selectors(rules, policy["metadata"].get("namespace")):
         owned = OWNER in labels or OWNER_NS in labels
         if labels.get(ENVOY) == "envoy" or owned:
             if not (labels.get(OWNER) and labels.get(OWNER_NS)):
                 fail(f"{where}: a selector picks Envoy pods without naming their Gateway "
                      f"({OWNER} and {OWNER_NS}): {labels}")
+            if namespace != labels[OWNER_NS]:
+                fail(f"{where}: a selector looks for the proxy pods of {labels[OWNER_NS]}/{labels[OWNER]} "
+                     f"in the namespace {namespace}: {labels}")
             found.add((str(labels[OWNER]), str(labels[OWNER_NS])))
     return found
 

@@ -4,7 +4,7 @@ The in-cluster destinations the actors' egress gateway (atenet-egress) reaches
 on 443 and 10443, as a JSON list of {namespace, matchLabels}: the pods of the
 public Gateway muster's route attaches to (ingress.parentRefs, else the
 chart-owned edge, else global.gatewayApi.parentRefs;
-agent-platform.route.edgeNamespaces), since muster's public hostname, which an
+agent-platform.route.edgePeers), since muster's public hostname, which an
 actor's OAuth flow reaches, resolves to that Gateway's load balancer and
 Cilium checks egress after the service translation: the destination is the
 backend pod, on its own port (10443 is the Envoy listener behind an Azure load

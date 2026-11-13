@@ -20,7 +20,7 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   parentRefs:
-    {{- $override := include "agent-platform.kagent.uiRouteParentRefs" . | fromJsonArray }}
+    {{- $override := include "agent-platform.kagent.routeParentRefs" (dict "ctx" . "route" "uiRoute") | fromJsonArray }}
     {{- include "agent-platform.parentRefs" (dict "ctx" . "override" $override "key" "kagent.uiRoute.parentRef") | nindent 4 }}
   hostnames:
     - {{ include "agent-platform.hostname" (dict "ctx" . "prefix" "kagent" "override" $uiRoute.hostname "key" "kagent.uiRoute.hostname") | quote }}

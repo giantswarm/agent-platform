@@ -85,10 +85,7 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   parentRefs:
-    {{- $override := list }}
-    {{- if $route.parentRef.name }}
-    {{- $override = list (dict "name" $route.parentRef.name "namespace" $route.parentRef.namespace "group" "gateway.networking.k8s.io" "kind" "Gateway") }}
-    {{- end }}
+    {{- $override := include "agent-platform.kagent.routeParentRefs" (dict "ctx" . "route" "controllerRoute") | fromJsonArray }}
     {{- include "agent-platform.parentRefs" (dict "ctx" . "override" $override "key" "kagent.controllerRoute.parentRef") | nindent 4 }}
   hostnames:
     - {{ include "agent-platform.kagent.controllerHostname" . | quote }}

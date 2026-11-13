@@ -327,7 +327,7 @@ spec:
   ingress:
     {{- /* The pods of the Gateway the kagent UI route attaches to
     (kagent.uiRoute.parentRef, resolved as the route resolves it). */}}
-    {{- with include "agent-platform.route.edgePeers" (dict "ctx" . "parentRefs" (include "agent-platform.kagent.uiRouteParentRefs" . | fromJsonArray) "routeNamespace" $kagentNs) | fromJsonArray }}
+    {{- with include "agent-platform.route.edgePeers" (dict "ctx" . "parentRefs" (include "agent-platform.kagent.routeParentRefs" (dict "ctx" . "route" "uiRoute") | fromJsonArray) "routeNamespace" $kagentNs) | fromJsonArray }}
     - fromEndpoints:
         {{- range . }}
         - matchLabels:

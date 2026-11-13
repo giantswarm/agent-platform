@@ -1253,8 +1253,11 @@ labels Envoy Gateway stamps on the data-plane pods it runs for a Gateway
 selects its peer through this one helper, so a policy never admits the proxy
 of another Gateway of the same namespace (giantswarm/agent-platform#1292);
 `make verify-envoy-peers` fails a render that selects Envoy pods without the
-owning Gateway. The caller names the pods' namespace: the Gateway's own, where
-the platform's Gateways and their proxies run.
+owning Gateway. The caller names the pods' namespace as the Gateway's own, as
+the policies did before: on the fleet the Gateways live in the Envoy Gateway
+controller's namespace, where the proxies run. A Gateway in another namespace
+under the controller-namespace deploy mode (the default) has its proxy in the
+controller's namespace, which these policies do not select.
 Usage: include "agent-platform.route.envoyPeer" (dict "name" $name "namespace" $ns) | fromJson
 */}}
 {{- define "agent-platform.route.envoyPeer" -}}
@@ -1282,15 +1285,17 @@ Usage: include "agent-platform.route.edgePeers" (dict "ctx" . "parentRefs" $refs
 {{- end -}}
 
 {{/*
-The kagent UI route's own parents (kagent.uiRoute.parentRef), as a JSON list:
-one Gateway ref when the parentRef names one, else empty, which leaves the
-choice to agent-platform.parentRefs. The route (kagent/ui-httproute.yaml) and
-the oauth2-proxy ingress policy (kagent/netpol.yaml) both read it, so the
-policy admits the Gateway the route attaches to.
-Usage: include "agent-platform.kagent.uiRouteParentRefs" . | fromJsonArray
+A kagent route's own parents (kagent.<route>.parentRef, route uiRoute or
+controllerRoute), as a JSON list: one Gateway ref when the parentRef names
+one, else empty, which leaves the choice to agent-platform.parentRefs. The
+routes (kagent/ui-httproute.yaml, kagent/controller-route.yaml) and the
+policies that follow them (the oauth2-proxy ingress in kagent/netpol.yaml,
+agent-platform.backstage.appConfigEdge) all read it, so a policy admits the
+Gateway its route attaches to.
+Usage: include "agent-platform.kagent.routeParentRefs" (dict "ctx" . "route" "uiRoute") | fromJsonArray
 */}}
-{{- define "agent-platform.kagent.uiRouteParentRefs" -}}
-{{- $ref := dig "uiRoute" "parentRef" dict (.Values.kagent | default dict) | default dict -}}
+{{- define "agent-platform.kagent.routeParentRefs" -}}
+{{- $ref := dig .route "parentRef" dict (.ctx.Values.kagent | default dict) | default dict -}}
 {{- if $ref.name -}}
 {{- list (dict "name" $ref.name "namespace" $ref.namespace "group" "gateway.networking.k8s.io" "kind" "Gateway") | toJson -}}
 {{- else -}}
@@ -1321,11 +1326,8 @@ Usage: include "agent-platform.backstage.appConfigEdge" . | fromJson
 */}}
 {{- define "agent-platform.backstage.appConfigEdge" -}}
 {{- $overrides := list (.Values.ingress.parentRefs | default list) -}}
-{{- $kagentRoute := dig "controllerRoute" dict (.Values.kagent | default dict) -}}
-{{- if and $kagentRoute.enabled (dig "parentRef" "name" "" $kagentRoute) -}}
-{{- $overrides = append $overrides (list $kagentRoute.parentRef) -}}
-{{- else if $kagentRoute.enabled -}}
-{{- $overrides = append $overrides list -}}
+{{- if dig "controllerRoute" "enabled" false (.Values.kagent | default dict) -}}
+{{- $overrides = append $overrides (include "agent-platform.kagent.routeParentRefs" (dict "ctx" . "route" "controllerRoute") | fromJsonArray) -}}
 {{- end -}}
 {{- $dataPlane := false -}}
 {{- $byKey := dict -}}

@@ -22,7 +22,8 @@ giantswarm/agent-platform#1292: every network policy of the connectivity chart t
 ### Operator action
 
 - **A caller that reaches one of these services through another Gateway than the one its route names** (for example a second Envoy Gateway in `envoy-gateway-system` with its own route to the same Service): pin the route to that Gateway, or, for kagent's UI, add that Gateway's proxy pods to `kagent.oauth2ProxyIngress.additionalPeers` (with their `io.kubernetes.pod.namespace`).
-- Nothing else: Envoy Gateway labels every proxy pod with its owning Gateway (v1.9.3 on the fleet).
+- **An installation whose EnvoyProxy sets `mergeGateways: true`** (gateway-api-config's `gatewayClasses[].envoyProxy.mergeGateways`; off by default and on no fleet installation): one proxy then serves every Gateway of the class, and its pods carry `gateway.envoyproxy.io/owning-gatewayclass` instead of the owning Gateway's labels, so these policies select none of them and the portal, kagent's UI, the workspace key set and the actors' path to muster stop. Turn `mergeGateways` off before the upgrade, or admit the merged proxy with a policy of its own.
+- Otherwise nothing: Envoy Gateway labels every per-Gateway proxy pod with its owning Gateway (v1.9.3 on the fleet).
 
 ## \<current\> → \<next\> (agent-manager 2.24: `list_organizations` and write-only organization credentials)
 
