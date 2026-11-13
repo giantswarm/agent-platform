@@ -1916,6 +1916,9 @@ spec:
         pass to `call_tool`, always the full name `filter_tools` returns,
         never a function of its own. A workflow first where one fits. The
         contract is in `agent-platform-tools`.
+      tags:
+      - general
+      - platform
     labels:
       agent-platform.giantswarm.io/default: "true"
       agent-platform.giantswarm.io/managed-by: agent-platform

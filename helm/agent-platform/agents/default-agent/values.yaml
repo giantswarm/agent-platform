@@ -4,6 +4,9 @@
 # agent.iconUrl, toolset (preset:full), labels and modelConfig.name, and puts
 # the display name in place of `[[ .DisplayName ]]` in the system message.
 agent:
+  # Shown as filters in the Dev Portal: broad everyday tasks, and part of
+  # the platform rather than someone's own agent.
+  tags: [general, platform]
   systemMessage: |
     Your name is [[ .DisplayName ]]. You are the default agent of this
     Agent Platform: where people start. You act with the identity of the person talking
