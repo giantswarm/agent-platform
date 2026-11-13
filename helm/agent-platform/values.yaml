@@ -1276,6 +1276,18 @@ components:  # @schema additionalProperties: true
     # refuses unknown top-level keys, and it reads them for nothing while the
     # component is off (see components.yaml, gatedValues).
     gatedValues: [vm-manager, vmManager]
+  beekeeper:  # @schema additionalProperties: true
+    chart: beekeeper
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    versionRange: ">=0.174.6 <0.175.0"
+    valuesFrom: beekeeper
+    omitKeys: [enabled, namespace]
+    injectGlobal: false
+    crds: CreateReplace
+    dependsOn: [muster]
+    gatedValues: [beekeeper]
+    gatedRoster: true
+    # Follows beekeeper.enabled; leave this entry's enabled unset.
   cluster-manager:  # @schema additionalProperties: true
     chart: cluster-manager
     # The cluster write surface of the Agent Platform (giantswarm/cluster-manager,
@@ -5505,6 +5517,20 @@ defaultAgent:
   # installation's default model once, when it has none (agent-manager sets it).
   # Set it to pin or change the model.
   modelConfig: ""
+
+# Optional central coordinator. Other keys pass through to the beekeeper chart.
+# The platform supplies serve.issuer, serve.clientIDs and serve.muster when unset.
+# Organization and team mappings must name the exact groups in callers' tokens.
+beekeeper:  # @schema additionalProperties: true
+  enabled: false
+  serve:  # @schema additionalProperties: true
+    organization: ""
+    teams: {}  # @schema additionalProperties: true
+  # Required: beekeeper serve does not start without it. A Secret holding the
+  # Postgres connection URI of the database its mailboxes live in.
+  database:
+    secretName: ""
+    secretKey: uri
 
 # === Cluster manager (cluster-manager) ===
 # Values forwarded verbatim to the cluster-manager component release

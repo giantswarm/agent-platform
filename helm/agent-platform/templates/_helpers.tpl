@@ -96,6 +96,9 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- $root := .root -}}
 {{- $c := index $root.Values.components .name -}}
 {{- if $c -}}
+{{- if and (eq .name "beekeeper") (hasKey $c "enabled") (ne $c.enabled (.root.Values.beekeeper.enabled | default false)) -}}
+{{- fail "set beekeeper.enabled only; components.beekeeper.enabled disagrees with it" -}}
+{{- end -}}
 {{- $on := true -}}
 {{- /* An `enabled: null` is no switch: Helm keeps a null only for a key the
        chart's values do not default, the entries below that follow another. */ -}}
@@ -112,6 +115,8 @@ Usage: include "agent-platform.componentEnabled" (dict "root" $root "name" "agen
 {{- /* The data plane's route to muster: on whenever muster is on
        (agent-platform.validateMusterRoute refuses an explicit false then). */ -}}
 {{- $on = eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "muster")) "true" }}
+{{- else if eq .name "beekeeper" }}
+{{- $on = ($root.Values.beekeeper | default dict).enabled | default false }}
 {{- else if eq .name "skill-manager" }}
 {{- /* The skill-manager serves agent-manager's skills: on with it, unless
        its own switch says otherwise. */ -}}
@@ -416,6 +421,22 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
 {{- $derived := dict -}}
+{{- if and (eq .name "agent-platform-connectivity") .root.Values.beekeeper.enabled -}}
+{{- $_ := set $derived "beekeeper" (dict "namespace" (dig "beekeeper" "targetNamespace" "" .root.Values.components | default (include "agent-platform.targetNamespace" .root))) -}}
+{{- end -}}
+{{- if and (eq .name "beekeeper") .root.Values.beekeeper.enabled -}}
+{{- if not (include "agent-platform.componentEnabled" (dict "root" .root "name" "muster")) -}}
+{{- fail "beekeeper.enabled requires components.muster.enabled" -}}
+{{- end -}}
+{{- $serve := deepCopy (.root.Values.beekeeper.serve | default dict) -}}
+{{- if not $serve.issuer -}}{{- $_ := set $serve "issuer" (required "beekeeper needs global.identity.issuerUrl or beekeeper.serve.issuer" (.root.Values.global.identity.issuerUrl | default (dig "muster" "oauth" "server" "dex" "issuerUrl" "" .root.Values.muster))) -}}{{- end -}}
+{{- if not $serve.clientIDs -}}{{- $_ := set $serve "clientIDs" (list (required "beekeeper needs global.identity.clientId or beekeeper.serve.clientIDs" (.root.Values.global.identity.clientId | default (dig "muster" "oauth" "server" "dex" "clientId" "" .root.Values.muster)))) -}}{{- end -}}
+{{- if not $serve.muster -}}
+{{- $namespace := dig "muster" "targetNamespace" "" .root.Values.components | default (include "agent-platform.targetNamespace" .root) -}}
+{{- $_ := set $serve "muster" (printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .root) $namespace (include "agent-platform.musterServicePort" .root)) -}}
+{{- end -}}
+{{- $_ := set $derived "serve" $serve -}}
+{{- end -}}
 {{- if eq .name "mcp-kubernetes" -}}
 {{- $oauth := dig "mcpKubernetes" "oauth" dict (index .root.Values "mcp-kubernetes" | default dict) -}}
 {{- if $oauth.enabled -}}

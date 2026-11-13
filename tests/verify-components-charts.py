@@ -278,7 +278,7 @@ ALL_ON_INPUTS = [
 
 # Components without a toggle of their own: each follows its switch, and a
 # toggle set beside it is refused by the meta chart's guard.
-SWITCHED = {"workspace-manager": "workspaces.enabled", "agent-platform-operator": "agentPlatformOrganizations.enabled"}
+SWITCHED = {"beekeeper": "beekeeper.enabled", "workspace-manager": "workspaces.enabled", "agent-platform-operator": "agentPlatformOrganizations.enabled"}
 
 API_VERSIONS = [
     "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy",

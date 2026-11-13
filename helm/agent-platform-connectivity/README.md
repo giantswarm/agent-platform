@@ -1155,6 +1155,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | global.observability.traces.otlp.protocol | string | `"grpc"` | `grpc` or `http/protobuf`; empty is grpc. |
 | global.observability.traces.otlp.tenant | string | `"giantswarm"` | The collector's tenant. Read by the meta chart (the X-Scope-OrgID header, the observability.giantswarm.io/tenant pod label); the data plane's label arrives resolved in gateway.parameters.podLabels. |
 | global.observability.traces.otlp.headers | object | `{}` | More OTLP headers, appended to the data-plane env. |
+| components.beekeeper.enabled | bool | `false` |  |
 | components.muster.enabled | bool | `true` |  |
 | components.dicebear.enabled | bool | `true` |  |
 | components.agentgateway.enabled | bool | `true` |  |
@@ -2066,3 +2067,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | modelServing.modelsGateway.jwtAuthentication.jwks.path | string | `"/keys"` |  |
 | modelServing.modelsGateway.jwtAuthentication.jwks.tls.enabled | bool | `false` |  |
 | modelServing.modelsGateway.jwtAuthentication.jwks.tls.caSecretName | string | `""` |  |
+| beekeeper.enabled | bool | `false` |  |
+| beekeeper.serve.organization | string | `""` |  |
+| beekeeper.serve.teams | object | `{}` |  |
+| beekeeper.database.secretName | string | `""` |  |
+| beekeeper.database.secretKey | string | `"uri"` |  |
