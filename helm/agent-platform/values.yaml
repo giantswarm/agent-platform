@@ -941,16 +941,21 @@ components:  # @schema additionalProperties: true
     # time (maxSurge 0, maxUnavailable 1, ~17 s a node) plus ate-api-server,
     # ate-controller, atenet and the kagent WorkerPool: on 20+ Substrate nodes
     # that exceeds helm-controller's 5m default, the upgrade fails on "context
-    # deadline exceeded" and the remediation rolls a healthy release back, over
-    # and over. 15m fits a cold roll of such a cluster with margin.
+    # deadline exceeded" and a rollback would roll every node again. 15m fits a
+    # cold roll of such a cluster with margin.
     timeout: 15m  # @schema pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
-    # Overrides of this release's spec.upgrade.remediation over
-    # gitops.retries, key by key. Each failed attempt waits out the full
-    # timeout and its rollback rolls every node again, so three attempts are
-    # the bound; a release that fails all three is rolled back to the last
-    # good one (strategy rollback, remediateLastFailure: Flux's defaults).
-    upgradeRemediation:  # @schema additionalProperties: true
-      retries: 3
+    # This release's spec.upgrade.strategy (helm-controller >= v1.4). A failed
+    # upgrade is upgraded again every retryInterval instead of rolled back:
+    # Flux's rollback remediation stalls the release for good when Helm's
+    # history holds no deployed revision to return to ("missing target release
+    # for rollback"), and with it kagent, agent-manager and everything else
+    # that dependsOn substrate, until a person forces a reconcile
+    # (giantswarm/agent-platform#1367). A retry is what that force does, and it
+    # rolls no node back. Another component can set upgradeStrategy the same
+    # way; with RetryOnFailure no spec.upgrade.remediation renders.
+    upgradeStrategy:  # @schema additionalProperties: true
+      name: RetryOnFailure  # @schema enum: [RemediateOnFailure, RetryOnFailure]
+      retryInterval: 5m  # @schema pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
   google-access-token-credential-provider:  # @schema additionalProperties: true
     chart: google-access-token-credential-provider
     # The Google access-token credential provider: an Agent Substrate
