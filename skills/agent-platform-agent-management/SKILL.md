@@ -27,6 +27,11 @@ the configured skill sources, a toolset (Muster selectors and presets), `EgressP
 it may reach), a Harness. agent-manager picks and pins them; it never writes model configs or egress
 policies.
 
+A toolset may contain at most 128 selectors and 8192 UTF-8 bytes joined with commas. Muster enforces
+runtime limits; agent-manager reuses the chart's schema and render validation. Backstage reads the
+existing MCP schema and server validation responses. Use a preset for larger selections. The complete
+serialized Session binding must fit its 16 KiB JSON body limit, including escaped names and other fields.
+
 Where the reference lives — fetch it, never quote it from memory:
 
 - Managed namespaces, chart and version, the platform Harness, skill-manager (`skillManager`), the
@@ -90,8 +95,11 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   what the portal and Slack show.
 - **Model**: the cheapest config from the live list that can do the job, never invented — an agent
   on a missing or not-accepted config never boots. No suitable model: a hosted API model with a key is
-  `x_agent-manager_set_organization_model` (organization admin; the key goes into the credential
-  form it links); a local or Hugging Face model is model-manager (`agent-platform-tools`); a
+  `x_agent-manager_set_organization_model` (organization admin, or cluster admin
+  for the installation namespace; the key goes into the credential form it
+  links). Native Vertex models also take nonsecret `projectID` and `location`;
+  upload their JSON only in that credential form. Direct Vertex calls are
+  unmetered by the LLM gateway. A local or Hugging Face model is model-manager (`agent-platform-tools`); a
   subscription (OAuth) model — `openAI.credentialType: chatgptOAuth`, `apiFormat: responses` — is the
   platform's configuration in git, which no tool writes.
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only
