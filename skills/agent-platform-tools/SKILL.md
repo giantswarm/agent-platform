@@ -2,7 +2,7 @@
 name: agent-platform-tools
 description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing or refused, connectors and signing in to one, workflows, or model-manager.
 metadata:
-  version: "3.1.0"
+  version: "3.1.1"
 ---
 
 # Tools on the Agent Platform
@@ -146,8 +146,10 @@ https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
   person the link and call again once they signed in.
 - An agent acting for a person never receives the person's GitHub grant: its commit, and its pin or
   read of a private skill, are refused (`forbidden`). The person does it in their own session.
-- `forbidden` or `Unauthorized` from a backend is the **person's** authorization (RBAC, the service's
-  account); no toolset change affects it.
+- `forbidden` or `Unauthorized` from a backend concerns its authorization; a toolset change cannot
+  grant backend permissions. A successful agent-manager read with `releaseWithheld` is a partial
+  answer, not an error: use the readable Agent data and explain which release details are unavailable.
+  Do not send an authenticated person through sign-in again or blame them for this platform limit.
 - "tool `x_…` not found" from the runtime: a backend tool was emitted as a function — go through
   `call_tool`.
 - Everything else: https://docs.giantswarm.io/tutorials/agent-platform/troubleshooting/.

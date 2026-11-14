@@ -532,7 +532,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.valuesFromRefs[0].optional | bool | `true` |  |
 | components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.substrate.timeout | string | `"15m"` |  |
-| components.substrate.upgradeRemediation.retries | int | `3` |  |
+| components.substrate.upgradeStrategy.name | string | `"RetryOnFailure"` |  |
+| components.substrate.upgradeStrategy.retryInterval | string | `"5m"` |  |
 | components.google-access-token-credential-provider.chart | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.google-access-token-credential-provider.versionRange | string | `">=0.3.0 <0.4.0"` |  |
@@ -565,7 +566,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `">=3.0.0-rc.10 <4.0.0-0"` |  |
+| components.agent-manager.versionRange | string | `">=3.0.0 <4.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.omitEmptyKeys[0] | string | `"harness.egress"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
@@ -636,7 +637,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.toolchain-manager.gatedRoster | bool | `true` |  |
 | components.agent-platform-operator.chart | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-operator.versionRange | string | `">=0.3.0 <0.4.0"` |  |
+| components.agent-platform-operator.versionRange | string | `">=0.4.0 <0.5.0"` |  |
 | components.agent-platform-operator.valuesFrom | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.crds | string | `"CreateReplace"` |  |
 | components.agent-platform-operator.ownedCrds[0] | string | `"agentplatformorganizations.agent-platform.giantswarm.io"` |  |

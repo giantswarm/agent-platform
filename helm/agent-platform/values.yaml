@@ -941,16 +941,21 @@ components:  # @schema additionalProperties: true
     # time (maxSurge 0, maxUnavailable 1, ~17 s a node) plus ate-api-server,
     # ate-controller, atenet and the kagent WorkerPool: on 20+ Substrate nodes
     # that exceeds helm-controller's 5m default, the upgrade fails on "context
-    # deadline exceeded" and the remediation rolls a healthy release back, over
-    # and over. 15m fits a cold roll of such a cluster with margin.
+    # deadline exceeded" and a rollback would roll every node again. 15m fits a
+    # cold roll of such a cluster with margin.
     timeout: 15m  # @schema pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
-    # Overrides of this release's spec.upgrade.remediation over
-    # gitops.retries, key by key. Each failed attempt waits out the full
-    # timeout and its rollback rolls every node again, so three attempts are
-    # the bound; a release that fails all three is rolled back to the last
-    # good one (strategy rollback, remediateLastFailure: Flux's defaults).
-    upgradeRemediation:  # @schema additionalProperties: true
-      retries: 3
+    # This release's spec.upgrade.strategy (helm-controller >= v1.4). A failed
+    # upgrade is upgraded again every retryInterval instead of rolled back:
+    # Flux's rollback remediation stalls the release for good when Helm's
+    # history holds no deployed revision to return to ("missing target release
+    # for rollback"), and with it kagent, agent-manager and everything else
+    # that dependsOn substrate, until a person forces a reconcile
+    # (giantswarm/agent-platform#1367). A retry is what that force does, and it
+    # rolls no node back. Another component can set upgradeStrategy the same
+    # way; with RetryOnFailure no spec.upgrade.remediation renders.
+    upgradeStrategy:  # @schema additionalProperties: true
+      name: RetryOnFailure  # @schema enum: [RemediateOnFailure, RetryOnFailure]
+      retryInterval: 5m  # @schema pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
   google-access-token-credential-provider:  # @schema additionalProperties: true
     chart: google-access-token-credential-provider
     # The Google access-token credential provider: an Agent Substrate
@@ -1167,7 +1172,7 @@ components:  # @schema additionalProperties: true
     # skills through the skill-manager and takes installation and
     # defaultAgentModel (giantswarm/agent-manager#290).
     # github.tokenExchange needs the on-demand grant contract and its schema.
-    versionRange: ">=3.0.0-rc.10 <4.0.0-0"
+    versionRange: ">=3.0.0 <4.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -1404,9 +1409,9 @@ components:  # @schema additionalProperties: true
     # (agent-platform-operator, its chart's name), and another targetNamespace
     # fails the render.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # A 0.3.x release rolls in without a change here, its CRD with it
+    # A 0.4.x release rolls in without a change here, its CRD with it
     # (CreateReplace); one that needs wiring of this chart is a minor
-    # release, 0.4.0, outside the range. 0.1.0 carries the CRD, the curated
+    # release, 0.5.0, outside the range. 0.1.0 carries the CRD, the curated
     # copies, organization cleanup, the ate-api CA projected from ClusterTrustBundles
     # (agent-platform-operator#2, #3, #7, #21) and the serviceAccountBindings
     # the meta chart derives: the credential providers' Secret readers bound
@@ -1421,8 +1426,22 @@ components:  # @schema additionalProperties: true
     # status.lastAppliedRevision, the last revision Flux applied an
     # organization from, kept while it is Orphaned; agent-manager 2.23.0 links
     # its commit (agent-platform-operator#37, #44, agent-manager#355). It
-    # needs no new wiring of this chart either.
-    versionRange: ">=0.3.0 <0.4.0"
+    # needs no new wiring of this chart either. 0.4.0 is the floor: an
+    # organization runs spec.workers.replicas warm workers (1 when not set,
+    # the CRD's new default; 0 set on purpose stays 0) while its namespace
+    # holds a ModelConfig and an Agent (a curated copy counts) or a
+    # ModelConfig and a kagent session, and 0 otherwise; below it a new
+    # organization runs 0 workers and its agents never become ready
+    # (agent-platform-operator#50, giantswarm/giantswarm#39250). It watches
+    # Agent metadata in every namespace, which its ClusterRole already
+    # grants, and asks for the sessions through the erasure's kagent target,
+    # which this chart already derives, binds (organization-erasure) and
+    # opens in the network policies: no new wiring here. kagent admits that
+    # call as a machine caller only with its controller-extensions controller
+    # (kagent.controller.image.repository, the default); with the line's own
+    # controller an organization with a ModelConfig and no Agent keeps its
+    # workers and is Ready=False.
+    versionRange: ">=0.4.0 <0.5.0"
     valuesFrom: agent-platform-operator
     # App-owned CRD: the chart ships agentplatformorganizations in its crds/
     # dir. CreateReplace makes Flux upgrade it with the app on every release
