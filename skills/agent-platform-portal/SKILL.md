@@ -34,6 +34,15 @@ place by its label in **bold**, the path behind it after an arrow: **Customize**
 | **Agents** | Browse and favourite agents, open one, **Use this agent** to start a session, **New agent** (a wizard: Details, Skills, Tools, Review). Edit, update skills or delete, where allowed. |
 | **Skills** | Browse the skill catalogue; **Add skill** and **Edit** open a pull request as the person. |
 | **Connectors** | The MCP servers (`agent-platform-building-blocks`): sign in to one, browse and run its tools, **Add connector**. |
+
+A connector's status describes your access. A family summarizes the access to
+its instances; **View instances** opens their individual states and recovery
+actions. The **Tools** tab explains unavailable tools and keeps available tools
+visible when only some instances connect. **Company login** describes the
+authentication method, separately from access status. Use **Sign in** where it
+is offered; an SSO failure can require an administrator instead. **Status
+unavailable** means access could not be checked, not that the connector has no
+tools.
 | **Models** | The models agents run on; **Connect a model** (OpenAI-compatible, Anthropic, Gemini, Ollama). |
 | **Workflows** | Read and run workflows; they are created by agents and Git, not in the portal. |
 | **Workspaces** | Only where the installation runs workspaces: choose which of an organization's repositories sessions work on. |
