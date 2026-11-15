@@ -51,8 +51,9 @@ header or bound to the session when it starts. `filter_tools`, `describe_tool`, 
 unknown preset is an error on every meta-tool call, never a fall-back to everything. A request without
 any toolset sees the person's whole catalogue — an agent without a toolset has implicit full access.
 
-Inline toolsets allow at most 128 selectors and 8192 UTF-8 bytes when joined with commas. These
-limits apply to the header, `filter_tools` argument and Session binding. Larger selections use an
+Inline toolsets allow at most 128 selectors and 8192 UTF-8 bytes when joined with commas, from Muster
+5.63.7 (32 selectors before; the `toolset.maxItems` of `x_agent-manager_create_agent` gives the current
+count). These limits apply to the header, `filter_tools` argument and Session binding. Larger selections use an
 existing preset or an admin-managed `toolsetPresets` entry; selecting All for a connector also
 includes its future tools. Count limits do not limit the number of tools a preset resolves to.
 
