@@ -745,6 +745,16 @@ def prove_label(meta_chart, k8s):
         case(f"native {provider} with an organization credential", create(vertex))
         vertex["spec"]["apiKeySecret"] = "platform-credential"
         case(f"native {provider} with a platform credential", create(vertex), "agent-platform-tenant-model-credentials")
+        vertex["spec"]["apiKeySecret"] = "tenant-credential-vertex"
+        for loc in ("eu", "us", "europe-west1"):
+            vertex["spec"][block] = {"projectID": "vertex-test", "location": loc}
+            case(f"native {provider} in location {loc}", create(vertex))
+        for what, fields in (("a location that is a host", {"projectID": "vertex-test", "location": "attacker.example/x?"}),
+                             ("an upper-case location", {"projectID": "vertex-test", "location": "EU"}),
+                             ("a project ID with a slash", {"projectID": "vertex-test/x", "location": "global"}),
+                             ("a project ID too short", {"projectID": "abc", "location": "global"})):
+            vertex["spec"][block] = fields
+            case(f"native {provider} with {what}", create(vertex), "agent-platform-tenant-model-routing")
     secret = lambda name, type_="Opaque": {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": name, "namespace": ORG_NS},
                                            "type": type_, "stringData": {"k": "v"}}
     must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "secret-writer", "namespace": ORG_NS},

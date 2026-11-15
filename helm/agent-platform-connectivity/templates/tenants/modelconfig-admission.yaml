@@ -13,8 +13,10 @@ listener serves its provider (agent-platform.tenants.providers: the providers
 of llmRouting.models, and OpenAI when model-manager serves models on the
 listener) and its baseUrl is the listener URL for that provider
 (agent-platform.llmListenerUrl). Native AnthropicVertexAI and GeminiVertexAI
-providers use their CRD-defined project and location, with namespace-local
-credential references checked by agent-platform-tenant-credentials.
+providers skip the listener; their projectID must be a Google project ID
+and their location global, us, eu or a Google region, since kagent builds
+the Vertex host from it. Their namespace-local credential references are
+checked by agent-platform-tenant-credentials.
 A ModelConfig of any other provider, Bedrock
 included (it has no baseUrl), is refused: it would reach the provider
 directly, unmetered. The chart's routing policy
@@ -84,6 +86,17 @@ spec:
       expression: "'provider' in variables.spec ? string(variables.spec.provider) : ''"
     - name: directVertex
       expression: "variables.provider in ['AnthropicVertexAI', 'GeminiVertexAI']"
+    # kagent builds the Vertex host from location, so both fields are held
+    # to Google's formats before the listener rule is skipped.
+    - name: vertexBlock
+      expression: "variables.provider == 'AnthropicVertexAI' ? 'anthropicVertexAI' : 'geminiVertexAI'"
+    - name: vertex
+      expression: >-
+        variables.directVertex && variables.vertexBlock in variables.spec ? dyn(variables.spec[variables.vertexBlock]) : dyn({})
+    - name: vertexValid
+      expression: >-
+        'location' in variables.vertex && string(variables.vertex.location).matches('^(global|us|eu|[a-z]+-[a-z]+[0-9]+)$') &&
+        'projectID' in variables.vertex && string(variables.vertex.projectID).matches('^[a-z][a-z0-9-]{4,28}[a-z0-9]$')
     - name: served
       expression: {{ printf "{%s}" (join ", " $served) | quote }}
     # [block, listener URL] of a served provider, else [].
@@ -113,6 +126,12 @@ spec:
         'in an Organization namespace a ModelConfig goes through the platform\'s LLM listener, which meters every model call and passes your own key through untouched: set spec.' +
         variables.route[0] + '.baseUrl to ' + variables.route[1] + ', or leave it out and the listener is filled in (it is ' + (variables.baseUrl == '' ? 'unset' : variables.baseUrl) +
         '). Refused for ' + request.userInfo.username + ': ' + request.name
+    - expression: "variables.releasing || !variables.directVertex || variables.vertexValid"
+      reason: Invalid
+      messageExpression: >-
+        'a ' + variables.provider + ' ModelConfig needs spec.' + variables.vertexBlock + '.projectID, a Google project ID, and spec.' +
+        variables.vertexBlock + '.location, one of global, us, eu or a Google region such as europe-west1. Refused for ' +
+        request.userInfo.username + ': ' + request.name
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
