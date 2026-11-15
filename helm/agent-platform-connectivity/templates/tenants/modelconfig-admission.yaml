@@ -15,8 +15,10 @@ listener) and its baseUrl is the listener URL for that provider
 (agent-platform.llmListenerUrl). Native AnthropicVertexAI and GeminiVertexAI
 providers skip the listener; their projectID must be a Google project ID
 and their location global, us, eu or a Google region, since kagent builds
-the Vertex host from it. Their namespace-local credential references are
-checked by agent-platform-tenant-credentials.
+the Vertex host from it. They must name an apiKeySecret: without one the
+runtime uses Google's application default credentials, the node's identity
+on Google Cloud. Their namespace-local credential references are checked by
+agent-platform-tenant-credentials.
 A ModelConfig of any other provider, Bedrock
 included (it has no baseUrl), is refused: it would reach the provider
 directly, unmetered. The chart's routing policy
@@ -131,6 +133,15 @@ spec:
       messageExpression: >-
         'a ' + variables.provider + ' ModelConfig needs spec.' + variables.vertexBlock + '.projectID, a Google project ID, and spec.' +
         variables.vertexBlock + '.location, one of global, us, eu or a Google region such as europe-west1. Refused for ' +
+        request.userInfo.username + ': ' + request.name
+    # Without a key the runtime falls back to Google's application default
+    # credentials, which on a Google Cloud node is the node's identity.
+    - expression: >-
+        variables.releasing || !variables.directVertex ||
+        ('apiKeySecret' in variables.spec && string(variables.spec.apiKeySecret) != '')
+      reason: Forbidden
+      messageExpression: >-
+        'a ' + variables.provider + ' ModelConfig in an Organization namespace names its service account key: set spec.apiKeySecret to a tenant credential holding the JSON key (without it Google application default credentials, such as the node\'s identity, would be used). Refused for ' +
         request.userInfo.username + ': ' + request.name
 ---
 apiVersion: admissionregistration.k8s.io/v1

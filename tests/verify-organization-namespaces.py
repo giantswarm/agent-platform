@@ -755,6 +755,12 @@ def prove_label(meta_chart, k8s):
                              ("a project ID too short", {"projectID": "abc", "location": "global"})):
             vertex["spec"][block] = fields
             case(f"native {provider} with {what}", create(vertex), "agent-platform-tenant-model-routing")
+        vertex["spec"][block] = {"projectID": "vertex-test", "location": "global"}
+        for what, drop in (("no apiKeySecret", ("apiKeySecret", "apiKeySecretKey")), ("an empty apiKeySecret", ())):
+            keyless = {**vertex, "spec": {k: v for k, v in vertex["spec"].items() if k not in drop}}
+            if not drop:
+                keyless["spec"]["apiKeySecret"] = ""
+            case(f"native {provider} with {what}", create(keyless), "agent-platform-tenant-model-routing")
     secret = lambda name, type_="Opaque": {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": name, "namespace": ORG_NS},
                                            "type": type_, "stringData": {"k": "v"}}
     must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "secret-writer", "namespace": ORG_NS},

@@ -77,7 +77,8 @@ To share with one team instead, create it in that team's organization.
   nonsecret `projectID` and `location`. Upload the service-account JSON only in
   the linked credential form when it requests `google-service-account-json`.
   Google calls are direct; LLM gateway metering, rate limits and spend reporting
-  are unavailable. Never read, paste or
+  are unavailable. Admission refuses one without `apiKeySecret`, so the runtime
+  never falls back to the node's Google identity. Never read, paste or
   send a person's credential file through an MCP tool.
 - **Organizations themselves**: created and deleted by holders of
   `agent-platform:organizations-admin` (platform staff, or a customer's platform team).

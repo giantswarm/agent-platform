@@ -24,7 +24,10 @@ and location, then upload a service-account JSON file in the shared credential
 form. The API declares `inputFormat: google-service-account-json`; it validates
 the project and private key before writing `GOOGLE_APPLICATION_CREDENTIALS`.
 Neither the model form nor an MCP call takes the JSON. Organization credentials
-still require `tenant-credential-*` Secret names.
+still require `tenant-credential-*` Secret names, and admission refuses an
+organization Vertex model without `apiKeySecret`: without a key the runtime
+would use Google application default credentials, the node's identity on
+Google Cloud.
 
 These providers call Google directly. LLM gateway metering, rate limits and
 spend reporting are unavailable.
