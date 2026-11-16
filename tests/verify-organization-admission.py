@@ -886,28 +886,29 @@ def prove_secret_deletes():
     collection = json.dumps({"kind": "DeleteOptions", "apiVersion": "v1", "propagationPolicy": "Background", "dryRun": ["All"]})
     must(create({**credential("tenant-credential-a"), "metadata": {"name": "tenant-credential-a", "namespace": ORG2}}, dry=False),
          f"create a Secret in {ORG2}, which no finalizer holds")
-    case("the namespace controller deletes the Secrets of an organization namespace none of which a finalizer holds (DeleteCollection, Background)",
-         kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG2}/secrets", "-f", "-"], collection, NS_CONTROLLER, ()))
     # giantswarm/agent-platform#1362: a DeleteCollection runs admission once
     # for each item with the collection request's attributes, which carry no
-    # name (request.name is unset), so the policy names the Secret by
-    # oldObject, the stored item. With request.name the expression failed to
-    # evaluate on an item a finalizer holds and failurePolicy Fail stopped
-    # the DeleteCollection, for every requester; the namespace controller
-    # deletes Secrets only by DeleteCollection and does not fall back to item
-    # deletes on that error (namespaced_resources_deleter.go:330-338), so the
-    # namespace stayed Terminating.
-    case("the namespace controller deletes the Secrets of an organization namespace while a finalizer holds some of them (DeleteCollection, Background)",
-         kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG}/secrets", "-f", "-"], collection, NS_CONTROLLER, ()))
-    # A requester who may deletecollection Secrets but not get them is
-    # refused at an item a finalizer holds, named in the refusal (the items
-    # run in parallel, so which one is not fixed): the answer would list it.
+    # name (request.name is unset), so the policy names each Secret by
+    # oldObject, the stored item, and the namespace controller, which may get
+    # Secrets, empties the namespace also while a finalizer holds one. A
+    # DeleteCollection is answered with the list of its items, data included
+    # (store.go:1312-1365), so the policy matches every collection item: a
+    # requester who may deletecollection Secrets but not get them is refused
+    # at an item, named in the refusal (the items run in parallel, so which
+    # one is not fixed).
     must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": {"name": "secret-collection-deleter"},
                  "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["deletecollection"]}]}, dry=False),
          "create a ClusterRole that deletes collections of Secrets and reads none")
     must(create(crb("erin-secret-collection-deleter", "secret-collection-deleter", "erin"), dry=False),
          "bind erin to the ClusterRole that deletes collections of Secrets")
     API.settle()
+    case("the namespace controller deletes the Secrets of an organization namespace none of which a finalizer holds (DeleteCollection, Background)",
+         kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG2}/secrets", "-f", "-"], collection, NS_CONTROLLER, ()))
+    case("a requester who may not get Secrets deletes no collection of Secrets none of which a finalizer holds (DeleteCollection, Background)",
+         kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG2}/secrets", "-f", "-"], collection, "erin", ()), policy,
+         f"refused: {ORG2}/tenant-credential-a")
+    case("the namespace controller deletes the Secrets of an organization namespace while a finalizer holds some of them (DeleteCollection, Background)",
+         kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG}/secrets", "-f", "-"], collection, NS_CONTROLLER, ()))
     case("a requester who may not get Secrets deletes no collection of Secrets while a finalizer holds one (DeleteCollection, Background)",
          kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG}/secrets", "-f", "-"], collection, "erin", ()), policy, f"refused: {ORG}/tenant-credential-")
     case("the namespace controller deletes a Secret a finalizer holds (one item, Background)",
