@@ -65,6 +65,10 @@ To share with one team instead, create it in that team's organization.
   the request and clears entered values; Save and Cancel wait until the refresh finishes.
   Opening another request starts a separate form with no earlier values or result.
   A saved or cancelled request keeps its result without an extra confirmation read.
+  Direct credential saves and their recovery tolerate controller status updates.
+  Configuration, credential binding or consumer identity changes still require a new preparation. A failed
+  save can have written credentials already; refresh its confirmation and follow
+  the same operation's recovery instead of starting another request.
 - **Organizations themselves**: created and deleted by holders of
   `agent-platform:organizations-admin` (platform staff, or a customer's platform team).
 
