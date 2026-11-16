@@ -77,10 +77,12 @@ To share with one team instead, create it in that team's organization.
   display name (`displayName`, every provider; `""` removes it), its token limit (`maxTokens`:
   Anthropic, AnthropicVertexAI, AzureOpenAI, Mistral, OpenAI; `0` returns to the provider's default)
   and prompt caching (`promptCaching`, `cacheTTL` `5m` or `1h`: Anthropic, Bedrock). A new Anthropic
-  model has prompt caching on (`cacheTTL: 5m`) unless `promptCaching` is `false`. An update that
-  omits a setting keeps it. The API server refuses a setting that the provider does not have.
-  `x_agent-manager_list_model_configs` shows the settings of each model, to compare an
-  organization's model with the platform's.
+  model, or one changed to Anthropic, has prompt caching on (`cacheTTL: 5m`) unless `promptCaching`
+  is `false`. An update that omits a setting keeps it; a change of provider carries only `maxTokens`,
+  where the new provider has it. The API server refuses a setting that the provider does not have.
+  `x_agent-manager_list_model_configs` shows the settings of each model; to compare an
+  organization's model with the platform's, list the organization namespace and the platform
+  namespace (one call each).
 - **Vertex models**: use native `AnthropicVertexAI` or `GeminiVertexAI` with
   nonsecret `projectID` and `location`. Upload the service-account JSON only in
   the linked credential form when it requests `google-service-account-json`.

@@ -93,12 +93,7 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   on a missing or not-accepted config never boots. No suitable model: a hosted API model with a key is
   `x_agent-manager_set_organization_model` (organization admin, or cluster admin
   for the installation namespace; the key goes into the credential form it
-  links). `x_agent-manager_list_model_configs` (each model with a key) and
-  `x_agent-manager_list_egress_policies` (each destination with a credential) name its Secret by
-  `credentialSecret` and `credentialKey`: names only, never a value. They are the `secret` and `key`
-  of `x_agent-manager_replace_organization_credential` and the `credentialSecret` and
-  `credentialKey` of the set tools: take them from the list, never ask the person for them.
-  Native Vertex models also take nonsecret `projectID` and `location`;
+  links). Native Vertex models also take nonsecret `projectID` and `location`;
   upload their JSON only in that credential form. Direct Vertex calls are
   unmetered by the LLM gateway. A local or Hugging Face model is model-manager (`agent-platform-tools`); a
   subscription (OAuth) model — `openAI.credentialType: chatgptOAuth`, `apiFormat: responses` — is the
@@ -113,6 +108,14 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   `agent-platform-skill-authoring`.
 - **Egress**: none unless the job needs an origin; a named `EgressPolicy` where one fits, raw origins otherwise.
   Tenant admins write policies; a change to one reaches its agents from their next session.
+- **Credentials**: an existing model key or egress credential is named in the lists —
+  `x_agent-manager_list_model_configs` (each model with a key) and
+  `x_agent-manager_list_egress_policies` (each destination with a credential) give its Secret as
+  `credentialSecret` and `credentialKey`: names only, never a value. Pass them as `secret` and `key`
+  to `x_agent-manager_replace_organization_credential`, or as `credentialSecret` and `credentialKey`
+  to `x_agent-manager_set_organization_model` and `x_agent-manager_set_organization_egress_policy`;
+  never ask the person for them. A change of a model's provider, or of a Vertex model's project,
+  needs a new `credentialSecret` that does not exist yet.
 - **System prompt**: role, voice and rules; knowledge goes into skills. Every agent with tools carries
   the meta-tool paragraph from `references/system-prompt.md`.
 - **Icon**: `iconUrl` only where the installation serves avatars; omit it otherwise.
