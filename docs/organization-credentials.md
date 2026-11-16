@@ -4,17 +4,16 @@ agent-manager never takes a credential value in an MCP call. A missing or replac
 
 ## Credential form
 
-Set `agent-manager.credentials.uiURL` to the HTTPS URL template of the client that serves the form: it names the operation with one `{operation}` placeholder, and may name the organization with `{parent}` and `{organization}`. Which path the client serves is the client's own configuration. For the portal's credentials page, the template is `https://<portal>/organizations/<installation>/{parent}/{organization}/credentials?operation={operation}`; configure it only once the form ships in [giantswarm/backstage#3364](https://github.com/giantswarm/backstage/issues/3364). This chart derives no form URL. `agent-manager.devPortal` is refused.
+Set `agent-manager.credentials.uiURL` to the HTTPS RFC 6570 URL template of the client that serves the form. One template serves organization and installation models, with or without `agentPlatformOrganizations.enabled`: it names the operation with one `{operation}` expression and the target namespace with `{namespace}`. The form reads the organization and the scope from the operation, so the link carries no other identifier. For the portal, the template is `https://<portal>/customize/models/credentials/<installation>/{namespace}/{operation}`. A template with `{parent}` and `{organization}` and no `{namespace}` still links organization models, but agent-manager refuses installation model writes with it. This chart derives no form URL. `agent-manager.devPortal` is refused.
 
 The form uses its client's authenticated backend path to post the value to agent-manager's REST API as the person; agent-manager exposes no browser CORS exception. A client backend outside the cluster reaches that API through `agentManager.route` (`https://agentgateway.<global.domain>/agent-manager`, `agentManager.route.hostname` overrides the host): turn on `agentManager.route.enabled`, and `agentManager.route.jwtAuthentication.enabled` with the identity provider's issuer. agent-manager validates the token itself (`agent-manager.oauth`), so the audience of the ID token the client sends must be one it trusts (`agent-manager.oauth.trustedAudiences` and the muster audiences it accepts).
 
 Credential operations and `agent-manager.githubTokenExchange` need a floor of `2.22.0` or later in `components.agent-manager.versionRange`. The default floor, `2.24.0`, makes credentials write-only (agent-manager writes them without reading the Secret as the caller): `replace_organization_credential` replaces one, and a save whose credential's consumers changed is answered `credential_consumers_changed`. The Dev Portal's credential form needs it ([giantswarm/backstage#3364](https://github.com/giantswarm/backstage/issues/3364)). The organization switch keeps its own `2.20.0` floor. muster reaches the elicitation to the client from `5.61.0` (giantswarm/muster#1812), the floor of `components.muster.versionRange`.
 
-`agent-manager.credentials.uiURL` needs `agentPlatformOrganizations.enabled`.
-Installation models use the independent `agent-manager.credentials.platformUIURL`
-with OAuth and downstream authorization, including when organizations are disabled.
-The organization switch stays false; organization management is disabled and
-discovery returns an empty list.
+`agent-manager.credentials.uiURL` needs `agent-manager.oauth.enabled` and
+`agent-manager.oauth.downstream.enabled`. With organizations disabled it serves
+installation models only: the organization switch stays false, organization
+management is disabled and discovery returns an empty list.
 
 ## Vertex model credentials
 
@@ -38,10 +37,8 @@ Kubernetes to Google federation and identity isolation belong to
 giantswarm/giantswarm#39257; neither is required for JSON credentials.
 
 Installation model operations use the same manager and credential API, with
-cluster-admin authorization and an explicit `scope: platform` target. Configure
-`agent-manager.credentials.platformUIURL` to the portal's installation form,
-`https://<portal>/customize/models/credentials/<installation>/{namespace}/{operation}`,
-without requiring an organization UI URL. Enable the authenticated manager route
+cluster-admin authorization and an explicit `scope: platform` target, and the
+same `agent-manager.credentials.uiURL` form. Enable the authenticated manager route
 described above when the portal backend reaches it from outside the cluster.
 Commit mode also requires an explicit
 `agent-manager.tenants.commit.platformModelsPath` in the trusted repository.

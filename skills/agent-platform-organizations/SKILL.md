@@ -58,8 +58,8 @@ To share with one team instead, create it in that team's organization.
 - **Platform models**: cluster admins use the same model and credential tools with
   the installation namespace, or the installation's configuration in git. The
   credential operation declares `scope: platform`; it is not an organization.
-  This also works with organizations disabled: the installation form uses
-  `agent-manager.credentials.platformUIURL` and downstream OAuth independently.
+  This also works with organizations disabled: organization and installation
+  models share the one `agent-manager.credentials.uiURL` form.
 - **An organization**: its admins, on the organization's **Models** and **Egress** tabs (or
   `x_agent-manager_set_organization_model`, `x_agent-manager_set_organization_egress_policy`). A
   model key or credential goes into the portal's credential form and is never shown back, nor passed

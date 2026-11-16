@@ -213,8 +213,8 @@ def check_meta(chart):
                            "--set-json", f"agent-manager.tenants.commit={json.dumps(manager_commit)}")), "agent-manager")["values"]
     expect(am.get("credentials", {}).get("uiURL") == ui_url,
            "the explicit client credential URL template travels unchanged")
-    platform_url = "https://portal.example.com/customize/models/credentials/test/{namespace}/{operation}"
-    installation_forms = ["--set-literal", f"agent-manager.credentials.platformUIURL={platform_url}",
+    form_url = "https://portal.example.com/customize/models/credentials/test/{namespace}/{operation}"
+    installation_forms = ["--set-literal", f"agent-manager.credentials.uiURL={form_url}",
                           "--set", "agent-manager.oauth.enabled=true",
                           "--set", "agent-manager.oauth.downstream.enabled=true",
                           "--set", "agentManager.route.enabled=true",
@@ -222,16 +222,15 @@ def check_meta(chart):
     standalone = docs(meta(chart, *installation_forms))
     standalone_manager = release(standalone, "agent-manager")["values"]
     expect(standalone_manager["tenants"]["enabled"] is False
-           and standalone_manager["credentials"]["platformUIURL"] == platform_url
-           and not standalone_manager["credentials"].get("uiURL"),
-           "installation credentials preserve disabled tenancy and need no organization form")
+           and standalone_manager["credentials"] == {"uiURL": form_url},
+           "off, the credential form travels unchanged and tenancy stays disabled")
     standalone_route = release(standalone, "agent-platform-connectivity")["values"]["agentManager"]["route"]
     expect(standalone_route["enabled"] is True and standalone_route["jwtAuthentication"]["enabled"] is True,
            "the protected manager route is independent of the organization switch")
     for setting in ("agent-manager.oauth.enabled", "agent-manager.oauth.downstream.enabled"):
         refused = meta(chart, *installation_forms, "--set", f"{setting}=false")
-        expect(refused.returncode != 0 and "credentials.platformUIURL needs" in refused.stderr,
-               f"installation credentials require {setting}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL needs agent-manager.oauth.enabled" in refused.stderr,
+               f"off, the credential form requires {setting}")
     expect(am.get("githubTokenExchange", {}).get("clientID") == "agent-manager",
            "the configured confidential broker client travels unchanged")
     exchange = {"tokenEndpoint": "https://muster.example.com/oauth/token", "audience": "agent-manager",
@@ -410,9 +409,6 @@ def check_meta(chart):
     r = meta(chart, *SWITCH, "--set", "agent-platform-operator.commitMode.sourceRef.name=flux")
     expect(r.returncode != 0 and "agent-platform-operator.commitMode.sourceRef.name is set but agentPlatformOrganizations.fluxNamespace is not" in r.stderr,
            "on without fluxNamespace, an own commit mode source fails the render naming fluxNamespace")
-    r = meta(chart, "--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}")
-    expect(r.returncode != 0 and "agent-manager.credentials.uiURL needs agentPlatformOrganizations.enabled" in r.stderr,
-           "off with a credential form URL, the render fails naming the organization switch")
     r = meta(chart, "--set", "components.agent-platform-operator.enabled=true")
     expect(r.returncode != 0 and "components.agent-platform-operator.enabled is true but agentPlatformOrganizations.enabled is false" in r.stderr,
            "off with components.agent-platform-operator.enabled true, the render fails naming it")
