@@ -121,7 +121,7 @@ spec:
     - expression: "variables.releasing || variables.directVertex || size(variables.route) == 2"
       reason: Forbidden
       messageExpression: >-
-        {{ printf "'in an Organization namespace a ModelConfig goes through the platform\\'s LLM listener, which meters every model call; it serves the providers %s, and provider ' + (variables.provider == '' ? '<none>' : variables.provider) + ' is not one of them (a Bedrock ModelConfig has no baseUrl and would bypass the listener). Use a served provider (its spec.<provider>.baseUrl is the listener, filled in when you leave it out), or ask the platform team to add the provider to llmRouting.models. Refused for ' + request.userInfo.username + ': ' + request.name" (join ", " $providers) }}
+        {{ printf "'in an Organization namespace a ModelConfig goes through the platform\\'s LLM listener, which meters every model call; it serves the providers %s, and provider ' + (variables.provider == '' ? '<none>' : variables.provider) + ' is not one of them (a Bedrock ModelConfig has no baseUrl and would bypass the listener). AnthropicVertexAI and GeminiVertexAI are also admitted, with your own Google service account key and without metering. Use a served provider (its spec.<provider>.baseUrl is the listener, filled in when you leave it out), or ask the platform team to add the provider to llmRouting.models. Refused for ' + request.userInfo.username + ': ' + request.name" (join ", " $providers) }}
     - expression: "variables.releasing || size(variables.route) != 2 || variables.baseUrl == variables.route[1]"
       reason: Forbidden
       messageExpression: >-
@@ -131,7 +131,7 @@ spec:
     - expression: "variables.releasing || !variables.directVertex || variables.vertexValid"
       reason: Invalid
       messageExpression: >-
-        'a ' + variables.provider + ' ModelConfig needs spec.' + variables.vertexBlock + '.projectID, a Google project ID, and spec.' +
+        'a ModelConfig with provider ' + variables.provider + ' needs spec.' + variables.vertexBlock + '.projectID, a Google project ID, and spec.' +
         variables.vertexBlock + '.location, one of global, us, eu or a Google region such as europe-west1. Refused for ' +
         request.userInfo.username + ': ' + request.name
     # Without a key the runtime falls back to Google's application default
@@ -141,7 +141,7 @@ spec:
         ('apiKeySecret' in variables.spec && string(variables.spec.apiKeySecret) != '')
       reason: Forbidden
       messageExpression: >-
-        'a ' + variables.provider + ' ModelConfig in an Organization namespace names its service account key: set spec.apiKeySecret to a tenant credential holding the JSON key (without it Google application default credentials, such as the node\'s identity, would be used). Refused for ' +
+        'a ModelConfig with provider ' + variables.provider + ' in an Organization namespace must name its service account key: set spec.apiKeySecret to a tenant credential holding the JSON key (without it Google application default credentials, such as the node\'s identity, would be used). Refused for ' +
         request.userInfo.username + ': ' + request.name
 ---
 apiVersion: admissionregistration.k8s.io/v1

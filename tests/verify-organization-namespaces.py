@@ -757,6 +757,13 @@ def prove_label(meta_chart, k8s):
             if not drop:
                 keyless["spec"]["apiKeySecret"] = ""
             case(f"native {provider} with {what}", create(keyless), "agent-platform-tenant-model-routing")
+        blockless = {**vertex, "spec": {k: v for k, v in vertex["spec"].items() if k != block}}
+        case(f"native {provider} without its {block} block", create(blockless), "agent-platform-tenant-model-routing")
+        admitted = {**vertex, "metadata": {"name": f"vertex-{block.lower()}", "namespace": ORG_NS}}
+        must(create(admitted, dry=False), f"create the admitted {provider} ModelConfig")
+        keyless = {**admitted, "spec": {k: v for k, v in admitted["spec"].items() if k not in ("apiKeySecret", "apiKeySecretKey")}}
+        case(f"an update of an admitted native {provider} that removes apiKeySecret",
+             kubectl(["replace", "-f", "-", "--dry-run=server"], yaml.safe_dump(keyless)), "agent-platform-tenant-model-routing")
     secret = lambda name, type_="Opaque": {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": name, "namespace": ORG_NS},
                                            "type": type_, "stringData": {"k": "v"}}
     must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "secret-writer", "namespace": ORG_NS},
