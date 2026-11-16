@@ -228,10 +228,27 @@ def check_meta(chart):
     expect(standalone_route["enabled"] is True and standalone_route["jwtAuthentication"]["enabled"] is True,
            "the protected manager route is independent of the organization switch")
     for template in ("https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}",
-                     "https://portal.example.com/credentials/{operation}?ns=namespace"):
+                     "https://portal.example.com/credentials/{operation}?ns=namespace",
+                     "https://portal.example.com/x/{parent}/{organization}/{namespace}/{operation}",
+                     "https://portal.example.com/x/{namespace}/{operation}{?organization}"):
         refused = meta(chart, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
-        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL needs a {namespace} expression" in refused.stderr,
-               f"off, a credential form without a {{namespace}} expression is refused ({template})")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL needs a {namespace} expression and no {parent} or {organization}" in refused.stderr,
+               f"off, a credential form without {{namespace}} or with an organization variable is refused ({template})")
+    for range_ in (">=3.0.0 <4.0.0", ">=3.1.0-rc.10 <4.0.0-0"):
+        refused = meta(chart, *installation_forms, "--set", f"components.agent-manager.versionRange={range_}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL without agentPlatformOrganizations.enabled needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11" in refused.stderr,
+               f"off, a credential form needs agent-manager 3.1.0-rc.11 or later ({range_})")
+    r = meta(chart, *installation_forms, "--set", "components.agent-manager.versionRange=>=3.1.0-rc.11 <4.0.0-0")
+    expect(r.returncode == 0, "off, a credential form renders with the agent-manager 3.1.0-rc.11 floor")
+    platform_commit = {**manager_commit, "platformModelsPath": "platform-models"}
+    for range_, ok in ((">=3.0.0 <4.0.0", False), (">=3.1.0 <4.0.0", True)):
+        r = meta(chart, *ON, "--set", f"components.agent-manager.versionRange={range_}",
+                 "--set-json", f"agent-manager.tenants.commit={json.dumps(platform_commit)}")
+        if ok:
+            expect(r.returncode == 0, f"tenants.commit.platformModelsPath renders with {range_}")
+        else:
+            expect(r.returncode != 0 and "agent-manager.tenants.commit.platformModelsPath needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11" in r.stderr,
+                   f"tenants.commit.platformModelsPath is refused with {range_}")
     for template in ("https://portal.example.com/c/{operation}{?namespace}", "https://portal.example.com/c{/namespace,operation}"):
         r = meta(chart, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
         expect(r.returncode == 0, f"off, a credential form naming namespace in another RFC 6570 expression renders ({template})")

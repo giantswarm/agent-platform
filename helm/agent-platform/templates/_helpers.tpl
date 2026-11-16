@@ -1594,6 +1594,19 @@ Usage: include "agent-platform.toolchains.registries" $root | fromJson
 {{- end -}}
 
 {{/*
+Whether the floor of components.agent-manager.versionRange admits installation
+model credentials from one uiURL without tenancy and
+tenants.commit.platformModelsPath (giantswarm/agent-manager#409, first in
+3.1.0-rc.11): "true", else empty. Unlike componentFloorAtLeast it compares the
+prerelease too, since earlier 3.1.0 release candidates refuse these values.
+Usage: include "agent-platform.agentManager.installationModelsFloor" $root
+*/}}
+{{- define "agent-platform.agentManager.installationModelsFloor" -}}
+{{- $floor := include "agent-platform.semverRangeFloor" (dig "agent-manager" "versionRange" "" .Values.components) -}}
+{{- if and $floor (ge ((semver $floor).Compare (semver "3.1.0-rc.11")) 0) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
 Whether the floor of components.<name>.versionRange is at least version, a
 release candidate of it included: "true", else empty (a range without a floor
 too).
@@ -4499,8 +4512,20 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- if and (dig "credentials" "uiURL" "" $am) (not (and (dig "oauth" "enabled" false $am) (dig "oauth" "downstream" "enabled" false $am))) -}}
 {{- fail "agent-manager.credentials.uiURL needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled: the credential form posts the value to agent-manager as the person" -}}
 {{- end -}}
-{{- if and (dig "credentials" "uiURL" "" $am) (not $on) (not (regexMatch `\{[+#./;?&]?([^{}]*,)?namespace(:[0-9]+|\*)?(,[^{}]*)?\}` (dig "credentials" "uiURL" "" $am))) -}}
-{{- fail "agent-manager.credentials.uiURL needs a {namespace} expression without agentPlatformOrganizations.enabled: installation model links name the kagent namespace, and agent-manager refuses the template without it" -}}
+{{- $uiURL := dig "credentials" "uiURL" "" $am -}}
+{{- if and $uiURL (not $on) -}}
+{{- if not (include "agent-platform.agentManager.installationModelsFloor" .) -}}
+{{- fail "agent-manager.credentials.uiURL without agentPlatformOrganizations.enabled needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11 or later" -}}
+{{- end -}}
+{{- $variables := list -}}
+{{- range $expression := regexFindAll `\{[^{}]*\}` $uiURL -1 -}}
+{{- range $variable := splitList "," (regexReplaceAll `^\{[+#./;?&]?|\}$` $expression "") -}}
+{{- $variables = append $variables (regexReplaceAll `(:[0-9]+|\*)$` $variable "") -}}
+{{- end -}}
+{{- end -}}
+{{- if or (not (has "namespace" $variables)) (has "parent" $variables) (has "organization" $variables) -}}
+{{- fail "agent-manager.credentials.uiURL needs a {namespace} expression and no {parent} or {organization} without agentPlatformOrganizations.enabled: installation model links name the kagent namespace, and agent-manager refuses any other template" -}}
+{{- end -}}
 {{- end -}}
 {{- $own := dig "tenants" dict $am | default dict -}}
 {{- range $k, $_ := $own -}}
@@ -4510,6 +4535,9 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- end -}}
 {{- if and (hasKey $own "commit") (not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" "2.20.0"))) -}}
 {{- fail "agent-manager.tenants.commit needs components.agent-manager.versionRange with a floor of 2.20.0 or later" -}}
+{{- end -}}
+{{- if and (dig "commit" "platformModelsPath" "" $own) (not (include "agent-platform.agentManager.installationModelsFloor" .)) -}}
+{{- fail "agent-manager.tenants.commit.platformModelsPath needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11 or later" -}}
 {{- end -}}
 {{- if and (hasKey $own "enabled") (ne (toString $own.enabled) (toString $on)) -}}
 {{- fail (printf "agent-manager.tenants.enabled (%v) differs from agentPlatformOrganizations.enabled (%v): agent-manager serves the organization tools exactly while the operator keeps the organization namespaces — set agentPlatformOrganizations.enabled and leave agent-manager.tenants.enabled unset" $own.enabled $on) -}}
