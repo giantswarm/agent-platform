@@ -5814,7 +5814,7 @@ musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemR
 # this switch, so it serves the organization tools (the floor of
 # components.agent-manager.versionRange must be 2.20.0 or later). Credential
 # forms use an explicit agent-manager.credentials.uiURL template containing
-# {operation} and {namespace}, with or without this switch; credentials and github.tokenExchange need a manager floor of
+# {operation} and {namespace} ({namespace} is required without this switch); credentials and github.tokenExchange need a manager floor of
 # 2.22.0 or later. With components.muster on, muster serves
 # the MCPServers of the namespaces labelled
 # agent-platform.giantswarm.io/organization (muster.mcpServerNamespaceSelector,

@@ -227,6 +227,17 @@ def check_meta(chart):
     standalone_route = release(standalone, "agent-platform-connectivity")["values"]["agentManager"]["route"]
     expect(standalone_route["enabled"] is True and standalone_route["jwtAuthentication"]["enabled"] is True,
            "the protected manager route is independent of the organization switch")
+    for template in ("https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}",
+                     "https://portal.example.com/credentials/{operation}?ns=namespace"):
+        refused = meta(chart, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL needs a {namespace} expression" in refused.stderr,
+               f"off, a credential form without a {{namespace}} expression is refused ({template})")
+    for template in ("https://portal.example.com/c/{operation}{?namespace}", "https://portal.example.com/c{/namespace,operation}"):
+        r = meta(chart, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
+        expect(r.returncode == 0, f"off, a credential form naming namespace in another RFC 6570 expression renders ({template})")
+    organization_only = "https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}"
+    r = meta(chart, *ON, "--set-literal", f"agent-manager.credentials.uiURL={organization_only}")
+    expect(r.returncode == 0, "on, an organization-only credential form without {namespace} renders")
     for setting in ("agent-manager.oauth.enabled", "agent-manager.oauth.downstream.enabled"):
         refused = meta(chart, *installation_forms, "--set", f"{setting}=false")
         expect(refused.returncode != 0 and "agent-manager.credentials.uiURL needs agent-manager.oauth.enabled" in refused.stderr,

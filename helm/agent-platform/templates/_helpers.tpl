@@ -4499,6 +4499,9 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- if and (dig "credentials" "uiURL" "" $am) (not (and (dig "oauth" "enabled" false $am) (dig "oauth" "downstream" "enabled" false $am))) -}}
 {{- fail "agent-manager.credentials.uiURL needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled: the credential form posts the value to agent-manager as the person" -}}
 {{- end -}}
+{{- if and (dig "credentials" "uiURL" "" $am) (not $on) (not (regexMatch `\{[+#./;?&]?([^{}]*,)?namespace(:[0-9]+|\*)?(,[^{}]*)?\}` (dig "credentials" "uiURL" "" $am))) -}}
+{{- fail "agent-manager.credentials.uiURL needs a {namespace} expression without agentPlatformOrganizations.enabled: installation model links name the kagent namespace, and agent-manager refuses the template without it" -}}
+{{- end -}}
 {{- $own := dig "tenants" dict $am | default dict -}}
 {{- range $k, $_ := $own -}}
 {{- if not (has $k (list "enabled" "commit")) -}}
