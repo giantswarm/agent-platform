@@ -55,7 +55,11 @@ To share with one team instead, create it in that team's organization.
 
 ## Who manages models and egress policies
 
-- **Platform**: the installation's operators, through the platform's configuration.
+- **Platform models**: cluster admins use the same model and credential tools with
+  the installation namespace, or the installation's configuration in git. The
+  credential operation declares `scope: platform`; it is not an organization.
+  This also works with organizations disabled: organization and installation
+  models share the one `agent-manager.credentials.uiURL` form.
 - **An organization**: its admins, on the organization's **Models** and **Egress** tabs (or
   `x_agent-manager_set_organization_model`, `x_agent-manager_set_organization_egress_policy`). A
   model key or credential goes into the portal's credential form and is never shown back, nor passed
@@ -69,6 +73,13 @@ To share with one team instead, create it in that team's organization.
   Configuration, credential binding or consumer identity changes still require a new preparation. A failed
   save can have written credentials already; refresh its confirmation and follow
   the same operation's recovery instead of starting another request.
+- **Vertex models**: use native `AnthropicVertexAI` or `GeminiVertexAI` with
+  nonsecret `projectID` and `location`. Upload the service-account JSON only in
+  the linked credential form when it requests `google-service-account-json`.
+  Google calls are direct; LLM gateway metering, rate limits and spend reporting
+  are unavailable. Admission refuses one without `apiKeySecret`, so the runtime
+  never falls back to the node's Google identity. Never read, paste or
+  send a person's credential file through an MCP tool.
 - **Organizations themselves**: created and deleted by holders of
   `agent-platform:organizations-admin` (platform staff, or a customer's platform team).
 

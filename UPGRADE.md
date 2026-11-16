@@ -36,12 +36,13 @@ The `substrate` component HelmRelease uses `spec.upgrade.strategy: {name: RetryO
 
 ## \<current\> → \<next\> (agent-manager 3.x)
 
-`components.agent-manager.versionRange` selects `>=3.0.0 <4.0.0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).
+`components.agent-manager.versionRange` selects `>=3.1.0 <4.0.0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).
 
 ### Operator action
 
 - Before admitting agent-manager 3.x, upgrade every portal calling it to Backstage 3.38.2 or later and migrate other callers of `replaceCredential`.
 - Where `agent-manager.githubTokenExchange` is configured, keep an explicit `components.agent-manager.versionRange` below `3.0.0` until the installation's reviewed migration moves it to `agent-manager.github.tokenExchange`. Move `endpoint` to `tokenEndpoint` and `secretName` to `existingSecret`, remove `grantApp`, and set `github.enabled: true`. The audience must equal the muster provider App and broker grant target names. Apply the values and version range together after the agentlab proof (giantswarm/giantswarm#39239).
+- agent-manager 3.1.0 serves Vertex service-account JSON keys and installation models through `agent-manager.credentials.uiURL` (giantswarm/agent-manager#409). Without `agentPlatformOrganizations.enabled`, a `uiURL` needs a `{namespace}` expression and no `{parent}` or `{organization}`, and the range floor must be `3.1.0-rc.11` or later; `tenants.commit.platformModelsPath` needs the same floor.
 - The on-demand exchange needs agent-manager 3.0.0-rc.10 and muster 5.63.2 or later, which the meta chart validates from their range floors. muster 5.63.2 includes the Basic credential decoding fix in mcp-oauth (giantswarm/mcp-oauth#700), required for broker client credentials containing reserved characters. Installations still using the GitHub App pin keep it until their own rollout step.
 - Cluster-manager and model-manager derive broker egress from `github.tokenExchange.tokenEndpoint`, on its HTTPS origin and port, for both policy flavors. Use an external fully qualified hostname or IP address; Service aliases are refused. Native Kubernetes policies use the component's existing egress CIDRs or `networkPolicy.additionalEgressCIDRs` for private broker addresses.
 
