@@ -1207,7 +1207,46 @@ spec:
         enabled: true
         key: catalog.json
         name: ""
-        providers: {}
+        providers:
+          gcp.vertex_ai:
+            models:
+              claude-haiku-5-5:
+                rates:
+                  cacheRead: "0.01"
+                  cacheWrite: "0.125"
+                  input: "0.1"
+                  output: "0.5"
+                tiers:
+                - contextOver: 100000
+                  rates:
+                    cacheRead: "0.05"
+                    cacheWrite: "0.625"
+                    input: "0.5"
+                    output: "2.5"
+              claude-opus-5:
+                rates:
+                  cacheRead: "0.5"
+                  cacheWrite: "6.25"
+                  input: "5"
+                  output: "25"
+              claude-opus-5-5:
+                rates:
+                  cacheRead: "0.2"
+                  cacheWrite: "5"
+                  input: "4"
+                  output: "20"
+              claude-sonnet-5:
+                rates:
+                  cacheRead: "0.2"
+                  cacheWrite: "2.5"
+                  input: "2"
+                  output: "10"
+              claude-sonnet-5-5:
+                rates:
+                  cacheRead: "0.1"
+                  cacheWrite: "2.5"
+                  input: "2"
+                  output: "10"
       modelConfigPolicy:
         enabled: true
       models:

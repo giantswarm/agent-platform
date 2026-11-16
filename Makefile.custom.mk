@@ -769,11 +769,17 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@$(METRICS_EXPRS) $(VERIFY_TMP)/vl-on.out | grep -q '^agent=.* : source.unverifiedWorkload.serviceAccount$$' || { echo "FAIL: no agent attribution label (the source ServiceAccount behind the Substrate egress predicate; verify-metric-labels holds the expression)"; exit 1; }
 	@$(METRICS_EXPRS) $(VERIFY_TMP)/vl-on.out | grep -q '^agent_namespace=.* : source.unverifiedWorkload.namespace$$' || { echo "FAIL: no agent_namespace attribution label"; exit 1; }
 	@echo "ok: the labels on the metrics policy"
-	@echo "--> the defaults carry no overlay entries (the pinned gateway prices every default model): no price ConfigMap and no catalog source, the built-in catalog alone"
-	@if grep -qE 'model-catalog|^  modelCatalog:' $(VERIFY_TMP)/vl-on.out; then echo "FAIL: the default empty overlay renders the price ConfigMap or its catalog source"; exit 1; fi
+	@echo "--> the defaults price Claude on Vertex AI under the bare ids AnthropicVertexAI ModelConfigs send (the pinned catalog keys them <id>@default): the price ConfigMap carries them and the AgentgatewayParameters references it"
+	@grep -q 'name: t-model-catalog' $(VERIFY_TMP)/vl-on.out || { echo "FAIL: no default price ConfigMap; Claude on Vertex AI would go unpriced"; exit 1; }
+	@for model in claude-opus-5 claude-opus-5-5 claude-sonnet-5 claude-sonnet-5-5 claude-haiku-5-5; do \
+	  awk '/^  name: t-model-catalog$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-on.out | grep -q "\"$$model\": {" || { echo "FAIL: the default price ConfigMap does not price gcp.vertex_ai/$$model"; exit 1; }; \
+	done
+	@awk '/^  name: t-model-catalog$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-on.out | grep -q '"gcp.vertex_ai": {' || { echo "FAIL: the default overlay is not under the gateway's Vertex provider key gcp.vertex_ai"; exit 1; }
+	@grep -A4 '^  modelCatalog:' $(VERIFY_TMP)/vl-on.out | grep -q 'key: catalog.json' || { echo "FAIL: AgentgatewayParameters does not reference the default price ConfigMap"; exit 1; }
+	@echo "ok: default overlay prices Claude on Vertex AI"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true --set llmRouting.modelCatalog.providers=null >$(VERIFY_TMP)/vl-nocat.out 2>&1 || { cat $(VERIFY_TMP)/vl-nocat.out; exit 1; }
 	@if grep -qE 'model-catalog|^  modelCatalog:' $(VERIFY_TMP)/vl-nocat.out; then echo "FAIL: a null overlay renders the price ConfigMap or its catalog source"; exit 1; fi
-	@echo "ok: empty overlay renders nothing"
+	@echo "ok: a null overlay renders nothing"
 	@echo "--> an installation that prices a model renders the price ConfigMap, the AgentgatewayParameters references it, and the schema keeps providers open below the provider"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(LLM_VM) --set components.kagent.enabled=true --set-json 'llmRouting.modelCatalog.providers.anthropic.models.claude-extra={"rates":{"input":"1","output":"2"}}' >$(VERIFY_TMP)/vl-extra.out 2>&1 || { cat $(VERIFY_TMP)/vl-extra.out; echo "FAIL: the schema refuses a model under a provider"; exit 1; }
 	@grep -q 'name: t-model-catalog' $(VERIFY_TMP)/vl-extra.out || { echo "FAIL: no model-price ConfigMap; the overlay's models would go unpriced"; exit 1; }

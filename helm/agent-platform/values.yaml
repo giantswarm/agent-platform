@@ -2415,7 +2415,27 @@ llmRouting:
     # ConfigMap name; empty derives <release>-model-catalog.
     name: ""
     key: catalog.json
-    providers: {}  # @schema type: object; additionalProperties: {"$ref": "../agent-platform-connectivity/files/model-catalog/providers.schema.json"}; skipProperties: true
+    # Claude on Vertex AI under the bare ids kagent's AnthropicVertexAI
+    # ModelConfigs send (claude-sonnet-5): the pinned catalog keys them
+    # <id>@default, which the gateway's Vertex alias lookup does not reach.
+    # Anthropic list (= Vertex global) rates; Vertex's regional and multi-region
+    # (us, eu) endpoints cost 10% more, which an installation sets here.
+    providers:  # @schema type: object; additionalProperties: {"$ref": "../agent-platform-connectivity/files/model-catalog/providers.schema.json"}; skipProperties: true
+      gcp.vertex_ai:
+        models:
+          claude-opus-5:
+            rates: {input: "5", output: "25", cacheRead: "0.5", cacheWrite: "6.25"}
+          claude-opus-5-5:
+            rates: {input: "4", output: "20", cacheRead: "0.2", cacheWrite: "5"}
+          claude-sonnet-5:
+            rates: {input: "2", output: "10", cacheRead: "0.2", cacheWrite: "2.5"}
+          claude-sonnet-5-5:
+            rates: {input: "2", output: "10", cacheRead: "0.1", cacheWrite: "2.5"}
+          claude-haiku-5-5:
+            rates: {input: "0.1", output: "0.5", cacheRead: "0.01", cacheWrite: "0.125"}
+            tiers:
+              - contextOver: 100000
+                rates: {input: "0.5", output: "2.5", cacheRead: "0.05", cacheWrite: "0.625"}
 
 networkPolicy:
   enabled: true
