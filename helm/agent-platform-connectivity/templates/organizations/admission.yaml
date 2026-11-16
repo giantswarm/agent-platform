@@ -44,6 +44,16 @@ these.
     namespace (agent-platform:organizations-admin's own right) and may not
     create Roles there (as a cluster-admin or the namespace's built-in admin
     may) writes no RoleBinding there.
+  * agent-platform-organization-admin-mirrors: in an organization namespace
+    only the operator binds agent-platform:organizations-admin, as its
+    mirrors of the parent namespace's admins (giantswarm/agent-platform#1363):
+    an organizations-admin bound there holds every rule of the role, so RBAC
+    lets it bind the role without `bind`, and the subject could write
+    AgentPlatformOrganizations there. A create, and an update that changes
+    the subjects, is refused for everyone else but a requester who may
+    create Roles there (a cluster-admin, as in the policy above). A delete
+    passes; the operator's labelled mirrors are
+    agent-platform-organization-copies'.
   * agent-platform-organization-admins-binding: the RoleBinding
     organization-admins of an organization namespace binds agent-platform:admin
     to at least one subject; it is not deleted or emptied while the namespace
@@ -450,6 +460,63 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   policyName: agent-platform-organizations-admin-rolebindings
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-admin-mirrors
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      {{- include "agent-platform.organizations.namespaces" . | nindent 6 }}
+    resourceRules:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["rolebindings"]
+  matchConditions:
+    # A binding to agent-platform:organizations-admin. RBAC lets a requester
+    # bind a role whose rules it holds in the namespace without `bind`, and
+    # an organizations-admin bound here holds every rule of that role.
+    - name: organizations-admin
+      expression: "object.roleRef.kind == 'ClusterRole' && object.roleRef.name == 'agent-platform:organizations-admin'"
+    - name: not-operator
+      expression: {{ printf "request.userInfo.username != '%s'" $operator | quote }}
+    # The operator's mirrors (labelled, before or after the write) are
+    # agent-platform-organization-copies'.
+    - name: not-operator-object
+      expression: >-
+        [dyn(object), dyn(oldObject)].all(o, o == null || !(has(o.metadata.labels) && {{ squote $objectLabel }} in o.metadata.labels))
+    # As agent-platform-organizations-admin-rolebindings, and as
+    # agent-platform-organization-flux-writes, which holds only the
+    # organization's Flux ServiceAccount: a requester who may create Roles
+    # here (a cluster-admin, the namespace's built-in admin) is not held. It
+    # can grant the same rights by a Role of its own.
+    - name: not-role-writer
+      expression: >-
+        !authorizer.group('rbac.authorization.k8s.io').resource('roles').namespace(request.namespace).check('create').allowed()
+  validations:
+    # An update that leaves the subjects as they are passes (a label, an
+    # annotation, a finalizer): it grants nobody anything, and the roleRef of
+    # a RoleBinding never changes.
+    - expression: >-
+        request.operation == 'UPDATE' &&
+        (has(object.subjects) ? object.subjects : []) == (has(oldObject.subjects) ? oldObject.subjects : [])
+      reason: Forbidden
+      messageExpression: {{ printf "'only the agent-platform-operator (%s) binds agent-platform:organizations-admin in an organization namespace, as its mirrors of the parent namespace admins; refused for ' + request.userInfo.username + ': ' + request.operation + ' ' + request.namespace + '/' + object.metadata.name" $operator | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-admin-mirrors
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-admin-mirrors
   validationActions: [Deny]
 ---
 apiVersion: admissionregistration.k8s.io/v1

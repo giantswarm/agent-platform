@@ -41,7 +41,10 @@ policy holds:
   binds no provider there (giantswarm/agent-platform#1269);
 - the operator's mirror of a customer admin Group is admitted; a person's
   mirror labelled as the operator's is refused, an organization admin binds
-  no organizations-admin (giantswarm/agent-platform#1357);
+  no organizations-admin (giantswarm/agent-platform#1357); in an
+  organization namespace only the operator, or a cluster-admin, binds
+  organizations-admin or changes such a binding's subjects
+  (giantswarm/agent-platform#1363);
 - an organization admin's Secret delete is answered with a Status, never the
   Secret: a delete the API server would answer with it (Orphan, Foreground,
   orphanDependents, a finalizer, also one the admin's own update added) is
@@ -963,14 +966,34 @@ def prove_admin_mirrors():
          create(plain, *ADMIN), "RBAC:attempting to grant RBAC permissions not currently held")
     # Without the label, an organizations-admin bound in ORG holds every rule
     # of the role there, so RBAC lets it bind the role itself (no `bind`
-    # needed), and no policy holds the roleRef of a person's RoleBinding in an
-    # organization namespace: admitted today. The subject gets RoleBinding
-    # writes there and also AgentPlatformOrganization writes in ORG, which
-    # agent-platform:admin does not hold; the operator does not remove a
-    # binding it did not label. Pinned as it is
-    # until giantswarm/agent-platform#1363 decides it.
-    case("NOT HELD giantswarm/agent-platform#1363: an organizations-admin binds organizations-admin in an organization namespace without the operator's label",
-         create(plain, as_=CAROL, groups=()))
+    # needed): agent-platform-organization-admin-mirrors refuses it
+    # (giantswarm/agent-platform#1363). The subject would get
+    # AgentPlatformOrganization writes in ORG, and the operator does not
+    # remove a binding it did not label.
+    policy = "agent-platform-organization-admin-mirrors"
+    only = "only the agent-platform-operator (" + OP + ") binds agent-platform:organizations-admin in an organization namespace, as its mirrors of the parent namespace admins"
+    case("an organizations-admin binds no organizations-admin in an organization namespace without the operator's label",
+         create(plain, as_=CAROL, groups=()), policy, only + "; refused for carol: CREATE " + ORG + "/write-all-customer-group")
+    case("an organizations-admin by ClusterRoleBinding binds no organizations-admin in an organization namespace",
+         create(plain, as_=ALICE, groups=()), policy, "refused for alice: CREATE " + ORG + "/write-all-customer-group")
+    # An update that changes the subjects of a binding to the role, one the
+    # operator did not label (carol's mirror, written by prove_roles without
+    # the label), is refused; one that leaves them passes.
+    case("an organizations-admin changes the subjects of no binding to organizations-admin",
+         patch("rolebinding", "carol-organizations-admin", ORG, {"subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "acme:platform-admins"}]},
+               as_=CAROL, groups=()), policy, "refused for carol: UPDATE " + ORG + "/carol-organizations-admin")
+    case("an organizations-admin labels a binding to organizations-admin, its subjects unchanged",
+         patch("rolebinding", "carol-organizations-admin", ORG, {"metadata": {"labels": {"team": "platform"}}}, as_=CAROL, groups=()))
+    case("an organizations-admin deletes a binding to organizations-admin (not held)",
+         delete("rolebinding", "carol-organizations-admin", ORG, as_=ALICE, groups=()))
+    # A requester who may create Roles in the namespace (a cluster-admin) is
+    # not held, as by agent-platform-organizations-admin-rolebindings.
+    case("a cluster-admin binds organizations-admin in an organization namespace (not held)", create(plain, as_=PERSON))
+    user_mirror = rb("carol-organizations-admin-user", ORG, role="agent-platform:organizations-admin",
+                     subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": CAROL}])
+    user_mirror["metadata"]["labels"] = {OBJECT_LABEL: "organizations-admin-mirror", "app.kubernetes.io/managed-by": "agent-platform-operator"}
+    case("the operator mirrors a User of the parent as organizations-admin", create(user_mirror, as_=OP))
+    case("the operator binds organizations-admin without its label (not held)", create(plain, as_=OP))
 
 
 def prove_git_admins():
