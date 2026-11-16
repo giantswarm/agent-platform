@@ -699,13 +699,17 @@ spec:
         (has(oldObject.metadata.finalizers) && size(oldObject.metadata.finalizers) > 0) ||
         (has(request.options.propagationPolicy) && request.options.propagationPolicy in ['Orphan', 'Foreground']) ||
         (has(request.options.orphanDependents) && request.options.orphanDependents == true)
+  # The Secret under delete is named by oldObject: a DeleteCollection runs
+  # admission once for each item with the collection request's attributes,
+  # which carry no name (request.name is unset), while oldObject is the
+  # stored item. On a single delete the two names are the same.
   validations:
     - expression: >-
-        authorizer.group('').resource('secrets').namespace(request.namespace).name(request.name).check('get').allowed()
+        authorizer.group('').resource('secrets').namespace(request.namespace).name(oldObject.metadata.name).check('get').allowed()
       reason: Forbidden
       messageExpression: >-
         'a delete answered with the Secret (Orphan or Foreground propagation, or a finalizer on it) is made only by a requester that may get it; refused: ' +
-        request.namespace + '/' + request.name
+        request.namespace + '/' + oldObject.metadata.name
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

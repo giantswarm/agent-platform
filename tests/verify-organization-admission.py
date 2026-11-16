@@ -46,7 +46,10 @@ policy holds:
   Secret: a delete the API server would answer with it (Orphan, Foreground,
   orphanDependents, a finalizer, also one the admin's own update added) is
   refused; the Flux prune, the namespace controller and the garbage
-  collector stay admitted (giantswarm/agent-platform#1355);
+  collector stay admitted (giantswarm/agent-platform#1355), the namespace
+  controller's DeleteCollection also while a finalizer holds a Secret, and a
+  requester who may not get Secrets deletes no such collection
+  (giantswarm/agent-platform#1362);
 - the HelmRelease field lock, also for the organization's Flux ServiceAccount;
 - an organization is deleted only with prune: enabled or while its parent
   terminates, and one applied from git only once its delete pull request
@@ -885,19 +888,28 @@ def prove_secret_deletes():
          f"create a Secret in {ORG2}, which no finalizer holds")
     case("the namespace controller deletes the Secrets of an organization namespace none of which a finalizer holds (DeleteCollection, Background)",
          kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG2}/secrets", "-f", "-"], collection, NS_CONTROLLER, ()))
-    # A defect, pinned until giantswarm/agent-platform#1362 fixes it: a
-    # collection request has no name, so the policy's request.name fails to
-    # evaluate on an item it matches, and failurePolicy Fail stops the
-    # DeleteCollection at that item, for every requester (the items deleted
-    # before it stay deleted: store.go:1245-1290). The namespace controller
+    # giantswarm/agent-platform#1362: a DeleteCollection runs admission once
+    # for each item with the collection request's attributes, which carry no
+    # name (request.name is unset), so the policy names the Secret by
+    # oldObject, the stored item. With request.name the expression failed to
+    # evaluate on an item a finalizer holds and failurePolicy Fail stopped
+    # the DeleteCollection, for every requester; the namespace controller
     # deletes Secrets only by DeleteCollection and does not fall back to item
     # deletes on that error (namespaced_resources_deleter.go:330-338), so the
-    # held Secret never gets a deletionTimestamp and the namespace stays
-    # Terminating, even when the finalizer's controller is healthy.
-    case("DEFECT giantswarm/agent-platform#1362: the namespace controller's DeleteCollection fails while a finalizer holds one Secret",
-         kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG}/secrets", "-f", "-"], collection, NS_CONTROLLER, ()),
-         "API:agent-platform-organization-secret-deletes' with binding 'agent-platform-organization-secret-deletes' denied request: expression "
-         "'authorizer.group('').resource('secrets').namespace(request.namespace).name(request.name).check('get').allowed()' resulted in error: no such key: name")
+    # namespace stayed Terminating.
+    case("the namespace controller deletes the Secrets of an organization namespace while a finalizer holds some of them (DeleteCollection, Background)",
+         kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG}/secrets", "-f", "-"], collection, NS_CONTROLLER, ()))
+    # A requester who may deletecollection Secrets but not get them is
+    # refused at an item a finalizer holds, named in the refusal (the items
+    # run in parallel, so which one is not fixed): the answer would list it.
+    must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": {"name": "secret-collection-deleter"},
+                 "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["deletecollection"]}]}, dry=False),
+         "create a ClusterRole that deletes collections of Secrets and reads none")
+    must(create(crb("erin-secret-collection-deleter", "secret-collection-deleter", "erin"), dry=False),
+         "bind erin to the ClusterRole that deletes collections of Secrets")
+    API.settle()
+    case("a requester who may not get Secrets deletes no collection of Secrets while a finalizer holds one (DeleteCollection, Background)",
+         kubectl(["delete", "--raw", f"/api/v1/namespaces/{ORG}/secrets", "-f", "-"], collection, "erin", ()), policy, f"refused: {ORG}/tenant-credential-")
     case("the namespace controller deletes a Secret a finalizer holds (one item, Background)",
          delete_secret("tenant-credential-finalized", NS_CONTROLLER, propagationPolicy="Background"))
     # The garbage collector deletes a dependent with Foreground, Orphan or
