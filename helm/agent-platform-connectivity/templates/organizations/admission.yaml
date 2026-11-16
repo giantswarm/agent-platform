@@ -50,11 +50,17 @@ these.
     an organizations-admin bound there holds every rule of the role, so RBAC
     lets it bind the role without `bind`, and the subject could write
     AgentPlatformOrganizations there. A create, and an update that changes
-    the subjects, is refused for everyone else but a cluster-admin (a
-    requester who may escalate ClusterRoles), as
-    agent-platform-organization-flux-writes lets one through. A delete
-    passes; the operator's labelled mirrors are
-    agent-platform-organization-copies'.
+    the subjects, is refused for everyone else, a cluster-admin too: an
+    admin of the organization is made in the parent namespace, and the
+    operator mirrors it. A delete passes; the operator's labelled mirrors
+    are agent-platform-organization-copies'.
+  * agent-platform-organization-no-nesting: no AgentPlatformOrganization is
+    created in an organization namespace, by anyone, the operator and a
+    cluster-admin included (giantswarm/agent-platform#1423): organizations
+    are created in a parent namespace. The operator would reconcile one
+    there into a nested organization, with its own namespace, workers and
+    admin mirrors. An update or a delete of one that exists passes, so it
+    can be removed.
   * agent-platform-organization-admins-binding: the RoleBinding
     organization-admins of an organization namespace binds agent-platform:admin
     to at least one subject; it is not deleted or emptied while the namespace
@@ -485,6 +491,10 @@ spec:
     # an organizations-admin bound here holds every rule of that role.
     - name: organizations-admin
       expression: "object.roleRef.kind == 'ClusterRole' && object.roleRef.name == 'agent-platform:organizations-admin'"
+    # Every requester but the operator, a cluster-admin too: no authorizer
+    # check tells a cluster-admin apart without a way around it (a Role, or
+    # escalate alone, would pass one). An admin of an organization namespace
+    # is made in its parent namespace, where the operator mirrors it.
     - name: not-operator
       expression: {{ printf "request.userInfo.username != '%s'" $operator | quote }}
     # The operator's mirrors (labelled, before or after the write) are
@@ -492,14 +502,6 @@ spec:
     - name: not-operator-object
       expression: >-
         [dyn(object), dyn(oldObject)].all(o, o == null || !(has(o.metadata.labels) && {{ squote $objectLabel }} in o.metadata.labels))
-    # As agent-platform-organization-flux-writes, which holds only the
-    # organization's Flux ServiceAccount: a cluster-admin is not held. It is
-    # told by escalate on ClusterRoles, cluster-wide: it may grant any role
-    # anyway. A Role that grants create on Roles in this namespace alone does
-    # not lift the rule.
-    - name: not-cluster-admin
-      expression: >-
-        !authorizer.group('rbac.authorization.k8s.io').resource('clusterroles').check('escalate').allowed()
   validations:
     # An update that leaves the subjects as they are, the same list in the
     # same order, passes (a label, an annotation, a finalizer): it grants
@@ -508,7 +510,7 @@ spec:
         request.operation == 'UPDATE' &&
         (has(object.subjects) ? object.subjects : []) == (has(oldObject.subjects) ? oldObject.subjects : [])
       reason: Forbidden
-      messageExpression: {{ printf "'only the agent-platform-operator (%s) binds agent-platform:organizations-admin in an organization namespace, as its mirrors of the parent namespace admins; refused for ' + request.userInfo.username + ': ' + request.operation + ' ' + request.namespace + '/' + object.metadata.name" $operator | quote }}
+      messageExpression: {{ printf "'only the agent-platform-operator (%s) binds agent-platform:organizations-admin in an organization namespace, as its mirrors of the parent namespace admins: bind the person to agent-platform:organizations-admin in the parent namespace, and the operator mirrors it; refused for ' + request.userInfo.username + ': ' + request.operation + ' ' + request.namespace + '/' + object.metadata.name" $operator | quote }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -518,6 +520,43 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   policyName: agent-platform-organization-admin-mirrors
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-no-nesting
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  # Every requester, the operator and a cluster-admin included: an
+  # organization's parent is a parent namespace, never an organization
+  # namespace. Only CREATE: an update or a delete of a nested organization
+  # made before this policy passes, so its erasure runs.
+  matchConstraints:
+    namespaceSelector:
+      {{- include "agent-platform.organizations.namespaces" . | nindent 6 }}
+    resourceRules:
+      - apiGroups: ["agent-platform.giantswarm.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE"]
+        resources: ["agentplatformorganizations"]
+  validations:
+    - expression: "false"
+      reason: Forbidden
+      messageExpression: >-
+        'an AgentPlatformOrganization is created in a parent namespace, never in an organization namespace; refused for ' +
+        request.userInfo.username + ': ' + request.namespace + '/' + request.name
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-no-nesting
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-no-nesting
   validationActions: [Deny]
 ---
 apiVersion: admissionregistration.k8s.io/v1

@@ -42,9 +42,11 @@ policy holds:
 - the operator's mirror of a customer admin Group is admitted; a person's
   mirror labelled as the operator's is refused, an organization admin binds
   no organizations-admin (giantswarm/agent-platform#1357); in an
-  organization namespace only the operator, or a cluster-admin (one who
-  may escalate ClusterRoles), binds organizations-admin or changes such a binding's subjects
-  (giantswarm/agent-platform#1363);
+  organization namespace only the operator binds organizations-admin or
+  changes such a binding's subjects, a cluster-admin is held too
+  (giantswarm/agent-platform#1363); no AgentPlatformOrganization is created
+  in an organization namespace, by anyone; one that exists there is updated
+  and deleted (giantswarm/agent-platform#1423);
 - an organization admin's Secret delete is answered with a Status, never the
   Secret: a delete the API server would answer with it (Orphan, Foreground,
   orphanDependents, a finalizer, also one the admin's own update added) is
@@ -435,7 +437,7 @@ def fixtures():
         must(create(ns(n, labels), dry=False), f"create namespace {n}")
     objects = [
         workerpool("kagent", replicas=1),
-        apo("payments", PARENT), apo("retired", PARENT, prune="enabled"), apo("kept", PARENT, prune="disabled"), apo("gone", GONE),
+        apo("payments", PARENT), apo("retired", PARENT, prune="enabled"), apo("nested", ORG, prune="enabled"), apo("kept", PARENT, prune="disabled"), apo("gone", GONE),
         *(apo(n, PARENT, prune="enabled") for n in ORPHANED),
         rb("organization-admins", ORG, role="agent-platform:admin"), rb("organization-admins", OLD, role="agent-platform:admin"),
         rb("members", ORG),
@@ -971,7 +973,8 @@ def prove_admin_mirrors():
     # AgentPlatformOrganization writes in ORG, and the operator does not
     # remove a binding it did not label.
     policy = "agent-platform-organization-admin-mirrors"
-    only = "only the agent-platform-operator (" + OP + ") binds agent-platform:organizations-admin in an organization namespace, as its mirrors of the parent namespace admins"
+    only = "only the agent-platform-operator (" + OP + ") binds agent-platform:organizations-admin in an organization namespace, as its mirrors of the parent namespace admins: "
+    only += "bind the person to agent-platform:organizations-admin in the parent namespace, and the operator mirrors it"
     case("an organizations-admin binds no organizations-admin in an organization namespace without the operator's label",
          create(plain, as_=CAROL, groups=()), policy, only + "; refused for carol: CREATE " + ORG + "/write-all-customer-group")
     case("an organizations-admin by ClusterRoleBinding binds no organizations-admin in an organization namespace",
@@ -986,26 +989,30 @@ def prove_admin_mirrors():
          patch("rolebinding", "carol-organizations-admin", ORG, {"metadata": {"labels": {"team": "platform"}}}, as_=CAROL, groups=()))
     case("an organizations-admin deletes a binding to organizations-admin (not held)",
          delete("rolebinding", "carol-organizations-admin", ORG, as_=ALICE, groups=()))
-    # A cluster-admin (it may escalate ClusterRoles) is not held, as by
-    # agent-platform-organization-flux-writes. A Role that lets carol create
-    # Roles in ORG alone does not lift the rule.
-    case("a cluster-admin binds organizations-admin in an organization namespace (not held)", create(plain, as_=PERSON))
-    must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "role-writer", "namespace": ORG},
-                 "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["roles"], "verbs": ["create"]}]}, dry=False),
-         "create a Role that creates Roles in the organization namespace")
-    must(create(rb("carol-role-writer", ORG, role="role-writer", kind="Role",
-                   subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": CAROL}]), dry=False), "bind carol to it")
-    API.settle()
-    case("an organizations-admin who may create Roles in the organization namespace binds no organizations-admin",
-         create(plain, as_=CAROL, groups=()), policy, "refused for carol: CREATE " + ORG + "/write-all-customer-group")
-    must(kubectl(["delete", "rolebinding", "carol-role-writer", "-n", ORG]), "unbind carol from the Role writer")
-    must(kubectl(["delete", "role", "role-writer", "-n", ORG]), "delete the Role writer")
-    API.settle()
+    # A cluster-admin is held too: an admin of an organization is made in
+    # its parent namespace, and the operator mirrors it.
+    case("a cluster-admin binds no organizations-admin in an organization namespace",
+         create(plain, as_=PERSON), policy, "bind the person to agent-platform:organizations-admin in the parent namespace, and the operator mirrors it; refused for jose")
     user_mirror = rb("carol-organizations-admin-user", ORG, role="agent-platform:organizations-admin",
                      subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": CAROL}])
     user_mirror["metadata"]["labels"] = {OBJECT_LABEL: "organizations-admin-mirror", "app.kubernetes.io/managed-by": "agent-platform-operator"}
     case("the operator mirrors a User of the parent as organizations-admin", create(user_mirror, as_=OP))
     case("the operator binds organizations-admin without its label (not held)", create(plain, as_=OP))
+    # giantswarm/agent-platform#1423: the operator reconciles an
+    # AgentPlatformOrganization in any namespace, so one in an organization
+    # namespace would be a nested organization. carol (organizations-admin in
+    # ORG by her mirror) may create one there by RBAC; admission refuses it,
+    # for a cluster-admin too. "nested" exists from before the policy.
+    nesting = "agent-platform-organization-no-nesting"
+    created_in = "an AgentPlatformOrganization is created in a parent namespace, never in an organization namespace"
+    case("an organizations-admin by the operator's mirror creates no AgentPlatformOrganization in an organization namespace",
+         create(apo("inner", ORG), as_=CAROL, groups=()), nesting, created_in + "; refused for carol: " + ORG + "/inner")
+    case("a cluster-admin creates no AgentPlatformOrganization in an organization namespace",
+         create(apo("inner", ORG), as_=PERSON), nesting, created_in + "; refused for jose")
+    case("an organizations-admin by RoleBinding creates an AgentPlatformOrganization in its parent", create(apo("inner", PARENT), as_=CAROL, groups=()))
+    case("a nested AgentPlatformOrganization that exists is updated (not held)",
+         patch("agentplatformorganization", "nested", ORG, {"metadata": {"labels": {"team": "x"}}}, as_=PERSON))
+    case("a nested AgentPlatformOrganization that exists is deleted (not held)", delete("agentplatformorganization", "nested", ORG, as_=PERSON))
 
 
 def prove_git_admins():
