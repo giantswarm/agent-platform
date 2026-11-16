@@ -228,7 +228,9 @@ Usage: include "agent-platform.operator.serviceAccountBindings" . | fromJsonArra
 {{- $pns := dig "google-access-token-credential-provider" "targetNamespace" "ate-system" .Values.components -}}
 {{- /* The connectivity chart's admission policy admits the operator's binding
 of a provider's ServiceAccount of ate-system only: another namespace binds
-nothing, and the readers stay cluster-wide. */ -}}
+nothing, and the readers stay cluster-wide. Substrate itself outside
+ate-system fails the render first (agent-platform.validateOrganizations); its
+test here is defence in depth, the plugin's is live. */ -}}
 {{- if and (eq $ns "ate-system") (or (not $plugin) (eq $pns "ate-system")) -}}
 {{- $out = append $out (dict "clusterRole" "k8s-credential-provider-secret-reader" "serviceAccount" (dict "namespace" $ns "name" "k8s-credential-provider")) -}}
 {{- if $plugin -}}
@@ -1589,6 +1591,19 @@ Usage: include "agent-platform.toolchains.registries" $root | fromJson
 {{- with toString ($tm.registryPullSecret | default "") -}}{{- $_ := set $out "pullSecret" . -}}{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+Whether the floor of components.agent-manager.versionRange admits installation
+model credentials from one uiURL without tenancy and
+tenants.commit.platformModelsPath (giantswarm/agent-manager#409, first in
+3.1.0-rc.11): "true", else empty. Unlike componentFloorAtLeast it compares the
+prerelease too, since earlier 3.1.0 release candidates refuse these values.
+Usage: include "agent-platform.agentManager.installationModelsFloor" $root
+*/}}
+{{- define "agent-platform.agentManager.installationModelsFloor" -}}
+{{- $floor := include "agent-platform.semverRangeFloor" (dig "agent-manager" "versionRange" "" .Values.components) -}}
+{{- if and $floor (ge ((semver $floor).Compare (semver "3.1.0-rc.11")) 0) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -4468,8 +4483,9 @@ the controller's kubernetes authorization mode needs (agent-platform.kagent.auth
 agent-manager's organization values, as JSON. tenants.enabled follows the
 organization switch. The 2.20.0 floor keeps the connectivity chart as the
 only owner of agent-platform-tenant-flux. Credential UI URLs are explicit
-client configuration; this chart does not derive them from Backstage, and
-refuses one while the organization switch is off.
+client configuration; this chart does not derive them from Backstage. One
+form serves organization and installation models, with or without the
+organization switch.
 Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 */}}
 {{- define "agent-platform.agentManager.organizations" -}}
@@ -4493,8 +4509,23 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- fail "agent-manager.github.tokenExchange needs components.muster.versionRange with a floor of 5.63.2 or later" -}}
 {{- end -}}
 {{- end -}}
-{{- if and (dig "credentials" "uiURL" "" $am) (not $on) -}}
-{{- fail "agent-manager.credentials.uiURL needs agentPlatformOrganizations.enabled: agent-manager links the credential form only beside its organization tools (tenants.enabled, which follows the switch)" -}}
+{{- if and (dig "credentials" "uiURL" "" $am) (not (and (dig "oauth" "enabled" false $am) (dig "oauth" "downstream" "enabled" false $am))) -}}
+{{- fail "agent-manager.credentials.uiURL needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled: the credential form posts the value to agent-manager as the person" -}}
+{{- end -}}
+{{- $uiURL := dig "credentials" "uiURL" "" $am -}}
+{{- if and $uiURL (not $on) -}}
+{{- if not (include "agent-platform.agentManager.installationModelsFloor" .) -}}
+{{- fail "agent-manager.credentials.uiURL without agentPlatformOrganizations.enabled needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11 or later" -}}
+{{- end -}}
+{{- $variables := list -}}
+{{- range $expression := regexFindAll `\{[^{}]*\}` $uiURL -1 -}}
+{{- range $variable := splitList "," (regexReplaceAll `^\{[+#./;?&]?|\}$` $expression "") -}}
+{{- $variables = append $variables (regexReplaceAll `(:[0-9]+|\*)$` $variable "") -}}
+{{- end -}}
+{{- end -}}
+{{- if or (not (has "namespace" $variables)) (has "parent" $variables) (has "organization" $variables) -}}
+{{- fail "agent-manager.credentials.uiURL needs a {namespace} expression and no {parent} or {organization} without agentPlatformOrganizations.enabled: installation model links name the kagent namespace, and agent-manager refuses any other template" -}}
+{{- end -}}
 {{- end -}}
 {{- $own := dig "tenants" dict $am | default dict -}}
 {{- range $k, $_ := $own -}}
@@ -4504,6 +4535,9 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- end -}}
 {{- if and (hasKey $own "commit") (not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" "2.20.0"))) -}}
 {{- fail "agent-manager.tenants.commit needs components.agent-manager.versionRange with a floor of 2.20.0 or later" -}}
+{{- end -}}
+{{- if and (dig "commit" "platformModelsPath" "" $own) (not (include "agent-platform.agentManager.installationModelsFloor" .)) -}}
+{{- fail "agent-manager.tenants.commit.platformModelsPath needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11 or later" -}}
 {{- end -}}
 {{- if and (hasKey $own "enabled") (ne (toString $own.enabled) (toString $on)) -}}
 {{- fail (printf "agent-manager.tenants.enabled (%v) differs from agentPlatformOrganizations.enabled (%v): agent-manager serves the organization tools exactly while the operator keeps the organization namespaces — set agentPlatformOrganizations.enabled and leave agent-manager.tenants.enabled unset" $own.enabled $on) -}}
@@ -5904,7 +5938,11 @@ Fail the render for an organizations setup that cannot work
     without kagent.fluxServiceAccountName, without the llm listener's routing
     of ModelConfigs (llmRouting.enabled, llmRouting.modelConfigPolicy.enabled),
     and without the installation's API hostnames (global.domain or
-    agentPlatformOrganizations.apiHostnames).
+    agentPlatformOrganizations.apiHostnames);
+  - components.substrate.targetNamespace other than ate-system: the operator
+    calls ate-api there, but the connectivity chart's operator egress rule
+    and operator-to-ate-api ingress policy name ate-system
+    (agent-platform.substrate.namespace there), so the call is dropped.
 */}}
 {{- define "agent-platform.validateOrganizations" -}}
 {{- $on := include "agent-platform.organizations.on" . -}}
@@ -5929,6 +5967,15 @@ Fail the render for an organizations setup that cannot work
 {{- end -}}
 {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "substrate")) -}}
 {{- fail "agentPlatformOrganizations.enabled needs Agent Substrate (components.substrate): an organization's agents run on its copy of the platform WorkerPool, and cleanup of a deleted organization asks ate-api until it has no actor left" -}}
+{{- end -}}
+{{- /* The namespace the substrate HelmRelease installs into, as
+components.yaml derives it: the kagent namespace with inKagentNamespace,
+else targetNamespace, else the platform's. */ -}}
+{{- $sc := index .Values.components "substrate" | default dict -}}
+{{- $ateNs := toString ($sc.targetNamespace | default (include "agent-platform.targetNamespace" .)) -}}
+{{- if $sc.inKagentNamespace -}}{{- $ateNs = include "agent-platform.kagent.namespace" . -}}{{- end -}}
+{{- if ne $ateNs "ate-system" -}}
+{{- fail (printf "components.substrate.targetNamespace: Agent Substrate installs into %s, not ate-system: with agentPlatformOrganizations.enabled the operator calls ate-api in Substrate's namespace, but the connectivity chart's operator egress rule and the operator-to-ate-api ingress policy name ate-system, so the call is dropped and the erasure of a deleted organization stops at the ate-api step — set components.substrate.targetNamespace to ate-system and leave components.substrate.inKagentNamespace unset" $ateNs) -}}
 {{- end -}}
 {{- if not (include "agent-platform.kagent.fluxServiceAccountName" .) -}}
 {{- fail "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: it is the operator's helmReleaseServiceAccount, the ServiceAccount an organization's HelmReleases run as" -}}

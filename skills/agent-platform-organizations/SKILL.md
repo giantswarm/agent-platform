@@ -2,7 +2,7 @@
 name: agent-platform-organizations
 description: Use when someone asks who owns an agent, why they can or cannot see or start one, what an organization (tenant) is, how to share an agent with everyone or with a team, how to join an organization, or who manages model configs and egress policies.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Organizations: who owns an agent, who may use it
@@ -55,7 +55,11 @@ To share with one team instead, create it in that team's organization.
 
 ## Who manages models and egress policies
 
-- **Platform**: the installation's operators, through the platform's configuration.
+- **Platform models**: cluster admins use the same model and credential tools with
+  the installation namespace, or the installation's configuration in git. The
+  credential operation declares `scope: platform`; it is not an organization.
+  This also works with organizations disabled: organization and installation
+  models share the one `agent-manager.credentials.uiURL` form.
 - **An organization**: its admins, on the organization's **Models** and **Egress** tabs (or
   `x_agent-manager_set_organization_model`, `x_agent-manager_set_organization_egress_policy`). A
   model key or credential goes into the portal's credential form and is never shown back, nor passed
@@ -69,6 +73,23 @@ To share with one team instead, create it in that team's organization.
   Configuration, credential binding or consumer identity changes still require a new preparation. A failed
   save can have written credentials already; refresh its confirmation and follow
   the same operation's recovery instead of starting another request.
+- **An organization model's settings**, through `x_agent-manager_set_organization_model`: its
+  display name (`displayName`, every provider; `""` removes it), its token limit (`maxTokens`:
+  Anthropic, AnthropicVertexAI, AzureOpenAI, Mistral, OpenAI; `0` returns to the provider's default)
+  and prompt caching (`promptCaching`, `cacheTTL` `5m` or `1h`: Anthropic, Bedrock). A new Anthropic
+  model, or one changed to Anthropic, has prompt caching on (`cacheTTL: 5m`) unless `promptCaching`
+  is `false`. An update that omits a setting keeps it; a change of provider carries only `maxTokens`,
+  where the new provider has it. The API server refuses a setting that the provider does not have.
+  `x_agent-manager_list_model_configs` shows the settings of each model; to compare an
+  organization's model with the platform's, list the organization namespace and the platform
+  namespace (one call each).
+- **Vertex models**: use native `AnthropicVertexAI` or `GeminiVertexAI` with
+  nonsecret `projectID` and `location`. Upload the service-account JSON only in
+  the linked credential form when it requests `google-service-account-json`.
+  Google calls are direct; LLM gateway metering, rate limits and spend reporting
+  are unavailable. Admission refuses one without `apiKeySecret`, so the runtime
+  never falls back to the node's Google identity. Never read, paste or
+  send a person's credential file through an MCP tool.
 - **Organizations themselves**: created and deleted by holders of
   `agent-platform:organizations-admin` (platform staff, or a customer's platform team).
 

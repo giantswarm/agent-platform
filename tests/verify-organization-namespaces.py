@@ -213,6 +213,52 @@ def check_meta(chart):
                            "--set-json", f"agent-manager.tenants.commit={json.dumps(manager_commit)}")), "agent-manager")["values"]
     expect(am.get("credentials", {}).get("uiURL") == ui_url,
            "the explicit client credential URL template travels unchanged")
+    form_url = "https://portal.example.com/customize/models/credentials/test/{namespace}/{operation}"
+    installation_forms = ["--set-literal", f"agent-manager.credentials.uiURL={form_url}",
+                          "--set", "agent-manager.oauth.enabled=true",
+                          "--set", "agent-manager.oauth.downstream.enabled=true",
+                          "--set", "agentManager.route.enabled=true",
+                          "--set", "agentManager.route.jwtAuthentication.enabled=true"]
+    standalone = docs(meta(chart, *installation_forms))
+    standalone_manager = release(standalone, "agent-manager")["values"]
+    expect(standalone_manager["tenants"]["enabled"] is False
+           and standalone_manager["credentials"] == {"uiURL": form_url},
+           "off, the credential form travels unchanged and tenancy stays disabled")
+    standalone_route = release(standalone, "agent-platform-connectivity")["values"]["agentManager"]["route"]
+    expect(standalone_route["enabled"] is True and standalone_route["jwtAuthentication"]["enabled"] is True,
+           "the protected manager route is independent of the organization switch")
+    for template in ("https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}",
+                     "https://portal.example.com/credentials/{operation}?ns=namespace",
+                     "https://portal.example.com/x/{parent}/{organization}/{namespace}/{operation}",
+                     "https://portal.example.com/x/{namespace}/{operation}{?organization}"):
+        refused = meta(chart, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL needs a {namespace} expression and no {parent} or {organization}" in refused.stderr,
+               f"off, a credential form without {{namespace}} or with an organization variable is refused ({template})")
+    for range_ in (">=3.0.0 <4.0.0", ">=3.1.0-rc.10 <4.0.0-0"):
+        refused = meta(chart, *installation_forms, "--set", f"components.agent-manager.versionRange={range_}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL without agentPlatformOrganizations.enabled needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11" in refused.stderr,
+               f"off, a credential form needs agent-manager 3.1.0-rc.11 or later ({range_})")
+    r = meta(chart, *installation_forms, "--set", "components.agent-manager.versionRange=>=3.1.0-rc.11 <4.0.0-0")
+    expect(r.returncode == 0, "off, a credential form renders with the agent-manager 3.1.0-rc.11 floor")
+    platform_commit = {**manager_commit, "platformModelsPath": "platform-models"}
+    for range_, ok in ((">=3.0.0 <4.0.0", False), (">=3.1.0 <4.0.0", True)):
+        r = meta(chart, *ON, "--set", f"components.agent-manager.versionRange={range_}",
+                 "--set-json", f"agent-manager.tenants.commit={json.dumps(platform_commit)}")
+        if ok:
+            expect(r.returncode == 0, f"tenants.commit.platformModelsPath renders with {range_}")
+        else:
+            expect(r.returncode != 0 and "agent-manager.tenants.commit.platformModelsPath needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11" in r.stderr,
+                   f"tenants.commit.platformModelsPath is refused with {range_}")
+    for template in ("https://portal.example.com/c/{operation}{?namespace}", "https://portal.example.com/c{/namespace,operation}"):
+        r = meta(chart, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
+        expect(r.returncode == 0, f"off, a credential form naming namespace in another RFC 6570 expression renders ({template})")
+    organization_only = "https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}"
+    r = meta(chart, *ON, "--set-literal", f"agent-manager.credentials.uiURL={organization_only}")
+    expect(r.returncode == 0, "on, an organization-only credential form without {namespace} renders")
+    for setting in ("agent-manager.oauth.enabled", "agent-manager.oauth.downstream.enabled"):
+        refused = meta(chart, *installation_forms, "--set", f"{setting}=false")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL needs agent-manager.oauth.enabled" in refused.stderr,
+               f"off, the credential form requires {setting}")
     expect(am.get("githubTokenExchange", {}).get("clientID") == "agent-manager",
            "the configured confidential broker client travels unchanged")
     exchange = {"tokenEndpoint": "https://muster.example.com/oauth/token", "audience": "agent-manager",
@@ -263,6 +309,12 @@ def check_meta(chart):
     conn = release(on, "agent-platform-connectivity")["values"]
     expect(conn["components"].get("agent-platform-operator") == {"enabled": True} and "agent-platform-operator" not in conn,
            "the connectivity release sees the operator in the roster, never its values block")
+
+    erasure = release(docs(meta(chart, *ON, "--set", "components.substrate.targetNamespace=ate-system")), "agent-platform-operator")["values"]["erasure"]["substrate"]
+    expect(erasure["target"] == "grpcs://api.ate-system.svc:443" and erasure["audience"] == "api.ate-system.svc",
+           "on with components.substrate.targetNamespace ate-system, the render succeeds and the operator calls ate-api in ate-system, where the connectivity chart's operator policies point")
+    off_moved = meta(chart, "--set", "components.substrate.targetNamespace=ate-x")
+    expect(off_moved.returncode == 0, f"off, another components.substrate.targetNamespace is not refused by the organizations check:\n{off_moved.stderr}")
 
     moved = docs(meta(chart, *ON, "--set", "components.agent-platform-connectivity.targetNamespace=apo"))
     expect(release(moved, "agent-platform-operator")["targetNamespace"] == "apo",
@@ -338,6 +390,14 @@ def check_meta(chart):
              "components.agent-platform-operator.enabled is false but agentPlatformOrganizations.enabled is true"),
             ("another targetNamespace", ["--set", "components.agent-platform-operator.targetNamespace=elsewhere"],
              "components.agent-platform-operator.targetNamespace (elsewhere) differs"),
+            ("Substrate outside ate-system", ["--set", "components.substrate.targetNamespace=ate-x"],
+             "components.substrate.targetNamespace: Agent Substrate installs into ate-x, not ate-system"),
+            ("an empty Substrate namespace", ["--set", "components.substrate.targetNamespace="],
+             f"components.substrate.targetNamespace: Agent Substrate installs into {RELEASE_NS}, not ate-system"),
+            ("no Substrate namespace", ["--set", "components.substrate.targetNamespace=null"],
+             f"components.substrate.targetNamespace: Agent Substrate installs into {RELEASE_NS}, not ate-system"),
+            ("Substrate in the kagent namespace", ["--set", "components.substrate.inKagentNamespace=true"],
+             "components.substrate.targetNamespace: Agent Substrate installs into kagent, not ate-system"),
             ("an agent-manager floor below 2.20.0", ["--set", "components.agent-manager.versionRange=>=2.19.0 <3.0.0"],
              "agentPlatformOrganizations.enabled needs agent-manager 2.20.0 or later: components.agent-manager.versionRange (>=2.19.0 <3.0.0)"),
             ("an own agent-manager.tenants.enabled false", ["--set", "agent-manager.tenants.enabled=false"],
@@ -377,9 +437,6 @@ def check_meta(chart):
     r = meta(chart, *SWITCH, "--set", "agent-platform-operator.commitMode.sourceRef.name=flux")
     expect(r.returncode != 0 and "agent-platform-operator.commitMode.sourceRef.name is set but agentPlatformOrganizations.fluxNamespace is not" in r.stderr,
            "on without fluxNamespace, an own commit mode source fails the render naming fluxNamespace")
-    r = meta(chart, "--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}")
-    expect(r.returncode != 0 and "agent-manager.credentials.uiURL needs agentPlatformOrganizations.enabled" in r.stderr,
-           "off with a credential form URL, the render fails naming the organization switch")
     r = meta(chart, "--set", "components.agent-platform-operator.enabled=true")
     expect(r.returncode != 0 and "components.agent-platform-operator.enabled is true but agentPlatformOrganizations.enabled is false" in r.stderr,
            "off with components.agent-platform-operator.enabled true, the render fails naming it")
@@ -705,6 +762,36 @@ def prove_label(meta_chart, k8s):
     bedrock = {"apiVersion": "api.kagent.dev/v1alpha3", "kind": "ModelConfig", "metadata": {"name": "bedrock", "namespace": ORG_NS},
                "spec": {"provider": "Bedrock", "model": "m", "bedrock": {"region": "eu-west-1"}}}
     case(f"a Bedrock ModelConfig in {ORG_NS} (no listener serves it)", create(bedrock), "agent-platform-tenant-model-routing")
+    for provider, block in (("AnthropicVertexAI", "anthropicVertexAI"), ("GeminiVertexAI", "geminiVertexAI")):
+        vertex = {"apiVersion": "api.kagent.dev/v1alpha3", "kind": "ModelConfig", "metadata": {"name": "vertex", "namespace": ORG_NS},
+                  "spec": {"provider": provider, "model": "model", "apiKeySecret": "tenant-credential-vertex", "apiKeySecretKey": "GOOGLE_APPLICATION_CREDENTIALS",
+                           block: {"projectID": "vertex-test", "location": "global"}}}
+        case(f"native {provider} with an organization credential", create(vertex))
+        vertex["spec"]["apiKeySecret"] = "platform-credential"
+        case(f"native {provider} with a platform credential", create(vertex), "agent-platform-tenant-model-credentials")
+        vertex["spec"]["apiKeySecret"] = "tenant-credential-vertex"
+        for loc in ("eu", "us", "europe-west1"):
+            vertex["spec"][block] = {"projectID": "vertex-test", "location": loc}
+            case(f"native {provider} in location {loc}", create(vertex))
+        for what, fields in (("a location that is a host", {"projectID": "vertex-test", "location": "attacker.example/x?"}),
+                             ("an upper-case location", {"projectID": "vertex-test", "location": "EU"}),
+                             ("a project ID with a slash", {"projectID": "vertex-test/x", "location": "global"}),
+                             ("a project ID too short", {"projectID": "abc", "location": "global"})):
+            vertex["spec"][block] = fields
+            case(f"native {provider} with {what}", create(vertex), "agent-platform-tenant-model-routing")
+        vertex["spec"][block] = {"projectID": "vertex-test", "location": "global"}
+        for what, drop in (("no apiKeySecret", ("apiKeySecret", "apiKeySecretKey")), ("an empty apiKeySecret", ())):
+            keyless = {**vertex, "spec": {k: v for k, v in vertex["spec"].items() if k not in drop}}
+            if not drop:
+                keyless["spec"]["apiKeySecret"] = ""
+            case(f"native {provider} with {what}", create(keyless), "agent-platform-tenant-model-routing")
+        blockless = {**vertex, "spec": {k: v for k, v in vertex["spec"].items() if k != block}}
+        case(f"native {provider} without its {block} block", create(blockless), "agent-platform-tenant-model-routing")
+        admitted = {**vertex, "metadata": {"name": f"vertex-{block.lower()}", "namespace": ORG_NS}}
+        must(create(admitted, dry=False), f"create the admitted {provider} ModelConfig")
+        keyless = {**admitted, "spec": {k: v for k, v in admitted["spec"].items() if k not in ("apiKeySecret", "apiKeySecretKey")}}
+        case(f"an update of an admitted native {provider} that removes apiKeySecret",
+             kubectl(["replace", "-f", "-", "--dry-run=server"], yaml.safe_dump(keyless)), "agent-platform-tenant-model-routing")
     secret = lambda name, type_="Opaque": {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": name, "namespace": ORG_NS},
                                            "type": type_, "stringData": {"k": "v"}}
     must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "secret-writer", "namespace": ORG_NS},

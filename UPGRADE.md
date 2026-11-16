@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (Secret deletes answered with the Secret are held in every namespace)
+
+giantswarm/agent-platform#1365: the ValidatingAdmissionPolicy `agent-platform-secret-deletes` (Fail, Deny) replaces `agent-platform-organization-secret-deletes`. It renders whenever kagent is on, `agentPlatformOrganizations.enabled` on or off, and matches Secret deletes in every namespace, not only in organization namespaces: `agent-platform:admin` can be bound anywhere. A delete the API server answers with the Secret (Orphan or Foreground propagation, `orphanDependents: true`, a Secret a finalizer holds, or a DeleteCollection) is made only by a requester that may already read that Secret (`get`, `list`, `watch` or `patch`), a dry run included.
+
+### Operator action
+
+- **None.** Requesters that may read a Secret (cluster-admin, the Kubernetes controllers, Flux, cert-manager, external-secrets, Cluster API) are not held, and a Background or default delete of a Secret no finalizer holds is not matched.
+- **A role of your own that deletes Secrets, or deletes collections of them, without `get`, `list`, `watch` or `patch`**: its Orphan or Foreground deletes, its deletes of a Secret a finalizer holds and its DeleteCollections are refused now. Add `get` on the Secrets it deletes, or delete with Background propagation.
+
 ## \<current\> → \<next\> (agent-platform-operator 0.4: warm workers follow the models and the agents)
 
 giantswarm/giantswarm#39250: `components.agent-platform-operator.versionRange` is `>=0.4.0 <0.5.0`. With `agentPlatformOrganizations.enabled`, agent-platform-operator 0.4.0 sizes each organization's WorkerPool by a new rule (giantswarm/agent-platform-operator#50): the pool runs `spec.workers.replicas` warm workers while the organization namespace holds a ModelConfig and an Agent (a curated copy counts), or a ModelConfig and a kagent session, and 0 otherwise; an `Orphaned` organization stays at 0. `spec.workers.replicas` is optional now: the CRD defaults it to 1 (`crds: CreateReplace` upgrades the CRD with the release), and a 0 set on purpose stays 0. Under 0.3.x a new organization ran 0 workers, so its agents stayed `ActorTemplatePending` and never became ready. The operator now watches Agent metadata in every namespace and asks kagent whether an organization with a ModelConfig and no Agent has a session, through the kagent target the erasure already uses. Its ClusterRole, the `agent-platform:organization-erasure` binding and the network policies already allow both, so nothing the chart renders changes besides the range. kagent admits the session question as a machine caller only with its controller-extensions controller (`kagent.controller.image.repository: giantswarm/kagent/controller-extensions`, the default).
@@ -36,12 +45,13 @@ The `substrate` component HelmRelease uses `spec.upgrade.strategy: {name: RetryO
 
 ## \<current\> → \<next\> (agent-manager 3.x)
 
-`components.agent-manager.versionRange` selects `>=3.0.0 <4.0.0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).
+`components.agent-manager.versionRange` selects `>=3.1.0 <4.0.0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).
 
 ### Operator action
 
 - Before admitting agent-manager 3.x, upgrade every portal calling it to Backstage 3.38.2 or later and migrate other callers of `replaceCredential`.
 - Where `agent-manager.githubTokenExchange` is configured, keep an explicit `components.agent-manager.versionRange` below `3.0.0` until the installation's reviewed migration moves it to `agent-manager.github.tokenExchange`. Move `endpoint` to `tokenEndpoint` and `secretName` to `existingSecret`, remove `grantApp`, and set `github.enabled: true`. The audience must equal the muster provider App and broker grant target names. Apply the values and version range together after the agentlab proof (giantswarm/giantswarm#39239).
+- agent-manager 3.1.0 serves Vertex service-account JSON keys and installation models through `agent-manager.credentials.uiURL` (giantswarm/agent-manager#409). Without `agentPlatformOrganizations.enabled`, a `uiURL` needs a `{namespace}` expression and no `{parent}` or `{organization}`, and the range floor must be `3.1.0-rc.11` or later; `tenants.commit.platformModelsPath` needs the same floor.
 - The on-demand exchange needs agent-manager 3.0.0-rc.10 and muster 5.63.2 or later, which the meta chart validates from their range floors. muster 5.63.2 includes the Basic credential decoding fix in mcp-oauth (giantswarm/mcp-oauth#700), required for broker client credentials containing reserved characters. Installations still using the GitHub App pin keep it until their own rollout step.
 - Cluster-manager and model-manager derive broker egress from `github.tokenExchange.tokenEndpoint`, on its HTTPS origin and port, for both policy flavors. Use an external fully qualified hostname or IP address; Service aliases are refused. Native Kubernetes policies use the component's existing egress CIDRs or `networkPolicy.additionalEgressCIDRs` for private broker addresses.
 
