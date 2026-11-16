@@ -1,0 +1,26 @@
+{{- /* The edge authenticates the person at muster; muster forwards that token
+unchanged and beekeeper verifies its issuer, audience and organization groups. */ -}}
+{{- if include "agent-platform.optionalComponentEnabled" (dict "root" . "name" "beekeeper") }}
+{{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) }}
+{{- fail "beekeeper requires muster" }}
+{{- end }}
+apiVersion: muster.giantswarm.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: beekeeper
+  namespace: {{ .Release.Namespace }}
+  labels:
+    muster.giantswarm.io/type: beekeeper
+    agent-platform.giantswarm.io/tool-group: agent-platform
+    {{- include "labels.common" . | nindent 4 }}
+  annotations:
+    ui.giantswarm.io/display-name: Beekeeper
+spec:
+  autoStart: true
+  type: streamable-http
+  timeout: 30
+  url: http://beekeeper.{{ .Values.beekeeper.namespace | default .Release.Namespace }}.svc.cluster.local:{{ dig "service" "port" 8080 .Values.beekeeper }}/mcp
+  auth:
+    type: oauth
+    forwardToken: true
+{{- end }}

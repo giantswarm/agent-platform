@@ -269,6 +269,40 @@
         "baseDomain": {
             "type": "string"
         },
+        "beekeeper": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+                "database": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "secretKey": {
+                            "type": "string"
+                        },
+                        "secretName": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "serve": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "organization": {
+                            "type": "string"
+                        },
+                        "teams": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "bootstrapMode": {
             "type": "object",
             "additionalProperties": true
@@ -526,6 +560,51 @@
                             }
                         },
                         "enabled": {
+                            "type": "boolean"
+                        },
+                        "omitKeys": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "beekeeper": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "crds": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
+                        },
+                        "gatedValues": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "injectGlobal": {
                             "type": "boolean"
                         },
                         "omitKeys": {
