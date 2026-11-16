@@ -202,7 +202,14 @@ def check_render(chart):
         if r.returncode == 0 or "agentPlatformOrganizations.fluxPathPrefix" not in r.stderr:
             fail(f"fluxPathPrefix {prefix!r} renders, or fails for another reason:\n{r.stderr}")
     print("ok:  a fluxPathPrefix that is not ./<segments>/ fails the render naming the key")
+    # Secret deletes are held in every namespace, organizations on or off
+    # (tests/verify-secret-deletes.py proves it outside them): installed here
+    # for the organization namespaces' cases.
     policies = [d for d in organization_objects(objs) if d["kind"] != "ClusterRole"]
+    secret_deletes = [d for d in objs if d["metadata"]["name"] == "agent-platform-secret-deletes"]
+    if sorted(d["kind"] for d in secret_deletes) != ["ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding"]:
+        fail("agent-platform-secret-deletes and its binding do not render with organizations on")
+    policies += secret_deletes
     # The sandbox shape is admission's own object, not Kyverno's: a
     # PolicyException excepts from Kyverno policies only.
     for name in ("agent-platform-organization-workers", "agent-platform-organization-workerpool-copy"):
@@ -736,7 +743,7 @@ def prove_flux_role():
     held = secret("tenant-credential-held")
     held["metadata"]["finalizers"] = ["example.com/hold"]
     must(create(held, dry=False), "create a Secret a finalizer holds")
-    policy = "agent-platform-organization-secret-deletes"
+    policy = "agent-platform-secret-deletes"
     for cascade in ("orphan", "foreground"):
         case(f"an organization admin deletes no Secret with {cascade} propagation",
              delete("secret", "tenant-credential-by-people", ORG, as_=admin[0], groups=admin[1], cascade=cascade), policy,
@@ -800,8 +807,9 @@ def prove_secret_deletes():
     """giantswarm/agent-platform#1355: an organization admin holds create,
     update and delete on Secrets and no get. A DELETE the API server answers
     with the stored object reads the Secret, so
-    agent-platform-organization-secret-deletes admits it only for a requester
-    that may get it; every other delete must be answered with a Status.
+    agent-platform-secret-deletes admits it only for a requester
+    that may read it (get, list, watch or patch); every other delete must be
+    answered with a Status.
 
     Every way a Secret DELETE is answered with the object, in k8s.io/apiserver
     v0.36.3 (Kubernetes 1.36) pkg/registry/generic/registry/store.go:
@@ -821,7 +829,7 @@ def prove_secret_deletes():
     sets no ReturnDeletedObject (pkg/registry/core/secret/storage/storage.go:37-49).
     Preconditions are checked before any write and refuse with a Conflict
     (pkg/registry/rest/delete.go:84-91)."""
-    policy = "agent-platform-organization-secret-deletes"
+    policy = "agent-platform-secret-deletes"
     for name in ("tenant-credential-plain", "tenant-credential-finalized"):
         must(create(credential(name), dry=False), f"create the Secret {name}")
     must(create(credential("tenant-credential-pinned", finalizers=["example.com/hold"]), dry=False), "create a Secret a finalizer holds")
