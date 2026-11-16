@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (Secret deletes answered with the Secret are held in every namespace)
+
+giantswarm/agent-platform#1365: the ValidatingAdmissionPolicy `agent-platform-secret-deletes` (Fail, Deny) replaces `agent-platform-organization-secret-deletes`. It renders whenever kagent is on, `agentPlatformOrganizations.enabled` on or off, and matches Secret deletes in every namespace, not only in organization namespaces: `agent-platform:admin` can be bound anywhere. A delete the API server answers with the Secret (Orphan or Foreground propagation, `orphanDependents: true`, a Secret a finalizer holds, or a DeleteCollection) is made only by a requester that may `get` that Secret, a dry run included. The legacy service account token cleaner of kube-system, the one default controller that deletes Secrets without `get`, is not held.
+
+### Operator action
+
+- **None.** Requesters that may `get` a Secret (cluster-admin, the namespace controller, the garbage collector, Flux, cert-manager, external-secrets, Cluster API) are not held, and a Background or default delete of a Secret no finalizer holds is not matched.
+- **A role of your own that deletes Secrets, or deletes collections of them, without `get`**: its Orphan or Foreground deletes, its deletes of a Secret a finalizer holds and its DeleteCollections are refused now. Add `get` on the Secrets it deletes, or delete with Background propagation.
+
 ## \<current\> → \<next\> (agent-platform-operator 0.4: warm workers follow the models and the agents)
 
 giantswarm/giantswarm#39250: `components.agent-platform-operator.versionRange` is `>=0.4.0 <0.5.0`. With `agentPlatformOrganizations.enabled`, agent-platform-operator 0.4.0 sizes each organization's WorkerPool by a new rule (giantswarm/agent-platform-operator#50): the pool runs `spec.workers.replicas` warm workers while the organization namespace holds a ModelConfig and an Agent (a curated copy counts), or a ModelConfig and a kagent session, and 0 otherwise; an `Orphaned` organization stays at 0. `spec.workers.replicas` is optional now: the CRD defaults it to 1 (`crds: CreateReplace` upgrades the CRD with the release), and a 0 set on purpose stays 0. Under 0.3.x a new organization ran 0 workers, so its agents stayed `ActorTemplatePending` and never became ready. The operator now watches Agent metadata in every namespace and asks kagent whether an organization with a ModelConfig and no Agent has a session, through the kagent target the erasure already uses. Its ClusterRole, the `agent-platform:organization-erasure` binding and the network policies already allow both, so nothing the chart renders changes besides the range. kagent admits the session question as a machine caller only with its controller-extensions controller (`kagent.controller.image.repository: giantswarm/kagent/controller-extensions`, the default).
