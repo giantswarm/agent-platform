@@ -297,7 +297,8 @@ def agreement(m, c):
                 "the erasure binding names the operator's ServiceAccount in its namespace"))
     vaps = {d["metadata"]["name"]: d for d in c if d["kind"] == "ValidatingAdmissionPolicy"}
     for name in ("agent-platform-organization-operator-scope", "agent-platform-organization-operator-objects",
-                 "agent-platform-organization-labels", "agent-platform-organization-copies"):
+                 "agent-platform-organization-labels", "agent-platform-organization-copies",
+                 "agent-platform-organization-admin-mirrors"):
         out.append((name in vaps and f"'{user}'" in flat(vaps[name]), f"{name} names the operator as {user}"))
 
     peer = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": ns}}, "podSelector": {"matchLabels": names["podLabels"]}}

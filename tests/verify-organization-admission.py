@@ -42,8 +42,8 @@ policy holds:
 - the operator's mirror of a customer admin Group is admitted; a person's
   mirror labelled as the operator's is refused, an organization admin binds
   no organizations-admin (giantswarm/agent-platform#1357); in an
-  organization namespace only the operator, or a cluster-admin, binds
-  organizations-admin or changes such a binding's subjects
+  organization namespace only the operator, or a cluster-admin (one who
+  may escalate ClusterRoles), binds organizations-admin or changes such a binding's subjects
   (giantswarm/agent-platform#1363);
 - an organization admin's Secret delete is answered with a Status, never the
   Secret: a delete the API server would answer with it (Orphan, Foreground,
@@ -986,9 +986,21 @@ def prove_admin_mirrors():
          patch("rolebinding", "carol-organizations-admin", ORG, {"metadata": {"labels": {"team": "platform"}}}, as_=CAROL, groups=()))
     case("an organizations-admin deletes a binding to organizations-admin (not held)",
          delete("rolebinding", "carol-organizations-admin", ORG, as_=ALICE, groups=()))
-    # A requester who may create Roles in the namespace (a cluster-admin) is
-    # not held, as by agent-platform-organizations-admin-rolebindings.
+    # A cluster-admin (it may escalate ClusterRoles) is not held, as by
+    # agent-platform-organization-flux-writes. A Role that lets carol create
+    # Roles in ORG alone does not lift the rule.
     case("a cluster-admin binds organizations-admin in an organization namespace (not held)", create(plain, as_=PERSON))
+    must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "role-writer", "namespace": ORG},
+                 "rules": [{"apiGroups": ["rbac.authorization.k8s.io"], "resources": ["roles"], "verbs": ["create"]}]}, dry=False),
+         "create a Role that creates Roles in the organization namespace")
+    must(create(rb("carol-role-writer", ORG, role="role-writer", kind="Role",
+                   subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": CAROL}]), dry=False), "bind carol to it")
+    API.settle()
+    case("an organizations-admin who may create Roles in the organization namespace binds no organizations-admin",
+         create(plain, as_=CAROL, groups=()), policy, "refused for carol: CREATE " + ORG + "/write-all-customer-group")
+    must(kubectl(["delete", "rolebinding", "carol-role-writer", "-n", ORG]), "unbind carol from the Role writer")
+    must(kubectl(["delete", "role", "role-writer", "-n", ORG]), "delete the Role writer")
+    API.settle()
     user_mirror = rb("carol-organizations-admin-user", ORG, role="agent-platform:organizations-admin",
                      subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": CAROL}])
     user_mirror["metadata"]["labels"] = {OBJECT_LABEL: "organizations-admin-mirror", "app.kubernetes.io/managed-by": "agent-platform-operator"}

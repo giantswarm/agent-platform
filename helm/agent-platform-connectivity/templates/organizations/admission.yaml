@@ -50,8 +50,9 @@ these.
     an organizations-admin bound there holds every rule of the role, so RBAC
     lets it bind the role without `bind`, and the subject could write
     AgentPlatformOrganizations there. A create, and an update that changes
-    the subjects, is refused for everyone else but a requester who may
-    create Roles there (a cluster-admin, as in the policy above). A delete
+    the subjects, is refused for everyone else but a cluster-admin (a
+    requester who may escalate ClusterRoles), as
+    agent-platform-organization-flux-writes lets one through. A delete
     passes; the operator's labelled mirrors are
     agent-platform-organization-copies'.
   * agent-platform-organization-admins-binding: the RoleBinding
@@ -491,18 +492,18 @@ spec:
     - name: not-operator-object
       expression: >-
         [dyn(object), dyn(oldObject)].all(o, o == null || !(has(o.metadata.labels) && {{ squote $objectLabel }} in o.metadata.labels))
-    # As agent-platform-organizations-admin-rolebindings, and as
-    # agent-platform-organization-flux-writes, which holds only the
-    # organization's Flux ServiceAccount: a requester who may create Roles
-    # here (a cluster-admin, the namespace's built-in admin) is not held. It
-    # can grant the same rights by a Role of its own.
-    - name: not-role-writer
+    # As agent-platform-organization-flux-writes, which holds only the
+    # organization's Flux ServiceAccount: a cluster-admin is not held. It is
+    # told by escalate on ClusterRoles, cluster-wide: it may grant any role
+    # anyway. A Role that grants create on Roles in this namespace alone does
+    # not lift the rule.
+    - name: not-cluster-admin
       expression: >-
-        !authorizer.group('rbac.authorization.k8s.io').resource('roles').namespace(request.namespace).check('create').allowed()
+        !authorizer.group('rbac.authorization.k8s.io').resource('clusterroles').check('escalate').allowed()
   validations:
-    # An update that leaves the subjects as they are passes (a label, an
-    # annotation, a finalizer): it grants nobody anything, and the roleRef of
-    # a RoleBinding never changes.
+    # An update that leaves the subjects as they are, the same list in the
+    # same order, passes (a label, an annotation, a finalizer): it grants
+    # nobody anything, and the roleRef of a RoleBinding never changes.
     - expression: >-
         request.operation == 'UPDATE' &&
         (has(object.subjects) ? object.subjects : []) == (has(oldObject.subjects) ? oldObject.subjects : [])
