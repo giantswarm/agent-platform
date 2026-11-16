@@ -915,6 +915,10 @@ components:  # @schema additionalProperties: true
     versionRange: ">=1.18.0 <1.19.0"
     valuesFrom: substrate
     injectGlobal: false
+    # With agentPlatformOrganizations.enabled the render refuses any other
+    # namespace (agent-platform.validateOrganizations): the connectivity
+    # chart's operator egress rule and the operator-to-ate-api ingress policy
+    # name ate-system, where the operator calls ate-api.
     targetNamespace: ate-system
     dependsOn: [substrate-crds, agent-platform-connectivity]
     # atelet's pinned image set comes from the kagent release: its chart
