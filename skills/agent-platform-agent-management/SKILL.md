@@ -27,6 +27,12 @@ the configured skill sources, a toolset (Muster selectors and presets), `EgressP
 it may reach), a Harness. agent-manager picks and pins them; it never writes model configs or egress
 policies.
 
+A toolset's selector count is the `maxItems` of the `toolset` property in
+`x_agent-manager_create_agent`'s input schema (`describe_tool`); read it there. From Muster 5.63.7 and
+agent chart 2.6.1 it is 128 selectors and 8192 UTF-8 bytes joined with commas; before that, 32.
+agent-manager refuses a toolset over the limits: use a preset. The complete serialized Session binding
+must fit its 16 KiB JSON body limit, including escaped names and other fields.
+
 Where the reference lives — fetch it, never quote it from memory:
 
 - Managed namespaces, chart and version, the platform Harness, skill-manager (`skillManager`), the
