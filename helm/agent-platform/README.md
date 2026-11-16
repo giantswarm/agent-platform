@@ -532,7 +532,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.valuesFromRefs[0].optional | bool | `true` |  |
 | components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.substrate.timeout | string | `"15m"` |  |
-| components.substrate.upgradeRemediation.retries | int | `3` |  |
+| components.substrate.upgradeStrategy.name | string | `"RetryOnFailure"` |  |
+| components.substrate.upgradeStrategy.retryInterval | string | `"5m"` |  |
 | components.google-access-token-credential-provider.chart | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.google-access-token-credential-provider.versionRange | string | `">=0.3.0 <0.4.0"` |  |
