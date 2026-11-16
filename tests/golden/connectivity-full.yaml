@@ -15825,10 +15825,6 @@ spec:
         operations: ["DELETE"]
         resources: ["secrets"]
   matchConditions:
-    # The cluster's own controller that deletes Secrets without get.
-    - name: not-the-token-cleaner
-      expression: >-
-        request.userInfo.username != 'system:serviceaccount:kube-system:legacy-service-account-token-cleaner'
     # A delete the API server answers with the stored object: the garbage
     # collector's finalizer is added (Orphan, Foreground, orphanDependents),
     # or a finalizer already holds the Secret; a background delete of a
@@ -15844,12 +15840,25 @@ spec:
   # admission once for each item with the collection request's attributes,
   # which carry no name (request.name is unset), while oldObject is the
   # stored item. On a single delete the two names are the same.
+  # The authorizer's cost allows two checks per expression
+  # (k8s.io/apiserver pkg/cel/library/cost.go): two variables of two each,
+  # evaluated only when the first does not admit.
+  variables:
+    - name: secret
+      expression: >-
+        authorizer.group('').resource('secrets').namespace(request.namespace).name(oldObject.metadata.name)
+    - name: readsOne
+      expression: >-
+        variables.secret.check('get').allowed() || variables.secret.check('patch').allowed()
+    - name: readsMany
+      expression: >-
+        variables.secret.check('list').allowed() || variables.secret.check('watch').allowed()
   validations:
     - expression: >-
-        authorizer.group('').resource('secrets').namespace(request.namespace).name(oldObject.metadata.name).check('get').allowed()
+        variables.readsOne || variables.readsMany
       reason: Forbidden
       messageExpression: >-
-        'a delete answered with the Secret (Orphan or Foreground propagation, a finalizer on it, or a DeleteCollection) is made only by a requester that may get it; refused: ' +
+        'a delete answered with the Secret (Orphan or Foreground propagation, a finalizer on it, or a DeleteCollection) is made only by a requester that may read it (get, list, watch or patch); refused: ' +
         request.namespace + '/' + oldObject.metadata.name
 ---
 # Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml

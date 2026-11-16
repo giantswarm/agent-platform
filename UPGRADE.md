@@ -17,12 +17,12 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## \<current\> → \<next\> (Secret deletes answered with the Secret are held in every namespace)
 
-giantswarm/agent-platform#1365: the ValidatingAdmissionPolicy `agent-platform-secret-deletes` (Fail, Deny) replaces `agent-platform-organization-secret-deletes`. It renders whenever kagent is on, `agentPlatformOrganizations.enabled` on or off, and matches Secret deletes in every namespace, not only in organization namespaces: `agent-platform:admin` can be bound anywhere. A delete the API server answers with the Secret (Orphan or Foreground propagation, `orphanDependents: true`, a Secret a finalizer holds, or a DeleteCollection) is made only by a requester that may `get` that Secret, a dry run included. The legacy service account token cleaner of kube-system, the one default controller that deletes Secrets without `get`, is not held.
+giantswarm/agent-platform#1365: the ValidatingAdmissionPolicy `agent-platform-secret-deletes` (Fail, Deny) replaces `agent-platform-organization-secret-deletes`. It renders whenever kagent is on, `agentPlatformOrganizations.enabled` on or off, and matches Secret deletes in every namespace, not only in organization namespaces: `agent-platform:admin` can be bound anywhere. A delete the API server answers with the Secret (Orphan or Foreground propagation, `orphanDependents: true`, a Secret a finalizer holds, or a DeleteCollection) is made only by a requester that may already read that Secret (`get`, `list`, `watch` or `patch`), a dry run included.
 
 ### Operator action
 
-- **None.** Requesters that may `get` a Secret (cluster-admin, the namespace controller, the garbage collector, Flux, cert-manager, external-secrets, Cluster API) are not held, and a Background or default delete of a Secret no finalizer holds is not matched.
-- **A role of your own that deletes Secrets, or deletes collections of them, without `get`**: its Orphan or Foreground deletes, its deletes of a Secret a finalizer holds and its DeleteCollections are refused now. Add `get` on the Secrets it deletes, or delete with Background propagation.
+- **None.** Requesters that may read a Secret (cluster-admin, the Kubernetes controllers, Flux, cert-manager, external-secrets, Cluster API) are not held, and a Background or default delete of a Secret no finalizer holds is not matched.
+- **A role of your own that deletes Secrets, or deletes collections of them, without `get`, `list`, `watch` or `patch`**: its Orphan or Foreground deletes, its deletes of a Secret a finalizer holds and its DeleteCollections are refused now. Add `get` on the Secrets it deletes, or delete with Background propagation.
 
 ## \<current\> → \<next\> (agent-platform-operator 0.4: warm workers follow the models and the agents)
 

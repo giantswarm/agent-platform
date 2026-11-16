@@ -808,7 +808,8 @@ def prove_secret_deletes():
     update and delete on Secrets and no get. A DELETE the API server answers
     with the stored object reads the Secret, so
     agent-platform-secret-deletes admits it only for a requester
-    that may get it; every other delete must be answered with a Status.
+    that may read it (get, list, watch or patch); every other delete must be
+    answered with a Status.
 
     Every way a Secret DELETE is answered with the object, in k8s.io/apiserver
     v0.36.3 (Kubernetes 1.36) pkg/registry/generic/registry/store.go:

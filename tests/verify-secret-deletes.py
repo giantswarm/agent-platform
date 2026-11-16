@@ -28,13 +28,16 @@ admin bound in the kagent namespace and in a plain namespace:
   refused by RBAC;
 - every other delete of the admin is answered with a Status, never the
   Secret;
-- a requester who may get the Secret is not held: a reader's Orphan delete and
-  DeleteCollection, a Flux controller bound to cluster-admin pruning a held
-  Secret, the namespace controller's DeleteCollection while a finalizer holds a
-  Secret, the garbage collector with its preconditions;
-- the cluster's own controllers that delete Secrets without get (the
-  bootstrap roles of the API server, read from it) are not held, and a user
-  with the same role is.
+- a requester who may read the Secret (get, list, watch or patch, also by
+  resourceNames) is not held: a reader's Orphan delete and DeleteCollection,
+  a list-, watch- or patch-only deleter, a Flux controller bound to
+  cluster-admin pruning a held Secret, the namespace controller's
+  DeleteCollection while a finalizer holds a Secret, the garbage collector
+  with its preconditions, the legacy token cleaner with its precondition; a
+  deleter who may list only another Secret by name is held;
+- no default role of the API server (its bootstrap ClusterRoles, and its
+  Roles in kube-system and kube-public) deletes Secrets without one of those
+  four verbs.
 
 Every refusal names the policy with its own message, never an evaluation
 error (which refuses too under failurePolicy Fail and would read as the one
@@ -67,10 +70,13 @@ SECRET_DATA = "c3ludGhldGlj"
 NS_CONTROLLER = "system:serviceaccount:kube-system:namespace-controller"
 GC = "system:serviceaccount:kube-system:generic-garbage-collector"
 FLUX = "system:serviceaccount:flux-giantswarm:kustomize-controller"  # bound to cluster-admin, as Flux installs it
-# The bootstrap controller that deletes Secrets with delete and no get
+# The bootstrap controller that deletes Secrets with delete and patch, no get
 # (k8s.io/kubernetes plugin/pkg/auth/authorizer/rbac/bootstrappolicy
-# controller_policy.go): the policy does not hold it.
+# controller_policy.go).
 TOKEN_CLEANER = "legacy-service-account-token-cleaner"
+# Deleters who read the Secrets by one verb only; NARROW lists one other Secret.
+READ_VERBS = ("list", "watch", "patch")
+NARROW = "nora"
 
 API = None
 results = []
@@ -245,9 +251,14 @@ def fixtures():
     apply(binding("ClusterRoleBinding", "erin-secret-collection-deleter", None, "secret-collection-deleter", user(COLLECTOR)))
     apply(binding("ClusterRoleBinding", "flux-cluster-admin", None, "cluster-admin",
                   {"kind": "ServiceAccount", "name": "kustomize-controller", "namespace": "flux-giantswarm"}))
-    # A user holding the token cleaner's role, who is not the cluster's
-    # controller.
-    apply(binding("ClusterRoleBinding", "frank-token-cleaner", None, f"system:controller:{TOKEN_CLEANER}", user("frank")))
+    for verb in READ_VERBS:
+        apply({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": {"name": f"secret-{verb}-deleter"},
+               "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": [verb, "delete", "deletecollection"]}]})
+        apply(binding("ClusterRoleBinding", f"{verb}-deleter", None, f"secret-{verb}-deleter", user(f"{verb}-deleter")))
+    apply({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "ClusterRole", "metadata": {"name": "secret-narrow-deleter"},
+           "rules": [{"apiGroups": [""], "resources": ["secrets"], "verbs": ["delete"]},
+                     {"apiGroups": [""], "resources": ["secrets"], "verbs": ["list"], "resourceNames": ["tenant-credential-plain"]}]})
+    apply(binding("ClusterRoleBinding", "narrow-deleter", None, "secret-narrow-deleter", user(NARROW)))
     for n in (KAGENT, PLAIN):
         for name in ("plain", "real-orphan", "gone"):
             make(secret(f"tenant-credential-{name}", n))
@@ -257,28 +268,29 @@ def fixtures():
 
 
 def survey():
-    """The default roles that delete Secrets without get, from the API
-    server's own bootstrap RBAC: each must be bound only to a ServiceAccount
-    the policy does not hold (TOKEN_CLEANER). A new one in a later Kubernetes
-    fails here, naming it."""
+    """The default roles that delete Secrets without reading them, from the API
+    server's own bootstrap RBAC (ClusterRoles, and Roles in kube-system and
+    kube-public): the policy would hold their controllers. None today; a new
+    one in a later Kubernetes fails here, naming it."""
     roles = json.loads(must(kubectl(["get", "clusterroles", "-o", "json"]), "list the ClusterRoles"))["items"]
-    bindings = json.loads(must(kubectl(["get", "clusterrolebindings", "-o", "json"]), "list the ClusterRoleBindings"))["items"]
+    for n in ("kube-system", "kube-public"):
+        roles += json.loads(must(kubectl(["get", "roles", "-n", n, "-o", "json"]), f"list the Roles of {n}"))["items"]
 
     def verbs(role):
         out = set()
         for r in role.get("rules") or []:
-            if set(r.get("apiGroups", [])) & {"", "*"} and set(r.get("resources", [])) & {"secrets", "*"} and not r.get("resourceNames"):
+            if set(r.get("apiGroups", [])) & {"", "*"} and set(r.get("resources", [])) & {"secrets", "*"}:
                 out |= set(r.get("verbs", []))
         return out
 
-    blind = {r["metadata"]["name"] for r in roles if r["metadata"]["name"].startswith("system:")
-             and verbs(r) & {"delete", "deletecollection"} and not verbs(r) & {"get", "*"}}
-    subjects = {f"{s['kind']}:{s.get('namespace', '')}:{s['name']}" for b in bindings
-                if b["roleRef"]["name"] in blind and b["metadata"]["name"].startswith("system:") for s in b.get("subjects") or []}
-    want = {f"ServiceAccount:kube-system:{TOKEN_CLEANER}"}
-    ok = subjects == want
-    results.append((ok, "the default roles that delete Secrets without get bind only the legacy token cleaner"))
-    print(("ok:  " if ok else "FAIL:"), "default roles deleting Secrets without get:", sorted(blind), "bound to", sorted(subjects))
+    blind = sorted(f"{r['metadata'].get('namespace', '')}/{r['metadata']['name']}" for r in roles
+                   if r["metadata"]["name"].startswith("system:")
+                   and verbs(r) & {"delete", "deletecollection"} and not verbs(r) & {"get", "list", "watch", "patch", "*"})
+    readers = sorted(r["metadata"]["name"] for r in roles if r["metadata"]["name"].startswith("system:")
+                     and verbs(r) & {"delete", "deletecollection"})
+    ok = not blind
+    results.append((ok, "no default role deletes Secrets without get, list, watch or patch"))
+    print(("ok:  " if ok else "FAIL:"), "default roles deleting Secrets without reading them:", blind, "| deleting and reading:", readers)
 
 
 def prove(n):
@@ -318,6 +330,17 @@ def prove(n):
     case(f"[{n}] a reader's Background delete of a held Secret is admitted",
          delete_secret(n, "tenant-credential-held", READER, propagationPolicy="Background"))
     case(f"[{n}] a reader's DeleteCollection is admitted", delete_collection(n, READER, propagationPolicy="Background"))
+    for verb in READ_VERBS:
+        case(f"[{n}] a deleter who may {verb} Secrets (no get) deletes a held Secret",
+             delete_secret(n, "tenant-credential-held", f"{verb}-deleter", propagationPolicy="Background"))
+        case(f"[{n}] a deleter who may {verb} Secrets (no get) makes an Orphan delete",
+             delete_secret(n, "tenant-credential-plain", f"{verb}-deleter", propagationPolicy="Orphan"))
+        case(f"[{n}] a deleter who may {verb} Secrets (no get) deletes a collection",
+             delete_collection(n, f"{verb}-deleter", propagationPolicy="Background"))
+    case(f"[{n}] a deleter who may list that Secret by name makes an Orphan delete",
+         delete_secret(n, "tenant-credential-plain", NARROW, propagationPolicy="Orphan"))
+    case(f"[{n}] a deleter who may list only another Secret by name deletes no held Secret",
+         delete_secret(n, "tenant-credential-held", NARROW, propagationPolicy="Background"), POLICY, f"refused: {n}/tenant-credential-held")
     case(f"[{n}] a Flux controller bound to cluster-admin prunes a held Secret (Background)",
          delete_secret(n, "tenant-credential-held", FLUX, propagationPolicy="Background"))
     case(f"[{n}] the namespace controller's DeleteCollection while a finalizer holds a Secret is admitted",
@@ -331,12 +354,13 @@ def prove(n):
     for propagation in ("Foreground", "Orphan", "Background"):
         case(f"[{n}] the garbage collector deletes an owned Secret with {propagation} propagation and its preconditions",
              delete_secret(n, "tenant-credential-owned", GC, propagationPolicy=propagation, preconditions=pre))
-    # The token cleaner deletes without options (pkg/controller/serviceaccount
-    # legacy_serviceaccount_token_cleaner.go), with delete and no get.
-    case(f"[{n}] the legacy token cleaner deletes a held Secret",
-         delete_secret(n, "tenant-credential-held", f"system:serviceaccount:kube-system:{TOKEN_CLEANER}"))
-    case(f"[{n}] a user with the token cleaner's role deletes no held Secret",
-         delete_secret(n, "tenant-credential-held", "frank"), POLICY, f"refused: {n}/tenant-credential-held")
+    # The token cleaner deletes with a resourceVersion precondition
+    # (pkg/controller/serviceaccount legacy_serviceaccount_token_cleaner.go),
+    # holding delete and patch.
+    held = json.loads(must(kubectl(["get", "secret", "tenant-credential-held", "-n", n, "-o", "json"]), "read the held Secret"))
+    case(f"[{n}] the legacy token cleaner deletes a held Secret with its precondition",
+         delete_secret(n, "tenant-credential-held", f"system:serviceaccount:kube-system:{TOKEN_CLEANER}",
+                       preconditions={"resourceVersion": held["metadata"]["resourceVersion"]}))
 
 
 def main():
