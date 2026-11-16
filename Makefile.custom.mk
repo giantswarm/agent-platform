@@ -206,6 +206,10 @@ TENANT_FLUX_RBAC := agent-platform-tenant-flux
 # (giantswarm/agent-platform#1040), an intended change of the default render with kagent on (verify-tenant-rbac asserts
 # it); dropped from the golden until GOLDEN_REF carries it.
 TENANT_EGRESS_ADMISSION := agent-platform-tenant-egress-credentials agent-platform-tenant-model-credentials agent-platform-tenant-credentials agent-platform-tenant-credential-refs agent-platform-platform-tenant-credential-refs
+# The Secret deletes answered with the Secret, refused in every namespace for a requester who may not read it
+# (giantswarm/agent-platform#1365), an intended change of the default render with kagent on (verify-secret-deletes
+# asserts it); dropped from the golden until GOLDEN_REF carries it.
+TENANT_SECRET_DELETES := agent-platform-secret-deletes
 # New beside GOLDEN_REF: left out of both sides of the postgres golden too.
 WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
@@ -221,7 +225,7 @@ WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
 # agent-platform-tenant-flux (giantswarm/agent-platform#1268) is new with kagent on: the
 # connectivity chart renders it now that agent-manager's tenant reconciler is gone;
 # verify-organization-namespaces asserts it. Drop it once GOLDEN_REF carries it.
-GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP) $(TENANT_RBAC_ALL) $(TENANT_EGRESS_ADMISSION) agent-platform-tenant-flux
+GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP) $(TENANT_RBAC_ALL) $(TENANT_EGRESS_ADMISSION) $(TENANT_SECRET_DELETES) agent-platform-tenant-flux
 # Any reference is enough: the assertions read the rendered exception, not the image.
 PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
