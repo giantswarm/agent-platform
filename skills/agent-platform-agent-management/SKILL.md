@@ -2,7 +2,7 @@
 name: agent-platform-agent-management
 description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.1.2"
+  version: "3.2.0"
 ---
 
 # Managing agents and their building blocks
@@ -108,6 +108,14 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   `agent-platform-skill-authoring`.
 - **Egress**: none unless the job needs an origin; a named `EgressPolicy` where one fits, raw origins otherwise.
   Tenant admins write policies; a change to one reaches its agents from their next session.
+- **Credentials**: an existing model key or egress credential is named in the lists —
+  `x_agent-manager_list_model_configs` (each model with a key) and
+  `x_agent-manager_list_egress_policies` (each destination with a credential) give its Secret as
+  `credentialSecret` and `credentialKey`: names only, never a value. Pass them as `secret` and `key`
+  to `x_agent-manager_replace_organization_credential`, or as `credentialSecret` and `credentialKey`
+  to `x_agent-manager_set_organization_model` and `x_agent-manager_set_organization_egress_policy`;
+  never ask the person for them. A change of a model's provider, or of a Vertex model's project,
+  needs a new `credentialSecret` that does not exist yet.
 - **System prompt**: role, voice and rules; knowledge goes into skills. Every agent with tools carries
   the meta-tool paragraph from `references/system-prompt.md`.
 - **Icon**: `iconUrl` only where the installation serves avatars; omit it otherwise.
