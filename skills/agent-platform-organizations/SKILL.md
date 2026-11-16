@@ -2,7 +2,7 @@
 name: agent-platform-organizations
 description: Use when someone asks who owns an agent, why they can or cannot see or start one, what an organization (tenant) is, how to share an agent with everyone or with a team, how to join an organization, or who manages model configs and egress policies.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Organizations: who owns an agent, who may use it
@@ -73,6 +73,14 @@ To share with one team instead, create it in that team's organization.
   Configuration, credential binding or consumer identity changes still require a new preparation. A failed
   save can have written credentials already; refresh its confirmation and follow
   the same operation's recovery instead of starting another request.
+- **An organization model's settings**, through `x_agent-manager_set_organization_model`: its
+  display name (`displayName`, every provider; `""` removes it), its token limit (`maxTokens`:
+  Anthropic, AnthropicVertexAI, AzureOpenAI, Mistral, OpenAI; `0` returns to the provider's default)
+  and prompt caching (`promptCaching`, `cacheTTL` `5m` or `1h`: Anthropic, Bedrock). A new Anthropic
+  model has prompt caching on (`cacheTTL: 5m`) unless `promptCaching` is `false`. An update that
+  omits a setting keeps it. The API server refuses a setting that the provider does not have.
+  `x_agent-manager_list_model_configs` shows the settings of each model, to compare an
+  organization's model with the platform's.
 - **Vertex models**: use native `AnthropicVertexAI` or `GeminiVertexAI` with
   nonsecret `projectID` and `location`. Upload the service-account JSON only in
   the linked credential form when it requests `google-service-account-json`.

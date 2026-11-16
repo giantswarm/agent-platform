@@ -2,7 +2,7 @@
 name: agent-platform-agent-management
 description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.1.2"
+  version: "3.2.0"
 ---
 
 # Managing agents and their building blocks
@@ -93,7 +93,12 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   on a missing or not-accepted config never boots. No suitable model: a hosted API model with a key is
   `x_agent-manager_set_organization_model` (organization admin, or cluster admin
   for the installation namespace; the key goes into the credential form it
-  links). Native Vertex models also take nonsecret `projectID` and `location`;
+  links). `x_agent-manager_list_model_configs` (each model with a key) and
+  `x_agent-manager_list_egress_policies` (each destination with a credential) name its Secret by
+  `credentialSecret` and `credentialKey`: names only, never a value. They are the `secret` and `key`
+  of `x_agent-manager_replace_organization_credential` and the `credentialSecret` and
+  `credentialKey` of the set tools: take them from the list, never ask the person for them.
+  Native Vertex models also take nonsecret `projectID` and `location`;
   upload their JSON only in that credential form. Direct Vertex calls are
   unmetered by the LLM gateway. A local or Hugging Face model is model-manager (`agent-platform-tools`); a
   subscription (OAuth) model — `openAI.credentialType: chatgptOAuth`, `apiFormat: responses` — is the

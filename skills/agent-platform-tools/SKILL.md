@@ -2,7 +2,7 @@
 name: agent-platform-tools
 description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing or refused, connectors and signing in to one, workflows, or model-manager.
 metadata:
-  version: "3.1.1"
+  version: "3.2.0"
 ---
 
 # Tools on the Agent Platform
@@ -93,6 +93,14 @@ answer is a URL elicitation of the credential form, link in `credentials[].next`
 written once the person saves the form. No link: give the person the raw answer, never an
 explanation or a hand-made Secret. Check with `x_agent-manager_list_organization_connectors`
 (non-empty `credentials`); `core_mcpserver_detect` probes the URL.
+
+To replace a model key or an egress credential, read its Secret from the list:
+`x_agent-manager_list_model_configs` (each model with a key) and
+`x_agent-manager_list_egress_policies` (each destination with a credential) name it by
+`credentialSecret` and `credentialKey` — names only, never a value. Pass them as `secret` and `key`
+to `x_agent-manager_replace_organization_credential`, or as `credentialSecret` and `credentialKey`
+to `x_agent-manager_set_organization_model` and `x_agent-manager_set_organization_egress_policy`;
+never ask the person for them.
 
 Tools register live when a server connects. Adding connectors:
 https://docs.giantswarm.io/tutorials/agent-platform/managing-mcp-servers/ and
