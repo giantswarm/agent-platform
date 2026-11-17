@@ -122,6 +122,8 @@ data:
           url: https://muster.ci.example.com/mcp
           authProvider: oidc-agent-platform
     agentPlatform:
+      organizations:
+        enabled: false
       skills:
         repositories:
           - https://github.com/giantswarm/agent-skills
@@ -9773,7 +9775,7 @@ data:
         license: apache-2.0
         storageUri: oci://gsoci.azurecr.io/giantswarm/models/mistral-small-4-nvfp4:45331841b631
       requirements:
-        minComputeCapability: "8.9"
+        minComputeCapability: "8.6"
         overheadGiB: 60
         weightsGiB: 66
       resources:
@@ -10265,10 +10267,15 @@ data:
         Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
         node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
         follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
-        requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
-        its host memory is the runtime and the weights passing through the page
-        cache; the KV cache lives on the GPU. A 16 GB T4 does not host it
-        (14 + 9 GiB, and the card has neither FP8 nor bf16).
+        requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU) — its
+        host memory is the runtime and the weights passing through the page
+        cache; the KV cache lives on the GPU. The same recipe serves on a GB10
+        (unified memory) without an override: vLLM's --gpu-memory-utilization
+        share is not charged to the pod there either, but the runtime loads the
+        weights through host memory, a 19.5 GiB peak (8 GiB once serving), so
+        the memory limit is 24 GiB; on a g6.xlarge the node bounds it first. A
+        16 GB T4 does not host it (14 + 9 GiB, and the card has neither FP8 nor
+        bf16).
       displayName: Qwen3.5 9B (FP8, one 24 GB GPU)
       env:
       - name: HOME
@@ -10302,7 +10309,7 @@ data:
         gpus: 1
         limits:
           cpu: "4"
-          memory: 12Gi
+          memory: 24Gi
         requests:
           cpu: "2"
           memory: 10Gi
@@ -11320,13 +11327,15 @@ spec:
   ingress:
     # The route attaches to the platform's front Gateway (the Envoy edge), which
     # proxies straight to the portal's Service: agentgateway is not in this path.
-    # The namespaces are the route's own parents (backstage.parentRefs, else
-    # global.gatewayApi.parentRefs); `app.kubernetes.io/name: envoy` is the
-    # label Envoy Gateway stamps on the proxy pods it runs for a Gateway, as
-    # the oauth2-proxy policy selects them.
+    # The peers are the proxy pods of the route's own parents
+    # (backstage.parentRefs, else global.gatewayApi.parentRefs), by the
+    # owning-Gateway labels Envoy Gateway stamps on them
+    # (agent-platform.route.envoyPeer), as the oauth2-proxy policy selects them.
     - fromEndpoints:
         - matchLabels:
             app.kubernetes.io/name: envoy
+            gateway.envoyproxy.io/owning-gateway-name: giantswarm-default
+            gateway.envoyproxy.io/owning-gateway-namespace: envoy-gateway-system
             io.kubernetes.pod.namespace: envoy-gateway-system
       toPorts:
         - ports:
@@ -11387,7 +11396,8 @@ spec:
             - port: "10443"
               protocol: TCP
     # Skill discovery (backstage.skillsRepositories): the backend lists each
-    # repository's SKILL.md files through the GitHub API.
+    # repository's SKILL.md files through the GitHub API. Skill pull requests
+    # (backstage.skillPullRequests) go to the same API.
     - toFQDNs:
         - matchName: api.github.com
       toPorts:
@@ -11897,7 +11907,7 @@ spec:
             - --selector=app=backstage
             - --overwrite
             - --field-manager=agent-platform-config-reload
-            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=17dfed0c93c61330ee2942c868b67df5a07b24457ad3b08924e09bfbf86ccb14
+            - AGENT_PLATFORM_APP_CONFIG_CHECKSUM=db131b80e8d4d85c37bebf93e300c0322370396305ac49797c920524c3c57529
           env:
             # kubectl keeps its discovery/http cache under $HOME; the root
             # filesystem is read-only.

@@ -284,7 +284,6 @@ gitops:
   retries: 5
   # Refuse credentials given inline in these values. Every component chart can
   # read its credentials from a pre-created Secret instead: kagent
-  # providers.<name>.apiKeySecretRef (with an empty apiKey) and
   # oauth2-proxy.config.existingSecret; muster.muster.oauth.server.existingSecret
   # and .storage.valkey.existingSecret; valkey.valkey.auth.usersExistingSecret;
   # klausGateway.slack.secretName (with an empty botToken) and
@@ -293,7 +292,7 @@ gitops:
   # component's HelmRelease spec.values and into Helm's release storage,
   # readable by anyone allowed to get HelmReleases in `namespace`. With true the render fails and names the offending key paths
   # (never their values); false keeps the pre-existing behavior. The keys it
-  # checks: kagent.providers.*.apiKey, kagent.oauth2-proxy.config.clientSecret
+  # checks: kagent.oauth2-proxy.config.clientSecret
   # and .cookieSecret, muster.muster.oauth.server.dex.clientSecret,
   # .google.clientSecret, .registrationToken, .encryptionKeyValue and
   # .storage.valkey.password, valkey.valkey.auth.aclUsers.*.password,
@@ -319,7 +318,8 @@ gitops:
 #       within the line the forwarded values were proven against: a 0.x range
 #       ends at the next minor (0.N.x, <0.N.0), a range from 1.0.0 at the next
 #       major at most, and the release that renders values for the next line
-#       raises the ceiling (tests/verify-range-ceilings.py). Pin exactly for a
+#       raises the ceiling (tests/verify-range-ceilings.py, whose UNCAPPED
+#       components take every release above their floor). Pin exactly for a
 #       customer BOM.
 #   valuesFrom   — top-level values block forwarded to this release's values.
 #   forwardAllValues — forward the whole values tree (connectivity reads many
@@ -453,14 +453,29 @@ components:  # @schema additionalProperties: true
     # request of the Session's sandbox resolves within it (binding ∩ header,
     # giantswarm/muster#1618); agent-manager from 2.9.0 sends it, which an
     # older muster refuses, so the two floors move together.
-    # Floor 5.52.5: a person's ChatGPT login (a kagent.modelConfigs entry
-    # with credentialType chatgptOAuth and no apiKeySecret) is muster's
-    # provider App chatgpt, whose device-code grant muster files as the
-    # person's from 5.52.5 (giantswarm/muster#1653); an older muster files it
+    # Floor 5.52.5: a person's ChatGPT login is muster's provider App chatgpt, whose device-code grant muster files
+    # as the person's from 5.52.5 (giantswarm/muster#1653); an older muster files it
     # under the asking session only and refuses every codex request.
+    # Floor 5.58.0: muster serves the MCPServers of the namespaces
+    # mcpServerNamespaceSelector selects, which this chart sets to the
+    # organization namespaces with agentPlatformOrganizations.enabled
+    # (giantswarm/muster#1783, agent-platform.muster.organizations); an older
+    # chart refuses the key.
+    # Broker authorization uses opaque state handles within server state limits.
+    # Resource access tokens authenticate callers independently of backend grants.
+    # Floor 5.60.0: muster accepts an ID token whose audience is listed in
+    # muster.muster.oauth.server.trustedAudiences on /mcp and on the
+    # person-only endpoints (giantswarm/muster#1807). From 5.59.0 an older
+    # muster answers it with 401: on /mcp the tokens agentgateway and the
+    # portal forward, on /session-bindings agent-manager's start_session.
+    # Floor 5.61.0: muster passes a backend's input_required through to the
+    # caller (giantswarm/muster#1812), which agent-manager's credential
+    # elicitations (agent-manager.credentials) reach the client by; an older
+    # muster relays a backend's URL elicitation only for an MCPServer with
+    # spec.urlElicitation: Relay.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.52.5 <6.0.0"
+    versionRange: ">=5.63.2 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -679,8 +694,10 @@ components:  # @schema additionalProperties: true
     # (giantswarm/kagent-upstream#911, #916), and the codex Harness speaks
     # MCP 2026-07-28 (Codex's mcp_2026_07_28 feature). From 1.29.0 the omp
     # Harness relays them too, through its MCP bridge
-    # (giantswarm/kagent-upstream#927).
-    versionRange: ">=1.29.0 <1.30.0"
+    # (giantswarm/kagent-upstream#927). From 1.31.0 ListSessions filters by
+    # the Agent's namespace (giantswarm/kagent-upstream#958), which the
+    # operator's cleanup process asks for.
+    versionRange: ">=1.31.0 <1.32.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -713,9 +730,13 @@ components:  # @schema additionalProperties: true
     # unchanged kagent release reports "in-sync" and never recreates it —
     # every template stays unadmitted until a values change or a forced
     # reconcile (#409; 600 s observed). With it the Harness is back within
-    # one interval and the templates are re-admitted. No ignore rule: nothing
-    # of the platform edits this release's objects in place (no HPA on its
-    # Deployments, no webhook-injected field, no hook). An object of the
+    # one interval and the templates are re-admitted. Nothing of the platform
+    # edits this release's objects in place (no HPA on its Deployments, no
+    # webhook-injected field, no hook); the chart itself appends one ignore
+    # rule, kagent-controller's /spec/template/spec/volumes, because
+    # helm-controller before 1.4 strips their podCertificate sources when it
+    # corrects them (#879; agent-platform.driftDetection in _helpers.tpl),
+    # also to an ignore list set here. An object of the
     # chart opts out with the annotation helm.toolkit.fluxcd.io/driftDetection:
     # disabled. kagent's, muster's and kserve-runtime-configs' only by
     # default — turning it on for another release is a decision per release,
@@ -751,7 +772,6 @@ components:  # @schema additionalProperties: true
       # The store block is this chart's and the connectivity chart's: the kagent
       # chart gets the derived harness.snapshotLocation, never the block.
       - harness.snapshotStore
-      - modelConfigs
       - oauth2ProxyIngress
       - remoteMcpServers
       - uiRoute
@@ -794,7 +814,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.29.0 <1.30.0"
+    versionRange: ">=1.31.0 <1.32.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -844,9 +864,13 @@ components:  # @schema additionalProperties: true
     # kagent line's own pin moves
     # (README "Agent Substrate"). A mirror sets `repository` here and
     # substrate.image.registry below, which the derived worker image follows.
-    # The floor is 1.17.5, the Substrate release the kagent line's 1.24
-    # builds are published against (tests/verify-worker-image.py). From
-    # 1.17.0 ate-api serves the actor JWT mint as
+    # The floor is 1.18.0, on the same upstream as 1.17.5, the Substrate
+    # release the kagent line's 1.24 builds are published against
+    # (tests/verify-worker-image.py, SAME_UPSTREAM). From 1.18.0 the
+    # credential provider's Secret reader is bound only where the derived
+    # namespacePolicies grant (credentialProvider.rbac.namespaces) and
+    # ate-controller reads only the egress MITM CA pool's Secret
+    # (giantswarm/agent-platform#1269); from 1.17.0 ate-api serves the actor JWT mint as
     # Control.MintActorJwt and its egress gateway runs agentgateway 2.6.5,
     # which mints through that name (a 1.16 ate-api with that gateway, or a
     # 1.17 ate-api with an older one, answers every actor_jwt header source
@@ -857,9 +881,9 @@ components:  # @schema additionalProperties: true
     # each actor's DNS queries (ate_actor_stats_dns_queries_total); from
     # 1.13.0 ate-idp-server serves the actor-JWT issuer
     # (https://idp.<namespace>.svc) muster verifies a Session's actor JWT
-    # against (muster.credentialProvider.actorBearer, with workspaces on).
+    # against (muster.credentialProvider.actorBearer, on with Substrate).
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.17.5 <1.18.0"
+    versionRange: ">=1.18.0 <1.19.0"
     # Follows gitops.prereleases like every component: from 1.4.0 on the
     # line's ate-controller runs every gVisor pool on the ateom-gvisor of the
     # release Flux resolved (ateController.gvisorWorker.followRelease, which
@@ -888,9 +912,13 @@ components:  # @schema additionalProperties: true
     # — so this release installs with a real readiness wait and no
     # installDisableWait. The kagent release comes after it.
     repository: oci://gsoci.azurecr.io/giantswarm/substrate/helm
-    versionRange: ">=1.17.5 <1.18.0"
+    versionRange: ">=1.18.0 <1.19.0"
     valuesFrom: substrate
     injectGlobal: false
+    # With agentPlatformOrganizations.enabled the render refuses any other
+    # namespace (agent-platform.validateOrganizations): the connectivity
+    # chart's operator egress rule and the operator-to-ate-api ingress policy
+    # name ate-system, where the operator calls ate-api.
     targetNamespace: ate-system
     dependsOn: [substrate-crds, agent-platform-connectivity]
     # atelet's pinned image set comes from the kagent release: its chart
@@ -917,16 +945,21 @@ components:  # @schema additionalProperties: true
     # time (maxSurge 0, maxUnavailable 1, ~17 s a node) plus ate-api-server,
     # ate-controller, atenet and the kagent WorkerPool: on 20+ Substrate nodes
     # that exceeds helm-controller's 5m default, the upgrade fails on "context
-    # deadline exceeded" and the remediation rolls a healthy release back, over
-    # and over. 15m fits a cold roll of such a cluster with margin.
+    # deadline exceeded" and a rollback would roll every node again. 15m fits a
+    # cold roll of such a cluster with margin.
     timeout: 15m  # @schema pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
-    # Overrides of this release's spec.upgrade.remediation over
-    # gitops.retries, key by key. Each failed attempt waits out the full
-    # timeout and its rollback rolls every node again, so three attempts are
-    # the bound; a release that fails all three is rolled back to the last
-    # good one (strategy rollback, remediateLastFailure: Flux's defaults).
-    upgradeRemediation:  # @schema additionalProperties: true
-      retries: 3
+    # This release's spec.upgrade.strategy (helm-controller >= v1.4). A failed
+    # upgrade is upgraded again every retryInterval instead of rolled back:
+    # Flux's rollback remediation stalls the release for good when Helm's
+    # history holds no deployed revision to return to ("missing target release
+    # for rollback"), and with it kagent, agent-manager and everything else
+    # that dependsOn substrate, until a person forces a reconcile
+    # (giantswarm/agent-platform#1367). A retry is what that force does, and it
+    # rolls no node back. Another component can set upgradeStrategy the same
+    # way; with RetryOnFailure no spec.upgrade.remediation renders.
+    upgradeStrategy:  # @schema additionalProperties: true
+      name: RetryOnFailure  # @schema enum: [RemediateOnFailure, RetryOnFailure]
+      retryInterval: 5m  # @schema pattern: ^([0-9]+(\.[0-9]+)?(ms|s|m|h))+$
   google-access-token-credential-provider:  # @schema additionalProperties: true
     chart: google-access-token-credential-provider
     # The Google access-token credential provider: an Agent Substrate
@@ -942,11 +975,13 @@ components:  # @schema additionalProperties: true
     # (agent-platform.componentDerivedValues). The Substrate chart routes the
     # class to it through substrate.credentialProvider.additionalProviders
     # below; a Substrate release before 1.14.0 refuses that entry, its bundled
-    # provider serving the name itself. The floor is 0.2.0, the first plugin
-    # that reads the selector grants agentPlatformOrganizations.enabled derives; an
-    # older plugin refuses its policy file at start.
+    # provider serving the name itself. The floor is 0.3.0, whose chart binds
+    # its Secret reader only where the derived namespacePolicies grant
+    # (rbac.namespaces, giantswarm/agent-platform#1269); from 0.2.0 the plugin
+    # reads the selector grants agentPlatformOrganizations.enabled derives (an
+    # older plugin refuses its policy file at start).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: ">=0.2.0 <0.3.0"
+    versionRange: ">=0.3.0 <0.4.0"
     valuesFrom: google-access-token-credential-provider
     injectGlobal: false
     targetNamespace: ate-system
@@ -1080,7 +1115,7 @@ components:  # @schema additionalProperties: true
     # agents as Flux HelmReleases of the agent chart, as REST and MCP. Off by
     # default: it needs the kagent component and Flux on the cluster.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # agent-manager 1.x and 2.x are the kagent API v2 line (kagent.dev/v1alpha3
+    # agent-manager 1.x, 2.x and 3.x are the kagent API v2 line (kagent.dev/v1alpha3
     # AgentTemplates through the Generic agent chart 1.x, the agent unit); 0.x
     # composes agents for kagent 0.10 (v1alpha2) and never meets this chart.
     # Until 1.0.0 is published the range resolves nothing (the component is
@@ -1117,11 +1152,34 @@ components:  # @schema additionalProperties: true
     # without defaultToolchains with the github toolchain, so gh stays in its
     # Sessions once the Harness images carry none; it is the floor before any
     # kagent line without gh in its Harness images (giantswarm/agent-manager#252).
-    # The ceiling 2.19.0 keeps agent-manager on the line whose tenants.enabled
-    # is the old tenant reconciler, which this chart keeps off: from 2.19.0
-    # tenants.enabled serves the organizations (with devPortal.url), and the
-    # range moves past it together with the values that turn it on.
-    versionRange: ">=2.16.0 <2.19.0"
+    # 2.19.0 reports a namespace's default ModelConfig (the one annotated
+    # agent-platform.giantswarm.io/is-default-model-config) as `default` on
+    # list_model_configs and fills an omitted modelConfig on create_agent
+    # from it (giantswarm/agent-manager#298). Its tenants.enabled serves the
+    # organization tools; this chart derives it from
+    # agentPlatformOrganizations.enabled (agent-platform.agentManager.organizations).
+    # 2.20.0 is the floor agentPlatformOrganizations.enabled needs: its chart
+    # leaves the ClusterRole agent-platform-tenant-flux to the connectivity
+    # chart (giantswarm/agent-manager#305), and its organization tools write
+    # in commit mode (giantswarm/agent-manager#300).
+    # 2.22.0 is the floor agent-manager.credentials and
+    # agent-manager.githubTokenExchange need: it answers a missing organization
+    # credential with the credentials.uiURL form and exchanges the person's
+    # identity for their GitHub App grant.
+    # 2.24.0 is the floor the Dev Portal's organization pages need
+    # (giantswarm/backstage#3364): list_organizations replaces
+    # list_my_organizations, organization credentials are write-only,
+    # replace_organization_credential replaces one, and a save whose
+    # credential's consumers changed is answered credential_consumers_changed
+    # (giantswarm/agent-manager#360, #361, #364, #373). It is also
+    # agent-platform.agentManager.skillManagerFloor: from it agent-manager pins
+    # skills through the skill-manager and takes installation and
+    # defaultAgentModel (giantswarm/agent-manager#290).
+    # github.tokenExchange needs the on-demand grant contract and its schema.
+    # 3.1.0 serves Vertex service-account JSON keys and installation models
+    # through the same credentials.uiURL, without tenancy too, and takes
+    # tenants.commit.platformModelsPath (giantswarm/agent-manager#409).
+    versionRange: ">=3.1.0 <4.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -1130,9 +1188,71 @@ components:  # @schema additionalProperties: true
       - harness.egress
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
-    # and manages agents in the kagent namespace; both references are dropped
-    # at render time when the component is off.
+    # and manages agents in the kagent namespace. No skill-manager: it calls
+    # the skill-manager only when it pins a skill and answers that call
+    # unavailable while it is down, so a failed skill-manager never holds it.
+    # Each reference is dropped at render time when its component is off.
     dependsOn: [muster, kagent]
+  skill-manager:  # @schema additionalProperties: true
+    chart: skill-manager
+    # The skill sources of the Agent Platform (giantswarm/skill-manager,
+    # giantswarm/giantswarm#38322): lists the skills of every source and pins
+    # a skill to a commit as the person, MCP through muster (tools appear as
+    # x_skill-manager_<tool>, tool group agent-platform) and REST for
+    # agent-manager. No `enabled` here: on wherever agent-manager is on;
+    # false leaves it out, and agent-manager falls back to its own
+    # (deprecated) skill discovery.
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # The floor is 0.2.2, the first release on mcp-oauth v1.13.18 (its Dex
+    # client follows HTTPS_PROXY and NO_PROXY). The ceiling is the next minor:
+    # a skill-manager minor rolls in with the chart release that renders its
+    # values.
+    versionRange: ">=0.2.2 <0.3.0"
+    valuesFrom: skill-manager
+    # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
+    # app); the reference is dropped at render time when muster is off.
+    dependsOn: [muster]
+    # The component's roster entry reaches the connectivity release only while
+    # the component is on (see components.yaml, gatedRoster).
+    gatedRoster: true
+  default-agent:  # @schema additionalProperties: true
+    # The default agent (defaultAgent.displayName), where people start and the portal's meta
+    # agent: one release of the Generic
+    # agent chart in kagent with the values of agents/default-agent/values.yaml
+    # and the platform's skills (skills/) pinned to the release's commit. Its
+    # muster.url, agent.iconUrl, toolset, labels and modelConfig.name are
+    # derived (defaultAgent). On while kagent, muster and agent-manager
+    # are on; false leaves it out.
+    chart: agent
+    repository: oci://gsoci.azurecr.io/charts/giantswarm
+    # The agent chart line, moved with agent-manager.agentChart.semver
+    # (make verify-default-agent). The floor is 2.6.0, whose empty
+    # modelConfig.name renders no model (giantswarm/agent#130).
+    versionRange: ">=2.6.0 <3.0.0"
+    valuesFile: agents/default-agent/values.yaml
+    injectGlobal: false
+    # Installs where the agents live: the kagent component's namespace
+    # (kagent.namespaceOverride).
+    inKagentNamespace: true
+    # The Agent's readiness (its model, its skills) is reported on the Agent,
+    # never a reason to hold the platform's install or upgrade.
+    disableWait: true
+    # No driftDetection: unpinned (defaultAgent.modelConfig), the Agent's
+    # model is agent-manager's.
+    # On the HelmRelease and the Agent: agent-manager lists it read-only
+    # (managed-by) and reports it as the installation's default agent (default).
+    # Labels set here add to these two on the Agent, never drop them.
+    labels:  # @schema additionalProperties: true
+      agent-platform.giantswarm.io/managed-by: agent-platform
+      agent-platform.giantswarm.io/default: "true"
+    # Travels to the connectivity release only while on, which then wires the
+    # portal's meta-agent features to it.
+    gatedRoster: true
+    enabled: true
+    # Only kagent, which owns its CRs: its skills are pinned at render and
+    # its model is set here or later by agent-manager, so neither
+    # agent-manager nor muster holds its install.
+    dependsOn: [kagent]
   vm-manager:  # @schema additionalProperties: true
     chart: vm-manager
     # VM provisioning for the Agent Platform (giantswarm/vm-manager): KVM
@@ -1151,9 +1271,10 @@ components:  # @schema additionalProperties: true
     # the pod fetches (0.20.0 and 0.20.1 have no guest image: their
     # guest-image job failed; 0.19.x were on ghcr.io, with the guest image as
     # a node path).
-    # The floor is 0.24.0: the chart takes observability.otel, the OTLP trace
-    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
-    versionRange: ">=0.24.0 <0.25.0"
+    # The floor is 0.26.10, the first release on mcp-oauth v1.13.18 (its Dex
+    # client follows HTTPS_PROXY and NO_PROXY); the chart takes
+    # observability.otel since 0.24.0 (giantswarm/giantswarm#36711).
+    versionRange: ">=0.26.10 <0.27.0"
     valuesFrom: vm-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
@@ -1184,7 +1305,12 @@ components:  # @schema additionalProperties: true
     # export global.observability.traces.otlp derives, and serviceMonitor
     # with observability.metrics, the metrics port its ServiceMonitor scrapes
     # (giantswarm/cluster-manager#138, giantswarm/giantswarm#36711).
-    versionRange: ">=0.22.0 <0.35.0"
+    # No ceiling: the keys this chart derives for cluster-manager (identity,
+    # observability, modelManager.namespace) do not depend on its version, so
+    # each new cluster-manager line rolls in without a release of this chart. A
+    # cluster-manager release that renames one of them must not ship until this
+    # chart follows (UNCAPPED in tests/verify-range-ceilings.py).
+    versionRange: ">=0.22.0"
     valuesFrom: cluster-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
@@ -1228,7 +1354,7 @@ components:  # @schema additionalProperties: true
     # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
     # minor: a workspace-manager minor rolls in with the chart release that
     # renders its values.
-    versionRange: ">=0.14.0 <0.15.0"
+    versionRange: ">=0.14.0 <0.16.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
@@ -1283,7 +1409,7 @@ components:  # @schema additionalProperties: true
     # The Agent Platform organizations' operator
     # (giantswarm/agent-platform-operator, giantswarm/giantswarm#38891): it
     # reconciles each AgentPlatformOrganization (agent-platform.giantswarm.io)
-    # into its organization namespace, with the curated copies, and erases a
+    # into its organization namespace, with the curated copies, and cleans up a
     # deleted organization behind a finalizer. No `enabled` here: the
     # component follows the one switch agentPlatformOrganizations.enabled
     # (below), and an explicit value that disagrees with it fails the render
@@ -1292,12 +1418,39 @@ components:  # @schema additionalProperties: true
     # (agent-platform-operator, its chart's name), and another targetNamespace
     # fails the render.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # Pinned exactly, not a range: the operator's image and its CRD (CreateReplace)
-    # move only with a change here, and a release that needs more wiring
-    # (commit mode, agent-platform-operator#10) never rolls in before the
-    # wiring does. 0.1.0-rc.5 carries the CRD, the curated copies and the
-    # erasure (agent-platform-operator#2, #3, #7).
-    versionRange: "0.1.0-rc.5"
+    # A 0.4.x release rolls in without a change here, its CRD with it
+    # (CreateReplace); one that needs wiring of this chart is a minor
+    # release, 0.5.0, outside the range. 0.1.0 carries the CRD, the curated
+    # copies, organization cleanup, the ate-api CA projected from ClusterTrustBundles
+    # (agent-platform-operator#2, #3, #7, #21) and the serviceAccountBindings
+    # the meta chart derives: the credential providers' Secret readers bound
+    # in every organization namespace (agent-platform-operator#23,
+    # giantswarm/agent-platform#1269).
+    # Snapshot endpoints, path-style addressing and credential Secret
+    # references require 0.1.7 or later. 0.2.0 also mirrors the User and
+    # Group subjects of rbac-operator's cluster-admin RoleBindings of a parent
+    # namespace as agent-platform:organizations-admin in its organization
+    # namespaces (agent-platform-operator#38, giantswarm/agent-platform#1336);
+    # it needs no new wiring of this chart. 0.3.0 records
+    # status.lastAppliedRevision, the last revision Flux applied an
+    # organization from, kept while it is Orphaned; agent-manager 2.23.0 links
+    # its commit (agent-platform-operator#37, #44, agent-manager#355). It
+    # needs no new wiring of this chart either. 0.4.0 is the floor: an
+    # organization runs spec.workers.replicas warm workers (1 when not set,
+    # the CRD's new default; 0 set on purpose stays 0) while its namespace
+    # holds a ModelConfig and an Agent (a curated copy counts) or a
+    # ModelConfig and a kagent session, and 0 otherwise; below it a new
+    # organization runs 0 workers and its agents never become ready
+    # (agent-platform-operator#50, giantswarm/giantswarm#39250). It watches
+    # Agent metadata in every namespace, which its ClusterRole already
+    # grants, and asks for the sessions through the erasure's kagent target,
+    # which this chart already derives, binds (organization-erasure) and
+    # opens in the network policies: no new wiring here. kagent admits that
+    # call as a machine caller only with its controller-extensions controller
+    # (kagent.controller.image.repository, the default); with the line's own
+    # controller an organization with a ModelConfig and no Agent keeps its
+    # workers and is Ready=False.
+    versionRange: ">=0.4.0 <0.5.0"
     valuesFrom: agent-platform-operator
     # App-owned CRD: the chart ships agentplatformorganizations in its crds/
     # dir. CreateReplace makes Flux upgrade it with the app on every release
@@ -1366,6 +1519,8 @@ components:  # @schema additionalProperties: true
       - enabledExtensions
       - disabledExtensions
       - skillsRepositories
+      - skillPullRequests
+      - metaAgents
       - configReload
     enabled: false
     # Renders a CNPG Cluster for its database when backstage.database.engine is
@@ -1378,19 +1533,18 @@ components:  # @schema additionalProperties: true
   mcp-kubernetes:  # @schema additionalProperties: true
     chart: mcp-kubernetes
     # The Kubernetes MCP server (giantswarm/mcp-kubernetes), acting as the user:
-    # an OAuth 2.1 resource server against the platform identity provider,
-    # presenting the forwarded token to the kube-apiserver. Registered with
+    # an OAuth 2.1 resource server with its own access tokens and an upstream
+    # identity for kube-apiserver access. Registered with
     # muster through an MCPServer CR the connectivity chart renders.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # The mcp-kubernetes block below leaves the issuer, client, Secret and CA
-    # to the chart's global.identity fallbacks (from 1.1.1). The floor is
-    # 1.3.0: the chart takes mcpKubernetes.instrumentation.otlpProtocol and
-    # .otlpHeaders, so its traces reach the collector's gRPC endpoint with the
-    # tenant header (giantswarm/giantswarm#36711). The next major is the ceiling.
-    versionRange: ">=1.3.0 <2.0.0"
+    # to the chart's global.identity fallbacks. OAuth consent uses encrypted
+    # shared state, and MCP requests require resource access tokens.
+    # The next major is the ceiling.
+    versionRange: ">=1.14.0 <2.0.0"
     valuesFrom: mcp-kubernetes
     # The connectivity chart's keys, not the chart's (which validates strictly):
-    # the audience muster requests for the forwarded token and the shape of the
+    # the upstream Kubernetes audience and the shape of the
     # registration, read for the MCPServer CR
     # (templates/mcp-kubernetes/mcpserver.yaml there).
     omitKeys:
@@ -1412,6 +1566,9 @@ components:  # @schema additionalProperties: true
     # the minor: moving to the next CNPG line is a deliberate edit here, not a
     # reconcile.
     versionRange: "0.29.x"
+    # The chart of another team (apps-to-teams-mapping): the chart writes no
+    # application.giantswarm.io/team, so team-stamper keeps the mapped team.
+    teamAnnotation: false
     valuesFrom: cloudnative-pg
     enabled: false
   kserve-llmisvc-crd:  # @schema additionalProperties: true
@@ -1541,6 +1698,9 @@ components:  # @schema additionalProperties: true
     # wrapper moves the operator, the platform follows the line.
     versionRange: "1.x"
     valuesFrom: gpu-operator
+    # The chart of another team (apps-to-teams-mapping): the chart writes no
+    # application.giantswarm.io/team, so team-stamper keeps the mapped team.
+    teamAnnotation: false
     # The wrapper takes every value under its subchart's key.
     valuesKey: gpu-operator
     # The operator consumes nothing of the platform's global (the wrapper pins
@@ -1577,6 +1737,9 @@ components:  # @schema additionalProperties: true
     chart: gateway-api-crds
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     versionRange: ">=1.9.1 <2.0.0"
+    # The chart of another team (apps-to-teams-mapping): the chart writes no
+    # application.giantswarm.io/team, so team-stamper keeps the mapped team.
+    teamAnnotation: false
     # The chart's own defaults are the fleet's (the standard channel, the
     # safe-upgrades admission policy); it reads nothing of the platform's.
     injectGlobal: false
@@ -1655,10 +1818,21 @@ components:  # @schema additionalProperties: true
       # The well-known configs' values (components.kserve-runtime-configs); no
       # wiring reads them, so the connectivity chart never sees the block.
       - kserve-runtime-configs
+      # The skill sources reach the connectivity release derived
+      # (backstage.skillsRepositories, networkPolicy.mcpBackends.skill-manager),
+      # and the skill-manager's and the default agent's values their own
+      # releases only.
+      - skills
+      - skillManager
+      - skill-manager
+      - defaultAgent
       # agent-platform-operator's values (components.agent-platform-operator);
       # the connectivity chart reads agentPlatformOrganizations, never this
       # block.
       - agent-platform-operator
+      # The operator's names reach the connectivity release derived
+      # (agent-platform.organizations.operator), never as declared here.
+      - agentPlatformOrganizations.operator
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -2097,15 +2271,12 @@ gatewayApi:
 # `x-api-key` header passes through untouched, so reach to the listener grants
 # no spend.
 #
-# Two values turn it on, and the order matters:
-#   1. llmRouting.enabled: true  — renders the `llm` listener on the data-plane
-#      Gateway plus the AgentgatewayModels attached to it (llmRouting.models)
-#      that carry the traffic, and the model-price ConfigMap. Nothing routes
-#      through it yet.
-#   2. kagent.providers.anthropic.config.baseUrl:
-#        http://<gateway.name>.<release namespace>.svc:<llmRouting.listener.port>
-#      — points kagent's default ModelConfig at the listener. This is the
-#      cutover; rollback is the removal of this second value.
+# llmRouting.enabled: true renders the `llm` listener on the data-plane Gateway
+# plus the AgentgatewayModels attached to it (llmRouting.models) that carry the
+# traffic, and the model-price ConfigMap. A ModelConfig of a served provider
+# without a baseUrl of its own takes the listener as its baseUrl at its next
+# create or update (llmRouting.modelConfigPolicy). Rollback is
+# llmRouting.enabled: false: the reconcile hook takes that baseUrl off again.
 # Requires the agentgateway component, in front of muster. The
 # render fails when llmRouting.enabled is true and that component is off.
 # Consumed by the connectivity chart; see its values.yaml for the rendered
@@ -2138,8 +2309,7 @@ llmRouting:
   # whose `match` takes the model wins, so a `*` entry would shadow every model
   # named after it — a served model (model-manager, the LLMEndpoint
   # document) joins under its preset's name. Every entry's provider rides the
-  # listener: its ModelConfigs (kagent.modelConfigs, modelConfigPolicy) get
-  # the listener as baseUrl. An OpenAI entry serves the Responses route
+  # listener: its ModelConfigs get the listener as baseUrl (modelConfigPolicy). An OpenAI entry serves the Responses route
   # (/v1/responses) a codex agent calls, metered and rate-limited like the
   # rest:
   #   - name: openai
@@ -2638,6 +2808,10 @@ muster:  # @schema skipProperties: true; additionalProperties: true
     #
     # Requires muster ≥ 5.12.0 (the `label:` rule); a 5.11.0 muster refuses
     # to start on it, which is why components.muster.versionRange floors there.
+    #
+    # icon: optional `data:` URI (svg, png, jpeg, webp; ≤ 65536 chars), muster
+    # ≥ 5.61.0 (giantswarm/muster#1817). The chart sets one on both presets
+    # below when they have none, once the range's floor is 5.61.0 or later.
     toolsetPresets:
       infrastructure:
         description: The servers for the infrastructure underneath the platform (Giant Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus.
@@ -3431,39 +3605,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     seccompProfile:
       type: RuntimeDefault
 
-  # Model provider — Anthropic by default.
-  # Pre-create the Secret named by apiKeySecretRef in the kagent namespace with
-  # the key apiKeySecretKey and leave apiKey empty: the chart then renders no
-  # Secret and the default ModelConfig references the pre-created one. An apiKey
-  # set inline makes the chart create the Secret, but also copies the key into
-  # this component's HelmRelease values and Helm release storage
-  # (gitops.forbidInlineSecrets rejects it).
-  providers:
-    default: anthropic
-    anthropic:
-      provider: Anthropic
-      model: claude-sonnet-5-5
-      apiKeySecretRef: kagent-anthropic
-      apiKeySecretKey: ANTHROPIC_API_KEY
-      apiKey: ""  # Leave empty; pre-create the apiKeySecretRef Secret instead
-      # Provider options the kagent chart renders into the default ModelConfig's
-      # `anthropic` block, next to the baseUrl the LLM cut-over forwards
-      # (llmRouting; README "LLM routing"). promptCaching (the kagent line's
-      # carried patch kagent-dev/kagent#2788) marks the last tool definition,
-      # the last system prompt block and the last content block of the latest
-      # turn with cache_control, so every model call after the first reads its
-      # prefix — system prompt, tool schemas, previous turns — from Anthropic's
-      # cache at a tenth of the input price and with a time to first token that
-      # no longer grows with the history; the first call of a turn writes the
-      # cache at 1.25× (giantswarm/giantswarm#37788). On for the platform: an
-      # agent loop reads every prefix it writes. cacheTTL "5m" (each hit
-      # refreshes the window) or "1h" (dearer writes, for calls spaced further
-      # apart). The connectivity chart's kagent.modelConfigs[] entries inherit
-      # both for their Anthropic models unless an entry sets its own.
-      config:
-        promptCaching: true
-        cacheTTL: "5m"
-
   # OTel — traces and logs to the collector global.observability.traces.otlp
   # names, in the kagent chart's SDK-spec shape: the controller exports with
   # these settings and compiles them into every actor (OTEL_EXPORTER_OTLP_*,
@@ -3793,18 +3934,17 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           accountKeySecretRef:
             name: ""
             key: ""
-    # The Harness's environment. KAGENT_PROPAGATE_TOKEN makes the Go ADK re-emit
-    # the caller's bearer on its MCP calls, so muster sees the person, not the
-    # platform. OTEL_EXPORTER_OTLP_HEADERS is the tenant header of the OTLP
-    # gateway kagent.otel names: the controller compiles the rest of the
-    # actors' telemetry settings from kagent.otel and passes this one through
-    # from the Harness, like the controller's own copy (kagent.controller.env).
-    # The meta chart drops it when both exporters resolve off (auto: no
-    # observability platform). Nothing else today (a per-namespace skills
-    # credential is a later, separate decision).
+    # The Harness's environment. OTEL_EXPORTER_OTLP_HEADERS is the tenant
+    # header of the OTLP gateway kagent.otel names: the controller compiles the
+    # rest of the actors' telemetry settings from kagent.otel and passes this
+    # one through from the Harness, like the controller's own copy
+    # (kagent.controller.env). The meta chart drops it when both exporters
+    # resolve off (auto: no observability platform). No KAGENT_PROPAGATE_TOKEN:
+    # a runtime never re-emits the caller's token on its MCP calls, so the
+    # controller hands it none, and a Session reaches muster with its Actor's
+    # JWT, which the egress gateway injects on muster's host for every Session
+    # agent-manager starts and binds (muster.credentialProvider.actorBearer).
     env:
-      - name: KAGENT_PROPAGATE_TOKEN
-        value: "true"
       - name: OTEL_EXPORTER_OTLP_HEADERS
         value: auto
 
@@ -3870,6 +4010,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # The name the Dev Portal shows for the server (the MCPServer's
       # ui.giantswarm.io/display-name annotation); empty renders none.
       displayName: Kagent
+      # The line the Dev Portal shows under the server's name (the MCPServer's
+      # spec.description, at most 500 characters); empty renders none.
+      description: "Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
@@ -3954,34 +4097,6 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # agent-platform.musterMcpUrl helper's value), the toolset header, the
   # discovery opt-out label — and binds it.
 
-  # Additional ModelConfig CRs — the model catalog beyond the
-  # default-model-config the kagent chart creates from providers.anthropic.
-  # An AgentTemplate references a ModelConfig by name (spec.modelConfig).
-  # The apiKeySecret must be pre-created in the kagent namespace.
-  modelConfigs: []
-  # - name: anthropic-sonnet
-  #   displayName: Anthropic Sonnet 4.6
-  #   provider: Anthropic
-  #   model: claude-sonnet-4-6
-  #   apiKeySecret: kagent-anthropic
-  #   apiKeySecretKey: ANTHROPIC_API_KEY
-  # - name: openai-gpt-5-5   # a codex model: the Responses API, through the
-  #   provider: OpenAI       # llm listener's OpenAI entry (llmRouting.models)
-  #   model: gpt-5.5
-  #   apiKeySecret: kagent-openai
-  #   apiKeySecretKey: OPENAI_API_KEY
-  #   apiFormat: responses
-  # - name: chatgpt-subscription   # "ChatGPT (your subscription)": a codex
-  #   provider: OpenAI              # model on the ChatGPT subscription the
-  #   model: gpt-5.6-luna           # Session's person connected in muster
-  #                                 # (docs/chatgpt-login.md).
-  #   credentialType: chatgptOAuth  # No apiKeySecret: the chart derives
-  #   apiFormat: responses          # muster's provider App chatgpt and kagent's
-  #                                 # provider chatgpt from it (needs workspaces
-  #                                 # with Substrate, muster's
-  #                                 # oauth.server.encryptionKey and
-  #                                 # oauth.mcpClient, kagent 1.24, muster 5.52.5)
-
   # Operator-owned RemoteMCPServer CRs (the platform renders none of its own).
   # Each entry creates one CR in the kagent namespace; an AgentTemplate binds it
   # by name. Set tokenSecret to a pre-existing Secret holding key "token" with
@@ -4014,22 +4129,16 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
   # declares its own egress (spec.egress, which
   # agent-manager writes from agent-manager.harness.egress.<Harness name>); a
   # Harness carries none. A codex agent's model is a Responses API ModelConfig
-  # (kagent.modelConfigs[].apiFormat: responses). kagent refuses a share of a
+  # (spec.openAI.apiFormat: responses). kagent refuses a share of a
   # Session on a coding Harness. Empty (the default) renders no further
   # Harness: an installation opts into each runtime here.
   harnesses: []
   # - name: claude
   #   runtime: claude
   #   snapshotLocation: s3://<bucket>/claude
-  #   env:
-  #     - name: KAGENT_PROPAGATE_TOKEN          # tool calls to muster as the person
-  #       value: "true"
   # - name: codex
   #   runtime: codex
   #   snapshotLocation: s3://<bucket>/codex
-  #   env:
-  #     - name: KAGENT_PROPAGATE_TOKEN
-  #       value: "true"
   # - name: omp
   #   runtime: byo
   #   displayName: oh-my-pi
@@ -4087,6 +4196,13 @@ postgres:
   # restarts in place either way and writes fail for that time.
   # null renders neither field: the operator's defaults (restart) apply.
   primaryUpdateMethod: switchover  # @schema enum: [switchover, restart]
+  # Bound WAL retained by inactive HA replication slots on primaries and
+  # replicas. PostgreSQL enforces this at checkpoints; allow headroom for
+  # database growth and WAL bursts beyond this cap. A replica that exceeds
+  # the limit may need rebuilding from the primary or a verified backup.
+  # null or "-1" selects unlimited retention; size this with storage.size.
+  # The meta chart forwards null as "-1" to preserve it across both renders.
+  maxSlotWalKeepSize: 4GB
   storage:
     size: 20Gi
     # EKS: gp3. Azure: managed-premium. on-prem: rook-ceph or local-path.
@@ -4538,8 +4654,9 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
       enabled: false
 
   # A2A client adapter. Routes channel turns to a kagent A2A endpoint.
-  # defaultAgent is the fallback agentRef when the channel does not supply one.
-  # Omit defaultAgent to require callers to pass agentRef explicitly.
+  # defaultAgent is the agent the Slack agent picker preselects. Empty: the
+  # default agent (<kagent namespace>/default-agent) while
+  # components.default-agent is on, else none.
   a2a:
     enabled: false
     defaultAgent: ""
@@ -4824,7 +4941,7 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
+      allowPrivateURLs: false
     sso:
       allowPrivateIPs: true
     downstream:
@@ -5035,7 +5152,7 @@ vm-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
+      allowPrivateURLs: false
     sso:
       allowPrivateIPs: true
   muster:
@@ -5154,20 +5271,22 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # 1.x rendered the kagent.dev AgentTemplate of the 1.x kagent line, 0.x
     # the v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases
     # of the line reach the agents on their own; the major is the API boundary
-    # and moves only with this chart. The floor moves with components.kagent.
-    semver: ">=2.0.0 <3.0.0"
-  # The skill repositories list_skills offers — the same list the portal's
-  # create flow reads.
+    # and moves only with this chart. The floor moves with components.kagent
+    # and components.default-agent.versionRange.
+    semver: ">=2.6.0 <3.0.0"
+  # Deprecated: set skillManager.sources. Read only while agent-manager does
+  # not pin through the skill-manager (components.skill-manager off, or
+  # agent-manager below agent-platform.agentManager.skillManagerFloor), as
+  # URLs; when set, replaces skillManager.sources for agent-manager.
   skills:
-    repositories:
-      - https://github.com/giantswarm/agent-skills
+    repositories: []
   mcp:
     enabled: true
   oauth:
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
+      allowPrivateURLs: false
     sso:
       allowPrivateIPs: true
     downstream:
@@ -5312,9 +5431,89 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.17.31
+      tag: 2.24.0
     dryRun: false
     gitopsNamespaces: []
+
+# === Skill repositories ===
+# The platform's own skill source, which skill-manager and the portal list
+# first: {url: https://github.com/giantswarm/agent-platform, ref: v<chart
+# version>, path: skills, readOnly: true}; a dev build reads the commit it was
+# built from. false leaves it out (an air-gapped installation).
+skills:
+  platformSource:
+    enabled: true
+    # A full commit id of giantswarm/agent-platform (e.g. a skills branch's
+    # head): the source's ref and the default agent's skill pins. Empty: as above.
+    ref: ""
+
+# === Skill manager (components.skill-manager) ===
+# The installation's skill sources, after the platform's own
+# (skills.platformSource): the skill-manager's sources and the portal's
+# agentPlatform.skills.repositories (backstage.skillsRepositories; URLs alone
+# and no platform source below agent-platform.backstage.skillSourcesFloor;
+# none from agent-platform.backstage.skillManagerFloor on with the
+# skill-manager on, where the portal reads them from the skill-manager).
+# An entry is a GitHub repository URL or {url, ref, path, readOnly}: ref a
+# branch, tag or commit (empty: the default branch), path the directory
+# scanned, readOnly reported only. backstage.skillsRepositories, when set,
+# replaces these for the portal below that floor and fails the render from it on.
+skillManager:
+  sources:  # @schema type: array; item: [string, object]; itemRef: files/skill-repository.schema.json
+    - https://github.com/giantswarm/agent-skills
+
+# Values forwarded verbatim to the skill-manager component release
+# (giantswarm/skill-manager). Derived, not set here: sources (from
+# skills.platformSource and skillManager.sources; a list set here fails the
+# render), networkPolicy.ingressNamespaces (its callers' namespaces: muster's,
+# the portal's, agent-manager's and the kagent namespace of agent-manager's
+# migrate run, after the block's own) and serviceToken.secretName (the
+# platform's bearer for that run, a Secret the connectivity release generates,
+# while agent-manager pins through the skill-manager). Identity as for
+# model-manager: an OAuth 2.1 resource server validating the session's token
+# muster forwards (its MCPServer CR, labelled for the agent-platform tool
+# group) and the one agent-manager forwards on its REST calls, acting as the
+# person; the issuer, client, secret and CA fall back to global.identity
+# inside the chart, and what both leave unset is filled from muster's login
+# (muster.muster.oauth.server, agent-platform.identity.apply). GitHub is read with the App (github.app.secretName) or
+# token Secret (github.tokenSecret.name) set here; empty: anonymous, public
+# repositories only. The connectivity chart registers it as muster's MCP
+# backend (networkPolicy.mcpBackends.skill-manager, derived) and opens
+# agent-manager's egress to it.
+skill-manager:  # @schema skipProperties: true; additionalProperties: true
+  fullnameOverride: skill-manager
+  # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,
+  # protocol, the tenant as X-Scope-OrgID next to headers).
+  observability:
+    otel:
+      endpoint: auto
+      protocol: auto
+      headers: auto
+  oauth:
+    enabled: true
+    dex:
+      allowPrivateURLs: false
+    sso:
+      allowPrivateIPs: true
+  muster:
+    mcpServer:
+      enabled: true
+      auth:
+        forwardToken: true
+        requiredAudiences:
+          - dex-k8s-authenticator
+
+# === Default agent (components.default-agent) ===
+defaultAgent:
+  # The name people see for the default agent in the portal and Slack, and the
+  # name its system message gives it. Its technical name is always default-agent.
+  displayName: "General Assistant"  # @schema minLength: 1
+  # The default agent's one-line description in the portal's agent lists.
+  description: "Start here. Handles everyday tasks with your connectors and helps you find or create the right agent."
+  # ModelConfig in kagent the default agent runs on. Empty: it gets the
+  # installation's default model once, when it has none (agent-manager sets it).
+  # Set it to pin or change the model.
+  modelConfig: ""
 
 # === Cluster manager (cluster-manager) ===
 # Values forwarded verbatim to the cluster-manager component release
@@ -5364,7 +5563,7 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
+      allowPrivateURLs: false
     sso:
       allowPrivateIPs: true
     downstream:
@@ -5492,8 +5691,9 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # kagent on, the connectivity release renders the three ClusterRoles a tenant's
 # RoleBindings refer to:
 #   - agent-platform:user: see the tenant's agents, templates, RemoteMCPServers,
-#     ModelConfigs, EgressPolicies and muster MCPServers, and start a Session
-#     with an agent;
+#     ModelConfigs, EgressPolicies and muster MCPServers, read the tenant's
+#     RoleBindings (its members; get and list), and start a Session with an
+#     agent;
 #   - agent-platform:editor: the above, plus the writes agent-manager performs
 #     as the caller (HelmReleases, OCIRepositories, Agents, AgentTemplates,
 #     RemoteMCPServers);
@@ -5515,9 +5715,10 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # Sessions for the session directories' cleanup, which no tenant role grants.
 tenants:
   platform:
-    # -- Every signed-in person: bound to agent-platform:user in the kagent
-    # namespace, and to `list` (with get and watch) on muster's MCPServers in
-    # muster's namespace (the servers for everyone). RBAC subjects. The
+    # -- Every signed-in person: bound to agent-platform:platform-user in the
+    # kagent namespace, and, while musterMcpServerViewers is unset, to `list`
+    # (with get and watch) on muster's MCPServers in muster's namespace (the
+    # servers for everyone). RBAC subjects. The
     # default, system:authenticated, gives this to every user. It also gives
     # it to every ServiceAccount, so every pod in the cluster can read the
     # platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer
@@ -5538,6 +5739,24 @@ tenants:
       - apiGroup: rbac.authorization.k8s.io
         kind: Group
         name: giantswarm-github:giantswarm:giantswarm-admins
+    # kagent's own HelmRelease in the kagent namespace
+    # (giantswarm/agent-platform#1387). This chart keeps kagent's HelmRelease
+    # in its own namespace (targetNamespace kagent) and needs none of it; a
+    # deployer that places each workload's HelmRelease in its target
+    # namespace (the connectivity chart installed on its own) puts it in the
+    # kagent namespace, where the policy agent-platform-platform-helmreleases
+    # holds every HelmRelease to an agent's shape. The policy admits a write
+    # of the HelmRelease `name` by one of `writers`; that name from anyone
+    # else, and any other HelmRelease from them, is held as before. Both keys
+    # or neither.
+    kagentRelease:
+      # -- The name of kagent's HelmRelease in the kagent namespace. Empty,
+      # the default, admits none.
+      name: ""
+      # -- The identities that write it: RBAC-style subjects of kind User,
+      # Group or ServiceAccount (with its namespace), as the API server sees
+      # them (a kubeconfig's user or group, a Flux ServiceAccount).
+      writers: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"kind": {"type": "string", "enum": ["User", "Group", "ServiceAccount"]}, "name": {"type": "string"}, "namespace": {"type": "string"}}
   # -- The customer's platform team, per installation: RBAC subjects bound to
   # agent-platform:editor in the kagent namespace beside `platform.editors`,
   # and added to muster's mcpserver-editor and workflow-editor subjects beside
@@ -5545,6 +5764,21 @@ tenants:
   # release's values). Empty by default. A group is written as the API server
   # sees it (with the OIDC groups prefix of the installation).
   platformTeam: []  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
+
+# -- muster's MCP-server viewers (giantswarm/agent-platform#1331): RBAC
+# subjects bound to `list` (with get and watch) on muster's MCPServers in
+# muster's namespace, the servers for everyone (the connectivity release's
+# Role and RoleBinding agent-platform:mcpserver-viewer). muster lists them as
+# the person once it lists as the caller, and always with
+# agentPlatformOrganizations.enabled, so a person not bound here sees none of
+# them. Unset (null), the default, the viewers are tenants.platform.users, so
+# nothing changes until an installation sets this key. Set it before
+# tenants.platform.users is emptied ([]; a null brings the default back): it
+# does not bind anyone in the kagent namespace.
+# An empty list binds nobody. A group is written as the API server sees it
+# (with the installation's OIDC groups prefix). system:authenticated also
+# binds every ServiceAccount.
+musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
 
 # === Agent Platform organizations (giantswarm/giantswarm#38891) ===
 # An AgentPlatformOrganization (agent-platform.giantswarm.io/v1alpha1, the
@@ -5567,7 +5801,7 @@ tenants:
 #     llm listener's base-URL policy, the workers' network peers, and kagent's
 #     authorizer lists a person's agents there
 #     (kagent.controller.authorization.namespaceSelector);
-#   - the operator's access for the erasure of a deleted organization
+#   - the operator's access for cleanup of a deleted organization
 #     (giantswarm/giantswarm#38988): the kagent controller admits its
 #     ServiceAccount as a machine caller that lists and deletes every
 #     creator's Sessions; its network policies (the cluster DNS, the API
@@ -5575,25 +5809,35 @@ tenants:
 #     an S3 snapshot location, S3 and STS); with the Crossplane AWS snapshot store
 #     the IAM role <store role>-operator, which deletes keys under an
 #     organization's UID prefix of the bucket only, named on the operator's
-#     ServiceAccount (IRSA). The capz and s3proxy stores give the operator no
-#     snapshot access yet: there the erasure stops at the snapshots' step;
-#   - the ConfigMap agent-platform-operator-ate-api-ca (the substrate bootstrap
-#     hook), ate-api-server's serving roots, which the operator verifies it
-#     with.
+#     ServiceAccount (IRSA). RustFS and the s3proxy facade use path-style
+#     endpoints and a credential Secret in the operator namespace;
+#   - ate-api-server's serving roots, which the operator verifies it with:
+#     the ClusterTrustBundles of servicedns.podcert.ate.dev/identity
+#     labelled podcert.ate.dev/canarying: live, projected into its pod.
 # The operator's own values are the agent-platform-operator block below.
-# agent-manager's chart keeps its tenants.enabled off: its tenant reconciler is
-# gone (tenants.organizations, the namespaces labelled giantswarm.io/organization,
-# is removed; giantswarm/agent-platform#1268), and the connectivity chart renders
-# the ClusterRole agent-platform-tenant-flux the operator binds.
+# With components.agent-manager on, agent-manager's tenants.enabled follows
+# this switch, so it serves the organization tools (the floor of
+# components.agent-manager.versionRange must be 2.20.0 or later). Credential
+# forms use an explicit agent-manager.credentials.uiURL template containing
+# {operation} and {namespace} ({namespace}, and no {parent} or {organization},
+# is required without this switch, with a manager floor of 3.1.0-rc.11);
+# credentials and github.tokenExchange need a manager floor of
+# 2.22.0 or later. With components.muster on, muster serves
+# the MCPServers of the namespaces labelled
+# agent-platform.giantswarm.io/organization (muster.mcpServerNamespaceSelector,
+# muster 5.58.0 or later), listed as the person: muster's OAuth server on the
+# dex provider and muster's MCP-server viewers (musterMcpServerViewers, or
+# tenants.platform.users while it is unset) are then required. The
+# connectivity chart renders the ClusterRole agent-platform-tenant-flux the
+# operator binds.
 # The switch is the rollout gate, off by default for now: it turns on by default
-# once the capz and s3proxy snapshot stores give the operator access, the kagent
-# line carries giantswarm/kagent-extensions#27, and an operator release with
-# giantswarm/agent-platform-operator#10 (commit mode) is the range's floor.
+# once the capz and s3proxy snapshot stores give the operator access and the
+# kagent line carries giantswarm/kagent-extensions#27.
 # Before you turn this on in an installation: the kagent line must carry
 # giantswarm/kagent-extensions#27 (kagent reviews a delete of another
-# creator's Session as a cluster-wide `delete`); until it does, the erasure of
+# creator's Session as a cluster-wide `delete`); until it does, cleanup of
 # an organization that holds a person's Session stops at the Sessions' step,
-# with the reason, and erases nothing after it.
+# with the reason, and performs no further cleanup.
 agentPlatformOrganizations:
   # -- Install agent-platform-operator and render the organizations' role,
   # admission policies and access. Needs kagent (components.kagent.enabled),
@@ -5639,6 +5883,21 @@ agentPlatformOrganizations:
   # covers one, beside the cluster-internal and host-local names it never
   # names. The render fails while both are empty.
   apiHostnames: []  # @schema item: string
+  # -- agent-platform-operator's names, which this chart derives onto the
+  # connectivity release while the organizations are on
+  # (agent-platform.organizations.operator, giantswarm/agent-platform#1278).
+  # Declared for the connectivity chart's schema only: never forwarded as
+  # set here (components.agent-platform-connectivity.omitKeys), and an own
+  # value fails the render. Leave it unset.
+  operator:
+    # -- Derived: the operator's ServiceAccount (its chart's name).
+    serviceAccountName: ""
+    # -- Derived: its pods' selector labels.
+    podLabels: {}  # @schema additionalProperties: {"type": "string"}
+    # -- Derived, with substrate.rustfs.enabled: the Secret of RustFS's keys.
+    snapshotSecret: ""
+    # -- Derived, with the Crossplane AWS snapshot store: its IRSA role.
+    awsRoleName: ""
 
 # === agent-platform-operator (components.agent-platform-operator) ===
 # Values forwarded to the agent-platform-operator release (see its chart's
@@ -5658,8 +5917,9 @@ agentPlatformOrganizations:
 # store's region); erasure.fluxNamespace (agentPlatformOrganizations.fluxNamespace);
 # erasure.kagent.target and .audience (the kagent controller's API Service and
 # the controller's machine audience); erasure.substrate.target, .audience and
-# .caConfigMap (ate-api-server's Service, the audience its authentication
-# config accepts, and the ConfigMap with its serving roots); and, with the
+# .caClusterTrustBundle (ate-api-server's Service, the audience its
+# authentication config accepts, and the signer and labels of the
+# ClusterTrustBundles with its serving roots); and, with the
 # Crossplane AWS snapshot store, serviceAccount.annotations
 # eks.amazonaws.com/role-arn (the role <store role>-operator). Everything
 # else (erasure.snapshotDelay, objectQuota, syncPeriod, resources, image) is
@@ -6328,6 +6588,13 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
 # (networkPolicy.mcpBackends.toolchain-manager, derived while the component is
 # on).
 toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
+  muster:
+    mcpServer:
+      # Muster requests this cross-client audience at login. The manager's
+      # chart trusts it alongside auth.trustedAudiences so portal ID tokens
+      # are accepted when their Dex client differs from the platform's.
+      requiredAudiences:
+        - dex-k8s-authenticator
   # The installation's owners, who approve a source a person adds before its
   # toolchains are offered: Dex groups and verified emails. Without any, an
   # added source is never approved.
@@ -6401,7 +6668,8 @@ toolchain-manager:  # @schema skipProperties: true; additionalProperties: true
 # renders (templates/backstage/ there) and which are dropped from the values
 # forwarded to the backstage chart (components.backstage.omitKeys): hostname,
 # parentRefs, installationName, extraScopes, startUrlSearchParams,
-# enabledExtensions, disabledExtensions, skillsRepositories, configReload. Their
+# enabledExtensions, disabledExtensions, skillsRepositories, skillPullRequests,
+# metaAgents, configReload. Their
 # meaning is documented in the connectivity chart's values.yaml; the defaults
 # are the standalone's.
 backstage:  # @schema skipProperties: true; additionalProperties: true
@@ -6450,9 +6718,15 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
     - api:ai-chat/service
     - api:ai-chat/drawer
     - app-root-element:ai-chat/drawer
-  # Skill repositories offered when an agent is created.
-  skillsRepositories:
-    - https://github.com/giantswarm/agent-skills
+  # Deprecated: set skillManager.sources. When set, replaces it for the portal;
+  # fails the render while the portal reads its skills from the skill-manager
+  # (agent-platform.backstage.skillManagerFloor).
+  skillsRepositories: []
+  # The agent behind a portal role (generalInformation, agentManagement,
+  # workflowManagement, platformOperations, skillEvaluation, skillCreation), as
+  # <installation>/<namespace>/<name>. Unset roles take the default agent while
+  # components.default-agent is on.
+  metaAgents: {}
   # Roll the Backstage pod when the app-config ConfigMap changes: a
   # post-install/post-upgrade hook Job of the connectivity release stamps the
   # rendered app-config's checksum into the Deployment's pod template (no-op
@@ -6561,11 +6835,9 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       organization: "Shared Org"
   # --- Wiring (read by the connectivity chart, not passed to the mcp-kubernetes chart) ---
-  # Audience the forwarded IdP id_token must carry on top of the platform
-  # client's so the kube-apiserver accepts it: muster requests this
-  # cross-client audience at login (the MCPServer CR's auth.requiredAudiences
-  # the connectivity chart renders) and mcp-kubernetes presents the token to
-  # the apiserver (enableDownstreamOAuth) — the user's RBAC governs.
+  # Audience the upstream IdP identity must carry for kube-apiserver access.
+  # The Kubernetes MCP requests this cross-client audience in its own OAuth
+  # flow and uses the identity at the apiserver (enableDownstreamOAuth).
   # dex-k8s-authenticator is the Dex client Giant Swarm apiservers trust; an
   # apiserver that trusts another client id names it here. Empty: no extra
   # audience (a Google IdP has no cross-client scopes and its client id IS the
@@ -6672,6 +6944,14 @@ substrate:  # @schema skipProperties: true; additionalProperties: true
   # narrows ate-golden's reads in the Organizations' namespaces too). The
   # policies set here stay; an ate-golden allowedNamespaceSelector on other
   # namespaces, or a Substrate floor below 1.12.0, fails the render.
+  # From Substrate 1.18.0 the meta chart also derives
+  # credentialProvider.rbac.namespaces, and from the plugin 0.3.0 its
+  # rbac.namespaces: the provider's Secret reader is bound by RoleBinding in
+  # every namespace an allowedNamespaces entry names, not cluster-wide, and
+  # with agentPlatformOrganizations.enabled agent-platform-operator binds it
+  # in every organization namespace (giantswarm/agent-platform#1269). A policy
+  # that selects other labelled namespaces keeps it cluster-wide; an own
+  # credentialProvider.rbac.namespaces stays as set.
   credentialProvider:
     namespacePolicies:
       - atespace: kagent

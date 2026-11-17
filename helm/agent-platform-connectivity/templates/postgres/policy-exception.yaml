@@ -11,9 +11,10 @@
 # Cluster never reaches an active instance. kagent's controller then crashloops on
 # its pgvector migration check, because there is no database to connect to.
 #
-# Scope: the cnpg.io/cluster label the operator sets on this Cluster's instance
-# pods and on its own bootstrap/join Jobs. Both carry the ImageVolume. The rule
-# is restrict-volume-types' restricted-volumes (kyvernoPolicies.rules).
+# Scope: the source and <clusterName>-restore labels the operator sets on
+# instance pods and bootstrap/recovery Jobs. The restore needs the same
+# extension image as the source. The exception covers restrict-volume-types'
+# restricted-volumes rule (kyvernoPolicies.rules).
 #
 # PolicyExceptions must live in policy-exceptions, giantswarm, flux-giantswarm or
 # kube-system — restrict-polex-namespaces enforces this.
@@ -36,7 +37,11 @@ spec:
         namespaces:
         - {{ $ns }}
         selector:
-          matchLabels:
-            cnpg.io/cluster: {{ $clusterName }}
+          matchExpressions:
+          - key: cnpg.io/cluster
+            operator: In
+            values:
+            - {{ $clusterName }}
+            - {{ $clusterName }}-restore
 {{- end }}
 {{- end }}

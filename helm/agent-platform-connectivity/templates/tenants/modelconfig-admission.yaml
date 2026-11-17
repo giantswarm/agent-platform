@@ -1,16 +1,25 @@
 {{- /*
 A tenant's own ModelConfig (giantswarm/agent-platform#759): with kagent and
-agentPlatformOrganizations.enabled, an organization brings its own model key, and every model call of the
-organization still goes through the `llm` listener, so the gateway meters it
-under the organization's namespace. Two ValidatingAdmissionPolicies, in every
+agentPlatformOrganizations.enabled, an organization brings its own model credential.
+Listener-supported providers are metered through `llm`. Vertex AI uses the
+Google token credential provider and direct Substrate egress; it is unmetered.
+Two ValidatingAdmissionPolicies, in every
 organization namespace (agent-platform.orgNamespaces.label: selected by the
 label, never listed) except the kagent namespace, the platform tenant, for
 every requester:
 
 agent-platform-tenant-model-routing admits a ModelConfig only when the
-listener serves its provider (agent-platform.llmRouting.providers, from
-llmRouting.models) and its baseUrl is the listener URL for that provider
-(agent-platform.llmListenerUrl). A ModelConfig of any other provider, Bedrock
+listener serves its provider (agent-platform.tenants.providers: the providers
+of llmRouting.models, and OpenAI when model-manager serves models on the
+listener) and its baseUrl is the listener URL for that provider
+(agent-platform.llmListenerUrl). Native AnthropicVertexAI and GeminiVertexAI
+providers skip the listener; their projectID must be a Google project ID
+and their location global, us, eu or a Google region, since kagent builds
+the Vertex host from it. They must name an apiKeySecret: without one the
+runtime uses Google's application default credentials, the node's identity
+on Google Cloud. Their namespace-local credential references are checked by
+agent-platform-tenant-credentials.
+A ModelConfig of any other provider, Bedrock
 included (it has no baseUrl), is refused: it would reach the provider
 directly, unmetered. The chart's routing policy
 (templates/llm/modelconfig-policy.yaml) runs first, in these namespaces too,
@@ -40,9 +49,9 @@ ModelConfig without a baseUrl is refused.
 {{- if not (include "agent-platform.llmRouting" .) }}
 {{- fail (printf "%s needs llmRouting.enabled: a ModelConfig in an organization namespace must name the llm listener as its baseUrl, and with routing off there is no listener" $switch) }}
 {{- end }}
-{{- $providers := include "agent-platform.llmRouting.providers" . | fromJsonArray }}
+{{- $providers := include "agent-platform.tenants.providers" . | fromJsonArray }}
 {{- if not $providers }}
-{{- fail (printf "%s needs an llmRouting.models entry whose provider a ModelConfig can point at the listener (Anthropic, Mistral or OpenAI): no other ModelConfig is admitted in an organization namespace" $switch) }}
+{{- fail (printf "%s needs an llmRouting.models entry whose provider a ModelConfig can point at the listener (Anthropic, Mistral, OpenAI or SAP AI Core), or a model-manager that serves models there: no other ModelConfig is admitted in an organization namespace" $switch) }}
 {{- end }}
 {{- if not (include "agent-platform.llmRouting.modelConfigs" .) }}
 {{- fail (printf "%s needs the modelconfig-llm-routing MutatingAdmissionPolicy, which fills in the listener as the baseUrl of a ModelConfig in an organization namespace: set llmRouting.modelConfigPolicy.enabled, on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy" $switch) }}
@@ -77,6 +86,19 @@ spec:
       expression: "has(object.spec) ? dyn(object.spec) : dyn({})"
     - name: provider
       expression: "'provider' in variables.spec ? string(variables.spec.provider) : ''"
+    - name: directVertex
+      expression: "variables.provider in ['AnthropicVertexAI', 'GeminiVertexAI']"
+    # kagent builds the Vertex host from location, so both fields are held
+    # to Google's formats before the listener rule is skipped.
+    - name: vertexBlock
+      expression: "variables.provider == 'AnthropicVertexAI' ? 'anthropicVertexAI' : 'geminiVertexAI'"
+    - name: vertex
+      expression: >-
+        variables.directVertex && variables.vertexBlock in variables.spec ? dyn(variables.spec[variables.vertexBlock]) : dyn({})
+    - name: vertexValid
+      expression: >-
+        'location' in variables.vertex && string(variables.vertex.location).matches('^(global|us|eu|[a-z]+-[a-z]+[0-9]+)$') &&
+        'projectID' in variables.vertex && string(variables.vertex.projectID).matches('^[a-z][a-z0-9-]{4,28}[a-z0-9]$')
     - name: served
       expression: {{ printf "{%s}" (join ", " $served) | quote }}
     # [block, listener URL] of a served provider, else [].
@@ -96,16 +118,31 @@ spec:
         has(object.metadata.deletionTimestamp) && request.operation == 'UPDATE' &&
         variables.spec == (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
   validations:
-    - expression: "variables.releasing || size(variables.route) == 2"
+    - expression: "variables.releasing || variables.directVertex || size(variables.route) == 2"
       reason: Forbidden
       messageExpression: >-
-        {{ printf "'in an Organization namespace a ModelConfig goes through the platform\\'s LLM listener, which meters every model call; it serves the providers %s, and provider ' + (variables.provider == '' ? '<none>' : variables.provider) + ' is not one of them (a Bedrock ModelConfig has no baseUrl and would bypass the listener). Use a served provider (its spec.<provider>.baseUrl is the listener, filled in when you leave it out), or ask the platform team to add the provider to llmRouting.models. Refused for ' + request.userInfo.username + ': ' + request.name" (join ", " $providers) }}
+        {{ printf "'in an Organization namespace a ModelConfig goes through the platform\\'s LLM listener, which meters every model call; it serves the providers %s, and provider ' + (variables.provider == '' ? '<none>' : variables.provider) + ' is not one of them (a Bedrock ModelConfig has no baseUrl and would bypass the listener). AnthropicVertexAI and GeminiVertexAI are also admitted, with your own Google service account key and without metering. Use a served provider (its spec.<provider>.baseUrl is the listener, filled in when you leave it out), or ask the platform team to add the provider to llmRouting.models. Refused for ' + request.userInfo.username + ': ' + request.name" (join ", " $providers) }}
     - expression: "variables.releasing || size(variables.route) != 2 || variables.baseUrl == variables.route[1]"
       reason: Forbidden
       messageExpression: >-
         'in an Organization namespace a ModelConfig goes through the platform\'s LLM listener, which meters every model call and passes your own key through untouched: set spec.' +
         variables.route[0] + '.baseUrl to ' + variables.route[1] + ', or leave it out and the listener is filled in (it is ' + (variables.baseUrl == '' ? 'unset' : variables.baseUrl) +
         '). Refused for ' + request.userInfo.username + ': ' + request.name
+    - expression: "variables.releasing || !variables.directVertex || variables.vertexValid"
+      reason: Invalid
+      messageExpression: >-
+        'a ModelConfig with provider ' + variables.provider + ' needs spec.' + variables.vertexBlock + '.projectID, a Google project ID, and spec.' +
+        variables.vertexBlock + '.location, one of global, us, eu or a Google region such as europe-west1. Refused for ' +
+        request.userInfo.username + ': ' + request.name
+    # Without a key the runtime falls back to Google's application default
+    # credentials, which on a Google Cloud node is the node's identity.
+    - expression: >-
+        variables.releasing || !variables.directVertex ||
+        ('apiKeySecret' in variables.spec && string(variables.spec.apiKeySecret) != '')
+      reason: Forbidden
+      messageExpression: >-
+        'a ModelConfig with provider ' + variables.provider + ' in an Organization namespace must name its service account key: set spec.apiKeySecret to a tenant credential holding the JSON key (without it Google application default credentials, such as the node\'s identity, would be used). Refused for ' +
+        request.userInfo.username + ': ' + request.name
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

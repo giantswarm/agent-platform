@@ -356,6 +356,9 @@ def main(meta: str, connectivity: str) -> int:
             if not re.search(r"^        admission:\n          jwt:\n", session, re.M):
                 fail(f"switching workspaces on did not derive kagent's Session admission onto {key}:\n{session}")
             on = on.replace(session, "", 1)
+            # muster's actor-JWT provider follows Substrate, not the switch: the
+            # baseline lists it too when it derives one (tests/verify-actor-bearer.py).
+            doc = doc.replace(block(block(doc, "controller", 4), "session", 6), "", 1)
             # And, in the kubernetes authorization mode, the manager's token audience
             # and its pods admitted to the controller's API port
             # (tests/verify-kagent-authorization.py pins both).
@@ -380,17 +383,19 @@ def main(meta: str, connectivity: str) -> int:
                 fail(f"switching workspaces on did not derive the gateway's workspaces.toolsPrefix onto {key}")
             on = on.replace(prefix, "", 1)
         if key == ("HelmRelease", "agent-manager"):
-            # And agent-manager told that muster trusts the actor JWT, so it
-            # reports each session's toolset as bound
-            # (agent-platform.validateToolsetBinding).
+            # agent-manager is told that muster trusts the actor JWT with
+            # Substrate on, whatever the switch (agent-platform.validateToolsetBinding,
+            # tests/verify-actor-bearer.py): on both sides, so nothing moves.
             bearer = "      actorBearer: true\n"
-            if bearer not in block(block(on or "", "values", 2), "muster", 4):
-                fail(f"switching workspaces on did not derive agent-manager.muster.actorBearer onto {key}")
-            on = on.replace(bearer, "", 1)
+            for side, text in (("on", on or ""), ("off", doc)):
+                if bearer not in block(block(text, "values", 2), "muster", 4):
+                    fail(f"workspaces {side}: agent-manager.muster.actorBearer is not derived onto {key}")
         if key == ("HelmRelease", "muster"):
             # And muster's credential provider, which answers the egress gateway
             # for a workspace Session's provider hosts while Substrate is on
             # (tests/verify-workspace-session-admission.py pins its values).
+            # With Substrate on the baseline has it too, serving the actor bearer
+            # alone (tests/verify-actor-bearer.py): both sides drop it.
             provider = block(block(on or "", "muster", 4), "credentialProvider", 6)
             if provider:
                 on = on.replace(provider, "", 1)
@@ -398,6 +403,9 @@ def main(meta: str, connectivity: str) -> int:
                 # Ready neither its install nor its upgrade waits for them
                 # (giantswarm/agent-platform#1107).
                 on = on.replace("    disableWait: true\n", "", 2)
+            baseline = block(block(doc, "muster", 4), "credentialProvider", 6)
+            if baseline:
+                doc = doc.replace(baseline, "", 1).replace("    disableWait: true\n", "", 2)
         if on != doc:
             fail(f"switching workspaces on changed {key} (muster.* included)")
     if any(kind == "MCPServer" for kind, _ in on_docs):

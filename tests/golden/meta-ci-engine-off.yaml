@@ -13,6 +13,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: agent-manager
@@ -34,7 +36,9 @@ spec:
   values:
     agentChart:
       ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
-      semver: '>=2.0.0 <3.0.0'
+      semver: '>=2.6.0 <3.0.0'
+    defaultAgentModel:
+      agent: default-agent
     flux:
       helmReleaseServiceAccount: kagent-flux
     fullnameOverride: agent-manager
@@ -60,6 +64,7 @@ spec:
             protocol: grpc
             tenant: giantswarm
       registry: gsoci.azurecr.io
+    installation: agent-platform
     kagent:
       apiVersion: v1alpha3
       controllerTarget: ""
@@ -67,6 +72,7 @@ spec:
     mcp:
       enabled: true
     muster:
+      actorBearer: true
       mcpServer:
         auth:
           forwardToken: true
@@ -78,7 +84,7 @@ spec:
       enabled: false
     oauth:
       dex:
-        allowPrivateURLs: true
+        allowPrivateURLs: false
       downstream:
         enabled: true
       enabled: true
@@ -95,9 +101,10 @@ spec:
       interval: 60s
       labels:
         observability.giantswarm.io/tenant: giantswarm
+    skillManager:
+      url: http://skill-manager.default.svc.cluster.local:8080
     skills:
-      repositories:
-      - https://github.com/giantswarm/agent-skills
+      repositories: []
     tenants:
       enabled: false
 ---
@@ -115,6 +122,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: agent-platform-connectivity
@@ -141,7 +150,7 @@ spec:
     agent-manager:
       agentChart:
         ociUrl: oci://gsoci.azurecr.io/charts/giantswarm/agent
-        semver: '>=2.0.0 <3.0.0'
+        semver: '>=2.6.0 <3.0.0'
       fullnameOverride: agent-manager
       harness:
         egress: {}
@@ -161,7 +170,7 @@ spec:
         enabled: false
       oauth:
         dex:
-          allowPrivateURLs: true
+          allowPrivateURLs: false
         downstream:
           enabled: true
         enabled: true
@@ -179,8 +188,7 @@ spec:
         labels:
           observability.giantswarm.io/tenant: giantswarm
       skills:
-        repositories:
-        - https://github.com/giantswarm/agent-skills
+        repositories: []
     agent-platform-mcps:
       agentgateway:
         enabled: true
@@ -197,7 +205,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 2.17.31
+          tag: 2.24.0
       networkPolicy:
         egress:
           cidrs: []
@@ -229,6 +237,10 @@ spec:
           name: giantswarm-default
           namespace: envoy-gateway-system
         pathPrefix: /agent-manager
+      skillManager:
+        namespace: default
+        serviceTokenSecret: skill-manager-service-token
+        url: http://skill-manager.default.svc.cluster.local:8080
     agentPlatformOrganizations:
       apiHostnames: []
       enabled: false
@@ -368,6 +380,7 @@ spec:
       ingress:
         enabled: false
       installationName: agent-platform
+      metaAgents: {}
       observability:
         otel:
           endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -400,6 +413,8 @@ spec:
         enabled: false
       cluster-manager:
         enabled: false
+      default-agent:
+        enabled: true
       dicebear:
         enabled: true
       flux:
@@ -429,6 +444,8 @@ spec:
       modelServing:
         enabled: false
       muster:
+        enabled: true
+      skill-manager:
         enabled: true
       substrate:
         enabled: true
@@ -701,6 +718,8 @@ spec:
               enabled: false
           mode: Strict
         mcp:
+          description: 'Your agent sessions on this installation, as the signed-in person:
+            list them, send one a message, and checkpoint or fork them'
           displayName: Kagent
           enabled: true
           pathPrefix: /kagent/mcp
@@ -722,9 +741,7 @@ spec:
           eventRetentionSize: 4
           tokenThreshold: 600000
         create: true
-        env:
-        - name: KAGENT_PROPAGATE_TOKEN
-          value: "true"
+        env: []
         image: ""
         snapshotLocation: s3://ci-agent-snapshots/agents
         snapshotStore:
@@ -778,7 +795,6 @@ spec:
                 ephemeral-storage: 256Mi
                 memory: 1Gi
       harnesses: []
-      modelConfigs: []
       namespaceOverride: kagent
       oauth2-proxy:
         config:
@@ -854,17 +870,6 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      providers:
-        anthropic:
-          apiKey: ""
-          apiKeySecretKey: ANTHROPIC_API_KEY
-          apiKeySecretRef: kagent-anthropic
-          config:
-            cacheTTL: 5m
-            promptCaching: true
-          model: claude-sonnet-5-5
-          provider: Anthropic
-        default: anthropic
       registry: gsoci.azurecr.io
       remoteMcpServers: []
       securityContext:
@@ -1091,7 +1096,7 @@ spec:
         enabled: false
       oauth:
         dex:
-          allowPrivateURLs: true
+          allowPrivateURLs: false
         downstream:
           enabled: true
         enabled: true
@@ -1229,6 +1234,7 @@ spec:
             kind: Group
             name: giantswarm-github:giantswarm:giantswarm-admins
       replicaCount: 2
+    musterMcpServerViewers: null
     networkPolicy:
       additionalEgressCIDRs: []
       additionalEgressFQDNs: []
@@ -1248,7 +1254,16 @@ spec:
       - matchLabels:
           app.kubernetes.io/instance: alloy-metrics
         namespace: kube-system
-      mcpBackends: {}
+      mcpBackends:
+        skill-manager:
+          identityProvider:
+            issuerUrl: https://dex.ci.example.com
+            provider: dex
+          namespace: default
+          podSelector:
+            app.kubernetes.io/name: skill-manager
+          ports:
+          - 8080
       musterInClusterMcpPorts:
       - 8080
       - 8443
@@ -1370,6 +1385,7 @@ spec:
         name: ""
       imagePullSecrets: []
       instances: 3
+      maxSlotWalKeepSize: 4GB
       namespace: kagent
       primaryUpdateMethod: switchover
       resources:
@@ -1478,6 +1494,9 @@ spec:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
           name: giantswarm-github:giantswarm:giantswarm-admins
+        kagentRelease:
+          name: ""
+          writers: []
         users:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
@@ -1569,7 +1588,7 @@ spec:
         enabled: false
       oauth:
         dex:
-          allowPrivateURLs: true
+          allowPrivateURLs: false
         enabled: true
         provider: dex
         sso:
@@ -1615,6 +1634,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: agent-platform-mcps
@@ -1654,6 +1675,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: agent-sandbox
@@ -1690,6 +1713,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: agentgateway
@@ -1787,6 +1812,135 @@ spec:
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
+  name: default-agent
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+    agent-platform.giantswarm.io/default: "true"
+    agent-platform.giantswarm.io/managed-by: agent-platform
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
+spec:
+  interval: 10m
+  releaseName: default-agent
+  targetNamespace: kagent
+  storageNamespace: kagent
+  chartRef:
+    kind: OCIRepository
+    name: default-agent
+    namespace: default
+  install:
+    createNamespace: true
+    disableWait: true
+    remediation:
+      retries: 5
+  upgrade:
+    disableWait: true
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: kagent
+  values:
+    agent:
+      description: Start here. Handles everyday tasks with your connectors and helps you
+        find or create the right agent.
+      displayName: General Assistant
+      systemMessage: |
+        Your name is General Assistant. You are the default agent of this
+        Agent Platform: where people start. You act with the identity of the person talking
+        to you, through their connectors, within their permissions; the
+        audit log names them.
+
+        Most people who talk to you are new to the Agent Platform and still
+        exploring it. They may not know what agents, skills, toolsets,
+        toolchains, connectors or workspaces are, or why they would want an
+        agent of their own. Explain a platform term in one sentence the first
+        time you use it.
+
+        Your first job is the person's task or question:
+        - A one-off task (look something up, summarise, draft, check,
+          change one thing): do it yourself with the person's connectors.
+        - Questions about the platform and its agents: answer from your
+          skills and the live tools.
+
+        Your second job is to show people what the platform can do for them.
+        When a part of it would help them reach their goal, say so once and
+        briefly, after helping: a specialist agent, a connector to sign in to,
+        a workspace, a toolchain, a toolset. Your skills say what each is and
+        when it helps.
+
+        A specialist agent fits a task that repeats or needs its own tools or
+        knowledge. It runs on the cheapest model that still does the job,
+        carries only the instructions and skills the job needs, and reaches
+        only the tools it needs, on a model fit for its data. When an existing
+        agent fits, recommend it with a start link; when none does, offer to
+        create one and guide the person through it.
+        `agent-platform-agent-routing` has how to find agents, when a task
+        deserves one and the link format.
+
+        The portal also sends you its platform tasks; the first message says
+        which:
+        - Creating, changing or inspecting an agent:
+          `agent-platform-agent-management`.
+        - Workflows: find, list, read, validate, create, change, run and
+          delete them (`agent-platform-tools`).
+        - Operating the platform: report its state with the read tools;
+          change it only through the tools that write.
+        - Evaluating a skill: `agent-platform-skill-review`.
+        - Writing a skill: `agent-platform-skill-authoring`.
+
+        Your knowledge lives in your skills; load one the first time its
+        topic comes up rather than working from memory.
+
+        How you operate:
+        - Read before you write, and choose from live lists, never from
+          memory.
+        - Be proactive. Assume the user wants to get something done. E. g.
+          If asked whether you can do something, answer the question and
+          offer to execute. When done with a task, report the result and
+          offer to proceed with the next best action.
+        - Writes only on the person's request. Confirm what you chose for
+          them before writing; once confirmed, act and report the result.
+        - Destructive actions only on an explicit request that names the
+          target, one at a time, and say what you did.
+        - Be brief and concrete; no filler. Ask one thing at a time, with
+          the `ask_user` tool where you have it, and propose rather than
+          ask from scratch.
+        - The person sees only your reply text and any `ask_user` question.
+          Write a plan out before asking them to confirm it.
+        - Call an agent by its display name if it has one, else by its
+          technical name.
+
+        Your tools come from muster through meta-tools: `filter_tools`,
+        `describe_tool` and `call_tool` are your only functions besides your
+        built-ins. Every `x_*`, `core_*` and `workflow_*` is the `name` you
+        pass to `call_tool`, always the full name `filter_tools` returns,
+        never a function of its own. A workflow first where one fits. The
+        contract is in `agent-platform-tools`.
+      tags:
+      - general
+      - platform
+    labels:
+      agent-platform.giantswarm.io/default: "true"
+      agent-platform.giantswarm.io/managed-by: agent-platform
+    modelConfig:
+      name: ""
+    muster:
+      url: http://muster.default.svc.cluster.local:8090/mcp
+    skills: []
+    toolset:
+    - preset:full
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
   name: dicebear
   namespace: default
   labels:
@@ -1797,6 +1951,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: dicebear
@@ -1832,6 +1988,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: google-access-token-credential-provider
@@ -1858,6 +2016,9 @@ spec:
     - allowedNamespaces:
       - kagent
       atespace: ate-golden
+    rbac:
+      namespaces:
+      - kagent
     substrate:
       namespace: ate-system
       releaseName: substrate
@@ -1876,6 +2037,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: kagent
@@ -1892,6 +2055,12 @@ spec:
     remediation:
       retries: 5
   driftDetection:
+    ignore:
+    - paths:
+      - /spec/template/spec/volumes
+      target:
+        kind: Deployment
+        name: kagent-controller
     mode: enabled
   dependsOn:
     - name: kagent-crds
@@ -2019,9 +2188,7 @@ spec:
         eventRetentionSize: 4
         tokenThreshold: 600000
       create: true
-      env:
-      - name: KAGENT_PROPAGATE_TOKEN
-        value: "true"
+      env: []
       snapshotLocation: s3://ci-agent-snapshots/agents
     harnesses: []
     namespaceOverride: kagent
@@ -2099,17 +2266,7 @@ spec:
       runAsNonRoot: true
       seccompProfile:
         type: RuntimeDefault
-    providers:
-      anthropic:
-        apiKey: ""
-        apiKeySecretKey: ANTHROPIC_API_KEY
-        apiKeySecretRef: kagent-anthropic
-        config:
-          cacheTTL: 5m
-          promptCaching: true
-        model: claude-sonnet-5-5
-        provider: Anthropic
-      default: anthropic
+    providers: false
     registry: gsoci.azurecr.io
     securityContext:
       allowPrivilegeEscalation: false
@@ -2144,7 +2301,7 @@ spec:
           requests:
             cpu: 250m
             memory: 512Mi
-      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.17.5
+      workerImage: gsoci.azurecr.io/giantswarm/substrate/ateom-gvisor:1.18.0
     ui:
       image:
         repository: giantswarm/kagent/ui
@@ -2163,6 +2320,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: kagent-crds
@@ -2198,6 +2357,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: klaus-gateway
@@ -2215,7 +2376,7 @@ spec:
       retries: 5
   values:
     a2a:
-      defaultAgent: ""
+      defaultAgent: kagent/default-agent
       enabled: false
       fallbackIconUrlTemplate: ""
       url: grpc://agentgateway.agent-platform.svc.cluster.local:8080
@@ -2300,6 +2461,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: model-manager
@@ -2365,7 +2528,7 @@ spec:
       enabled: false
     oauth:
       dex:
-        allowPrivateURLs: true
+        allowPrivateURLs: false
       downstream:
         enabled: true
       enabled: true
@@ -2400,6 +2563,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: muster
@@ -2411,10 +2576,12 @@ spec:
   install:
     createNamespace: true
     crds: CreateReplace
+    disableWait: true
     remediation:
       retries: 5
   upgrade:
     crds: CreateReplace
+    disableWait: true
     remediation:
       retries: 5
   driftDetection:
@@ -2462,6 +2629,12 @@ spec:
     image:
       registry: gsoci.azurecr.io
     muster:
+      credentialProvider:
+        actorBearer:
+          enabled: true
+          issuer: https://idp.ate-system.svc
+        enabled: true
+        gatewayIdentity: spiffe://cluster.local/ns/ate-system/sa/atenet-egress
       oauth:
         server:
           baseUrl: ""
@@ -2501,12 +2674,14 @@ spec:
         agent-platform:
           description: The platform's own management surface — agent-manager, model-manager,
             vm-manager, cluster-manager, kagent's session tools and muster's core tools.
+          icon: data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM1MzRBQjciLz48ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTYgOWwxLjggNS4yTDIzIDE2bC01LjIgMS44TDE2IDIzbC0xLjgtNS4yTDkgMTZsNS4yLTEuOHoiLz48L2c+PC9zdmc+
           include:
           - label: agent-platform.giantswarm.io/tool-group=agent-platform
           - pattern: core_*
         infrastructure:
           description: The servers for the infrastructure underneath the platform (Giant
             Swarm installations' management clusters) — mcp-kubernetes, mcp-capi, mcp-prometheus.
+          icon: data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM5OTNDMUQiLz48ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSIxMCIgeT0iOSIgd2lkdGg9IjEyIiBoZWlnaHQ9IjYiIHJ4PSIxLjUiLz48cmVjdCB4PSIxMCIgeT0iMTciIHdpZHRoPSIxMiIgaGVpZ2h0PSI2IiByeD0iMS41Ii8+PHBhdGggZD0iTTEzIDEyaC4wMU0xMyAyMGguMDEiLz48L2c+PC9zdmc+
           include:
           - label: agent-platform.giantswarm.io/tool-group=infrastructure
     networkPolicy:
@@ -2542,6 +2717,92 @@ spec:
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
+  name: skill-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
+spec:
+  interval: 10m
+  releaseName: skill-manager
+  targetNamespace: default
+  chartRef:
+    kind: OCIRepository
+    name: skill-manager
+    namespace: default
+  install:
+    createNamespace: true
+    remediation:
+      retries: 5
+  upgrade:
+    remediation:
+      retries: 5
+  dependsOn:
+    - name: muster
+  values:
+    fullnameOverride: skill-manager
+    global:
+      domain: ""
+      gatewayApi:
+        parentRefs: []
+      identity:
+        clientId: ""
+        existingSecret: ""
+        issuerUrl: https://dex.ci.example.com
+      imagePullSecrets: []
+      observability:
+        metrics:
+          serviceMonitor:
+            enabled: false
+            interval: ""
+            labels: {}
+        traces:
+          otlp:
+            endpoint: http://otlp-gateway.kube-system.svc:4317
+            headers: {}
+            protocol: grpc
+            tenant: giantswarm
+      registry: gsoci.azurecr.io
+    muster:
+      mcpServer:
+        auth:
+          forwardToken: true
+          requiredAudiences:
+          - dex-k8s-authenticator
+        enabled: true
+    networkPolicy:
+      ingressNamespaces:
+      - kagent
+    oauth:
+      dex:
+        allowPrivateURLs: false
+      enabled: true
+      sso:
+        allowPrivateIPs: true
+    observability:
+      otel:
+        endpoint: http://otlp-gateway.kube-system.svc:4317
+        headers: X-Scope-OrgID=giantswarm
+        protocol: grpc
+    serviceToken:
+      secretName: skill-manager-service-token
+    sources:
+    - path: skills
+      readOnly: true
+      url: https://github.com/giantswarm/agent-platform
+    - https://github.com/giantswarm/agent-skills
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
   name: substrate
   namespace: default
   labels:
@@ -2552,6 +2813,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   timeout: 15m
@@ -2567,8 +2830,9 @@ spec:
     remediation:
       retries: 5
   upgrade:
-    remediation:
-      retries: 3
+    strategy:
+      name: RetryOnFailure
+      retryInterval: 5m
   dependsOn:
     - name: substrate-crds
     - name: agent-platform-connectivity
@@ -2627,6 +2891,9 @@ spec:
       - allowedNamespaces:
         - kagent
         atespace: ate-golden
+      rbac:
+        namespaces:
+        - kagent
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/substrate
@@ -2667,6 +2934,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: substrate-crds
@@ -2700,6 +2969,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: valkey
@@ -2821,6 +3092,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 10m
   releaseName: vm-manager
@@ -2872,7 +3145,7 @@ spec:
       enabled: false
     oauth:
       dex:
-        allowPrivateURLs: true
+        allowPrivateURLs: false
       enabled: true
       provider: dex
       sso:
@@ -2905,6 +3178,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-manager
@@ -2912,7 +3187,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=2.16.0 <2.19.0"
+    semver: ">=3.1.0 <4.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2928,6 +3203,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-connectivity
@@ -2951,6 +3228,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-platform-mcps
@@ -2974,6 +3253,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agent-sandbox
@@ -2997,6 +3278,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/agentgateway
@@ -3005,6 +3288,31 @@ spec:
     operation: copy
   ref:
     semver: ">=2.8.0 <3.0.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: default-agent
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
+spec:
+  interval: 1m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/agent
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    semver: ">=2.6.0 <3.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3020,6 +3328,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/dicebear
@@ -3043,6 +3353,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/google-access-token-credential-provider
@@ -3050,7 +3362,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=0.2.0 <0.3.0"
+    semver: ">=0.3.0 <0.4.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3066,6 +3378,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent
@@ -3073,7 +3387,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.29.0 <1.30.0"
+    semver: ">=1.31.0 <1.32.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3089,6 +3403,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/giantswarm/kagent/helm/kagent-crds
@@ -3096,7 +3412,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.29.0 <1.30.0"
+    semver: ">=1.31.0 <1.32.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3112,6 +3428,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/klaus-gateway
@@ -3135,6 +3453,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/model-manager
@@ -3158,6 +3478,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/muster
@@ -3165,7 +3487,32 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=5.52.5 <6.0.0"
+    semver: ">=5.63.2 <6.0.0"
+---
+# Source: agent-platform/templates/components.yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: skill-manager
+  namespace: default
+  labels:
+    app: "agent-platform"
+    app.kubernetes.io/name: "agent-platform"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
+spec:
+  interval: 1m
+  url: oci://gsoci.azurecr.io/charts/giantswarm/skill-manager
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    semver: ">=0.2.2 <0.3.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3181,6 +3528,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/giantswarm/substrate/helm/substrate
@@ -3188,7 +3537,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.17.5 <1.18.0"
+    semver: ">=1.18.0 <1.19.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3204,6 +3553,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/giantswarm/substrate/helm/substrate-crds
@@ -3211,7 +3562,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.17.5 <1.18.0"
+    semver: ">=1.18.0 <1.19.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3227,6 +3578,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/valkey
@@ -3250,6 +3603,8 @@ metadata:
     app.kubernetes.io/version: "0.1.0"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "agent-platform-1.1.35"
+  annotations:
+    application.giantswarm.io/team: "bumblebee"
 spec:
   interval: 1m
   url: oci://gsoci.azurecr.io/charts/giantswarm/vm-manager
@@ -3257,4 +3612,4 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=0.24.0 <0.25.0"
+    semver: ">=0.26.10 <0.27.0"

@@ -32,6 +32,12 @@ components:
   agent-manager:
     enabled: true
 
+# The default agent runs on the smoke's model (tests/ats/model-config.yaml):
+# that model is applied after the install, after the ModelConfig CRD, so the
+# chart's lookup of the namespace's default finds none at install.
+defaultAgent:
+  modelConfig: ats-model
+
 muster:
   # One replica: the OAuth state is in memory (storage below), so a token muster
   # issued is known to the pod that issued it only. The MCP calls reach muster
@@ -56,9 +62,8 @@ muster:
         # No bundled Valkey in the smoke: sessions in memory.
         storage:
           type: memory
-        # Accept the lab Dex's ID tokens as bearer tokens (the password grant
-        # the smoke uses, and the token muster forwards to agent-manager with
-        # the cross-client audience its MCPServer requires).
+        # Explicit compatibility trust accepts signed Dex ID-token bearers.
+        # agent-manager requires the cross-client audience downstream.
         trustedAudiences:
           - agent-platform
           - dex-k8s-authenticator

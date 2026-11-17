@@ -5,16 +5,22 @@ giantswarm/giantswarm#38988), which renders with agentPlatformOrganizations.enab
 */}}
 
 {{/*
-The operator's IRSA role: the snapshot store's role name and -operator. IAM
-takes 64 characters; a longer name fails the render rather than be cut, which
-could give it Substrate's role's name or one the operator's chart is not told.
+The operator's IRSA role, with the Crossplane AWS snapshot store: the name the
+meta chart derives (agentPlatformOrganizations.operator.awsRoleName, the store's
+role name and -operator) and names on the operator's ServiceAccount.
 */}}
 {{- define "agent-platform.organizationErasure.awsRoleName" -}}
-{{- $name := printf "%s-operator" (include "agent-platform.substrateStore.awsRoleName" .) -}}
-{{- if gt (len $name) 64 -}}
-{{- fail (printf "agentPlatformOrganizations: the operator's IAM role %s is longer than 64 characters: set a shorter kagent.harness.snapshotStore.crossplane.aws.roleName (at most 55)" $name) -}}
+{{- required "agentPlatformOrganizations.operator.awsRoleName is required with agentPlatformOrganizations.enabled and the Crossplane AWS snapshot store: the meta chart derives it (agent-platform.organizations.operator), the IAM role it names on agent-platform-operator's ServiceAccount" (include "agent-platform.organizations.operator" . | fromJson).awsRoleName -}}
 {{- end -}}
-{{- $name -}}
+
+{{/*
+The Secret of RustFS's keys the operator reads its snapshots with, with RustFS
+(substrate.rustfs.enabled): the name the meta chart derives
+(agentPlatformOrganizations.operator.snapshotSecret) and gives the operator as
+snapshots.credentials.existingSecret.
+*/}}
+{{- define "agent-platform.organizationErasure.snapshotSecret" -}}
+{{- required "agentPlatformOrganizations.operator.snapshotSecret is required with agentPlatformOrganizations.enabled and RustFS: the meta chart derives it (agent-platform.organizations.operator), the Secret it names in agent-platform-operator's snapshots.credentials.existingSecret" (include "agent-platform.organizations.operator" . | fromJson).snapshotSecret -}}
 {{- end -}}
 
 {{/*

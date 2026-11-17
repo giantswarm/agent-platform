@@ -109,8 +109,9 @@ spec:
     - --gpu-memory-utilization=0.90
     # Text only: no image per prompt, so vLLM skips the Pixtral processor the
     # v0.8.0 runtime's vLLM cannot run with its transformers (giantswarm/llm-d#37).
-    # The dotted form: the JSON form's quotes do not survive the llm-d
-    # container's shell wrapper.
+    # The dotted form needs no quoting. The well-known runtime template
+    # re-parses every argument through a shell (eval "… $@"), so the JSON
+    # form only survives single-quoted inside its argument, as in gemma-4-12b.
     - --limit-mm-per-prompt.image=0
   resources:
     gpus: 4
@@ -127,6 +128,7 @@ spec:
     # next to 16.5 GiB of weights.
     weightsGiB: 66
     overheadGiB: 60
-    # NVFP4 through vLLM's Marlin weight-only FP4 path: proven on the L40S (8.9), nothing below it
-    # is (giantswarm/agent-platform#832).
-    minComputeCapability: "8.9"
+    # NVFP4 weights run through vLLM's weight-only FP4 Marlin path from
+    # compute capability 8.6 (A10G). Memory, GPU count and the runtime
+    # recipe still decide which pool can host this preset.
+    minComputeCapability: "8.6"

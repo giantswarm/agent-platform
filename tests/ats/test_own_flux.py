@@ -94,6 +94,7 @@ from conftest import (
     wait_for_substrate,
     wait_for_agent_ready,
 )
+from scenarios import MODEL_CONFIG_MANIFEST
 
 logger = logging.getLogger(__name__)
 
@@ -389,7 +390,7 @@ def test_agent_deploys_through_the_clusters_flux(kube: Kube, platform_through_fl
     started = time.monotonic()
     try:
         kube.wait_deployment(KAGENT_NAMESPACE, "kagent-controller", timeout=600)
-        wait_for(f"ModelConfig {MODEL_CONFIG}", lambda: kube.get("modelconfigs.api.kagent.dev", MODEL_CONFIG, namespace=KAGENT_NAMESPACE), 120)
+        kube.apply_file(str(MODEL_CONFIG_MANIFEST))
         assert kube.get("serviceaccount", KAGENT_FLUX_SA, namespace=KAGENT_NAMESPACE), f"the connectivity release did not render ServiceAccount {KAGENT_FLUX_SA}"
         apply_placeholder_provider_secret(kube)
         wait_for_substrate(kube)

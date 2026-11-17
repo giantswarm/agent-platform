@@ -13,8 +13,6 @@ Checked, in both charts' values.yaml:
 - the controller and data-plane tags of both charts agree: the catalog is the
   data plane's, and the controller and its data planes run one release;
 - no overlay provider/model is in the pinned release's built-in catalog;
-- the platform's default model (kagent.providers.anthropic.model) is priced by
-  the built-in catalog or the overlay;
 - both charts carry the same overlay.
 
 The catalog is fetched from GitHub at v<tag>; MODEL_CATALOG_FILE points at a
@@ -75,14 +73,7 @@ def main(meta_dir: str, connectivity_dir: str) -> None:
     if errors:
         fail("\n  ".join(["overlay entries shadow the built-in catalog:", *errors]))
 
-    default = meta["kagent"]["providers"]["anthropic"]["model"]
-    priced = default in builtin.get("anthropic", {}).get("models", {}) or default in (
-        (overlay.get("anthropic") or {}).get("models") or {}
-    )
-    if not priced:
-        fail(f"the platform's default model anthropic/{default} is priced by neither gateway v{tag} nor the overlay")
-
-    print(f"ok: overlay holds only models gateway v{tag} does not price; default model {default} priced")
+    print(f"ok: overlay holds only models gateway v{tag} does not price")
 
 
 if __name__ == "__main__":

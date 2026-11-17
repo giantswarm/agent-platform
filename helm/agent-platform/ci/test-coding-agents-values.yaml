@@ -7,15 +7,9 @@ kagent:
     - name: claude
       runtime: claude
       snapshotLocation: s3://ci-agent-snapshots/claude
-      env:
-        - name: KAGENT_PROPAGATE_TOKEN
-          value: "true"
     - name: codex
       runtime: codex
       snapshotLocation: s3://ci-agent-snapshots/codex
-      env:
-        - name: KAGENT_PROPAGATE_TOKEN
-          value: "true"
     # omp is a BYO Harness: the kagent line's omp-harness by digest (the
     # floor release's runtimeImages.ompHarness.digest), its command and the
     # display name the portal shows.

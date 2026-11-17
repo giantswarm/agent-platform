@@ -1,0 +1,72 @@
+# Organization credentials
+
+agent-manager never takes a credential value in an MCP call. A missing or replaced credential is answered with an MCP URL elicitation of the credential form when the client declares URL elicitation, and with the form link in `credentials[].next` otherwise. The value is then posted to agent-manager over authenticated HTTPS. The API, authentication and recovery rules are in [agent-manager's documentation](https://github.com/giantswarm/agent-manager/blob/main/docs/organization-credentials.md).
+
+## Credential form
+
+Set `agent-manager.credentials.uiURL` to the HTTPS RFC 6570 URL template of the client that serves the form. One template serves organization and installation models: it names the operation with one `{operation}` expression and the target namespace with `{namespace}`. Without `agentPlatformOrganizations.enabled` the render refuses a template with no `{namespace}` expression or with `{parent}` or `{organization}`. A template naming `{namespace}`, and any template without `agentPlatformOrganizations.enabled`, needs a `components.agent-manager.versionRange` floor of `3.1.0-rc.11` or later (agent-manager 3.1.0, giantswarm/agent-manager#409): earlier releases refuse `{namespace}` when the server starts. A template containing `#` is refused, as agent-manager refuses a fragment. The form reads the organization and the scope from the operation, so the link carries no other identifier. For the portal, the template is `https://<portal>/customize/models/credentials/<installation>/{namespace}/{operation}`. With organizations enabled, a template with `{parent}` and `{organization}` and no `{namespace}` still links organization models, but agent-manager refuses installation model writes with it. This chart derives no form URL. `agent-manager.devPortal` is refused.
+
+The form uses its client's authenticated backend path to post the value to agent-manager's REST API as the person; agent-manager exposes no browser CORS exception. A client backend outside the cluster reaches that API through `agentManager.route` (`https://agentgateway.<global.domain>/agent-manager`, `agentManager.route.hostname` overrides the host): turn on `agentManager.route.enabled`, and `agentManager.route.jwtAuthentication.enabled` with the identity provider's issuer. agent-manager validates the token itself (`agent-manager.oauth`), so the audience of the ID token the client sends must be one it trusts (`agent-manager.oauth.trustedAudiences` and the muster audiences it accepts).
+
+Credential operations and `agent-manager.githubTokenExchange` need a floor of `2.22.0` or later in `components.agent-manager.versionRange`. From `2.24.0` credentials are write-only (agent-manager writes them without reading the Secret as the caller), and the default range `>=3.1.0 <4.0.0` includes it: `replace_organization_credential` replaces one, and a save whose credential's consumers changed is answered `credential_consumers_changed`. The Dev Portal's credential form needs it ([giantswarm/backstage#3364](https://github.com/giantswarm/backstage/issues/3364)). The organization switch keeps its own `2.20.0` floor. muster reaches the elicitation to the client from `5.61.0` (giantswarm/muster#1812), the floor of `components.muster.versionRange`.
+
+`agent-manager.credentials.uiURL` needs `agent-manager.oauth.enabled` and
+`agent-manager.oauth.downstream.enabled`. With organizations disabled it serves
+installation models only: the organization switch stays false, organization
+management is disabled and discovery returns an empty list.
+
+## Vertex model credentials
+
+Native `AnthropicVertexAI` and `GeminiVertexAI` models use Substrate's existing
+Google access-token credential provider. Create the model with its Google project
+and location, then upload a service-account JSON file in the shared credential
+form. The API declares `inputFormat: google-service-account-json`; it validates
+the project and private key before writing `GOOGLE_APPLICATION_CREDENTIALS`.
+Neither the model form nor an MCP call takes the JSON. Organization credentials
+still require `tenant-credential-*` Secret names. Admission takes `projectID`
+as a Google project ID (6 to 30 lowercase letters, digits or hyphens, starting
+with a letter), so legacy domain-scoped IDs such as `example.com:my-project` are
+refused. Admission also refuses an
+organization Vertex model without `apiKeySecret`: without a key the runtime
+would use Google application default credentials, the node's identity on
+Google Cloud.
+
+These providers call Google directly. LLM gateway metering, rate limits and
+spend reporting are unavailable.
+Admission exempts exactly these two native providers from the listener rule;
+other provider routing and credential-reference policies still apply. Gateway
+routing and credential ownership belong to giantswarm/giantswarm#38545. AWS
+Kubernetes to Google federation and identity isolation belong to
+giantswarm/giantswarm#39257; neither is required for JSON credentials.
+
+Installation model operations use the same manager and credential API, with
+cluster-admin authorization and an explicit `scope: platform` target, and the
+same `agent-manager.credentials.uiURL` form. Enable the authenticated manager route
+described above when the portal backend reaches it from outside the cluster.
+Commit mode also requires an explicit
+`agent-manager.tenants.commit.platformModelsPath` in the trusted repository,
+which needs the same `3.1.0-rc.11` floor. agent-manager 3.1.0 serves the Vertex
+JSON key, `scope: platform` and `inputFormat`; the portal release with
+giantswarm/backstage#3530 serves the form for them. Deploy them together; the
+portal refuses an older tool schema rather than writing Secrets through its
+Kubernetes client.
+
+## GitOps writes
+
+`agent-manager.tenants.commit` (`repository`, `branch`, `objectsPath`, `contentPrefix`) configures where organization changes are committed. It travels beside the derived `tenants.enabled` and does not control the organization switch. The repository needs a SOPS policy and review ownership.
+
+A commit is opened as the person: agent-manager exchanges the person's platform identity for their `https://github.com/apps/giantswarm-agent-manager` grant at an RFC 8693 token endpoint (`agent-manager.githubTokenExchange`: `endpoint`, `clientID`, `audience` and `secretName` are required), with `agent-manager.github.enabled` off. Give its client a dedicated credential, that App as its only target, the canonical identity issuer and an explicit input-audience allowlist.
+
+Configure `agentPlatformOrganizations.fluxNamespace`, `fluxSource` and `fluxDecryptionSecret` so the operator creates each organization's Kustomization and restricted ServiceAccount. The bundled Flux engine needs `kustomize-controller` in `flux-engine.instance.components`.
+
+## Network policy
+
+The manager's egress policy admits the origin of `githubTokenExchange.endpoint` on its port:
+- Cilium: a rule for the host name, or for the address when the endpoint is an IP literal.
+- Native NetworkPolicy: public addresses on that port, or the single address of an IP literal. A broker on a private network needs its range in `agentManager.networkPolicy.egress.cidrs` or `networkPolicy.additionalEgressCIDRs`.
+
+An endpoint on an in-cluster Service name (`<service>.<namespace>.svc`), or on a name of fewer than three labels (`muster`, `muster.agent-platform`) that the cluster's DNS search path resolves to one, fails the render while network policies are on: neither flavour can select a Service by its DNS name. Use the broker's external hostname or address.
+
+## Replicas
+
+A 2025-11-25 MCP client's session capabilities and elicitation completions live in one manager process, so keep `agent-manager.replicaCount: 1` for such clients. 2026-07-28 clients carry their capabilities on each request and work with several replicas.

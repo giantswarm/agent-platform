@@ -29,6 +29,21 @@ spec:
     {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
     - toEntities:
         - kube-apiserver
+    {{- with index (.Values.networkPolicy.mcpBackends | default dict) "skill-manager" }}
+    {{- if dig "skillManager" "url" "" ($.Values.agentManager | default dict) }}
+    # The skill-manager (the run pins skills through it).
+    - toEndpoints:
+        - matchLabels:
+            {{- toYaml .podSelector | nindent 12 }}
+            io.kubernetes.pod.namespace: {{ .namespace }}
+      toPorts:
+        - ports:
+            {{- range .ports }}
+            - port: {{ . | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+    {{- end }}
     {{- include "agent-platform.agentManager.chartSourcesEgress.cilium" . | nindent 4 }}
     {{- with .Values.networkPolicy.additionalEgressFQDNs }}
     - toFQDNs:

@@ -181,8 +181,10 @@ WIRING_PG_GOLDEN_HOLD := --set components.model-manager.enabled=false --set valk
 # alone turns red the moment its change merges: origin/main then renders the key
 # and the held side does not (giantswarm/agent-platform#904's hold did, on the
 # merge commit's pipeline). Drop an entry once GOLDEN_REF carries it, so the
-# comparison covers the key again. Empty: GOLDEN_REF carries #904.
-WIRING_PG_GOLDEN_HOLD_NEW :=
+# comparison covers the key again.
+# The slot-retention cap intentionally changes the postgres render; hold it
+# absent for the baseline comparison. verify-postgres-wal covers the contract.
+WIRING_PG_GOLDEN_HOLD_NEW := --set postgres.maxSlotWalKeepSize=null
 # muster's kubernetes-flavour egress policy renders here (giantswarm/agent-platform#840)
 # and not on a golden from before; it is left out of both sides. Drop it once
 # GOLDEN_REF carries #840.
@@ -204,6 +206,10 @@ TENANT_FLUX_RBAC := agent-platform-tenant-flux
 # (giantswarm/agent-platform#1040), an intended change of the default render with kagent on (verify-tenant-rbac asserts
 # it); dropped from the golden until GOLDEN_REF carries it.
 TENANT_EGRESS_ADMISSION := agent-platform-tenant-egress-credentials agent-platform-tenant-model-credentials agent-platform-tenant-credentials agent-platform-tenant-credential-refs agent-platform-platform-tenant-credential-refs
+# The Secret deletes answered with the Secret, refused in every namespace for a requester who may not read it
+# (giantswarm/agent-platform#1365), an intended change of the default render with kagent on (verify-secret-deletes
+# asserts it); dropped from the golden until GOLDEN_REF carries it.
+TENANT_SECRET_DELETES := agent-platform-secret-deletes
 # New beside GOLDEN_REF: left out of both sides of the postgres golden too.
 WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
 # Objects the 4.0 line changes on purpose, dropped from BOTH renders before the
@@ -219,7 +225,7 @@ WIRING_PG_GOLDEN_DROP += $(TENANT_RBAC_ALL)
 # agent-platform-tenant-flux (giantswarm/agent-platform#1268) is new with kagent on: the
 # connectivity chart renders it now that agent-manager's tenant reconciler is gone;
 # verify-organization-namespaces asserts it. Drop it once GOLDEN_REF carries it.
-GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP) $(TENANT_RBAC_ALL) $(TENANT_EGRESS_ADMISSION) agent-platform-tenant-flux
+GOLDEN_EXCLUDE := kagent-declarative-seccomp agent-platform-connectivity-kagent-controller-ingress kagent $(DASHBOARDS_GOLDEN_DROP) $(TENANT_RBAC_ALL) $(TENANT_EGRESS_ADMISSION) $(TENANT_SECRET_DELETES) agent-platform-tenant-flux
 # Any reference is enough: the assertions read the rendered exception, not the image.
 PGVECTOR_IMG := gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm
 
@@ -299,9 +305,9 @@ verify-modes: ## Assert the single ingress topology (agentgateway in front of mu
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) >$(VERIFY_TMP)/vm-pe-img.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-img.out; exit 1; }
 	@if ! grep -q "name: kagent-pg-image-volume" $(VERIFY_TMP)/vm-pe-img.out; then \
 		echo "FAIL: no volume-types exception for the ImageVolume pgvector path; CNPG instance pods would be denied admission"; exit 1; \
-	elif ! grep -q "cnpg.io/cluster: kagent-pg" $(VERIFY_TMP)/vm-pe-img.out; then \
-		echo "FAIL: the exception is not scoped to the Cluster's own pods"; exit 1; \
-	else echo "ok: ImageVolume exception scoped to cnpg.io/cluster"; fi
+	elif [ "$$(python3 tests/pick-doc.py $(VERIFY_TMP)/vm-pe-img.out PolicyException kagent-pg-image-volume | sed -n '/matchExpressions:/,$$p' | tr -s ' \n' ' ')" != " matchExpressions: - key: cnpg.io/cluster operator: In values: - kagent-pg - kagent-pg-restore --- " ]; then \
+		echo "FAIL: the exception does not select exactly cnpg.io/cluster in (kagent-pg, kagent-pg-restore), the Cluster and its documented restore Cluster"; exit 1; \
+	else echo "ok: ImageVolume exception selects cnpg.io/cluster kagent-pg and kagent-pg-restore"; fi
 	@echo "--> a rule with no ClusterPolicy in kyvernoPolicies.rules must fail (an exception naming no policy matches nothing)"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) --set kyvernoPolicies.rules.restricted-volumes=null >$(VERIFY_TMP)/vm-pe-rule.out 2>&1; then \
 		echo "FAIL: the unknown-rule guard did not fire"; exit 1; \
@@ -463,10 +469,10 @@ verify-global: ## Assert the global.* contract behaviors (derived hostnames, gat
 
 # Every credential key the guard knows, set to one canary value. The value must
 # never appear in the failure message; the paths must all appear.
-INLINE_SECRET_PATHS := kagent.providers.anthropic.apiKey kagent.oauth2-proxy.config.clientSecret kagent.oauth2-proxy.config.cookieSecret muster.muster.oauth.server.dex.clientSecret muster.muster.oauth.server.registrationToken muster.muster.oauth.server.encryptionKeyValue muster.muster.oauth.server.storage.valkey.password valkey.valkey.auth.aclUsers.default.password klausGateway.slack.botToken klausGateway.slack.signingSecret klausGateway.obo.stateKey klausGateway.obo.storeKey model-manager.oauth.dex.clientSecret agent-manager.oauth.dex.clientSecret cluster-manager.oauth.dex.clientSecret
-INLINE_SECRET_SETS := --set kagent.providers.anthropic.apiKey=LEAK-CANARY-VALUE --set kagent.oauth2-proxy.config.clientSecret=LEAK-CANARY-VALUE --set kagent.oauth2-proxy.config.cookieSecret=LEAK-CANARY-VALUE --set muster.muster.oauth.server.dex.clientSecret=LEAK-CANARY-VALUE --set muster.muster.oauth.server.registrationToken=LEAK-CANARY-VALUE --set muster.muster.oauth.server.encryptionKeyValue=LEAK-CANARY-VALUE --set muster.muster.oauth.server.storage.valkey.password=LEAK-CANARY-VALUE --set valkey.valkey.auth.aclUsers.default.password=LEAK-CANARY-VALUE --set klausGateway.slack.botToken=LEAK-CANARY-VALUE --set klausGateway.slack.signingSecret=LEAK-CANARY-VALUE --set klausGateway.obo.stateKey=LEAK-CANARY-VALUE --set klausGateway.obo.storeKey=LEAK-CANARY-VALUE --set model-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE --set agent-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE --set cluster-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE
+INLINE_SECRET_PATHS := kagent.oauth2-proxy.config.clientSecret kagent.oauth2-proxy.config.cookieSecret muster.muster.oauth.server.dex.clientSecret muster.muster.oauth.server.registrationToken muster.muster.oauth.server.encryptionKeyValue muster.muster.oauth.server.storage.valkey.password valkey.valkey.auth.aclUsers.default.password klausGateway.slack.botToken klausGateway.slack.signingSecret klausGateway.obo.stateKey klausGateway.obo.storeKey model-manager.oauth.dex.clientSecret agent-manager.oauth.dex.clientSecret cluster-manager.oauth.dex.clientSecret
+INLINE_SECRET_SETS := --set kagent.oauth2-proxy.config.clientSecret=LEAK-CANARY-VALUE --set kagent.oauth2-proxy.config.cookieSecret=LEAK-CANARY-VALUE --set muster.muster.oauth.server.dex.clientSecret=LEAK-CANARY-VALUE --set muster.muster.oauth.server.registrationToken=LEAK-CANARY-VALUE --set muster.muster.oauth.server.encryptionKeyValue=LEAK-CANARY-VALUE --set muster.muster.oauth.server.storage.valkey.password=LEAK-CANARY-VALUE --set valkey.valkey.auth.aclUsers.default.password=LEAK-CANARY-VALUE --set klausGateway.slack.botToken=LEAK-CANARY-VALUE --set klausGateway.slack.signingSecret=LEAK-CANARY-VALUE --set klausGateway.obo.stateKey=LEAK-CANARY-VALUE --set klausGateway.obo.storeKey=LEAK-CANARY-VALUE --set model-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE --set agent-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE --set cluster-manager.oauth.dex.clientSecret=LEAK-CANARY-VALUE
 # The same installation on referenced Secrets: the knobs an operator sets instead.
-REFERENCED_SECRET_SETS := --set kagent.providers.anthropic.apiKeySecretRef=kagent-anthropic-key --set kagent.oauth2-proxy.config.existingSecret=kagent-oauth2-proxy-credentials --set muster.muster.oauth.server.existingSecret=muster-oauth-credentials --set muster.muster.oauth.server.storage.valkey.existingSecret=muster-valkey-credentials --set valkey.valkey.auth.usersExistingSecret=muster-valkey-credentials --set valkey.valkey.auth.aclUsers.default.passwordKey=valkey-password --set klausGateway.slack.secretName=klaus-gateway-slack-credentials --set klausGateway.obo.existingSecret=klaus-gateway-obo-keys
+REFERENCED_SECRET_SETS := --set kagent.oauth2-proxy.config.existingSecret=kagent-oauth2-proxy-credentials --set muster.muster.oauth.server.existingSecret=muster-oauth-credentials --set muster.muster.oauth.server.storage.valkey.existingSecret=muster-valkey-credentials --set valkey.valkey.auth.usersExistingSecret=muster-valkey-credentials --set valkey.valkey.auth.aclUsers.default.passwordKey=valkey-password --set klausGateway.slack.secretName=klaus-gateway-slack-credentials --set klausGateway.obo.existingSecret=klaus-gateway-obo-keys
 
 .PHONY: verify-secrets
 verify-secrets: ## Assert gitops.forbidInlineSecrets: off by default, fails the render naming (only) the inline credential paths, passes on referenced Secrets.
@@ -486,9 +492,9 @@ verify-secrets: ## Assert gitops.forbidInlineSecrets: off by default, fails the 
 	@echo "--> the failure message carries the key paths, never the values"
 	@if grep -q 'LEAK-CANARY-VALUE' $(VERIFY_TMP)/vs-forbid.out; then echo "FAIL: the guard's message leaked a credential value"; exit 1; else echo "ok: no value in the message"; fi
 	@echo "--> a single inline key is enough to fail, and is the only one named"
-	@if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.forbidInlineSecrets=true --set kagent.providers.anthropic.apiKey=LEAK-CANARY-VALUE >$(VERIFY_TMP)/vs-one.out 2>&1; then \
+	@if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set gitops.forbidInlineSecrets=true --set kagent.oauth2-proxy.config.clientSecret=LEAK-CANARY-VALUE >$(VERIFY_TMP)/vs-one.out 2>&1; then \
 		echo "FAIL: one inline key passed the guard"; exit 1; fi
-	@grep -q 'kagent.providers.anthropic.apiKey' $(VERIFY_TMP)/vs-one.out || { echo "FAIL: the single key was not named"; cat $(VERIFY_TMP)/vs-one.out; exit 1; }
+	@grep -q 'kagent.oauth2-proxy.config.clientSecret' $(VERIFY_TMP)/vs-one.out || { echo "FAIL: the single key was not named"; cat $(VERIFY_TMP)/vs-one.out; exit 1; }
 	@if grep -q 'klausGateway.slack.botToken' $(VERIFY_TMP)/vs-one.out; then echo "FAIL: an unset key was named"; exit 1; fi
 	@echo "ok: single key"
 	@echo "--> forbidInlineSecrets: true with referenced Secrets renders, and no child HelmRelease carries a credential"
@@ -496,7 +502,7 @@ verify-secrets: ## Assert gitops.forbidInlineSecrets: off by default, fails the 
 	@if grep -E '^\s*(apiKey|clientSecret|cookieSecret|botToken|signingSecret|appToken|stateKey|storeKey|registrationToken|encryptionKeyValue|password): ' $(VERIFY_TMP)/vs-ref.out | grep -vqE ': ""$$'; then \
 		echo "FAIL: a child HelmRelease still carries a non-empty credential key:"; grep -nE '^\s*(apiKey|clientSecret|cookieSecret|botToken|signingSecret|appToken|stateKey|storeKey|registrationToken|encryptionKeyValue|password): ' $(VERIFY_TMP)/vs-ref.out | grep -vE ': ""$$'; exit 1; fi
 	@grep -q 'existingSecret: klaus-gateway-obo-keys' $(VERIFY_TMP)/vs-ref.out || { echo "FAIL: klausGateway.obo.existingSecret was not forwarded to the klaus-gateway release"; exit 1; }
-	@grep -q 'apiKeySecretRef: kagent-anthropic-key' $(VERIFY_TMP)/vs-ref.out || { echo "FAIL: kagent.providers.anthropic.apiKeySecretRef was not forwarded"; exit 1; }
+	@grep -q 'existingSecret: kagent-oauth2-proxy-credentials' $(VERIFY_TMP)/vs-ref.out || { echo "FAIL: kagent.oauth2-proxy.config.existingSecret was not forwarded"; exit 1; }
 	@echo "ok: referenced Secrets render clean"
 	@echo "--> the flag itself is meta-package plumbing and is not forwarded to any child release"
 	@if grep -q 'forbidInlineSecrets' $(VERIFY_TMP)/vs-ref.out; then echo "FAIL: gitops.forbidInlineSecrets leaked into a child HelmRelease's values"; exit 1; else echo "ok: flag not forwarded"; fi
@@ -551,7 +557,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@grep -qE '^    - name: agentgateway$$' $(VERIFY_TMP)/ap-flux.out || { echo "FAIL: a CR consumer no longer dependsOn its CRD-owning component (agentgateway)"; exit 1; }
 	@echo "--> kagent's first install does not wait for the controller (it mounts the CNPG Secret connectivity renders, and connectivity dependsOn kagent)"
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent.enabled=true >$(VERIFY_TMP)/ap-kag.out 2>&1 || { cat $(VERIFY_TMP)/ap-kag.out; exit 1; }
-	@python3 -c 'import re,sys; docs=open("$(VERIFY_TMP)/ap-kag.out").read().split("\n---\n"); hr=[d for d in docs if "kind: HelmRelease" in d and re.search(r"^  name: kagent$$", d, re.M)]; sys.exit("FAIL: kagent HelmRelease not rendered") if not hr else None; waived=[re.search(r"^  name: (.*)$$", d, re.M).group(1) for d in docs if "kind: HelmRelease" in d and "disableWait: true" in d]; sys.exit("FAIL: a component install no longer waits for its workload: "+", ".join(waived)+" (kagent and substrate depend on the connectivity release, whose hooks mint what their pods start against, so every install waits)") if waived else print("ok: every component install waits for its workload (no install.disableWait)")'
+	@python3 -c 'import re,sys; docs=open("$(VERIFY_TMP)/ap-kag.out").read().split("\n---\n"); hr=[d for d in docs if "kind: HelmRelease" in d and re.search(r"^  name: kagent$$", d, re.M)]; sys.exit("FAIL: kagent HelmRelease not rendered") if not hr else None; waived=[re.search(r"^  name: (.*)$$", d, re.M).group(1) for d in docs if "kind: HelmRelease" in d and "disableWait: true" in d and not (re.search(r"^  name: muster$$", d, re.M) and "gatewayIdentity:" in d) and not re.search(r"^  name: default-agent$$", d, re.M)]; sys.exit("FAIL: a component install no longer waits for its workload: "+", ".join(waived)+" (kagent and substrate depend on the connectivity release, whose hooks mint what their pods start against, so every install waits)") if waived else print("ok: every component install waits for its workload (no install.disableWait), but the default agent'"'"'s, whose Agent reports its own readiness (components.default-agent.disableWait), and muster while its credential provider mounts the certificates of a substrate release not Ready yet (giantswarm/agent-platform#1107)")'
 	@echo "ok: flux render"
 	@echo "--> agentgateway 2.x wiring: forwarded values are FLAT and carry no umbrella-only key"
 	@./tests/verify-agentgateway-wiring.py $(VERIFY_TMP)/ap-flux.out
@@ -560,16 +566,21 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	@echo "ok: agentgateway 2.x wiring"
 	@echo "--> the kagent line's wiring: kagent + kagent-crds on the line's release range, one build (tag + Harness digest), flat forwarded values with no umbrella-only or retired key"
 	@./tests/verify-kagent-wiring.py $(VERIFY_TMP)/ap-flux.out
+	@echo "--> drift detection leaves the pod-certificate workloads' volumes to Helm (helm-controller before 1.4 strips podCertificate, giantswarm/agent-platform#879)"
+	@HELM="$(HELM)" ./tests/verify-drift-podcertificate.py $(CHART_DIR)
 	@if $(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent-crds.enabled=false >$(VERIFY_TMP)/ap-kag-crds.out 2>&1; then \
 		echo "FAIL: kagent on with kagent-crds off rendered; the controller would run without its CRDs"; exit 1; \
 	elif ! grep -q "components.kagent-crds.enabled is not" $(VERIFY_TMP)/ap-kag-crds.out; then \
 		echo "FAIL: the kagent-crds guard failed for the wrong reason"; cat $(VERIFY_TMP)/ap-kag-crds.out; exit 1; \
 	else echo "ok: kagent on without kagent-crds is refused"; fi
 	@echo "ok: the kagent line's wiring"
-	@echo "--> the substrate release fits a cold atelet roll: spec.timeout 15m and three upgrade attempts; every other child on the default timeout and gitops.retries"
+	@echo "--> the substrate release fits a cold atelet roll (spec.timeout 15m) and retries a failed upgrade every 5m instead of rolling back (RetryOnFailure, no remediation; giantswarm/agent-platform#1367); every other child on the default timeout and gitops.retries"
 	@python3 tests/verify-helmrelease-timeout.py $(VERIFY_TMP)/ap-kag.out
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent.enabled=true --set gitops.retries=0 >$(VERIFY_TMP)/ap-hr-retries.out 2>&1 || { cat $(VERIFY_TMP)/ap-hr-retries.out; exit 1; }
 	@python3 tests/verify-helmrelease-timeout.py $(VERIFY_TMP)/ap-hr-retries.out 0
+	@echo "--> components.substrate.upgradeStrategy=null brings back rollback remediation on gitops.retries (UPGRADE.md's opt-out)"
+	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml $(ENGINE_OFF) --set components.kagent.enabled=true --set components.substrate.upgradeStrategy=null >$(VERIFY_TMP)/ap-hr-remediate.out 2>&1 || { cat $(VERIFY_TMP)/ap-hr-remediate.out; exit 1; }
+	@python3 tests/verify-helmrelease-timeout.py $(VERIFY_TMP)/ap-hr-remediate.out 5 remediate
 	@echo "--> PURE app-of-apps (engine off): root emits ONLY OCIRepository + HelmRelease as release objects (no raw CRs, no hook)"
 	@python3 -c 'import re,sys; docs=open("$(VERIFY_TMP)/ap-flux.out").read().split("\n---\n"); bad=[re.search(r"^kind: (\S+)$$", d, re.M).group(1) for d in docs if re.search(r"^kind: ", d, re.M) and "helm.sh/hook:" not in d and not re.search(r"^kind: (OCIRepository|HelmRelease)$$", d, re.M)]; sys.exit("FAIL: root rendered a non-app-of-apps kind: " + ", ".join(bad)) if bad else print("ok: pure renderer (only OCIRepository/HelmRelease besides the hooks)")'
 	@echo "--> Flux is the only engine: the render carries no argoproj.io object"
@@ -644,7 +655,7 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	elif ! grep -q 'gateway.parameters.dataPlaneEnv' $(VERIFY_TMP)/ap-sym-neg-conn.out; then \
 		echo "FAIL: the symmetry check failed for the wrong reason"; cat $(VERIFY_TMP)/ap-sym-neg-conn.out; exit 1; \
 	else echo "ok: a nested meta key the connectivity schema lacks fails, naming gateway.parameters.dataPlaneEnv"; fi
-	@echo "--> mirrored defaults: the meta chart's copy of every networkPolicy fqdns / cidrs list and port, of every leaf of the modelServing namespace, serving, cache, policies, prepull, modelImages and imageVerification blocks of the clusterManager prewarmPriorityClass block and of the agentgateway data plane's resource budget, equals the connectivity chart's default — the forwarded copy shadows the child's (#522, #525, #537, #539, #545, #551, #552, #565)"
+	@echo "--> mirrored defaults: the meta chart's copy of every networkPolicy fqdns / cidrs list and port, of every leaf of the modelServing namespace, serving, cache, policies, prepull, modelImages and imageVerification blocks of the clusterManager prewarmPriorityClass block, of the agentgateway data plane's resource budget and of kagent's MCP server registration, equals the connectivity chart's default — the forwarded copy shadows the child's (#522, #525, #537, #539, #545, #551, #552, #565)"
 	@python3 tests/verify-mirrored-values.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "--> the mirrored-defaults check has teeth: a meta prewarm PriorityClass under another name fails it, naming the path"
 	@python3 -c 'import yaml; v=yaml.safe_load(open("$(CHART_DIR)/values.yaml")); v["clusterManager"]["prewarmPriorityClass"]["name"]="other-placeholder"; yaml.safe_dump(v, open("$(VERIFY_TMP)/ap-mirror-meta-pc.yaml", "w"))'
@@ -653,6 +664,13 @@ verify-meta: ## Assert the app-of-apps meta-package render (pure renderer with t
 	elif ! grep -q 'clusterManager.prewarmPriorityClass.name' $(VERIFY_TMP)/ap-mirror-neg-pc.out; then \
 		echo "FAIL: the mirrored-defaults check failed for the wrong reason"; cat $(VERIFY_TMP)/ap-mirror-neg-pc.out; exit 1; \
 	else echo "ok: a mirrored class name that differs fails, naming clusterManager.prewarmPriorityClass.name"; fi
+	@echo "--> the mirrored-defaults check has teeth: a meta kagent MCP description reworded in one chart only fails it, naming the path"
+	@python3 -c 'import yaml; v=yaml.safe_load(open("$(CHART_DIR)/values.yaml")); v["kagent"]["controllerRoute"]["mcp"]["description"]="Reworded"; yaml.safe_dump(v, open("$(VERIFY_TMP)/ap-mirror-meta-kagent.yaml", "w"))'
+	@if python3 tests/verify-mirrored-values.py $(CHART_DIR) $(CONNECTIVITY_DIR) --meta-values $(VERIFY_TMP)/ap-mirror-meta-kagent.yaml >$(VERIFY_TMP)/ap-mirror-neg-kagent.out 2>&1; then \
+		echo "FAIL: the mirrored-defaults check passed a meta chart whose kagent.controllerRoute.mcp.description differs (every installation would render the meta chart's copy)"; exit 1; \
+	elif ! grep -q 'kagent.controllerRoute.mcp.description' $(VERIFY_TMP)/ap-mirror-neg-kagent.out; then \
+		echo "FAIL: the mirrored-defaults check failed for the wrong reason"; cat $(VERIFY_TMP)/ap-mirror-neg-kagent.out; exit 1; \
+	else echo "ok: a mirrored kagent MCP description that differs fails, naming kagent.controllerRoute.mcp.description"; fi
 	@echo "--> the mirrored-defaults check has teeth: a meta env list short of its entry fails it, naming the path"
 	@python3 -c 'import yaml; v=yaml.safe_load(open("$(CHART_DIR)/values.yaml")); v["modelServing"]["policies"]["env"].pop(); yaml.safe_dump(v, open("$(VERIFY_TMP)/ap-mirror-meta-env.yaml", "w"))'
 	@if python3 tests/verify-mirrored-values.py $(CHART_DIR) $(CONNECTIVITY_DIR) --meta-values $(VERIFY_TMP)/ap-mirror-meta-env.yaml >$(VERIFY_TMP)/ap-mirror-neg-env.out 2>&1; then \
@@ -856,67 +874,11 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	elif ! grep -q "is already taken by the http listener" $(VERIFY_TMP)/vl-port.out; then \
 		echo "FAIL: the port-collision guard failed for the wrong reason"; cat $(VERIFY_TMP)/vl-port.out; exit 1; \
 	else echo "ok: port-collision guard"; fi
-	@echo "--> the CI scenario renders, and a chart-owned ModelConfig can ride the listener"
+	@echo "--> the CI scenario renders"
 	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >$(VERIFY_TMP)/vl-ci.out 2>&1 || { cat $(VERIFY_TMP)/vl-ci.out; exit 1; }
-	@grep -A3 'anthropic:' $(VERIFY_TMP)/vl-ci.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: a chart-owned ModelConfig does not reach the listener; that agent would bypass it"; exit 1; }
-	@echo "ok: CI scenario"
-	@echo "--> a ModelConfig that names no baseUrl rides the listener"
-	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' || { echo "FAIL: an entry with no baseUrl stayed direct; a new model would be unmetered by default"; exit 1; }
-	@echo "ok: routed by default"
-	@echo "--> an explicit baseUrl wins (the escape hatch), and an entry for another provider stays direct"
-	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out | grep -q 'baseUrl: "https://api.anthropic.com"' || { echo "FAIL: an explicit baseUrl was overwritten by the listener default; a model could never leave the gateway"; exit 1; }
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].provider=Mistral' >$(VERIFY_TMP)/vl-other.out 2>&1 || { cat $(VERIFY_TMP)/vl-other.out; exit 1; }
-	@if awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-other.out | grep -q 'baseUrl:'; then \
-		echo "FAIL: a model of a provider no llmRouting.models entry serves was pointed at the listener; it would reach the wrong upstream"; exit 1; \
-	else echo "ok: explicit URL and foreign provider"; fi
-	@echo "--> an entry whose provider has no baseUrl in ModelConfigSpec fails the render, naming the entry"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].provider=Ollama' >$(VERIFY_TMP)/vl-nourl.out 2>&1; then \
-		echo "FAIL: a baseUrl rendered under a provider block the CRD prunes; the model would stay direct in silence"; exit 1; \
-	else grep -q 'anthropic-opus-direct' $(VERIFY_TMP)/vl-nourl.out || { cat $(VERIFY_TMP)/vl-nourl.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
-	@echo "ok: provider without a baseUrl"
-	@echo "--> a non-Anthropic entry's baseUrl goes under the CRD's block key (openAI), never the lower-cased provider"
-	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out | grep -A1 '^  openAI:$$' | grep -q 'baseUrl: "https://api.openai.com/v1"' || { echo "FAIL: the OpenAI entry's baseUrl is not under spec.openAI; the API server would prune it and the model would stay direct in silence"; exit 1; }
-	@if grep -qE '^  (openai|sapaicore):$$' $(VERIFY_TMP)/vl-ci.out; then echo "FAIL: a lower-cased provider block rendered; the CRD knows openAI and sapAICore only"; exit 1; fi
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set-json 'llmRouting.models=[{"name":"openai","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"gpt-*"}]' --set 'kagent.modelConfigs[0].provider=OpenAI' >$(VERIFY_TMP)/vl-openai-routed.out 2>&1 || { cat $(VERIFY_TMP)/vl-openai-routed.out; exit 1; }
-	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-openai-routed.out | grep -A1 '^  openAI:$$' | grep -q 'baseUrl: "http://agentgateway.default.svc:8081/v1"' || { echo "FAIL: the routed default for an OpenAI listener is not spec.openAI.baseUrl ending in /v1; an OpenAI client appends /responses to it and would miss the listener's routes"; exit 1; }
-	@echo "ok: openAI block key, explicit and routed"
-	@echo "--> a codex model rides the listener's OpenAI entry: the Responses API format, the listener URL with /v1, nothing the codex compiler refuses"
-	@awk '/name: "openai-gpt-codex"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out >$(VERIFY_TMP)/vl-codex.out
-	@grep -A2 '^  openAI:$$' $(VERIFY_TMP)/vl-codex.out | grep -q 'apiFormat: responses' || { cat $(VERIFY_TMP)/vl-codex.out; echo "FAIL: the codex ModelConfig carries no openAI.apiFormat: responses; the codex compiler refuses it"; exit 1; }
-	@grep -A2 '^  openAI:$$' $(VERIFY_TMP)/vl-codex.out | grep -q 'baseUrl: "http://agentgateway.default.svc:8081/v1"' || { cat $(VERIFY_TMP)/vl-codex.out; echo "FAIL: the codex ModelConfig does not reach the listener at /v1; its calls would bypass the metering and the rate limits"; exit 1; }
-	@if grep -qE '^  (defaultHeaders|tls|apiKeyPassthrough):|maxTokens|maxCompletionTokens' $(VERIFY_TMP)/vl-codex.out; then cat $(VERIFY_TMP)/vl-codex.out; echo "FAIL: the codex ModelConfig carries a field the codex compiler refuses"; exit 1; fi
+	@if grep -q '^kind: ModelConfig$$' $(VERIFY_TMP)/vl-ci.out; then echo "FAIL: the chart rendered a ModelConfig; an installation declares its own"; exit 1; fi
 	@awk '/^kind: AgentgatewayModel$$/{f=1} f&&/^---/{f=0} f' $(VERIFY_TMP)/vl-ci.out | grep -q '^  provider: OpenAI$$' || { echo "FAIL: no OpenAI AgentgatewayModel on the listener; a codex call has no Responses upstream"; exit 1; }
-	@echo "ok: codex ModelConfig"
-	@echo "--> guard: apiFormat on a provider without it, or outside the CRD's enum, fails the render naming the entry"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].apiFormat=responses' >$(VERIFY_TMP)/vl-fmt.out 2>&1; then \
-		echo "FAIL: apiFormat rendered on an Anthropic entry; the API server would prune it in silence"; exit 1; \
-	else grep -q 'anthropic-sonnet' $(VERIFY_TMP)/vl-fmt.out || { cat $(VERIFY_TMP)/vl-fmt.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[3].apiFormat=Responses' >$(VERIFY_TMP)/vl-fmt.out 2>&1; then \
-		echo "FAIL: apiFormat outside the CRD's enum rendered; the API server refuses it at admission"; exit 1; \
-	else grep -q 'openai-gpt-codex' $(VERIFY_TMP)/vl-fmt.out || { cat $(VERIFY_TMP)/vl-fmt.out; echo "FAIL: the failure does not name the entry"; exit 1; }; fi
-	@echo "ok: apiFormat guards"
-	@echo "--> a ChatGPT login (credentialType chatgptOAuth): no apiKeySecretKey, the Responses API, off the listener"
-	@awk '/name: "openai-chatgpt-codex"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-ci.out >$(VERIFY_TMP)/vl-chatgpt.out
-	@grep -q '^  apiKeySecret: "kagent-chatgpt-login"$$' $(VERIFY_TMP)/vl-chatgpt.out || { cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig does not name its login Secret"; exit 1; }
-	@if grep -q 'apiKeySecretKey' $(VERIFY_TMP)/vl-chatgpt.out; then cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig carries apiKeySecretKey; the CRD refuses it at admission"; exit 1; fi
-	@grep -A3 '^  openAI:$$' $(VERIFY_TMP)/vl-chatgpt.out | grep -q 'credentialType: chatgptOAuth' || { cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig carries no openAI.credentialType: chatgptOAuth"; exit 1; }
-	@grep -A3 '^  openAI:$$' $(VERIFY_TMP)/vl-chatgpt.out | grep -q 'apiFormat: responses' || { cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig carries no openAI.apiFormat: responses"; exit 1; }
-	@if grep -q 'baseUrl:' $(VERIFY_TMP)/vl-chatgpt.out; then cat $(VERIFY_TMP)/vl-chatgpt.out; echo "FAIL: the ChatGPT login ModelConfig was pointed at the listener, whose OpenAI route serves the OpenAI API, not the ChatGPT Codex backend"; exit 1; fi
-	@echo "ok: ChatGPT login ModelConfig"
-	@echo "--> guard: a ChatGPT login on another provider, with apiKeySecretKey, without apiFormat responses, or a credentialType outside the CRD's enum fails the render naming the entry"
-	@for args in "kagent.modelConfigs[4].provider=Anthropic" "kagent.modelConfigs[4].apiKeySecretKey=OPENAI_API_KEY" "kagent.modelConfigs[4].apiFormat=chatCompletions" "kagent.modelConfigs[4].apiFormat=" "kagent.modelConfigs[4].credentialType=ChatGPTOAuth"; do \
-		if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set "$$args" >$(VERIFY_TMP)/vl-chatgpt-guard.out 2>&1; then \
-			echo "FAIL: $$args rendered a ChatGPT login ModelConfig the CRD or the codex compiler refuses"; exit 1; \
-		fi; \
-		grep -q 'openai-chatgpt-codex' $(VERIFY_TMP)/vl-chatgpt-guard.out || { cat $(VERIFY_TMP)/vl-chatgpt-guard.out; echo "FAIL: $$args: the failure does not name the entry"; exit 1; }; \
-	done
-	@echo "ok: ChatGPT login guards"
-	@echo "--> guard: a provider outside the CRD's enum fails the render, naming the entry and the enum"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].provider=openai' >$(VERIFY_TMP)/vl-enum.out 2>&1; then \
-		echo "FAIL: provider 'openai' rendered; the API server refuses it at admission (the enum is case-sensitive) after the chart said nothing"; exit 1; \
-	elif ! grep -q 'anthropic-sonnet' $(VERIFY_TMP)/vl-enum.out || ! grep -q 'Anthropic, OpenAI, AzureOpenAI, Ollama, Gemini, GeminiVertexAI, AnthropicVertexAI, Bedrock, SAPAICore, Foundry' $(VERIFY_TMP)/vl-enum.out; then \
-		cat $(VERIFY_TMP)/vl-enum.out; echo "FAIL: the enum guard does not name the entry and the CRD's enum"; exit 1; \
-	else echo "ok: enum guard"; fi
+	@echo "ok: CI scenario"
 	@echo "--> the MutatingAdmissionPolicy writes the provider's own block name"
 	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set-json 'llmRouting.models=[{"name":"openai","provider":"OpenAI","baseURL":"https://api.openai.com/v1","match":"gpt-*"}]' >$(VERIFY_TMP)/vl-openai.out 2>&1 || { cat $(VERIFY_TMP)/vl-openai.out; exit 1; }
 	@grep -q 'object.spec.openAI.baseUrl' $(VERIFY_TMP)/vl-openai.out || { echo "FAIL: the policy reads the lower-cased provider name, not the ModelConfigSpec block; every CEL evaluation would error"; exit 1; }
@@ -928,7 +890,7 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 		echo "FAIL: the policy rendered without the GA API version; on 1.34/1.35 it would exist and mutate nothing"; exit 1; \
 	fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy >$(VERIFY_TMP)/vl-map.out 2>&1 || { cat $(VERIFY_TMP)/vl-map.out; exit 1; }
-	@grep -q 'kind: MutatingAdmissionPolicy$$' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: no MutatingAdmissionPolicy on a 1.36 API server; a ModelConfig created outside the chart would be unmetered"; exit 1; }
+	@grep -q 'kind: MutatingAdmissionPolicy$$' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: no MutatingAdmissionPolicy on a 1.36 API server; a ModelConfig without a baseUrl would be unmetered"; exit 1; }
 	@grep -q 'kind: MutatingAdmissionPolicyBinding' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy has no binding; it matches nothing"; exit 1; }
 	@grep -q 'failurePolicy: Ignore' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy fails closed; a CEL error would block every ModelConfig write"; exit 1; }
 	@grep -q 'kubernetes.io/metadata.name: kagent' $(VERIFY_TMP)/vl-map.out || { echo "FAIL: the policy is not scoped to the kagent namespace"; exit 1; }
@@ -938,11 +900,6 @@ verify-llm-routing: ## Assert the llmRouting toggle: off renders nothing of the 
 	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -a admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set llmRouting.modelConfigPolicy.enabled=false 2>/dev/null | grep -q 'kind: MutatingAdmissionPolicy'; then \
 		echo "FAIL: llmRouting.modelConfigPolicy.enabled=false still rendered the policy"; exit 1; \
 	else echo "ok: admission policy gated on the GA group and its own toggle"; fi
-	@echo "--> the meta chart forwards the cutover value to the kagent release"
-	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set kagent.providers.anthropic.config.baseUrl=http://agentgateway.default.svc:8081 >$(VERIFY_TMP)/vl-meta.out 2>&1 || { cat $(VERIFY_TMP)/vl-meta.out; exit 1; }
-	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: kagent$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vl-meta.out >$(VERIFY_TMP)/vl-meta-kagent.out
-	@grep -A8 '^    providers:$$' $(VERIFY_TMP)/vl-meta-kagent.out | grep -q 'baseUrl: http://agentgateway.default.svc:8081' || { echo "FAIL: the cutover value never reaches the kagent HelmRelease (flat, kagent 0.2.0+: providers.anthropic.config.baseUrl at the values root); the default ModelConfig would stay direct"; exit 1; }
-	@echo "ok: cutover forwarded"
 	@echo "All llmRouting behaviors verified."
 
 # The names of the AgentgatewayPolicy documents of a render that carry a
@@ -1372,78 +1329,6 @@ verify-access-log: ## Assert the data plane's access log fields (giantswarm/gian
 	@for f in agent_instance_id request_id; do grep -A12 '^      accessLog:$$' $(VERIFY_TMP)/val-meta-conn.out | grep -q "^          $$f:$$" || { echo "FAIL: the meta chart does not forward gateway.accessLog.attributes.$$f to the connectivity release"; exit 1; }; done
 	@echo "ok: $@"
 
-# Anthropic prompt caching (giantswarm/giantswarm#37788; the kagent line's carried patch kagent-dev/kagent#2788).
-.PHONY: verify-prompt-caching
-verify-prompt-caching: ## Assert Anthropic prompt caching: the meta chart forwards kagent.providers.anthropic.config.promptCaching: true + cacheTTL to the kagent release (the default ModelConfig) and to the connectivity release; the connectivity chart's Anthropic catalog entries inherit both in the one provider block next to the listener baseUrl, an entry's own keys win (false included), an OpenAI entry gets nothing, a Bedrock entry takes its own keys under spec.bedrock, the chart alone renders nothing; a cacheTTL outside the CRD's enum and the keys on a provider without them fail the render naming the entry.
-	@echo "====> $@"
-	@echo "--> the meta chart forwards promptCaching + cacheTTL to the kagent release and to the connectivity release"
-	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml >$(VERIFY_TMP)/vpc-meta.out 2>&1 || { cat $(VERIFY_TMP)/vpc-meta.out; exit 1; }
-	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: kagent$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vpc-meta.out >$(VERIFY_TMP)/vpc-meta-kagent.out
-	@grep -A14 '^    providers:$$' $(VERIFY_TMP)/vpc-meta-kagent.out | grep -q 'promptCaching: true' || { echo "FAIL: the kagent HelmRelease values carry no providers.anthropic.config.promptCaching: true; the default ModelConfig would stay uncached"; exit 1; }
-	@grep -A14 '^    providers:$$' $(VERIFY_TMP)/vpc-meta-kagent.out | grep -q 'cacheTTL: 5m' || { echo "FAIL: the kagent HelmRelease values carry no providers.anthropic.config.cacheTTL"; exit 1; }
-	@awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-platform-connectivity$$/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vpc-meta.out >$(VERIFY_TMP)/vpc-meta-conn.out
-	@grep -q 'promptCaching: true' $(VERIFY_TMP)/vpc-meta-conn.out || { echo "FAIL: the connectivity HelmRelease values carry no providers.anthropic.config.promptCaching; the catalog's Anthropic entries would inherit nothing"; exit 1; }
-	@echo "ok: forwarded to both releases"
-	@echo "--> connectivity: an Anthropic entry inherits the platform default in one block next to the listener baseUrl; an OpenAI entry gets nothing"
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >$(VERIFY_TMP)/vpc-ci.out 2>&1 || { cat $(VERIFY_TMP)/vpc-ci.out; exit 1; }
-	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vpc-ci.out >$(VERIFY_TMP)/vpc-sonnet.out
-	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' $(VERIFY_TMP)/vpc-sonnet.out && grep -q '^    promptCaching: true$$' $(VERIFY_TMP)/vpc-sonnet.out && grep -q '^    cacheTTL: 5m$$' $(VERIFY_TMP)/vpc-sonnet.out || { cat $(VERIFY_TMP)/vpc-sonnet.out; echo "FAIL: an Anthropic entry without its own keys did not inherit promptCaching: true / cacheTTL: 5m under spec.anthropic next to the listener baseUrl"; exit 1; }
-	@if [ "$$(grep -c '^  anthropic:$$' $(VERIFY_TMP)/vpc-sonnet.out)" != "1" ]; then cat $(VERIFY_TMP)/vpc-sonnet.out; echo "FAIL: the anthropic block renders more than once (baseUrl and the cache keys share one block; a second would overwrite the first)"; exit 1; fi
-	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vpc-ci.out >$(VERIFY_TMP)/vpc-openai.out
-	@if grep -qE 'promptCaching|cacheTTL' $(VERIFY_TMP)/vpc-openai.out; then cat $(VERIFY_TMP)/vpc-openai.out; echo "FAIL: an OpenAI entry carries the Anthropic cache keys; the API server would prune them"; exit 1; fi
-	@echo "ok: inherited by Anthropic entries only"
-	@echo "--> an entry's own keys win, false included"
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].promptCaching=false' --set 'kagent.modelConfigs[1].cacheTTL=1h' >$(VERIFY_TMP)/vpc-own.out 2>&1 || { cat $(VERIFY_TMP)/vpc-own.out; exit 1; }
-	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vpc-own.out >$(VERIFY_TMP)/vpc-opus.out
-	@grep -q '^    promptCaching: false$$' $(VERIFY_TMP)/vpc-opus.out && grep -q '^    cacheTTL: 1h$$' $(VERIFY_TMP)/vpc-opus.out || { cat $(VERIFY_TMP)/vpc-opus.out; echo "FAIL: an entry's own promptCaching: false / cacheTTL: 1h did not win over the platform default"; exit 1; }
-	@echo "ok: own keys win"
-	@echo "--> the connectivity chart alone (no platform default): nothing renders"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"plain","provider":"Anthropic","model":"m","apiKeySecret":"s","apiKeySecretKey":"k"}]' >$(VERIFY_TMP)/vpc-plain.out 2>&1 || { cat $(VERIFY_TMP)/vpc-plain.out; exit 1; }
-	@if grep -qE 'promptCaching|cacheTTL' $(VERIFY_TMP)/vpc-plain.out; then cat $(VERIFY_TMP)/vpc-plain.out; echo "FAIL: the connectivity chart invents a caching default of its own; the meta chart owns it"; exit 1; fi
-	@echo "ok: nothing by default"
-	@echo "--> a Bedrock entry takes its own keys under spec.bedrock (no baseUrl there)"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"bedrock","provider":"Bedrock","model":"m","apiKeySecret":"s","promptCaching":true,"cacheTTL":"1h"}]' >$(VERIFY_TMP)/vpc-bedrock.out 2>&1 || { cat $(VERIFY_TMP)/vpc-bedrock.out; exit 1; }
-	@grep -A2 '^  bedrock:$$' $(VERIFY_TMP)/vpc-bedrock.out | grep -q 'promptCaching: true' || { cat $(VERIFY_TMP)/vpc-bedrock.out; echo "FAIL: a Bedrock entry's promptCaching is not under spec.bedrock"; exit 1; }
-	@echo "ok: bedrock block"
-	@echo "--> guards: a cacheTTL outside the CRD's enum, and the keys on a provider without them, fail naming the entry"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[0].cacheTTL=10m' >$(VERIFY_TMP)/vpc-ttl.out 2>&1; then \
-		echo "FAIL: cacheTTL 10m rendered; the CRD's enum is 5m, 1h and the API server refuses it after the render said nothing"; exit 1; \
-	elif ! grep -q 'anthropic-sonnet' $(VERIFY_TMP)/vpc-ttl.out || ! grep -q '5m, 1h' $(VERIFY_TMP)/vpc-ttl.out; then cat $(VERIFY_TMP)/vpc-ttl.out; echo "FAIL: the cacheTTL guard does not name the entry and the enum"; exit 1; \
-	else echo "ok: cacheTTL guard"; fi
-	@if $(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[2].promptCaching=true' >$(VERIFY_TMP)/vpc-foreign.out 2>&1; then \
-		echo "FAIL: promptCaching on an OpenAI entry rendered; the API server would prune it and the model would stay uncached in silence"; exit 1; \
-	elif ! grep -q 'openai-gpt-direct' $(VERIFY_TMP)/vpc-foreign.out; then cat $(VERIFY_TMP)/vpc-foreign.out; echo "FAIL: the provider guard does not name the entry"; exit 1; \
-	else echo "ok: provider guard"; fi
-	@echo "All prompt-caching behaviors verified."
-
-# The ModelConfig output bound (giantswarm/agent-platform#702).
-.PHONY: verify-max-tokens
-verify-max-tokens: ## Assert the ModelConfig output bound: the connectivity chart's Anthropic catalog entries inherit kagent.providers.anthropic.config.maxTokens in the one provider block next to the listener baseUrl, an entry's own maxTokens wins, an OpenAI entry takes its own under spec.openAI and inherits nothing, the chart alone renders nothing; maxTokens on a provider without the field fails the render naming the entry.
-	@echo "====> $@"
-	@echo "--> an Anthropic entry inherits the platform bound in one block next to the listener baseUrl; an OpenAI entry inherits nothing"
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml >$(VERIFY_TMP)/vmt-ci.out 2>&1 || { cat $(VERIFY_TMP)/vmt-ci.out; exit 1; }
-	@awk '/name: "anthropic-sonnet"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vmt-ci.out >$(VERIFY_TMP)/vmt-sonnet.out
-	@grep -q 'baseUrl: "http://agentgateway.default.svc:8081"' $(VERIFY_TMP)/vmt-sonnet.out && grep -q '^    maxTokens: 32000$$' $(VERIFY_TMP)/vmt-sonnet.out || { cat $(VERIFY_TMP)/vmt-sonnet.out; echo "FAIL: an Anthropic entry without its own maxTokens did not inherit 32000 under spec.anthropic next to the listener baseUrl; it would stop at kagent's 8192"; exit 1; }
-	@if [ "$$(grep -c '^  anthropic:$$' $(VERIFY_TMP)/vmt-sonnet.out)" != "1" ]; then cat $(VERIFY_TMP)/vmt-sonnet.out; echo "FAIL: the anthropic block renders more than once"; exit 1; fi
-	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vmt-ci.out >$(VERIFY_TMP)/vmt-openai.out
-	@if grep -q 'maxTokens' $(VERIFY_TMP)/vmt-openai.out; then cat $(VERIFY_TMP)/vmt-openai.out; echo "FAIL: an OpenAI entry inherited the Anthropic default's maxTokens"; exit 1; fi
-	@echo "ok: inherited by Anthropic entries only"
-	@echo "--> an entry's own maxTokens wins; an OpenAI entry's own lands under spec.openAI"
-	@$(HELM) template t $(CONNECTIVITY_DIR) -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml --set 'kagent.modelConfigs[1].maxTokens=64000' --set 'kagent.modelConfigs[2].maxTokens=16000' >$(VERIFY_TMP)/vmt-own.out 2>&1 || { cat $(VERIFY_TMP)/vmt-own.out; exit 1; }
-	@awk '/name: "anthropic-opus-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vmt-own.out | grep -q '^    maxTokens: 64000$$' || { cat $(VERIFY_TMP)/vmt-own.out; echo "FAIL: an entry's own maxTokens 64000 did not win over the platform bound"; exit 1; }
-	@awk '/name: "openai-gpt-direct"/{f=1} f&&/^---/{exit} f' $(VERIFY_TMP)/vmt-own.out | grep -A3 '^  openAI:$$' | grep -q 'maxTokens: 16000' || { cat $(VERIFY_TMP)/vmt-own.out; echo "FAIL: an OpenAI entry's own maxTokens is not under spec.openAI"; exit 1; }
-	@echo "ok: own maxTokens wins"
-	@echo "--> the connectivity chart alone (no platform bound): nothing renders"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"plain","provider":"Anthropic","model":"m","apiKeySecret":"s","apiKeySecretKey":"k"}]' >$(VERIFY_TMP)/vmt-plain.out 2>&1 || { cat $(VERIFY_TMP)/vmt-plain.out; exit 1; }
-	@if grep -q 'maxTokens' $(VERIFY_TMP)/vmt-plain.out; then cat $(VERIFY_TMP)/vmt-plain.out; echo "FAIL: the connectivity chart invents a maxTokens of its own; the platform owns the bound"; exit 1; fi
-	@echo "ok: nothing by default"
-	@echo "--> guard: maxTokens on a provider without the field fails naming the entry"
-	@if $(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set kagent.namespaceOverride=kagent --set-json 'kagent.modelConfigs=[{"name":"gemini-bounded","provider":"Gemini","model":"m","apiKeySecret":"s","maxTokens":1000}]' >$(VERIFY_TMP)/vmt-foreign.out 2>&1; then \
-		echo "FAIL: maxTokens on a Gemini entry rendered; the API server would prune it"; exit 1; \
-	elif ! grep -q 'gemini-bounded' $(VERIFY_TMP)/vmt-foreign.out; then cat $(VERIFY_TMP)/vmt-foreign.out; echo "FAIL: the provider guard does not name the entry"; exit 1; \
-	else echo "ok: provider guard"; fi
-	@echo "All max-tokens behaviors verified."
-
 .PHONY: verify-engine
 verify-engine: ## Assert the bundled Flux engine's two shapes: engine off (pure renderer, no CRD/hook/operator/identity) and engine on (the eleven CRDs, operator, FluxInstance, agent-platform-flux on every HelmRelease, the teardown hooks at pre-delete and post-delete, resource-policy keep on exactly the engine objects they remove). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
@@ -1515,7 +1400,8 @@ verify-serving-teardown: ## Assert the serving slice's ordered teardown (giantsw
 	@echo "serving teardown verified."
 
 .PHONY: verify-preset-weights
-verify-preset-weights: ## Assert every shipped serving preset's requirements match the Hub: weightsGiB its checkpoint's size (giantswarm/agent-platform#535), minComputeCapability the GPU generation its weights need (giantswarm/agent-platform#832). Each preset's spec.model.id is sized the way model-manager sizes a fit — model.safetensors.index.json's metadata.total_size when it agrees with the shards it maps (a stale index is overruled by their sum), else the sum of the *.safetensors files — and passes at >= the Hub's size and <= 15 % above it; a preset the Hub cannot size fails. Its declared minComputeCapability is at or above what the checkpoint's quantization and dtype need, read the way model-manager's serve-time fit reads them (config.json, params.json for the mistral format, hf_quant_config.json for a ModelOpt mixed-precision checkpoint): FP8 or NVFP4 weights 8.9 (below it vLLM's weight-only Marlin fallback goes Ready and answers wrong), bf16 activations 8.0 (int4 and MXFP4 weights are dequantized to them), a CUTE_DSL_ARCH pin to Blackwell 10.0; a preset declaring none, or one the Hub cannot judge, fails. The three fixtures (tests/fixtures/serving-preset-*.yaml) are the negative controls and must verify as understated, overstated and floor-understated. Network: the Hub API.
+verify-preset-weights: ## Assert every shipped serving preset's requirements match the Hub: weightsGiB its checkpoint's size (giantswarm/agent-platform#535), minComputeCapability the GPU generation its weights need (giantswarm/agent-platform#832). Each preset's spec.model.id is sized the way model-manager sizes a fit — model.safetensors.index.json's metadata.total_size when it agrees with the shards it maps (a stale index is overruled by their sum), else the sum of the *.safetensors files — and passes at >= the Hub's size and <= 15 % above it; a preset the Hub cannot size fails. Its declared minComputeCapability is at or above what the checkpoint's quantization and dtype need, read the way model-manager's serve-time fit reads them (config.json, params.json for the mistral format, hf_quant_config.json for a ModelOpt mixed-precision checkpoint): FP8 weights 8.9 (below it the FP8 Marlin fallback answers wrong), pure NVFP4 weights 8.6 (the weight-only FP4 Marlin path proven on the A10G), mixed FP8+FP4 8.9, bf16 activations 8.0 (int4 and MXFP4 weights are dequantized to them), a CUTE_DSL_ARCH pin to Blackwell 10.0; a preset declaring none, or one the Hub cannot judge, fails. The three fixtures (tests/fixtures/serving-preset-*.yaml) are the negative controls and must verify as understated, overstated and floor-understated. Network: the Hub API.
+	@python3 tests/verify-preset-compute.py
 	@echo "====> $@ ($(CONNECTIVITY_DIR)/files/model-serving/presets)"
 	@python3 tests/verify-preset-weights.py $(CONNECTIVITY_DIR)/files/model-serving/presets
 	@python3 tests/verify-preset-weights.py --expect understated tests/fixtures/serving-preset-weights-understated.yaml
@@ -1546,7 +1432,7 @@ verify-gpu-operator: ## Assert the GPU operator component (giantswarm/agent-plat
 	@echo "GPU operator component verified."
 
 .PHONY: verify-cluster-manager
-verify-cluster-manager: ## Assert the cluster-manager component (giantswarm/agent-platform#316): components.cluster-manager off by default (no release, the roster says so, its two blocks held back from connectivity, nothing named cluster-manager in the connectivity render); on, ONE OCIRepository (the catalog's cluster-manager chart, >=0.22.0 <0.35.0) + ONE HelmRelease dependsOn muster with the block forwarded — the pinned Service name, the OAuth resource server acting as the caller, the muster registration with forwardToken and the kube-apiserver's audience, global injected, modelManager.namespace derived from the platform's namespace (an own value must agree) — and nothing else of the render moved but the roster entry and the two blocks; the connectivity chart renders the ingress (muster + probes), egress (DNS, the kube-apiserver, the identity provider, the workload clusters' API servers on their ports, the extra names and blocks) and muster-to policies in both flavors, none while the component is off; the prewarm placeholder's PriorityClass agent-platform-prewarm-placeholder (-1000, Never, not the global default) with the component on — the gpu-node-pool chart's default pool.prewarm.priorityClassName, one owner per installation (giantswarm/agent-platform#539) — none off or with clusterManager.prewarmPriorityClass.enabled false, name and value knobs; the guards (muster off, a missing identity input, a bad CIDR, no ports, a placeholder priority at or above 0 or fractional, a reserved or malformed class name); the target knob; the schema refuses a non-boolean toggle; the BOM pins the exact version and the pin reaches the OCIRepository. HELM selects the binary.
+verify-cluster-manager: ## Assert the cluster-manager component (giantswarm/agent-platform#316): components.cluster-manager off by default (no release, the roster says so, its two blocks held back from connectivity, nothing named cluster-manager in the connectivity render); on, ONE OCIRepository (the catalog's cluster-manager chart, >=0.22.0, uncapped) + ONE HelmRelease dependsOn muster with the block forwarded — the pinned Service name, the OAuth resource server acting as the caller, the muster registration with forwardToken and the kube-apiserver's audience, global injected, modelManager.namespace derived from the platform's namespace (an own value must agree) — and nothing else of the render moved but the roster entry and the two blocks; the connectivity chart renders the ingress (muster + probes), egress (DNS, the kube-apiserver, the identity provider, the workload clusters' API servers on their ports, the extra names and blocks) and muster-to policies in both flavors, none while the component is off; the prewarm placeholder's PriorityClass agent-platform-prewarm-placeholder (-1000, Never, not the global default) with the component on — the gpu-node-pool chart's default pool.prewarm.priorityClassName, one owner per installation (giantswarm/agent-platform#539) — none off or with clusterManager.prewarmPriorityClass.enabled false, name and value knobs; the guards (muster off, a missing identity input, a bad CIDR, no ports, a placeholder priority at or above 0 or fractional, a reserved or malformed class name); the target knob; the schema refuses a non-boolean toggle; the BOM pins the exact version and the pin reaches the OCIRepository. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-cluster-manager.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "cluster-manager component verified."
@@ -1563,7 +1449,7 @@ verify-toolchain-manager: ## Assert the toolchain-manager component (giantswarm/
 	@python3 tests/verify-toolchain-manager.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "toolchain-manager component verified."
 .PHONY: verify-chatgpt-personal-login
-verify-chatgpt-personal-login: ## Assert the wiring of a person's own ChatGPT login (giantswarm/giantswarm#38731): a kagent.modelConfigs[] entry with credentialType chatgptOAuth and no apiKeySecret derives muster's provider App chatgpt (flow chatgptDeviceCode) and kagent's installation provider chatgpt (chatgpt.com, /backend-api/codex/, Bearer) for the kagent and connectivity releases, own values stand, the installation's own login derives nothing, and muster 5.52.5 and kagent 1.24.0 take the values; the guards (muster's token encryption, its OAuth client, the credential provider, the kagent, kagent-crds and muster floors); the connectivity chart renders the model without apiKeySecret, as "ChatGPT (your subscription)", only beside the provider, and still requires apiFormat responses; the muster chart refuses the App without its encryption key. Network: gsoci.azurecr.io (the component charts). HELM selects the binary.
+verify-chatgpt-personal-login: ## Assert the wiring of a person's own ChatGPT login (giantswarm/giantswarm#38731): the platform's prerequisites derive muster's provider App chatgpt (flow chatgptDeviceCode) and kagent's installation provider chatgpt (chatgpt.com, /backend-api/codex/, Bearer) for the kagent release, own values stand, muster 5.52.5 and kagent 1.24.0 take the values, and without a prerequisite (muster's token encryption, its OAuth client, the credential provider, the kagent-crds and muster floors) nothing is derived; the muster chart refuses the App without its encryption key. Network: gsoci.azurecr.io (the component charts). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-chatgpt-personal-login.py $(CHART_DIR)
 	@echo "ChatGPT personal login verified."
@@ -1587,7 +1473,7 @@ verify-session-retention: ## Assert a workspace Session's directory lives as lon
 	@echo "session retention verified."
 
 .PHONY: verify-mcp-kubernetes-registration
-verify-mcp-kubernetes-registration: ## Assert the bundled mcp-kubernetes registration's three shapes (giantswarm/agent-platform#403): the family-less singleton mcp-kubernetes by default; with mcp-kubernetes.mcpServer.managementCluster a member of muster's kubernetes family as agent-platform-mcps renders one (<name>-mcp-kubernetes, the management-cluster label, spec.family {kubernetes, management_cluster}, url and auth unchanged); either shape carries mcp-kubernetes.mcpServer.displayName (Kubernetes, the kubernetes family's) as ui.giantswarm.io/display-name, none when empty; none with enabled false or with the component or muster off; a managementCluster that is not a DNS label fails naming the key; the meta chart forwards the block to connectivity and drops it from the mcp-kubernetes release. HELM selects the binary.
+verify-mcp-kubernetes-registration: ## Assert the bundled mcp-kubernetes registration's three shapes (giantswarm/agent-platform#403): the family-less singleton mcp-kubernetes by default; with mcp-kubernetes.mcpServer.managementCluster a member of muster's kubernetes family as agent-platform-mcps renders one (<name>-mcp-kubernetes, the management-cluster label, spec.family {kubernetes, management_cluster}, url and auth unchanged); either shape carries mcp-kubernetes.mcpServer.displayName (Kubernetes, the kubernetes family's) as ui.giantswarm.io/display-name and mcp-kubernetes.mcpServer.description as spec.description, none when empty, a description over the CRD's 500 characters failing naming the key; none with enabled false or with the component or muster off; a managementCluster that is not a DNS label fails naming the key; the meta chart forwards the block to connectivity and drops it from the mcp-kubernetes release. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-mcp-kubernetes-registration.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "mcp-kubernetes registration shapes verified."
@@ -1633,6 +1519,16 @@ verify-fast-links: ## Assert the fast-link input of the model serving layer (gia
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-fast-links.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 
+.PHONY: verify-default-agent
+verify-default-agent: ## Assert the default agent (components.default-agent, giantswarm/giantswarm#38970): one agent chart release in kagent while it, kagent and muster are on, with the derived values; no skills unstamped, every skill of skills/ pinned to the commit hack/stamp-release-commit.sh stamps into a packaged copy (the tag pipeline's step); the skill-manager (follows agent-manager, skillManager.sources with the platform source first, its MCP backend entry, agent-manager's egress) and skillManager.sources feeding the portal; agent-manager's skillManager.url from its floor, else the deprecated URL list; the portal's meta agents. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 tests/verify-default-agent.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+
+.PHONY: verify-skills
+verify-skills: ## Validate every skill of skills/ against what the agent runtime accepts, and that no SKILL.md lives elsewhere (scripts/validate_skills.py). Needs PyYAML.
+	@echo "====> $@"
+	@python3 scripts/validate_skills.py
+
 .PHONY: verify-gpu-pool
 verify-gpu-pool: ## Assert the GPU node pool input of the model serving layer (giantswarm/agent-platform#315): modelServing.gpuPool.taint tolerated by every published preset (the pool's entry first, a preset's equal entry once; Exists without a value, Equal with one), modelServing.gpuPool.nodeSelector merged under the presets' own (their keys win), both published as spec.gpuPool in the discovery ConfigMap model-manager >= 0.23.0 reads; an empty taint key renders no toleration and no taint, and the parsed serving render equals the default render with the pool's toleration taken out, object for object, but for the discovery block (both renders are the head's; a mismatch prints a unified diff); the guards (effect, key, string label values); the meta chart forwards the block. Fixture: ci/test-model-serving-gpu-pool-values.yaml. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
@@ -1655,6 +1551,11 @@ verify-labels: ## Assert every label value stays valid at the versions the chart
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-labels.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "label values verified."
+
+.PHONY: verify-team-annotation
+verify-team-annotation: ## Assert every HelmRelease and OCIRepository of the meta render carries the annotation application.giantswarm.io/team with the chart's team (Chart.yaml io.giantswarm.application.team), substrate and substrate-crds included, which team-stamper's mapping does not list: kube-state-metrics reads it into gotk_resource_info's team label, which routes the alerts on them. Engine on (the self release too) and off. The charts that apps-to-teams-mapping gives to another team (cloudnative-pg, gpu-operator, gateway-api-crds: components.<name>.teamAnnotation false) carry none from the chart when on, so team-stamper's mapped team stands. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@HELM="$(HELM)" python3 tests/verify-team-annotation.py $(CHART_DIR)
 
 .PHONY: verify-components
 verify-components: ## Assert the roster: the standalone chart's extras (backstage, mcp-kubernetes, cloudnative-pg, the kserve charts) off by default, sources and ranges, CRD-before-CR dependsOn, BOM pins, the forwarded tree validates against the connectivity schema; the kagent line and the managers on their ranges, the managers pinned to the line's kagent API version, kagent-crds following kagent; the connectivity range holds its own major.
@@ -1757,6 +1658,12 @@ verify-mcp-backend-netpol: ## Assert the in-cluster MCP backends' ingress (netwo
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) -f tests/fixtures/mcp-backends-values.yaml --set networkPolicy.flavor=kubernetes >$(VERIFY_TMP)/vmbn-muster.out 2>&1 || { cat $(VERIFY_TMP)/vmbn-muster.out; exit 1; }
 	@python3 tests/verify-mcp-backend-netpol.py --muster-egress $(VERIFY_TMP)/vmbn-muster.out
 
+.PHONY: verify-envoy-peers
+verify-envoy-peers: ## Assert every network policy that admits or reaches the Envoy edge names the owning Gateway of its pods (giantswarm/agent-platform#1292): over the portal (its own route, and in the kubernetes flavour the app-config's hostnames), the actors' egress gateway, kagent's oauth2-proxy and the workspace manager's key-set route, in both flavours, every selector of app.kubernetes.io/name: envoy carries gateway.envoyproxy.io/owning-gateway-name and -namespace and looks for the pods in the owning Gateway's namespace, and each policy selects exactly the Gateways its route's values name (global.gatewayApi.parentRefs, ingress.parentRefs, backstage.parentRefs, kagent.uiRoute.parentRef, kagent.controllerRoute.parentRef, workspaceManager.route.parentRefs), a Gateway of another name included. A policy that falls back to every Envoy pod of a namespace fails. Needs PyYAML. HELM selects the binary.
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@HELM="$(HELM)" python3 tests/verify-envoy-peers.py $(CONNECTIVITY_DIR)
+	@echo "Envoy peers verified."
+
 .PHONY: verify-substrate-idp-netpol
 verify-substrate-idp-netpol: ## Assert the path to Substrate's actor-JWT issuer (giantswarm/muster#1572), in both flavours: with Substrate and muster on ate-idp-server (8443, behind the Service idp) admits muster from the release namespace and the kubelet's probes only, and muster's egress reaches it by muster-to-substrate-idp whatever networkPolicy.musterInClusterMcpPorts opens; with muster off no muster is admitted and no egress policy renders; with Substrate off neither renders. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
@@ -1764,7 +1671,7 @@ verify-substrate-idp-netpol: ## Assert the path to Substrate's actor-JWT issuer 
 	@echo "substrate idp network path verified."
 
 .PHONY: verify-idp-egress
-verify-idp-egress: ## Assert the identity provider egress of the services that validate tokens themselves (giantswarm/agent-platform#1169), cilium flavour: the workspace-, cluster-, agent-, vm- and model-manager egress policies and the portal's open, for an issuer on accounts.google.com, exactly accounts.google.com, www.googleapis.com (JWKS), openidconnect.googleapis.com (userinfo) and oauth2.googleapis.com (token) on 443, whatever provider their block names; for a Dex issuer its host alone. HELM selects the binary.
+verify-idp-egress: ## Assert the identity provider egress of the services that validate tokens themselves (giantswarm/agent-platform#1169), cilium flavour: the workspace-, cluster-, agent-, vm- and model-manager egress policies and the portal's open, for an issuer on accounts.google.com, exactly accounts.google.com, www.googleapis.com (JWKS), openidconnect.googleapis.com (userinfo) and oauth2.googleapis.com (token) on 443, whatever provider their block names; for a Dex issuer its host alone. An MCP backend entry with identityProvider (the skill-manager's) gets the same rules for its pods, the cluster entity on 443 and 10443 included, fails the render without a podSelector, and renders nothing in the kubernetes flavour. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 tests/verify-idp-egress.py $(CONNECTIVITY_DIR)
 	@echo "identity provider egress verified."
@@ -2157,7 +2064,7 @@ define kagent_route_doc
 endef
 
 .PHONY: verify-kagent-route
-verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by the kagent API v2 + A2A v1 services (one service-only match per service by default, one exact service/method match per listed RPC as the fallback) on both hops, the bearer passthrough without a protocol pin, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim, x-agent-name and x-user-groups removed) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, kagent's MCP server (the in-cluster /kagent/mcp HTTPRoute under a twin of the JWT policy, MCPServer kagent in the agent-platform tool group, named Kagent by its ui.giantswarm.io/display-name annotation, none with an empty kagent.controllerRoute.mcp.displayName), and the guards.
+verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by the kagent API v2 + A2A v1 services (one service-only match per service by default, one exact service/method match per listed RPC as the fallback) on both hops, the bearer passthrough without a protocol pin, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim, x-agent-name and x-user-groups removed) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, kagent's MCP server (the in-cluster /kagent/mcp HTTPRoute under a twin of the JWT policy, MCPServer kagent in the agent-platform tool group, named Kagent by its ui.giantswarm.io/display-name annotation, none with an empty kagent.controllerRoute.mcp.displayName, and described by spec.description, none with an empty kagent.controllerRoute.mcp.description, one over the CRD's 500 characters failing the render), and the guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> the default shape: GRPCRoutes on both hops, no REST route, no path prefix"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set ingress.backendTrafficPolicy.enabled=true >$(VERIFY_TMP)/vkr.out 2>&1 || { cat $(VERIFY_TMP)/vkr.out; exit 1; }
@@ -2250,7 +2157,7 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@if grep -q '^              app: kagent$$' $(VERIFY_TMP)/vkr-np-k8s-ingress.out; then echo "FAIL: the kubernetes controller ingress still admits app: kagent pods"; exit 1; fi
 	@echo "ok: controller ingress in both flavors"
 	@echo "--> kagent's MCP server: an in-cluster HTTPRoute at /kagent/mcp rewritten to /mcp on the kagent backend, under a twin of the JWT policy, and MCPServer kagent in the agent-platform tool group with the forwarded token and its display name; off with the switch, muster or the route off"
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set components.muster.enabled=true >$(VERIFY_TMP)/vkr-mcp.out 2>&1 || { cat $(VERIFY_TMP)/vkr-mcp.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set components.muster.enabled=true --set 'kagent.controllerRoute.mcp.description=Probe: sessions' >$(VERIFY_TMP)/vkr-mcp.out 2>&1 || { cat $(VERIFY_TMP)/vkr-mcp.out; exit 1; }
 	$(call kagent_route_doc,HTTPRoute,kagent-mcp,$(VERIFY_TMP)/vkr-mcp.out,$(VERIFY_TMP)/vkr-mcp-route.out)
 	$(call kagent_route_doc,MCPServer,kagent,$(VERIFY_TMP)/vkr-mcp.out,$(VERIFY_TMP)/vkr-mcp-cr.out)
 	$(call kagent_route_doc,AgentgatewayPolicy,kagent-mcp-jwt,$(VERIFY_TMP)/vkr-mcp.out,$(VERIFY_TMP)/vkr-mcp-jwt.out)
@@ -2259,12 +2166,15 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 		grep -q -- "$$pattern" $(VERIFY_TMP)/vkr-mcp-route.out || { echo "FAIL: the kagent-mcp HTTPRoute lacks $$pattern"; exit 1; }; \
 	done
 	@if grep -q '^  hostnames:' $(VERIFY_TMP)/vkr-mcp-route.out; then echo "FAIL: the kagent-mcp HTTPRoute is hostname-scoped (muster dials the agentgateway Service by its cluster-DNS name)"; exit 1; fi
-	@for pattern in 'agent-platform.giantswarm.io/tool-group: agent-platform' 'muster.giantswarm.io/type: kagent' 'type: streamable-http' 'timeout: 300$$' 'url: http://agentgateway.agent-platform.svc.cluster.local:8080/kagent/mcp$$' 'type: oauth' 'forwardToken: true' '^    ui.giantswarm.io/display-name: "Kagent"$$'; do \
+	@for pattern in 'agent-platform.giantswarm.io/tool-group: agent-platform' 'muster.giantswarm.io/type: kagent' 'type: streamable-http' 'timeout: 300$$' 'url: http://agentgateway.agent-platform.svc.cluster.local:8080/kagent/mcp$$' 'type: oauth' 'forwardToken: true' '^    ui.giantswarm.io/display-name: "Kagent"$$' '^  description: "Probe: sessions"$$'; do \
 		grep -q -- "$$pattern" $(VERIFY_TMP)/vkr-mcp-cr.out || { echo "FAIL: MCPServer kagent lacks $$pattern"; exit 1; }; \
 	done
-	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set components.muster.enabled=true --set kagent.controllerRoute.mcp.displayName= >$(VERIFY_TMP)/vkr-mcp-noname.out 2>&1 || { cat $(VERIFY_TMP)/vkr-mcp-noname.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set components.muster.enabled=true --set kagent.controllerRoute.mcp.displayName= --set kagent.controllerRoute.mcp.description= >$(VERIFY_TMP)/vkr-mcp-noname.out 2>&1 || { cat $(VERIFY_TMP)/vkr-mcp-noname.out; exit 1; }
 	$(call kagent_route_doc,MCPServer,kagent,$(VERIFY_TMP)/vkr-mcp-noname.out,$(VERIFY_TMP)/vkr-mcp-noname-cr.out)
 	@if grep -q '^  annotations:' $(VERIFY_TMP)/vkr-mcp-noname-cr.out; then echo "FAIL: MCPServer kagent carries annotations with an empty kagent.controllerRoute.mcp.displayName"; exit 1; fi
+	@if grep -q '^  description:' $(VERIFY_TMP)/vkr-mcp-noname-cr.out; then echo "FAIL: MCPServer kagent carries spec.description with an empty kagent.controllerRoute.mcp.description"; exit 1; fi
+	@if $(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set components.muster.enabled=true --set "kagent.controllerRoute.mcp.description=$$(printf '%0501d' 0)" >$(VERIFY_TMP)/vkr-mcp-longdesc.out 2>&1; then echo "FAIL: a 501-character kagent.controllerRoute.mcp.description rendered (the MCPServer CRD caps it at 500)"; exit 1; fi
+	@grep -q 'kagent.controllerRoute.mcp.description: 501 characters, want at most 500' $(VERIFY_TMP)/vkr-mcp-longdesc.out || { echo "FAIL: a 501-character description failed for the wrong reason"; cat $(VERIFY_TMP)/vkr-mcp-longdesc.out; exit 1; }
 	@grep -A3 'targetRefs:' $(VERIFY_TMP)/vkr-mcp-jwt.out | grep -q 'kind: HTTPRoute' && grep -A3 'targetRefs:' $(VERIFY_TMP)/vkr-mcp-jwt.out | grep -q 'name: kagent-mcp$$' || { echo "FAIL: kagent-mcp-jwt does not target the kagent-mcp HTTPRoute"; exit 1; }
 	@[ "$$(grep -c '^    - group: ' $(VERIFY_TMP)/vkr-mcp-grpc-jwt.out)" = "1" ] || { echo "FAIL: kagent-controller-jwt targets more than the GRPCRoute (the CRD takes one kind of target per policy)"; exit 1; }
 	@sed -n '/^  traffic:/,$$p' $(VERIFY_TMP)/vkr-mcp-jwt.out >$(VERIFY_TMP)/vkr-mcp-jwt-traffic.out; sed -n '/^  traffic:/,$$p' $(VERIFY_TMP)/vkr-mcp-grpc-jwt.out >$(VERIFY_TMP)/vkr-mcp-grpc-jwt-traffic.out
@@ -2332,12 +2242,12 @@ verify-kagent-discovery: ## Assert the platform renders no RemoteMCPServer for m
 	@echo "kagent tool-discovery invariants verified."
 
 .PHONY: verify-model-catalog
-verify-model-catalog: ## Assert llmRouting.modelCatalog is an overlay of what the pinned gateway lacks (giantswarm/giantswarm#37975): no provider/model in it is priced by the built-in catalog of the data plane's release (catalog/model-catalog.json of giantswarm/agentgateway-upstream at v<agentgateway.proxy.image.tag>), the gateway tags of both charts agree, both charts carry the same overlay, and the platform's default model is priced. A gateway bump that starts pricing an overlay model fails here until the entry is dropped. Network: raw.githubusercontent.com (MODEL_CATALOG_FILE for offline). Needs PyYAML.
+verify-model-catalog: ## Assert llmRouting.modelCatalog is an overlay of what the pinned gateway lacks (giantswarm/giantswarm#37975): no provider/model in it is priced by the built-in catalog of the data plane's release (catalog/model-catalog.json of giantswarm/agentgateway-upstream at v<agentgateway.proxy.image.tag>), the gateway tags of both charts agree, and both charts carry the same overlay. A gateway bump that starts pricing an overlay model fails here until the entry is dropped. Network: raw.githubusercontent.com (MODEL_CATALOG_FILE for offline). Needs PyYAML.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-model-catalog.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 
 .PHONY: verify-kagent-crds
-verify-kagent-crds: ## Assert every api.kagent.dev object the connectivity chart renders (the ModelConfig / RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — api.kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that a ModelConfig of every provider in the CRD's enum renders (its baseUrl under the block the CRD gives one to, refused where it gives none, an unknown provider refused naming the enum), that the pinned AgentTemplate CRD serves the private repositories' per-source skills[]/plugins[].source.git.credentialRef, and no render of the chart carries kagent.dev/v1alpha2 — at the floor of components.kagent-crds.versionRange (tests/verify-kagent-crds.py; needs PyYAML).
+verify-kagent-crds: ## Assert every api.kagent.dev object the connectivity chart renders (the RemoteMCPServer catalog, the Harness) validates against the kagent line's CRDs at the pinned release — api.kagent.dev/v1alpha3, every field known to the CRD, the CEL rules the shapes can trip — that the LLM routing policies write a ModelConfig's baseUrl under the block the CRD gives one to, for exactly the providers whose block has one, that the pinned AgentTemplate CRD serves the private repositories' per-source skills[]/plugins[].source.git.credentialRef, and no render of the chart carries kagent.dev/v1alpha2 — at the floor of components.kagent-crds.versionRange (tests/verify-kagent-crds.py; needs PyYAML).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@python3 tests/verify-kagent-crds.py $(CONNECTIVITY_DIR)
@@ -2385,8 +2295,12 @@ verify-worker-image: ## Assert the Substrate worker image follows the chart's ow
 	@python3 tests/verify-worker-image.py $(CHART_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-manager-oauth-settings
+verify-manager-oauth-settings: ## Assert the five managers disable the obsolete Dex private-URL opt-in in both chart defaults and their rendered HelmReleases, preserving the separate forwarded-token JWKS policy.
+	@python3 tests/verify-manager-identity.py --oauth-settings-only $(CHART_DIR) $(CONNECTIVITY_DIR) $(VM)
+
 .PHONY: verify-managers
-verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards, the four managers' OAuth inputs derived from muster's login (giantswarm/agent-platform#484), and the metrics port of model-manager, agent-manager and cluster-manager (observability.metrics.port, only while observability.metrics.enabled) admitted from the cluster entity, never the API port, in both flavors, with their ServiceMonitors on in the meta render and carrying the tenant label (giantswarm/giantswarm#36711).
+verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards, the managers' OAuth inputs (skill-manager's included) derived from muster's login (giantswarm/agent-platform#484), and the metrics port of model-manager, agent-manager and cluster-manager (observability.metrics.port, only while observability.metrics.enabled) admitted from the cluster entity, never the API port, in both flavors, with their ServiceMonitors on in the meta render and carrying the tenant label (giantswarm/giantswarm#36711).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> both components off render nothing of theirs (agent-manager is off by default; model-manager is on since giantswarm/agent-platform#329)"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set components.model-manager.enabled=false >$(VERIFY_TMP)/vmg-off.out 2>&1 || { cat $(VERIFY_TMP)/vmg-off.out; exit 1; }
@@ -2748,7 +2662,7 @@ verify-identity: ## Assert the kagent-flux tenant identity (ONE value: ServiceAc
 	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set agent-manager.muster.url=http://muster.default.svc.cluster.local:8090/mcp >/dev/null 2>&1 || { echo "FAIL: an agreeing agent-manager.muster.url must pass"; exit 1; }
 	@grep -q 'define "agent-platform.musterMcpUrl"' $(CONNECTIVITY_DIR)/templates/_helpers.tpl || { echo "FAIL: the connectivity chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
 	@grep -q 'define "agent-platform.musterMcpUrl"' $(CHART_DIR)/templates/_helpers.tpl || { echo "FAIL: the meta chart lost the agent-platform.musterMcpUrl helper"; exit 1; }
-	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.muster.enabled=false 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' >$(VERIFY_TMP)/vid-meta-am-nomuster.out; if grep -q 'url: http://' $(VERIFY_TMP)/vid-meta-am-nomuster.out; then echo "FAIL: agent-manager's muster.url is derived while the muster component is off"; exit 1; fi
+	@$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.muster.enabled=false 2>/dev/null | awk '/^kind: HelmRelease$$/{h=1} h&&/^  name: agent-manager$$/{f=1} f&&/^---/{exit} f' >$(VERIFY_TMP)/vid-meta-am-nomuster.out; if grep -qE 'url: http://[^ ]+/mcp$$' $(VERIFY_TMP)/vid-meta-am-nomuster.out; then echo "FAIL: agent-manager's muster.url is derived while the muster component is off"; exit 1; fi
 	@echo "ok: muster MCP URL — one helper, one consumer (agent-manager muster.url; the portal sends none)"
 	@echo "--> empty value: no identity, agent-manager omits the ServiceAccount"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(IDENTITY_ON) --set kagent.fluxServiceAccountName= >$(VERIFY_TMP)/vid-empty.out 2>&1 || { cat $(VERIFY_TMP)/vid-empty.out; exit 1; }
@@ -2991,6 +2905,9 @@ verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every
 # meta chart forwards, so the check reads the real schema and template of that
 # version, not a copy. Recursive (=), so it is read only when a recipe uses it.
 PRESETS_MUSTER_MIN := 5.12.0
+# agent-platform.muster.presetIconsFloor, and a release below it.
+PRESETS_ICONS_MUSTER_MIN := 5.61.0
+PRESETS_ICONS_MUSTER_BELOW := 5.60.1
 PRESETS_MUSTER_VERSION = $(shell $(FLOORS) floor muster)
 # The muster chart's own render guards want the OAuth inputs an installation
 # supplies; these are placeholders for the render, not part of the assertion.
@@ -3017,6 +2934,11 @@ verify-presets: ## Assert the infrastructure / agent-platform toolset presets re
 	elif ! grep -q "built into muster" $(VERIFY_TMP)/vp-builtin.out; then \
 		echo "FAIL: the built-in guard failed for the wrong reason"; cat $(VERIFY_TMP)/vp-builtin.out; exit 1; \
 	else echo "ok: built-in names refused"; fi
+	@echo "--> preset icons only from a muster floor of $(PRESETS_ICONS_MUSTER_MIN), which takes toolsetPresets.<name>.icon"
+	@for gate in "off:$(PRESETS_ICONS_MUSTER_BELOW)" "on:$(PRESETS_ICONS_MUSTER_MIN)-0"; do \
+		$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set "components.muster.versionRange=>=$${gate#*:} <6.0.0" >$(VERIFY_TMP)/vp-icons.out 2>&1 || { cat $(VERIFY_TMP)/vp-icons.out; exit 1; }; \
+		python3 tests/verify-toolset-presets.py icons $(VERIFY_TMP)/vp-icons.out $${gate%%:*} || exit 1; \
+	done
 	@echo "ok: presets reach muster's config"
 
 .PHONY: verify-mirror
@@ -3100,10 +3022,16 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@if grep -q 'musterMcpUrl' $(VERIFY_TMP)/vw-bs-cm.out; then echo "FAIL: agentPlatform.musterMcpUrl is back in the portal's app-config — the Dev Portal reads no such key (create_agent takes no muster argument); where muster is reaches agent-manager as muster.url (verify-identity)"; exit 1; fi
 	@grep -q 'configMapRef: agent-platform-backstage-app-config' $(CHART_DIR)/values.yaml || { echo "FAIL: the meta chart's backstage: block no longer mounts the ConfigMap this chart renders"; exit 1; }
 	@echo "ok: app-config"
+	@echo "--> Organizations in the portal follow agentPlatformOrganizations.enabled"
+	@for enabled in false true; do \
+		$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_FULL) -f $(CONNECTIVITY_DIR)/ci/test-substrate-values.yaml -f $(CONNECTIVITY_DIR)/ci/test-llm-routing-values.yaml -f $(OPERATOR_VALUES) --api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy --set agentPlatformOrganizations.enabled=$$enabled >$(VERIFY_TMP)/vw-bs-orgs-$$enabled.out 2>&1 || { cat $(VERIFY_TMP)/vw-bs-orgs-$$enabled.out; exit 1; }; \
+		grep -A1 '^      organizations:$$' $(VERIFY_TMP)/vw-bs-orgs-$$enabled.out | grep -q "^        enabled: $$enabled$$" || { echo "FAIL: agentPlatform.organizations.enabled does not follow agentPlatformOrganizations.enabled=$$enabled"; exit 1; }; \
+	done
 	@echo "--> the one-value identity: renaming kagent.fluxServiceAccountName renames the portal's agentPlatform.fluxServiceAccountName; kagent off drops it"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) --set components.kagent.enabled=true --set kagent.fluxServiceAccountName=tenant-x 2>/dev/null | grep -q 'fluxServiceAccountName: tenant-x' || { echo "FAIL: the app-config does not follow kagent.fluxServiceAccountName"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE) >$(VERIFY_TMP)/vw-bs-nokagent.out 2>&1 || { cat $(VERIFY_TMP)/vw-bs-nokagent.out; exit 1; }
 	@if grep -q 'fluxServiceAccountName' $(VERIFY_TMP)/vw-bs-nokagent.out; then echo "FAIL: agentPlatform.fluxServiceAccountName rendered with kagent off"; exit 1; fi
+	@grep -A1 '^      organizations:$$' $(VERIFY_TMP)/vw-bs-nokagent.out | grep -q '^        enabled: false$$' || { echo "FAIL: the portal must disable Organizations with the switch off, including with kagent off"; exit 1; }
 	@echo "ok: one-value identity"
 	@echo "--> Backstage on: the route, the pg block, the installation name, the config-reload hook and its network policy in both flavors"
 	@awk '/^kind: HTTPRoute$$/,/^---/' $(VERIFY_TMP)/vw-bs.out | awk '/^  name: backstage$$/,/^---/' >$(VERIFY_TMP)/vw-bs-route.out
@@ -3142,17 +3070,17 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	elif ! grep -q "global.domain is empty" $(VERIFY_TMP)/vw-bs-nodomain.out; then \
 		echo "FAIL: the Backstage domain guard failed for the wrong reason"; cat $(VERIFY_TMP)/vw-bs-nodomain.out; exit 1; \
 	else echo "ok: Backstage domain guard"; fi
-	@echo "--> mcp-kubernetes on: the MCPServer with OAuth, the forwarded token and the kube audience; OAuth off drops the auth block; an empty audience drops requiredAudiences; muster off drops the CR"
+	@echo "--> mcp-kubernetes on: the MCPServer with OAuth, a per-server access token and the kube audience; OAuth off drops the auth block; an empty audience drops requiredAudiences; muster off drops the CR"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --namespace agent-platform --set components.mcp-kubernetes.enabled=true >$(VERIFY_TMP)/vw-mcpk.out 2>&1 || { cat $(VERIFY_TMP)/vw-mcpk.out; exit 1; }
 	@awk '/^kind: MCPServer$$/,/^---/' $(VERIFY_TMP)/vw-mcpk.out >$(VERIFY_TMP)/vw-mcpk-cr.out
-	@for pattern in '^  name: mcp-kubernetes$$' 'muster.giantswarm.io/type: mcp-kubernetes' 'agent-platform.giantswarm.io/tool-group: infrastructure' 'url: http://mcp-kubernetes.agent-platform.svc.cluster.local:8080/mcp' 'type: oauth' 'forwardToken: true' '- dex-k8s-authenticator'; do \
+	@for pattern in '^  name: mcp-kubernetes$$' 'muster.giantswarm.io/type: mcp-kubernetes' 'agent-platform.giantswarm.io/tool-group: infrastructure' 'url: http://mcp-kubernetes.agent-platform.svc.cluster.local:8080/mcp' 'type: oauth' 'forwardToken: false' '- dex-k8s-authenticator'; do \
 		grep -q -- "$$pattern" $(VERIFY_TMP)/vw-mcpk-cr.out || { echo "FAIL: the mcp-kubernetes MCPServer lacks $$pattern"; exit 1; }; \
 	done
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.mcp-kubernetes.enabled=true --set mcp-kubernetes.mcpKubernetes.oauth.enabled=false 2>/dev/null | awk '/^kind: MCPServer$$/,/^---/' >$(VERIFY_TMP)/vw-mcpk-noauth.out
 	@if grep -q 'forwardToken' $(VERIFY_TMP)/vw-mcpk-noauth.out; then echo "FAIL: the MCPServer carries an auth block with the server's OAuth off"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.mcp-kubernetes.enabled=true --set mcp-kubernetes.kubernetesAudience= 2>/dev/null | awk '/^kind: MCPServer$$/,/^---/' >$(VERIFY_TMP)/vw-mcpk-noaud.out
 	@if grep -q 'requiredAudiences' $(VERIFY_TMP)/vw-mcpk-noaud.out; then echo "FAIL: an empty kubernetesAudience still renders requiredAudiences"; exit 1; fi
-	@grep -q 'forwardToken: true' $(VERIFY_TMP)/vw-mcpk-noaud.out || { echo "FAIL: the auth block went with the audience"; exit 1; }
+	@grep -q 'forwardToken: false' $(VERIFY_TMP)/vw-mcpk-noaud.out || { echo "FAIL: the auth block went with the audience"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.mcp-kubernetes.enabled=true --set components.muster.enabled=false >$(VERIFY_TMP)/vw-mcpk-nomuster.out 2>&1 || { cat $(VERIFY_TMP)/vw-mcpk-nomuster.out; exit 1; }
 	@if grep -q 'kind: MCPServer' $(VERIFY_TMP)/vw-mcpk-nomuster.out; then echo "FAIL: the MCPServer renders with muster off (no CRD to map to)"; exit 1; fi
 	@echo "ok: mcp-kubernetes MCPServer"
@@ -3303,11 +3231,13 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 		awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' $(VERIFY_TMP)/vw-bsnp-pin-$$flavor.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' && { echo "FAIL: the $$flavor Backstage policy still admits the data plane while the route is pinned elsewhere"; exit 1; }; \
 		true; \
 	done
-	@echo "--> skill discovery's egress follows backstage.skillsRepositories; the portal's database gets a leg on the postgresql engine"
+	@echo "--> skill discovery's egress follows backstage.skillsRepositories or backstage.skillPullRequests; the portal's database gets a leg on the postgresql engine"
 	@grep -q -- 'matchName: api.github.com' $(VERIFY_TMP)/vw-bsnp-cilium.out || { echo "FAIL: the cilium Backstage policy lacks api.github.com, so skill discovery is denied"; cat $(VERIFY_TMP)/vw-bsnp-cilium.out; exit 1; }
 	@if grep -qE 'matchName: (github.com|raw.githubusercontent.com)$$' $(VERIFY_TMP)/vw-bsnp-cilium.out; then echo "FAIL: the cilium Backstage policy opens github.com or raw.githubusercontent.com, which no portal call reaches"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set backstage.skillsRepositories=null --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-noskills.out
 	@if grep -q 'github' $(VERIFY_TMP)/vw-bsnp-noskills.out; then echo "FAIL: the cilium Backstage policy renders the GitHub egress with backstage.skillsRepositories empty"; exit 1; fi
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set backstage.skillsRepositories=null --set backstage.skillPullRequests=true --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-skillprs.out
+	@grep -q -- 'matchName: api.github.com' $(VERIFY_TMP)/vw-bsnp-skillprs.out || { echo "FAIL: the cilium Backstage policy lacks api.github.com with backstage.skillPullRequests on, so the portal cannot open skill pull requests"; exit 1; }
 	@if grep -q '5432' $(VERIFY_TMP)/vw-bsnp-cilium.out; then echo "FAIL: the cilium Backstage policy renders 5432 on the sqlite engine"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_FULL) --set networkPolicy.flavor=cilium 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-full.out
 	@for pattern in 'backstage-cnpg' 'backstage-cnpg-restore' 'port: "5432"'; do \
@@ -3532,8 +3462,10 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 PICK := python3 tests/pick-doc.py
 MIGRATION_ON := $(MANAGERS_MIN) --set components.agent-manager.enabled=true
 # agentPlatformOrganizations.enabled needs the llm listener and its routing policy,
-# the agents' Flux identity and the API hostname (giantswarm/agent-platform#759, #1268).
-MIGRATION_TENANTS := --set agentPlatformOrganizations.enabled=true --set kagent.fluxServiceAccountName=kagent-flux --set global.domain=ci.example.com --set llmRouting.enabled=true --api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy
+# the agents' Flux identity and the API hostname (giantswarm/agent-platform#759, #1268),
+# and the operator's names the meta chart derives (OPERATOR_VALUES, #1278).
+OPERATOR_VALUES := tests/fixtures/organizations-operator-values.yaml
+MIGRATION_TENANTS := --set agentPlatformOrganizations.enabled=true --set kagent.fluxServiceAccountName=kagent-flux --set global.domain=ci.example.com --set llmRouting.enabled=true --api-versions admissionregistration.k8s.io/v1/MutatingAdmissionPolicy -f $(OPERATOR_VALUES)
 # The migrate Job's image pin: agentManager.migration.image.tag — the meta chart's BOM pin for agent-manager,
 # mirrored as the connectivity chart's default. Read from the values (Renovate bumps both files), never a literal.
 MIGRATION_PIN = python3 -c "import yaml; print(yaml.safe_load(open('$(CHART_DIR)/values.yaml'))['agentManager']['migration']['image']['tag'])"
@@ -3549,7 +3481,7 @@ EGRESS_NAMES := grep -E '^ *-? ?(matchName|matchPattern): |^ *- [0-9]+(\.[0-9]+)
 EGRESS_BLOCKS := grep -E '^ *cidr: ' | sed -E "s/^ *//; s/['\"]//g" | sort
 
 .PHONY: verify-organization-erasure
-verify-organization-erasure: ## Assert agent-platform-operator's access for the erasure of deleted organizations (agentPlatformOrganizations.enabled, giantswarm/giantswarm#38988) in the connectivity chart: off by default nothing renders; on with kagent the ClusterRole agent-platform:organization-erasure holds exactly list and delete on sessions.api.kagent.dev, bound to the operator's ServiceAccount in the release namespace; with network policies on the kagent controller's API port admits the operator's pods in both flavors; on with the Crossplane snapshot store on AWS the IAM role <store role>-operator beside Substrate's, trusted for that ServiceAccount only, allows s3:ListBucket only with an s3:prefix that starts with a UID segment and s3:DeleteObject only under one, evaluated with IAM's wildcards against an organization's keys (pass) and the platform Harness's prefix, other first segments, other buckets and other actions (refused); a store role name with no room for -operator fails the render; the store off renders no IAM role, kagent off fails the render. The machine caller is verify-kagent-extensions'. Needs PyYAML. HELM selects the binary.
+verify-organization-erasure: ## Assert agent-platform-operator's access for the erasure of deleted organizations (agentPlatformOrganizations.enabled, giantswarm/giantswarm#38988) in the connectivity chart: off by default nothing renders; on with kagent the ClusterRole agent-platform:organization-erasure holds exactly list and delete on sessions.api.kagent.dev, bound to the operator's ServiceAccount in the release namespace; with network policies on the kagent controller's API port admits the operator's pods in both flavors; on with the Crossplane snapshot store on AWS the IAM role <store role>-operator beside Substrate's, trusted for that ServiceAccount only, allows s3:ListBucket only with an s3:prefix that starts with a UID segment and s3:DeleteObject only under one, evaluated with IAM's wildcards against an organization's keys (pass) and the platform Harness's prefix, other first segments, other buckets and other actions (refused); the role takes the name agentPlatformOrganizations.operator.awsRoleName gives and the render fails without it; the store off renders no IAM role, kagent off fails the render. The operator's names are the meta chart's (tests/fixtures/organizations-operator-values.yaml, verify-operator-names'); the machine caller is verify-kagent-extensions'. Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-organization-erasure.py $(CONNECTIVITY_DIR)
@@ -3589,7 +3521,7 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@if grep -q -E 'expiration:|id: Expiration' $(VERIFY_TMP)/vss-lifecycle.out; then echo "FAIL: the snapshot bucket expires objects (every object left is a live snapshot, #792)"; exit 1; fi
 	@awk '/^kind: BucketPolicy$$/,/^---/' $(VERIFY_TMP)/vss-on.out | grep -q '"aws:SecureTransport": "false"' || { echo "FAIL: no TLS-only bucket policy"; exit 1; }
 	@awk '/^kind: BucketPublicAccessBlock$$/,/^---/' $(VERIFY_TMP)/vss-on.out | grep -q 'restrictPublicBuckets: true' || { echo "FAIL: no public-access block"; exit 1; }
-	@awk '/^kind: Role$$/,/^---/' $(VERIFY_TMP)/vss-on.out >$(VERIFY_TMP)/vss-role.out
+	@awk '/^apiVersion: iam\.aws\.upbound\.io\//{a=1;next} a&&/^kind: Role$$/{f=1} {a=0} f&&/^---/{f=0} f' $(VERIFY_TMP)/vss-on.out >$(VERIFY_TMP)/vss-role.out
 	@grep -q '"irsa.ci.example.com:sub": "system:serviceaccount:ate-system:atelet"' $(VERIFY_TMP)/vss-role.out || { echo "FAIL: the role does not trust atelet"; exit 1; }
 	@grep -q '"irsa.ci.example.com:sub": "system:serviceaccount:ate-system:ate-api-server"' $(VERIFY_TMP)/vss-role.out || { echo "FAIL: the role does not trust ate-api-server"; exit 1; }
 	@[ "$$(grep -c 'sts:AssumeRoleWithWebIdentity' $(VERIFY_TMP)/vss-role.out)" = "2" ] || { echo "FAIL: the trust policy has not exactly two statements"; exit 1; }
@@ -3846,14 +3778,15 @@ verify-postgres-primary-update: ## Assert the CNPG Cluster updates its primary b
 
 .PHONY: verify-identity-migration
 verify-identity: verify-identity-migration
-verify-identity-migration: ## Assert the migration holds no cluster-scoped right without tenants: the 1.x -> 2.x run deletes no CRD, so no ClusterRole or ClusterRoleBinding renders with the migration on, off, or with agent-manager off; with agentPlatformOrganizations on (#1268) the run covers no organization namespace and holds no right there, and the credential-refs refusal names the fix; the per-GitOps-namespace Roles follow a renamed identity.
+verify-identity-migration: ## Assert the migration's one cluster-scoped right: with the migration on exactly the ClusterRole and ClusterRoleBinding $(MIGRATION_JOB)-crds render (get/delete on the nine 0.x kagent.dev CRDs, list on their objects, verify-flux-identity checks the rules), nothing else cluster-scoped, and none with the migration off or with agent-manager off; with agentPlatformOrganizations on (#1268) the run covers no organization namespace and holds no right there, and the credential-refs refusal names the fix; the per-GitOps-namespace Roles follow a renamed identity.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@echo "--> migration on: no ClusterRole, no ClusterRoleBinding"
+	@echo "--> migration on: the -crds ClusterRole and ClusterRoleBinding (the 0.x CRD contract), nothing else cluster-scoped"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) >$(VERIFY_TMP)/vim-on.out 2>&1 || { cat $(VERIFY_TMP)/vim-on.out; exit 1; }
-	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-on.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC)"
-	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: a cluster-scoped RBAC object renders with the migration on"; grep -n -A3 -E '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; exit 1; fi
-	@if grep -q 'customresourcedefinitions' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: the migration is granted rights on customresourcedefinitions"; exit 1; fi
-	@echo "ok: nothing cluster-scoped"
+	@python3 tests/verify-flux-identity.py $(VERIFY_TMP)/vim-on.out kagent-flux kagent --migration
+	@$(PICK) $(VERIFY_TMP)/vim-on.out ClusterRole $(MIGRATION_JOB)-crds >/dev/null || { echo "FAIL: no ClusterRole $(MIGRATION_JOB)-crds with the migration on"; exit 1; }
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vim-on.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC) $(MIGRATION_JOB)-crds"
+	@if grep -qE '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; then echo "FAIL: a cluster-scoped RBAC object other than $(MIGRATION_JOB)-crds renders with the migration on"; grep -n -A3 -E '^kind: ClusterRole(Binding)?$$' $(VERIFY_TMP)/vim-on.out; exit 1; fi
+	@echo "ok: only the 0.x CRD contract is cluster-scoped"
 	@echo "--> agentPlatformOrganizations on (#1268): the run covers no organization namespace (no AGENT_MANAGER_MULTI_TENANT, no ClusterRole $(MIGRATION_JOB)-tenants); the organizations' credential-refs refusal names the fix"
 	@if $(PICK) $(VERIFY_TMP)/vim-on.out CronJob $(MIGRATION_JOB) kagent | grep -q 'AGENT_MANAGER_MULTI_TENANT'; then echo "FAIL: the run covers other namespaces than the kagent namespace"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MIGRATION_ON) $(MIGRATION_TENANTS) >$(VERIFY_TMP)/vim-ten.out 2>&1 || { cat $(VERIFY_TMP)/vim-ten.out; exit 1; }
@@ -3894,7 +3827,7 @@ verify-workspace-manager-route: ## Assert the workspace-manager's public route (
 	@echo "workspace-manager sign-in route verified."
 
 .PHONY: verify-workspace-signin-keys-cleanup
-verify-workspace-signin-keys-cleanup: ## Assert the cleanup of the workspace-manager sign-in keys Secret (giantswarm/agent-platform#1095): the connectivity chart renders no workspace-manager-signin-keys Secret with providers and oauth.enabled, and offline no cleanup Job and no delete rule. LIVE_CONTEXT=<kube context> adds the lookup cases — with the Secret there and this release's (meta.helm.sh/release-name and -namespace) ONE post-install,post-upgrade hook Job deletes exactly it as the hook identity, whose ClusterRole gains delete on exactly that Secret; one another release holds renders neither — creating and deleting the namespace ap-verify-signin-keys-cleanup there (a lab cluster, never an installation); empty, they are skipped. HELM selects the binary.
+verify-workspace-signin-keys-cleanup: ## Assert the cleanup of the workspace-manager sign-in keys Secret (giantswarm/agent-platform#1095): the connectivity chart renders no workspace-manager-signin-keys Secret with providers and oauth.enabled, and offline no cleanup Job and no delete rule. LIVE_CONTEXT=<kube context> adds the lookup cases — with the Secret there and this release's (meta.helm.sh/release-name and -namespace) ONE post-install,post-upgrade hook Job deletes exactly it as the hook identity, whose Role <release>-hooks-signin-keys-cleanup in the release namespace holds delete on exactly that Secret; one another release holds renders neither — creating and deleting the namespace ap-verify-signin-keys-cleanup there (a lab cluster, never an installation); empty, they are skipped. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@LIVE_CONTEXT=$(LIVE_CONTEXT) python3 tests/verify-workspace-signin-keys-cleanup.py $(CONNECTIVITY_DIR)
 	@echo "workspace-manager sign-in keys cleanup verified."
@@ -3910,6 +3843,12 @@ verify-workspace-session-admission: ## Assert kagent's jwt Session admission fol
 	@echo "====> $@ ($(CHART_DIR))"
 	@python3 tests/verify-workspace-session-admission.py $(CHART_DIR)
 	@echo "kagent's Session admission verified."
+
+.PHONY: verify-actor-bearer
+verify-actor-bearer: ## Assert muster's actor bearer follows Substrate, not the workspaces switch (giantswarm/giantswarm#38993): with kagent on, muster's OAuth server on and workspaces off the muster release's credentialProvider is on with actorBearer and Substrate's issuer and releases nothing, the agent-manager release gets muster.actorBearer true and the kagent release lists the actor-JWT provider muster (muster's host and audience); an own actorBearer.enabled false, muster's OAuth server off and the default render (kagent off) derive none of the three. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 tests/verify-actor-bearer.py $(CHART_DIR)
+	@echo "muster's actor bearer verified."
 
 .PHONY: verify-migration
 verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 cut-over (#346): off by default and with agent-manager off, on with kagent + agent-manager; no Job of the release (#378: a Failed one stalls the upgrade) but a suspended CronJob, whose run a post-install/post-upgrade hook starts as the tenant identity once the run's network policy is applied — both flavors —, the run named with the hash of its pod template — image, args, environment, identity, labels; a changed template starts a new run, an unchanged one finds its run started, the template byte-identical across chart versions while the CronJob's own labels follow them (#399), as the helper's ServiceAccount, from agent-manager's image at the value's tag, `migrate` (+ --dry-run), its inputs as environment and no GitHub token; the RBAC set (the per-namespace reads, nothing cluster-scoped); the network policy in both flavors; the guards; the meta chart's forwarding.
@@ -4003,7 +3942,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 	@grep -A1 'name: AGENT_MANAGER_SKILLS_GIT_AUTH_SECRET_NAME' $(VERIFY_TMP)/vmig-prov-job.out | grep -q 'value: tenant-credential-skills' || { echo "FAIL: the provisioned credential does not reach the Job"; exit 1; }
 	@grep -A1 'name: AGENT_MANAGER_SKILLS_GIT_AUTH_PREVIOUS_SECRET_NAMES' $(VERIFY_TMP)/vmig-prov-job.out | grep -q 'value: kagent-skills-token$$' || { echo "FAIL: the provisioned credential's earlier name does not reach the Job"; exit 1; }
 	@echo "ok: skills credential"
-	@echo "--> RBAC: nothing cluster-scoped (verify-identity-migration) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
+	@echo "--> RBAC: nothing cluster-scoped but the 0.x CRD contract (verify-identity-migration) and, per GitOps namespace, a Role + RoleBinding with get, list on helmreleases and ocirepositories — none without the list"
 	@python3 -c 'import sys,yaml; sys.exit("FAIL: a GitOps-namespace Role renders with an empty gitopsNamespaces" if [d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d["kind"]=="Role" and d["metadata"]["name"]==sys.argv[2] and d["metadata"].get("namespace")!="kagent"] else 0)' $(VERIFY_TMP)/vmig-on.out $(MIGRATION_JOB)
 	@$(PICK) $(VERIFY_TMP)/vmig-on.out Role $(MIGRATION_JOB) kagent >$(VERIFY_TMP)/vmig-role-kagent.out || { echo "FAIL: no Role of the migration's identity in the kagent namespace"; exit 1; }
 	@grep -A2 'apiGroups: \["helm.toolkit.fluxcd.io"\]' $(VERIFY_TMP)/vmig-role-kagent.out | grep -qF 'verbs: ["get", "list", "create", "update"]' || { echo "FAIL: the migration's identity may not create a HelmRelease in kagent, so the run's access review leaves the namespace out"; exit 1; }
@@ -4016,7 +3955,7 @@ verify-migration: ## Assert the agent-manager migrate Job of the kagent API v2 c
 		[ "$$(grep -c 'verbs: \["get", "list"\]' $(VERIFY_TMP)/vmig-role-$$ns.out)" = "2" ] || { echo "FAIL: the Role in $$ns grants more than get, list"; exit 1; }; \
 		$(PICK) $(VERIFY_TMP)/vmig-gitops.out RoleBinding $(MIGRATION_JOB) $$ns | grep -A3 '^subjects:' | grep -q 'name: $(MIGRATION_JOB)$$' || { echo "FAIL: the RoleBinding in $$ns does not bind the migration's identity"; exit 1; }; \
 	done
-	@$(GOLDEN_DROP) $(VERIFY_TMP)/vmig-gitops.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC)"
+	@$(GOLDEN_DROP) $(VERIFY_TMP)/vmig-gitops.out "$(TENANT_RBAC) $(DATAPLANE_RBAC) $(TENANT_FLUX_RBAC) $(MIGRATION_JOB)-crds"
 	@if grep -q '^kind: ClusterRoleBinding$$' $(VERIFY_TMP)/vmig-gitops.out; then echo "FAIL: the GitOps namespaces added a cluster-scoped binding"; exit 1; fi
 	@$(PICK) $(VERIFY_TMP)/vmig-gitops.out CronJob $(MIGRATION_JOB) kagent | grep -A1 'name: AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES' | grep -q 'value: flux-giantswarm,flux-team' || { echo "FAIL: the GitOps namespaces do not reach the command (AGENT_MANAGER_MIGRATE_GITOPS_NAMESPACES)"; exit 1; }
 	@if grep -q 'helm.sh/hook' $(VERIFY_TMP)/vmig-role-flux-giantswarm.out; then echo "FAIL: the GitOps-namespace Role is a hook resource"; exit 1; fi
@@ -4120,15 +4059,15 @@ verify-hooks-netpol: ## Assert the hook identity's network policy (#413): with n
 HOOKS_ALL := -f $(CONNECTIVITY_DIR)/ci/test-model-serving-oci-values.yaml $(VM) $(SUBSTRATE_ON) --set postgres.enabled=true --set modelServing.cache.enabled=true --set modelServing.prepull.enabled=true
 
 .PHONY: verify-hooks-memory
-verify-hooks-memory: ## Assert the connectivity hook Jobs' memory (#513): every hook container requests 10m/32Mi and 16Mi ephemeral-storage, is limited to 256Mi ephemeral-storage (#780) and to agent-platform.hooks.job's default 128Mi of memory, except the Substrate bootstrap's kubectl container at 256Mi (two kubectl processes at once next to its in-memory /work); all four hook Jobs render. Needs PyYAML.
+verify-hooks-memory: ## Assert the connectivity hook Jobs' memory (#513): every hook container requests 10m/32Mi and 16Mi ephemeral-storage, is limited to 256Mi ephemeral-storage (#780) and to agent-platform.hooks.job's default 128Mi of memory, except the Substrate bootstrap's kubectl container at 256Mi (two kubectl processes at once next to its in-memory /work); all five hook Jobs render. Needs PyYAML.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >$(VERIFY_TMP)/vhm.out 2>&1 || { cat $(VERIFY_TMP)/vhm.out; exit 1; }
-	@python3 -c 'import sys,yaml; R={"cpu":"10m","memory":"32Mi","ephemeral-storage":"16Mi"}; lim=lambda m: (R, {"memory": m, "ephemeral-storage": "256Mi"}); want={"t-substrate-bootstrap": {"openssl": lim("128Mi"), "sh": lim("256Mi")}, "t-postgres-databases": {"sh": lim("128Mi")}, "t-model-serving-cache": {"sh": lim("128Mi")}, "t-model-serving-prepull-cleanup": {"sh": lim("128Mi")}}; jobs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; got={j["metadata"]["name"]: {c["name"]: (c["resources"]["requests"], c["resources"]["limits"]) for c in j["spec"]["template"]["spec"].get("initContainers",[])+j["spec"]["template"]["spec"]["containers"]} for j in jobs}; sys.exit("FAIL: hook containers (requests, limits) are %s, want %s" % (got, want)) if got!=want else print("ok: four hook Jobs, 10m/32Mi/16Mi ephemeral-storage requests; t-substrate-bootstrap sh limited to 256Mi, every other hook container to 128Mi; 256Mi ephemeral-storage each")' $(VERIFY_TMP)/vhm.out
+	@python3 -c 'import sys,yaml; R={"cpu":"10m","memory":"32Mi","ephemeral-storage":"16Mi"}; lim=lambda m: (R, {"memory": m, "ephemeral-storage": "256Mi"}); want={"t-substrate-namespaces": {"sh": lim("128Mi")}, "t-substrate-bootstrap": {"openssl": lim("128Mi"), "sh": lim("256Mi")}, "t-postgres-databases": {"sh": lim("128Mi")}, "t-model-serving-cache": {"sh": lim("128Mi")}, "t-model-serving-prepull-cleanup": {"sh": lim("128Mi")}}; jobs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; got={j["metadata"]["name"]: {c["name"]: (c["resources"]["requests"], c["resources"]["limits"]) for c in j["spec"]["template"]["spec"].get("initContainers",[])+j["spec"]["template"]["spec"]["containers"]} for j in jobs}; sys.exit("FAIL: hook containers (requests, limits) are %s, want %s" % (got, want)) if got!=want else print("ok: five hook Jobs, 10m/32Mi/16Mi ephemeral-storage requests; t-substrate-bootstrap sh limited to 256Mi, every other hook container to 128Mi; 256Mi ephemeral-storage each")' $(VERIFY_TMP)/vhm.out
 	@echo "ok: $@"
 
 .PHONY: verify-hooks-ephemeral-storage
-verify-hooks-ephemeral-storage: ## Assert every hook Job and CronJob of both charts bounds its emptyDirs (#780, #866, Kyverno's require-emptydir-requests-and-limits): each container mounting an emptyDir requests and limits ephemeral-storage, each emptyDir carries a sizeLimit — the connectivity chart's four hook Jobs, the Backstage config-reload, the migrate start and the migrate CronJob, the meta chart's hooks with the engine on (self-management's included) and the serving teardown with it off. Needs PyYAML.
+verify-hooks-ephemeral-storage: ## Assert every hook Job and CronJob of both charts bounds its emptyDirs (#780, #866, Kyverno's require-emptydir-requests-and-limits): each container mounting an emptyDir requests and limits ephemeral-storage, each emptyDir carries a sizeLimit — the connectivity chart's five hook Jobs, the Backstage config-reload, the migrate start and the migrate CronJob, the meta chart's hooks with the engine on (self-management's included) and the serving teardown with it off. Needs PyYAML.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >$(VERIFY_TMP)/vhe-conn.out 2>&1 || { cat $(VERIFY_TMP)/vhe-conn.out; exit 1; }
@@ -4137,7 +4076,7 @@ verify-hooks-ephemeral-storage: ## Assert every hook Job and CronJob of both cha
 	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) >$(VERIFY_TMP)/vhe-meta.out 2>&1 || { cat $(VERIFY_TMP)/vhe-meta.out; exit 1; }
 	@$(HELM) template t $(CHART_DIR) $(HOOKS_ON) --set components.flux.enabled=false --set components.kserve-llmisvc-crd.enabled=true --set components.kserve-llmisvc-resources.enabled=true --set components.kserve-runtime-configs.enabled=true >$(VERIFY_TMP)/vhe-serving.out 2>&1 || { cat $(VERIFY_TMP)/vhe-serving.out; exit 1; }
 	@python3 tests/verify-hooks-ephemeral-storage.py \
-		$(VERIFY_TMP)/vhe-conn.out=t-substrate-bootstrap,t-postgres-databases,t-model-serving-cache,t-model-serving-prepull-cleanup \
+		$(VERIFY_TMP)/vhe-conn.out=t-substrate-namespaces,t-substrate-bootstrap,t-postgres-databases,t-model-serving-cache,t-model-serving-prepull-cleanup \
 		$(VERIFY_TMP)/vhe-backstage.out=agent-platform-connectivity-backstage-config-reload \
 		$(VERIFY_TMP)/vhe-migrate.out=t-agent-manager-migrate-start,agent-platform-connectivity-agent-manager-migrate \
 		$(VERIFY_TMP)/vhe-meta.out=t-flux-operator-crds,t-kagent-namespace,t-self-stop-resumer,t-self-suspend,t-self-values,t-teardown-engine,t-teardown-operator,t-teardown-releases \
@@ -4158,10 +4097,10 @@ verify-connectivity-hooks-netpol: ## Assert the connectivity hook identity's net
 	@grep -q 'app.kubernetes.io/instance: "t"' $(VERIFY_TMP)/vchn-cnp.out || { echo "FAIL: the policy does not select the release's instance label"; exit 1; }
 	@grep -q 'toEntities: \["kube-apiserver"\]' $(VERIFY_TMP)/vchn-cnp.out || { echo "FAIL: the cilium policy does not admit egress to the kube-apiserver entity"; exit 1; }
 	@if grep -q 'ingress:\|toFQDNs\|toCIDR\|toEndpoints\|world' $(VERIFY_TMP)/vchn-cnp.out; then echo "FAIL: the cilium policy admits more than apiserver egress"; exit 1; fi
-	@echo "--> all four hook Jobs: pre-delete joins the events, every hook Job's pod carries the selected labels"
+	@echo "--> all five hook Jobs: pre-delete joins the events, every hook Job's pod carries the selected labels"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(HOOKS_ALL) >$(VERIFY_TMP)/vchn-all.out 2>&1 || { cat $(VERIFY_TMP)/vchn-all.out; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vchn-all.out CiliumNetworkPolicy t-hooks | grep -q 'helm.sh/hook: pre-install,pre-upgrade,post-install,post-upgrade,pre-delete$$' || { echo "FAIL: with the pre-pull cleanup the policy is not at pre-delete too"; exit 1; }
-	@python3 -c 'import sys,yaml; docs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; sel={"app.kubernetes.io/instance":"t","app.kubernetes.io/component":"hooks"}; bad=[d["metadata"]["name"] for d in docs if any(d["spec"]["template"]["metadata"]["labels"].get(k)!=v for k,v in sel.items())]; sys.exit("FAIL: hook Jobs the policy does not select: %s" % bad) if bad or len(docs)!=4 else print("ok: 4 hook Jobs selected: %s" % sorted(d["metadata"]["name"] for d in docs))' $(VERIFY_TMP)/vchn-all.out
+	@python3 -c 'import sys,yaml; docs=[d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind")=="Job" and "helm.sh/hook" in d["metadata"].get("annotations",{})]; sel={"app.kubernetes.io/instance":"t","app.kubernetes.io/component":"hooks"}; bad=[d["metadata"]["name"] for d in docs if any(d["spec"]["template"]["metadata"]["labels"].get(k)!=v for k,v in sel.items())]; sys.exit("FAIL: hook Jobs the policy does not select: %s" % bad) if bad or len(docs)!=5 else print("ok: 5 hook Jobs selected: %s" % sorted(d["metadata"]["name"] for d in docs))' $(VERIFY_TMP)/vchn-all.out
 	@echo "--> kubernetes flavour: a NetworkPolicy hook, Egress only, to networkPolicy.kubernetes.apiServerCIDR"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) $(SUBSTRATE_ON) --set networkPolicy.flavor=kubernetes --set networkPolicy.kubernetes.apiServerCIDR=10.9.0.1/32 >$(VERIFY_TMP)/vchn-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vchn-k8s.out; exit 1; }
 	@$(PICK) $(VERIFY_TMP)/vchn-k8s.out NetworkPolicy t-hooks >$(VERIFY_TMP)/vchn-np.out || { echo "FAIL: no NetworkPolicy t-hooks in the kubernetes flavour"; exit 1; }
@@ -4524,7 +4463,7 @@ verify-kagent-oauth2-proxy-image: ## Assert kagent's oauth2-proxy runs the gsoci
 	@echo "ok: $@"
 
 .PHONY: verify-tenant-rbac
-verify-tenant-rbac: ## Assert the RBAC of agent tenants (giantswarm/agent-platform#706): with kagent on, the three ClusterRoles agent-platform:user, :editor and :admin nest, the user reads EgressPolicies and writes nothing, agent-platform:platform-user is the user without EgressPolicies, the editor writes what agent-manager writes as the caller and reads, never writes, the agent chart's OCIRepository, the admin writes ModelConfigs, EgressPolicies and RoleBindings, places Secrets it cannot read and binds the three roles only, none escalates or reads a Secret; the ValidatingAdmissionPolicy agent-platform-tenant-egress-credentials (Fail, Deny) holds an EgressPolicy's secretKeyRef to tenant-credential- Secrets in every Organization namespace but kagent, agent-platform-tenant-model-credentials holds a ModelConfig's apiKeySecret to them for every requester, agent-platform-tenant-credential-refs holds an Agent's or AgentTemplate's git credentialRef and a RemoteMCPServer's headersFrom Secret to them for every requester, and refuses the installation's skills credential under each of its names, and agent-platform-tenant-credentials keeps those Secrets of type Opaque; agent-platform-platform-tenant-credential-refs (Fail, Deny) refuses, in the kagent namespace only and for every requester, the six kinds' Secret references the requester may not get, on a create or a spec change, also of an object being deleted; the platform tenant's RoleBindings in the kagent namespace (agent-platform:platform-user to tenants.platform.users, tenants.platform.editors plus tenants.platformTeam; none for an empty list; none with kagent off); muster's MCPServers listed to tenants.platform.users in the release namespace; the meta chart appends tenants.platformTeam to muster's editor subjects. Needs PyYAML. HELM selects the binary.
+verify-tenant-rbac: ## Assert the RBAC of agent tenants (giantswarm/agent-platform#706): with kagent on, the three ClusterRoles agent-platform:user, :editor and :admin nest, the user reads Harnesses and EgressPolicies, gets and lists the namespace's RoleBindings (its members, giantswarm/agent-platform#1368) and writes nothing, agent-platform:platform-user is the user without EgressPolicies and RoleBindings, the editor writes what agent-manager writes as the caller and reads, never writes, the agent chart's OCIRepository, the admin writes ModelConfigs, EgressPolicies and RoleBindings, places Secrets it cannot read (create, update and delete, no patch, whose answer is the stored Secret) and binds the three roles only, none escalates or reads a Secret (get, list, watch or patch); the ValidatingAdmissionPolicy agent-platform-tenant-egress-credentials (Fail, Deny) holds an EgressPolicy's secretKeyRef to tenant-credential- Secrets in every Organization namespace but kagent, agent-platform-tenant-model-credentials holds a ModelConfig's apiKeySecret to them for every requester, agent-platform-tenant-credential-refs holds an Agent's or AgentTemplate's git credentialRef and a RemoteMCPServer's headersFrom Secret to them for every requester, and refuses the installation's skills credential under each of its names, and agent-platform-tenant-credentials keeps those Secrets of type Opaque; agent-platform-platform-tenant-credential-refs (Fail, Deny) refuses, in the kagent namespace only and for every requester, the six kinds' Secret references the requester may not get, on a create or a spec change, also of an object being deleted; the platform tenant's RoleBindings in the kagent namespace (agent-platform:platform-user to tenants.platform.users, tenants.platform.editors plus tenants.platformTeam; none for an empty list; none with kagent off); muster's MCPServers listed in the release namespace to musterMcpServerViewers, or tenants.platform.users while it is unset (an empty list binds nobody; with tenants.platform's lists empty no agent-platform:platform-user binding in kagent, and agent-platform:editor there bound to tenants.platformTeam only, or not at all while it is empty, giantswarm/agent-platform#1331); the meta chart appends tenants.platformTeam to muster's editor subjects. Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-tenant-rbac.py $(CHART_DIR) $(CONNECTIVITY_DIR)
@@ -4558,18 +4497,60 @@ verify-tenant-workers: ## Assert the workers of the organizations' namespaces (g
 	@HELM="$(HELM)" python3 tests/verify-tenant-workers.py $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-hooks-secrets
+verify-hooks-secrets: ## Assert the connectivity hook identity reads only the Secrets its hooks write (giantswarm/agent-platform#1269), on a local API server (tests/apiserver.py: envtest's etcd and kube-apiserver, RBAC on, no controllers): with Substrate, Postgres and agentPlatformOrganizations on, the hook ClusterRole carries no rule on secrets or configmaps and every Role rule names its objects but the Substrate bootstrap's create; replaying pre-install (the substrate-namespaces Job, the bootstrap's Roles and scripts), a second bootstrap run post-install (the databases hook against a stand-in CNPG Secret) and post-upgrade (the sign-in keys cleanup, rendered against the API server, deletes the Secret an earlier release kept) as the hook ServiceAccount, every script succeeds; that ServiceAccount is then refused a workload cluster kubeconfig in an org- namespace, a Secret and a ConfigMap no hook writes in each namespace a hook writes, a list of Secrets there and across the cluster, a Secret of any name outside the bootstrap's namespaces and the deletion of a Secret the cleanup does not name. Needs PyYAML, openssl and jq. HELM selects the binary. Network: github.com (the envtest binaries, cached in .bin/).
+	@echo "====> $@ ($(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-hooks-secrets.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-secret-readers
+verify-secret-readers: ## Assert Substrate's controller and credential providers read Secrets only where granted (giantswarm/agent-platform#1269): from Substrate 1.18.0 and the Google access-token plugin 0.3.0 the meta chart forwards the namespaces their Secret readers are bound in (every allowedNamespaces entry of the derived namespacePolicies) and, with agentPlatformOrganizations.enabled and agent-platform-operator 0.2.0, the operator's serviceAccountBindings of both readers in every organization namespace; an older chart, an older operator, a grant on namespaces of another label get nothing forwarded (the readers stay cluster-wide) and an own rbac.namespaces stays. Then on a local API server (tests/apiserver.py) the RBAC of the Substrate and plugin charts that bind by namespace, rendered with the forwarded values, beside the operator's bindings: ate-controller reads only egress-mitm-ca-pool in ate-system, each provider gets a Secret in kagent and in an organization namespace and is refused one in ate-system, kube-system and a workload cluster's namespace and any list (SubjectAccessReviews as each ServiceAccount). Needs PyYAML and openssl. HELM selects the binary. Network: gsoci.azurecr.io, github.com (the envtest binaries, cached in .bin/).
+	@echo "====> $@ ($(CHART_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-secret-readers.py $(CHART_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-organization-admission
-verify-organization-admission: ## Assert what the Agent Platform organizations' role and admission policies decide (giantswarm/agent-platform#1267), with server-side dry runs on a local API server (tests/apiserver.py: envtest's etcd and kube-apiserver, RBAC on, no controllers): with agentPlatformOrganizations.enabled the connectivity chart renders agent-platform:organizations-admin and the agent-platform-organization* ValidatingAdmissionPolicies (Fail, Deny), none with it off, a render failure with kagent off, no workers policies with Substrate off; on the API server, with the CRDs of the operator chart, Flux, kagent, Substrate and Kyverno, organizations-admin creates organizations and binds user, editor and admin in organization namespaces only and holds nothing else there, an editor never writes the OCIRepository, the operator creates only labelled agents-<organization>-* namespaces, writes RoleBindings only in them and Kustomizations and ServiceAccounts in the Flux namespace only when labelled with the organization UID, a Kustomization there only named agents-* running as the ServiceAccount of its own name into the namespace of its own name (each refusal shows the policy's own message), a Flux-namespace ServiceAccount bound by the operator only in the namespace of its name, agent-platform:organization-flux (rendered with fluxNamespace only) letting that ServiceAccount write the organization's kinds in its namespace only and bind no role but user, editor and admin (agent-platform-organization-flux-writes refuses a role whose rules it holds, the role itself included, and a ServiceAccount token Secret; a Flux controller acting as itself is not held), an operator Kustomization with spec.kubeConfig, spec.postBuild.substituteFrom, spec.patches or spec.components, another source than agentPlatformOrganizations.fluxSource (its name required with fluxNamespace, the render fails without it), another key than fluxDecryptionSecret, or a path other than fluxPathPrefix + its parent and organization labels (two DNS labels: not the root, a whole parent or another organization) refused, a fluxPathPrefix that is not ./<segments>/ failing the render, a file in git changing or pruning no RoleBinding its own Kustomization did not apply (organization-admins included), a git-applied organization-admins only with kustomize.toolkit.fluxcd.io/prune: disabled (create and update; its prune refused while the namespace lives, its deletion with the terminating namespace admitted), the operator binding a Flux-namespace ServiceAccount to nothing but agent-platform:organization-flux, only the operator touches the organization labels, organization-admins stays while its namespace lives, RoleBindings bind no system: identity or foreign ServiceAccount, the HelmRelease field lock holds (also for the Flux ServiceAccount), an organization is deleted only with prune: enabled or a terminating parent, the EgressPolicy floor, the operator's copies, and the sandbox shape with a Kyverno PolicyException for agents-* in place. Every refusal names its policy and has an admitted twin. Needs PyYAML and openssl. HELM selects the binary. Network: gsoci.azurecr.io, github.com (the envtest binaries, cached in .bin/).
+verify-organization-admission: ## Assert what the Agent Platform organizations' role and admission policies decide (giantswarm/agent-platform#1267), with server-side dry runs on a local API server (tests/apiserver.py: envtest's etcd and kube-apiserver, RBAC on, no controllers): with agentPlatformOrganizations.enabled the connectivity chart renders agent-platform:organizations-admin and the agent-platform-organization* ValidatingAdmissionPolicies (Fail, Deny), none with it off, a render failure with kagent off, no workers policies with Substrate off; on the API server, with the CRDs of the operator chart, Flux, kagent, Substrate and Kyverno, organizations-admin creates organizations and binds user, editor and admin in organization namespaces only and holds nothing else there, an editor never writes the OCIRepository, the operator creates only labelled agents-<organization>-* namespaces, writes RoleBindings only in them and Kustomizations and ServiceAccounts in the Flux namespace only when labelled with the organization UID, a Kustomization there only named agents-* running as the ServiceAccount of its own name into the namespace of its own name (each refusal shows the policy's own message), a Flux-namespace ServiceAccount bound by the operator only in the namespace of its name, agent-platform:organization-flux (rendered with fluxNamespace only) letting that ServiceAccount write the organization's kinds in its namespace only and bind no role but user, editor and admin (agent-platform-organization-flux-writes refuses a role whose rules it holds, the role itself included, and a ServiceAccount token Secret; a Flux controller acting as itself is not held), an operator Kustomization with spec.kubeConfig, spec.postBuild.substituteFrom, spec.patches or spec.components, another source than agentPlatformOrganizations.fluxSource (its name required with fluxNamespace, the render fails without it), another key than fluxDecryptionSecret, or a path other than fluxPathPrefix + its parent and organization labels (two DNS labels: not the root, a whole parent or another organization) refused, a fluxPathPrefix that is not ./<segments>/ failing the render, a file in git changing or pruning no RoleBinding its own Kustomization did not apply (organization-admins included), a Secret its organization's Kustomization applied replaced by no one but that Kustomization's ServiceAccount (agent-platform-organization-git-secrets; an organization admin replaces a Secret people wrote), a Secret deleted with an answer of the Secret (Orphan or Foreground propagation, or a finalizer on it) only by a requester that may get it (agent-platform-secret-deletes, held in every namespace; also orphanDependents, a finalizer the admin's own update added, a Secret being deleted; an organization admin deletes with background or no propagation and is answered with a Status, never the Secret, dry run or not; the Flux prune, the namespace controller and the garbage collector admitted; the namespace controller's DeleteCollection admitted also while a finalizer holds a Secret, and a requester who may not get Secrets refused a DeleteCollection, with or without such a Secret, giantswarm/agent-platform#1362), the operator's mirror of a customer admin Group admitted and a person's labelled mirror refused (giantswarm/agent-platform#1357), a binding of organizations-admin in an organization namespace, or an update of its subjects, refused for everyone but the operator, a cluster-admin included (agent-platform-organization-admin-mirrors, giantswarm/agent-platform#1363), no AgentPlatformOrganization created in an organization namespace by anyone while one that exists there is updated and deleted (agent-platform-organization-no-nesting, giantswarm/agent-platform#1423), a git-applied organization-admins only with kustomize.toolkit.fluxcd.io/prune: disabled (create and update; its prune refused while the namespace lives, its deletion with the terminating namespace admitted), the operator binding a Flux-namespace ServiceAccount to nothing but agent-platform:organization-flux, only the operator touches the organization labels, organization-admins stays while its namespace lives, RoleBindings bind no system: identity or foreign ServiceAccount, the HelmRelease field lock holds (also for the Flux ServiceAccount), an organization is deleted only with prune: enabled or a terminating parent, and one with an Orphaned condition (applied from git) only while it is True with reason DeleteMerged, the EgressPolicy floor, the operator's copies, and the sandbox shape with a Kyverno PolicyException for agents-* in place. Every refusal names its policy and has an admitted twin. Needs PyYAML and openssl. HELM selects the binary. Network: gsoci.azurecr.io, github.com (the envtest binaries, cached in .bin/).
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-organization-admission.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-secret-deletes
+verify-secret-deletes: ## Assert agent-platform-secret-deletes in every namespace, organizations off (giantswarm/agent-platform#1365), with server-side dry runs on a local API server (tests/apiserver.py: envtest's etcd and kube-apiserver, RBAC on): the policy and its binding render with kagent on (Fail, Deny, no namespace or object selector), the same with agentPlatformOrganizations.enabled, none with kagent off; for agent-platform:admin bound in the kagent namespace and in a plain namespace, an Orphan, Foreground or orphanDependents delete, a delete of a Secret a finalizer holds or that is being deleted, dry run or not, is refused by the policy, a DeleteCollection by a requester who may not get Secrets too (with or without a body), every other delete of the admin is answered with a Status; a requester who may get, list, watch or patch the Secret (also by resourceNames) is not held: a reader, list-, watch- and patch-only deleters, a Flux controller bound to cluster-admin, the namespace controller, the garbage collector and the legacy token cleaner; a deleter who may list only another Secret is; no default role of the API server (bootstrap ClusterRoles, Roles in kube-system and kube-public) deletes Secrets without one of those four verbs. Needs PyYAML and openssl. HELM selects the binary. Network: gsoci.azurecr.io, github.com (the envtest binaries, cached in .bin/).
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-secret-deletes.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-platform-tenant-credential-refs
+verify-platform-tenant-credential-refs: ## Assert agent-platform-platform-tenant-credential-refs asks the authorizer once per distinct Secret name, with server-side dry runs on a local API server (tests/apiserver.py: envtest's etcd and kube-apiserver, RBAC on, kagent's Agent, AgentTemplate and EgressPolicy CRDs at the floor of components.kagent-crds.versionRange): for an agent-platform:editor of the kagent namespace an Agent or AgentTemplate naming one Secret he may get six times, or two distinct ones repeated, is admitted, one he may not get refused; three distinct Secrets are refused by the limit for him and for a cluster-admin, an EgressPolicy too; an Agent written before the policy with six references takes an annotation and a spec change. Every refusal is the policy's own message, never an evaluation error. Needs PyYAML and openssl. HELM selects the binary. Network: gsoci.azurecr.io (kagent-crds), github.com (the envtest binaries, cached in .bin/).
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-platform-tenant-credential-refs.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-platform-helmreleases
+verify-platform-helmreleases: ## Assert agent-platform-platform-helmreleases (giantswarm/giantswarm#38840), with server-side dry runs on a local API server (tests/apiserver.py: envtest's etcd and kube-apiserver, RBAC on, Flux's HelmRelease CRD): with kagent on and kagent.fluxServiceAccountName set the connectivity chart renders the policy and its binding (Fail, Deny) in the kagent namespace (kagent.namespaceOverride moves it), none with kagent off or the ServiceAccount name empty; for an agent-platform:editor of the kagent namespace agent-manager's HelmRelease is admitted, spec.chart, valuesFrom, postRenderers, kubeConfig, targetNamespace, storageNamespace, another OCIRepository or one of another namespace, another ServiceAccount or none refused, values.skillsGitAuthSecretRef.name and an extraAgentSpec skill's or plugin's git credentialRef admitted empty, as the installation skills credential (current or earlier name) or a Secret the writer may get and refused otherwise, each name counted once and more than two distinct Secrets besides the installation's refused, for a cluster-admin too; a HelmRelease written before the policy takes an annotation and a move to kagent.fluxServiceAccountName but no other spec change; outside the kagent namespace nothing is held. kagent's own HelmRelease (tenants.platform.kagentRelease, giantswarm/agent-platform#1387): unset, no exemption renders; a name without writers, writers without a name, a writer of another kind, without a name or a ServiceAccount without its namespace fail the render; set, a writer (user, group or ServiceAccount) creates and upgrades it in a deployer's shape with the binding in place, while an editor, a cluster-admin who is no writer and any other HelmRelease from a writer are refused. Every refusal is the policy's own message. Needs PyYAML and openssl. HELM selects the binary. Network: github.com (the envtest binaries, cached in .bin/).
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-platform-helmreleases.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
 .PHONY: verify-organization-namespaces
-verify-organization-namespaces: ## Assert the deploy of agent-platform-operator and the organization label (giantswarm/agent-platform#1268): the meta chart renders the operator release only with agentPlatformOrganizations.enabled, in the connectivity release's namespace, after it, its CRD under CreateReplace, with the platform's wiring derived onto it (the kagent namespace, the workers' policies of the flavor, the agent chart line, the curated copies, the snapshot bucket, the erasure's targets, audiences, CA ConfigMap and Flux namespace, and the IRSA role the connectivity chart renders with the AWS store); agent-manager's tenant reconciler off, kagent's authorizer and Substrate's credential provider on agent-platform.giantswarm.io/organization, and kagent's authorizer on it with the switch off too; the render fails with an explicit operator switch or targetNamespace that disagrees, an own derived value. On a local API server (tests/apiserver.py) the credential provider's grants, the workers' PolicyException and the routing bindings select a namespace labelled agent-platform.giantswarm.io/organization and not one labelled only giantswarm.io/organization, and the model routing, the egress credential and the worker admission policies refuse there and admit there. The egress gateway has no kube-apiserver rule and reaches in-cluster 443/10443 only at the pods of muster's Gateway (both flavors; the kubernetes flavor's gateway and worker egress policies pass the API server), and a server-side render fails while such a pod runs on host networking; in the kubernetes flavor the gateway reaches private destinations only from networkPolicy.substrate.egressGateway.privateCIDRs (never networkPolicy.additionalEgressCIDRs), IPv6 only with networkPolicy.kubernetes.ipv6 and the cluster's IPv6 CIDRs left out (the render fails without them, or with an IPv4 entry), and the model pods on their ingress port; privateCIDRs takes RFC 1918 ranges and refuses /0, a non-IPv4 entry and any range that overlaps 169.254.0.0/16 or 168.63.129.16. Needs PyYAML and openssl. HELM selects the binary. Network: gsoci.azurecr.io, github.com (the envtest binaries, cached in .bin/).
+verify-organization-namespaces: ## Assert the deploy of agent-platform-operator and the organization label (giantswarm/agent-platform#1268): the meta chart renders the operator release only with agentPlatformOrganizations.enabled, in the connectivity release's namespace, after it, its CRD under CreateReplace, with the platform's wiring derived onto it (the kagent namespace, the workers' policies of the flavor, the agent chart line, the curated copies, the snapshot bucket, the erasure's targets, audiences, CA ClusterTrustBundle selector and Flux namespace, and the IRSA role the connectivity chart renders with the AWS store); agent-manager's tenant reconciler off, kagent's authorizer and Substrate's credential provider on agent-platform.giantswarm.io/organization, and kagent's authorizer on it with the switch off too; the render fails with an explicit operator switch or targetNamespace that disagrees, an own derived value, or a components.substrate.targetNamespace other than ate-system (where the connectivity chart's operator policies point). On a local API server (tests/apiserver.py) the credential provider's grants, the workers' PolicyException and the routing bindings select a namespace labelled agent-platform.giantswarm.io/organization and not one labelled only giantswarm.io/organization, and the model routing, the egress credential and the worker admission policies refuse there and admit there; with a serving model-manager and an Anthropic-only llmRouting.models, an organization's OpenAI ModelConfig at the listener's /v1 is admitted and one without a baseUrl gets it filled in, while the kagent namespace's is left alone. The egress gateway has no kube-apiserver rule and reaches in-cluster 443/10443 only at the pods of muster's Gateway (both flavors; the kubernetes flavor's gateway and worker egress policies pass the API server), and a server-side render fails while such a pod runs on host networking; in the kubernetes flavor the gateway reaches private destinations only from networkPolicy.substrate.egressGateway.privateCIDRs (never networkPolicy.additionalEgressCIDRs), IPv6 only with networkPolicy.kubernetes.ipv6 and the cluster's IPv6 CIDRs left out (the render fails without them, or with an IPv4 entry), and the model pods on their ingress port; privateCIDRs takes RFC 1918 ranges and refuses /0, a non-IPv4 entry and any range that overlaps 169.254.0.0/16 or 168.63.129.16. Needs PyYAML and openssl. HELM selects the binary. Network: gsoci.azurecr.io, github.com (the envtest binaries, cached in .bin/).
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-organization-namespaces.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-operator-names
+verify-operator-names: ## Assert agent-platform-operator's names have one source and the two charts agree on every name they share for it (giantswarm/agent-platform#1278): the meta chart derives the operator's ServiceAccount and pod labels from its chart's name, with RustFS the Secret of RustFS's keys and with the Crossplane AWS store its IRSA role (agent-platform.organizations.operator), tells the operator and derives them onto the connectivity release (agentPlatformOrganizations.operator) only while the organizations are on; the operator chart at its floor names its ServiceAccount and pods so; tests/fixtures/organizations-operator-values.yaml equals the derivation; an own value, and a store role name with no room for -operator, fail the meta render; the connectivity chart without the derived names fails naming the key and its templates write none of them. Then, in both flavors, with the AWS store, RustFS and the connectivity release in another namespace, the meta render and the connectivity render of the values it hands that release agree on the operator's namespace, ServiceAccount, pod labels, RustFS Secret and IAM role, the workers' policies it copies, the Secret readers it binds, the ClusterTrustBundles it trusts, the kagent and ate-api ports it calls, the agent chart's OCIRepository, commit mode's source, path prefix and key, the Helm ServiceAccount and the organization label. Needs PyYAML. HELM selects the binary. Network: gsoci.azurecr.io (the operator chart).
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-operator-names.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
 .PHONY: verify-policyexception-userinfo
@@ -4592,10 +4573,17 @@ verify-tenant-credentials: ## Assert Substrate's credential provider follows age
 	@echo "ok: $@"
 
 .PHONY: verify-tenant-modelconfigs
-verify-tenant-modelconfigs: ## Assert the render of an organization's own ModelConfig (giantswarm/agent-platform#759, #1268): with agentPlatformOrganizations.enabled off, neither agent-platform-tenant-model-routing nor agent-platform-tenant-secret-creation renders and the modelconfig-llm-routing policies bind the kagent namespace only; on, both (Fail, Deny) select every organization namespace but kagent, the routing policy carries each listener provider's block and URL, the Secret policy asks the authorizer on creations outside the tenant-credential- prefix, no writer is excepted from the key rule, and each modelconfig-llm-routing policy (Ignore) gets a second binding for the organizations' namespaces; the render fails with llmRouting off and without the modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled off, or MutatingAdmissionPolicy not served). Needs PyYAML. HELM selects the binary.
+verify-tenant-modelconfigs: ## Assert the render of an organization's own ModelConfig (giantswarm/agent-platform#759, #1268): with agentPlatformOrganizations.enabled off, neither agent-platform-tenant-model-routing nor agent-platform-tenant-secret-creation renders and the modelconfig-llm-routing policies bind the kagent namespace only; on, both (Fail, Deny) select every organization namespace but kagent, the routing policy carries each listener provider's block and URL, the Secret policy asks the authorizer on creations outside the tenant-credential- prefix, no writer is excepted from the key rule, and each modelconfig-llm-routing policy (Ignore) gets a second binding for the organizations' namespaces; with a serving model-manager and no OpenAI entry in llmRouting.models, OpenAI is served at the listener's /v1 and filled in, in the organizations' namespaces only; the render fails with llmRouting off and without the modelconfig-llm-routing policy (llmRouting.modelConfigPolicy.enabled off, or MutatingAdmissionPolicy not served). Needs PyYAML. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-tenant-modelconfigs.py $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-default-model-config
+verify-default-model-config: ## Assert the charts declare no model (giantswarm/giantswarm-platform-manager#789): the meta chart writes providers: false into the kagent release on every render (so the kagent chart renders no default-model-config), forwards no meta-only key to the kagent or connectivity release, and both charts fail the render naming kagent.providers, kagent.defaultModelConfig (meta) and kagent.modelConfigs, pointing at ModelConfig objects declared in GitOps; the connectivity chart renders no ModelConfig.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-default-model-config.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-login-public-paths
@@ -4610,6 +4598,53 @@ verify-scenarios: ## Assert the ATS scenario inputs (tests/ats/scenarios.py) and
 	@echo "====> $@"
 	@python3 tests/verify-scenarios.py
 	@echo "the ATS scenario inputs verified."
+
+.PHONY: verify-oauth-browser
+verify-oauth-browser: ## Check ATS consent and password form handling without a cluster.
+	@python3 -m unittest discover -s tests/ats -p 'test_oauth_browser.py'
+
+# A cap must apply with and without image-volume extensions, and installations
+# must be able to size it independently or retain the upstream default.
+.PHONY: verify-postgres-wal
+verify-postgres-wal:
+	@mkdir -p $(VERIFY_TMP)
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) >$(VERIFY_TMP)/vpg-wal.yaml
+	@python3 tests/verify-postgres-wal.py $(VERIFY_TMP)/vpg-wal.yaml 4GB
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm --set postgres.maxSlotWalKeepSize=2GB >$(VERIFY_TMP)/vpg-wal.yaml
+	@python3 tests/verify-postgres-wal.py $(VERIFY_TMP)/vpg-wal.yaml 2GB pgvector
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_PG) --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm --set postgres.maxSlotWalKeepSize=null >$(VERIFY_TMP)/vpg-wal.yaml
+	@python3 tests/verify-postgres-wal.py $(VERIFY_TMP)/vpg-wal.yaml absent pgvector
+
+	@set -eu; for value in default 2GB null -1; do \
+	  override=""; expected="$$value"; \
+	  case "$$value" in default) expected=4GB ;; null) override="--set postgres.maxSlotWalKeepSize=null"; expected=-1 ;; *) override="--set-string postgres.maxSlotWalKeepSize=$$value" ;; esac; \
+	  $(HELM) template t $(CHART_DIR) $(WIRING_PG) $$override --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=gsoci.azurecr.io/giantswarm/pgvector:0.8.2-18-bookworm >$(VERIFY_TMP)/vpg-wal-meta.yaml; \
+	  python3 tests/verify-postgres-wal.py --connectivity-values $(VERIFY_TMP)/vpg-wal-meta.yaml >$(VERIFY_TMP)/vpg-wal-values.yaml; \
+	  $(HELM) template t $(CONNECTIVITY_DIR) --namespace agent-platform $(FLEET_APIS) -f $(VERIFY_TMP)/vpg-wal-values.yaml >$(VERIFY_TMP)/vpg-wal.yaml; \
+	  python3 tests/verify-postgres-wal.py $(VERIFY_TMP)/vpg-wal.yaml "$$expected" pgvector; \
+	done
+
+.PHONY: verify-manager-grant-broker-egress
+verify-manager-grant-broker-egress: ## Assert cluster/model manager grant brokers are reachable on their HTTPS origin and port in both policy flavors, and reject Service aliases.
+	@mkdir -p $(VERIFY_TMP)
+	@set -eu; for component in cluster-manager model-manager; do \
+	  for flavor in cilium kubernetes; do \
+	    for endpoint in 'https://muster.ci.example.com:8443/oauth/token' 'https://203.0.113.10:8443/oauth/token' 'https://[2001:db8::10]:8443/oauth/token'; do \
+	      $(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set components.cluster-manager.enabled=true --set networkPolicy.flavor=$$flavor --set $$component.github.enabled=true --set-string "$$component.github.tokenExchange.tokenEndpoint=$$endpoint" >$(VERIFY_TMP)/manager-grant-egress.yaml; \
+	      awk "/^  name: agent-platform-connectivity-$$component-egress$$/,/^---/" $(VERIFY_TMP)/manager-grant-egress.yaml >$(VERIFY_TMP)/manager-grant-policy.yaml; \
+	      grep -q '8443' $(VERIFY_TMP)/manager-grant-policy.yaml || { cat $(VERIFY_TMP)/manager-grant-policy.yaml; exit 1; }; \
+	      case "$$endpoint" in \
+	        *muster.ci*) if [ "$$flavor" = cilium ]; then grep -q 'matchName: "muster.ci.example.com"' $(VERIFY_TMP)/manager-grant-policy.yaml; else grep -q 'cidr: 0.0.0.0/0' $(VERIFY_TMP)/manager-grant-policy.yaml; fi ;; \
+	        *203.0.113*) grep -q '203.0.113.10/32' $(VERIFY_TMP)/manager-grant-policy.yaml ;; \
+	        *2001:db8*) grep -q '2001:db8::10/128' $(VERIFY_TMP)/manager-grant-policy.yaml ;; \
+	      esac; \
+	    done; \
+	  done; \
+	  for endpoint in 'http://muster.ci.example.com/oauth/token' 'https://muster/oauth/token' 'https://muster.agent-platform.svc.cluster.local/oauth/token'; do \
+	    if $(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set components.cluster-manager.enabled=true --set-string "$$component.github.tokenExchange.tokenEndpoint=$$endpoint" >$(VERIFY_TMP)/manager-grant-refused.log 2>&1; then echo "FAIL: $$component accepts $$endpoint"; exit 1; fi; \
+	    grep -q "$$component.github.tokenExchange.tokenEndpoint" $(VERIFY_TMP)/manager-grant-refused.log; \
+	  done; \
+	done
 
 # --- verify-all --------------------------------------------------------------
 # Every offline assertion of this repository in one target, which is what CI

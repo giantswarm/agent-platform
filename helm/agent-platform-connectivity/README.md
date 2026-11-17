@@ -39,7 +39,7 @@ that component is off.
 
 ### Rollout
 
-Two values turn the path on, and the order matters.
+Two steps turn the path on, and the order matters.
 
 1. Render the listener and the routing resources:
 
@@ -67,21 +67,14 @@ Two values turn the path on, and the order matters.
      -d '{"model":"claude-sonnet-5-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}'
    ```
 
-2. Point kagent's default ModelConfig at the listener. This is the cutover:
-
-   ```yaml
-   kagent:
-     providers:
-       anthropic:
-         config:
-           baseUrl: http://agentgateway.<release namespace>.svc:8081
-   ```
-
-   The base URL lands in the default ModelConfig the kagent chart renders.
-   An agent is a Substrate actor with no pod of its own (see
+2. Write the ModelConfigs. This is the cutover: a ModelConfig of a provider
+   the listener serves, without a `baseUrl` of its own, takes the listener URL
+   at its next create or update (the `<release>-modelconfig-llm-routing`
+   policies, below). A ModelConfig that names its own `baseUrl` keeps it. An
+   agent is a Substrate actor with no pod of its own (see
    [Metric labels](#metric-labels)), so no agent pod rolls.
 
-Roll back by removing the second value. The listener may stay.
+Roll back by setting `llmRouting.enabled: false`.
 
 Turning `llmRouting.enabled` off afterwards also takes back what the
 `<release>-modelconfig-llm-routing` policies wrote: they mark every `baseUrl`
@@ -91,8 +84,8 @@ they set with the annotation `agent-platform.giantswarm.io/llm-routing-base-url`
 listener URL on a ModelConfig Helm does not manage that the policies wrote
 before they marked it, so every such ModelConfig calls its provider directly
 again; its log names each one. Helm cannot: it never owned the field. A
-`baseUrl` an operator set, and one a Helm release renders (the second value
-above included), is never touched: remove the second value first. With routing
+`baseUrl` an operator set, and one a Helm release renders, is never touched.
+With routing
 on, the hook also takes the listener URL off a ModelConfig whose provider no
 `llmRouting.models` entry serves any more. It never routes a ModelConfig: the
 policies do at its next write.
@@ -207,35 +200,28 @@ On the installation, after the cutover:
   in the Gateway's own `-metrics` policy — see [Metric labels](#metric-labels).
 - `ingress.httpRoute.timeouts` reaches the external routes only: the in-cluster
   path has no `HTTPRoute` to carry route timeouts.
-- An extra `kagent.modelConfigs[]` entry rides the listener unless it sets its
-  own `baseUrl` or names a provider no `llmRouting.models` entry serves; the
-  MutatingAdmissionPolicy does the same for a ModelConfig created elsewhere,
-  one policy per served provider. An OpenAI ModelConfig's listener URL ends in
-  `/v1`, the base its client appends `/responses` or `/chat/completions` to.
+- A ModelConfig rides the listener unless it sets its own `baseUrl` or names a
+  provider no `llmRouting.models` entry serves: the MutatingAdmissionPolicy,
+  one per served provider, writes the listener URL into it. An OpenAI
+  ModelConfig's listener URL ends in `/v1`, the base its client appends
+  `/responses` or `/chat/completions` to.
 - **codex**: the codex runtime speaks the Responses API only. An `OpenAI` entry
   on the listener (`baseURL: https://api.openai.com/v1`, `match: gpt-*`) and a
-  `kagent.modelConfigs[]` entry with `provider: OpenAI` and `apiFormat:
-  responses` give codex agents a model whose calls take the listener's
-  Responses route (`/v1/responses`): priced by the gateway's catalog, in the
-  GenAI usage metrics, under `llmRouting.rateLimits`. The codex compiler
-  refuses any other OpenAI option (`maxTokens` included), `defaultHeaders`,
-  `tls` and `apiKeyPassthrough`; the chart renders none of them for such an
-  entry, and refuses `apiFormat` on any other provider.
-- **codex on a ChatGPT subscription**: an `OpenAI` entry with `credentialType:
-  chatgptOAuth`, `apiFormat: responses` and no `apiKeySecret` is the Session
-  person's own ChatGPT login and renders no `apiKeySecretKey`. It
-  stays off the listener: the chart writes no listener `baseUrl`, the policy
-  skips it and the hook takes one it wrote off again, because the listener's
-  OpenAI route serves the OpenAI API, not the ChatGPT Codex backend, and a
-  subscription has no per-token price. Its turns are not in the GenAI usage
-  metrics. What a person connects and what the chart derives:
+  ModelConfig with `provider: OpenAI` and `openAI.apiFormat: responses` give
+  codex agents a model whose calls take the listener's Responses route
+  (`/v1/responses`): priced by the gateway's catalog, in the GenAI usage
+  metrics, under `llmRouting.rateLimits`.
+- **codex on a ChatGPT subscription**: an `OpenAI` ModelConfig with
+  `openAI.credentialType: chatgptOAuth` stays off the listener: the policy
+  skips it and the hook takes a listener URL it wrote off again, because the
+  listener's OpenAI route serves the OpenAI API, not the ChatGPT Codex backend,
+  and a subscription has no per-token price. Its turns are not in the GenAI
+  usage metrics. What a person connects and what the meta chart derives:
   [docs/chatgpt-login.md](../../docs/chatgpt-login.md).
-  The `baseUrl` lands under the CRD's block for the entry's provider —
-  `anthropic`, `mistral`, `openAI`, `sapAICore`, the four `ModelConfigSpec` gives one —
-  never the lower-cased provider name, which the API server would prune; the
-  render refuses a `baseUrl` on any other provider and a `provider` outside the
-  CRD's enum (case-sensitive). `make verify-kagent-crds` sweeps every provider
-  of the enum against the kagent line's CRD.
+- The policy writes the `baseUrl` under the CRD's block for the ModelConfig's
+  provider (`anthropic`, `mistral`, `openAI`, `sapAICore`, the four
+  `ModelConfigSpec` gives one), never the lower-cased provider name, which the
+  API server would prune.
 - The data plane is scraped by the packaging chart's own `PodMonitor`, under
   `agentgateway.monitoring.enabled` in the meta chart (the resolved
   `global.observability.metrics.serviceMonitor.enabled`). It selects the
@@ -243,6 +229,15 @@ On the installation, after the cutover:
   the MCP path is scraped too and the monitor exists before the cutover. This
   chart rendered one of its own, selecting by gateway name; it is gone, because
   two monitors of the same pods double every data-plane series.
+
+## The default ModelConfig
+
+The chart declares no model: an installation's ModelConfigs are plain objects
+declared in GitOps next to its agents. A namespace's default model is the
+ModelConfig annotated `agent-platform.giantswarm.io/is-default-model-config:
+"true"`. Nothing enforces one per namespace at admission: the writers (the
+portal, agent-manager) keep it unique, and a namespace with more than one
+marked ModelConfig has no default.
 
 ## Metric labels
 
@@ -650,9 +645,12 @@ the kagent controller with it.
 
 A private identity provider inside one of `worldExcludedCIDRs` needs its
 address in `networkPolicy.additionalEgressCIDRs`. The policy names the proxy
-pods as Envoy Gateway labels them (`app.kubernetes.io/name: envoy`), so a route
-pinned with `backstage.parentRefs` to a Gateway of another implementation needs
-that Gateway's pods admitted by a policy of its own.
+pods of each Gateway as Envoy Gateway labels them
+(`gateway.envoyproxy.io/owning-gateway-name` and `-namespace`, from the same
+parentRefs the routes attach with), so another Gateway's proxy in the same
+namespace is not admitted, and a route pinned with `backstage.parentRefs` to a
+Gateway of another implementation needs that Gateway's pods admitted by a
+policy of its own.
 
 The backstage chart's own CNPG policy is not this chart's: its missing DNS and
 operator legs, and the missing arm64 images, are filed against
@@ -1166,6 +1164,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | components.agent-sandbox.enabled | bool | `false` |  |
 | components.model-manager.enabled | bool | `true` |  |
 | components.agent-manager.enabled | bool | `false` |  |
+| components.default-agent.enabled | bool | `false` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.workspace-manager.enabled | bool | `false` |  |
@@ -1440,12 +1439,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.securityContext.allowPrivilegeEscalation | bool | `false` |  |
 | kagent.securityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | kagent.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
-| kagent.providers.default | string | `"anthropic"` |  |
-| kagent.providers.anthropic.provider | string | `"Anthropic"` |  |
-| kagent.providers.anthropic.model | string | `"claude-sonnet-5-5"` |  |
-| kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
-| kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
-| kagent.providers.anthropic.apiKey | string | `""` |  |
 | kagent.otel.exporter.otlp.endpoint | string | `"http://otlp-gateway.kube-system.svc:4317"` |  |
 | kagent.otel.exporter.otlp.protocol | string | `"grpc"` |  |
 | kagent.otel.exporter.otlp.timeout | string | `"500"` |  |
@@ -1535,6 +1528,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controllerRoute.mcp.pathPrefix | string | `"/kagent/mcp"` |  |
 | kagent.controllerRoute.mcp.timeout | int | `300` |  |
 | kagent.controllerRoute.mcp.displayName | string | `"Kagent"` |  |
+| kagent.controllerRoute.mcp.description | string | `"Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
@@ -1551,13 +1545,13 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.uiRoute.backendTrafficPolicy.timeout | string | `"60s"` |  |
 | kagent.uiRoute.backendTrafficPolicy.annotations | object | `{}` |  |
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
-| kagent.modelConfigs | list | `[]` |  |
 | kagent.remoteMcpServers | list | `[]` |  |
 | postgres.enabled | bool | `false` |  |
 | postgres.namespace | string | `"kagent"` |  |
 | postgres.clusterName | string | `"kagent-pg"` |  |
 | postgres.instances | int | `3` |  |
 | postgres.primaryUpdateMethod | string | `"switchover"` |  |
+| postgres.maxSlotWalKeepSize | string | `"4GB"` |  |
 | postgres.storage.size | string | `"20Gi"` |  |
 | postgres.storage.storageClass | string | `""` |  |
 | postgres.image.name | string | `""` |  |
@@ -1714,7 +1708,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | model-manager.mcp.enabled | bool | `true` |  |
 | model-manager.oauth.enabled | bool | `true` |  |
 | model-manager.oauth.provider | string | `"dex"` |  |
-| model-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| model-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | model-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | model-manager.oauth.downstream.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.enabled | bool | `true` |  |
@@ -1742,7 +1736,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | vm-manager.persistence.create | bool | `false` |  |
 | vm-manager.oauth.enabled | bool | `true` |  |
 | vm-manager.oauth.provider | string | `"dex"` |  |
-| vm-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| vm-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | vm-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | vm-manager.muster.mcpServer.enabled | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1763,7 +1757,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |
 | agent-manager.oauth.provider | string | `"dex"` |  |
-| agent-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| agent-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | agent-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | agent-manager.oauth.downstream.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.enabled | bool | `true` |  |
@@ -1795,7 +1789,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.17.31"` |  |
+| agentManager.migration.image.tag | string | `"2.24.0"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
@@ -1803,7 +1797,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | cluster-manager.mcp.enabled | bool | `true` |  |
 | cluster-manager.oauth.enabled | bool | `true` |  |
 | cluster-manager.oauth.provider | string | `"dex"` |  |
-| cluster-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| cluster-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | cluster-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | cluster-manager.oauth.downstream.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
@@ -1821,15 +1815,23 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
-| tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: agent-platform:user in the kagent namespace, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC "everyone" group instead. |
+| tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: agent-platform:platform-user in the kagent namespace, and, while musterMcpServerViewers is unset, list (get, watch) on muster's MCPServers in muster's namespace. The default, system:authenticated, includes every ServiceAccount: every pod with a token can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. An installation can set its OIDC "everyone" group instead. |
 | tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: agent-platform:editor in the kagent namespace. |
+| tenants.platform.kagentRelease.name | string | `""` | The name of kagent's HelmRelease in the kagent namespace. Empty, the default, admits none. |
+| tenants.platform.kagentRelease.writers | list | `[]` | The identities that write it: RBAC-style subjects of kind User, Group or ServiceAccount (with its namespace). |
 | tenants.platformTeam | list | `[]` | The customer's platform team: agent-platform:editor in the kagent namespace beside platform.editors (the meta chart also adds it to muster's editor bindings). |
+| musterMcpServerViewers | string | `nil` | muster's MCP-server viewers (giantswarm/agent-platform#1331): list (get, watch) on muster's MCPServers in muster's namespace (agent-platform:mcpserver-viewer). Unset (null), they are tenants.platform.users. An empty list binds nobody. |
 | agentPlatformOrganizations.enabled | bool | `false` | Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a model whose provider the listener serves (Anthropic, Mistral or OpenAI) and llmRouting.modelConfigPolicy.enabled on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain or apiHostnames: the render fails without them. The rollout gate: off by default for now (see above). |
 | agentPlatformOrganizations.fluxNamespace | string | `""` | The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace, and the operator's erasure.fluxNamespace (derived); set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces. |
 | agentPlatformOrganizations.fluxSource | object | `{"kind":"GitRepository","name":""}` | The installation's Flux source in fluxNamespace, which an organization's Kustomization applies from (agent-platform-operator's commitMode.sourceRef). The admission policy holds the operator's Kustomizations to this source. The name is required with fluxNamespace: the render fails without it. |
 | agentPlatformOrganizations.fluxPathPrefix | string | `"./agent-platform/organizations/"` | The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies exactly this prefix, its parent and its name, from the labels the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise. |
 | agentPlatformOrganizations.fluxDecryptionSecret | string | `"sops-keys"` | The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption. |
 | agentPlatformOrganizations.apiHostnames | list | `[]` | The installation's Kubernetes API hostnames beside api.<global.domain>, which is derived while global.domain is set: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. The render fails while both are empty. |
+| agentPlatformOrganizations.operator | object | `{"awsRoleName":"","podLabels":{},"serviceAccountName":"","snapshotSecret":""}` | agent-platform-operator's names, derived by the meta chart while the organizations are on (agent-platform.organizations.operator there): the meta chart installs the operator and tells it the same names, so this chart holds no copy of them (giantswarm/agent-platform#1278). Never set them yourself. |
+| agentPlatformOrganizations.operator.serviceAccountName | string | `""` | Its ServiceAccount, in this release's namespace. Required while enabled. |
+| agentPlatformOrganizations.operator.podLabels | object | `{}` | Its pods' selector labels. Required while enabled. |
+| agentPlatformOrganizations.operator.snapshotSecret | string | `""` | The Secret of RustFS's keys rendered for it. Required with substrate.rustfs.enabled. |
+| agentPlatformOrganizations.operator.awsRoleName | string | `""` | Its IRSA role. Required with the Crossplane AWS snapshot store. |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
 | workspaces.storage.storageClass.create | bool | `false` |  |
@@ -1936,6 +1938,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | backstage.disabledExtensions[10] | string | `"api:ai-chat/drawer"` |  |
 | backstage.disabledExtensions[11] | string | `"app-root-element:ai-chat/drawer"` |  |
 | backstage.skillsRepositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| backstage.skillPullRequests | bool | `false` |  |
+| backstage.metaAgents | object | `{}` |  |
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |
@@ -1946,6 +1950,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | mcp-kubernetes.mcpServer.enabled | bool | `true` |  |
 | mcp-kubernetes.mcpServer.managementCluster | string | `""` |  |
 | mcp-kubernetes.mcpServer.displayName | string | `"Kubernetes"` |  |
+| mcp-kubernetes.mcpServer.description | string | `"Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"` |  |
 | cloudnative-pg | object | `{}` |  |
 | kagent-crds | object | `{}` |  |
 | substrate.createNamespace | bool | `false` |  |

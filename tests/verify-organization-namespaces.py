@@ -12,7 +12,10 @@ The meta chart's render:
   kagent namespace, the workers' policies of the flavor, the agent chart line,
   the curated copies, the snapshot bucket, the erasure's targets, audiences and
   CA ConfigMap, the Flux namespace, and with the AWS store the IRSA role the
-  connectivity chart renders); agent-manager's tenant reconciler off;
+  connectivity chart renders); agent-manager's organization tools on
+  (tenants.enabled, with an agent-manager floor of 2.20.0, whose chart leaves
+  agent-platform-tenant-flux to the connectivity chart); credential UI URLs
+  are explicit client configuration;
   Substrate's credential provider reading
   the organization namespaces by the new label;
 - tenants.organizations is refused by the schema (the tenants mode is gone);
@@ -33,7 +36,15 @@ container to a worker there (a Pending pod is enough: admission runs before
 the node lookup); the operator writes its namespaced kinds only in
 organization namespaces (agent-platform-organization-operator-scope); one labelled only
 giantswarm.io/organization gets none of them. Each refusal names its policy
-and has an admitted twin.
+and has an admitted twin. No case runs before the API server has loaded every
+policy and binding applied (APIServer.settle, giantswarm/agent-platform#1291).
+
+With llmRouting.models naming Anthropic only and a serving model-manager
+(giantswarm/giantswarm#39175), the policies of that render applied in place:
+an organization's OpenAI ModelConfig at the listener's /v1 is admitted, one
+without a baseUrl gets the listener's /v1 filled in, one at the provider's own
+URL is still refused, and an OpenAI ModelConfig without a baseUrl in the
+kagent namespace is left as it is.
 
 The egress gateway: its Cilium policy has no kube-apiserver rule and reaches
 in-cluster endpoints on 443/10443 only at the pods of muster's public Gateway
@@ -49,12 +60,12 @@ github.com (the envtest binaries, cached in .bin/).
 Usage: verify-organization-namespaces.py META_CHART CONNECTIVITY_CHART
 """
 
+import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
-import time
 
 import yaml
 
@@ -72,6 +83,10 @@ POOL = "kagent-default"
 PERSON = "jose"
 LISTENER = "http://agentgateway.agent-platform.svc:8081"
 MAP_API = ["--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
+# The proxy pods of muster's Gateway (ci/test-substrate-values.yaml's ingress.parentRefs), as
+# Envoy Gateway labels them and agent-platform.route.envoyPeer selects them.
+ENVOY_PEER = {"app.kubernetes.io/name": "envoy", "gateway.envoyproxy.io/owning-gateway-name": "giantswarm-default",
+              "gateway.envoyproxy.io/owning-gateway-namespace": "envoy-gateway-system"}
 
 API = None
 results = []
@@ -118,7 +133,8 @@ def meta(chart, *extra):
                 *MAP_API, *extra])
 
 
-ON = ["--set", "agentPlatformOrganizations.enabled=true", "--set", "agentPlatformOrganizations.fluxNamespace=flux-giantswarm"]
+SWITCH = ["--set", "agentPlatformOrganizations.enabled=true"]
+ON = [*SWITCH, "--set", "agentPlatformOrganizations.fluxNamespace=flux-giantswarm", "--set", "agentPlatformOrganizations.fluxSource.name=giantswarm-config"]
 AWS = ["--set", "kagent.harness.snapshotLocation=", "--set", "kagent.harness.snapshotStore.crossplane.enabled=true",
        "--set", "kagent.harness.snapshotStore.crossplane.provider=aws", "--set", "kagent.harness.snapshotStore.crossplane.providerConfigRef=ci",
        "--set", "kagent.harness.snapshotStore.crossplane.region=eu-west-1",
@@ -141,6 +157,9 @@ def check_meta(chart):
     expect("agent-platform-operator" not in conn["components"], "off, the connectivity roster carries no agent-platform-operator entry")
 
     on = docs(meta(chart, *ON))
+    operator_peer = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": RELEASE_NS}}, "podSelector": {"matchLabels": {"app.kubernetes.io/name": "agent-platform-operator"}}}
+    expect(operator_peer in release(on, "kagent")["values"]["controller"]["networkPolicy"]["from"], "kagent admits the operator through controller.networkPolicy.from even with platform policies disabled")
+    expect(operator_peer not in release(off, "kagent")["values"]["controller"]["networkPolicy"]["from"], "organizations off: kagent admits no operator")
     op = release(on, "agent-platform-operator")
     expect(op is not None, "on, the agent-platform-operator release renders")
     expect(op["install"].get("crds") == "CreateReplace" and op["upgrade"].get("crds") == "CreateReplace",
@@ -160,17 +179,140 @@ def check_meta(chart):
     expect(e["kagent"] == {"target": "grpc://kagent-controller.kagent.svc:8083", "audience": "kagent"},
            "the erasure reaches the kagent controller's API Service with kagent's machine audience")
     expect(e["substrate"] == {"target": "grpcs://api.ate-system.svc:443", "audience": "api.ate-system.svc",
-                              "caConfigMap": {"name": "agent-platform-operator-ate-api-ca", "key": "ca.crt"}},
-           "the erasure reaches ate-api with the audience its authentication config accepts and the CA the bootstrap hook publishes")
+                              "caClusterTrustBundle": {"signerName": "servicedns.podcert.ate.dev/identity",
+                                                       "matchLabels": {"podcert.ate.dev/canarying": "live"}}},
+           "the erasure reaches ate-api with the audience its authentication config accepts and trusts the ClusterTrustBundles its serving certificate's signer publishes")
     hook = [d for d in docs(connectivity(f"{chart}/../agent-platform-connectivity")) if d["kind"] == "Job" and "substrate-bootstrap" in d["metadata"]["name"]]
-    script = yaml.safe_dump(hook)
-    expect(hook and f"create configmap \"{e['substrate']['caConfigMap']['name']}\" --from-file={e['substrate']['caConfigMap']['key']}=" in script.replace("\\\"", "\"")
-           and f"-n \"{op['targetNamespace']}\"" in script.replace("\\\"", "\""),
-           "the bootstrap hook writes the CA ConfigMap and key the operator mounts, in the operator's namespace")
-    expect(find(docs(connectivity(f"{chart}/../agent-platform-connectivity")), "ClusterRole", "agent-platform-tenant-flux") is not None,
+    script = "\n".join(arg for d in hook for c in d["spec"]["template"]["spec"]["containers"] for arg in c.get("command", []) + c.get("args", []))
+    expect(hook and 'trust_bundle "$pc_ns" service-dns-ca-pool servicedns.podcert.ate.dev/identity' in script
+           and "agent-platform-operator-ate-api-ca" not in script,
+           "the bootstrap hook publishes the signer's ClusterTrustBundle the operator projects, and copies no CA ConfigMap")
+    conn_chart = f"{chart}/../agent-platform-connectivity"
+    expect(find(docs(connectivity(conn_chart)), "ClusterRole", "agent-platform-tenant-flux") is not None,
            "on, the connectivity chart renders agent-platform-tenant-flux, which the operator binds")
+    expect(find(docs(connectivity(conn_chart, "kubernetes", "--set", "components.agent-manager.enabled=true", "--set", "agent-manager.oauth.enabled=false")),
+                "ClusterRole", "agent-platform-tenant-flux") is not None,
+           "on with agent-manager on, the connectivity chart still renders agent-platform-tenant-flux: no other release takes it over")
     am = release(on, "agent-manager")["values"]
-    expect(am.get("tenants") == {"enabled": False}, "agent-manager's tenant reconciler is off while the operator runs")
+    expect(am.get("tenants") == {"enabled": True}, "on, agent-manager serves the organization tools (tenants.enabled true)")
+    expect("devPortal" not in am, "no Dev Portal setting is derived")
+    expect(release(off, "agent-manager")["values"].get("tenants") == {"enabled": False},
+           "off, agent-manager's tenants.enabled is false")
+    for extra in ([], ["--set", "components.backstage.enabled=true"],
+                  ["--set", "components.backstage.enabled=true", "--set", "backstage.hostname=portal.example.com"]):
+        am = release(docs(meta(chart, *ON, *extra)), "agent-manager")["values"]
+        expect("devPortal" not in am and not am.get("credentials", {}).get("uiURL"),
+               "the portal does not implicitly configure credential UI routes")
+    ui_url = "https://portal.example.com/credential-operations/{operation}"
+    manager_commit = {"repository": "acme/management-clusters", "branch": "main",
+                      "objectsPath": "organizations", "contentPrefix": "agent-platform/organizations"}
+    am = release(docs(meta(chart, *ON, "--set", "components.agent-manager.versionRange=>=2.22.0-rc.3 <3.0.0",
+                           "--set-literal", f"agent-manager.credentials.uiURL={ui_url}",
+                           "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token",
+                           "--set", "agent-manager.githubTokenExchange.clientID=agent-manager",
+                           "--set-json", f"agent-manager.tenants.commit={json.dumps(manager_commit)}")), "agent-manager")["values"]
+    expect(am.get("credentials", {}).get("uiURL") == ui_url,
+           "the explicit client credential URL template travels unchanged")
+    form_url = "https://portal.example.com/customize/models/credentials/test/{namespace}/{operation}"
+    installation_forms = ["--set-literal", f"agent-manager.credentials.uiURL={form_url}",
+                          "--set", "agent-manager.oauth.enabled=true",
+                          "--set", "agent-manager.oauth.downstream.enabled=true",
+                          "--set", "agentManager.route.enabled=true",
+                          "--set", "agentManager.route.jwtAuthentication.enabled=true"]
+    standalone = docs(meta(chart, *installation_forms))
+    standalone_manager = release(standalone, "agent-manager")["values"]
+    expect(standalone_manager["tenants"]["enabled"] is False
+           and standalone_manager["credentials"] == {"uiURL": form_url},
+           "off, the credential form travels unchanged and tenancy stays disabled")
+    standalone_route = release(standalone, "agent-platform-connectivity")["values"]["agentManager"]["route"]
+    expect(standalone_route["enabled"] is True and standalone_route["jwtAuthentication"]["enabled"] is True,
+           "the protected manager route is independent of the organization switch")
+    for template in ("https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}",
+                     "https://portal.example.com/credentials/{operation}?ns=namespace",
+                     "https://portal.example.com/x/{parent}/{organization}/{namespace}/{operation}",
+                     "https://portal.example.com/x/{namespace}/{operation}{?organization}"):
+        refused = meta(chart, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL needs a {namespace} expression and no {parent} or {organization}" in refused.stderr,
+               f"off, a credential form without {{namespace}} or with an organization variable is refused ({template})")
+    for range_ in (">=3.0.0 <4.0.0", ">=3.1.0-rc.10 <4.0.0-0"):
+        refused = meta(chart, *installation_forms, "--set", f"components.agent-manager.versionRange={range_}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL without agentPlatformOrganizations.enabled needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11" in refused.stderr,
+               f"off, a credential form needs agent-manager 3.1.0-rc.11 or later ({range_})")
+    r = meta(chart, *installation_forms, "--set", "components.agent-manager.versionRange=>=3.1.0-rc.11 <4.0.0-0")
+    expect(r.returncode == 0, "off, a credential form renders with the agent-manager 3.1.0-rc.11 floor")
+    platform_commit = {**manager_commit, "platformModelsPath": "platform-models"}
+    for range_, ok in ((">=3.0.0 <4.0.0", False), (">=3.1.0 <4.0.0", True)):
+        r = meta(chart, *ON, "--set", f"components.agent-manager.versionRange={range_}",
+                 "--set-json", f"agent-manager.tenants.commit={json.dumps(platform_commit)}")
+        if ok:
+            expect(r.returncode == 0, f"tenants.commit.platformModelsPath renders with {range_}")
+        else:
+            expect(r.returncode != 0 and "agent-manager.tenants.commit.platformModelsPath needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11" in r.stderr,
+                   f"tenants.commit.platformModelsPath is refused with {range_}")
+    for template in ("https://portal.example.com/c/{operation}{?namespace}", "https://portal.example.com/c{/namespace,operation}"):
+        r = meta(chart, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
+        expect(r.returncode == 0, f"off, a credential form naming namespace in another RFC 6570 expression renders ({template})")
+    organization_only = "https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}"
+    r = meta(chart, *ON, "--set-literal", f"agent-manager.credentials.uiURL={organization_only}")
+    expect(r.returncode == 0, "on, an organization-only credential form without {namespace} renders")
+    for range_ in (">=3.0.0 <4.0.0", "3.0.0", ">=3.1.0-rc.10 <4.0.0-0"):
+        refused = meta(chart, *ON, *installation_forms, "--set", f"components.agent-manager.versionRange={range_}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL with a {namespace} expression needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11" in refused.stderr,
+               f"on, a credential form naming {{namespace}} needs agent-manager 3.1.0-rc.11 or later ({range_})")
+    r = meta(chart, *ON, *installation_forms)
+    expect(r.returncode == 0, "on, a credential form naming {namespace} renders with the default range")
+    r = meta(chart, *ON, "--set", "components.agent-manager.versionRange=>=3.0.0 <4.0.0",
+             "--set-literal", f"agent-manager.credentials.uiURL={organization_only}")
+    expect(r.returncode == 0, "on, an organization-only credential form keeps any agent-manager floor")
+    for switch, template in (([], "https://portal.example.com/c/{namespace}/{operation}{#namespace}"),
+                             ([], "https://portal.example.com/c/{namespace}/{operation}#form"),
+                             (ON, "https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}{#x}")):
+        refused = meta(chart, *switch, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL must not contain #" in refused.stderr,
+               f"a credential form with a fragment is refused ({template})")
+    for setting in ("agent-manager.oauth.enabled", "agent-manager.oauth.downstream.enabled"):
+        refused = meta(chart, *installation_forms, "--set", f"{setting}=false")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL needs agent-manager.oauth.enabled" in refused.stderr,
+               f"off, the credential form requires {setting}")
+    expect(am.get("githubTokenExchange", {}).get("clientID") == "agent-manager",
+           "the configured confidential broker client travels unchanged")
+    exchange = {"tokenEndpoint": "https://muster.example.com/oauth/token", "audience": "agent-manager",
+                "existingSecret": "agent-manager-github-broker"}
+    next_manager = docs(meta(chart, *ON, "--set", "components.agent-manager.versionRange=>=3.0.0 <4.0.0",
+                             "--set", "agent-manager.github.enabled=true",
+                             "--set-json", f"agent-manager.github.tokenExchange={json.dumps(exchange)}"))
+    next_values = release(next_manager, "agent-manager")["values"]
+    expect(next_values.get("github", {}).get("tokenExchange") == exchange
+           and next_values["github"].get("enabled") is True and "githubTokenExchange" not in next_values,
+           "the 3.x manager receives the on-demand grant configuration without the removed top-level key")
+    expect(am.get("tenants") == {"enabled": True, "commit": manager_commit},
+           "organization GitOps configuration reaches the manager beside the derived organization switch")
+    expect(v["commitMode"] == {"sourceRef": {"kind": "GitRepository", "name": "giantswarm-config"},
+                               "path": "./agent-platform/organizations/{parent}/{name}", "decryptionSecret": "sops-keys"},
+           f"with fluxNamespace, the operator's commit mode follows fluxSource, fluxPathPrefix and fluxDecryptionSecret ({v.get('commitMode')})")
+    own_cm = release(docs(meta(chart, *ON, "--set", "agent-platform-operator.commitMode.interval=5m",
+                               "--set", "agent-platform-operator.commitMode.installationKustomization.name=agent-platform",
+                               "--set", "agentPlatformOrganizations.fluxSource.kind=OCIRepository",
+                               "--set", "agentPlatformOrganizations.fluxPathPrefix=./orgs/",
+                               "--set", "agentPlatformOrganizations.fluxDecryptionSecret=")), "agent-platform-operator")["values"]["commitMode"]
+    expect(own_cm.get("interval") == "5m" and own_cm.get("installationKustomization", {}).get("name") == "agent-platform"
+           and own_cm["sourceRef"] == {"kind": "OCIRepository", "name": "giantswarm-config"}
+           and own_cm["path"] == "./orgs/{parent}/{name}" and own_cm["decryptionSecret"] == "",
+           f"an own commitMode.interval and installationKustomization travel beside the derived source, path and key ({own_cm})")
+    no_flux = release(docs(meta(chart, *SWITCH)), "agent-platform-operator")["values"]
+    expect("commitMode" not in no_flux or not no_flux["commitMode"].get("sourceRef", {}).get("name"),
+           "without fluxNamespace the operator gets no commit mode")
+    org_selector = {"matchExpressions": [{"key": NEW, "operator": "Exists"}]}
+    muster = release(on, "muster")["values"]["muster"]
+    expect(muster.get("mcpServerNamespaceSelector") == org_selector,
+           f"on, muster serves the MCPServers of the namespaces labelled {NEW} (mcpServerNamespaceSelector)")
+    expect("mcpServerNamespaceSelector" not in release(off, "muster")["values"].get("muster", {}),
+           "off, muster gets no namespace selector and serves its own namespace only")
+    own = {"matchLabels": {"team": "a"}}
+    muster = release(docs(meta(chart, "--set-json", f"muster.muster.mcpServerNamespaceSelector={json.dumps(own)}")), "muster")["values"]["muster"]
+    expect(muster.get("mcpServerNamespaceSelector") == own, "off, an own muster namespace selector travels unchanged")
+    muster = release(docs(meta(chart, *ON, "--set-json", f"muster.muster.mcpServerNamespaceSelector={json.dumps(org_selector)}")), "muster")["values"]["muster"]
+    expect(muster.get("mcpServerNamespaceSelector") == org_selector, "on, an own muster namespace selector equal to the derived one is a no-op")
     kagent = release(on, "kagent")["values"]["controller"]
     env = {x["name"]: x.get("value") for x in kagent.get("env", [])}
     expect(kagent["authorization"]["namespaceSelector"] == NEW and env.get("KAGENT_EXTENSIONS_NAMESPACE_SELECTOR") == NEW,
@@ -183,17 +325,34 @@ def check_meta(chart):
     expect(conn["components"].get("agent-platform-operator") == {"enabled": True} and "agent-platform-operator" not in conn,
            "the connectivity release sees the operator in the roster, never its values block")
 
+    erasure = release(docs(meta(chart, *ON, "--set", "components.substrate.targetNamespace=ate-system")), "agent-platform-operator")["values"]["erasure"]["substrate"]
+    expect(erasure["target"] == "grpcs://api.ate-system.svc:443" and erasure["audience"] == "api.ate-system.svc",
+           "on with components.substrate.targetNamespace ate-system, the render succeeds and the operator calls ate-api in ate-system, where the connectivity chart's operator policies point")
+    off_moved = meta(chart, "--set", "components.substrate.targetNamespace=ate-x")
+    expect(off_moved.returncode == 0, f"off, another components.substrate.targetNamespace is not refused by the organizations check:\n{off_moved.stderr}")
+
     moved = docs(meta(chart, *ON, "--set", "components.agent-platform-connectivity.targetNamespace=apo"))
     expect(release(moved, "agent-platform-operator")["targetNamespace"] == "apo",
            "with the connectivity release in another namespace, the operator installs there too")
 
     aws = docs(meta(chart, *ON, *AWS))
+    rustfs = docs(meta(chart, *ON, "--set", "substrate.rustfs.enabled=true", "--set", "substrate.rustfs.accessKey=proof-access", "--set", "substrate.rustfs.secretKey=proof-secret"))
+    snapshots = release(rustfs, "agent-platform-operator")["values"]["snapshots"]
+    expect(snapshots == {"bucket": "ci-agent-snapshots", "endpoint": "http://rustfs.ate-system.svc:9000", "usePathStyle": True, "region": "us-east-1", "credentials": {"existingSecret": "substrate-rustfs-operator"}}, "RustFS endpoint, path addressing, region and credential reference follow the configured store")
+    capz = docs(meta(chart, "-f", f"{chart}/../agent-platform-connectivity/ci/test-substrate-store-capz-values.yaml", *ON, "--set", "kagent.harness.snapshotLocation=", "--set", "muster.muster.oauth.server.enabled=true", "--set", "muster.muster.oauth.server.provider=dex"))
+    snapshots = release(capz, "agent-platform-operator")["values"]["snapshots"]
+    expect(snapshots["endpoint"] == f"http://substrate-s3proxy.{RELEASE_NS}.svc:80" and snapshots["usePathStyle"] is True and snapshots["region"] == "us-east-1" and snapshots["credentials"] == {"existingSecret": "substrate-s3proxy"}, "Azure s3proxy forwards endpoint, path addressing and Secret reference")
+    relocated_capz = docs(meta(chart, "-f", f"{chart}/../agent-platform-connectivity/ci/test-substrate-store-capz-values.yaml", *ON, "--set", "kagent.harness.snapshotLocation=", "--set", "muster.muster.oauth.server.enabled=true", "--set", "muster.muster.oauth.server.provider=dex", "--set", "components.agent-platform-connectivity.targetNamespace=apo"))
+    expect(release(relocated_capz, "agent-platform-operator")["values"]["snapshots"]["endpoint"] == "http://substrate-s3proxy.apo.svc:80", "s3proxy endpoint follows the connectivity namespace")
     arn = release(aws, "agent-platform-operator")["values"]["serviceAccount"]["annotations"]["eks.amazonaws.com/role-arn"]
+    # The connectivity chart, with the operator's names this meta render derives onto it.
+    derived = release(aws, "agent-platform-connectivity")["values"]["agentPlatformOrganizations"]["operator"]
     roles = [d for d in docs(run([HELM, "template", "t", f"{chart}/../agent-platform-connectivity", "-n", RELEASE_NS, "-f",
                                   f"{chart}/../agent-platform-connectivity/ci/test-substrate-store-aws-values.yaml",
                                   "--set", "agentPlatformOrganizations.enabled=true", "--set", "kagent.fluxServiceAccountName=kagent-flux",
                                   "--set", "global.domain=ci.example.com", "--set", "llmRouting.enabled=true", *MAP_API,
-                                  "-f", f"{chart}/../agent-platform-connectivity/ci/test-llm-routing-values.yaml"]))
+                                  "-f", f"{chart}/../agent-platform-connectivity/ci/test-llm-routing-values.yaml",
+                                  "--set-json", f"agentPlatformOrganizations.operator={json.dumps(derived)}"]))
              if d["kind"] == "Role" and d["apiVersion"].startswith("iam.aws")]
     role_names = {d["metadata"]["name"] for d in roles}
     expect(arn.split("/")[-1] in role_names and arn.startswith("arn:aws:iam::123456789012:role/"),
@@ -208,23 +367,91 @@ def check_meta(chart):
     expect(r.returncode != 0 and refuses_key(r.stderr, "organizations"),
            "tenants.organizations is refused by the connectivity chart, naming the key")
     r = meta(chart, "--set", "agent-manager.tenants.enabled=true")
-    expect(r.returncode != 0 and "agent-manager.tenants.enabled is true" in r.stderr,
-           "an own agent-manager.tenants.enabled true fails the render: the old reconciler stays off")
+    expect(r.returncode != 0 and "agent-manager.tenants.enabled (true) differs from agentPlatformOrganizations.enabled (false)" in r.stderr,
+           "off with an own agent-manager.tenants.enabled true, the render fails naming the switch")
+    r = meta(chart, "--set", "agent-manager.tenants.organizations.enabled=true")
+    expect(r.returncode != 0 and "agent-manager.tenants.organizations is unsupported" in r.stderr,
+           "an unsupported agent-manager.tenants key fails the render naming it")
+    r = meta(chart, "--set", "components.agent-manager.versionRange=>=2.19.0 <3.0.0",
+             "--set", "agent-manager.tenants.commit.repository=acme/management-clusters")
+    expect(r.returncode != 0 and "agent-manager.tenants.commit needs" in r.stderr,
+           "organization GitOps configuration on an older manager fails the render naming its floor")
     for what, extra, needle in (
+            ("credential UI on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
+                                                   "--set-literal", "agent-manager.credentials.uiURL=https://portal.example.com/{operation}"],
+             "agent-manager credential operations and GitHub token exchange need"),
+            ("token exchange on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
+                                                    "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.agent-manager.versionRange"),
+            ("the former token exchange on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
+                                                               "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.example.com/oauth/token"],
+             "agent-manager credential operations and GitHub token exchange need"),
+            ("token exchange before its schema", ["--set", "components.agent-manager.versionRange=>=3.0.0-rc.9 <4.0.0-0",
+                                                  "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.agent-manager.versionRange"),
+            ("token exchange before provider App grant release", ["--set", "components.muster.versionRange=>=5.62.0 <6.0.0",
+                                                                  "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.muster.versionRange"),
+            ("token exchange before the released broker", ["--set", "components.muster.versionRange=>=5.63.0-rc.1 <6.0.0-0",
+                                                           "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.muster.versionRange"),
+            ("token exchange before Basic credential decoding", ["--set", "components.muster.versionRange=>=5.63.1 <6.0.0",
+                                                                  "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.example.com/oauth/token"],
+             "agent-manager.github.tokenExchange needs components.muster.versionRange"),
+            ("operation metadata on an older manager", ["--set", "components.agent-manager.versionRange=>=2.20.0 <3.0.0",
+                                                        "--set", "agent-manager.credentials.operationsNamespace=credential-operations"],
+             "agent-manager credential operations and GitHub token exchange need"),
             ("components.agent-platform-operator.enabled false", ["--set", "components.agent-platform-operator.enabled=false"],
              "components.agent-platform-operator.enabled is false but agentPlatformOrganizations.enabled is true"),
             ("another targetNamespace", ["--set", "components.agent-platform-operator.targetNamespace=elsewhere"],
              "components.agent-platform-operator.targetNamespace (elsewhere) differs"),
-            ("an own commitMode", ["--set", "agent-platform-operator.commitMode.sourceRef.name=flux"],
-             "agent-platform-operator.commitMode is set"),
+            ("Substrate outside ate-system", ["--set", "components.substrate.targetNamespace=ate-x"],
+             "components.substrate.targetNamespace: Agent Substrate installs into ate-x, not ate-system"),
+            ("an empty Substrate namespace", ["--set", "components.substrate.targetNamespace="],
+             f"components.substrate.targetNamespace: Agent Substrate installs into {RELEASE_NS}, not ate-system"),
+            ("no Substrate namespace", ["--set", "components.substrate.targetNamespace=null"],
+             f"components.substrate.targetNamespace: Agent Substrate installs into {RELEASE_NS}, not ate-system"),
+            ("Substrate in the kagent namespace", ["--set", "components.substrate.inKagentNamespace=true"],
+             "components.substrate.targetNamespace: Agent Substrate installs into kagent, not ate-system"),
+            ("an agent-manager floor below 2.20.0", ["--set", "components.agent-manager.versionRange=>=2.19.0 <3.0.0"],
+             "agentPlatformOrganizations.enabled needs agent-manager 2.20.0 or later: components.agent-manager.versionRange (>=2.19.0 <3.0.0)"),
+            ("an own agent-manager.tenants.enabled false", ["--set", "agent-manager.tenants.enabled=false"],
+             "agent-manager.tenants.enabled (false) differs from agentPlatformOrganizations.enabled (true)"),
+            ("agent-manager's downstream OAuth off", ["--set", "agent-manager.oauth.downstream.enabled=false"],
+             "needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled"),
+            ("an unsupported devPortal block",
+             ["--set", "components.backstage.enabled=true", "--set", "agent-manager.devPortal.url=https://other.example.com"],
+             "agent-manager.devPortal is unsupported"),
+            ("an own commit mode path that differs", ["--set", "agent-platform-operator.commitMode.path=./elsewhere/{name}"],
+             "agent-platform-operator.commitMode.path (\"./elsewhere/{name}\") differs from what the chart derives"),
+            ("an own commit mode source that differs", ["--set", "agent-platform-operator.commitMode.sourceRef.name=other"],
+             "agent-platform-operator.commitMode.sourceRef.name (\"other\") differs from what the chart derives"),
+            ("fluxNamespace without fluxSource.name", ["--set", "agentPlatformOrganizations.fluxSource.name="],
+             "agentPlatformOrganizations.fluxSource.name is required with fluxNamespace"),
             ("an own derived operator value", ["--set", "agent-platform-operator.platformNamespace=other"],
              "agent-platform-operator.platformNamespace (\"other\") differs from what the chart derives"),
+            ("a muster floor below 5.58.0", ["--set", "components.muster.versionRange=>=5.57.0 <6.0.0"],
+             "agentPlatformOrganizations.enabled needs muster 5.58.0 or later, whose chart takes muster.mcpServerNamespaceSelector"),
+            ("an own muster namespace selector that differs", ["--set-json", 'muster.muster.mcpServerNamespaceSelector={"matchLabels":{"team":"a"}}'],
+             "muster.muster.mcpServerNamespaceSelector ({\"matchLabels\":{\"team\":\"a\"}}) differs from the one agentPlatformOrganizations.enabled derives"),
+            ("muster's OAuth server off", ["--set", "muster.muster.oauth.server.enabled=false"],
+             "needs muster.muster.oauth.server.enabled with the provider dex"),
+            ("no MCP-server viewers", ["--set-json", "tenants.platform.users=[]"], "needs muster's MCP-server viewers, musterMcpServerViewers"),
+            ("an empty musterMcpServerViewers", ["--set-json", "musterMcpServerViewers=[]"],
+             "needs muster's MCP-server viewers, musterMcpServerViewers"),
             ("llmRouting off", ["--set", "llmRouting.enabled=false"], "needs llmRouting.enabled"),
             ("no API hostname", ["--set", "global.domain="], "needs the installation's Kubernetes API hostnames"),
             ("an own kagent namespaceSelector", ["--set", f"kagent.controller.authorization.namespaceSelector={OLD}"],
              "kagent.controller.authorization.namespaceSelector (giantswarm.io/organization) differs")):
         r = meta(chart, *ON, *extra)
         expect(r.returncode != 0 and needle in r.stderr, f"on with {what}, the render fails naming it")
+    viewers = docs(meta(chart, *ON, "--set-json", "tenants.platform.users=[]", "--set-json", "tenants.platform.editors=[]", "--set-json",
+                        'musterMcpServerViewers=[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"acme:everyone"}]'))
+    expect(release(viewers, "agent-platform-connectivity")["values"]["musterMcpServerViewers"][0]["name"] == "acme:everyone",
+           "on with tenants.platform's lists empty and musterMcpServerViewers set, the render succeeds and hands the viewers to the connectivity release")
+    r = meta(chart, *SWITCH, "--set", "agent-platform-operator.commitMode.sourceRef.name=flux")
+    expect(r.returncode != 0 and "agent-platform-operator.commitMode.sourceRef.name is set but agentPlatformOrganizations.fluxNamespace is not" in r.stderr,
+           "on without fluxNamespace, an own commit mode source fails the render naming fluxNamespace")
     r = meta(chart, "--set", "components.agent-platform-operator.enabled=true")
     expect(r.returncode != 0 and "components.agent-platform-operator.enabled is true but agentPlatformOrganizations.enabled is false" in r.stderr,
            "off with components.agent-platform-operator.enabled true, the render fails naming it")
@@ -232,12 +459,68 @@ def check_meta(chart):
 
 # ---- the connectivity chart ---------------------------------------------------
 
+OPERATOR_VALUES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "organizations-operator-values.yaml")
+
+
 def connectivity(chart, flavor="kubernetes", *extra):
+    # The operator's names (OPERATOR_VALUES) are what the meta chart derives onto this release.
     return run([HELM, "template", "t", chart, "-n", RELEASE_NS, "-f", f"{chart}/ci/test-substrate-values.yaml",
-                "-f", f"{chart}/ci/test-llm-routing-values.yaml", "--set", "agentPlatformOrganizations.enabled=true",
+                "-f", f"{chart}/ci/test-llm-routing-values.yaml", "-f", OPERATOR_VALUES, "--set", "agentPlatformOrganizations.enabled=true",
                 "--set", "kagent.fluxServiceAccountName=kagent-flux", "--set", "global.domain=ci.example.com",
                 "--set", "kagent.namespaceOverride=kagent", "--set", f"networkPolicy.flavor={flavor}",
                 "--api-versions", "kyverno.io/v2/PolicyException", *MAP_API, *extra])
+
+
+def check_broker_egress(chart):
+    flags = ["--set", "components.agent-manager.enabled=true", "--set", "agent-manager.oauth.enabled=true",
+             "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+             "--set", "global.identity.clientId=muster", "--set", "global.identity.existingSecret=platform-oauth"]
+    cases = [("https://broker.example.com/oauth/token", "broker.example.com", "", 443),
+             ("https://BROKER.example.com./oauth/token", "broker.example.com", "", 443),
+             ("https://broker.example.com:8443/oauth/token", "broker.example.com", "", 8443),
+             ("https://198.51.100.7:8443/token", "", "198.51.100.7/32", 8443),
+             ("https://[2001:db8::7]:8443/token", "", "2001:db8::7/128", 8443)]
+    for flavor in ("cilium", "kubernetes"):
+        kind = "CiliumNetworkPolicy" if flavor == "cilium" else "NetworkPolicy"
+        for endpoint, host, cidr, port in cases:
+            for key in ("agent-manager.github.tokenExchange.tokenEndpoint", "agent-manager.githubTokenExchange.endpoint"):
+                rendered = docs(connectivity(chart, flavor, *flags, "--set", f"{key}={endpoint}"))
+                policy = find(rendered, kind, "agent-platform-connectivity-agent-manager-egress")
+                expect(policy is not None, f"{flavor}: the manager's egress policy is rendered")
+                if flavor == "cilium":
+                    target = {"toCIDR": [cidr]} if cidr else {"toFQDNs": [{"matchName": host}]}
+                    target["toPorts"] = [{"ports": [{"port": str(port), "protocol": "TCP"}]}]
+                    expect(target in policy["spec"]["egress"], f"{flavor}: the broker origin {endpoint} ({key}) has an explicit rule")
+                else:
+                    rules = [rule for rule in policy["spec"]["egress"] if rule.get("ports") == [{"port": port, "protocol": "TCP"}]]
+                    expect(any(any(peer.get("ipBlock", {}).get("cidr") == (cidr or "0.0.0.0/0") for peer in rule.get("to", [])) for rule in rules),
+                           f"{flavor}: the broker address class and HTTPS port are admitted for {endpoint} ({key})")
+        for extra in ([], ["--set", "agent-manager.githubTokenExchange.endpoint=https://broker.example.com:8443/token",
+                          "--set", "agent-manager.oauth.enabled=false"]):
+            policy = find(docs(connectivity(chart, flavor, *flags, *extra)), kind, "agent-platform-connectivity-agent-manager-egress")
+            ports = [port["port"] for rule in policy["spec"]["egress"] for port in rule.get("ports", [])]
+            ports += [port["port"] for rule in policy["spec"]["egress"] for entry in rule.get("toPorts", []) for port in entry.get("ports", [])]
+            expect(8443 not in ports and "8443" not in ports, f"{flavor}: no broker port while it is unconfigured or OAuth is off")
+    for flavor in ("cilium", "kubernetes"):
+        r = connectivity(chart, flavor, *flags, "--set", "agent-manager.github.tokenExchange.tokenEndpoint=https://muster.agent-platform.svc.cluster.local/oauth/token")
+        expect(r.returncode != 0 and "agent-manager.github.tokenExchange.tokenEndpoint (https://muster.agent-platform.svc.cluster.local/oauth/token) names an in-cluster Service" in r.stderr,
+               f"{flavor}: an in-cluster broker Service fails the render naming the endpoint")
+        r = connectivity(chart, flavor, *flags, "--set", "agent-manager.githubTokenExchange.endpoint=https://muster.agent-platform.svc.cluster.local/oauth/token")
+        expect(r.returncode != 0 and "agent-manager.githubTokenExchange.endpoint (https://muster.agent-platform.svc.cluster.local/oauth/token) names an in-cluster Service" in r.stderr,
+               f"{flavor}: an in-cluster broker Service under the former key fails the render naming it")
+        for endpoint in ("https://muster/oauth/token", "https://muster.agent-platform:8443/oauth/token"):
+            r = connectivity(chart, flavor, *flags, "--set", f"agent-manager.githubTokenExchange.endpoint={endpoint}")
+            expect(r.returncode != 0 and f"agent-manager.githubTokenExchange.endpoint ({endpoint}) names a host of fewer than three labels" in r.stderr,
+                   f"{flavor}: a broker host of fewer than three labels ({endpoint}) fails the render naming the endpoint")
+    private = docs(connectivity(chart, "kubernetes", *flags,
+                                "--set", "agent-manager.githubTokenExchange.endpoint=https://broker.example.com:8443/token",
+                                "--set", "agentManager.networkPolicy.egress.cidrs[0]=10.30.0.0/16",
+                                "--set", "networkPolicy.additionalEgressCIDRs[0]=10.20.0.0/16"))
+    policy = find(private, "NetworkPolicy", "agent-platform-connectivity-agent-manager-egress")
+    peers = [peer.get("ipBlock", {}).get("cidr") for rule in policy["spec"]["egress"]
+             if rule.get("ports") == [{"port": 8443, "protocol": "TCP"}] for peer in rule.get("to", [])]
+    expect("10.30.0.0/16" in peers and "10.20.0.0/16" in peers,
+           "kubernetes: private broker ranges follow both existing CIDR inputs on the broker's port")
 
 
 def check_default(chart):
@@ -247,7 +530,11 @@ def check_default(chart):
     expect(NEW in keys and OLD not in keys,
            f"with the switch off, the organizations' egress and credential policies select {NEW}, never {OLD}")
     expect(find(objs, "ClusterRole", "agent-platform-tenant-flux") is not None,
-           "with kagent on, the connectivity chart renders agent-platform-tenant-flux, whatever the switch says")
+           "with the switch off and kagent on, the connectivity chart renders agent-platform-tenant-flux")
+    objs = docs(run([HELM, "template", "t", chart, "-n", RELEASE_NS, "-f", f"{chart}/ci/test-llm-routing-values.yaml",
+                     "--set", "components.agent-manager.enabled=true", "--set", "agent-manager.oauth.enabled=false"]))
+    expect(find(objs, "ClusterRole", "agent-platform-tenant-flux") is not None,
+           "with the switch off and agent-manager on, the connectivity chart renders agent-platform-tenant-flux")
 
 
 def check_egress(chart):
@@ -263,7 +550,7 @@ def check_egress(chart):
     objs = docs(connectivity(chart, "cilium"))
     gw = find(objs, "CiliumNetworkPolicy", "substrate-atenet-egress")
     edge = [r for r in gw["spec"]["egress"] if any(p["port"] == "10443" for tp in r.get("toPorts", []) for p in tp["ports"])]
-    expect(len(edge) == 1 and edge[0]["toEndpoints"] == [{"matchLabels": {"app.kubernetes.io/name": "envoy", "io.kubernetes.pod.namespace": "envoy-gateway-system"}}],
+    expect(len(edge) == 1 and edge[0]["toEndpoints"] == [{"matchLabels": {**ENVOY_PEER, "io.kubernetes.pod.namespace": "envoy-gateway-system"}}],
            "the egress gateway reaches in-cluster 443/10443 only at the Envoy pods of muster's Gateway, and no kube-apiserver")
     own = docs(connectivity(chart, "cilium", "--set", "gatewayApi.gateway.create=true", "--set", "gatewayApi.gateway.tls.secretName=wildcard",
                             "--set", "ingress.parentRefs=null", "--set", "global.gatewayApi.parentRefs=null"))
@@ -279,7 +566,7 @@ def check_egress(chart):
     gw = find(k8s, "NetworkPolicy", "substrate-atenet-egress-egress")
     edge = [r for r in gw["spec"]["egress"] if any(p["port"] == 10443 for p in r.get("ports", []))]
     expect(len(edge) == 1 and edge[0]["to"] == [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "envoy-gateway-system"}},
-                                                  "podSelector": {"matchLabels": {"app.kubernetes.io/name": "envoy"}}}],
+                                                  "podSelector": {"matchLabels": ENVOY_PEER}}],
            "the kubernetes flavour reaches in-cluster 443/10443 only at the Envoy pods of muster's Gateway")
     world = [r for r in gw["spec"]["egress"] if any(t.get("ipBlock", {}).get("cidr") == "0.0.0.0/0" for t in r["to"])]
     excepted = world[0]["to"][0]["ipBlock"]["except"] if world else []
@@ -318,7 +605,7 @@ def check_egress(chart):
     # server named by hostname reaches the nodes on its port (never on 443 or
     # 10443), and an external OTLP collector is the world rule's.
     mm = ["--set", "components.model-manager.enabled=true", "--set", "model-manager.backend=ollama",
-          "--set", "global.identity.issuerUrl=https://dex.ci.example.com", "--set", "global.identity.clientId=platform",
+          "--set", "agent-manager.oauth.enabled=false", "--set", "global.identity.clientId=platform",
           "--set", "global.identity.existingSecret=platform-oauth"]
     for endpoint, port in (("https://models.example.com", "443"), ("https://models.example.com:10443", "10443"), ("http://ollama.lan:11434", "11434")):
         egress = find(docs(connectivity(chart, "cilium", *mm, "--set", f"model-manager.ollama.endpoint={endpoint}")),
@@ -450,6 +737,23 @@ def workerpool(ns):
                      "template": {"labels": {"team": "x"}, "serviceAccountName": "workers"}}}
 
 
+def prove_settle():
+    """A policy that never loads fails the wait by name, before anything is
+    applied."""
+    for what, objs, want in (
+            ("a ValidatingAdmissionPolicy without a binding", [{"kind": "ValidatingAdmissionPolicy", "metadata": {"name": "never-bound"}}],
+             "ValidatingAdmissionPolicy never-bound (no binding)"),
+            ("a MutatingAdmissionPolicyBinding without its policy",
+             [{"kind": "MutatingAdmissionPolicyBinding", "metadata": {"name": "orphan"}, "spec": {"policyName": "missing"}}],
+             "MutatingAdmissionPolicyBinding orphan (its policy is not applied)")):
+        try:
+            API.settle(objs)
+            got = "settled"
+        except SystemExit as e:
+            got = str(e)
+        case(f"the wait for the policies fails naming {what}", (0 if want in got else 1, got))
+
+
 def prove_label(meta_chart, k8s):
     sel = {"matchExpressions": [{"key": NEW, "operator": "Exists"}]}
     grants = release(docs(meta(meta_chart, *ON)), "substrate")["values"]["credentialProvider"]["namespacePolicies"]
@@ -473,6 +777,36 @@ def prove_label(meta_chart, k8s):
     bedrock = {"apiVersion": "api.kagent.dev/v1alpha3", "kind": "ModelConfig", "metadata": {"name": "bedrock", "namespace": ORG_NS},
                "spec": {"provider": "Bedrock", "model": "m", "bedrock": {"region": "eu-west-1"}}}
     case(f"a Bedrock ModelConfig in {ORG_NS} (no listener serves it)", create(bedrock), "agent-platform-tenant-model-routing")
+    for provider, block in (("AnthropicVertexAI", "anthropicVertexAI"), ("GeminiVertexAI", "geminiVertexAI")):
+        vertex = {"apiVersion": "api.kagent.dev/v1alpha3", "kind": "ModelConfig", "metadata": {"name": "vertex", "namespace": ORG_NS},
+                  "spec": {"provider": provider, "model": "model", "apiKeySecret": "tenant-credential-vertex", "apiKeySecretKey": "GOOGLE_APPLICATION_CREDENTIALS",
+                           block: {"projectID": "vertex-test", "location": "global"}}}
+        case(f"native {provider} with an organization credential", create(vertex))
+        vertex["spec"]["apiKeySecret"] = "platform-credential"
+        case(f"native {provider} with a platform credential", create(vertex), "agent-platform-tenant-model-credentials")
+        vertex["spec"]["apiKeySecret"] = "tenant-credential-vertex"
+        for loc in ("eu", "us", "europe-west1"):
+            vertex["spec"][block] = {"projectID": "vertex-test", "location": loc}
+            case(f"native {provider} in location {loc}", create(vertex))
+        for what, fields in (("a location that is a host", {"projectID": "vertex-test", "location": "attacker.example/x?"}),
+                             ("an upper-case location", {"projectID": "vertex-test", "location": "EU"}),
+                             ("a project ID with a slash", {"projectID": "vertex-test/x", "location": "global"}),
+                             ("a project ID too short", {"projectID": "abc", "location": "global"})):
+            vertex["spec"][block] = fields
+            case(f"native {provider} with {what}", create(vertex), "agent-platform-tenant-model-routing")
+        vertex["spec"][block] = {"projectID": "vertex-test", "location": "global"}
+        for what, drop in (("no apiKeySecret", ("apiKeySecret", "apiKeySecretKey")), ("an empty apiKeySecret", ())):
+            keyless = {**vertex, "spec": {k: v for k, v in vertex["spec"].items() if k not in drop}}
+            if not drop:
+                keyless["spec"]["apiKeySecret"] = ""
+            case(f"native {provider} with {what}", create(keyless), "agent-platform-tenant-model-routing")
+        blockless = {**vertex, "spec": {k: v for k, v in vertex["spec"].items() if k != block}}
+        case(f"native {provider} without its {block} block", create(blockless), "agent-platform-tenant-model-routing")
+        admitted = {**vertex, "metadata": {"name": f"vertex-{block.lower()}", "namespace": ORG_NS}}
+        must(create(admitted, dry=False), f"create the admitted {provider} ModelConfig")
+        keyless = {**admitted, "spec": {k: v for k, v in admitted["spec"].items() if k not in ("apiKeySecret", "apiKeySecretKey")}}
+        case(f"an update of an admitted native {provider} that removes apiKeySecret",
+             kubectl(["replace", "-f", "-", "--dry-run=server"], yaml.safe_dump(keyless)), "agent-platform-tenant-model-routing")
     secret = lambda name, type_="Opaque": {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": name, "namespace": ORG_NS},
                                            "type": type_, "stringData": {"k": "v"}}
     must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": {"name": "secret-writer", "namespace": ORG_NS},
@@ -480,6 +814,7 @@ def prove_label(meta_chart, k8s):
     must(create({"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": {"name": "secret-writer", "namespace": ORG_NS},
                  "roleRef": {"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "secret-writer"},
                  "subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": "writer"}]}, dry=False), "bind writer")
+    API.settle()
     case("a requester who may only create Secrets writes a Secret outside tenant-credential-*",
          kubectl(["create", "-f", "-", "--dry-run=server"], yaml.safe_dump(secret("platform-key")), "writer", ()), "agent-platform-tenant-secret-creation")
     case("a requester who may only create Secrets writes a tenant credential",
@@ -551,7 +886,7 @@ def prove_render_check(chart):
         if host_network:
             spec["hostNetwork"] = True
         return {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "envoy-edge", "namespace": "envoy-gateway-system",
-                                                                "labels": {"app.kubernetes.io/name": "envoy"}}, "spec": spec}
+                                                                "labels": ENVOY_PEER}, "spec": spec}
     server = ["--dry-run=server", "--kubeconfig", API.kubeconfig, "--kube-context", "verify"]
     must(create(envoy(True), dry=False), "create an Envoy pod on host networking")
     r = connectivity(chart, "cilium", *server)
@@ -569,10 +904,46 @@ def prove_render_check(chart):
          (0 if passed else 1, r.stderr.strip()[-200:]))
 
 
+def prove_model_manager(chart):
+    """Run last: it swaps the routing policies for those of another render."""
+    routing = lambda d: (d["kind"] in ("ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding") and d["metadata"]["name"] == "agent-platform-tenant-model-routing") or (
+        d["kind"] in ("MutatingAdmissionPolicy", "MutatingAdmissionPolicyBinding") and "modelconfig-llm-routing" in d["metadata"]["name"])
+    anthropic = '[{"name": "anthropic", "provider": "Anthropic", "baseURL": "https://api.anthropic.com/v1", "match": "claude-*"}]'
+    objs = [d for d in docs(connectivity(chart, "kubernetes", "--set-json", f"llmRouting.models={anthropic}",
+                                         "--set", "components.model-manager.enabled=true", "--set", "components.modelServing.enabled=true",
+                                         "--api-versions", "serving.kserve.io/v1alpha2")) if routing(d)]
+    keep = {(d["kind"], d["metadata"]["name"]) for d in objs}
+    for kind in ("MutatingAdmissionPolicyBinding", "MutatingAdmissionPolicy"):
+        for line in must(kubectl(["get", kind.lower(), "-o", "name"]), f"list the {kind}s").split():
+            name = line.split("/", 1)[1]
+            if "modelconfig-llm-routing" in name and (kind, name) not in keep:
+                must(kubectl(["delete", kind.lower(), name]), f"delete {kind} {name}")
+    for d in objs:
+        must(kubectl(["apply", "--server-side", "-f", "-"], yaml.safe_dump(d)), f"apply {d['kind']} {d['metadata']['name']}")
+
+    def base_url(ns):
+        rc, out = kubectl(["create", "-f", "-", "--dry-run=server", "-o", "json"], yaml.safe_dump(mc("filled", ns, None)))
+        return rc, (json.loads(out)["spec"].get("openAI", {}).get("baseUrl") if rc == 0 else out)
+
+    # The swapped policies and the deletes, all in force (the previous render
+    # fills in OpenAI in both namespaces too: the kagent case below shows it).
+    API.settle(objs)
+    case(f"model-manager serving, anthropic-only: an OpenAI ModelConfig at the listener's /v1 in {ORG_NS}", create(mc("local", ORG_NS, f"{LISTENER}/v1")))
+    case(f"model-manager serving, anthropic-only: an OpenAI ModelConfig at the provider's URL in {ORG_NS}",
+         create(mc("direct", ORG_NS, "https://api.openai.com/v1")), "agent-platform-tenant-model-routing")
+    got = base_url(ORG_NS)
+    case(f"model-manager serving, anthropic-only: an OpenAI ModelConfig without a baseUrl in {ORG_NS} gets the listener's /v1 ({got[1]})",
+         (0 if got == (0, f"{LISTENER}/v1") else 1, str(got[1])))
+    got = base_url("kagent")
+    case(f"model-manager serving, anthropic-only: an OpenAI ModelConfig without a baseUrl in the kagent namespace keeps none ({got[1]})",
+         (0 if got == (0, None) else 1, str(got[1])))
+
+
 def main():
     global API
     meta_chart, chart = sys.argv[1:3]
     check_meta(meta_chart)
+    check_broker_egress(chart)
     check_default(chart)
     k8s = check_egress(chart)
     policies = [d for d in k8s if d["kind"] in ("ValidatingAdmissionPolicy", "ValidatingAdmissionPolicyBinding",
@@ -587,19 +958,15 @@ def main():
         must(create(workerpool("kagent"), dry=False), "create the platform WorkerPool")
         for d in policies:
             must(kubectl(["apply", "--server-side", "-f", "-"], yaml.safe_dump(d)), f"apply {d['kind']} {d['metadata']['name']}")
-        deadline = time.time() + 60
-        while time.time() < deadline:
-            rc, out = create(mc("probe", ORG_NS, "https://api.openai.com/v1"))
-            if rc != 0 and "agent-platform-tenant-model-routing" in out:
-                break
-            time.sleep(0.5)
-        else:
-            fail("the API server did not apply the policies within 60s")
+        # Every policy and binding, not one of them (giantswarm/agent-platform#1291).
+        API.settle(policies)
+        prove_settle()
         prove_label(meta_chart, k8s)
         prove_netpol(k8s)
         prove_operator_scope()
         prove_worker_access()
         prove_render_check(chart)
+        prove_model_manager(chart)
     finally:
         API.stop()
     failed = [n for ok, n in results if not ok]

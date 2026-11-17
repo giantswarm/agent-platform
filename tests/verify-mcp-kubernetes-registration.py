@@ -12,6 +12,8 @@ The connectivity chart registers the bundled mcp-kubernetes with muster
   - enabled: false: no MCPServer;
   - displayName (default Kubernetes, the kubernetes family's in agent-platform-mcps)
     is the ui.giantswarm.io/display-name annotation of either shape; empty renders none;
+  - description is spec.description of either shape; empty renders none; one over the
+    MCPServer CRD's 500 characters fails the render naming the key;
   - a managementCluster that is not a DNS label fails the render naming the key;
   - with the component or muster off nothing renders, whatever the block says;
   - the meta chart forwards the block to the connectivity release and drops it from
@@ -60,6 +62,8 @@ def main() -> None:
     if len(default) != 1:
         fail(f"default: want one mcp-kubernetes MCPServer, got {len(default)}")
     single = default[0]
+    if single["spec"].get("auth", {}).get("forwardToken") is not False:
+        fail("OAuth registration must explicitly disable ID-token forwarding")
     if single["metadata"]["name"] != "mcp-kubernetes" or CLUSTER_LABEL in single["metadata"]["labels"] or "family" in single["spec"]:
         fail(f"default: want the family-less singleton mcp-kubernetes, got {single['metadata']} {single['spec']}")
     if single["metadata"]["labels"].get(TIER_LABEL) != "infrastructure":
@@ -90,6 +94,18 @@ def main() -> None:
     if len(unnamed) != 1 or "annotations" in unnamed[0]["metadata"]:
         fail(f"displayName empty: want no annotations, got {[d['metadata'].get('annotations') for d in unnamed]}")
 
+    if not single["spec"].get("description") or single["spec"].get("description") != m["spec"].get("description"):
+        fail(f"description: want the default on both shapes, got {single['spec'].get('description')!r} and {m['spec'].get('description')!r}")
+    described = mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.description=Probe: resources"]))
+    if len(described) != 1 or described[0]["spec"].get("description") != "Probe: resources":
+        fail(f"description set: want spec.description 'Probe: resources', got {[d['spec'].get('description') for d in described]}")
+    undescribed = mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.description="]))
+    if len(undescribed) != 1 or "description" in undescribed[0]["spec"]:
+        fail(f"description empty: want no spec.description, got {[d['spec'].get('description') for d in undescribed]}")
+    err = render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.description=" + "x" * 501], expect_fail=True)
+    if "mcp-kubernetes.mcpServer.description: 501 characters, want at most 500" not in err:
+        fail(f"a 501-character description: the failure does not name the key and the limit:\n{err}")
+
     if mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpServer.enabled=false"])):
         fail("enabled=false: an mcp-kubernetes MCPServer rendered")
     for off in ("components.mcp-kubernetes.enabled=false", "components.muster.enabled=false"):
@@ -100,15 +116,44 @@ def main() -> None:
     if "mcp-kubernetes.mcpServer.managementCluster" not in err:
         fail(f"a bad managementCluster: the failure does not name the key:\n{err}")
 
-    docs = render(meta, ["-f", f"{meta}/ci/ci-values.yaml", "--set", "components.flux.enabled=false", "--set", "components.mcp-kubernetes.enabled=true", "--set", "mcp-kubernetes.mcpServer.managementCluster=agentlab"])
+    docs = render(meta, ["-f", f"{meta}/ci/ci-values.yaml", "--set", "components.flux.enabled=false", "--set", "components.mcp-kubernetes.enabled=true", "--set", "global.domain=example.com", "--set", "ingress.parentRefs[0].name=x", "--set", "mcp-kubernetes.mcpServer.managementCluster=agentlab"])
     releases = {d["metadata"]["name"]: d for d in docs if d.get("kind") == "HelmRelease"}
     if "mcpServer" in releases["mcp-kubernetes"]["spec"].get("values", {}):
         fail("meta: mcp-kubernetes.mcpServer reaches the mcp-kubernetes release")
+    oauth = releases["mcp-kubernetes"]["spec"]["values"]["mcpKubernetes"]["oauth"]
+    if oauth.get("encryptionKey") is not True or oauth.get("storage", {}).get("type") != "valkey":
+        fail("OAuth must default to encrypted shared storage")
+    if oauth["storage"]["valkey"].get("url") != "muster-valkey:6379":
+        fail("OAuth must reuse the platform Valkey")
+    if oauth.get("dex", {}).get("kubernetesAuthenticatorClientID") != "dex-k8s-authenticator":
+        fail("OAuth must request the configured Kubernetes audience upstream")
+    route = releases["mcp-kubernetes"]["spec"]["values"]["gatewayAPI"]
+    if route.get("enabled") is not True or not route.get("httpRoute", {}).get("parentRefs"):
+        fail("OAuth must publish its browser endpoints through the public Gateway")
+    arguments = ["-f", f"{meta}/ci/ci-values.yaml", "--set", "components.flux.enabled=false", "--set", "components.mcp-kubernetes.enabled=true", "--set", "global.domain=example.com", "--set", "ingress.parentRefs[0].name=x"]
+    edge_docs = render(meta, arguments + ["--set", "gatewayApi.gateway.create=true", "--set", "gatewayApi.gateway.tls.secretName=tls", "--set", "ingress.parentRefs=null", "--set", "mcp-kubernetes.mcpKubernetes.oauth.baseURL=https://kubernetes.example.com:8443"])
+    edge = next(d["spec"]["values"] for d in edge_docs if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "mcp-kubernetes")
+    if edge["gatewayAPI"]["httpRoute"]["hostnames"] != ["kubernetes.example.com"]:
+        fail("the public route must match the issuer hostname without its port")
+    if edge["gatewayAPI"]["httpRoute"]["parentRefs"][0].get("sectionName") != "https":
+        fail("the chart-owned edge must publish OAuth on its HTTPS listener")
+    if not any(peer.get("matchLabels", {}).get("gateway.networking.k8s.io/gateway-name") == "agentgateway" for peer in edge["ciliumNetworkPolicy"]["ingress"]["gatewayPeers"]):
+        fail("the Kubernetes MCP must admit its Gateway's data plane")
+    own_docs = render(meta, arguments + ["--set", "mcp-kubernetes.gatewayAPI.enabled=false", "--set", "mcp-kubernetes.mcpKubernetes.oauth.storage.valkey.url=external:6379", "--set", "mcp-kubernetes.mcpKubernetes.oauth.storage.valkey.keyPrefix=own:", "--set", "mcp-kubernetes.mcpKubernetes.oauth.dex.kubernetesAuthenticatorClientID=own-audience"])
+    own = next(d["spec"]["values"] for d in own_docs if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "mcp-kubernetes")
+    if own["gatewayAPI"]["enabled"] is not False or own["mcpKubernetes"]["oauth"]["storage"]["valkey"]["url"] != "external:6379" or own["mcpKubernetes"]["oauth"]["storage"]["valkey"]["keyPrefix"] != "own:" or own["mcpKubernetes"]["oauth"]["dex"]["kubernetesAuthenticatorClientID"] != "own-audience":
+        fail("explicit route, store and Kubernetes audience values must remain effective")
+    error = render(meta, arguments + ["--set", "components.valkey.enabled=false"], expect_fail=True)
+    if "mcp-kubernetes OAuth needs shared storage" not in error:
+        fail("a missing shared store must fail the render")
+    readers = releases["valkey"]["spec"]["values"]["ciliumNetworkPolicy"]["ingress"]["clients"]
+    if not any(reader.get("matchLabels", {}).get("app.kubernetes.io/name") == "mcp-kubernetes" for reader in readers):
+        fail("the platform Valkey must admit the Kubernetes MCP")
     forwarded = releases["agent-platform-connectivity"]["spec"]["values"].get("mcp-kubernetes", {}).get("mcpServer")
     if forwarded != {"managementCluster": "agentlab"}:
         fail(f"meta: the connectivity release carries mcp-kubernetes.mcpServer {forwarded}")
 
-    print("ok: singleton by default, family member with managementCluster, none with enabled=false; the display name on both shapes, none when empty; the guard; the meta chart forwards and omits the block")
+    print("ok: singleton by default, family member with managementCluster, none with enabled=false; the display name and description on both shapes, none when empty; the guards; the meta chart forwards and omits the block")
 
 
 if __name__ == "__main__":

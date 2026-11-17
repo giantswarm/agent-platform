@@ -15,6 +15,206 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (Secret deletes answered with the Secret are held in every namespace)
+
+giantswarm/agent-platform#1365: the ValidatingAdmissionPolicy `agent-platform-secret-deletes` (Fail, Deny) replaces `agent-platform-organization-secret-deletes`. It renders whenever kagent is on, `agentPlatformOrganizations.enabled` on or off, and matches Secret deletes in every namespace, not only in organization namespaces: `agent-platform:admin` can be bound anywhere. A delete the API server answers with the Secret (Orphan or Foreground propagation, `orphanDependents: true`, a Secret a finalizer holds, or a DeleteCollection) is made only by a requester that may already read that Secret (`get`, `list`, `watch` or `patch`), a dry run included.
+
+### Operator action
+
+- **None.** Requesters that may read a Secret (cluster-admin, the Kubernetes controllers, Flux, cert-manager, external-secrets, Cluster API) are not held, and a Background or default delete of a Secret no finalizer holds is not matched.
+- **A role of your own that deletes Secrets, or deletes collections of them, without `get`, `list`, `watch` or `patch`**: its Orphan or Foreground deletes, its deletes of a Secret a finalizer holds and its DeleteCollections are refused now. Add `get` on the Secrets it deletes, or delete with Background propagation.
+
+## \<current\> → \<next\> (agent-platform-operator 0.4: warm workers follow the models and the agents)
+
+giantswarm/giantswarm#39250: `components.agent-platform-operator.versionRange` is `>=0.4.0 <0.5.0`. With `agentPlatformOrganizations.enabled`, agent-platform-operator 0.4.0 sizes each organization's WorkerPool by a new rule (giantswarm/agent-platform-operator#50): the pool runs `spec.workers.replicas` warm workers while the organization namespace holds a ModelConfig and an Agent (a curated copy counts), or a ModelConfig and a kagent session, and 0 otherwise; an `Orphaned` organization stays at 0. `spec.workers.replicas` is optional now: the CRD defaults it to 1 (`crds: CreateReplace` upgrades the CRD with the release), and a 0 set on purpose stays 0. Under 0.3.x a new organization ran 0 workers, so its agents stayed `ActorTemplatePending` and never became ready. The operator now watches Agent metadata in every namespace and asks kagent whether an organization with a ModelConfig and no Agent has a session, through the kagent target the erasure already uses. Its ClusterRole, the `agent-platform:organization-erasure` binding and the network policies already allow both, so nothing the chart renders changes besides the range. kagent admits the session question as a machine caller only with its controller-extensions controller (`kagent.controller.image.repository: giantswarm/kagent/controller-extensions`, the default).
+
+### Operator action
+
+- **None before the upgrade.** At the upgrade, each organization with a ModelConfig and an Agent and no `spec.workers.replicas` gets one warm worker, and its pending agents become ready. Each organization with a ModelConfig, no Agent and no session goes to 0 workers, also when it ran some before; its first Agent brings them back. An organization with `spec.workers.replicas: 0` keeps 0. To check: `kubectl -n <organization namespace> get workerpools.ate.dev -o custom-columns=NAME:.metadata.name,REPLICAS:.spec.replicas`.
+- **An organization that keeps its workers with no Agent and is `Ready=False`**: the operator cannot read its Agents or ask kagent for its sessions (for one, the line's own kagent controller in place of controller-extensions), and keeps `spec.workers.replicas` until it can. Read the error: `kubectl -n <parent> get agentplatformorganization <name> -o jsonpath='{.status.conditions}'`.
+- **An installation that pins the BOM at `0.3.x`**: move `agent-platform-operator` to `0.4.0`, since `0.3.x` is outside the range.
+
+## \<current\> → \<next\> (the Substrate release retries a failed upgrade)
+
+The `substrate` component HelmRelease uses `spec.upgrade.strategy: {name: RetryOnFailure, retryInterval: 5m}` and renders no `spec.upgrade.remediation`. A failed upgrade is attempted again every 5 minutes instead of being rolled back. Under the old default, Flux's rollback remediation stalled the release for good when Helm's history held no deployed revision to return to, and kagent, agent-manager and every other release that depends on Substrate stalled with it until someone forced a reconcile ([#1367](https://github.com/giantswarm/agent-platform/issues/1367)). `components.<name>.upgradeStrategy` sets the same field for any component.
+
+### Operator action
+
+- With the cluster's own Flux (`components.flux.enabled: false`), run helm-controller v1.4 or later, the first version whose HelmRelease API has `spec.upgrade.strategy`. The bundled engine already has it.
+- An installation that set `components.substrate.upgradeRemediation` keeps that value in its values, but it no longer renders while `upgradeStrategy.name` is `RetryOnFailure`. To keep rollback remediation, set `components.substrate.upgradeStrategy: null`.
+
+## \<current\> → \<next\> (agent-manager 3.x)
+
+`components.agent-manager.versionRange` selects `>=3.1.0 <4.0.0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).
+
+### Operator action
+
+- Before admitting agent-manager 3.x, upgrade every portal calling it to Backstage 3.38.2 or later and migrate other callers of `replaceCredential`.
+- Where `agent-manager.githubTokenExchange` is configured, keep an explicit `components.agent-manager.versionRange` below `3.0.0` until the installation's reviewed migration moves it to `agent-manager.github.tokenExchange`. Move `endpoint` to `tokenEndpoint` and `secretName` to `existingSecret`, remove `grantApp`, and set `github.enabled: true`. The audience must equal the muster provider App and broker grant target names. Apply the values and version range together after the agentlab proof (giantswarm/giantswarm#39239).
+- agent-manager 3.1.0 serves Vertex service-account JSON keys and installation models through `agent-manager.credentials.uiURL` (giantswarm/agent-manager#409). Without `agentPlatformOrganizations.enabled`, a `uiURL` needs a `{namespace}` expression and no `{parent}` or `{organization}`. A `uiURL` naming `{namespace}`, with or without organizations, and any `uiURL` without organizations need a range floor of `3.1.0-rc.11` or later; `tenants.commit.platformModelsPath` needs the same floor. A `uiURL` containing `#` is refused.
+- The on-demand exchange needs agent-manager 3.0.0-rc.10 and muster 5.63.2 or later, which the meta chart validates from their range floors. muster 5.63.2 includes the Basic credential decoding fix in mcp-oauth (giantswarm/mcp-oauth#700), required for broker client credentials containing reserved characters. Installations still using the GitHub App pin keep it until their own rollout step.
+- Cluster-manager and model-manager derive broker egress from `github.tokenExchange.tokenEndpoint`, on its HTTPS origin and port, for both policy flavors. Use an external fully qualified hostname or IP address; Service aliases are refused. Native Kubernetes policies use the component's existing egress CIDRs or `networkPolicy.additionalEgressCIDRs` for private broker addresses.
+
+## \<current\> → \<next\> (the Envoy peer of the network policies is the owning Gateway's proxy)
+
+giantswarm/agent-platform#1292: every network policy of the connectivity chart that admits or reaches the Envoy edge selects the proxy pods of the Gateway its route attaches to, by the labels Envoy Gateway stamps on them (`gateway.envoyproxy.io/owning-gateway-name` and `-namespace`), not every `app.kubernetes.io/name: envoy` pod of the namespace. The Gateway's name and namespace come from the values the routes attach with: the portal's ingress (`backstage.parentRefs`, else `global.gatewayApi.parentRefs`) and, in the kubernetes flavour, its egress to the app-config's hostnames (`ingress.parentRefs`, `kagent.controllerRoute.parentRef`); the actors' egress gateway to muster's hostname (`ingress.parentRefs`); kagent's oauth2-proxy (`kagent.uiRoute.parentRef`, which was the namespace `envoy-gateway-system` as a literal); the workspace manager's key-set route (`workspaceManager.route.parentRefs`, else `ingress.parentRefs`). A Gateway of another name moves the policies with it, so nothing changes for an installation whose values name the Gateways its routes use.
+
+### Operator action
+
+- **A caller that reaches one of these services through another Gateway than the one its route names** (for example a second Envoy Gateway in `envoy-gateway-system` with its own route to the same Service): pin the route to that Gateway, or, for kagent's UI, add that Gateway's proxy pods to `kagent.oauth2ProxyIngress.additionalPeers` (with their `io.kubernetes.pod.namespace`).
+- **An installation whose EnvoyProxy sets `mergeGateways: true`** (gateway-api-config's `gatewayClasses[].envoyProxy.mergeGateways`; off by default and on no fleet installation): one proxy then serves every Gateway of the class, and its pods carry `gateway.envoyproxy.io/owning-gatewayclass` instead of the owning Gateway's labels, so these policies select none of them and the portal, kagent's UI, the workspace key set and the actors' path to muster stop. Turn `mergeGateways` off before the upgrade, or admit the merged proxy with a policy of its own.
+- Otherwise nothing: Envoy Gateway labels every per-Gateway proxy pod with its owning Gateway (v1.9.3 on the fleet).
+
+## \<current\> → \<next\> (agent-manager 2.24: `list_organizations` and write-only organization credentials)
+
+giantswarm/backstage#3364: agent-manager 2.24.0 replaces the tool `list_my_organizations` with `list_organizations` (the organizations the person manages or belongs to), makes organization credentials write-only (it writes them without reading the Secret as the caller), adds `replace_organization_credential`, and answers a save whose credential's consumers changed with `credential_consumers_changed`; the Dev Portal 3.38.0 replaces a credential with `replace_organization_credential` and deletes one through its delete dialog (it lists organizations with `list_organizations` from 3.37.0, giantswarm/backstage#3467). 2.24.0 is also `agent-platform.agentManager.skillManagerFloor`: with `components.skill-manager` on (it follows agent-manager), agent-manager now pins skills through the skill-manager (`skillManager.url`) and gets `installation` and, while the default agent is on, `defaultAgentModel`, as the earlier entry on the default agent and the skill-manager describes. With `defaultAgentModel`, agent-manager gives the default agent (`default-agent` in the kagent namespace) the installation's default model once, while it has none: the ModelConfig in the kagent namespace annotated `agent-platform.giantswarm.io/is-default-model-config: "true"`. Below this floor the default agent gets no model and is not ready (`Compatible=False`, `kagent ModelConfig is required`). The agent-manager migrate run's image (`agentManager.migration.image.tag`) is already `2.24.0`, so the migrate run pins skills the same way.
+
+### Operator action
+
+- **A client or agent that calls `list_my_organizations`**: call `list_organizations`. The platform's `agent-platform-organizations` skill names the new tool.
+- **A Dev Portal before 3.37.0** (`components.backstage` pinned below it, or a portal installed apart): it still calls `list_my_organizations`, so its organization list fails. Move it to 3.37.0 or later; 3.38.0 or later to replace and delete credentials.
+- **An installation that sets `agent-manager.skills.repositories`**: the render fails while the skill-manager is on. **Before the upgrade**, move the list to `skillManager.sources`, or set `components.skill-manager.enabled: false`.
+- **The default agent's model**: annotate one ModelConfig in the kagent namespace with `agent-platform.giantswarm.io/is-default-model-config: "true"`, or set `defaultAgent.modelConfig`, or set `components.default-agent.enabled: false`. Without one of these the default agent stays without a model and is not ready.
+- **An installation that pins the BOM**: move `agent-manager` to `2.24.0`.
+
+## \<current\> → \<next\> (the default agent, the skill-manager and `skillManager.sources`)
+
+giantswarm/giantswarm#38970, giantswarm/giantswarm#38322: the chart deploys the default agent (`default-agent` in the kagent namespace) wherever kagent, muster and agent-manager are on, and the skill-manager (`components.skill-manager`) wherever agent-manager is on. The skill-manager and the portal take their skill sources from `skillManager.sources`, with the platform's own `skills/` first. agent-manager pins skills through the skill-manager (`skillManager.url`) from `agent-platform.agentManager.skillManagerFloor` on. Platform HelmReleases are named after their `components` key, which is the chart name for every existing component, so no release is renamed.
+
+### Operator action
+
+- **An installation that deploys its own meta agent (an Agent Manager) or `swarm-operator`**: remove it, or set `components.default-agent.enabled: false`.
+- **The default agent's model**: it gets the installation's default model once, when it has none. To pin or change it, set `defaultAgent.modelConfig`.
+- **An installation that sets `agent-manager.agentChart.semver` or `components.default-agent.versionRange`**: both need the agent chart `>=2.6.0 <3.0.0`; below 2.6.0 the default agent's release refuses an unset model.
+- **An installation that names the default agent differently**: set `defaultAgent.displayName` (and `defaultAgent.description`); its technical name stays `default-agent`.
+- **An installation that reads private skill repositories**: set `skill-manager.github.app.secretName`, as for agent-manager's (`tokenSecret.name`, a static token, still works and is deprecated).
+- **An installation that sets `agent-manager.skills.repositories` or `backstage.skillsRepositories`**: these keys now default to `[]`. Move the list to `skillManager.sources`. A portal list still replaces the sources for the portal below `agent-platform.backstage.skillManagerFloor`. An agent-manager list fails the render once agent-manager pins through the skill-manager, and a portal list once the portal reads its skills from the skill-manager.
+- **An installation that lists `https://github.com/giantswarm/agent-platform` itself**: the render fails. Remove the entry, or set `skills.platformSource.enabled: false`.
+- **An air-gapped installation**: set `skills.platformSource.enabled: false`.
+- **An installation that keeps agent-manager's own skill discovery**: set `components.skill-manager.enabled: false`.
+
+## \<current\> → \<next\> (organization credential Secrets are write-only)
+
+giantswarm/agent-platform#1352 and this release: `agent-platform:admin` holds `create`, `update` and `delete` on Secrets, no longer `patch`, whose answer is the stored Secret. With `agentPlatformOrganizations.enabled`, two ValidatingAdmissionPolicies (Fail, Deny) hold Secrets in organization namespaces. `agent-platform-organization-git-secrets`: a Secret applied by an organization's Kustomization is updated only by that Kustomization's ServiceAccount, cluster-admin included. `agent-platform-organization-secret-deletes`: a delete the API server answers with the Secret (Orphan or Foreground propagation, or a Secret a finalizer holds) is made only by a requester that may `get` it.
+
+### Operator action
+
+- **None.** agent-manager writes credentials with `create`, `update` and a background delete.
+- An organization admin's `kubectl patch` or `kubectl apply` of a Secret is refused; `kubectl replace` and `kubectl delete` (background, the default) work. A Secret applied from an organization's path in git is changed in git.
+
+## \<current\> → \<next\> (agent-platform-operator 0.3: the last revision of an organization's file)
+
+giantswarm/giantswarm#38891: `components.agent-platform-operator.versionRange` is `>=0.3.0 <0.4.0`. agent-platform-operator 0.3.0 records `status.lastAppliedRevision` on every AgentPlatformOrganization applied by the installation Kustomization: that Kustomization's `status.lastAppliedRevision` while the organization is in its settled inventory, kept while the organization is `Orphaned`. agent-manager 2.23.0, inside its current range, reports it on the organization tools as `lastAppliedRevision` and, in commit mode, `lastAppliedRevisionUrl`, the GitHub commit that last held the organization's file. The CRD gains the optional status field; nothing the chart renders changes otherwise: no value, no RBAC rule and no flag of the operator is new.
+
+### Operator action
+
+- **None.** An organization already missing from git when 0.3.0 starts has no `lastAppliedRevision`. To check one: `kubectl -n <parent> get agentplatformorganization <name> -o jsonpath='{.status.lastAppliedRevision}'`.
+- **An installation that pins the BOM at `0.2.x`**: move `agent-platform-operator` to `0.3.0`, since `0.2.x` is outside the range, and `agent-manager` to `2.23.0` for the commit link.
+
+## \<current\> → \<next\> (muster's MCP-server viewers have their own value)
+
+giantswarm/agent-platform#1331: `musterMcpServerViewers` names muster's MCP-server viewers, the subjects of the Role and RoleBinding `agent-platform:mcpserver-viewer` in muster's namespace (`list`, `get` and `watch` on muster's MCPServers, the servers for everyone). Unset, the default, the viewers are `tenants.platform.users`, as before: nothing that renders changes. Set, the key alone binds the viewers, and `tenants.platform.users` binds only `agent-platform:platform-user` in the kagent namespace. An empty list binds nobody. With `agentPlatformOrganizations.enabled`, the render needs the viewers (the key, or `tenants.platform.users` while it is unset), no longer `tenants.platform.users` itself. With the key set and `tenants.platform.users` and `tenants.platform.editors` empty (`[]`), the render succeeds, and the connectivity release renders no `agent-platform:platform-user` RoleBinding in the kagent namespace. The `agent-platform:editor` RoleBinding there goes only when `tenants.platformTeam` is empty too; with `tenants.platformTeam` set, it stays, bound to the platform team only, on purpose.
+
+### Operator action
+
+- **None** for an installation that keeps `tenants.platform.*`.
+- **To retire the platform tenant's bindings** (giantswarm/giantswarm#38990): set `musterMcpServerViewers` to the subjects that must keep seeing muster's MCP servers, then set `tenants.platform.users: []` and `tenants.platform.editors: []`, in the same values change or after it. Use empty lists: a removed or `null` key brings back the chart's default (`system:authenticated` and the admin groups), and the bindings stay. The old default of the viewers is `[{apiGroup: rbac.authorization.k8s.io, kind: Group, name: system:authenticated}]`. With the lists empty and the key unset, the organizations' render fails naming `musterMcpServerViewers`; with the organizations off, nobody is bound and muster shows its own namespace's servers to nobody once it lists as the person. To check after the upgrade: `kubectl -n <connectivity namespace> get rolebinding agent-platform:mcpserver-viewer -o jsonpath='{.subjects}'` and `kubectl -n kagent get rolebinding agent-platform:platform-user` (not found). `kubectl -n kagent get rolebinding agent-platform:editor -o jsonpath='{.subjects}'` is not found with `tenants.platformTeam` empty, and lists only the platform team's subjects with it set: the platform team stays an editor of the kagent namespace on purpose.
+
+## \<current\> → \<next\> (agent-platform-operator 0.2: rbac-operator's admins become organization admins)
+
+giantswarm/agent-platform#1336: `components.agent-platform-operator.versionRange` is `>=0.2.0 <0.3.0`. With `agentPlatformOrganizations.enabled`, agent-platform-operator 0.2.0 mirrors more parent bindings into each organization namespace: besides every RoleBinding to `agent-platform:organizations-admin`, every RoleBinding to `cluster-admin` labelled `giantswarm.io/managed-by: rbac-operator` (in a Giant Swarm Organization's namespace `org-<name>`: `write-all-customer-group`, the installation's customer admin groups, and rbac-operator's copy of each RoleBindingTemplate that selects the organization). The mirror always binds `agent-platform:organizations-admin`, never `cluster-admin`, and keeps the User and Group subjects whose names do not start with `system:`. A `cluster-admin` RoleBinding written by hand in the parent is not mirrored. A mirror now goes as soon as the deletion of its parent binding starts, also while a finalizer holds the binding. Nothing the chart renders changes: no value, no CRD schema, no RBAC rule and no flag of the operator is new.
+
+### Operator action
+
+- **None.** Expect an `agent-platform:organizations-admin` RoleBinding named after each rbac-operator `cluster-admin` binding with User or Group subjects in every organization namespace of that parent. To check: `kubectl -n <organization namespace> get rolebinding -l agent-platform.giantswarm.io/organization-object=organizations-admin-mirror`.
+- **An installation that pins the BOM**: move `agent-platform-operator` to `0.2.0`.
+
+## \<current\> → \<next\> (helm-controller before 1.4 keeps the pod-certificate volumes)
+
+giantswarm/agent-platform#879: **helm-controller 1.4 (Flux 2.7) or later** is what drift detection of a workload that projects a `podCertificate` volume source (a Kubernetes 1.35 field) needs. helm-controller 1.3.0 (Flux 2.6) decodes a Deployment through API types that predate the field, so its drift correction re-applied `Deployment/kagent-controller` with the `substrate-podidentity` volume's source emptied (`{}`) one second after the 4.x upgrade, and the new ReplicaSet's pod crash-looped on `substrate: dial ate-api "dns:///api.ate-system.svc:443": context deadline exceeded`, masked while the previous ReplicaSet's pod kept serving. The component HelmReleases now leave `/spec/template/spec/volumes` of the releases' pod-certificate workloads out of drift detection whenever it is on (`mode: enabled` or `warn`): `Deployment/kagent-controller` in the kagent release (the target follows `kagent.fullnameOverride` or the chart's release-name fallback when renamed), and every Deployment, StatefulSet and DaemonSet of the substrate release should drift detection ever be turned on for it. The rules are appended to the entry's own `components.<name>.driftDetection.ignore`, so an installation's list keeps them. Helm's upgrades apply those volumes as the chart renders them; every other field of those workloads and every other object of the releases is still corrected.
+
+### Operator action
+
+- **None.** An installation that bridged the failure with its own ignore rule for `kagent-controller`'s volumes (`components.kagent.driftDetection.ignore`) can drop it; kept, it renders once.
+- **A crash-looping `kagent-controller` after the upgrade** (`kubectl -n kagent get deploy kagent-controller -o json | jq '[.spec.template.spec.volumes[]|select(.projected)|.projected.sources]'` shows `[{}]`): after the new ignore rule has reached the kagent HelmRelease, force a Helm upgrade to restore the volume source: `flux reconcile helmrelease kagent -n <meta-namespace> --force` (use the rendered HelmRelease name and namespace if overridden). Changing only `spec.driftDetection.ignore` does not change the chart or values and therefore does not itself trigger a Helm upgrade; an ordinary reconcile leaves the ignored, already damaged volumes in place.
+
+## \<current\> → \<next\> (agent-manager 2.22 and muster 5.61: the credential form is an explicit URL)
+
+giantswarm/agent-platform#1312: the chart no longer derives agent-manager's `devPortal.url` from the portal's hostname, and an own `agent-manager.devPortal` fails the render. agent-manager 2.22.0 links a missing organization credential to `credentials.uiURL`, an HTTPS URL template with one `{operation}` placeholder, and its chart refuses `devPortal`. `components.agent-manager.versionRange` is `>=2.22.0 <3.0.0`, and `credentials` and `githubTokenExchange` fail the render on a lower floor. `components.muster.versionRange` is `>=5.61.0 <6.0.0`: muster passes a backend's `input_required` through to the caller (giantswarm/muster#1812), which carries agent-manager's credential elicitation. See [organization credentials](docs/organization-credentials.md).
+
+### Operator action
+
+- **Before the upgrade**, remove `agent-manager.devPortal` from the installation's values.
+- Set `agent-manager.credentials.uiURL` to the form of the client that serves it once that client ships it (the portal: giantswarm/backstage#3364), and turn on `agentManager.route` for a client outside the cluster (see [organization credentials](docs/organization-credentials.md#credential-form)). Until then a missing credential is answered without a form link.
+- **An installation that pins the BOM**: move `agent-manager` to `2.22.0` and `muster` to `5.61.0`. A pinned agent-manager floor below `2.22.0` fails the render once `credentials` or `githubTokenExchange` is set.
+
+## \<current\> → \<next\> (the charts declare no model)
+
+giantswarm/giantswarm-platform-manager#789: `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` fail the render. The kagent release always carries `providers: false`, so the upgrade deletes `default-model-config` from the kagent namespace, and the connectivity release deletes every ModelConfig it rendered from `kagent.modelConfigs`.
+
+### Operator action
+
+- **Before the upgrade**, declare every model the agents use as a ModelConfig object in the installation's GitOps repository, next to its agents, and point every Agent and agent HelmRelease that names `default-model-config` at one of them. An entry of `kagent.modelConfigs` becomes:
+
+  ```yaml
+  apiVersion: api.kagent.dev/v1alpha3
+  kind: ModelConfig
+  metadata:
+    name: anthropic-sonnet
+    namespace: kagent
+    annotations:
+      agent-platform.giantswarm.io/is-default-model-config: "true"  # the entry with default: true
+      ui.giantswarm.io/display-name: Anthropic Sonnet 4.6           # its displayName
+  spec:
+    provider: Anthropic
+    model: claude-sonnet-4-6
+    apiKeySecret: kagent-anthropic
+    apiKeySecretKey: ANTHROPIC_API_KEY
+    anthropic:
+      promptCaching: true
+      cacheTTL: 5m
+  ```
+
+  An entry's `promptCaching`, `cacheTTL`, `maxTokens`, `apiFormat`, `credentialType` and `baseUrl` go under the provider's block (`anthropic`, `openAI`, ...); an Anthropic entry inherited `kagent.providers.anthropic.config` before, so carry those keys over. Leave `baseUrl` out to ride the LLM listener with `llmRouting.enabled`. A ModelConfig of the same name that the connectivity release rendered is deleted by the upgrade; give the declared one another name, or let Flux recreate it on its next reconcile.
+- **Remove** `kagent.providers`, `kagent.defaultModelConfig` and `kagent.modelConfigs` from the values. A Secret the kagent chart created from `kagent.providers.<name>.apiKey` goes with the upgrade too: pre-create the Secret the ModelConfig names.
+- **A person's own ChatGPT login**: replace the `kagent.modelConfigs[]` entry with `credentialType: chatgptOAuth` and no `apiKeySecret` by the same ModelConfig declared with the agents; the chart wires the login wherever its prerequisites are on ([docs/chatgpt-login.md](docs/chatgpt-login.md)).
+
+## \<current\> → \<next\> (the credential providers read Secrets only where bound)
+
+giantswarm/agent-platform#1269: once `components.substrate.versionRange` selects Substrate 1.18.0 or later and `components.google-access-token-credential-provider.versionRange` the plugin 0.3.0 or later, their Secret readers are bound in the namespaces the credential grants name (every `allowedNamespaces` entry of `substrate.credentialProvider.namespacePolicies`) and, with `agentPlatformOrganizations.enabled`, by agent-platform-operator in every organization namespace. The providers already refused an actor a Secret outside its grants in their own process; what changes is that their ServiceAccounts can no longer read any other Secret of the cluster, a workload cluster's kubeconfig on a management cluster among them. An own `substrate.credentialProvider.rbac.namespaces` that leaves out a granted namespace makes the egress gateway answer that namespace's credentials with `403` (`not permitted to read secret <namespace>/<name>`).
+
+### Operator action
+
+- **None** for an installation on the default `namespacePolicies` (the platform namespace) or with the organizations on.
+- **An installation whose own `namespacePolicies` name a namespace in `allowedNamespaces`**: the namespace must exist before the ranges move, since the Substrate and plugin releases create a RoleBinding in it; remove a grant of a namespace that is gone. An `agents-*` entry is left to agent-platform-operator while the organizations are on.
+- **An installation whose own `namespacePolicies` grant namespaces by a label other than the organizations'**: nothing; the readers stay bound cluster-wide. To narrow them, list the namespaces in `substrate.credentialProvider.rbac.namespaces` (and `google-access-token-credential-provider.rbac.namespaces`).
+
+## \<current\> → \<next\> (no runtime forwards the person's token)
+
+giantswarm/giantswarm#38993: the platform Harness no longer sets `KAGENT_PROPAGATE_TOKEN`. A Session reaches muster with its Actor's JWT, which needs muster to trust the actor JWT and agent-manager to bind the Session (on whenever Agent Substrate is on, from the release that carries `make verify-actor-bearer`). A Session nobody bound (one created through the kagent UI or the controller API, not agent-manager) gets no muster tools.
+
+### Operator action
+
+- **Upgrade to the release where muster trusts the actor JWT without workspaces first**, and confirm a Session started through agent-manager reaches muster as its Actor (muster logs `actor_bearer` accepted).
+- **An installation whose `kagent.harnesses[]` entries set `KAGENT_PROPAGATE_TOKEN`** (a claude or codex Harness): remove the variable from each entry's `env`. While it is set, that Harness's runtime still receives the person's token and forwards it to every MCP server of its agents.
+
+## \<current\> → \<next\> (a HelmRelease in the kagent namespace is an agent release)
+
+giantswarm/giantswarm#38840: the ValidatingAdmissionPolicy `agent-platform-platform-helmreleases` refuses, in the kagent namespace, a HelmRelease created or changed in its spec unless it installs the agent chart from the namespace's `agent` OCIRepository as `kagent.fluxServiceAccountName` (`kagent-flux`), sets none of `spec.chart`, `valuesFrom`, `postRenderers`, `kubeConfig`, `targetNamespace` and `storageNamespace`, and names as a git credential (`values.skillsGitAuthSecretRef.name`, or a `credentialRef` in `values.extraAgentSpec`) only the installation skills credential or a Secret its writer may `get`. A HelmRelease that already exists keeps running; only its next spec change is checked.
+
+### Operator action
+
+- **None** for an installation whose kagent HelmReleases all have agent-manager's shape. List the others with:
+
+  ```sh
+  kubectl get helmreleases -n kagent -o json | jq -r '.items[] | select(.spec.serviceAccountName != "kagent-flux"
+    or .spec.chartRef.name != "agent" or (.spec | has("valuesFrom") or has("postRenderers") or has("chart")
+    or has("kubeConfig") or has("targetNamespace") or has("storageNamespace"))) | .metadata.name'
+  ```
+
+- **An agent HelmRelease running as another ServiceAccount** (`kagent-controller`, say): set `spec.serviceAccountName: kagent-flux`. Helm upgrades the release in place, and the policy admits that change.
+- **A HelmRelease in kagent that installs another chart**: move it out of the kagent namespace, together with a ServiceAccount and Role of its own.
+
 ## \<current\> → \<next\> (the tenants mode is removed)
 
 giantswarm/agent-platform#1268: `tenants.organizations` is refused by both charts' schemas. agent-manager's tenant reconciler no longer keeps the `org-<name>` namespaces, muster no longer serves their MCP servers, and no policy of the platform selects `giantswarm.io/organization`. Organizations are AgentPlatformOrganizations (`agentPlatformOrganizations.enabled`), each with an organization namespace `agents-<name>-<random>`.
@@ -23,7 +223,13 @@ giantswarm/agent-platform#1268: `tenants.organizations` is refused by both chart
 
 - **None** for an installation without `tenants.organizations.enabled`.
 - **An installation with `tenants.organizations.enabled: true`** (graveler), in this order:
-  1. Before the upgrade, hand the ClusterRole `agent-platform-tenant-flux` from the agent-manager release to the connectivity release. The connectivity release renders it now, and it upgrades before agent-manager (agent-manager waits for kagent, kagent for connectivity), so without this step its upgrade fails on the object's Helm ownership and never gets past it. `<release>` and `<namespace>` are those of the connectivity HelmRelease's Helm release (`kubectl get helmrelease -A | grep connectivity`, its `spec.releaseName` and `spec.targetNamespace`):
+  1. Before the upgrade, read which Helm release owns the ClusterRole `agent-platform-tenant-flux`:
+
+     ```sh
+     kubectl get clusterrole agent-platform-tenant-flux -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
+     ```
+
+     The connectivity release is the Helm release of the connectivity HelmRelease (`kubectl get helmrelease -A | grep connectivity`, its `spec.releaseName` in `spec.targetNamespace`). When the command prints the connectivity release, or the role is not found, skip the hand-over below: the connectivity release renders the role whenever kagent is on, and from agent-manager 2.20 on agent-manager's chart renders no such role, so nothing moves (giantswarm/agent-manager#305). When it prints the agent-manager release, or prints nothing, hand the role to the connectivity release. The connectivity release upgrades before agent-manager (agent-manager waits for kagent, kagent for connectivity), so without the hand-over its upgrade fails on the object's Helm ownership and never gets past it. `<release>` and `<namespace>` are the connectivity release's `spec.releaseName` and `spec.targetNamespace`:
 
      ```sh
      kubectl annotate clusterrole agent-platform-tenant-flux --overwrite \
@@ -39,11 +245,13 @@ giantswarm/agent-platform#1268: `tenants.organizations` is refused by both chart
      kubectl label clusterrole agent-platform-tenant-flux --overwrite app.kubernetes.io/managed-by=Helm
      ```
 
-     The connectivity release adopts it, and the agent-manager release keeps it when it drops it from its manifest. Then remove `tenants.organizations` and any `agent-manager.tenants` and `muster.muster.mcpServersInAllNamespaces` from the installation's values.
-  2. Turn `agentPlatformOrganizations.enabled` on with its prerequisites: kagent and Agent Substrate on, `kagent.fluxServiceAccountName`, `llmRouting.enabled` with a model whose provider the listener serves and `llmRouting.modelConfigPolicy.enabled` on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, `global.domain` (or `agentPlatformOrganizations.apiHostnames`), and the kagent line with giantswarm/kagent-extensions#27 for the erasure.
-  3. Create each organization through agent-manager's organization tools (`create_organization` in the parent `org-<name>`, then its members and its model). Two steps decide when they answer:
-     - With this release, `components.agent-manager.versionRange` is `>=2.16.0 <2.19.0` and agent-manager gets `tenants.enabled: false`: an agent-manager 2.18 with `tenants.enabled` would run the old tenant reconciler over every `giantswarm.io/organization` namespace. Its organization tools do not exist yet.
-     - The next agent-platform release whose CHANGELOG moves `components.agent-manager.versionRange` to the release with giantswarm/agent-manager#294 turns agent-manager's `tenants.enabled` on with `agentPlatformOrganizations.enabled` (and sets `devPortal.url`); without it the organization tools answer `unsupported`. That release also hands `agent-platform-tenant-flux` back: the connectivity chart drops it and agent-manager's chart renders it again. Its UPGRADE.md entry gives the same annotation step in the other direction (the agent-manager release's name and namespace), so the role is never missing. Upgrade graveler to that release before this step.
+     The connectivity release adopts it, and the agent-manager release keeps it when it drops it from its manifest.
+
+     Whether or not you handed the role over, remove `tenants.organizations` and any `agent-manager.tenants` and `muster.muster.mcpServersInAllNamespaces` from the installation's values.
+  2. Turn `agentPlatformOrganizations.enabled` on with its prerequisites: kagent and Agent Substrate on, `kagent.fluxServiceAccountName`, `llmRouting.enabled` with a model whose provider the listener serves and `llmRouting.modelConfigPolicy.enabled` on an API server that serves `admissionregistration.k8s.io/v1` MutatingAdmissionPolicy, `global.domain` (or `agentPlatformOrganizations.apiHostnames`), muster's OAuth server on the `dex` provider with muster's MCP-server viewers, `musterMcpServerViewers` or `tenants.platform.users` while it is unset (muster lists the MCP servers as the person), and the kagent line with giantswarm/kagent-extensions#27 for the erasure.
+  3. Create each organization through agent-manager's organization tools (`create_organization` in the parent `org-<name>`, then its members and its model). Two things decide when they answer:
+     - From agent-platform 4.175.0 on, `components.agent-manager.versionRange` is `>=2.20.0 <3.0.0` (giantswarm/agent-platform#1298): from 2.20.0 on, agent-manager's chart leaves `agent-platform-tenant-flux` to the connectivity chart (giantswarm/agent-manager#305) and its organization tools write in commit mode (giantswarm/agent-manager#300).
+     - That release turns agent-manager's `tenants.enabled` on with `agentPlatformOrganizations.enabled` (and sets `devPortal.url`); without it the organization tools answer `unsupported`. `agent-platform-tenant-flux` stays with the connectivity release: agent-manager's chart does not render it, so nothing moves and no hand-over is needed. graveler gets this range with this upgrade: no second upgrade is needed.
   4. Delete the old tenant agent objects in each `org-<name>` namespace: the agents' HelmReleases and the `agent` OCIRepository, the copies the reconciler kept (the Harness, the WorkerPool and its ServiceAccount, `default-model-config` and its key Secret, the workers' network policies, all labelled `agent-manager.giantswarm.io/tenant-object`), and the RoleBinding of the agents' Flux ServiceAccount. Their sessions do not move.
 
 ## \<current\> → \<next\> (the organization label, and the egress gateway reaches only muster's Gateway in the cluster)
@@ -71,7 +279,7 @@ The ServiceAccount `kagent.fluxServiceAccountName` (`kagent-flux`) is bound to t
 ### Operator action
 
 - **None** for an installation whose kagent-namespace HelmReleases with `serviceAccountName: kagent-flux` all install the Generic agent chart (every agent the portal or agent-manager creates).
-- **A HelmRelease in kagent that installs another chart as `kagent-flux`**: give it a ServiceAccount and Role of its own for the kinds that chart renders, and name that ServiceAccount in the HelmRelease, before the upgrade.
+- **A HelmRelease in kagent that installs another chart as `kagent-flux`**: move it out of the kagent namespace with a ServiceAccount and Role of its own for the kinds that chart renders, before the upgrade (`agent-platform-platform-helmreleases` refuses any chart but the agent chart there).
 - **A management cluster that applies its own copy of the RoleBinding `kagent-flux`** (outside this chart): remove that copy, or it binds `cluster-admin` again.
 
 ## \<current\> → \<next\> (agent-platform-mcps follows muster)
@@ -1382,7 +1590,7 @@ New keys: `gateway.jwksEgress.external.fqdns`, `.cidrs` and `.port` (443), for a
 ### Operator action
 
 - **The release is inert until an installation admits it.** Every Giant Swarm installation selects this chart at `>=2.5.5 <4.0.0` (giantswarm/management-cluster-bases#739); nothing changes on an installation until its own bound is lifted — the per-installation cut-over of the migration (giantswarm/management-cluster-bases#737, #738), which destroys the v1alpha2 agents and their conversations (upstream's hard cut) and needs the prerequisites below in place first. Do not lift the bound for this release alone.
-- **Cluster prerequisites with kagent on**: Kubernetes 1.35 (Substrate uses `certificates.k8s.io/v1beta1` `PodCertificateRequest`; 1.34 serves it only as `v1alpha1`) with the feature gates `ClusterTrustBundle`, `ClusterTrustBundleProjection` and `PodCertificateRequest` on kube-apiserver, kube-controller-manager **and every kubelet** — giantswarm/cluster#1005 turns them on by default; until that release reaches an installation the cluster chart's `internal.advancedConfiguration.{controlPlane.apiServer,controlPlane.controllerManager,kubelet}.featureGates` sets them (each list replaces the chart's default list: repeat the defaults next to the three gates, on all three components); enabling them rolls the control plane and every node, so it is done ahead of the cut-over. A live render (helm-controller) of this release with kagent on refuses a cluster that does not serve `certificates.k8s.io/v1beta1/PodCertificateRequest`, naming the gates — the kubelet gates it cannot see. Agent Substrate itself comes with the chart now: nothing to install by hand, no `kubectl-ate` step; an installation that ran Substrate from outside the chart (a lab) hands `ate-system` over to the chart's releases (README "Agent Substrate"). A cluster that reaches no public registry needs pull-throughs for `ghcr.io/giantswarm` (the kagent and Substrate images and charts), `docker.io/alpine/k8s` and `docker.io/alpine/openssl` (the hook images; `hooks.kubectlImage`, `hooks.opensslImage`) and the gVisor release asset from `storage.googleapis.com` (the `SandboxConfig`'s `spec.assets`).
+- **Cluster prerequisites with kagent on**: helm-controller 1.4 (Flux 2.7) or later, whose API types know the `podCertificate` volume source (on 1.3 the kagent release's drift correction stripped it from `kagent-controller` until the chart left those volumes out, see "helm-controller before 1.4 keeps the pod-certificate volumes"); Kubernetes 1.35 (Substrate uses `certificates.k8s.io/v1beta1` `PodCertificateRequest`; 1.34 serves it only as `v1alpha1`) with the feature gates `ClusterTrustBundle`, `ClusterTrustBundleProjection` and `PodCertificateRequest` on kube-apiserver, kube-controller-manager **and every kubelet** — giantswarm/cluster#1005 turns them on by default; until that release reaches an installation the cluster chart's `internal.advancedConfiguration.{controlPlane.apiServer,controlPlane.controllerManager,kubelet}.featureGates` sets them (each list replaces the chart's default list: repeat the defaults next to the three gates, on all three components); enabling them rolls the control plane and every node, so it is done ahead of the cut-over. A live render (helm-controller) of this release with kagent on refuses a cluster that does not serve `certificates.k8s.io/v1beta1/PodCertificateRequest`, naming the gates — the kubelet gates it cannot see. Agent Substrate itself comes with the chart now: nothing to install by hand, no `kubectl-ate` step; an installation that ran Substrate from outside the chart (a lab) hands `ate-system` over to the chart's releases (README "Agent Substrate"). A cluster that reaches no public registry needs pull-throughs for `ghcr.io/giantswarm` (the kagent and Substrate images and charts), `docker.io/alpine/k8s` and `docker.io/alpine/openssl` (the hook images; `hooks.kubectlImage`, `hooks.opensslImage`) and the gVisor release asset from `storage.googleapis.com` (the `SandboxConfig`'s `spec.assets`).
 - **The `HelmRelease` that installs the meta chart needs `spec.timeout: 12m` or more** (helm-controller's default is 5 minutes). Its install is the Helm SDK's `--wait`, which returns when every component `HelmRelease` is Ready; with kagent on the first 4.x reconcile installs nine of them plus Substrate and kagent in dependency order — about 5–6 minutes through a cluster's own Flux (220 s for the components under `helm install --wait`, Ready through Flux in 289 s in the green run) — so a `HelmRelease` on the default fails its first 4.x reconcile on the timeout and is retried. Measured by the ATS own-Flux scenario of giantswarm/agent-platform#380 (`tests/ats/test_own_flux.py` sets `12m`; CircleCI job 5941 hit the default, job 6033 passed). Giant Swarm's management-cluster base already sets `20m` (`extras/agent-platform/helm-release.yaml` in giantswarm/management-cluster-bases); a per-installation cut-over patch must not lower it. The uninstall through that Flux takes about 30–105 s and has to remove the component releases in reverse-dependency waves (giantswarm/agent-platform#385; README "Uninstalling").
 - **`kagent.harness.snapshotLocation` is required with kagent on** (the render fails without it): the Substrate snapshot location the platform Harness writes the actors' snapshots to — `s3://<bucket>/<prefix>` on the installation's S3 bucket (CAPA: provision the bucket and an IRSA role for Substrate's `atelet` and `ate-api-server` ServiceAccounts; the bucket is the installation's infrastructure), or an S3-compatible store with its endpoint and credentials in `substrate.atelet.extraEnv`. Set it in the per-installation values before lifting the bound.
 - **Substrate's database** rides the platform's CNPG Cluster where `postgres.enabled` is on (the fleet): the `Database` `<clusterName>-substrate` and the derived Secret `<clusterName>-substrate-app` in `ate-system` appear with the connectivity 4.0 release; nothing to set (`substrate.postgres.enabled: auto`). The Cluster's network policy admits `ate-api-server` on 5432. An installation without the Cluster runs Substrate's bundled single-instance Postgres unless it names `substrate.postgres.connectionString`.

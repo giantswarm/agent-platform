@@ -43,7 +43,10 @@ every composed LLMInferenceService gets from the discovery ConfigMap) and of the
 namespace block (`modelServing.namespace`; #565 — the namespace's keep policy
 is what stands between a slice composed without the cache and a cache claim an
 earlier slice left in the namespace, and a forwarded copy without `keep` or
-with it off would strip the policy from every installation's render) — and
+with it off would strip the policy from every installation's render) and of
+kagent's MCP server registration (`kagent.controllerRoute.mcp`; the display
+name and description the Dev Portal shows for it, which a reworded copy in
+one chart only would leave unchanged on every installation) — and
 holds the meta chart's value at the same path equal to it,
 naming the path and both values when they differ or the meta chart lacks the
 path. It refuses to pass
@@ -51,7 +54,8 @@ vacuously: the two `huggingFace.fqdns` lists, the model-serving port, the
 StorageClass provisioner, the policies' env, the PriorityClass name, the
 pre-pull image and model-preset lists and its (empty) selector, the model-images registry, the image
 verification's failureAction, the serving defaults' GPU resource name and the
-namespace's keep switch and the models Gateway's load balancer scheme (#690) must be among the paths it compared.
+namespace's keep switch and the models Gateway's load balancer scheme (#690)
+and kagent's MCP display name and description must be among the paths it compared.
 `--meta-values FILE` compares another meta values file (the negative
 controls in `make verify-meta`).
 """
@@ -69,10 +73,11 @@ REQUIRED = {"modelServing.networkPolicy.huggingFace.fqdns", "modelManager.networ
             "modelServing.serving.gpuResourceName",
             "modelServing.namespace.keep",
             "modelServing.modelsGateway.service.annotations.service.beta.kubernetes.io/aws-load-balancer-scheme",
-            "gateway.parameters.dataPlaneResources.limits.cpu", "gateway.parameters.dataPlaneResources.limits.memory"}
+            "gateway.parameters.dataPlaneResources.limits.cpu", "gateway.parameters.dataPlaneResources.limits.memory",
+            "kagent.controllerRoute.mcp.displayName", "kagent.controllerRoute.mcp.description"}
 MIRRORED = ("fqdns", "cidrs", "port")
 # Blocks the meta chart mirrors leaf for leaf (#537, #539, #545, #551, #552, #565).
-SUBTREES = (("modelServing", "namespace"), ("modelServing", "serving"), ("modelServing", "cache"), ("modelServing", "policies"), ("modelServing", "prepull"), ("modelServing", "modelImages"),
+SUBTREES = (("kagent", "controllerRoute", "mcp"), ("modelServing", "namespace"), ("modelServing", "serving"), ("modelServing", "cache"), ("modelServing", "policies"), ("modelServing", "prepull"), ("modelServing", "modelImages"),
             ("modelServing", "imageVerification"), ("modelServing", "modelsGateway", "service"),
             ("clusterManager", "prewarmPriorityClass"),
             ("gateway", "parameters", "dataPlaneResources"))
@@ -124,7 +129,7 @@ def main() -> int:
         sys.exit(f"FAIL: the connectivity chart no longer declares {sorted(missing)}; this check would pass vacuously")
     if drift:
         sys.exit("FAIL: a mirrored default differs between the charts — the meta chart forwards its copy, which shadows the connectivity default:\n  " + "\n  ".join(drift))
-    print(f"ok: {len(compared)} mirrored defaults (networkPolicy fqdns/cidrs lists and ports, the modelServing namespace, serving, cache, policies, prepull, modelImages and imageVerification blocks, the models Gateway's service annotations, the clusterManager prewarmPriorityClass block, the agentgateway data plane's resource budget) are equal in both charts ({', '.join(sorted(compared))})")
+    print(f"ok: {len(compared)} mirrored defaults (networkPolicy fqdns/cidrs lists and ports, the modelServing namespace, serving, cache, policies, prepull, modelImages and imageVerification blocks, the models Gateway's service annotations, the clusterManager prewarmPriorityClass block, the agentgateway data plane's resource budget, kagent's MCP server registration) are equal in both charts ({', '.join(sorted(compared))})")
     return 0
 
 

@@ -143,6 +143,7 @@ def main(meta: str, connectivity: str) -> int:
     must_have(vals, (
         "auth:\n  dex:\n    issuerURL: https://dex.ci.example.com\n  trustedAudiences:\n  - platform\n",
         "  mcpServer:\n    enabled: true\n",
+        "    requiredAudiences:\n    - dex-k8s-authenticator\n",
         "sources:\n- registry: gsoci.azurecr.io/giantswarm/agent-toolchains\n  repository: giantswarm/agent-toolchains\n",
         "global:\n",
     ), "the release values")
@@ -150,8 +151,10 @@ def main(meta: str, connectivity: str) -> int:
     conn = values(on_docs[("HelmRelease", "agent-platform-connectivity")])
     must_have(conn, (
         "  toolchain-manager:\n    enabled: true\n",
-        "  mcpBackends:\n    toolchain-manager:\n      namespace: default\n      podSelector:\n        app.kubernetes.io/name: toolchain-manager\n      ports:\n      - 8080\n",
     ), "the connectivity release values")
+    # Its entry among the MCP backends (the skill-manager's sorts before it).
+    if not re.search(r"^  mcpBackends:\n(    \S.*\n(      .*\n)*)*    toolchain-manager:\n      namespace: default\n      podSelector:\n        app\.kubernetes\.io/name: toolchain-manager\n      ports:\n      - 8080\n", conn, re.M):
+        fail(f"the connectivity release values lack networkPolicy.mcpBackends.toolchain-manager:\n{conn}")
     if re.search(r"^toolchain-manager:", conn, re.M):
         fail("the toolchain-manager block reached the connectivity release, whose root schema refuses it")
     ok(f"on: one OCIRepository ({REPOSITORY}/{NAME}, {rng}) and one HelmRelease after muster, the login derived from global.identity, the registration on, the agent-toolchains source; connectivity gets the roster and MCP backend entries")
@@ -206,6 +209,13 @@ def main(meta: str, connectivity: str) -> int:
                      "      issuer: https://github.com/apps/own\n", "    enabled: false\n"), "the release values with own keys")
     must_lack(vals, ("ci-agents", "  - platform\n"), "the release values with own keys")
     ok("own issuer, trusted audiences, pin and registration switch stand")
+
+    for audiences, expected in (('["portal"]', "    requiredAudiences:\n    - portal\n"), ("[]", "    requiredAudiences: []\n")):
+        _, vals, _ = release(meta, [*ON, *IDENTITY,
+                                    "--set-json", f"toolchain-manager.muster.mcpServer.requiredAudiences={audiences}"])
+        must_have(vals, (expected,), "the release values with own required audiences")
+        must_lack(vals, ("dex-k8s-authenticator",), "the release values with own required audiences")
+    ok("the registration requests the portal cross-client audience by default; an own audience list or empty list stands")
 
     # --- additionalSources ------------------------------------------------------
     _, vals, _ = release(meta, [*ON, *IDENTITY,
@@ -269,7 +279,8 @@ def main(meta: str, connectivity: str) -> int:
     d = documents(helm(meta, [*IDENTITY, *AGENTS, *PRIVATE, *LINES]))
     must_lack(values(d[("HelmRelease", "agent-manager")]), ("registryConfig", "agent-toolchains"), "the agent-manager release values with the component off")
     must_lack(values(d[("HelmRelease", "substrate")]), ("toolchains-pull",), "the substrate release values with the component off")
-    d = documents(helm(meta, [*ON, *IDENTITY, *AGENTS, *PRIVATE, "--set", "components.agent-manager.versionRange=>=2.14.0 <3.0.0"]))
+    d = documents(helm(meta, [*ON, *IDENTITY, *AGENTS, *PRIVATE, "--set", "components.agent-manager.versionRange=>=2.14.0 <3.0.0",
+                              "--set", "components.substrate.versionRange=>=1.17.5 <1.18.0", "--set", "components.substrate-crds.versionRange=>=1.17.5 <1.18.0"]))
     must_lack(values(d[("HelmRelease", "agent-manager")]), ("registryConfig",), "the agent-manager release values below the 2.16.0 floor")
     must_lack(values(d[("HelmRelease", "substrate")]), ("toolchains-pull",), "the substrate release values below the 1.18.0 floor")
     if "differs from toolchain-manager.registryPullSecret" not in helm(meta, [*ON, *IDENTITY, *AGENTS, *PRIVATE, *LINES, "--set", "agent-manager.toolchains.registryConfig.secretName=other"], expect_fail=True):

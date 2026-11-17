@@ -102,16 +102,24 @@ spec:
       postInitTemplateSQL:
         - "CREATE EXTENSION IF NOT EXISTS vector"
       {{- end }}
+  {{- if or .Values.postgres.maxSlotWalKeepSize (and .Values.postgres.vector.enabled .Values.postgres.vector.extensionImage.reference) }}
   {{- if and .Values.postgres.vector.enabled .Values.postgres.vector.extensionImage.reference }}
   # CNPG 1.29+ / PG 18 ImageVolume: mount the pgvector binary from a sidecar
   # OCI image. A Database CR (database.yaml) instructs CNPG to run
   # CREATE EXTENSION as the operator (superuser). Requires the Kubernetes
   # ImageVolume feature gate and the postgresql.cnpg.io/v1 Database CRD.
+  {{- end }}
   postgresql:
+    {{- with .Values.postgres.maxSlotWalKeepSize }}
+    parameters:
+      max_slot_wal_keep_size: {{ . | quote }}
+    {{- end }}
+    {{- if and .Values.postgres.vector.enabled .Values.postgres.vector.extensionImage.reference }}
     extensions:
       - name: pgvector
         image:
           reference: {{ .Values.postgres.vector.extensionImage.reference | quote }}
+    {{- end }}
   {{- end }}
   {{- if include "agent-platform.postgres.backupEnabled" . }}
   {{- if eq .Values.postgres.backup.method "plugin" }}

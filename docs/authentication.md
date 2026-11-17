@@ -21,6 +21,8 @@ With the chart-owned edge (`gatewayApi.gateway.create: true`) the agentgateway d
 
 muster validates every token itself. agentgateway on the MCP path passes the bearer through unverified.
 
+`muster.muster.oauth.server.trustedAudiences` is a compatibility exception to the [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization#token-handling), which requires a token issued for the MCP server itself. muster accepts a signed ID token of the configured identity provider as a bearer when its audience is a listed client, on `/mcp` and on its person-only endpoints such as `/session-bindings`; a token naming an acting party (`act`) or bound to a DPoP key (`cnf`) is not accepted this way. muster's own access tokens from its login flow are the conforming path. List only the client IDs whose ID tokens reach muster as bearers: the portal's client and the clients whose tokens agentgateway and agent-manager forward. Removing the exception is tracked in [giantswarm/mcp-oauth#678](https://github.com/giantswarm/mcp-oauth/issues/678). The ATS smoke test checks that a listed audience is accepted and that an unlisted audience, an invalid signature and an unknown access token are refused.
+
 ## 2. OAuth discovery
 
 All of it happens on muster's hostname:
@@ -40,7 +42,7 @@ muster aggregates many MCP servers behind `/mcp`. Each server entry in `agent-pl
 | `forward` | The server trusts the issuer the caller signed in with (typically the same cluster). | The person's bearer goes through unchanged. |
 | `exchange` | The server sits behind a different issuer (another cluster's Dex). | muster performs an [RFC 8693](https://www.rfc-editor.org/rfc/rfc8693) token exchange at that issuer's token endpoint, with the client credentials of the `identityProviders.<provider>` entry. |
 
-muster signs no tokens of its own: every downstream server validates against Dex. A kagent agent acts as the person who invoked it: the Harness propagates that person's token (`KAGENT_PROPAGATE_TOKEN`) as the only `Authorization` reaching muster. model-manager, agent-manager and mcp-kubernetes receive the person's token with the audience `dex-k8s-authenticator` and act on the cluster with that person's RBAC (install.md, [The identity provider](install.md#the-identity-provider)).
+muster signs no tokens of its own: every downstream server validates against Dex. A kagent agent acts as the person who started its Session: agent-manager binds the Session's Actor to that person at muster, and the egress gateway puts the Actor's JWT on every call to muster, which serves it as the bound person. The runtime never holds or forwards the person's token: the Harness sets no `KAGENT_PROPAGATE_TOKEN`, so no MCP server receives it, and muster refuses a Session nobody bound. model-manager, agent-manager and mcp-kubernetes receive the person's token with the audience `dex-k8s-authenticator` and act on the cluster with that person's RBAC (install.md, [The identity provider](install.md#the-identity-provider)).
 
 ## 4. Edge JWT validation and JWKS
 
@@ -92,3 +94,11 @@ A model served by the serving slice ([reference](reference.md#the-serving-slice-
 POST https://models.<domain>/<namespace>/<model>/v1/chat/completions
 Authorization: Bearer <id_token>
 ```
+
+## OAuth issuer connectivity
+
+The model-manager, agent-manager, vm-manager, cluster-manager and skill-manager defaults set `oauth.dex.allowPrivateURLs: false`. Their Dex discovery client can reach an operator-configured issuer that resolves to a private address without this opt-in and follows `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`. An issuer discovery failure calls for checking DNS, egress, proxy settings and certificate trust, rather than asking the person to sign in again. Keep HTTPS, certificate verification and the exact configured issuer identity intact; configure the installation's internal CA through `global.identity.ca.secretName` when needed.
+
+When a manager refuses `--allow-private-oauth-urls=true` or its chart value `oauth.dex.allowPrivateURLs: true`, remove the old opt-in or set the chart value to `false`. The platform defaults already use `false`, which also works with the earlier manager releases. This changes no JWKS permission: `oauth.sso.allowPrivateIPs` controls the separate fetch that validates forwarded ID tokens. Only that fetch needs its private-address permission when its configured JWKS endpoint is private. Do not change it to repair discovery or a certificate error.
+
+Muster's operation-specific setting is `muster.muster.oauth.server.dex.allowPrivateIPJWKS` for forwarded-ID-token JWKS fetching. The old `dex.allowPrivateIPOIDC` spelling remains a deprecated alias during migration: either setting being true enables the same permission. After upgrading, replace the old key with `dex.allowPrivateIPJWKS` and preserve its intended boolean value; remove the old alias before disabling the permission through the new key. Dex discovery, token and userinfo calls need neither switch. These settings do not make ID-token forwarding an MCP authorization mechanism.

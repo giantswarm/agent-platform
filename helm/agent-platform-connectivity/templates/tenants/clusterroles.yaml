@@ -6,7 +6,7 @@ agent-platform.giantswarm.io/organization. A tenant's
 RoleBindings bind groups to these ClusterRoles in its namespace; the chart
 binds the platform tenant only (platform-tenant.yaml), its signed-in people
 to agent-platform:platform-user, the user's role without the platform's
-EgressPolicies. The names are fixed:
+EgressPolicies and RoleBindings. The names are fixed:
 the bindings an installation declares refer to them, and the admin role's
 `bind` names them.
 
@@ -19,9 +19,12 @@ deletes when a release leaves them behind, and the reads it reports on
 (Harnesses, events, the namespace's agent chart OCIRepository, which the
 editor reads and never writes). The admin also owns the
 tenant's egress: it writes EgressPolicies and places the Secrets they name,
-which it may create, replace and delete but never read back (no get, list or
-watch on Secrets); admission lets a tenant's EgressPolicy name only its
-`tenant-credential-` Secrets (egress-policy-admission.yaml). No role carries
+which it may create, replace and delete but never read back (no get, list,
+watch or patch on Secrets, as a patch answers with the stored Secret; a delete
+answered with it, by Orphan or Foreground propagation, on a Secret a
+finalizer holds or as a DeleteCollection, admission refuses in every
+namespace, agent-platform-secret-deletes); admission lets a tenant's EgressPolicy name only its `tenant-credential-`
+Secrets (egress-policy-admission.yaml). No role carries
 `escalate`.
 */ -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) }}
@@ -66,9 +69,13 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["modelconfigs", "egresspolicies"]
     verbs: ["create", "update", "patch", "delete"]
+  # No patch: its response is the stored Secret, data included. A delete
+  # answered with the Secret (Orphan or Foreground propagation, a finalizer
+  # on it) is refused in admission in every namespace
+  # (agent-platform-secret-deletes).
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create", "update", "patch", "delete"]
+    verbs: ["create", "update", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

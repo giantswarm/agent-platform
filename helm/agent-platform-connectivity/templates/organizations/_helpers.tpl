@@ -52,20 +52,56 @@ agent-platform.giantswarm.io/copied-from
 {{- end -}}
 
 {{/*
-agent-platform-operator's ServiceAccount, as JSON {name, namespace}: the
-component the meta chart installs (components.agent-platform-operator), whose
-chart names its ServiceAccount after itself, in this release's namespace (the
-meta chart refuses another targetNamespace for the operator, so the two
-cannot disagree). Every policy, binding and role here names it from this one
-place.
+agent-platform-operator's names, as JSON: agentPlatformOrganizations.operator,
+which the meta chart derives onto this release while the organizations are on
+(agent-platform.organizations.operator there, giantswarm/agent-platform#1278).
+The meta chart installs the operator and tells it the same names, so this
+chart holds no copy of them. Fails the render while the name is missing.
 */}}
-{{- define "agent-platform.organizations.operatorServiceAccount" -}}
-{{- dict "name" "agent-platform-operator" "namespace" .Release.Namespace | toJson -}}
+{{- define "agent-platform.organizations.operator" -}}
+{{- $op := dig "operator" dict (.Values.agentPlatformOrganizations | default dict) | default dict -}}
+{{- $_ := required "agentPlatformOrganizations.operator.serviceAccountName is required with agentPlatformOrganizations.enabled: the meta chart derives it (agent-platform.organizations.operator), the name of agent-platform-operator's ServiceAccount" $op.serviceAccountName -}}
+{{- if not $op.podLabels -}}
+{{- fail "agentPlatformOrganizations.operator.podLabels is required with agentPlatformOrganizations.enabled: the meta chart derives it (agent-platform.organizations.operator), the selector labels of agent-platform-operator's pods" -}}
+{{- end -}}
+{{- $op | toJson -}}
 {{- end -}}
 
-{{/* The labels of agent-platform-operator's pods (the operator chart's selector labels). */}}
+{{/*
+agent-platform-operator's ServiceAccount, as JSON {name, namespace}: the name
+the meta chart derives (agent-platform.organizations.operator), in this
+release's namespace (the meta chart refuses another targetNamespace for the
+operator, so the two cannot disagree). Every policy, binding and role here
+names it from this one place.
+*/}}
+{{- define "agent-platform.organizations.operatorServiceAccount" -}}
+{{- $op := include "agent-platform.organizations.operator" . | fromJson -}}
+{{- dict "name" $op.serviceAccountName "namespace" .Release.Namespace | toJson -}}
+{{- end -}}
+
+{{/*
+The Secret readers of Substrate's credential providers the operator binds in
+every organization namespace (its serviceAccountBindings, derived by the meta
+chart; giantswarm/agent-platform#1269), as a JSON map "<namespace>/<name>" of
+the provider's ServiceAccount -> its Secret reader ClusterRole: Substrate's
+bundled provider (release substrate) and the Google access-token plugin
+(release google-access-token-credential-provider), both in Substrate's
+namespace. The operator names each RoleBinding after its ClusterRole. With
+Substrate 1.18 and the plugin 0.3 those releases bind their readers in the
+platform namespace only, so these bindings are what lets a provider read an
+organization's credential Secrets, and nothing else may write them.
+*/}}
+{{- define "agent-platform.organizations.secretReaders" -}}
+{{- $ns := include "agent-platform.substrate.namespace" . -}}
+{{- dict
+      (printf "%s/k8s-credential-provider" $ns) "k8s-credential-provider-secret-reader"
+      (printf "%s/google-access-token-credential-provider" $ns) "google-access-token-credential-provider-secret-reader"
+    | toJson -}}
+{{- end -}}
+
+{{/* The labels of agent-platform-operator's pods (the operator chart's selector labels), as YAML: the ones the meta chart derives. */}}
 {{- define "agent-platform.organizations.operatorPodLabels" -}}
-app.kubernetes.io/name: agent-platform-operator
+{{- (include "agent-platform.organizations.operator" . | fromJson).podLabels | toYaml -}}
 {{- end -}}
 
 {{/* The operator's ServiceAccount, as a username. */}}
@@ -111,14 +147,4 @@ never a list of names.
 matchExpressions:
   - key: {{ include "agent-platform.organizations.label" . }}
     operator: Exists
-{{- end -}}
-
-{{/*
-The ConfigMap agent-platform-operator reads ate-api-server's serving roots
-from, as JSON {name, namespace}: the substrate bootstrap hook writes it
-(substrate/bootstrap.yaml), the meta chart names it in the operator's
-erasure.substrate.caConfigMap.
-*/}}
-{{- define "agent-platform.organizations.ateApiCa" -}}
-{{- dict "name" "agent-platform-operator-ate-api-ca" "namespace" .Release.Namespace | toJson -}}
 {{- end -}}

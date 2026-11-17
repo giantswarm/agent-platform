@@ -24,10 +24,11 @@ The ceiling moves in the release that renders values for the next line: that
 release is what proves them (verify-components-charts renders every component
 chart at the version its range resolves to).
 
-Components released with this chart (releasedWithChart, no range) carry the
-chart's own exact version and are skipped. Stdlib only: the CI image has no
-PyYAML, so the roster is read from values.yaml's own layout — two-space entries
-under `components:`, four-space keys.
+A component in UNCAPPED takes every release above its floor, for the reason
+recorded there. Components released with this chart (releasedWithChart, no
+range) carry the chart's own exact version and are skipped. Stdlib only: the
+CI image has no PyYAML, so the roster is read from values.yaml's own layout —
+two-space entries under `components:`, four-space keys.
 """
 
 import os
@@ -37,6 +38,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fluxsemver  # noqa: E402
 from fluxsemver import Version  # noqa: E402
+
+# Components whose range takes every release above its floor, each with the
+# reason it needs no ceiling.
+UNCAPPED = {
+    "cluster-manager": "no key this chart derives for it depends on its version",
+}
 
 
 def fail(msg: str) -> None:
@@ -98,6 +105,9 @@ def main() -> None:
         if not rng:
             print(f"ok: {name}: released with the chart (no range)")
             continue
+        if name in UNCAPPED:
+            print(f"ok: {name}: {rng!r} uncapped, {UNCAPPED[name]}")
+            continue
         try:
             above = first_above(rng)
         except ValueError as e:
@@ -112,7 +122,7 @@ def main() -> None:
         print(f"ok: {name}: {rng!r} stops below {above.text}, its candidates included")
     if failures:
         fail("a range admits a release its values were not proven against; cap it at the proven line and raise the cap in the release that renders values for the next one:\n  " + "\n  ".join(failures))
-    print(f"all {len(components)} component ranges are capped at the line their values were proven against.")
+    print(f"all {len(components) - len(UNCAPPED)} capped component ranges stop at the line their values were proven against.")
 
 
 if __name__ == "__main__":

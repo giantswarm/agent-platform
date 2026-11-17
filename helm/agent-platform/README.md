@@ -455,7 +455,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.flux.enabled | bool | `true` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `">=5.52.5 <6.0.0"` |  |
+| components.muster.versionRange | string | `">=5.63.2 <6.0.0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.muster.dependsOn[0] | string | `"valkey"` |  |
@@ -485,7 +485,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.29.0 <1.30.0"` |  |
+| components.kagent.versionRange | string | `">=1.31.0 <1.32.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -498,30 +498,29 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.omitKeys[1] | string | `"controller.vpa"` |  |
 | components.kagent.omitKeys[2] | string | `"fluxServiceAccountName"` |  |
 | components.kagent.omitKeys[3] | string | `"harness.snapshotStore"` |  |
-| components.kagent.omitKeys[4] | string | `"modelConfigs"` |  |
-| components.kagent.omitKeys[5] | string | `"oauth2ProxyIngress"` |  |
-| components.kagent.omitKeys[6] | string | `"remoteMcpServers"` |  |
-| components.kagent.omitKeys[7] | string | `"uiRoute"` |  |
-| components.kagent.omitKeys[8] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
-| components.kagent.omitKeys[9] | string | `"substrateWorkerPool.priorityClass"` |  |
+| components.kagent.omitKeys[4] | string | `"oauth2ProxyIngress"` |  |
+| components.kagent.omitKeys[5] | string | `"remoteMcpServers"` |  |
+| components.kagent.omitKeys[6] | string | `"uiRoute"` |  |
+| components.kagent.omitKeys[7] | string | `"substrateWorkerPool.podDisruptionBudget"` |  |
+| components.kagent.omitKeys[8] | string | `"substrateWorkerPool.priorityClass"` |  |
 | components.kagent.omitEmptyKeys[0] | string | `"substrateWorkerPool.workerImage"` |  |
 | components.kagent.omitEmptyKeys[1] | string | `"harness.image"` |  |
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.29.0 <1.30.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.31.0 <1.32.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
 | components.substrate-crds.chart | string | `"substrate-crds"` |  |
 | components.substrate-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate-crds.versionRange | string | `">=1.17.5 <1.18.0"` |  |
+| components.substrate-crds.versionRange | string | `">=1.18.0 <1.19.0"` |  |
 | components.substrate-crds.valuesFrom | string | `"substrate-crds"` |  |
 | components.substrate-crds.injectGlobal | bool | `false` |  |
 | components.substrate-crds.targetNamespace | string | `"ate-system"` |  |
 | components.substrate.chart | string | `"substrate"` |  |
 | components.substrate.repository | string | `"oci://gsoci.azurecr.io/giantswarm/substrate/helm"` |  |
-| components.substrate.versionRange | string | `">=1.17.5 <1.18.0"` |  |
+| components.substrate.versionRange | string | `">=1.18.0 <1.19.0"` |  |
 | components.substrate.valuesFrom | string | `"substrate"` |  |
 | components.substrate.injectGlobal | bool | `false` |  |
 | components.substrate.targetNamespace | string | `"ate-system"` |  |
@@ -533,10 +532,11 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.substrate.valuesFromRefs[0].optional | bool | `true` |  |
 | components.substrate.omitEmptyKeys[0] | string | `"atelet.imageCache.pinnedImages"` |  |
 | components.substrate.timeout | string | `"15m"` |  |
-| components.substrate.upgradeRemediation.retries | int | `3` |  |
+| components.substrate.upgradeStrategy.name | string | `"RetryOnFailure"` |  |
+| components.substrate.upgradeStrategy.retryInterval | string | `"5m"` |  |
 | components.google-access-token-credential-provider.chart | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.google-access-token-credential-provider.versionRange | string | `">=0.2.0 <0.3.0"` |  |
+| components.google-access-token-credential-provider.versionRange | string | `">=0.3.0 <0.4.0"` |  |
 | components.google-access-token-credential-provider.valuesFrom | string | `"google-access-token-credential-provider"` |  |
 | components.google-access-token-credential-provider.injectGlobal | bool | `false` |  |
 | components.google-access-token-credential-provider.targetNamespace | string | `"ate-system"` |  |
@@ -566,15 +566,33 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `">=2.16.0 <2.19.0"` |  |
+| components.agent-manager.versionRange | string | `">=3.1.0 <4.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.omitEmptyKeys[0] | string | `"harness.egress"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
 | components.agent-manager.dependsOn[0] | string | `"muster"` |  |
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
+| components.skill-manager.chart | string | `"skill-manager"` |  |
+| components.skill-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.skill-manager.versionRange | string | `">=0.2.2 <0.3.0"` |  |
+| components.skill-manager.valuesFrom | string | `"skill-manager"` |  |
+| components.skill-manager.dependsOn[0] | string | `"muster"` |  |
+| components.skill-manager.gatedRoster | bool | `true` |  |
+| components.default-agent.chart | string | `"agent"` |  |
+| components.default-agent.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
+| components.default-agent.versionRange | string | `">=2.6.0 <3.0.0"` |  |
+| components.default-agent.valuesFile | string | `"agents/default-agent/values.yaml"` |  |
+| components.default-agent.injectGlobal | bool | `false` |  |
+| components.default-agent.inKagentNamespace | bool | `true` |  |
+| components.default-agent.disableWait | bool | `true` |  |
+| components.default-agent.labels."agent-platform.giantswarm.io/managed-by" | string | `"agent-platform"` |  |
+| components.default-agent.labels."agent-platform.giantswarm.io/default" | string | `"true"` |  |
+| components.default-agent.gatedRoster | bool | `true` |  |
+| components.default-agent.enabled | bool | `true` |  |
+| components.default-agent.dependsOn[0] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.vm-manager.versionRange | string | `">=0.24.0 <0.25.0"` |  |
+| components.vm-manager.versionRange | string | `">=0.26.10 <0.27.0"` |  |
 | components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |
@@ -582,7 +600,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
 | components.cluster-manager.chart | string | `"cluster-manager"` |  |
 | components.cluster-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.cluster-manager.versionRange | string | `">=0.22.0 <0.35.0"` |  |
+| components.cluster-manager.versionRange | string | `">=0.22.0"` |  |
 | components.cluster-manager.valuesFrom | string | `"cluster-manager"` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.cluster-manager.dependsOn[0] | string | `"muster"` |  |
@@ -590,7 +608,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.workspace-manager.chart | string | `"workspace-manager"` |  |
 | components.workspace-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.workspace-manager.versionRange | string | `">=0.14.0 <0.15.0"` |  |
+| components.workspace-manager.versionRange | string | `">=0.14.0 <0.16.0"` |  |
 | components.workspace-manager.valuesFrom | string | `"workspace-manager"` |  |
 | components.workspace-manager.dependsOn[0] | string | `"muster"` |  |
 | components.workspace-manager.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
@@ -619,7 +637,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.toolchain-manager.gatedRoster | bool | `true` |  |
 | components.agent-platform-operator.chart | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-operator.versionRange | string | `"0.1.0-rc.5"` |  |
+| components.agent-platform-operator.versionRange | string | `">=0.4.0 <0.5.0"` |  |
 | components.agent-platform-operator.valuesFrom | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.crds | string | `"CreateReplace"` |  |
 | components.agent-platform-operator.ownedCrds[0] | string | `"agentplatformorganizations.agent-platform.giantswarm.io"` |  |
@@ -637,13 +655,15 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.omitKeys[5] | string | `"enabledExtensions"` |  |
 | components.backstage.omitKeys[6] | string | `"disabledExtensions"` |  |
 | components.backstage.omitKeys[7] | string | `"skillsRepositories"` |  |
-| components.backstage.omitKeys[8] | string | `"configReload"` |  |
+| components.backstage.omitKeys[8] | string | `"skillPullRequests"` |  |
+| components.backstage.omitKeys[9] | string | `"metaAgents"` |  |
+| components.backstage.omitKeys[10] | string | `"configReload"` |  |
 | components.backstage.enabled | bool | `false` |  |
 | components.backstage.dependsOn[0] | string | `"cloudnative-pg"` |  |
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
 | components.mcp-kubernetes.chart | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.mcp-kubernetes.versionRange | string | `">=1.3.0 <2.0.0"` |  |
+| components.mcp-kubernetes.versionRange | string | `">=1.14.0 <2.0.0"` |  |
 | components.mcp-kubernetes.valuesFrom | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.omitKeys[0] | string | `"kubernetesAudience"` |  |
 | components.mcp-kubernetes.omitKeys[1] | string | `"mcpServer"` |  |
@@ -651,6 +671,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cloudnative-pg.chart | string | `"cloudnative-pg"` |  |
 | components.cloudnative-pg.repository | string | `"oci://gsoci.azurecr.io/giantswarm/cloudnative-pg/charts"` |  |
 | components.cloudnative-pg.versionRange | string | `"0.29.x"` |  |
+| components.cloudnative-pg.teamAnnotation | bool | `false` |  |
 | components.cloudnative-pg.valuesFrom | string | `"cloudnative-pg"` |  |
 | components.cloudnative-pg.enabled | bool | `false` |  |
 | components.kserve-llmisvc-crd.chart | string | `"kserve-llmisvc-crd"` |  |
@@ -679,6 +700,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.gpu-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.gpu-operator.versionRange | string | `"1.x"` |  |
 | components.gpu-operator.valuesFrom | string | `"gpu-operator"` |  |
+| components.gpu-operator.teamAnnotation | bool | `false` |  |
 | components.gpu-operator.valuesKey | string | `"gpu-operator"` |  |
 | components.gpu-operator.injectGlobal | bool | `false` |  |
 | components.gpu-operator.enabled | bool | `false` |  |
@@ -688,6 +710,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.gateway-api-crds.chart | string | `"gateway-api-crds"` |  |
 | components.gateway-api-crds.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
 | components.gateway-api-crds.versionRange | string | `">=1.9.1 <2.0.0"` |  |
+| components.gateway-api-crds.teamAnnotation | bool | `false` |  |
 | components.gateway-api-crds.injectGlobal | bool | `false` |  |
 | components.gateway-api-crds.enabled | bool | `false` |  |
 | components.gateway-api-crds.targetNamespace | string | `"kube-system"` |  |
@@ -708,7 +731,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.omitKeys[2] | string | `"gpu-operator"` |  |
 | components.agent-platform-connectivity.omitKeys[3] | string | `"toolchain-manager"` |  |
 | components.agent-platform-connectivity.omitKeys[4] | string | `"kserve-runtime-configs"` |  |
-| components.agent-platform-connectivity.omitKeys[5] | string | `"agent-platform-operator"` |  |
+| components.agent-platform-connectivity.omitKeys[5] | string | `"skills"` |  |
+| components.agent-platform-connectivity.omitKeys[6] | string | `"skillManager"` |  |
+| components.agent-platform-connectivity.omitKeys[7] | string | `"skill-manager"` |  |
+| components.agent-platform-connectivity.omitKeys[8] | string | `"defaultAgent"` |  |
+| components.agent-platform-connectivity.omitKeys[9] | string | `"agent-platform-operator"` |  |
+| components.agent-platform-connectivity.omitKeys[10] | string | `"agentPlatformOrganizations.operator"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -1013,14 +1041,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.securityContext.allowPrivilegeEscalation | bool | `false` |  |
 | kagent.securityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | kagent.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
-| kagent.providers.default | string | `"anthropic"` |  |
-| kagent.providers.anthropic.provider | string | `"Anthropic"` |  |
-| kagent.providers.anthropic.model | string | `"claude-sonnet-5-5"` |  |
-| kagent.providers.anthropic.apiKeySecretRef | string | `"kagent-anthropic"` |  |
-| kagent.providers.anthropic.apiKeySecretKey | string | `"ANTHROPIC_API_KEY"` |  |
-| kagent.providers.anthropic.apiKey | string | `""` |  |
-| kagent.providers.anthropic.config.promptCaching | bool | `true` |  |
-| kagent.providers.anthropic.config.cacheTTL | string | `"5m"` |  |
 | kagent.otel.exporter.otlp.endpoint | string | `"auto"` |  |
 | kagent.otel.exporter.otlp.protocol | string | `"auto"` |  |
 | kagent.otel.exporter.otlp.timeout | string | `"500"` |  |
@@ -1115,10 +1135,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.harness.snapshotStore.s3proxy.azure.container | string | `""` |  |
 | kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.name | string | `""` |  |
 | kagent.harness.snapshotStore.s3proxy.azure.accountKeySecretRef.key | string | `""` |  |
-| kagent.harness.env[0].name | string | `"KAGENT_PROPAGATE_TOKEN"` |  |
-| kagent.harness.env[0].value | string | `"true"` |  |
-| kagent.harness.env[1].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
-| kagent.harness.env[1].value | string | `"auto"` |  |
+| kagent.harness.env[0].name | string | `"OTEL_EXPORTER_OTLP_HEADERS"` |  |
+| kagent.harness.env[0].value | string | `"auto"` |  |
 | kagent.controllerRoute.enabled | bool | `false` |  |
 | kagent.controllerRoute.hostname | string | `""` |  |
 | kagent.controllerRoute.parentRef.name | string | `"giantswarm-default"` |  |
@@ -1134,6 +1152,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controllerRoute.mcp.pathPrefix | string | `"/kagent/mcp"` |  |
 | kagent.controllerRoute.mcp.timeout | int | `300` |  |
 | kagent.controllerRoute.mcp.displayName | string | `"Kagent"` |  |
+| kagent.controllerRoute.mcp.description | string | `"Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
@@ -1150,7 +1169,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.uiRoute.backendTrafficPolicy.timeout | string | `"60s"` |  |
 | kagent.uiRoute.backendTrafficPolicy.annotations | object | `{}` |  |
 | kagent.uiRoute.backendTrafficPolicy.labels | object | `{}` |  |
-| kagent.modelConfigs | list | `[]` |  |
 | kagent.remoteMcpServers | list | `[]` |  |
 | kagent.harnesses | list | `[]` |  |
 | dashboards.enabled | bool | `true` |  |
@@ -1162,6 +1180,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | postgres.clusterName | string | `"kagent-pg"` |  |
 | postgres.instances | int | `3` |  |
 | postgres.primaryUpdateMethod | string | `"switchover"` |  |
+| postgres.maxSlotWalKeepSize | string | `"4GB"` |  |
 | postgres.storage.size | string | `"20Gi"` |  |
 | postgres.storage.storageClass | string | `""` |  |
 | postgres.image.name | string | `""` |  |
@@ -1348,7 +1367,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | model-manager.mcp.enabled | bool | `true` |  |
 | model-manager.oauth.enabled | bool | `true` |  |
 | model-manager.oauth.provider | string | `"dex"` |  |
-| model-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| model-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | model-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | model-manager.oauth.downstream.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.enabled | bool | `true` |  |
@@ -1381,7 +1400,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | vm-manager.persistence.create | bool | `false` |  |
 | vm-manager.oauth.enabled | bool | `true` |  |
 | vm-manager.oauth.provider | string | `"dex"` |  |
-| vm-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| vm-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | vm-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | vm-manager.muster.mcpServer.enabled | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1405,12 +1424,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.kagent.apiVersion | string | `"v1alpha3"` |  |
 | agent-manager.harness.egress | object | `{}` | The origins a coding agent reaches, by the name of its Harness ({claude: [https://github.com, …], codex: […], omp: […]}): the installation's forge and git hosts plus the toolchain's registries; the model host is not listed (kagent adds the ModelConfig's destination). agent-manager writes the list into the Agent's spec.egress and the Substrate egress gate refuses any other origin with a 403; agent-manager refuses an agent on a coding Harness without an entry. Empty (the default) is not forwarded and the agent-manager chart's own list applies: GitHub for claude (and codex from agent-manager 2.2.0) plus the Go and npm registries for claude-go and claude-node. Each kagent.harnesses entry an installation adds gets its entry here; an installation whose forge is not GitHub sets every Harness it serves: Helm merges the map into the chart's, so a Harness left out keeps the GitHub list. Needs agent-manager 1.11.0 or later. |
 | agent-manager.agentChart.ociUrl | string | `"oci://gsoci.azurecr.io/charts/giantswarm/agent"` |  |
-| agent-manager.agentChart.semver | string | `">=2.0.0 <3.0.0"` |  |
-| agent-manager.skills.repositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| agent-manager.agentChart.semver | string | `">=2.6.0 <3.0.0"` |  |
+| agent-manager.skills.repositories | list | `[]` |  |
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |
 | agent-manager.oauth.provider | string | `"dex"` |  |
-| agent-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| agent-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | agent-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | agent-manager.oauth.downstream.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.enabled | bool | `true` |  |
@@ -1445,9 +1464,25 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.17.31"` |  |
+| agentManager.migration.image.tag | string | `"2.24.0"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
+| skills.platformSource.enabled | bool | `true` |  |
+| skills.platformSource.ref | string | `""` |  |
+| skillManager.sources[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| skill-manager.fullnameOverride | string | `"skill-manager"` |  |
+| skill-manager.observability.otel.endpoint | string | `"auto"` |  |
+| skill-manager.observability.otel.protocol | string | `"auto"` |  |
+| skill-manager.observability.otel.headers | string | `"auto"` |  |
+| skill-manager.oauth.enabled | bool | `true` |  |
+| skill-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
+| skill-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| skill-manager.muster.mcpServer.enabled | bool | `true` |  |
+| skill-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
+| skill-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
+| defaultAgent.displayName | string | `"General Assistant"` |  |
+| defaultAgent.description | string | `"Start here. Handles everyday tasks with your connectors and helps you find or create the right agent."` |  |
+| defaultAgent.modelConfig | string | `""` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
 | cluster-manager.observability.otel.endpoint | string | `"auto"` |  |
 | cluster-manager.observability.otel.protocol | string | `"auto"` |  |
@@ -1456,7 +1491,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | cluster-manager.mcp.enabled | bool | `true` |  |
 | cluster-manager.oauth.enabled | bool | `true` |  |
 | cluster-manager.oauth.provider | string | `"dex"` |  |
-| cluster-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| cluster-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | cluster-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | cluster-manager.oauth.downstream.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
@@ -1477,15 +1512,23 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
-| tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: bound to agent-platform:user in the kagent namespace, and to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, gives this to every user. It also gives it to every ServiceAccount, so every pod in the cluster can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. To give it to people only, replace the default with an OIDC group that every user belongs to, written as the API server sees it (with the installation's OIDC groups prefix). |
+| tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: bound to agent-platform:platform-user in the kagent namespace, and, while musterMcpServerViewers is unset, to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, gives this to every user. It also gives it to every ServiceAccount, so every pod in the cluster can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. To give it to people only, replace the default with an OIDC group that every user belongs to, written as the API server sees it (with the installation's OIDC groups prefix). |
 | tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects. |
+| tenants.platform.kagentRelease.name | string | `""` | The name of kagent's HelmRelease in the kagent namespace. Empty, the default, admits none. |
+| tenants.platform.kagentRelease.writers | list | `[]` | The identities that write it: RBAC-style subjects of kind User, Group or ServiceAccount (with its namespace), as the API server sees them (a kubeconfig's user or group, a Flux ServiceAccount). |
 | tenants.platformTeam | list | `[]` | The customer's platform team, per installation: RBAC subjects bound to agent-platform:editor in the kagent namespace beside `platform.editors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation). |
+| musterMcpServerViewers | string | `nil` | muster's MCP-server viewers (giantswarm/agent-platform#1331): RBAC subjects bound to `list` (with get and watch) on muster's MCPServers in muster's namespace, the servers for everyone (the connectivity release's Role and RoleBinding agent-platform:mcpserver-viewer). muster lists them as the person once it lists as the caller, and always with agentPlatformOrganizations.enabled, so a person not bound here sees none of them. Unset (null), the default, the viewers are tenants.platform.users, so nothing changes until an installation sets this key. Set it before tenants.platform.users is emptied ([]; a null brings the default back): it does not bind anyone in the kagent namespace. An empty list binds nobody. A group is written as the API server sees it (with the installation's OIDC groups prefix). system:authenticated also binds every ServiceAccount. |
 | agentPlatformOrganizations.enabled | bool | `false` | Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a model whose provider the listener serves (Anthropic, Mistral or OpenAI) and llmRouting.modelConfigPolicy.enabled on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain or apiHostnames: the render fails without them. The rollout gate: off by default for now (see above). |
 | agentPlatformOrganizations.fluxNamespace | string | `""` | The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace, and the operator's erasure.fluxNamespace (derived); set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces. |
 | agentPlatformOrganizations.fluxSource | object | `{"kind":"GitRepository","name":""}` | The installation's Flux source in fluxNamespace, which an organization's Kustomization applies from (agent-platform-operator's commitMode.sourceRef). The admission policy holds the operator's Kustomizations to this source. The name is required with fluxNamespace: the render fails without it. |
 | agentPlatformOrganizations.fluxPathPrefix | string | `"./agent-platform/organizations/"` | The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies exactly this prefix, its parent and its name, from the labels the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise. |
 | agentPlatformOrganizations.fluxDecryptionSecret | string | `"sops-keys"` | The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption. |
 | agentPlatformOrganizations.apiHostnames | list | `[]` | The installation's Kubernetes API hostnames beside api.<global.domain>, which is derived while global.domain is set: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. The render fails while both are empty. |
+| agentPlatformOrganizations.operator | object | `{"awsRoleName":"","podLabels":{},"serviceAccountName":"","snapshotSecret":""}` | agent-platform-operator's names, which this chart derives onto the connectivity release while the organizations are on (agent-platform.organizations.operator, giantswarm/agent-platform#1278). Declared for the connectivity chart's schema only: never forwarded as set here (components.agent-platform-connectivity.omitKeys), and an own value fails the render. Leave it unset. |
+| agentPlatformOrganizations.operator.serviceAccountName | string | `""` | Derived: the operator's ServiceAccount (its chart's name). |
+| agentPlatformOrganizations.operator.podLabels | object | `{}` | Derived: its pods' selector labels. |
+| agentPlatformOrganizations.operator.snapshotSecret | string | `""` | Derived, with substrate.rustfs.enabled: the Secret of RustFS's keys. |
+| agentPlatformOrganizations.operator.awsRoleName | string | `""` | Derived, with the Crossplane AWS snapshot store: its IRSA role. |
 | agent-platform-operator | object | `{}` |  |
 | workspaces.enabled | bool | `false` |  |
 | workspaces.storage.storageClassName | string | `"workspaces-rwx"` |  |
@@ -1585,6 +1628,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspaceManager.networkPolicy.ingress.additionalPeers | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | workspaceManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| toolchain-manager.muster.mcpServer.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | toolchain-manager.owners.groups | list | `[]` |  |
 | toolchain-manager.owners.emails | list | `[]` |  |
 | toolchain-manager.sources[0].repository | string | `"giantswarm/agent-toolchains"` |  |
@@ -1614,7 +1658,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | backstage.disabledExtensions[9] | string | `"api:ai-chat/service"` |  |
 | backstage.disabledExtensions[10] | string | `"api:ai-chat/drawer"` |  |
 | backstage.disabledExtensions[11] | string | `"app-root-element:ai-chat/drawer"` |  |
-| backstage.skillsRepositories[0] | string | `"https://github.com/giantswarm/agent-skills"` |  |
+| backstage.skillsRepositories | list | `[]` |  |
+| backstage.metaAgents | object | `{}` |  |
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |

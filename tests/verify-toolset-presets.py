@@ -10,6 +10,10 @@ with exactly what the meta chart forwards.
 `configmap <render>` reads a render of the muster chart's ConfigMap and checks
 the presets landed in muster's config.yaml, where muster reads them at startup.
 
+`icons <render> on|off` reads the meta chart's render and checks both presets
+in the muster HelmRelease values carry an svg `data:` icon (on) or no icon
+(off): the chart sets them only from the muster floor that takes the key.
+
 Deliberately stdlib-only: the CI image has no PyYAML. The render is split on
 document separators and the values block is cut by indentation, which is all
 the shape of a HelmRelease needs.
@@ -89,7 +93,39 @@ def assert_presets(text: str, where: str) -> None:
             fail(f"{where}: a preset redefines the built-in {name}")
 
 
+def preset_icon(values: str, name: str) -> str:
+    """The icon line of preset `name` under toolsetPresets, "" without one."""
+    lines = values.splitlines()
+    seen = False
+    for i, line in enumerate(lines):
+        seen = seen or line.strip() == "toolsetPresets:"
+        if seen and line.strip() == f"{name}:":
+            indent = len(line) - len(line.lstrip())
+            for inner in lines[i + 1:]:
+                if inner.strip() and len(inner) - len(inner.lstrip()) <= indent:
+                    break
+                if inner.strip().startswith("icon:"):
+                    return inner.strip()
+            return ""
+    fail(f"preset {name} missing")
+    return ""  # unreachable
+
+
+def assert_icons(text: str, want: str) -> None:
+    values = values_block(muster_release(text))
+    for name in PRESETS:
+        icon = preset_icon(values, name)
+        if want == "on" and not icon.startswith("icon: data:image/svg+xml;base64,"):
+            fail(f"preset {name} carries no svg data: icon")
+        if want == "off" and icon:
+            fail(f"preset {name} carries an icon below the muster floor that takes it")
+    print(f"ok: preset icons {want}", file=sys.stderr)
+
+
 def main() -> None:
+    if len(sys.argv) == 4 and sys.argv[1] == "icons" and sys.argv[3] in ("on", "off"):
+        assert_icons(open(sys.argv[2], encoding="utf-8").read(), sys.argv[3])
+        return
     if len(sys.argv) != 3 or sys.argv[1] not in ("release-values", "configmap"):
         print(__doc__, file=sys.stderr)
         sys.exit(2)

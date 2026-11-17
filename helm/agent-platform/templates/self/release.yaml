@@ -38,6 +38,8 @@ metadata:
   labels:
     {{- include "labels.common" . | nindent 4 }}
     app.kubernetes.io/component: self-management
+  annotations:
+    {{- include "annotations.team" . | nindent 4 }}
 spec:
   interval: {{ .Values.gitops.sourceInterval }}
   url: {{ include "agent-platform.mirror.ref" (dict "ref" (printf "%s/%s" (trimSuffix "/" .Values.gitops.self.repository) .Chart.Name) "mirror" (include "agent-platform.mirror.registry" .)) }}
@@ -60,6 +62,8 @@ metadata:
   labels:
     {{- include "labels.common" . | nindent 4 }}
     app.kubernetes.io/component: self-management
+  annotations:
+    {{- include "annotations.team" . | nindent 4 }}
 spec:
   interval: {{ .Values.gitops.self.interval }}
   {{- if or .Release.IsInstall (not $existing) }}

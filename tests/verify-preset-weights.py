@@ -33,9 +33,9 @@ floor the way model-manager's fit reads it (internal/backend/kserve/compute.go):
 FP8 weights and activations (vLLM's fp8, compressed-tensors 8-bit float,
 ModelOpt FP8, mistral fp8_e4m3) need 8.9 -- native FP8 (Ada, Hopper,
 Blackwell); FP4 weights (NVFP4: compressed-tensors 4-bit float, ModelOpt NVFP4)
-need 8.9 -- native on Blackwell, the Marlin weight-only FP4 path proven on the
-L40S, nothing proven below; weight-only schemes the runtime dequantizes (int4,
-MXFP4) and unquantized weights need what their activations' dtype needs: bf16
+need 8.6 -- native on Blackwell, the weight-only FP4 Marlin path proven on
+the A10G; mixed FP8 and FP4 checkpoints still need 8.9 for their FP8 layers.
+Weight-only schemes the runtime dequantizes (int4, MXFP4) and unquantized weights need what their activations' dtype needs: bf16
 8.0 (Ampere; a T4 predates it), float16 7.0 (vLLM's own floor). A recipe
 pinned to Blackwell kernels (CUTE_DSL_ARCH=sm_100a, sm_103a, sm_120a, sm_121a
 in spec.env) needs 10.0 whatever its weights. The preset passes when its
@@ -85,7 +85,7 @@ VERDICTS = ("ok",) + WEIGHT_VERDICTS + FLOOR_VERDICTS
 CAPABILITY_FP16 = "7.0"
 CAPABILITY_BF16 = "8.0"
 CAPABILITY_FP8 = "8.9"
-CAPABILITY_FP4 = "8.9"
+CAPABILITY_FP4 = "8.6"
 CAPABILITY_BLACKWELL = "10.0"
 # The CuTe DSL architecture pins of Blackwell GPUs (B200/GB200, B300, RTX PRO, GB10).
 BLACKWELL_ARCHS = ("sm_100", "sm_103", "sm_120", "sm_121")

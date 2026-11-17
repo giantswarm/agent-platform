@@ -1,0 +1,36 @@
+{{- /*
+The skill-manager's service token (key token): the bearer agent-manager's
+migrate run, which has no person, calls the skill-manager with, admitted by
+the skill-manager as the platform's own caller (its serviceToken.secretName,
+which the meta chart derives). Rendered while the meta chart derives
+agentManager.skillManager.serviceTokenSecret: in the skill-manager's
+namespace, which it reads, and in the kagent namespace, where the migrate run
+reads it (SKILL_MANAGER_TOKEN). Generated once: an existing Secret's token is
+kept (a lookup of the live object in the skill-manager's namespace), and the
+Secret is kept on uninstall.
+*/ -}}
+{{- with dig "skillManager" "serviceTokenSecret" "" (.Values.agentManager | default dict) }}
+{{- $name := . }}
+{{- $sm := $.Values.agentManager.skillManager }}
+{{- $token := "" }}
+{{- with (lookup "v1" "Secret" $sm.namespace $name) }}
+{{- $token = dig "data" "token" "" . }}
+{{- end }}
+{{- $token = $token | default (randAlphaNum 48 | b64enc) }}
+{{- $kagentNs := $.Values.kagent.namespaceOverride | default $.Release.Namespace }}
+{{- range $ns := uniq (list $sm.namespace $kagentNs) }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "agent-platform.agentManager.labels" $ | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  token: {{ $token }}
+{{- end }}
+{{- end }}

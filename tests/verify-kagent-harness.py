@@ -4,7 +4,7 @@ and that the meta chart forwards its policy alone.
 
 On kagent API v2 how an agent runs is a Harness (giantswarm/agent-platform#344,
 bumblebee-plans#51 D5): a digest-pinned Go ADK runtime image, the environment
-that makes the caller's token reach muster (KAGENT_PROPAGATE_TOKEN), and the
+with no KAGENT_PROPAGATE_TOKEN (a Session reaches muster with its Actor's JWT), and the
 Substrate policy (a WorkerPool, a snapshot location). An Agent names its Harness
 by spec.harnessRef; the Harness has no admission selector. This test asserts:
   - the connectivity chart renders NO Harness and reads no kagent.harness key;
@@ -13,7 +13,7 @@ by spec.harnessRef; the Harness has no admission selector. This test asserts:
     (the chart's defaults: its stamped digest, the WorkerPool
     substrateWorkerPool.name) and no allowedAgentTemplates;
   - the env follows the kagent OTel exporters the way the controller's tenant
-    header does: KAGENT_PROPAGATE_TOKEN always; with an exporter on,
+    header does: empty with both off; with an exporter on,
     OTEL_EXPORTER_OTLP_HEADERS (the tenant). Both exporters resolve off without
     the monitoring API (auto) or explicitly. The controller compiles every other
     telemetry setting into the actors from kagent.otel, whose export timeout
@@ -55,7 +55,6 @@ DIGEST = "localhost:5001/golang-adk@sha256:" + "a" * 64
 SNAPSHOT = "s3://bucket/agents"
 CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.kagent.enabled=true", "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri"]
 MONITORING_API = ["--api-versions", "monitoring.coreos.com/v1"]  # the observability platform: the auto knobs resolve on
-ENV_PROPAGATE = {"name": "KAGENT_PROPAGATE_TOKEN", "value": "true"}
 ENV_HEADERS = {"name": "OTEL_EXPORTER_OTLP_HEADERS", "value": "X-Scope-OrgID=giantswarm"}
 EXPORT_TIMEOUT = "500"  # kagent.otel.exporter.otlp.timeout, milliseconds (#456)
 
@@ -126,24 +125,24 @@ def main(connectivity: str, meta: str) -> int:
     expected = {
         "create": True,
         "snapshotLocation": SNAPSHOT,
-        "env": [ENV_PROPAGATE],
+        "env": [],
         "compaction": {"tokenThreshold": 600000, "eventRetentionSize": 4},
     }
     if harness != expected:
         fail(f"the forwarded kagent.harness is not the GS policy alone:\n  got      {harness}\n  expected {expected}\n"
              "(no image by default — the chart's stamped digest is the Harness image; no workerPoolRef — the chart defaults it to "
              "substrateWorkerPool.name; no allowedAgentTemplates — an Agent names its Harness by spec.harnessRef; with both "
-             "OTel exporters resolved off the env is KAGENT_PROPAGATE_TOKEN alone)")
-    print("ok: the meta chart forwards the platform Harness policy — create, the snapshot location, KAGENT_PROPAGATE_TOKEN "
-          "(exporters off), the compaction; no image, no workerPoolRef, no selector")
+             "OTel exporters resolved off the env is empty, no KAGENT_PROPAGATE_TOKEN: a runtime never re-emits the caller's token, giantswarm/giantswarm#38993)")
+    print("ok: the meta chart forwards the platform Harness policy — create, the snapshot location, an empty env "
+          "(exporters off, no KAGENT_PROPAGATE_TOKEN), the compaction; no image, no workerPoolRef, no selector")
 
     # The actors' tenant header follows the exporters; the signals reach the
     # kagent chart resolved, in its SDK-spec shape.
     for label, args, want, signals in (
-        ("both exporters on (auto, monitoring API served)", [*MONITORING_API], [ENV_PROPAGATE, ENV_HEADERS], (True, True)),
-        ("traces on, logs off", [*MONITORING_API, "--set", "kagent.otel.logs.enabled=false"], [ENV_PROPAGATE, ENV_HEADERS], (True, False)),
-        ("logs on alone (explicit, no monitoring API)", ["--set", "kagent.otel.logs.enabled=true"], [ENV_PROPAGATE, ENV_HEADERS], (False, True)),
-        ("both off explicitly with the monitoring API served", [*MONITORING_API, "--set", "kagent.otel.traces.enabled=false", "--set", "kagent.otel.logs.enabled=false"], [ENV_PROPAGATE], (False, False)),
+        ("both exporters on (auto, monitoring API served)", [*MONITORING_API], [ENV_HEADERS], (True, True)),
+        ("traces on, logs off", [*MONITORING_API, "--set", "kagent.otel.logs.enabled=false"], [ENV_HEADERS], (True, False)),
+        ("logs on alone (explicit, no monitoring API)", ["--set", "kagent.otel.logs.enabled=true"], [ENV_HEADERS], (False, True)),
+        ("both off explicitly with the monitoring API served", [*MONITORING_API, "--set", "kagent.otel.traces.enabled=false", "--set", "kagent.otel.logs.enabled=false"], [], (False, False)),
     ):
         values = kagent_values(render(meta, [*base, *args]))
         got = values["harness"]["env"]

@@ -6,6 +6,7 @@
 {{- $musterOn := include "agent-platform.componentEnabled" (dict "root" . "name" "muster") }}
 {{- $mcpOn := and $musterOn (dig "muster" "mcpServer" "enabled" false $chart) }}
 {{- $oauthOn := include "agent-platform.clusterManager.oauthEnabled" . }}
+{{- $broker := include "agent-platform.managerGrantBroker" (dict "chart" $chart "oauthOn" $oauthOn "component" "cluster-manager") | fromJson }}
 {{- /* Extra same-namespace callers admitted on the Service port
 (clusterManager.networkPolicy.ingress.additionalPeers): pod label maps, each
 rendered as one more ingress peer in the flavor's own dialect. */ -}}
@@ -100,6 +101,9 @@ spec:
       {{- include "agent-platform.clusterManager.podSelector" . | nindent 6 }}
   egress:
     {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- with $broker }}
+    {{- include "agent-platform.managerGrantBroker.egress" (dict "root" $ "broker" . "cidrs" $egress.cidrs) | nindent 4 }}
+    {{- end }}
     {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "cluster-manager's traces go to" "flavor" "cilium") }}
     {{- . | nindent 4 }}
     {{- end }}
@@ -247,6 +251,9 @@ spec:
       {{- include "agent-platform.clusterManager.podSelector" . | nindent 6 }}
   policyTypes: [Egress]
   egress:
+    {{- with $broker }}
+    {{- include "agent-platform.managerGrantBroker.egress" (dict "root" $ "broker" . "cidrs" $egress.cidrs) | nindent 4 }}
+    {{- end }}
     {{- with include "agent-platform.componentOtlpEgress" (dict "chart" $chart "who" "cluster-manager's traces go to" "flavor" "kubernetes") }}
     {{- . | nindent 4 }}
     {{- end }}

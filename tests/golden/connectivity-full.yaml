@@ -12016,7 +12016,7 @@ data:
         license: apache-2.0
         storageUri: oci://gsoci.azurecr.io/giantswarm/models/mistral-small-4-nvfp4:45331841b631
       requirements:
-        minComputeCapability: "8.9"
+        minComputeCapability: "8.6"
         overheadGiB: 60
         weightsGiB: 66
       resources:
@@ -12508,10 +12508,15 @@ data:
         Sized for the smallest L4 instance, a g6.xlarge (4 vCPU, 16 GiB): the
         node's kubelet keeps about 0.6 vCPU and 2.6 GiB and the daemonsets that
         follow the pool's taint another 0.4 vCPU and 1.5 GiB, so the predictor
-        requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU, 12 GiB) —
-        its host memory is the runtime and the weights passing through the page
-        cache; the KV cache lives on the GPU. A 16 GB T4 does not host it
-        (14 + 9 GiB, and the card has neither FP8 nor bf16).
+        requests 2 vCPU and 10 GiB and may burst to the node (4 vCPU) — its
+        host memory is the runtime and the weights passing through the page
+        cache; the KV cache lives on the GPU. The same recipe serves on a GB10
+        (unified memory) without an override: vLLM's --gpu-memory-utilization
+        share is not charged to the pod there either, but the runtime loads the
+        weights through host memory, a 19.5 GiB peak (8 GiB once serving), so
+        the memory limit is 24 GiB; on a g6.xlarge the node bounds it first. A
+        16 GB T4 does not host it (14 + 9 GiB, and the card has neither FP8 nor
+        bf16).
       displayName: Qwen3.5 9B (FP8, one 24 GB GPU)
       env:
       - name: HOME
@@ -12545,7 +12550,7 @@ data:
         gpus: 1
         limits:
           cpu: "4"
-          memory: 12Gi
+          memory: 24Gi
         requests:
           cpu: "2"
           memory: 10Gi
@@ -13092,7 +13097,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13103,6 +13108,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["egresspolicies"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list"]
 ---
 # Source: agent-platform-connectivity/templates/tenants/clusterroles.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -13119,7 +13127,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13143,7 +13151,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13154,6 +13162,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["egresspolicies"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list"]
   - apiGroups: ["helm.toolkit.fluxcd.io"]
     resources: ["helmreleases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -13163,9 +13174,6 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["agents", "agenttemplates", "remotemcpservers"]
     verbs: ["create", "update", "patch", "delete"]
-  - apiGroups: ["api.kagent.dev"]
-    resources: ["harnesses"]
-    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
@@ -13185,7 +13193,7 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 rules:
   - apiGroups: ["api.kagent.dev"]
-    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+    resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["muster.giantswarm.io"]
     resources: ["mcpservers"]
@@ -13196,6 +13204,9 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["egresspolicies"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list"]
   - apiGroups: ["helm.toolkit.fluxcd.io"]
     resources: ["helmreleases"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -13205,18 +13216,19 @@ rules:
   - apiGroups: ["api.kagent.dev"]
     resources: ["agents", "agenttemplates", "remotemcpservers"]
     verbs: ["create", "update", "patch", "delete"]
-  - apiGroups: ["api.kagent.dev"]
-    resources: ["harnesses"]
-    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["api.kagent.dev"]
     resources: ["modelconfigs", "egresspolicies"]
     verbs: ["create", "update", "patch", "delete"]
+  # No patch: its response is the stored Secret, data included. A delete
+  # answered with the Secret (Orphan or Foreground propagation, a finalizer
+  # on it) is refused in admission in every namespace
+  # (agent-platform-secret-deletes).
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create", "update", "patch", "delete"]
+    verbs: ["create", "update", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
@@ -14626,6 +14638,8 @@ spec:
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: envoy
+            gateway.envoyproxy.io/owning-gateway-name: x
+            gateway.envoyproxy.io/owning-gateway-namespace: default
             io.kubernetes.pod.namespace: default
       toPorts:
         - ports:
@@ -15619,6 +15633,96 @@ spec:
       messageExpression: >-
         'in an Organization namespace, ' + request.kind.kind + ' ' + request.name + ' may name only tenant credentials, Secrets named tenant-credential-*, as a git credentialRef or a headersFrom Secret. Refused for ' + request.userInfo.username + ': ' + variables.foreign.map(n, n == '' ? '<no name>' : n).join(', ') + '. Fix: rename each to a tenant-credential-* Secret of this namespace or remove it (UPGRADE.md: the migrate run removes the installation skills credential from the platform agents)'
 ---
+# Source: agent-platform-connectivity/templates/tenants/platform-helmreleases.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-platform-helmreleases
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: "kagent"
+    resourceRules:
+      - apiGroups: ["helm.toolkit.fluxcd.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["helmreleases"]
+  matchConditions:
+    - name: spec-written
+      expression: >-
+        request.operation == 'CREATE' ||
+        (has(object.spec) ? dyn(object.spec) : dyn({})) != (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
+  # Read untyped: the policy admits every served version.
+  variables:
+    - name: spec
+      expression: "has(object.spec) ? dyn(object.spec) : dyn({})"
+    - name: forbidden
+      expression: >-
+        ['chart', 'valuesFrom', 'postRenderers', 'kubeConfig', 'targetNamespace', 'storageNamespace'].filter(f, f in variables.spec)
+    - name: chartRef
+      expression: "'chartRef' in variables.spec ? dyn(variables.spec.chartRef) : dyn({})"
+    - name: values
+      expression: "'values' in variables.spec ? dyn(variables.spec.values) : dyn({})"
+    - name: extraAgentSpec
+      expression: "'extraAgentSpec' in variables.values ? dyn(variables.values.extraAgentSpec) : dyn({})"
+    # An empty name asks for every Secret of the namespace.
+    - name: credentials
+      expression: >-
+        (('skillsGitAuthSecretRef' in variables.values && 'name' in variables.values.skillsGitAuthSecretRef &&
+        string(variables.values.skillsGitAuthSecretRef.name) != '' ?
+        [string(variables.values.skillsGitAuthSecretRef.name)] : dyn([])) +
+        (('skills' in variables.extraAgentSpec ? dyn(variables.extraAgentSpec.skills) : dyn([])) +
+        ('plugins' in variables.extraAgentSpec ? dyn(variables.extraAgentSpec.plugins) : dyn([])))
+        .filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
+        .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '')).distinct()
+    # The credentials the authorizer is asked about, each distinct name once:
+    # its cost allows two checks per expression (k8s.io/apiserver
+    # pkg/cel/library/cost.go).
+    - name: checked
+      expression: >-
+        variables.credentials
+  validations:
+    - expression: "size(variables.forbidden) == 0"
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, a HelmRelease sets none of spec.chart, valuesFrom, postRenderers, kubeConfig,
+        targetNamespace and storageNamespace; refused for ' + request.userInfo.username + ': ' + variables.forbidden.join(', ')
+    - expression: >-
+        'kind' in variables.chartRef && variables.chartRef.kind == 'OCIRepository' &&
+        'name' in variables.chartRef && variables.chartRef.name == 'agent' &&
+        (!('namespace' in variables.chartRef) || variables.chartRef.namespace == request.namespace)
+      reason: Forbidden
+      messageExpression: "'in the kagent namespace, a HelmRelease installs the agent chart from the namespace OCIRepository agent (spec.chartRef); refused for ' + request.userInfo.username + ': ' + request.name"
+    - expression: >-
+        'serviceAccountName' in variables.spec && variables.spec.serviceAccountName == 'kagent-flux'
+      reason: Forbidden
+      messageExpression: "'in the kagent namespace, a HelmRelease runs as the ServiceAccount kagent-flux (spec.serviceAccountName); refused for ' + request.userInfo.username + ': ' + request.name"
+    - expression: "size(variables.checked) <= 2"
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, a HelmRelease names as a git credential (values.skillsGitAuthSecretRef.name,
+        values.extraAgentSpec skills and plugins) at most two distinct Secrets besides the installation skills credential;
+        refused for ' + request.userInfo.username + ': ' + variables.checked.map(n, n == '' ? '<no name>' : n).join(', ')
+    - expression: >-
+        size(variables.checked) > 2 || variables.checked.all(n,
+        authorizer.group('').resource('secrets').namespace(request.namespace).name(n).check('get').allowed())
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, a HelmRelease names as a git credential (values.skillsGitAuthSecretRef.name,
+        values.extraAgentSpec skills and plugins) the installation skills credential or a Secret its writer may get;
+        refused for ' + request.userInfo.username + ', who may not get at least one of: ' +
+        variables.credentials.map(n, n == '' ? '<no name>' : n).join(', ')
+---
 # Source: agent-platform-connectivity/templates/tenants/platform-tenant-credential-refs.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -15663,9 +15767,11 @@ spec:
         request.resource.resource in ['agents', 'agenttemplates'] ?
         ('skills' in variables.template ? dyn(variables.template.skills) : dyn([])) +
         ('plugins' in variables.template ? dyn(variables.template.plugins) : dyn([])) : dyn([])
+    # Each distinct name once: the authorizer's cost allows two checks per
+    # expression (k8s.io/apiserver pkg/cel/library/cost.go).
     - name: refs
       expression: >-
-        variables.sources.filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
+        (variables.sources.filter(s, has(s.source) && has(s.source.git) && has(s.source.git.credentialRef))
         .map(s, has(s.source.git.credentialRef.name) ? string(s.source.git.credentialRef.name) : '') +
         (request.resource.resource == 'remotemcpservers' && 'headersFrom' in variables.spec ?
         dyn(variables.spec.headersFrom).filter(h, has(h.valueFrom) && has(h.valueFrom.type) && h.valueFrom.type == 'Secret')
@@ -15676,13 +15782,19 @@ spec:
         (request.resource.resource == 'modelconfigs' && 'apiKeySecret' in variables.spec ?
         [string(variables.spec.apiKeySecret)] : dyn([])) +
         (request.resource.resource == 'modelproviderconfigs' && 'secretRef' in variables.spec ?
-        [has(variables.spec.secretRef.name) ? string(variables.spec.secretRef.name) : ''] : dyn([]))
+        [has(variables.spec.secretRef.name) ? string(variables.spec.secretRef.name) : ''] : dyn([]))).distinct()
   # The authorizer is not available to a messageExpression, so the refusal
   # names every referenced Secret. An empty name asks for every Secret of the
   # namespace.
   validations:
+    - expression: "size(variables.refs) <= 2"
+      reason: Forbidden
+      messageExpression: >-
+        'in the kagent namespace, ' + request.kind.kind + ' ' + request.name + ' names at most two distinct Secrets,
+        as a git credentialRef, a headersFrom Secret, a secretKeyRef, an apiKeySecret or a secretRef. Refused for ' +
+        request.userInfo.username + ': ' + variables.refs.map(n, n == '' ? '<no name>' : n).join(', ')
     - expression: >-
-        variables.refs.all(n,
+        size(variables.refs) > 2 || variables.refs.all(n,
         authorizer.group('').resource('secrets').namespace(request.namespace).name(n).check('get').allowed())
       reason: Forbidden
       messageExpression: >-
@@ -15690,6 +15802,64 @@ spec:
         as a git credentialRef, a headersFrom Secret, a secretKeyRef, an apiKeySecret or a secretRef. Refused for ' +
         request.userInfo.username + ', who may not get at least one of: ' +
         variables.refs.map(n, n == '' ? '<no name>' : n).join(', ')
+---
+# Source: agent-platform-connectivity/templates/tenants/secret-deletes-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-secret-deletes
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["DELETE"]
+        resources: ["secrets"]
+  matchConditions:
+    # A delete the API server answers with the stored object: the garbage
+    # collector's finalizer is added (Orphan, Foreground, orphanDependents),
+    # or a finalizer already holds the Secret; a background delete of a
+    # Secret without finalizers is answered with a Status. A DeleteCollection
+    # (a request with no name) is always answered with the list of its items.
+    - name: answered-with-the-secret
+      expression: >-
+        !has(request.name) || request.name == '' ||
+        (has(oldObject.metadata.finalizers) && size(oldObject.metadata.finalizers) > 0) ||
+        (has(request.options.propagationPolicy) && request.options.propagationPolicy in ['Orphan', 'Foreground']) ||
+        (has(request.options.orphanDependents) && request.options.orphanDependents == true)
+  # The Secret under delete is named by oldObject: a DeleteCollection runs
+  # admission once for each item with the collection request's attributes,
+  # which carry no name (request.name is unset), while oldObject is the
+  # stored item. On a single delete the two names are the same.
+  # The authorizer's cost allows two checks per expression
+  # (k8s.io/apiserver pkg/cel/library/cost.go): two variables of two each,
+  # evaluated only when the first does not admit.
+  variables:
+    - name: secret
+      expression: >-
+        authorizer.group('').resource('secrets').namespace(request.namespace).name(oldObject.metadata.name)
+    - name: readsOne
+      expression: >-
+        variables.secret.check('get').allowed() || variables.secret.check('patch').allowed()
+    - name: readsMany
+      expression: >-
+        variables.secret.check('list').allowed() || variables.secret.check('watch').allowed()
+  validations:
+    - expression: >-
+        variables.readsOne || variables.readsMany
+      reason: Forbidden
+      messageExpression: >-
+        'a delete answered with the Secret (Orphan or Foreground propagation, a finalizer on it, or a DeleteCollection) is made only by a requester that may read it (get, list, watch or patch); refused: ' +
+        request.namespace + '/' + oldObject.metadata.name
 ---
 # Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
@@ -15759,6 +15929,23 @@ spec:
   policyName: agent-platform-tenant-credential-refs
   validationActions: [Deny]
 ---
+# Source: agent-platform-connectivity/templates/tenants/platform-helmreleases.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-platform-helmreleases
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-platform-helmreleases
+  validationActions: [Deny]
+---
 # Source: agent-platform-connectivity/templates/tenants/platform-tenant-credential-refs.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -15774,6 +15961,23 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 spec:
   policyName: agent-platform-platform-tenant-credential-refs
+  validationActions: [Deny]
+---
+# Source: agent-platform-connectivity/templates/tenants/secret-deletes-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-secret-deletes
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-secret-deletes
   validationActions: [Deny]
 ---
 # Source: agent-platform-connectivity/templates/substrate/hooks-rbac.yaml
@@ -15816,9 +16020,6 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
 rules:
   - apiGroups: [""]
-    resources: ["secrets", "configmaps"]
-    verbs: ["get", "list", "watch", "create", "patch"]
-  - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "create"]
   - apiGroups: ["certificates.k8s.io"]
@@ -15860,6 +16061,216 @@ subjects:
   - kind: ServiceAccount
     name: t-hooks
     namespace: default
+---
+# Source: agent-platform-connectivity/templates/substrate/hooks-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: t-hooks-substrate-bootstrap
+  namespace: podcertificate-controller-system
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-3"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["service-dns-ca-pool","pod-identity-ca-pool"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+# Source: agent-platform-connectivity/templates/substrate/hooks-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: t-hooks-substrate-bootstrap
+  namespace: ate-system
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-3"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["actor-id-jwt-pool","actor-id-ca-pool","egress-mitm-ca-pool"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["actor-id-ca-certs"]
+    verbs: ["get","patch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["ate-api-authentication"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+# Source: agent-platform-connectivity/templates/substrate/hooks-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: t-hooks-substrate-bootstrap
+  namespace: podcertificate-controller-system
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-3"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: t-hooks-substrate-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: t-hooks
+    namespace: default
+---
+# Source: agent-platform-connectivity/templates/substrate/hooks-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: t-hooks-substrate-bootstrap
+  namespace: ate-system
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-3"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: t-hooks-substrate-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: t-hooks
+    namespace: default
+---
+# Source: agent-platform-connectivity/templates/substrate/bootstrap.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: t-substrate-namespaces
+  namespace: default
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+    app.kubernetes.io/component: hooks
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-4"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+    agent-platform.giantswarm.io/about: "create the namespaces ate-system and podcertificate-controller-system the Substrate bootstrap writes into when they are missing, ahead of its Roles there"
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  # Success cleanup comes from the hook delete policy; the TTL reaps a FAILED
+  # Job after its debugging window.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: "agent-platform-connectivity"
+        app.kubernetes.io/name: "agent-platform-connectivity"
+        app.kubernetes.io/instance: "t"
+        app.kubernetes.io/managed-by: "Helm"
+        app.kubernetes.io/version: "0.1.0"
+        application.giantswarm.io/team: "bumblebee"
+        helm.sh/chart: "agent-platform-connectivity-1.1.35"
+        app.kubernetes.io/component: hooks
+    spec:
+      serviceAccountName: t-hooks
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sh
+          image: "gsoci.azurecr.io/giantswarm/alpine-k8s:1.37.2"
+          command: ["/bin/sh", "-eu", "-c"]
+          args:
+            - |
+              for ns in "podcertificate-controller-system" "ate-system"; do
+                if kubectl get namespace "$ns" >/dev/null 2>&1; then
+                  echo "namespace $ns: present"
+                else
+                  kubectl create namespace "$ns" >/dev/null
+                  echo "namespace $ns: created (the substrate release adopts it)"
+                fi
+              done
+          env:
+            # kubectl keeps its discovery cache under $HOME; the root filesystem
+            # is read-only.
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+              ephemeral-storage: 16Mi
+            limits:
+              memory: 128Mi
+              ephemeral-storage: 256Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
 ---
 # Source: agent-platform-connectivity/templates/substrate/bootstrap.yaml
 apiVersion: batch/v1
@@ -15977,14 +16388,6 @@ spec:
               pool_id="1"
               audience="api.${ns}.svc"
               b64() { base64 < "$1" | tr -d '\n'; }
-              ensure_ns() {
-                if kubectl get namespace "$1" >/dev/null 2>&1; then
-                  echo "namespace $1: present"
-                else
-                  kubectl create namespace "$1" >/dev/null
-                  echo "namespace $1: created (the substrate release adopts it)"
-                fi
-              }
               ca_pool() {
                 if kubectl -n "$1" get secret "$2" >/dev/null 2>&1; then
                   echo "CA pool $1/$2: present, kept (a regenerated root would orphan every certificate issued from it)"
@@ -16040,8 +16443,6 @@ spec:
                   | kubectl apply --server-side --force-conflicts --field-manager=agent-platform-connectivity -f - >/dev/null
                 echo "trust bundle $name: $state (the roots of $1/$2)"
               }
-              ensure_ns "$pc_ns"
-              ensure_ns "$ns"
               ca_pool "$pc_ns" service-dns-ca-pool
               ca_pool "$pc_ns" pod-identity-ca-pool
               trust_bundle "$pc_ns" service-dns-ca-pool servicedns.podcert.ate.dev/identity

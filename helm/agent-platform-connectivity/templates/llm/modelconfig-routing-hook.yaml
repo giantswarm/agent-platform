@@ -16,9 +16,8 @@ mark existed. It never routes a ModelConfig without a baseUrl: the policies do
 at its next write. A baseUrl the chart wrote carries the mark
 (agent-platform.llmRouting.baseUrlMark); one written before the mark existed
 is the listener URL on an object Helm does not manage. Any other baseUrl is the
-operator's and stays, a Helm-managed one included: it is a release's value
-(kagent.providers.<default>.config.baseUrl, the cutover's second step), which
-that release removes itself.
+operator's and stays, one a Helm release renders included: that release removes
+it itself.
 
 Each patch is a merge patch preconditioned on the object's resourceVersion: a
 ModelConfig written in between fails the run, and the Job's retry reads it

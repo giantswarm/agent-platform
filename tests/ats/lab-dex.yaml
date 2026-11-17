@@ -263,6 +263,9 @@ stringData:
         secret: lab-only-dex-k8s-authenticator-secret
         trustedPeers:
           - agent-platform
+      - id: ats-untrusted
+        name: Untrusted MCP audience (lab)
+        secret: lab-only-ats-untrusted-secret
 ---
 apiVersion: apps/v1
 kind: Deployment

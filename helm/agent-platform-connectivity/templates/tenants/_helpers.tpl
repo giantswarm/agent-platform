@@ -5,26 +5,36 @@ Helpers of the agent tenants' RBAC (templates/tenants/, giantswarm/agent-platfor
 
 {{/*
 The rules of agent-platform:user: see the tenant's agents, templates,
-RemoteMCPServers, ModelConfigs, EgressPolicies (what its Agents may select)
-and muster MCPServers; start a Session. The kagent namespace binds
-agent-platform:platform-user instead, without the EgressPolicies.
+RemoteMCPServers, ModelConfigs, Harnesses, EgressPolicies (what its Agents may
+select) and muster MCPServers; start a Session; read the tenant's members
+(giantswarm/agent-platform#1368): agent-manager's list_organization_members
+lists the namespace's RoleBindings as the caller and keeps those to the three
+roles. RBAC cannot narrow a list by roleRef, so a member reads every
+RoleBinding of the tenant namespace: its subjects and roleRefs, no credential.
+get and list only, no watch. The kagent namespace binds
+agent-platform:platform-user instead, without the EgressPolicies and the
+RoleBindings.
 */}}
 {{- define "agent-platform.tenants.userRules" -}}
 {{ include "agent-platform.tenants.platformUserRules" . }}
 - apiGroups: ["api.kagent.dev"]
   resources: ["egresspolicies"]
   verbs: ["get", "list", "watch"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["rolebindings"]
+  verbs: ["get", "list"]
 {{- end -}}
 
 {{/*
 The rules of agent-platform:platform-user, what every signed-in person holds
 in the kagent namespace (platform-tenant.yaml): agent-platform:user's but the
-EgressPolicies. The platform tenant's policies name the platform's egress
-origins and the Secrets they authenticate with; its editors read them.
+EgressPolicies and the RoleBindings. The platform tenant's policies name the
+platform's egress origins and the Secrets they authenticate with, and its
+RoleBindings the platform's own identities; its editors read them.
 */}}
 {{- define "agent-platform.tenants.platformUserRules" -}}
 - apiGroups: ["api.kagent.dev"]
-  resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs"]
+  resources: ["agents", "agenttemplates", "remotemcpservers", "modelconfigs", "harnesses"]
   verbs: ["get", "list", "watch"]
 - apiGroups: ["muster.giantswarm.io"]
   resources: ["mcpservers"]
@@ -51,9 +61,6 @@ editor (giantswarm/agent-platform#1267).
 - apiGroups: ["api.kagent.dev"]
   resources: ["agents", "agenttemplates", "remotemcpservers"]
   verbs: ["create", "update", "patch", "delete"]
-- apiGroups: ["api.kagent.dev"]
-  resources: ["harnesses"]
-  verbs: ["get", "list", "watch"]
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["get", "list", "watch"]
@@ -80,6 +87,24 @@ else empty.
 {{- end -}}
 
 {{/*
+The providers an organization's ModelConfig reaches the LLM listener with, as a
+JSON list: agent-platform.llmRouting.providers, plus openai when model-manager
+serves (agent-platform.modelManager.serves). Its models attach to the listener
+as AgentgatewayModels and are called in the OpenAI format, at the listener's
+/v1. The extra openai is the organizations' only: in the kagent namespace an
+OpenAI ModelConfig without a baseUrl keeps calling its provider directly, as
+the listener has no route to the OpenAI API unless llmRouting.models names it.
+Usage: include "agent-platform.tenants.providers" . | fromJsonArray
+*/}}
+{{- define "agent-platform.tenants.providers" -}}
+{{- $out := include "agent-platform.llmRouting.providers" . | fromJsonArray -}}
+{{- if and (include "agent-platform.modelManager.serves" .) (not (has "openai" $out)) -}}
+{{- $out = append $out "openai" -}}
+{{- end -}}
+{{- toJson $out -}}
+{{- end -}}
+
+{{/*
 The subjects of a binding, as a YAML list: the lists given, each subject once.
 Usage: include "agent-platform.tenants.subjects" (list .Values.tenants.platform.editors .Values.tenants.platformTeam)
 */}}
@@ -87,6 +112,25 @@ Usage: include "agent-platform.tenants.subjects" (list .Values.tenants.platform.
 {{- $subjects := list -}}
 {{- range . -}}{{- range . -}}{{- if not (has . $subjects) -}}{{- $subjects = append $subjects . -}}{{- end -}}{{- end -}}{{- end -}}
 {{- with $subjects }}{{ toYaml . }}{{ end -}}
+{{- end -}}
+
+{{/*
+The subjects of muster's MCP-server viewers (muster-mcpservers.yaml), as a
+YAML list, each subject once: musterMcpServerViewers, or
+tenants.platform.users while musterMcpServerViewers is unset (null), so an
+installation's viewers stay as they are until it sets the key. An empty list
+binds nobody. giantswarm/agent-platform#1331: the platform tenant's
+tenants.platform.* can then go without muster's viewers. The meta chart's
+guard (agent-platform.muster.organizations) resolves the viewers the same way:
+change both together, and drop the fallback in both when tenants.platform.*
+is retired (giantswarm/giantswarm#38990, giantswarm/agent-manager#166).
+*/}}
+{{- define "agent-platform.muster.mcpServerViewers" -}}
+{{- $viewers := .Values.musterMcpServerViewers -}}
+{{- if kindIs "invalid" $viewers -}}
+{{- $viewers = dig "platform" "users" list (.Values.tenants | default dict) -}}
+{{- end -}}
+{{- include "agent-platform.tenants.subjects" (list $viewers) -}}
 {{- end -}}
 
 {{/*
@@ -164,4 +208,60 @@ there.
 {{- $deploymentController := dict "kind" "ServiceAccount" "name" "deployment-controller" "namespace" "kube-system" -}}
 {{- $replicaSetController := dict "kind" "ServiceAccount" "name" "replicaset-controller" "namespace" "kube-system" -}}
 {{- dict "Deployment" (list $ateController $deploymentController) "ReplicaSet" (list $deploymentController) "Pod" (list $replicaSetController $ateController) | toJson -}}
+{{- end -}}
+
+{{/*
+The HelmRelease spec fields an agent release never sets, as a CEL list
+literal: through them helm-controller acts as itself (spec.chart's
+HelmChart, valuesFrom, postRenderers, kubeConfig) or moves the release out
+of its namespace (targetNamespace, storageNamespace). Held in the kagent
+namespace (platform-helmreleases.yaml) and in the organization namespaces
+(organizations/admission.yaml).
+*/}}
+{{- define "agent-platform.helmReleases.forbiddenFields" -}}
+['chart', 'valuesFrom', 'postRenderers', 'kubeConfig', 'targetNamespace', 'storageNamespace']
+{{- end -}}
+
+{{/*
+kagent's own HelmRelease in the kagent namespace
+(tenants.platform.kagentRelease, giantswarm/agent-platform#1387), as a CEL
+expression that is true for a write of it by one of its writers; empty while
+it is unset. A deployer that places each workload's HelmRelease in its target
+namespace puts kagent's in the kagent namespace, where
+agent-platform-platform-helmreleases holds every HelmRelease to an agent's
+shape. The meta chart keeps it in its own namespace and needs none of this.
+Both keys or neither: a name without writers admits no one, writers without
+a name would admit every release they write.
+*/}}
+{{- define "agent-platform.tenants.kagentReleaseWrite" -}}
+{{- $release := dig "platform" "kagentRelease" dict (.Values.tenants | default dict) | default dict -}}
+{{- $name := $release.name | default "" -}}
+{{- $writers := $release.writers | default list -}}
+{{- if and $name (not $writers) -}}
+{{- fail "tenants.platform.kagentRelease.name needs tenants.platform.kagentRelease.writers: the identities that write kagent's own HelmRelease (fogctl's kubeconfig user or group, a Flux ServiceAccount)" -}}
+{{- end -}}
+{{- if and $writers (not $name) -}}
+{{- fail "tenants.platform.kagentRelease.writers needs tenants.platform.kagentRelease.name: the writers are admitted for that one HelmRelease only" -}}
+{{- end -}}
+{{- if $name -}}
+{{- $checks := list -}}
+{{- range $writers -}}
+{{- if not .name -}}
+{{- fail "tenants.platform.kagentRelease.writers: every writer names its user, group or ServiceAccount (name)" -}}
+{{- end -}}
+{{- if eq .kind "User" -}}
+{{- $checks = append $checks (printf "request.userInfo.username == %s" (squote .name)) -}}
+{{- else if eq .kind "Group" -}}
+{{- $checks = append $checks (printf "(has(request.userInfo.groups) && %s in request.userInfo.groups)" (squote .name)) -}}
+{{- else if eq .kind "ServiceAccount" -}}
+{{- if not .namespace -}}
+{{- fail (printf "tenants.platform.kagentRelease.writers: the ServiceAccount %s needs its namespace" .name) -}}
+{{- end -}}
+{{- $checks = append $checks (printf "request.userInfo.username == %s" (squote (printf "system:serviceaccount:%s:%s" .namespace .name))) -}}
+{{- else -}}
+{{- fail (printf "tenants.platform.kagentRelease.writers: kind %q is none of User, Group and ServiceAccount" (.kind | default "")) -}}
+{{- end -}}
+{{- end -}}
+request.name == {{ squote $name }} && ({{ join " || " (uniq $checks) }})
+{{- end -}}
 {{- end -}}

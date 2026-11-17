@@ -94,6 +94,19 @@ spec:
         - port: 8090
           protocol: TCP
     {{- end }}
+    {{- $kubernetes := index .Values "mcp-kubernetes" | default dict }}
+    {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "mcp-kubernetes")) (dig "gatewayAPI" "enabled" (dig "mcpKubernetes" "oauth" "enabled" false $kubernetes) $kubernetes) }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ dig "mcp-kubernetes" "targetNamespace" "" .Values.components | default .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: mcp-kubernetes
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
     # xDS to the agentgateway controller (its own release; match the
     # controller-only `agentgateway: agentgateway` label, not the release name).
     - to:

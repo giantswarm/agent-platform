@@ -61,6 +61,8 @@ BASE = [
     "--set", "components.substrate-crds.enabled=true",
     "--api-versions", "kyverno.io/v1",
     "--api-versions", "cilium.io/v2",
+    # The operator's names, which the meta chart derives onto this release.
+    "-f", os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "organizations-operator-values.yaml"),
 ]
 # agentPlatformOrganizations.enabled needs the llm listener and its routing policy
 # (giantswarm/agent-platform#759).

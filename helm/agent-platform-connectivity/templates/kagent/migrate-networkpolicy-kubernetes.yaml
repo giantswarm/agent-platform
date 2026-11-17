@@ -31,6 +31,23 @@ spec:
           protocol: TCP
         - port: 6443
           protocol: TCP
+    {{- with index (.Values.networkPolicy.mcpBackends | default dict) "skill-manager" }}
+    {{- if dig "skillManager" "url" "" ($.Values.agentManager | default dict) }}
+    # The skill-manager (the run pins skills through it).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .podSelector | nindent 14 }}
+      ports:
+        {{- range .ports }}
+        - port: {{ . | int }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- end }}
     {{- include "agent-platform.agentManager.chartSourcesEgress.kubernetes" . | nindent 4 }}
     {{- with .Values.networkPolicy.additionalEgressCIDRs }}
     - to:
