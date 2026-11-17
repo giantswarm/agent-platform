@@ -5320,9 +5320,10 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
 agentManager:  # @schema skipProperties: true; additionalProperties: true
   # Expose the agent-manager API on the agentgateway data plane at
   # https://agentgateway.<domain><pathPrefix> (the same shape as
-  # kagent.controllerRoute). Off by default: the MCP tools reach muster in-cluster
-  # without it; turn it on for a portal or CLI that calls the REST API.
-  # Requires muster, which the data plane fronts.
+  # kagent.controllerRoute). On with its JWT policy whenever
+  # agent-manager.credentials.uiURL is set; otherwise off unless enabled here:
+  # the MCP tools reach agent-manager in-cluster without it. Requires muster,
+  # which the data plane fronts.
   route:
     enabled: false
     pathPrefix: /agent-manager

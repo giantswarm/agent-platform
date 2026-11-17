@@ -3996,6 +3996,15 @@ Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 {{- if kindIs "map" (dig "route" nil (index $v "dicebear" | default dict)) -}}
 {{- $_ := set (index $v "dicebear" "route") "enabled" $dicebearRoute -}}
 {{- end -}}
+{{- /* A credential form (agent-manager.credentials.uiURL) posts the person's
+value to agent-manager's REST API through its route; a rendered route always
+sits behind its JWT policy. */ -}}
+{{- if and (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" "agent-manager")) "true") (dig "credentials" "uiURL" "" (index $v "agent-manager")) -}}
+{{- $_ := set $v.agentManager.route "enabled" true -}}
+{{- end -}}
+{{- if $v.agentManager.route.enabled -}}
+{{- $_ := set $v.agentManager.route.jwtAuthentication "enabled" true -}}
+{{- end -}}
 {{- if kindIs "map" (dig "podSecurity" nil (index $v "agentSandbox" | default dict)) -}}
 {{- $_ := set (index $v "agentSandbox" "podSecurity") "enabled" $podSecurity -}}
 {{- end -}}

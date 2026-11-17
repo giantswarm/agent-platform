@@ -227,6 +227,25 @@ def check_meta(chart):
     standalone_route = release(standalone, "agent-platform-connectivity")["values"]["agentManager"]["route"]
     expect(standalone_route["enabled"] is True and standalone_route["jwtAuthentication"]["enabled"] is True,
            "the protected manager route is independent of the organization switch")
+    derived_form = ["--set-literal", f"agent-manager.credentials.uiURL={form_url}",
+                    "--set", "agent-manager.oauth.enabled=true",
+                    "--set", "agent-manager.oauth.downstream.enabled=true"]
+    derived_route = lambda *extra: release(docs(meta(chart, *derived_form, *extra)), "agent-platform-connectivity")["values"]["agentManager"]["route"]
+    route = derived_route()
+    expect(route["enabled"] is True and route["jwtAuthentication"]["enabled"] is True
+           and route["jwtAuthentication"]["mode"] == "Strict" and route["jwtAuthentication"]["issuer"] == "",
+           "a credential form alone renders agent-manager's route behind its Strict JWT policy (issuer left to global.identity.issuerUrl)")
+    route = release(docs(meta(chart)), "agent-platform-connectivity")["values"]["agentManager"]["route"]
+    expect(route["enabled"] is False and route["jwtAuthentication"]["enabled"] is False,
+           "without a credential form agent-manager's route stays off")
+    route = release(docs(meta(chart, "--set", "agentManager.route.enabled=true")), "agent-platform-connectivity")["values"]["agentManager"]["route"]
+    expect(route["jwtAuthentication"]["enabled"] is True,
+           "a route turned on without a credential form still sits behind its JWT policy")
+    no_manager = docs(meta(chart, *derived_form, "--set", "components.agent-manager.enabled=false",
+                           "--set", "agent-manager.oauth.enabled=false", "--set", "agent-manager.oauth.downstream.enabled=false"))
+    route = release(no_manager, "agent-platform-connectivity")["values"]["agentManager"]["route"]
+    expect(release(no_manager, "agent-manager") is None and route["enabled"] is False,
+           "with agent-manager off a credential form renders, and no route follows from it")
     for template in ("https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}",
                      "https://portal.example.com/credentials/{operation}?ns=namespace",
                      "https://portal.example.com/x/{parent}/{organization}/{namespace}/{operation}",
