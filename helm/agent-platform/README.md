@@ -1445,6 +1445,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.route.hostname | string | `""` |  |
 | agentManager.route.parentRef.name | string | `"giantswarm-default"` |  |
 | agentManager.route.parentRef.namespace | string | `"envoy-gateway-system"` |  |
+| agentManager.route.timeouts.request | string | `"100s"` |  |
 | agentManager.route.jwtAuthentication.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.mode | string | `"Strict"` |  |
 | agentManager.route.jwtAuthentication.issuer | string | `""` |  |

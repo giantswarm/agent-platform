@@ -244,6 +244,7 @@ These are the main non-component settings. Component switches are in [Enabling a
 | `kyvernoPolicies.enabled` | `auto` | Renders the Kyverno objects where `kyverno.io/v1` is served. |
 | `global.observability.metrics.serviceMonitor.enabled` | `auto` | Renders monitors where `monitoring.coreos.com/v1` is served. See [Observability](#observability). |
 | `agentManager.route.enabled` | `false` | Exposes agent-manager's REST API at `https://agentgateway.<domain>/agent-manager`. |
+| `agentManager.route.timeouts` | `request: 100s` | Gateway API rule timeouts of both agent-manager routes, in place of `ingress.httpRoute.timeouts`. The request bound is above agent-manager's limit on a credential save (90 s) and below the portal backend's wait (120 s). `null` falls back to `ingress.httpRoute.timeouts`. |
 | `kagent.controllerRoute.enabled` | `false` | Exposes the kagent controller's gRPC API as a `GRPCRoute` on the data plane. The route requires a JWT (`Strict`, on by default). See [Authentication](authentication.md#5-the-kagent-controller-route). |
 | `dicebear.route.enabled` | `auto` | The avatar route. Renders where `gateway.envoyproxy.io/v1alpha1` is served. When it renders, `dicebear.route.parentRefs` and `dicebear.route.hostnames` (for example `avatars.<domain>`) are required. |
 | `muster.muster.oauth.server.enabled` | `true` | OAuth protection on the muster API. Storage defaults to the bundled Valkey (`muster-valkey:6379`). |

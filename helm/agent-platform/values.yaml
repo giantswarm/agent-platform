@@ -5343,6 +5343,16 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     parentRef:
       name: giantswarm-default
       namespace: envoy-gateway-system
+    # Gateway API rule timeouts on both agent-manager routes (the public one on
+    # the edge Gateway and the data plane's inner one), in place of the shared
+    # ingress.httpRoute.timeouts. Without one, Envoy Gateway's default route
+    # timeout (15 s) cuts a credential save that opens a Git pull request.
+    # The request bound sits above agent-manager's own limit on a save (90 s)
+    # and below the portal backend's wait on it (120 s), so agent-manager
+    # answers first and the portal reads that answer. null falls back to
+    # ingress.httpRoute.timeouts.
+    timeouts:
+      request: 100s
     jwtAuthentication:
       enabled: false
       mode: Strict

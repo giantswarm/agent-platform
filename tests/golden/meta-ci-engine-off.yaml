@@ -237,6 +237,8 @@ spec:
           name: giantswarm-default
           namespace: envoy-gateway-system
         pathPrefix: /agent-manager
+        timeouts:
+          request: 100s
       skillManager:
         namespace: default
         serviceTokenSecret: skill-manager-service-token

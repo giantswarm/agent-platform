@@ -2300,7 +2300,7 @@ verify-manager-oauth-settings: ## Assert the five managers disable the obsolete 
 	@python3 tests/verify-manager-identity.py --oauth-settings-only $(CHART_DIR) $(CONNECTIVITY_DIR) $(VM)
 
 .PHONY: verify-managers
-verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards, the managers' OAuth inputs (skill-manager's included) derived from muster's login (giantswarm/agent-platform#484), and the metrics port of model-manager, agent-manager and cluster-manager (observability.metrics.port, only while observability.metrics.enabled) admitted from the cluster entity, never the API port, in both flavors, with their ServiceMonitors on in the meta render and carrying the tenant label (giantswarm/giantswarm#36711).
+verify-managers: ## Assert the model-manager / agent-manager wiring (routes and agent-manager's route request timeout between its save limit and the portal's wait, JWT policies, network policies in both flavors) and its guards, the managers' OAuth inputs (skill-manager's included) derived from muster's login (giantswarm/agent-platform#484), and the metrics port of model-manager, agent-manager and cluster-manager (observability.metrics.port, only while observability.metrics.enabled) admitted from the cluster entity, never the API port, in both flavors, with their ServiceMonitors on in the meta render and carrying the tenant label (giantswarm/giantswarm#36711).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> both components off render nothing of theirs (agent-manager is off by default; model-manager is on since giantswarm/agent-platform#329)"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(VM) --set components.kagent.enabled=true --set components.model-manager.enabled=false >$(VERIFY_TMP)/vmg-off.out 2>&1 || { cat $(VERIFY_TMP)/vmg-off.out; exit 1; }
@@ -2348,6 +2348,17 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT
 	@[ "$$(grep -c 'issuer: "https://dex.ci.example.com"' $(VERIFY_TMP)/vmg-cilium.out)" = "1" ] || { echo "FAIL: the JWT policy does not default its issuer from global.identity.issuerUrl"; exit 1; }
 	@[ "$$(grep -c '"agentgateway.ci.example.com"' $(VERIFY_TMP)/vmg-cilium.out)" = "1" ] || { echo "FAIL: the public route does not derive its hostname from global.domain"; exit 1; }
 	@echo "ok: route + JWT policy"
+	@echo "--> both agent-manager routes carry a request timeout above agent-manager's save limit (90 s) and within the portal backend's wait (120 s); Envoy's 15 s default cut a Git save; the shared ingress.httpRoute.timeouts does not replace it, agentManager.route.timeouts does"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) --set ingress.httpRoute.timeouts.request=0s >$(VERIFY_TMP)/vmg-timeout-shared.out 2>&1 || { cat $(VERIFY_TMP)/vmg-timeout-shared.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) $(MANAGERS_ROUTES) --set agentManager.route.timeouts.request=110s >$(VERIFY_TMP)/vmg-timeout-own.out 2>&1 || { cat $(VERIFY_TMP)/vmg-timeout-own.out; exit 1; }
+	@python3 -c 'import sys,yaml,re; s={"s":1,"m":60,"h":3600}; sec=lambda v: sum(int(n)*s[u] for n,u in re.findall(r"(\d+)(h|m|s)",v)); \
+	routes=lambda p: {d["metadata"]["name"]: [r.get("timeouts",{}).get("request") for r in d["spec"]["rules"]] for d in yaml.safe_load_all(open(p)) if d and d.get("kind")=="HTTPRoute" and d["metadata"]["name"] in ("agent-manager","agent-manager-public")}; \
+	got={p: routes(p) for p in sys.argv[1:]}; \
+	bad=[(p,n,v) for p in sys.argv[1:3] for n,vs in got[p].items() for v in vs if v is None or not 90 < sec(v) <= 120]; \
+	own=[(n,v) for n,vs in got[sys.argv[3]].items() for v in vs if v != "110s"]; \
+	ok=all(len(got[p])==2 for p in sys.argv[1:]) and not bad and not own; \
+	print("ok: agent-manager route timeouts" if ok else "FAIL: agent-manager route timeouts: %s" % got); sys.exit(0 if ok else 1)' \
+		$(VERIFY_TMP)/vmg-cilium.out $(VERIFY_TMP)/vmg-timeout-shared.out $(VERIFY_TMP)/vmg-timeout-own.out
 	@grep -q 'matchName: dex.ci.example.com' $(VERIFY_TMP)/vmg-cilium.out || { echo "FAIL: no FQDN egress to the identity provider"; exit 1; }
 	@grep -q 'matchName: gsoci.azurecr.io' $(VERIFY_TMP)/vmg-cilium.out || { echo "FAIL: agent-manager egress does not name the agent chart registry"; exit 1; }
 	@grep -qE "matchPattern: ['\"]\*\.blob\.core\.windows\.net['\"]" $(VERIFY_TMP)/vmg-cilium.out || { echo "FAIL: agent-manager egress lost the registry blob front"; exit 1; }
