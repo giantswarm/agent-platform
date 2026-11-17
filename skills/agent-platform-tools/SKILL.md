@@ -166,6 +166,6 @@ https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
   reaches private addresses through the normal proxy settings without that opt-in. If a manager
   refuses an old `true`, remove it. Forwarded-token JWKS access is a separate permission; do not
   change `oauth.sso.allowPrivateIPs` to repair discovery. Muster names its remaining forwarded-token
-  setting `dex.allowPrivateIPJWKS`, rather than `dex.allowPrivateIPOIDC`. Operator checks and migration:
+  setting `dex.allowPrivateIPJWKS`; `dex.allowPrivateIPOIDC` remains a deprecated alias. Operator checks and migration:
   [OAuth issuer connectivity](https://github.com/giantswarm/agent-platform/blob/main/docs/authentication.md#oauth-issuer-connectivity).
 - Everything else: https://docs.giantswarm.io/tutorials/agent-platform/troubleshooting/.
