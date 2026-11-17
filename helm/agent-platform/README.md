@@ -574,7 +574,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.skill-manager.chart | string | `"skill-manager"` |  |
 | components.skill-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.skill-manager.versionRange | string | `">=0.1.0 <0.2.0"` |  |
+| components.skill-manager.versionRange | string | `">=0.2.2 <0.3.0"` |  |
 | components.skill-manager.valuesFrom | string | `"skill-manager"` |  |
 | components.skill-manager.dependsOn[0] | string | `"muster"` |  |
 | components.skill-manager.gatedRoster | bool | `true` |  |
@@ -592,7 +592,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.default-agent.dependsOn[0] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.vm-manager.versionRange | string | `">=0.24.0 <0.25.0"` |  |
+| components.vm-manager.versionRange | string | `">=0.26.10 <0.27.0"` |  |
 | components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |

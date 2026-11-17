@@ -53,7 +53,7 @@ components:
   agent-manager:                 { versionRange: "3.1.0" }
   # The default agent (components.default-agent): the agent chart.
   default-agent:       { versionRange: "2.6.0" }
-  vm-manager:                    { versionRange: "0.24.0" }
+  vm-manager:                    { versionRange: "0.26.10" }
   # The cluster write surface (components.cluster-manager, off by default).
   cluster-manager:               { versionRange: "0.22.0" }
   # The workspace surface (components.workspace-manager, follows
@@ -62,7 +62,7 @@ components:
   # The toolchain surface (components.toolchain-manager, off by default).
   toolchain-manager:             { versionRange: "0.5.0" }
   # The skill sources (components.skill-manager, follows agent-manager).
-  skill-manager:                 { versionRange: "0.1.0" }
+  skill-manager:                 { versionRange: "0.2.2" }
   # The organizations' operator (components.agent-platform-operator, follows
   # agentPlatformOrganizations.enabled, off by default).
   agent-platform-operator:       { versionRange: "0.4.0" }

@@ -1203,10 +1203,11 @@ components:  # @schema additionalProperties: true
     # false leaves it out, and agent-manager falls back to its own
     # (deprecated) skill discovery.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is skill-manager's first release (giantswarm/giantswarm#38322).
-    # The ceiling is the next minor: a skill-manager minor rolls in with the
-    # chart release that renders its values.
-    versionRange: ">=0.1.0 <0.2.0"
+    # The floor is 0.2.2, the first release on mcp-oauth v1.13.18 (its Dex
+    # client follows HTTPS_PROXY and NO_PROXY). The ceiling is the next minor:
+    # a skill-manager minor rolls in with the chart release that renders its
+    # values.
+    versionRange: ">=0.2.2 <0.3.0"
     valuesFrom: skill-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
     # app); the reference is dropped at render time when muster is off.
@@ -1270,9 +1271,10 @@ components:  # @schema additionalProperties: true
     # the pod fetches (0.20.0 and 0.20.1 have no guest image: their
     # guest-image job failed; 0.19.x were on ghcr.io, with the guest image as
     # a node path).
-    # The floor is 0.24.0: the chart takes observability.otel, the OTLP trace
-    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
-    versionRange: ">=0.24.0 <0.25.0"
+    # The floor is 0.26.10, the first release on mcp-oauth v1.13.18 (its Dex
+    # client follows HTTPS_PROXY and NO_PROXY); the chart takes
+    # observability.otel since 0.24.0 (giantswarm/giantswarm#36711).
+    versionRange: ">=0.26.10 <0.27.0"
     valuesFrom: vm-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
