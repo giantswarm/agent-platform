@@ -373,7 +373,7 @@ spec:
         enabled: false
       oauth:
         dex:
-          allowPrivateURLs: true
+          allowPrivateURLs: false
         downstream:
           enabled: true
         enabled: true
@@ -1268,7 +1268,7 @@ spec:
         enabled: false
       oauth:
         dex:
-          allowPrivateURLs: true
+          allowPrivateURLs: false
         downstream:
           enabled: true
         enabled: true
@@ -2011,7 +2011,7 @@ spec:
       enabled: false
     oauth:
       dex:
-        allowPrivateURLs: true
+        allowPrivateURLs: false
       downstream:
         enabled: true
       enabled: true

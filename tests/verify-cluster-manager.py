@@ -148,7 +148,7 @@ def main(meta: str, connectivity: str) -> int:
         f"    fullnameOverride: {NAME}\n",
         "    installation:\n      name: \"\"\n",
         "    modelManager:\n      namespace: default\n",
-        "    oauth:\n      dex:\n        allowPrivateURLs: true\n      downstream:\n        enabled: true\n      enabled: true\n      provider: dex\n",
+        "    oauth:\n      dex:\n        allowPrivateURLs: false\n      downstream:\n        enabled: true\n      enabled: true\n      provider: dex\n",
         "    muster:\n      mcpServer:\n        auth:\n          forwardToken: true\n          requiredAudiences:\n          - dex-k8s-authenticator\n        enabled: true\n",
         "\n    global:\n",
     ), "the HelmRelease")
