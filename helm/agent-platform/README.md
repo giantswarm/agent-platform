@@ -608,7 +608,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.workspace-manager.chart | string | `"workspace-manager"` |  |
 | components.workspace-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.workspace-manager.versionRange | string | `">=0.14.0 <0.16.0"` |  |
+| components.workspace-manager.versionRange | string | `">=0.15.9 <0.16.0"` |  |
 | components.workspace-manager.valuesFrom | string | `"workspace-manager"` |  |
 | components.workspace-manager.dependsOn[0] | string | `"muster"` |  |
 | components.workspace-manager.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
@@ -663,7 +663,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
 | components.mcp-kubernetes.chart | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.mcp-kubernetes.versionRange | string | `">=1.14.0 <2.0.0"` |  |
+| components.mcp-kubernetes.versionRange | string | `">=1.14.26 <2.0.0"` |  |
 | components.mcp-kubernetes.valuesFrom | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.omitKeys[0] | string | `"kubernetesAudience"` |  |
 | components.mcp-kubernetes.omitKeys[1] | string | `"mcpServer"` |  |
@@ -1608,7 +1608,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspace-manager.observability.otel.headers | string | `"auto"` |  |
 | workspace-manager.oauth.enabled | bool | `true` |  |
 | workspace-manager.oauth.baseURL | string | `""` |  |
-| workspace-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| workspace-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | workspace-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1699,7 +1699,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.provider | string | `"dex"` |  |
-| mcp-kubernetes.mcpKubernetes.oauth.allowPrivateURLs | bool | `true` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enableDownstreamOAuth | bool | `true` |  |
 | mcp-kubernetes.grafanaDashboards.enabled | string | `"auto"` |  |

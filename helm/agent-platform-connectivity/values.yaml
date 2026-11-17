@@ -3391,7 +3391,7 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
     # (workspaceManager.route) serves its host.
     baseURL: ""
     dex:
-      allowPrivateURLs: true
+      allowPrivateURLs: false
     sso:
       allowPrivateIPs: true
   muster:

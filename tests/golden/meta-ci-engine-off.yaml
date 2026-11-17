@@ -1067,7 +1067,6 @@ spec:
               observability.giantswarm.io/tenant: giantswarm
           tracingExporter: otlp
         oauth:
-          allowPrivateURLs: true
           enableDownstreamOAuth: true
           enabled: true
           provider: dex

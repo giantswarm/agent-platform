@@ -162,7 +162,11 @@ def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> Non
             manager_oauth = values[name]["oauth"]
             expect(f"{chart}: {name} obsolete Dex opt-in", manager_oauth["dex"].get("allowPrivateURLs"), False)
             expect(f"{chart}: {name} separate JWKS policy", manager_oauth["sso"].get("allowPrivateIPs"), True)
-        expect(f"{chart}: workspace-manager separate setting", values["workspace-manager"]["oauth"]["dex"].get("allowPrivateURLs"), True)
+        expect(f"{chart}: workspace-manager obsolete Dex opt-in", values["workspace-manager"]["oauth"]["dex"].get("allowPrivateURLs"), False)
+        expect(f"{chart}: workspace-manager separate JWKS policy", values["workspace-manager"]["oauth"]["sso"].get("allowPrivateIPs"), True)
+    with open(f"{meta}/values.yaml") as source:
+        values = yaml.safe_load(source)
+    expect(f"{meta}: mcp-kubernetes obsolete Dex opt-in unset", "allowPrivateURLs" in values["mcp-kubernetes"]["mcpKubernetes"]["oauth"], False)
 
     rels = releases(meta, [*base, *ALL_ON, *LOGIN])
     for name in MANAGERS:
@@ -170,7 +174,7 @@ def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> Non
         if name not in NOT_IN_CONNECTIVITY:
             forwarded = rels["agent-platform-connectivity"][name]["oauth"]
             expect(f"connectivity {name} obsolete Dex opt-in", forwarded["dex"].get("allowPrivateURLs"), False)
-    print("ok: all five manager releases disable the obsolete Dex opt-in; independent JWKS policies remain separate")
+    print("ok: the five manager releases and workspace-manager disable the obsolete Dex opt-in, mcp-kubernetes does not set it; independent JWKS policies remain separate")
 
 
 def main() -> None:

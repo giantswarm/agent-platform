@@ -1332,7 +1332,10 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.14.0, whose sync_workspace returns a request id that the
+    # The floor is 0.15.9, the first release on which oauth.dex.allowPrivateURLs
+    # has no effect: its Dex client reaches a private issuer and follows
+    # HTTP_PROXY, HTTPS_PROXY and NO_PROXY without it, so the default below is
+    # false. 0.14.0 is the first whose sync_workspace returns a request id that the
     # Workspace status names (its CRD gains that optional field; no values
     # change). 0.13.0 is the first whose list_repositories reports each
     # repository's owner login and host with facet counts, beside list_owners
@@ -1354,7 +1357,7 @@ components:  # @schema additionalProperties: true
     # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
     # minor: a workspace-manager minor rolls in with the chart release that
     # renders its values.
-    versionRange: ">=0.14.0 <0.16.0"
+    versionRange: ">=0.15.9 <0.16.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
@@ -1540,8 +1543,11 @@ components:  # @schema additionalProperties: true
     # The mcp-kubernetes block below leaves the issuer, client, Secret and CA
     # to the chart's global.identity fallbacks. OAuth consent uses encrypted
     # shared state, and MCP requests require resource access tokens.
-    # The next major is the ceiling.
-    versionRange: ">=1.14.0 <2.0.0"
+    # The floor is 1.14.26, the first release on which
+    # mcpKubernetes.oauth.allowPrivateURLs has no effect: its Dex client reaches
+    # a private issuer and follows HTTP_PROXY, HTTPS_PROXY and NO_PROXY without
+    # it, so the block below does not set it. The next major is the ceiling.
+    versionRange: ">=1.14.26 <2.0.0"
     valuesFrom: mcp-kubernetes
     # The connectivity chart's keys, not the chart's (which validates strictly):
     # the upstream Kubernetes audience and the shape of the
@@ -6358,7 +6364,7 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
     # port) is taken as it is: the route matches the host.
     baseURL: ""
     dex:
-      allowPrivateURLs: true
+      allowPrivateURLs: false
     sso:
       allowPrivateIPs: true
   muster:
@@ -6861,7 +6867,6 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
     oauth:
       enabled: true
       provider: dex
-      allowPrivateURLs: true
       sso:
         allowPrivateIPs: true
       enableDownstreamOAuth: true

@@ -2296,7 +2296,7 @@ verify-worker-image: ## Assert the Substrate worker image follows the chart's ow
 	@echo "ok: $@"
 
 .PHONY: verify-manager-oauth-settings
-verify-manager-oauth-settings: ## Assert the five managers disable the obsolete Dex private-URL opt-in in both chart defaults and their rendered HelmReleases, preserving the separate forwarded-token JWKS policy.
+verify-manager-oauth-settings: ## Assert the five managers and workspace-manager disable the obsolete Dex private-URL opt-in in both chart defaults (the five in their rendered HelmReleases too) and the mcp-kubernetes block does not set it, preserving the separate forwarded-token JWKS policy.
 	@python3 tests/verify-manager-identity.py --oauth-settings-only $(CHART_DIR) $(CONNECTIVITY_DIR) $(VM)
 
 .PHONY: verify-managers
