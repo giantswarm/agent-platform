@@ -329,6 +329,12 @@ from muster's OAuth server block, the platform's one login
 (giantswarm/agent-platform#484), on the same copy, so the connectivity release
 guards and wires what the manager releases run with. */ -}}
 {{- include "agent-platform.identity.apply" (dict "values" $shaped) -}}
+{{- /* skill-manager's block reaches its own release only (omitKeys of the
+connectivity release), so its one-login and absence guards run here, on the
+filled block, while the component is on. */ -}}
+{{- if (index $roster "skill-manager").enabled -}}
+{{- include "agent-platform.identity.validate" (dict "name" "skill-manager" "values" $shaped) -}}
+{{- end -}}
 {{- /* gitops.prereleases widens the agent chart line agent-manager composes for
 every agent too, on the same copy, so the agent-manager release and the
 connectivity chart's migrate Job read the same range and filter. */ -}}
