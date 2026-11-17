@@ -9,7 +9,8 @@ cluster-manager and skill-manager; oauth.baseURL for the two routed managers.
 The connectivity release receives the same filled blocks (not skill-manager's,
 which only its own release reads), so each case renders the meta chart, then
 the connectivity chart with the values its HelmRelease carries — where the
-absence guard and the one-login guard fire.
+absence guard and the one-login guard fire. skill-manager's guards fire in the
+meta render (agent-platform.identity.validate, giantswarm/agent-platform#1382).
 
 Usage: verify-manager-identity.py <meta chart> <connectivity chart> [helm flags...]
 The helm flags (the Makefile's VM: API versions, required inputs) go to both renders.
@@ -230,7 +231,8 @@ def main() -> None:
     for what, extra, want in (
         ("muster's login", (), ISSUER),
         ("global.identity wins over muster's", ("global.identity.issuerUrl=https://global.example.com",), "https://global.example.com"),
-        ("its own issuer wins", ("global.identity.issuerUrl=https://global.example.com", "skill-manager.oauth.dex.issuerURL=https://own.example.com"), "https://own.example.com"),
+        # One that differs from global.identity fails the render (the one-login case below).
+        ("its own issuer wins over muster's", ("skill-manager.oauth.dex.issuerURL=https://own.example.com",), "https://own.example.com"),
     ):
         expect(f"skill-manager identityProvider, {what}", entry(*extra), {"provider": "dex", "issuerUrl": want})
     expect("skill-manager identityProvider with its OAuth off", entry("skill-manager.oauth.enabled=false"), None)
@@ -312,6 +314,35 @@ def main() -> None:
         if result.returncode == 0 or not all(f in result.stderr for f in fragments):
             sys.exit(f"FAIL: absent, {what}: the connectivity render did not fail naming {fragments}\n{result.stderr}")
         print(f"ok: absent, {what}")
+
+    # skill-manager's block reaches its own release only, so the meta render guards it.
+    print("--> one login, skill-manager: an own value that differs from global.identity fails the meta render naming both")
+    agreed = sets(f"global.identity.issuerUrl={ISSUER}", f"global.identity.clientId={CLIENT}", f"global.identity.existingSecret={SECRET}")
+    for key, global_key, value in (
+        ("dex.issuerURL", "issuerUrl", ISSUER),
+        ("dex.clientID", "clientId", CLIENT),
+        ("existingSecret", "existingSecret", SECRET),
+    ):
+        flags = [*base, *ALL_ON, *LOGIN, *agreed, *sets(f"skill-manager.oauth.{key}=other")]
+        result = helm(meta, flags)
+        want = f"skill-manager.oauth.{key} (other) differs from global.identity.{global_key} ({value})"
+        if result.returncode == 0 or want not in result.stderr:
+            sys.exit(f"FAIL: one login, skill-manager.oauth.{key}: the meta render did not fail with {want!r}\n{result.stderr}")
+        if helm(meta, [*flags, *sets("components.skill-manager.enabled=false")]).returncode != 0:
+            sys.exit(f"FAIL: one login, skill-manager.oauth.{key}: the guard fires with the skill-manager off")
+        releases(meta, [*base, *ALL_ON, *LOGIN, *agreed, *sets(f"skill-manager.oauth.{key}={value}")])
+        print(f"ok: one login, skill-manager.oauth.{key}")
+
+    print("--> absent, skill-manager: what cannot be derived fails the meta render naming the key")
+    for what, extra, fragments in (
+        ("no Secret", sets("muster.muster.oauth.server.existingSecret="), ("none of skill-manager.oauth.existingSecret", "set muster.muster.oauth.server.existingSecret")),
+        ("no client", sets("muster.muster.oauth.server.dex.clientId="), ("skill-manager.oauth.dex.clientID is empty", "set muster.muster.oauth.server.dex.clientId")),
+        ("no base URL (no domain)", sets("global.domain="), ("skill-manager.oauth.baseURL is empty", "set global.domain")),
+    ):
+        result = helm(meta, [*base, *ALL_ON, *LOGIN, *extra])
+        if result.returncode == 0 or not all(f in result.stderr for f in fragments):
+            sys.exit(f"FAIL: absent, skill-manager, {what}: the meta render did not fail naming {fragments}\n{result.stderr}")
+        print(f"ok: absent, skill-manager, {what}")
 
     print("--> no login named (muster's issuer unset): nothing filled, the guard stays silent")
     rels = releases(meta, [*base, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",

@@ -4361,7 +4361,8 @@ muster read) — so an installation that names muster's login names the
 managers' too, a customer's own Dex client included, which a fleet-wide
 global.identity.clientId cannot carry. Defaults, not the single-source rule: a
 manager's own value wins, and so does global.identity (the connectivity chart
-fails the render when either disagrees with muster's). Only for the dex
+fails the render when either disagrees with muster's; skill-manager's own
+values are guarded here, agent-platform.identity.validate). Only for the dex
 provider, while muster's OAuth server is on (with it off, model-manager's oauth
 is off: componentDerivedValues).
 oauth.baseURL of model-manager and agent-manager is
@@ -4402,6 +4403,56 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- $host := $route.hostname -}}
 {{- if and (not $host) $domain }}{{ $host = printf "agentgateway.%s" $domain }}{{ end -}}
 {{- if and $host $route.pathPrefix }}{{ $_ := set $oauth "baseURL" (printf "https://%s%s" $host $route.pathPrefix) }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The one-login guard for a manager whose oauth block does not reach the
+connectivity release, where the other managers' guards run (their
+validate.yaml): today the skill-manager (giantswarm/agent-platform#1382). Runs
+on the $shaped copy after agent-platform.identity.apply, so it reads the block
+the manager's release runs with. While the block's OAuth is on with the dex
+provider:
+- an issuer, client or Secret in the block that disagrees with
+  global.identity fails the render, naming both values: the platform has one
+  login provider;
+- once the installation names muster's login (agent-platform.identity.musterLogin
+  has an issuer), a client, Secret or base URL that the block, global.identity
+  and muster's login all leave unset fails the render, naming the key to set,
+  instead of the manager's own release. The issuer needs no check: muster's
+  issuer fills it. The base URL is the chart's own derivation from
+  global.domain (https://<fullname>.<global.domain>).
+A render that names no login is untouched. Emits nothing.
+Usage: include "agent-platform.identity.validate" (dict "name" "skill-manager" "values" $shaped)
+*/}}
+{{- define "agent-platform.identity.validate" -}}
+{{- $name := .name -}}
+{{- $v := .values -}}
+{{- $block := index $v $name | default dict -}}
+{{- $oauth := dig "oauth" dict $block -}}
+{{- if and (kindIs "map" $oauth) (dig "enabled" false $oauth) (eq (toString (dig "provider" "dex" $oauth)) "dex") -}}
+{{- $dex := dig "dex" dict $oauth -}}
+{{- $global := index $v "global" | default dict -}}
+{{- $identity := dig "identity" dict $global -}}
+{{- range $pair := list (list "dex.issuerURL" (dig "issuerURL" "" $dex) "issuerUrl") (list "dex.clientID" (dig "clientID" "" $dex) "clientId") (list "existingSecret" (dig "existingSecret" "" $oauth) "existingSecret") -}}
+{{- $own := index $pair 1 -}}
+{{- $want := dig (index $pair 2) "" $identity -}}
+{{- if and $own $want (ne (toString $own) (toString $want)) -}}
+{{- fail (printf "%s.oauth.%s (%s) differs from global.identity.%s (%s); the platform has one login provider" $name (index $pair 0) $own (index $pair 2) $want) -}}
+{{- end -}}
+{{- end -}}
+{{- $login := include "agent-platform.identity.musterLogin" $v | fromJson -}}
+{{- if $login.issuerURL -}}
+{{- if and (not (dig "clientID" "" $dex)) (not (dig "clientId" "" $identity)) -}}
+{{- fail (printf "%s.oauth.dex.clientID is empty and global.identity.clientId is not set: %s validates tokens for the platform's login client — set muster.muster.oauth.server.dex.clientId, which the meta chart fills %s.oauth.dex.clientID from (or set global.identity.clientId)" $name $name $name) -}}
+{{- end -}}
+{{- if and (not (dig "existingSecret" "" $oauth)) (not (dig "clientSecret" "" $dex)) (not (dig "existingSecret" "" $identity)) -}}
+{{- fail (printf "none of %s.oauth.existingSecret, %s.oauth.dex.clientSecret or global.identity.existingSecret is set: %s needs the login client's secret — set muster.muster.oauth.server.existingSecret (a Secret with key dex-client-secret), which the meta chart fills %s.oauth.existingSecret from (or set global.identity.existingSecret)" $name $name $name $name) -}}
+{{- end -}}
+{{- if and (not (dig "baseURL" "" $oauth)) (not (dig "domain" "" $global)) -}}
+{{- fail (printf "%s.oauth.baseURL is empty and global.domain is not set: the resource server needs its public base URL — its chart derives https://<fullname>.<global.domain>; set global.domain, or %s.oauth.baseURL" $name $name) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
