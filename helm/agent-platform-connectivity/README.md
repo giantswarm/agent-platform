@@ -1273,6 +1273,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.flavor | string | `"auto"` | `auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor. |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
+| networkPolicy.envoyGateway.proxyNamespace | string | `"envoy-gateway-system"` | Where Envoy Gateway runs the Gateways' proxy pods. The default is the controller's namespace of Envoy Gateway's default deploy mode (ControllerNamespace); change it when Envoy Gateway runs in another namespace, and set it empty when it runs in the GatewayNamespace mode, which puts each proxy in its Gateway's own namespace. |
 | networkPolicy.substrate.credentialProvider.egressFQDNs | list | `[]` |  |
 | networkPolicy.substrate.egressGateway.privateCIDRs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |

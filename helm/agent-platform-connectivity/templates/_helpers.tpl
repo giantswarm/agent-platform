@@ -1222,11 +1222,14 @@ Usage: include "agent-platform.route.toDataPlane" (dict "ctx" . "parentRefs" $re
 
 {{/*
 The front Gateways such a route attaches to, as a JSON list of
-{name, namespace}, in the order the route names its parents: its own
-parentRefs when pinned, else `global.gatewayApi.parentRefs`. A parentRef
-without a namespace attaches to a Gateway of the route's own namespace
-(Gateway API), so that is what an absent or empty key means here too:
-`routeNamespace` when the caller names it, else this release's namespace.
+{name, namespace, proxyNamespace}, in the order the route names its parents:
+its own parentRefs when pinned, else `global.gatewayApi.parentRefs`. A
+parentRef without a namespace attaches to a Gateway of the route's own
+namespace (Gateway API), so that is what an absent or empty key means here
+too: `routeNamespace` when the caller names it, else this release's namespace.
+`proxyNamespace` is where Envoy Gateway runs the Gateway's proxy pods, the
+namespace a network policy selects them in
+(agent-platform.route.envoyProxyNamespace).
 Empty when the route attaches to the chart-owned data plane — the data plane
 is then the peer, selected by the Gateway's own name. A network policy selects
 each one's proxy pods with agent-platform.route.envoyPeer.
@@ -1239,10 +1242,23 @@ Usage: include "agent-platform.route.edgeGateways" (dict "ctx" . "parentRefs" $r
 {{- $gateways := list -}}
 {{- if not (include "agent-platform.route.toDataPlane" .) -}}
 {{- range $refs -}}
-{{- $gateways = append $gateways (dict "name" (toString .name) "namespace" (dig "namespace" "" . | default $routeNamespace | toString)) -}}
+{{- $namespace := dig "namespace" "" . | default $routeNamespace | toString -}}
+{{- $gateways = append $gateways (dict "name" (toString .name) "namespace" $namespace "proxyNamespace" (include "agent-platform.route.envoyProxyNamespace" (dict "ctx" $ctx "namespace" $namespace))) -}}
 {{- end -}}
 {{- end -}}
 {{- $gateways | uniq | toJson -}}
+{{- end -}}
+
+{{/*
+The namespace Envoy Gateway runs a Gateway's proxy pods in:
+`networkPolicy.envoyGateway.proxyNamespace` (default envoy-gateway-system, the
+controller's namespace under Envoy Gateway's default deploy mode,
+ControllerNamespace), or the Gateway's own namespace when that value is empty
+(the GatewayNamespace deploy mode).
+Usage: include "agent-platform.route.envoyProxyNamespace" (dict "ctx" . "namespace" $gatewayNamespace)
+*/}}
+{{- define "agent-platform.route.envoyProxyNamespace" -}}
+{{- dig "envoyGateway" "proxyNamespace" "envoy-gateway-system" (.ctx.Values.networkPolicy | default dict) | default .namespace -}}
 {{- end -}}
 
 {{/*
@@ -1253,11 +1269,10 @@ labels Envoy Gateway stamps on the data-plane pods it runs for a Gateway
 selects its peer through this one helper, so a policy never admits the proxy
 of another Gateway of the same namespace (giantswarm/agent-platform#1292);
 `make verify-envoy-peers` fails a render that selects Envoy pods without the
-owning Gateway. The caller names the pods' namespace as the Gateway's own, as
-the policies did before: on the fleet the Gateways live in the Envoy Gateway
-controller's namespace, where the proxies run. A Gateway in another namespace
-under the controller-namespace deploy mode (the default) has its proxy in the
-controller's namespace, which these policies do not select.
+owning Gateway. The caller selects the pods in the Gateway's proxyNamespace
+(agent-platform.route.edgeGateways), not in the Gateway's own namespace: in
+Envoy Gateway's default deploy mode the proxies of every Gateway run in the
+controller's namespace (giantswarm/agent-platform#1393).
 Usage: include "agent-platform.route.envoyPeer" (dict "name" $name "namespace" $ns) | fromJson
 */}}
 {{- define "agent-platform.route.envoyPeer" -}}
@@ -1278,7 +1293,7 @@ Usage: include "agent-platform.route.edgePeers" (dict "ctx" . "parentRefs" $refs
 {{- $peers = append $peers (dict "namespace" .ctx.Release.Namespace "matchLabels" (dict "gateway.networking.k8s.io/gateway-name" .ctx.Values.gateway.name)) -}}
 {{- else -}}
 {{- range (include "agent-platform.route.edgeGateways" . | fromJsonArray) -}}
-{{- $peers = append $peers (dict "namespace" .namespace "matchLabels" (include "agent-platform.route.envoyPeer" . | fromJson)) -}}
+{{- $peers = append $peers (dict "namespace" .proxyNamespace "matchLabels" (include "agent-platform.route.envoyPeer" . | fromJson)) -}}
 {{- end -}}
 {{- end -}}
 {{- $peers | toJson -}}

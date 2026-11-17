@@ -741,6 +741,16 @@ networkPolicy:
   #   additionalEgressFQDNs:
   #     - matchName: dex.example.gigantic.io
   additionalEgressFQDNs: []
+  # The proxy pods of the front Gateways (the Envoy edge): the policies that
+  # admit or reach a Gateway's proxy select its pods by the owning-Gateway
+  # labels in this namespace, where Envoy Gateway runs them.
+  envoyGateway:
+    # -- Where Envoy Gateway runs the Gateways' proxy pods. The default is the
+    # controller's namespace of Envoy Gateway's default deploy mode
+    # (ControllerNamespace); change it when Envoy Gateway runs in another
+    # namespace, and set it empty when it runs in the GatewayNamespace mode,
+    # which puts each proxy in its Gateway's own namespace.
+    proxyNamespace: envoy-gateway-system  # @schema pattern: ^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)?$
   # Substrate's credential provider (k8s-credential-provider, ate-system),
   # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) it reaches
   # on 443/TCP besides the apiserver and DNS, through the DNS proxy rule the
