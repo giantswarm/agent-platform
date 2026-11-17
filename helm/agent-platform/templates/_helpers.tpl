@@ -4513,17 +4513,23 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- fail "agent-manager.credentials.uiURL needs agent-manager.oauth.enabled and agent-manager.oauth.downstream.enabled: the credential form posts the value to agent-manager as the person" -}}
 {{- end -}}
 {{- $uiURL := dig "credentials" "uiURL" "" $am -}}
-{{- if and $uiURL (not $on) -}}
-{{- if not (include "agent-platform.agentManager.installationModelsFloor" .) -}}
-{{- fail "agent-manager.credentials.uiURL without agentPlatformOrganizations.enabled needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11 or later" -}}
+{{- if $uiURL -}}
+{{- if contains "#" $uiURL -}}
+{{- fail "agent-manager.credentials.uiURL must not contain #: agent-manager refuses a fragment in the template" -}}
 {{- end -}}
 {{- $variables := list -}}
 {{- range $expression := regexFindAll `\{[^{}]*\}` $uiURL -1 -}}
-{{- range $variable := splitList "," (regexReplaceAll `^\{[+#./;?&]?|\}$` $expression "") -}}
+{{- range $variable := splitList "," (regexReplaceAll `^\{[+./;?&]?|\}$` $expression "") -}}
 {{- $variables = append $variables (regexReplaceAll `(:[0-9]+|\*)$` $variable "") -}}
 {{- end -}}
 {{- end -}}
-{{- if or (not (has "namespace" $variables)) (has "parent" $variables) (has "organization" $variables) -}}
+{{- if and (not $on) (not (include "agent-platform.agentManager.installationModelsFloor" .)) -}}
+{{- fail "agent-manager.credentials.uiURL without agentPlatformOrganizations.enabled needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11 or later" -}}
+{{- end -}}
+{{- if and (has "namespace" $variables) (not (include "agent-platform.agentManager.installationModelsFloor" .)) -}}
+{{- fail "agent-manager.credentials.uiURL with a {namespace} expression needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11 or later: earlier agent-manager releases refuse {namespace} when the server starts" -}}
+{{- end -}}
+{{- if and (not $on) (or (not (has "namespace" $variables)) (has "parent" $variables) (has "organization" $variables)) -}}
 {{- fail "agent-manager.credentials.uiURL needs a {namespace} expression and no {parent} or {organization} without agentPlatformOrganizations.enabled: installation model links name the kagent namespace, and agent-manager refuses any other template" -}}
 {{- end -}}
 {{- end -}}

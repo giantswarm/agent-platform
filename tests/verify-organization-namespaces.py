@@ -255,6 +255,21 @@ def check_meta(chart):
     organization_only = "https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}"
     r = meta(chart, *ON, "--set-literal", f"agent-manager.credentials.uiURL={organization_only}")
     expect(r.returncode == 0, "on, an organization-only credential form without {namespace} renders")
+    for range_ in (">=3.0.0 <4.0.0", "3.0.0", ">=3.1.0-rc.10 <4.0.0-0"):
+        refused = meta(chart, *ON, *installation_forms, "--set", f"components.agent-manager.versionRange={range_}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL with a {namespace} expression needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11" in refused.stderr,
+               f"on, a credential form naming {{namespace}} needs agent-manager 3.1.0-rc.11 or later ({range_})")
+    r = meta(chart, *ON, *installation_forms)
+    expect(r.returncode == 0, "on, a credential form naming {namespace} renders with the default range")
+    r = meta(chart, *ON, "--set", "components.agent-manager.versionRange=>=3.0.0 <4.0.0",
+             "--set-literal", f"agent-manager.credentials.uiURL={organization_only}")
+    expect(r.returncode == 0, "on, an organization-only credential form keeps any agent-manager floor")
+    for switch, template in (([], "https://portal.example.com/c/{namespace}/{operation}{#namespace}"),
+                             ([], "https://portal.example.com/c/{namespace}/{operation}#form"),
+                             (ON, "https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}{#x}")):
+        refused = meta(chart, *switch, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL must not contain #" in refused.stderr,
+               f"a credential form with a fragment is refused ({template})")
     for setting in ("agent-manager.oauth.enabled", "agent-manager.oauth.downstream.enabled"):
         refused = meta(chart, *installation_forms, "--set", f"{setting}=false")
         expect(refused.returncode != 0 and "agent-manager.credentials.uiURL needs agent-manager.oauth.enabled" in refused.stderr,
