@@ -4939,7 +4939,7 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
+      allowPrivateURLs: false
     sso:
       allowPrivateIPs: true
     downstream:
@@ -5150,7 +5150,7 @@ vm-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
+      allowPrivateURLs: false
     sso:
       allowPrivateIPs: true
   muster:
@@ -5284,7 +5284,7 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
+      allowPrivateURLs: false
     sso:
       allowPrivateIPs: true
     downstream:
@@ -5490,7 +5490,7 @@ skill-manager:  # @schema skipProperties: true; additionalProperties: true
   oauth:
     enabled: true
     dex:
-      allowPrivateURLs: true
+      allowPrivateURLs: false
     sso:
       allowPrivateIPs: true
   muster:
@@ -5561,7 +5561,7 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
+      allowPrivateURLs: false
     sso:
       allowPrivateIPs: true
     downstream:

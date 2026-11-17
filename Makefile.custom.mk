@@ -2295,6 +2295,10 @@ verify-worker-image: ## Assert the Substrate worker image follows the chart's ow
 	@python3 tests/verify-worker-image.py $(CHART_DIR)
 	@echo "ok: $@"
 
+.PHONY: verify-manager-oauth-settings
+verify-manager-oauth-settings: ## Assert the five managers disable the obsolete Dex private-URL opt-in in both chart defaults and their rendered HelmReleases, preserving the separate forwarded-token JWKS policy.
+	@python3 tests/verify-manager-identity.py --oauth-settings-only $(CHART_DIR) $(CONNECTIVITY_DIR) $(VM)
+
 .PHONY: verify-managers
 verify-managers: ## Assert the model-manager / agent-manager wiring (routes, JWT policies, network policies in both flavors) and its guards, the managers' OAuth inputs (skill-manager's included) derived from muster's login (giantswarm/agent-platform#484), and the metrics port of model-manager, agent-manager and cluster-manager (observability.metrics.port, only while observability.metrics.enabled) admitted from the cluster entity, never the API port, in both flavors, with their ServiceMonitors on in the meta render and carrying the tenant label (giantswarm/giantswarm#36711).
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"

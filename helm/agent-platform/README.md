@@ -1367,7 +1367,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | model-manager.mcp.enabled | bool | `true` |  |
 | model-manager.oauth.enabled | bool | `true` |  |
 | model-manager.oauth.provider | string | `"dex"` |  |
-| model-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| model-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | model-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | model-manager.oauth.downstream.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.enabled | bool | `true` |  |
@@ -1400,7 +1400,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | vm-manager.persistence.create | bool | `false` |  |
 | vm-manager.oauth.enabled | bool | `true` |  |
 | vm-manager.oauth.provider | string | `"dex"` |  |
-| vm-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| vm-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | vm-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | vm-manager.muster.mcpServer.enabled | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1429,7 +1429,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |
 | agent-manager.oauth.provider | string | `"dex"` |  |
-| agent-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| agent-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | agent-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | agent-manager.oauth.downstream.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.enabled | bool | `true` |  |
@@ -1475,7 +1475,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | skill-manager.observability.otel.protocol | string | `"auto"` |  |
 | skill-manager.observability.otel.headers | string | `"auto"` |  |
 | skill-manager.oauth.enabled | bool | `true` |  |
-| skill-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| skill-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | skill-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | skill-manager.muster.mcpServer.enabled | bool | `true` |  |
 | skill-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1491,7 +1491,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | cluster-manager.mcp.enabled | bool | `true` |  |
 | cluster-manager.oauth.enabled | bool | `true` |  |
 | cluster-manager.oauth.provider | string | `"dex"` |  |
-| cluster-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| cluster-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | cluster-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | cluster-manager.oauth.downstream.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
