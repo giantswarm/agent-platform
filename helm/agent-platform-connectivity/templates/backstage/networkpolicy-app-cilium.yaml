@@ -43,7 +43,7 @@ spec:
         {{- range $edgeGateways }}
         - matchLabels:
             {{- include "agent-platform.route.envoyPeer" . | fromJson | toYaml | nindent 12 }}
-            io.kubernetes.pod.namespace: {{ .namespace }}
+            io.kubernetes.pod.namespace: {{ .proxyNamespace }}
         {{- end }}
       toPorts:
         - ports:

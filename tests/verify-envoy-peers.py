@@ -12,7 +12,11 @@ CiliumNetworkPolicy of the connectivity chart is read:
 
 - every selector (matchLabels) that selects Envoy pods carries both owning
   labels, a selector with one owning label carries the other, and the
-  namespace it looks for the pods in is the owning Gateway's;
+  namespace it looks for the pods in is where Envoy Gateway runs the proxy
+  (giantswarm/agent-platform#1393): networkPolicy.envoyGateway.proxyNamespace,
+  envoy-gateway-system by default (Envoy Gateway's ControllerNamespace deploy
+  mode, whatever namespace the Gateway is in), the owning Gateway's own
+  namespace when the value is empty (the GatewayNamespace deploy mode);
 - each shape's policies select exactly the Gateways the routes they follow
   attach to: the values the chart attaches the routes with
   (global.gatewayApi.parentRefs, ingress.parentRefs, backstage.parentRefs,
@@ -65,8 +69,19 @@ SUBSTRATE = ["--set", "components.substrate.enabled=true", "--set", "components.
 KAGENT_UI = ["--set", "components.kagent.enabled=true", "--set", "kagent.namespaceOverride=kagent",
              "--set", "kagent.oauth2-proxy.enabled=true", "--set", "kagent.uiRoute.enabled=true"]
 WORKSPACES = ["--set", "components.workspace-manager.enabled=true", "-f", "tests/fixtures/workspaces-values.yaml"]
+# A Gateway outside the Envoy Gateway controller's namespace, every route on it.
+EDGE = ("edge", "edge-system")
+ON_EDGE = [*VM, *IDENTITY, *SUBSTRATE, *KAGENT_UI, *WORKSPACES, "--set", "components.backstage.enabled=true",
+           "--set", "kagent.uiRoute.hostname=kagent.ci.example.com",
+           "--set", f"kagent.uiRoute.parentRef.name={EDGE[0]}", "--set", f"kagent.uiRoute.parentRef.namespace={EDGE[1]}",
+           "--set", f"global.gatewayApi.parentRefs[0].name={EDGE[0]}", "--set", f"global.gatewayApi.parentRefs[0].namespace={EDGE[1]}"]
+ON_EDGE_WANT = {"cilium": {"backstage": {EDGE}, "substrate-atenet-egress": {EDGE}, "oauth2-proxy-ingress": {EDGE},
+                           "workspace-manager-ingress": {EDGE}},
+                "kubernetes": {"backstage": {EDGE}, "backstage-egress": {EDGE}, "substrate-atenet-egress-egress": {EDGE},
+                               "workspace-manager-ingress": {EDGE}}}
 
-# name, flags, flavours, {policy name (less the prefix): {(gateway, namespace), ...}}
+# name, flags, flavours, {policy name (less the prefix): {(gateway, namespace), ...}}[, the namespace
+# the proxy pods are selected in: EG unless the shape names one, None for the Gateway's own]
 SHAPES = [
     ("the portal: its own route on the public Gateway, the app-config's hostnames on muster's internal one",
      [*VM, *IDENTITY, *GATEWAYS, "--set", "components.backstage.enabled=true"],
@@ -108,6 +123,12 @@ SHAPES = [
       "--set", f"workspaceManager.route.parentRefs[0].name={PUBLIC[0]}", "--set", f"workspaceManager.route.parentRefs[0].namespace={EG}"],
      {"cilium": {"workspace-manager-ingress": {PUBLIC}},
       "kubernetes": {"workspace-manager-ingress": {PUBLIC}}}),
+    ("every route on a Gateway in edge-system, Envoy Gateway's default deploy mode: the proxy runs in envoy-gateway-system",
+     ON_EDGE, ON_EDGE_WANT, EG),
+    ("every route on a Gateway in edge-system, the GatewayNamespace deploy mode (proxyNamespace empty): the proxy runs in edge-system",
+     [*ON_EDGE, "--set", "networkPolicy.envoyGateway.proxyNamespace="], ON_EDGE_WANT, None),
+    ("every route on a Gateway in edge-system, Envoy Gateway run in a namespace of its own (proxyNamespace gateways)",
+     [*ON_EDGE, "--set", "networkPolicy.envoyGateway.proxyNamespace=gateways"], ON_EDGE_WANT, "gateways"),
 ]
 
 
@@ -152,9 +173,10 @@ def selectors(node, own_namespace):
             yield from selectors(item, own_namespace)
 
 
-def envoy_gateways(policy: dict, where: str) -> set:
+def envoy_gateways(policy: dict, where: str, proxy_namespace) -> set:
     """The owning Gateways a policy selects Envoy pods of; fails on a selector without its owner,
-    or one that looks for the pods in another namespace than the owning Gateway's."""
+    or one that looks for the pods in another namespace than proxy_namespace (the owning
+    Gateway's own when None)."""
     found = set()
     # The rules' peers; the policy's own subject (podSelector, endpointSelector) is not a peer.
     rules = {k: v for k, v in (policy.get("spec") or {}).items() if k not in ("podSelector", "endpointSelector")}
@@ -164,9 +186,10 @@ def envoy_gateways(policy: dict, where: str) -> set:
             if not (labels.get(OWNER) and labels.get(OWNER_NS)):
                 fail(f"{where}: a selector picks Envoy pods without naming their Gateway "
                      f"({OWNER} and {OWNER_NS}): {labels}")
-            if namespace != labels[OWNER_NS]:
+            expected = proxy_namespace or labels[OWNER_NS]
+            if namespace != expected:
                 fail(f"{where}: a selector looks for the proxy pods of {labels[OWNER_NS]}/{labels[OWNER]} "
-                     f"in the namespace {namespace}: {labels}")
+                     f"in the namespace {namespace}, not in {expected}: {labels}")
             found.add((str(labels[OWNER]), str(labels[OWNER_NS])))
     return found
 
@@ -175,7 +198,8 @@ def main(argv: list) -> int:
     if len(argv) != 1:
         sys.exit(__doc__)
     chart = argv[0]
-    for name, flags, flavours in SHAPES:
+    for name, flags, flavours, *rest in SHAPES:
+        proxy_namespace = rest[0] if rest else EG
         for flavour, want in flavours.items():
             docs = render(chart, [*flags, "--set", f"networkPolicy.flavor={flavour}"])
             got = {}
@@ -183,7 +207,7 @@ def main(argv: list) -> int:
                 if doc.get("kind") not in POLICY_KINDS:
                     continue
                 where = f"{name}, {flavour}: {doc['kind']} {doc['metadata']['name']}"
-                gateways = envoy_gateways(doc, where)
+                gateways = envoy_gateways(doc, where, proxy_namespace)
                 if gateways:
                     got[doc["metadata"]["name"].removeprefix(PREFIX)] = gateways
             if got != want:

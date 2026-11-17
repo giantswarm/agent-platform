@@ -1239,6 +1239,8 @@ spec:
       additionalEgressCIDRs: []
       additionalEgressFQDNs: []
       enabled: true
+      envoyGateway:
+        proxyNamespace: envoy-gateway-system
       flavor: kubernetes
       kubernetes:
         apiServerCIDR: 0.0.0.0/0

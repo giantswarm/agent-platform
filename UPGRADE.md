@@ -15,6 +15,17 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the Envoy peer is looked for where Envoy Gateway runs the proxy)
+
+giantswarm/agent-platform#1393: the network policies that admit or reach a front Gateway's Envoy proxy select its pods in `networkPolicy.envoyGateway.proxyNamespace` (default `envoy-gateway-system`), not in the Gateway's own namespace. In Envoy Gateway's default deploy mode (`ControllerNamespace`) every Gateway's proxy runs in the controller's namespace, so a Gateway outside `envoy-gateway-system` was cut off before.
+
+### Operator action
+
+- **None** when the Gateways of `global.gatewayApi.parentRefs` (and of the routes' own parentRefs) live in `envoy-gateway-system`, as on every fleet installation: the policies select the same pods.
+- **Envoy Gateway in another namespace**: set `networkPolicy.envoyGateway.proxyNamespace` to that namespace.
+- **Envoy Gateway in the `GatewayNamespace` deploy mode**: set `networkPolicy.envoyGateway.proxyNamespace: ""`, so the policies look for each proxy in its Gateway's namespace, as before.
+- With either change, the mcp-* server charts that serve a public route still admit the proxies through their own `ciliumNetworkPolicy.ingress.gatewayPeers` (`envoy-gateway-system` by default): set the same namespace there, or add it to `networkPolicy.mcpBackends.<key>.additionalPeers` ([MCP backend network policy](docs/mcp-backend-network-policy.md)).
+
 ## \<current\> → \<next\> (Secret deletes answered with the Secret are held in every namespace)
 
 giantswarm/agent-platform#1365: the ValidatingAdmissionPolicy `agent-platform-secret-deletes` (Fail, Deny) replaces `agent-platform-organization-secret-deletes`. It renders whenever kagent is on, `agentPlatformOrganizations.enabled` on or off, and matches Secret deletes in every namespace, not only in organization namespaces: `agent-platform:admin` can be bound anywhere. A delete the API server answers with the Secret (Orphan or Foreground propagation, `orphanDependents: true`, a Secret a finalizer holds, or a DeleteCollection) is made only by a requester that may already read that Secret (`get`, `list`, `watch` or `patch`), a dry run included.
