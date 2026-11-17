@@ -24,6 +24,7 @@ giantswarm/agent-platform#1393: the network policies that admit or reach a front
 - **None** when the Gateways of `global.gatewayApi.parentRefs` (and of the routes' own parentRefs) live in `envoy-gateway-system`, as on every fleet installation: the policies select the same pods.
 - **Envoy Gateway in another namespace**: set `networkPolicy.envoyGateway.proxyNamespace` to that namespace.
 - **Envoy Gateway in the `GatewayNamespace` deploy mode**: set `networkPolicy.envoyGateway.proxyNamespace: ""`, so the policies look for each proxy in its Gateway's namespace, as before.
+- With either change, the mcp-* server charts that serve a public route still admit the proxies through their own `ciliumNetworkPolicy.ingress.gatewayPeers` (`envoy-gateway-system` by default): set the same namespace there, or add it to `networkPolicy.mcpBackends.<key>.additionalPeers` ([MCP backend network policy](docs/mcp-backend-network-policy.md)).
 
 ## \<current\> → \<next\> (Secret deletes answered with the Secret are held in every namespace)
 

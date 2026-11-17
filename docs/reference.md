@@ -240,7 +240,7 @@ These are the main non-component settings. Component switches are in [Enabling a
 | `gateway.parameters.serviceType` | `ClusterIP` | Data-plane Service type. |
 | `networkPolicy.enabled` | `true` | Master switch for network policies. |
 | `networkPolicy.flavor` | `auto` | `cilium` where `cilium.io/v2` is served, otherwise `kubernetes`. muster and Valkey follow. |
-| `networkPolicy.envoyGateway.proxyNamespace` | `envoy-gateway-system` | The namespace where the network policies look for a front Gateway's Envoy proxy pods (by the owning-Gateway labels). Change it when Envoy Gateway runs in another namespace; set it empty when Envoy Gateway runs in its `GatewayNamespace` mode, which puts each proxy in its Gateway's own namespace. |
+| `networkPolicy.envoyGateway.proxyNamespace` | `envoy-gateway-system` | The namespace where the network policies look for a front Gateway's Envoy proxy pods (by the owning-Gateway labels). Change it when Envoy Gateway runs in another namespace; set it empty when Envoy Gateway runs in its `GatewayNamespace` mode, which puts each proxy in its Gateway's own namespace. The mcp-* server charts admit the proxies through their own `ciliumNetworkPolicy.ingress.gatewayPeers`: set the same namespace there ([MCP backend network policy](mcp-backend-network-policy.md)). |
 | `kyvernoPolicies.enabled` | `auto` | Renders the Kyverno objects where `kyverno.io/v1` is served. |
 | `global.observability.metrics.serviceMonitor.enabled` | `auto` | Renders monitors where `monitoring.coreos.com/v1` is served. See [Observability](#observability). |
 | `agentManager.route.enabled` | `false` | Exposes agent-manager's REST API at `https://agentgateway.<domain>/agent-manager`. |

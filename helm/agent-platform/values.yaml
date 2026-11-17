@@ -2451,9 +2451,12 @@ networkPolicy:
   #   additionalEgressFQDNs:
   #     - matchName: dex.example.gigantic.io
   additionalEgressFQDNs: []
-  # The proxy pods of the front Gateways (the Envoy edge): the policies that
-  # admit or reach a Gateway's proxy select its pods by the owning-Gateway
-  # labels in this namespace, where Envoy Gateway runs them.
+  # The proxy pods of the front Gateways (the Envoy edge): the connectivity
+  # chart's policies that admit or reach a Gateway's proxy select its pods by
+  # the owning-Gateway labels in this namespace, where Envoy Gateway runs them.
+  # The mcp-* server charts admit the proxies through their own
+  # ciliumNetworkPolicy.ingress.gatewayPeers (docs/mcp-backend-network-policy.md):
+  # set the same namespace there.
   envoyGateway:
     # -- Where Envoy Gateway runs the Gateways' proxy pods. The default is the
     # controller's namespace of Envoy Gateway's default deploy mode
