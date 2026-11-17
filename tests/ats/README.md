@@ -165,6 +165,34 @@ on the same commit: 18.1 min; the median of the 144 green runs before it, 19.2).
 | the functional scenario (pytest) | 231 |
 | the whole `execute-chart-tests` job | 11:00 min |
 
+## CI execution and failure handling
+
+The render job `test-ingress-modes` uses four independent CircleCI containers.
+`make verify-all` still discovers every `verify-*` target from
+`Makefile.custom.mk`, excluding only the existing chained and release-only
+targets. `tests/run-verify.py` sorts that list and assigns positions `i, i+N, …`
+to shard `i` of `N`: every assertion runs once, and a new target is included
+automatically. Targets run serially within each shard; checkouts, downloaded
+tools and temporary files are not shared between CI nodes. Each invocation
+gets a private temporary directory for both Make's scratch renders and Python's
+temporary files. No test result is cached and no failed target is retried.
+
+Locally, `make verify-all` runs the whole suite. To reproduce a CI shard:
+
+```sh
+make verify-all VERIFY_SHARD_INDEX=0 VERIFY_SHARD_TOTAL=4
+```
+
+The Kubernetes smoke and functional scenarios stay sequential on one cluster:
+the second scenario verifies reinstalling over the first scenario's retained
+state. The smoke's endpoint fixtures depend explicitly on `app_deployment`.
+If installation fails, they never wait for endpoints of the missing deployment.
+The auth tests wait on the existing bounded health/route readiness predicates
+and execute their assertions once, without pytest's blanket flaky reruns.
+`test_fixture_dependencies.py` verifies successful forwarding and cleanup, the
+external-endpoint path, and failure propagation with no endpoint wait or second
+install, using the real fixture definitions in a sandbox pytest session.
+
 ## Render assertions (no cluster)
 
 The three shapes of the chart and the `auto` knobs are asserted offline, in CI
@@ -312,7 +340,7 @@ roadmap#4348) carried the platform's two product tests in its
 | `_dump_auth_logs` on a failed login | `dump_auth` (muster, lab-dex, agent-manager logs) |
 | `test_kagent_agent_reaches_ready` — placeholder `kagent-anthropic` Secret, a declarative `Agent` against `default-model-config`, Ready within 600 s | `test_declarative_agent_reaches_ready` — the same Secret, the ModelConfig `ats-model` (`values-kagent.yaml`), the same timeout, on the kagent line: an `Agent` naming the platform Harness with its template inline, Ready; preceded by `test_substrate_runs_a_worker_for_the_platform_harness` (the runtime the standalone's kind cluster never had) |
 | — | new: `test_agent_manager_create_agent_reaches_a_ready_helmrelease` — the Flux write path the standalone's kind cluster never had; the Generic agent chart's HelmRelease, the `Agent` Ready on the Harness, the agent's `RemoteMCPServer` Accepted |
-| `@pytest.mark.flaky(reruns=2, reruns_delay=30)` on the auth tests | the same marker on the three auth tests (`reruns_delay=20`) |
+| `@pytest.mark.flaky(reruns=2, reruns_delay=30)` on the auth tests | none: the auth tests run once and wait on the `muster` fixture's bounded readiness checks |
 | `test_upgrade` — the stable chart from the OCI catalog, `upgrade-hook.sh` re-applies the candidate's CRDs, `helm upgrade` to the candidate, readiness + auth re-asserted; `post-hook.sh` uninstalls the smoke's release first | no longer applies: this chart's day 2 is self-management (the fixpoint and the refused CLI are asserted), Helm never upgrades `crds/` and the Flux Operator owns the Flux CRDs; the component CRDs are `CreateReplace` on their HelmReleases. The upgrade scenario stays skipped (`.ats/main.yaml`) |
 | the heartbeat log line every minute (CircleCI's no-output timeout) | `log_heartbeat`, module-scoped, autouse |
 
