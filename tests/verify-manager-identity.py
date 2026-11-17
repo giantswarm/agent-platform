@@ -146,7 +146,31 @@ def idp_rules(docs: list[dict], name: str) -> list[dict]:
     return rules
 
 
+def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> None:
+    for chart in (meta, conn):
+        with open(f"{chart}/values.yaml") as source:
+            values = yaml.safe_load(source)
+        for name in MANAGERS:
+            if chart == conn and name in NOT_IN_CONNECTIVITY:
+                continue
+            manager_oauth = values[name]["oauth"]
+            expect(f"{chart}: {name} obsolete Dex opt-in", manager_oauth["dex"].get("allowPrivateURLs"), False)
+            expect(f"{chart}: {name} separate JWKS policy", manager_oauth["sso"].get("allowPrivateIPs"), True)
+        expect(f"{chart}: workspace-manager separate setting", values["workspace-manager"]["oauth"]["dex"].get("allowPrivateURLs"), True)
+
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN])
+    for name in MANAGERS:
+        expect(f"{name} HelmRelease obsolete Dex opt-in", oauth(rels, name)["dex"].get("allowPrivateURLs"), False)
+        if name not in NOT_IN_CONNECTIVITY:
+            forwarded = rels["agent-platform-connectivity"][name]["oauth"]
+            expect(f"connectivity {name} obsolete Dex opt-in", forwarded["dex"].get("allowPrivateURLs"), False)
+    print("ok: all five manager releases disable the obsolete Dex opt-in; independent JWKS policies remain separate")
+
+
 def main() -> None:
+    if sys.argv[1] == "--oauth-settings-only":
+        verify_private_issuer_defaults(sys.argv[2], sys.argv[3], sys.argv[4:])
+        return
     meta, conn, base = sys.argv[1], sys.argv[2], sys.argv[3:]
 
     print("--> roster: every component that forwards an oauth block takes muster's login")
@@ -292,7 +316,7 @@ def main() -> None:
     print("--> no login named (muster's issuer unset): nothing filled, the guard stays silent")
     rels = releases(meta, [*base, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
                                         "kagent.controller.image.repository=giantswarm/kagent/controller")])
-    expect("model-manager oauth.dex", oauth(rels, "model-manager").get("dex"), {"allowPrivateURLs": True})
+    expect("model-manager oauth.dex", oauth(rels, "model-manager").get("dex"), {"allowPrivateURLs": False})
     result = connectivity(conn, rels["agent-platform-connectivity"], base)
     if result.returncode != 0:
         sys.exit(f"FAIL: no login: the connectivity render failed\n{result.stderr}")

@@ -84,7 +84,7 @@ spec:
       enabled: false
     oauth:
       dex:
-        allowPrivateURLs: true
+        allowPrivateURLs: false
       downstream:
         enabled: true
       enabled: true
@@ -170,7 +170,7 @@ spec:
         enabled: false
       oauth:
         dex:
-          allowPrivateURLs: true
+          allowPrivateURLs: false
         downstream:
           enabled: true
         enabled: true
@@ -1096,7 +1096,7 @@ spec:
         enabled: false
       oauth:
         dex:
-          allowPrivateURLs: true
+          allowPrivateURLs: false
         downstream:
           enabled: true
         enabled: true
@@ -1588,7 +1588,7 @@ spec:
         enabled: false
       oauth:
         dex:
-          allowPrivateURLs: true
+          allowPrivateURLs: false
         enabled: true
         provider: dex
         sso:
@@ -2528,7 +2528,7 @@ spec:
       enabled: false
     oauth:
       dex:
-        allowPrivateURLs: true
+        allowPrivateURLs: false
       downstream:
         enabled: true
       enabled: true
@@ -2782,7 +2782,7 @@ spec:
       - kagent
     oauth:
       dex:
-        allowPrivateURLs: true
+        allowPrivateURLs: false
       enabled: true
       sso:
         allowPrivateIPs: true
@@ -3145,7 +3145,7 @@ spec:
       enabled: false
     oauth:
       dex:
-        allowPrivateURLs: true
+        allowPrivateURLs: false
       enabled: true
       provider: dex
       sso:

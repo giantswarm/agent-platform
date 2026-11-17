@@ -94,3 +94,11 @@ A model served by the serving slice ([reference](reference.md#the-serving-slice-
 POST https://models.<domain>/<namespace>/<model>/v1/chat/completions
 Authorization: Bearer <id_token>
 ```
+
+## OAuth issuer connectivity
+
+The model-manager, agent-manager, vm-manager, cluster-manager and skill-manager defaults set `oauth.dex.allowPrivateURLs: false`. Their Dex discovery client can reach an operator-configured issuer that resolves to a private address without this opt-in and follows `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`. An issuer discovery failure calls for checking DNS, egress, proxy settings and certificate trust, rather than asking the person to sign in again. Keep HTTPS, certificate verification and the exact configured issuer identity intact; configure the installation's internal CA through `global.identity.ca.secretName` when needed.
+
+When a manager refuses `--allow-private-oauth-urls=true` or its chart value `oauth.dex.allowPrivateURLs: true`, remove the old opt-in or set the chart value to `false`. The platform defaults already use `false`, which also works with the earlier manager releases. This changes no JWKS permission: `oauth.sso.allowPrivateIPs` controls the separate fetch that validates forwarded ID tokens. Only that fetch needs its private-address permission when its configured JWKS endpoint is private. Do not change it to repair discovery or a certificate error.
+
+Muster's operation-specific setting is `muster.muster.oauth.server.dex.allowPrivateIPJWKS` for forwarded-ID-token JWKS fetching. When upgrading to the release that rejects `dex.allowPrivateIPOIDC: true`, replace that old key with `dex.allowPrivateIPJWKS` and preserve its intended boolean value. Dex discovery, token and userinfo calls need neither switch. The renamed field and the false-only old key are a configuration migration; they do not make ID-token forwarding an MCP authorization mechanism.
