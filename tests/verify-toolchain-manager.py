@@ -177,7 +177,9 @@ def main(meta: str, connectivity: str) -> int:
 
     # muster's login stands in for global.identity.
     _, vals, _ = release(meta, [*ON, "--set", "global.identity.issuerUrl=", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller", "--set", "muster.muster.oauth.server.dex.issuerUrl=https://login.ci.example.com",
-                                "--set", "muster.muster.oauth.server.dex.clientId=muster-client"])
+                                "--set", "muster.muster.oauth.server.dex.clientId=muster-client",
+                                # This login names no Secret and no domain, which the skill-manager's absence guard refuses.
+                                "--set", "components.skill-manager.enabled=false"])
     must_have(vals, ("    issuerURL: https://login.ci.example.com\n", "  trustedAudiences:\n  - muster-client\n"), "the release values from muster's login")
     _, vals, _ = release(meta, [*ON, *IDENTITY, "--set", "global.identity.ca.secretName=dex-ca"])
     must_have(vals, ("    caSecret:\n      key: ca.crt\n      name: dex-ca\n",), "the release values with global.identity.ca")
