@@ -8,9 +8,10 @@ under a page; everything longer is a skill.
 ## The Muster meta-tool paragraph (every tooled agent)
 
 Every agent with tools needs a short paragraph in its prompt that states Muster's `call_tool`
-contract — the meta-tools are its only functions, every `x_*`, `workflow_*` and `core_*` is a `name`
-passed to `call_tool`, always the full catalogue name from `filter_tools` — and that a workflow comes
-first where one fits. The contract itself is the `agent-platform-tools` skill ("The `call_tool`
+contract — the meta-tools are its only Muster functions, every `x_*`, `workflow_*` and `core_*` is a
+`name` passed to `call_tool`, always the full catalogue name from `filter_tools` — and that a workflow
+comes first where one fits. An agent with organization connectors (`connectors`) also has their
+tools as functions of their own, called directly; say so in the paragraph. The contract itself is the `agent-platform-tools` skill ("The `call_tool`
 contract"); write it in your own words there, and give an agent that touches family tools (an
 instance argument such as `management_cluster`) that skill rather than a copy.
 

@@ -117,7 +117,7 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   `list_agents` return them. The agent calls the connector itself with the connector's credential;
   its host needs no `EgressPolicy`. Choose only a usable one (`agent-platform-tools`). Refused: a
   name that does not exist, an agent on a coding Harness, in the platform namespace or on a
-  workload cluster, and an agent's own Muster `RemoteMCPServer`.
+  workload cluster, and any agent's Muster `RemoteMCPServer` (named like its agent).
 - **Toolchains and workspace**: `defaultToolchains` and `defaultWorkspace`, the smallest set the job
   needs, and only where the installation offers them (both are opt-in: `x_toolchain-manager_*`,
   `x_workspace-manager_*` in `filter_tools`); otherwise leave them out.

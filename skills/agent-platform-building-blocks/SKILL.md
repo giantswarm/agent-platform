@@ -22,7 +22,8 @@ suggest the one that gets them to their goal. Mechanics (names, sign-in, selecto
 
 ## Connectors
 
-Each connector offers tools behind Muster, the platform's one tool gateway. Every call runs as the
+Each connector of **Customize** → **Connectors** offers tools behind Muster, the platform's tool
+gateway. Every call runs as the
 person: what they may do in the service is what the agent may do there. Some connectors ask the
 person to sign in once with their own account; until then their tools are hidden for that person.
 

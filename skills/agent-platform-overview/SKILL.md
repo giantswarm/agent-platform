@@ -21,7 +21,8 @@ For newcomers: `agent-platform-building-blocks`, `agent-platform-portal`, `agent
 The Agent Platform runs AI agents in production on the installation's own Kubernetes clusters. It has
 two capabilities on one foundation: **governed tool access** — every tool call, from an IDE, the Dev
 Portal, Slack or an agent, goes through one gateway path (agentgateway in front of **Muster**, the MCP
-aggregator that enforces sign-in and fans out to the MCP servers behind it) — and an **agent runtime**
+aggregator that enforces sign-in and fans out to the MCP servers behind it; an organization's own
+connector is the one exception, called by the agent directly) — and an **agent runtime**
 that runs agents as Kubernetes resources, each versioned as one unit (prompt, model, skills, toolset).
 The foundation is the cluster and the installation's identity provider: single sign-on, Kubernetes RBAC
 and GitOps apply to agents as they apply to people. On the tool path an agent holds no credential of
@@ -78,7 +79,9 @@ no credential of their own on the tool path and act with the person's identity e
 each person only the tools of the servers they are signed in to, and each backend's own authorization —
 Kubernetes RBAC, a service's own accounts — decides what a call may do. The audit log names the person.
 What an agent's model may discover and call is bounded by its toolset, which never widens what the
-person may reach (the `agent-platform-tools` skill has the mechanics).
+person may reach (the `agent-platform-tools` skill has the mechanics). The exception is an
+organization's own connector: the agent calls it with the connector's shared credential, not as the
+person.
 
 ## How an agent is built and runs
 
@@ -86,7 +89,7 @@ An agent is one Flux `HelmRelease` of the `agent` chart, rendered into a kagent 
 template and names the `Harness` that runs it. The Harness boots it once and takes a **golden
 snapshot**; the Agent reports `Ready`. Every conversation is an actor restored from that snapshot onto a
 Substrate worker, running its turns in a sandbox and sending tool calls to Muster as the person, within
-the agent's toolset. Any change is a new revision: running sessions keep theirs, new sessions start
+the agent's toolset (and to its organization's connectors directly). Any change is a new revision: running sessions keep theirs, new sessions start
 from the new one.
 
 ## Look at the live platform

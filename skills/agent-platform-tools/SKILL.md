@@ -111,10 +111,12 @@ explanation or a hand-made Secret. Check with `x_agent-manager_list_organization
 Whether an organization's connector is usable, from agent-manager 3.3.0: in
 `x_agent-manager_list_organization_connectors`, each credential's `state` is `present` or
 `missing` (whether its Secret exists, checked by a dry-run create as you; not whether it holds the
-key) or `unknown` (you may not check it), and each connector's `accepted`, `reason` and `message`
-are kagent's tool discovery. Usable: every credential `present` and `accepted: true`.
-`accepted: false` is a connector that does not work (a missing key, say): tell the person its
-`message`. `accepted: null`: not reported yet.
+key) or `unknown` (the check failed, or you may not create that Secret: an editor gets `unknown`),
+and each connector's `accepted`, `reason` and `message` are kagent's tool discovery. Usable:
+`accepted: true` and no credential `missing`; `unknown` does not stop it. `accepted: false` is a
+connector that does not work (a missing key, say): tell the person its `message`.
+`accepted: null`: not reported yet. The list also holds the agents' own Muster
+`RemoteMCPServer`s, each named like its agent: they are no connectors.
 
 To replace a model key or an egress credential, read its Secret from the list:
 `x_agent-manager_list_model_configs` (each model with a key) and
