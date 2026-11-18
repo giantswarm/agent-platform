@@ -110,7 +110,7 @@ spec:
     - toEntities:
         - kube-apiserver
     {{- if $oauthOn }}
-    {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.clusterManager.oauthProvider" .) "issuerUrl" (include "agent-platform.clusterManager.issuerUrl" .)) | trim | nindent 4 }}
+    {{- include "agent-platform.idpEgress.cilium" (dict "ctx" $ "provider" (include "agent-platform.clusterManager.oauthProvider" .) "issuerUrl" (include "agent-platform.clusterManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
     {{- with $wcFQDNs }}
     # The workload clusters' API servers by name.

@@ -1385,15 +1385,55 @@ Usage: include "agent-platform.backstage.edgeGateways" . | fromJsonArray
 {{- end -}}
 
 {{/*
+The in-cluster pods a platform service reaches the login identity provider at,
+as a JSON list of {namespace, matchLabels, ports}
+(giantswarm/agent-platform#1383). An issuer served through an in-cluster
+Gateway whose LoadBalancer address Cilium translates (a private installation)
+is, at policy time, that Gateway's proxy pods on their own port (the Envoy edge
+listens on 10443), not the issuer's name; an in-cluster issuer Service is its
+pods. networkPolicy.identityProvider.inClusterPeers, when set, is the list
+([] renders no in-cluster leg). Unset, the list is derived:
+- the pods of the public Gateway muster's route attaches to
+  (ingress.parentRefs, else the chart-owned edge, else
+  global.gatewayApi.parentRefs; agent-platform.route.edgePeers), on 443 and
+  10443: the Gateway that serves the platform's own hostnames, the one the
+  actors' egress reaches (agent-platform.substrate.egressEdge);
+- for an issuer host that names an in-cluster Service
+  (<service>.<namespace>.svc[.cluster.local], agent-platform.jwks.inCluster),
+  every pod of that namespace on the URL's port (443 for https, 80 for http).
+Usage: include "agent-platform.idpEgress.inClusterPeers" (dict "ctx" $ "issuerUrl" $url) | fromJsonArray
+*/}}
+{{- define "agent-platform.idpEgress.inClusterPeers" -}}
+{{- $ctx := .ctx -}}
+{{- $set := dig "identityProvider" "inClusterPeers" nil ($ctx.Values.networkPolicy | default dict) -}}
+{{- $peers := list -}}
+{{- if not (kindIs "invalid" $set) -}}
+{{- range $set -}}
+{{- $peers = append $peers (dict "namespace" .namespace "matchLabels" (.matchLabels | default dict) "ports" .ports) -}}
+{{- end -}}
+{{- else -}}
+{{- range (include "agent-platform.route.edgePeers" (dict "ctx" $ctx "parentRefs" ($ctx.Values.ingress.parentRefs | default list)) | fromJsonArray) -}}
+{{- $peers = append $peers (dict "namespace" .namespace "matchLabels" .matchLabels "ports" (list 443 10443)) -}}
+{{- end -}}
+{{- $url := urlParse (toString (.issuerUrl | default "")) -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" ($url.hostname | default "") -}}
+{{- if include "agent-platform.jwks.inCluster" $host -}}
+{{- $port := regexFind ":[0-9]+$" ($url.host | default "") | trimPrefix ":" | default (ternary "80" "443" (eq $url.scheme "http")) | int -}}
+{{- $peers = append $peers (dict "namespace" (index (splitList "." $host) 1) "matchLabels" dict "ports" (list $port)) -}}
+{{- end -}}
+{{- end -}}
+{{- $peers | toJson -}}
+{{- end -}}
+
+{{/*
 Cilium egress rules from a platform service to the login identity provider:
 the hosts of agent-platform.idpHosts (discovery, JWKS, userinfo, token) by
-name on 443 (through the DNS proxy rule the caller renders), plus the cluster
-entity on 443 and 10443 — an issuer served through an in-cluster Gateway whose
-LoadBalancer address Cilium translates to the data-plane pods (the Envoy edge
-listens on 10443), or an in-cluster issuer Service, is `cluster` at policy
-time, not the name. Mirrors the klaus-gateway OBO and oauth2-proxy egress.
+name on 443 (through the DNS proxy rule the caller renders), plus the
+in-cluster peers of agent-platform.idpEgress.inClusterPeers, each by its
+namespace and pod labels on its ports — never the cluster entity, which would
+open every in-cluster endpoint on those ports (giantswarm/agent-platform#1383).
 Rendered as YAML list items; the caller provides `egress:` and the indentation.
-Usage: include "agent-platform.idpEgress.cilium" (dict "provider" "dex" "issuerUrl" $url)
+Usage: include "agent-platform.idpEgress.cilium" (dict "ctx" $ "provider" "dex" "issuerUrl" $url)
 */}}
 {{- define "agent-platform.idpEgress.cilium" -}}
 {{- with (include "agent-platform.idpHosts" . | fromJsonArray) }}
@@ -1406,14 +1446,20 @@ Usage: include "agent-platform.idpEgress.cilium" (dict "provider" "dex" "issuerU
         - port: "443"
           protocol: TCP
 {{- end }}
-- toEntities:
-    - cluster
+{{- range (include "agent-platform.idpEgress.inClusterPeers" . | fromJsonArray) }}
+- toEndpoints:
+    - matchLabels:
+        {{- with .matchLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        io.kubernetes.pod.namespace: {{ .namespace }}
   toPorts:
     - ports:
-        - port: "443"
+        {{- range .ports }}
+        - port: {{ . | toString | quote }}
           protocol: TCP
-        - port: "10443"
-          protocol: TCP
+        {{- end }}
+{{- end }}
 {{- end -}}
 
 {{/*

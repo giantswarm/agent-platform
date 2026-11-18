@@ -14088,8 +14088,12 @@ spec:
               - matchPattern: "*"
     - toEntities:
         - kube-apiserver
-    - toEntities:
-        - cluster
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: envoy
+            gateway.envoyproxy.io/owning-gateway-name: x
+            gateway.envoyproxy.io/owning-gateway-namespace: default
+            io.kubernetes.pod.namespace: envoy-gateway-system
       toPorts:
         - ports:
             - port: "443"

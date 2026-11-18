@@ -1244,6 +1244,8 @@ spec:
       envoyGateway:
         proxyNamespace: envoy-gateway-system
       flavor: kubernetes
+      identityProvider:
+        inClusterPeers: null
       kubernetes:
         apiServerCIDR: 0.0.0.0/0
         ipv6:

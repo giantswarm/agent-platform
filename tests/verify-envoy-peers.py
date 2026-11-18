@@ -22,7 +22,10 @@ CiliumNetworkPolicy of the connectivity chart is read:
   (global.gatewayApi.parentRefs, ingress.parentRefs, backstage.parentRefs,
   kagent.uiRoute.parentRef, kagent.controllerRoute.parentRef,
   workspaceManager.route.parentRefs), so a policy
-  cannot pass by selecting nothing.
+  cannot pass by selecting nothing. In the cilium flavour the identity
+  provider egress of the managers and the portal follows muster's route
+  (ingress.parentRefs, giantswarm/agent-platform#1383), and so does the
+  portal's egress to the app-config's hostnames.
 
 Usage: verify-envoy-peers.py CONNECTIVITY_CHART. Needs PyYAML. HELM selects the binary.
 """
@@ -64,6 +67,8 @@ GATEWAYS = [
     "--set", f"global.gatewayApi.parentRefs[0].name={PUBLIC[0]}", "--set", f"global.gatewayApi.parentRefs[0].namespace={EG}",
     "--set", f"ingress.parentRefs[0].name={INTERNAL[0]}", "--set", f"ingress.parentRefs[0].namespace={EG}",
 ]
+# The cilium identity provider egress of a manager on by default: muster's Gateway (ingress.parentRefs).
+IDP = {"model-manager-egress": {INTERNAL}}
 SUBSTRATE = ["--set", "components.substrate.enabled=true", "--set", "components.substrate-crds.enabled=true",
              "--set", "components.kagent.enabled=true", "--set", "muster.enabled=true"]
 KAGENT_UI = ["--set", "components.kagent.enabled=true", "--set", "kagent.namespaceOverride=kagent",
@@ -76,7 +81,8 @@ ON_EDGE = [*VM, *IDENTITY, *SUBSTRATE, *KAGENT_UI, *WORKSPACES, "--set", "compon
            "--set", f"kagent.uiRoute.parentRef.name={EDGE[0]}", "--set", f"kagent.uiRoute.parentRef.namespace={EDGE[1]}",
            "--set", f"global.gatewayApi.parentRefs[0].name={EDGE[0]}", "--set", f"global.gatewayApi.parentRefs[0].namespace={EDGE[1]}"]
 ON_EDGE_WANT = {"cilium": {"backstage": {EDGE}, "substrate-atenet-egress": {EDGE}, "oauth2-proxy-ingress": {EDGE},
-                           "workspace-manager-ingress": {EDGE}},
+                           "workspace-manager-ingress": {EDGE}, "model-manager-egress": {EDGE},
+                           "workspace-manager-egress": {EDGE}},
                 "kubernetes": {"backstage": {EDGE}, "backstage-egress": {EDGE}, "substrate-atenet-egress-egress": {EDGE},
                                "workspace-manager-ingress": {EDGE}}}
 
@@ -85,43 +91,43 @@ ON_EDGE_WANT = {"cilium": {"backstage": {EDGE}, "substrate-atenet-egress": {EDGE
 SHAPES = [
     ("the portal: its own route on the public Gateway, the app-config's hostnames on muster's internal one",
      [*VM, *IDENTITY, *GATEWAYS, "--set", "components.backstage.enabled=true"],
-     {"cilium": {"backstage": {PUBLIC}},
+     {"cilium": {"backstage": {PUBLIC, INTERNAL}, **IDP},
       "kubernetes": {"backstage": {PUBLIC}, "backstage-egress": {INTERNAL}}}),
     ("the portal pinned to the internal Gateway (backstage.parentRefs)",
      [*VM, *IDENTITY, *GATEWAYS, "--set", "components.backstage.enabled=true",
       "--set", f"backstage.parentRefs[0].name={INTERNAL[0]}", "--set", f"backstage.parentRefs[0].namespace={EG}"],
-     {"cilium": {"backstage": {INTERNAL}},
+     {"cilium": {"backstage": {INTERNAL}, **IDP},
       "kubernetes": {"backstage": {INTERNAL}, "backstage-egress": {INTERNAL}}}),
     ("the portal's egress to the kagent controller's route on a Gateway of its own (kagent.controllerRoute.parentRef)",
      [*VM, *IDENTITY, *GATEWAYS, "--set", "components.backstage.enabled=true", "--set", "components.kagent.enabled=true",
       "--set", "kagent.controllerRoute.enabled=true", "--set", "kagent.controllerRoute.jwtAuthentication.enabled=false",
       "--set", "kagent.controllerRoute.hostname=agentgateway.ci.example.com",
       "--set", f"kagent.controllerRoute.parentRef.name={CONTROLLER[0]}", "--set", f"kagent.controllerRoute.parentRef.namespace={EG}"],
-     {"cilium": {"backstage": {PUBLIC}},
+     {"cilium": {"backstage": {PUBLIC, INTERNAL, CONTROLLER}, **IDP},
       "kubernetes": {"backstage": {PUBLIC}, "backstage-egress": {INTERNAL, CONTROLLER}}}),
     ("the actors' egress gateway: muster's route on the internal Gateway",
      [*VM, *IDENTITY, *GATEWAYS, *SUBSTRATE],
-     {"cilium": {"substrate-atenet-egress": {INTERNAL}},
+     {"cilium": {"substrate-atenet-egress": {INTERNAL}, **IDP},
       "kubernetes": {"substrate-atenet-egress-egress": {INTERNAL}}}),
     ("the actors' egress gateway: muster's route on a Gateway of another name",
      [*VM, *IDENTITY, *SUBSTRATE, "--set", "ingress.parentRefs[0].name=edge", "--set", f"ingress.parentRefs[0].namespace={EG}"],
-     {"cilium": {"substrate-atenet-egress": {("edge", EG)}},
+     {"cilium": {"substrate-atenet-egress": {("edge", EG)}, "model-manager-egress": {("edge", EG)}},
       "kubernetes": {"substrate-atenet-egress-egress": {("edge", EG)}}}),
     ("kagent's UI: oauth2-proxy behind the UI route's Gateway (kagent.uiRoute.parentRef)",
      [*VM, *IDENTITY, *GATEWAYS, *KAGENT_UI, "--set", "kagent.uiRoute.hostname=kagent.ci.example.com"],
-     {"cilium": {"oauth2-proxy-ingress": {PUBLIC}}}),
+     {"cilium": {"oauth2-proxy-ingress": {PUBLIC}, **IDP}}),
     ("kagent's UI on the internal Gateway",
      [*VM, *IDENTITY, *GATEWAYS, *KAGENT_UI, "--set", "kagent.uiRoute.hostname=kagent.ci.example.com",
       "--set", f"kagent.uiRoute.parentRef.name={INTERNAL[0]}"],
-     {"cilium": {"oauth2-proxy-ingress": {INTERNAL}}}),
+     {"cilium": {"oauth2-proxy-ingress": {INTERNAL}, **IDP}}),
     ("the workspace manager's key-set route on muster's Gateway",
      [*VM, *IDENTITY, *GATEWAYS, *WORKSPACES],
-     {"cilium": {"workspace-manager-ingress": {INTERNAL}},
+     {"cilium": {"workspace-manager-ingress": {INTERNAL}, "workspace-manager-egress": {INTERNAL}, **IDP},
       "kubernetes": {"workspace-manager-ingress": {INTERNAL}}}),
     ("the workspace manager's key-set route pinned to the public Gateway",
      [*VM, *IDENTITY, *GATEWAYS, *WORKSPACES,
       "--set", f"workspaceManager.route.parentRefs[0].name={PUBLIC[0]}", "--set", f"workspaceManager.route.parentRefs[0].namespace={EG}"],
-     {"cilium": {"workspace-manager-ingress": {PUBLIC}},
+     {"cilium": {"workspace-manager-ingress": {PUBLIC}, "workspace-manager-egress": {INTERNAL}, **IDP},
       "kubernetes": {"workspace-manager-ingress": {PUBLIC}}}),
     ("every route on a Gateway in edge-system, Envoy Gateway's default deploy mode: the proxy runs in envoy-gateway-system",
      ON_EDGE, ON_EDGE_WANT, EG),

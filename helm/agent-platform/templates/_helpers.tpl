@@ -5077,8 +5077,9 @@ own oauth.dex.issuerURL, else global.identity.issuerUrl, else muster's login
 provider) — the order its chart and agent-platform.identity.apply resolve it
 in. Its MCP backend entry carries it (identityProvider), so the connectivity
 chart opens the pods' egress to it as it does for the other managers
-(agent-platform.idpEgress.cilium): by name, and the cluster entity on 443 and
-10443 for an issuer served through an in-cluster Gateway — on Cilium the
+(agent-platform.idpEgress.cilium): by name, and the in-cluster peers
+(networkPolicy.identityProvider.inClusterPeers) for an issuer served through an
+in-cluster Gateway — on Cilium the
 chart's own NetworkPolicy, an ipBlock on 443, matches no in-cluster endpoint.
 Empty with its OAuth off or no issuer named.
 Usage: include "agent-platform.skillManager.issuerUrl" .

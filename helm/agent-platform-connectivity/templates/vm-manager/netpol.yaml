@@ -89,7 +89,7 @@ spec:
     {{- . | nindent 4 }}
     {{- end }}
     {{- if $oauthOn }}
-    {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.vmManager.oauthProvider" .) "issuerUrl" (include "agent-platform.vmManager.issuerUrl" .)) | trim | nindent 4 }}
+    {{- include "agent-platform.idpEgress.cilium" (dict "ctx" $ "provider" (include "agent-platform.vmManager.oauthProvider" .) "issuerUrl" (include "agent-platform.vmManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
     {{- with $guests.cidrs }}
     # The guests' destinations, every port and protocol.

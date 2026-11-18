@@ -2464,6 +2464,24 @@ networkPolicy:
     # namespace, and set it empty when it runs in the GatewayNamespace mode,
     # which puts each proxy in its Gateway's own namespace.
     proxyNamespace: envoy-gateway-system  # @schema pattern: ^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)?$
+  # The login identity provider's in-cluster leg (cilium flavour): the egress
+  # policies of the services that validate the login's tokens (the managers,
+  # the portal, an MCP backend entry with identityProvider) open the issuer's
+  # hosts by name on 443 and these pods, never the cluster entity
+  # (giantswarm/agent-platform#1383). An issuer served through an in-cluster
+  # Gateway whose LoadBalancer address Cilium translates (a private
+  # installation) is that Gateway's proxy pods at policy time, on their own
+  # port (10443 behind a 443 listener). A wrong peer cuts the login: OIDC
+  # discovery times out and the managers stop at start.
+  identityProvider:
+    # -- The in-cluster peers of the identity provider egress, each a
+    # namespace, optional pod labels (matchLabels) and its ports. Unset (null),
+    # the chart derives them: the proxy pods of the public Gateway muster's
+    # route attaches to (ingress.parentRefs, else the chart-owned edge, else
+    # global.gatewayApi.parentRefs) on 443 and 10443, and, for an issuer host
+    # <service>.<namespace>.svc[.cluster.local], that namespace on the URL's
+    # port. A list replaces the derived peers; [] renders no in-cluster leg.
+    inClusterPeers: null  # @schema type: [array, null]; item: object; itemRequired: [namespace, ports]; itemProperties: {"namespace": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"}, "matchLabels": {"type": "object", "additionalProperties": {"type": "string"}}, "ports": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1, "maximum": 65535}}}
   # Substrate's credential provider (k8s-credential-provider, ate-system),
   # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) it reaches
   # on 443/TCP besides the apiserver and DNS, through the DNS proxy rule the

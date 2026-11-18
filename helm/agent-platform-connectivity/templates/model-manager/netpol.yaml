@@ -148,7 +148,7 @@ spec:
     - toEntities:
         - kube-apiserver
     {{- if $oauthOn }}
-    {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.modelManager.oauthProvider" .) "issuerUrl" (include "agent-platform.modelManager.issuerUrl" .)) | trim | nindent 4 }}
+    {{- include "agent-platform.idpEgress.cilium" (dict "ctx" $ "provider" (include "agent-platform.modelManager.oauthProvider" .) "issuerUrl" (include "agent-platform.modelManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
     {{- if $kserveOn }}
     {{- with $hf.fqdns }}
