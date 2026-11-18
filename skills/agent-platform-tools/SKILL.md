@@ -45,8 +45,9 @@ management cluster is reachable only when it is in that `enum`; otherwise say so
 
 The catalogue is computed on every request as three filters in order: the servers **this person is
 signed in to**, the **workflows** available, and the **toolset** — the agent's selector list
-(`preset:<name>`, `server:<name>`, `workflow:<name>`, `tool:<name>`), sent as the `X-Muster-Toolset`
-header or bound to the session when it starts. `filter_tools`, `describe_tool`, `list_tools` and
+(`preset:<name>`, `server:<name>`, `workflow:<name>`, `tool:<name>`; a server in an organization
+namespace is `server:<namespace>/<name>`; a bare name selects only a server of muster's own
+namespace), sent as the `X-Muster-Toolset` header or bound to the session when it starts. `filter_tools`, `describe_tool`, `list_tools` and
 `call_tool` all answer within it; a call outside it is refused with an error naming the toolset. An
 unknown preset is an error on every meta-tool call, never a fall-back to everything. A request without
 any toolset sees the person's whole catalogue — an agent without a toolset has implicit full access.
