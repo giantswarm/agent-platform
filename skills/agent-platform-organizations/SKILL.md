@@ -67,7 +67,8 @@ To share with one team instead, create it in that team's organization.
   When the key already exists, Add model completes at once: a live save closes its dialog, a save
   by pull request keeps it open with the pull request. Replace key is offered on every model, one
   from Git too, to a person who may change credentials. Each model's name opens its page, where it
-  is edited, set as default or deleted. On the credential form, Check again refreshes
+  is edited, set as default or deleted; a model from Git only where saves open a pull request
+  (below), and a model of another manager not there. On the credential form, Check again refreshes
   the request and clears entered values; Save and Cancel wait until the refresh finishes.
   Opening another request starts a separate form with no earlier values or result.
   A saved or cancelled request keeps its result without an extra confirmation read.
@@ -83,7 +84,10 @@ To share with one team instead, create it in that team's organization.
   applies only after the merge; tell the person so, never that it is live. Edit model says so
   before the save, and after one keeps its button disabled beside a line naming the pull request.
   Every other organization: a live write. To save the other way, open a pull request by hand, use
-  `kubectl`, or call the agent-manager tool with its `mode` argument.
+  `kubectl`, or call the agent-manager tool with its `mode` argument. The tools write live by
+  default (`mode: apply`), which puts new content of an organization from Git outside Git: for
+  such an organization (`x_agent-manager_list_organizations` marks it `gitops`, or gives it an
+  `orphaned` condition) pass `mode: commit`, as the portal does.
 - **An organization model's settings**, in the portal (**Token limit**, **Prompt caching** and
   **Cache time** on Connect a model with an organization as owner, Add model and Edit model; the
   Models tab shows them) or through `x_agent-manager_set_organization_model`: its
