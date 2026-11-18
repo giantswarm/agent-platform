@@ -22,13 +22,19 @@ suggest the one that gets them to their goal. Mechanics (names, sign-in, selecto
 
 ## Connectors
 
-Each connector offers tools behind Muster, the platform's one tool gateway. Every call runs as the
+Each connector of **Customize** → **Connectors** offers tools behind Muster, the platform's tool
+gateway. Every call runs as the
 person: what they may do in the service is what the agent may do there. Some connectors ask the
 person to sign in once with their own account; until then their tools are hidden for that person.
 
 **Suggest one** when the goal needs a system no connector reaches yet ("read our Jira tickets"):
 someone registers it with **Add connector**. A connector that exists but whose tools are missing
 for this person usually needs their sign-in.
+
+An organization can also have connectors of its own, on its **Connectors** tab: a service its admins
+set up with one shared credential. An agent of that organization calls it directly with that
+credential, not through Muster and not as the person; the agent names it, its toolset does not
+(`agent-platform-tools`).
 
 ## Toolsets
 

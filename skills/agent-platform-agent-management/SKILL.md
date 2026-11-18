@@ -23,9 +23,9 @@ Muster. The Harness boots the agent into a golden snapshot and the Agent reports
 a new revision: running sessions keep theirs, new sessions start from the new one.
 
 Its building blocks are separate resources the agent names: a `ModelConfig` (the model), skills from
-the configured skill sources, a toolset (Muster selectors and presets), `EgressPolicy`s (the origins
-it may reach), a Harness. agent-manager picks and pins them; it never writes model configs or egress
-policies.
+the configured skill sources, a toolset (Muster selectors and presets), its organization's own
+connectors (`connectors`), `EgressPolicy`s (the origins it may reach), a Harness. agent-manager picks
+and pins them; it never writes model configs or egress policies.
 
 A toolset's selector count is the `maxItems` of the `toolset` property in
 `x_agent-manager_create_agent`'s input schema (`describe_tool`); read it there. From Muster 5.63.7 and
@@ -107,6 +107,17 @@ never assume an argument. The agent tools drop an unknown key without an error: 
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only
   on an explicit request. An own-account (OAuth) connector without `grantScope: subject` needs a
   sign-in in each of the agent's conversations (`agent-platform-tools`); say so before choosing it.
+- **An organization's connectors**: a kagent `RemoteMCPServer` in the organization namespace
+  (`x_agent-manager_set_organization_connector`), not a Muster server, so no `toolset` selector
+  reaches it. From agent-manager 3.3.0 (`connectors` in `x_agent-manager_create_agent`'s schema;
+  without it the agent takes none), pass the names that
+  `x_agent-manager_list_organization_connectors` gives as `connectors` to `create_agent`,
+  `validate_agent` or `update_agent`: each name alone, once. On update the list replaces the
+  agent's connectors, `[]` removes them, and an absent argument keeps them; `get_agent` and
+  `list_agents` return them. The agent calls the connector itself with the connector's credential;
+  its host needs no `EgressPolicy`. Choose only a usable one (`agent-platform-tools`). Refused: a
+  name that does not exist, an agent on a coding Harness, in the platform namespace or on a
+  workload cluster, and any agent's Muster `RemoteMCPServer` (named like its agent).
 - **Toolchains and workspace**: `defaultToolchains` and `defaultWorkspace`, the smallest set the job
   needs, and only where the installation offers them (both are opt-in: `x_toolchain-manager_*`,
   `x_workspace-manager_*` in `filter_tools`); otherwise leave them out.
@@ -128,7 +139,7 @@ never assume an argument. The agent tools drop an unknown key without an error: 
 - **Confirm every choice you made for the person** — the technical name above all, and the display
   name, description and system prompt verbatim — and wait for a yes before writing. Write the plan in
   your reply text first: owner (the organization), name, display name, description, harness, model,
-  toolset, skills, egress and system prompt. The person sees neither your tool calls' arguments nor `validate_agent`'s output,
+  toolset, connectors, skills, egress and system prompt. The person sees neither your tool calls' arguments nor `validate_agent`'s output,
   and an `ask_user` question carries no plan, so never point at "the plan above" you have not written
   out; when the person says they see none, write it out instead of asking again. When a tool cannot
   express what the person confirmed, stop and say so; never run a different write instead.

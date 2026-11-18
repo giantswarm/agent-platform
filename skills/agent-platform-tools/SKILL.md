@@ -14,13 +14,14 @@ https://docs.giantswarm.io/reference/muster/toolsets/ (toolsets and the selector
 platform is belongs to the `agent-platform-overview` skill; agents and their building blocks to
 `agent-platform-agent-management`.
 
-## Muster is the only tool surface
+## Muster is the tool surface
 
 Every agent, IDE and portal session talks to one MCP endpoint, Muster, and sees a small fixed set of
 **meta-tools** instead of the hundreds of tools behind it: `filter_tools`, `describe_tool` and
 `call_tool` for discovery and execution; `list_tools` and `list_core_tools` for whole listings (large —
 prefer `filter_tools`); and list/filter/describe/get tools for MCP resources and prompts. The set you
-have is your own tool list.
+have is your own tool list. The one exception: an agent's organization connectors (below) are
+tools of their own beside the meta-tools, called as functions, not through `call_tool`.
 
 **The `call_tool` contract.** Every tool behind Muster runs as
 `call_tool {"name": "<exact name>", "arguments": {…}}`, `name` first. The name is a string argument,
@@ -47,7 +48,7 @@ The catalogue is computed on every request as three filters in order: the server
 signed in to**, the **workflows** available, and the **toolset** — the agent's selector list
 (`preset:<name>`, `server:<name>`, `workflow:<name>`, `tool:<name>`; a server in an organization
 namespace is `server:<namespace>/<name>`; a bare name selects only a server of muster's own
-namespace), sent as the `X-Muster-Toolset` header or bound to the session when it starts. `filter_tools`, `describe_tool`, `list_tools` and
+namespace; an organization's own connector is no Muster server and no selector reaches it), sent as the `X-Muster-Toolset` header or bound to the session when it starts. `filter_tools`, `describe_tool`, `list_tools` and
 `call_tool` all answer within it; a call outside it is refused with an error naming the toolset. An
 unknown preset is an error on every meta-tool call, never a fall-back to everything. A request without
 any toolset sees the person's whole catalogue — an agent without a toolset has implicit full access.
@@ -79,6 +80,12 @@ https://docs.giantswarm.io/tutorials/agent-platform/toolset-presets/.
 
 ## Connectors (MCP servers)
 
+"Connector" names two things. A **Muster connector** is a Muster `MCPServer`, and an agent reaches
+its tools through its `toolset`. An **organization's own connector** is a kagent `RemoteMCPServer`
+in the organization namespace, and an agent of that organization takes it by name with
+`connectors` (`agent-platform-agent-management`); its calls go from the agent straight to the
+connector with the connector's credential, not through Muster.
+
 The Dev Portal calls MCP servers **connectors** (Customize → Connectors). Each is an `MCPServer`
 resource (`muster.giantswarm.io`); `core_mcpserver_list` shows them with their state. A
 platform-shipped one carries the label `agent-platform.giantswarm.io/tool-group` (`agent-platform`:
@@ -100,6 +107,16 @@ answer is a URL elicitation of the credential form, link in `credentials[].next`
 written once the person saves the form. No link: give the person the raw answer, never an
 explanation or a hand-made Secret. Check with `x_agent-manager_list_organization_connectors`
 (non-empty `credentials`); `core_mcpserver_detect` probes the URL.
+
+Whether an organization's connector is usable, from agent-manager 3.3.0: in
+`x_agent-manager_list_organization_connectors`, each credential's `state` is `present` or
+`missing` (whether its Secret exists, checked by a dry-run create as you; not whether it holds the
+key) or `unknown` (the check failed, or you may not create that Secret: an editor gets `unknown`),
+and each connector's `accepted`, `reason` and `message` are kagent's tool discovery. Usable:
+`accepted: true` and no credential `missing`; `unknown` does not stop it. `accepted: false` is a
+connector that does not work (a missing key, say): tell the person its `message`.
+`accepted: null`: not reported yet. The list also holds the agents' own Muster
+`RemoteMCPServer`s, each named like its agent: they are no connectors.
 
 To replace a model key or an egress credential, read its Secret from the list:
 `x_agent-manager_list_model_configs` (each model with a key) and
