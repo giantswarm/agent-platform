@@ -439,6 +439,19 @@ timeouts:
 {{- end -}}
 
 {{/*
+HTTPRoute rule timeouts of the agent-manager routes: agentManager.route.timeouts,
+else the shared ingress.httpRoute.timeouts. The whole map replaces the shared one,
+so a shared backendRequest never meets a shorter request of this route. Usage as
+agent-platform.routeTimeouts.
+*/}}
+{{- define "agent-platform.agentManager.routeTimeouts" -}}
+{{- with (.Values.agentManager.route.timeouts | default .Values.ingress.httpRoute.timeouts) }}
+timeouts:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
+{{/*
 === Cluster shape ===
 
 The knobs that describe what the cluster can admit — Kyverno policies, the

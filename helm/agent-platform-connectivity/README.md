@@ -1770,6 +1770,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.route.hostname | string | `""` |  |
 | agentManager.route.parentRef.name | string | `"giantswarm-default"` |  |
 | agentManager.route.parentRef.namespace | string | `"envoy-gateway-system"` |  |
+| agentManager.route.timeouts.request | string | `"100s"` |  |
 | agentManager.route.jwtAuthentication.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.mode | string | `"Strict"` |  |
 | agentManager.route.jwtAuthentication.issuer | string | `""` |  |

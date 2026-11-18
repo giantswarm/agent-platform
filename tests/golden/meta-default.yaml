@@ -440,6 +440,8 @@ spec:
           name: giantswarm-default
           namespace: envoy-gateway-system
         pathPrefix: /agent-manager
+        timeouts:
+          request: 100s
     agentPlatformOrganizations:
       apiHostnames: []
       enabled: false
