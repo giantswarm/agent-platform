@@ -1344,7 +1344,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
         # gaul/s3proxy, mirrored by giantswarm/retagger (amd64 and arm64).
         image:
           repository: gsoci.azurecr.io/giantswarm/s3proxy
-          tag: 4.1.1
+          tag: 4.2.0
         replicas: 2
         # The JVM's options: its heap as a share of the memory limit (the
         # image's own default leaves most of the limit unused); always set a limit.
