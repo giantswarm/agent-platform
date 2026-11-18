@@ -30,6 +30,11 @@ person to sign in once with their own account; until then their tools are hidden
 someone registers it with **Add connector**. A connector that exists but whose tools are missing
 for this person usually needs their sign-in.
 
+An organization can also have connectors of its own, on its **Connectors** tab: a service its admins
+set up with one shared credential. An agent of that organization calls it directly with that
+credential, not through Muster and not as the person; the agent names it, its toolset does not
+(`agent-platform-tools`).
+
 ## Toolsets
 
 A toolset is the agent's list of allowed tools: whole presets (`preset:read-only`), servers or single

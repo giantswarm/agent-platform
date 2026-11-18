@@ -42,7 +42,8 @@ components. Otherwise `x_agent-manager_get_info` names the service version, char
 The Dev Portal calls MCP servers **connectors**; the platform's own are grouped into the
 `agent-platform` and `infrastructure` presets, everything else is registered by the installation or
 a person. Groups, states and sign-in: the `agent-platform-tools` skill; the live presets:
-`filter_tools {"include_presets": true}`.
+`filter_tools {"include_presets": true}`. An organization's own connectors are kagent
+`RemoteMCPServer`s in its namespace, not Muster servers (`agent-platform-tools`).
 
 ## How people reach agents
 

@@ -114,5 +114,5 @@ To share with one team instead, create it in that team's organization.
   `Orphaned=True` reason `DeleteMerged` (Pending erase), and `mode: commit` with
   `confirm: <parent>/<name>`, typed by the person, erases it.
 
-An agent uses its own namespace's model configs and egress policies. Choosing them for an agent:
-`agent-platform-agent-management`.
+An agent uses its own namespace's model configs and egress policies and, from agent-manager 3.3.0,
+its organization's own connectors. Choosing them for an agent: `agent-platform-agent-management`.
