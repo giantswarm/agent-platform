@@ -32,11 +32,15 @@ ROUTED = {"model-manager": "/model-manager", "agent-manager": "/agent-manager"}
 ISSUER = "https://dex.ci.example.com"
 CLIENT = "muster-acme"
 SECRET = "muster-oauth"
-# agent-platform.idpEgress.cilium for a Dex issuer: its host by name, and the cluster entity on the
-# ports an in-cluster Gateway serves it on (a private installation's Dex resolves there).
+# agent-platform.idpEgress.cilium for a Dex issuer: its host by name, and the proxy pods of the
+# Gateway muster's route attaches to (ingress.parentRefs, x in the release namespace) on the ports
+# that Gateway serves it on (a private installation's Dex resolves there), never the cluster entity.
 IDP_EGRESS = [
     {"toFQDNs": [{"matchName": "dex.ci.example.com"}], "toPorts": [{"ports": [{"port": "443", "protocol": "TCP"}]}]},
-    {"toEntities": ["cluster"], "toPorts": [{"ports": [{"port": "443", "protocol": "TCP"}, {"port": "10443", "protocol": "TCP"}]}]},
+    {"toEndpoints": [{"matchLabels": {"app.kubernetes.io/name": "envoy", "gateway.envoyproxy.io/owning-gateway-name": "x",
+                                      "gateway.envoyproxy.io/owning-gateway-namespace": "agent-platform",
+                                      "io.kubernetes.pod.namespace": "envoy-gateway-system"}}],
+     "toPorts": [{"ports": [{"port": "443", "protocol": "TCP"}, {"port": "10443", "protocol": "TCP"}]}]},
 ]
 
 
@@ -136,14 +140,15 @@ def roster_covered(meta: str) -> None:
 
 
 def idp_rules(docs: list[dict], name: str) -> list[dict]:
-    """The identity-provider egress rules (toFQDNs, the cluster entity) of the Cilium policies selecting <name>'s pods."""
+    """The identity-provider egress rules (toFQDNs, the cluster entity, the Envoy edge) of the Cilium policies selecting <name>'s pods."""
     rules = []
     for d in docs:
         if d.get("kind") != "CiliumNetworkPolicy":
             continue
         if d["spec"].get("endpointSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/name") != name:
             continue
-        rules += [r for r in d["spec"].get("egress", []) if "toFQDNs" in r or "cluster" in r.get("toEntities", [])]
+        rules += [r for r in d["spec"].get("egress", []) if "toFQDNs" in r or "cluster" in r.get("toEntities", [])
+                  or any(e.get("matchLabels", {}).get("app.kubernetes.io/name") == "envoy" for e in r.get("toEndpoints", []))]
     return rules
 
 
@@ -206,13 +211,15 @@ def main() -> None:
         sys.exit("FAIL: derived: model-manager's egress does not reach the derived issuer")
     print("ok: derived")
 
-    print("--> identity-provider egress: every manager's pods reach the login by name and through an in-cluster gateway (cluster on 443 and 10443)")
+    print("--> identity-provider egress: every manager's pods reach the login by name and through the in-cluster Gateway's proxy pods on 443 and 10443, not the cluster entity")
     docs = [d for d in yaml.safe_load_all(result.stdout) if d]
     for name in MANAGERS:
         rules = idp_rules(docs, name)
         for want in IDP_EGRESS:
             if want not in rules:
                 sys.exit(f"FAIL: idp egress: no Cilium policy gives {name}'s pods {want}; it has {rules}")
+        if any("cluster" in r.get("toEntities", []) for r in rules):
+            sys.exit(f"FAIL: idp egress: a Cilium policy gives {name}'s pods the cluster entity; it has {rules}")
     print("ok: idp egress")
 
     print("--> skill-manager off: no policy selects its pods")

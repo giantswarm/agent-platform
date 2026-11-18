@@ -150,7 +150,7 @@ spec:
               protocol: TCP
     {{- end }}
     {{- if $oauthOn }}
-    {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.workspaceManager.oauthProvider" .) "issuerUrl" (include "agent-platform.workspaceManager.issuerUrl" .)) | trim | nindent 4 }}
+    {{- include "agent-platform.idpEgress.cilium" (dict "ctx" $ "provider" (include "agent-platform.workspaceManager.oauthProvider" .) "issuerUrl" (include "agent-platform.workspaceManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
     {{- range $p := keys $byPort | sortAlpha }}
     # The provider instances' hosts on {{ $p }}.

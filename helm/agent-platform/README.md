@@ -847,6 +847,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
 | networkPolicy.envoyGateway.proxyNamespace | string | `"envoy-gateway-system"` | Where Envoy Gateway runs the Gateways' proxy pods. The default is the controller's namespace of Envoy Gateway's default deploy mode (ControllerNamespace); change it when Envoy Gateway runs in another namespace, and set it empty when it runs in the GatewayNamespace mode, which puts each proxy in its Gateway's own namespace. |
+| networkPolicy.identityProvider.inClusterPeers | string | `nil` | The in-cluster peers of the identity provider egress, each a namespace, optional pod labels (matchLabels) and its ports. Unset (null), the chart derives them: the proxy pods of the public Gateway muster's route attaches to (ingress.parentRefs, else the chart-owned edge, else global.gatewayApi.parentRefs) on 443 and 10443, and, for an issuer host <service>.<namespace>.svc[.cluster.local], that namespace on the URL's port. A list replaces the derived peers; [] renders no in-cluster leg. |
 | networkPolicy.substrate.credentialProvider.egressFQDNs | list | `[]` |  |
 | networkPolicy.substrate.egressGateway.privateCIDRs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |

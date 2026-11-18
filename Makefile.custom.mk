@@ -1671,9 +1671,9 @@ verify-substrate-idp-netpol: ## Assert the path to Substrate's actor-JWT issuer 
 	@echo "substrate idp network path verified."
 
 .PHONY: verify-idp-egress
-verify-idp-egress: ## Assert the identity provider egress of the services that validate tokens themselves (giantswarm/agent-platform#1169), cilium flavour: the workspace-, cluster-, agent-, vm- and model-manager egress policies and the portal's open, for an issuer on accounts.google.com, exactly accounts.google.com, www.googleapis.com (JWKS), openidconnect.googleapis.com (userinfo) and oauth2.googleapis.com (token) on 443, whatever provider their block names; for a Dex issuer its host alone. An MCP backend entry with identityProvider (the skill-manager's) gets the same rules for its pods, the cluster entity on 443 and 10443 included, fails the render without a podSelector, and renders nothing in the kubernetes flavour. HELM selects the binary.
+verify-idp-egress: ## Assert the identity provider egress of the services that validate tokens themselves (giantswarm/agent-platform#1169), cilium flavour: the workspace-, cluster-, agent-, vm- and model-manager egress policies and the portal's open, for an issuer on accounts.google.com, exactly accounts.google.com, www.googleapis.com (JWKS), openidconnect.googleapis.com (userinfo) and oauth2.googleapis.com (token) on 443, whatever provider their block names; for a Dex issuer its host alone. An MCP backend entry with identityProvider (the skill-manager's) gets the same rules for its pods, fails the render without a podSelector, and renders nothing in the kubernetes flavour. The in-cluster leg (giantswarm/agent-platform#1383): no caller opens the cluster entity on 443 or 10443; each opens networkPolicy.identityProvider.inClusterPeers — unset, the proxy pods of the Gateway muster's route attaches to (ingress.parentRefs) on 443 and 10443 and an in-cluster issuer Service's namespace on its URL's port; a list replaces them, [] renders none. A token-validating workload (the policies above, the skill-manager's and the toolchain-manager's pods) that an egress policy selects has the identity provider rule in one of them. HELM selects the binary.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
-	@python3 tests/verify-idp-egress.py $(CONNECTIVITY_DIR)
+	@HELM="$(HELM)" python3 tests/verify-idp-egress.py $(CONNECTIVITY_DIR)
 	@echo "identity provider egress verified."
 
 .PHONY: verify-kagent-netpol
@@ -2376,7 +2376,6 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes and 
 			grep -q "matchName: $$h$$" $(VERIFY_TMP)/vmg-google-$$n.out || { echo "FAIL: $$n egress lacks $$h for the google provider"; exit 1; }; \
 		done; \
 		if grep -q 'matchName: dex.ci.example.com' $(VERIFY_TMP)/vmg-google-$$n.out; then echo "FAIL: $$n egress names the Dex issuer for the google provider"; exit 1; fi; \
-		grep -q '\- cluster' $(VERIFY_TMP)/vmg-google-$$n.out || { echo "FAIL: $$n egress lost the cluster entity for the google provider"; exit 1; }; \
 	done
 	@echo "ok: google IdP egress"
 	@echo "--> modelManager.networkPolicy.egress: names and blocks on 443 (cilium), blocks (kubernetes), whatever the backend; the chart-wide additional egress renders for the ollama backend too"
@@ -3226,7 +3225,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@if grep -q 'envoy-gateway-system' $(VERIFY_TMP)/vw-bsnp-edge.out; then echo "FAIL: with the chart owning the edge the policy still admits the front Gateway"; exit 1; fi
 	@echo "--> the edge namespace follows the Gateway the route names as its parent, in both flavors, where Envoy Gateway runs each proxy in its Gateway's namespace (networkPolicy.envoyGateway.proxyNamespace empty; the default namespace is verify-envoy-peers's)"
 	@for flavor in cilium kubernetes; do \
-		$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set networkPolicy.flavor=$$flavor --set networkPolicy.envoyGateway.proxyNamespace= --set 'global.gatewayApi.parentRefs[0].name=edge' --set 'global.gatewayApi.parentRefs[0].namespace=ingress' 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' | grep -E '^ *(io.kubernetes.pod.namespace|kubernetes.io/metadata.name): ' >$(VERIFY_TMP)/vw-bsnp-ns-$$flavor.out; \
+		$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL) --set networkPolicy.flavor=$$flavor --set networkPolicy.envoyGateway.proxyNamespace= --set 'global.gatewayApi.parentRefs[0].name=edge' --set 'global.gatewayApi.parentRefs[0].namespace=ingress' 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^(---|  egress:)$$/{exit} f' | grep -E '^ *(io.kubernetes.pod.namespace|kubernetes.io/metadata.name): ' >$(VERIFY_TMP)/vw-bsnp-ns-$$flavor.out; \
 		grep -q ': ingress$$' $(VERIFY_TMP)/vw-bsnp-ns-$$flavor.out || { echo "FAIL: the $$flavor Backstage ingress policy pins envoy-gateway-system instead of the parentRef's namespace"; cat $(VERIFY_TMP)/vw-bsnp-ns-$$flavor.out; exit 1; }; \
 		if grep -q 'envoy-gateway-system' $(VERIFY_TMP)/vw-bsnp-ns-$$flavor.out; then echo "FAIL: the $$flavor Backstage ingress policy still names envoy-gateway-system with the parentRef elsewhere"; exit 1; fi; \
 	done
@@ -3239,7 +3238,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@for flavor in cilium kubernetes; do \
 		$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_EDGE) --set networkPolicy.flavor=$$flavor --set 'backstage.parentRefs[0].name=own' --set 'backstage.parentRefs[0].namespace=portal-edge' 2>/dev/null >$(VERIFY_TMP)/vw-bsnp-pin-$$flavor.out; \
 		grep -q 'portal-edge' $(VERIFY_TMP)/vw-bsnp-pin-$$flavor.out || { echo "FAIL: the $$flavor Backstage policy follows the chart-owned edge while the route is pinned with backstage.parentRefs, so the portal is unreachable through the Gateway that serves it"; exit 1; }; \
-		awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^---$$/{exit} f' $(VERIFY_TMP)/vw-bsnp-pin-$$flavor.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' && { echo "FAIL: the $$flavor Backstage policy still admits the data plane while the route is pinned elsewhere"; exit 1; }; \
+		awk '/^  name: agent-platform-connectivity-backstage$$/{f=1} f&&/^(---|  egress:)$$/{exit} f' $(VERIFY_TMP)/vw-bsnp-pin-$$flavor.out | grep -q 'gateway.networking.k8s.io/gateway-name: agentgateway' && { echo "FAIL: the $$flavor Backstage policy still admits the data plane while the route is pinned elsewhere"; exit 1; }; \
 		true; \
 	done
 	@echo "--> skill discovery's egress follows backstage.skillsRepositories or backstage.skillPullRequests; the portal's database gets a leg on the postgresql engine"
@@ -3267,7 +3266,7 @@ verify-wiring: ## Assert the standalone's ported wiring: toggles off = no object
 	@for port in 443 10443; do \
 		grep -q -- "- port: $$port$$" $(VERIFY_TMP)/vw-bsnp-k8s-edge.out || { echo "FAIL: the kubernetes Backstage egress leg to the Envoy edge does not open $$port, so the app-config's public hostnames are denied behind an Envoy Gateway (a listener on 443 is a proxy pod on 10443)"; cat $(VERIFY_TMP)/vw-bsnp-k8s-eg.out; exit 1; }; \
 	done
-	@awk '/^    - toEntities:$$/{f=1} f&&/^    - /&&!/toEntities/{f=0} f' $(VERIFY_TMP)/vw-bsnp-cilium.out | grep -q '10443' || { echo "FAIL: the cilium Backstage policy opens no cluster entity on 10443, so the edge is unreachable"; cat $(VERIFY_TMP)/vw-bsnp-cilium.out; exit 1; }
+	@awk '/# The front Gateways \(the Envoy edge\)/{f=1} f&&/^    # muster/{exit} f' $(VERIFY_TMP)/vw-bsnp-cilium.out | grep -q '10443' || { echo "FAIL: the cilium Backstage policy opens no Envoy edge pod on 10443, so the edge is unreachable"; cat $(VERIFY_TMP)/vw-bsnp-cilium.out; exit 1; }
 	@grep -q 'kubernetes.io/metadata.name: envoy-gateway-system' $(VERIFY_TMP)/vw-bsnp-k8s-in.out || { echo "FAIL: the kubernetes Backstage ingress policy does not name the front Gateway that serves its route"; cat $(VERIFY_TMP)/vw-bsnp-k8s-in.out; exit 1; }
 	@echo "--> the kubernetes egress follows the same edge split as the ingress"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(WIRING_BACKSTAGE_NETPOL_EDGE) --set networkPolicy.flavor=kubernetes 2>/dev/null | awk '/^  name: agent-platform-connectivity-backstage-egress$$/{f=1} f&&/^---$$/{exit} f' >$(VERIFY_TMP)/vw-bsnp-k8s-edge-eg.out

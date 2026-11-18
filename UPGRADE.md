@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the identity provider egress reaches the Gateway's proxy pods, not the cluster entity)
+
+giantswarm/agent-platform#1383: in the Cilium flavour the egress policies of the services that validate the login's tokens (agent-, cluster-, model-, vm- and workspace-manager, the portal, an `networkPolicy.mcpBackends` entry with `identityProvider`) no longer open the `cluster` entity on 443 and 10443. They open the issuer's hosts by name on 443 and `networkPolicy.identityProvider.inClusterPeers`: unset, the proxy pods of the Gateway muster's route attaches to (`ingress.parentRefs`) on 443 and 10443, and, for an in-cluster issuer Service host, that namespace on the URL's port. The portal's calls to the edge get their own rule to the same Gateways' proxy pods.
+
+### Operator action
+
+- **None** when Dex is served by the Gateway muster's route attaches to (`giantswarm-default` in `envoy-gateway-system` on every fleet installation), or by a public address outside the cluster.
+- **Dex behind another in-cluster Gateway or ingress controller whose address Cilium translates**: set `networkPolicy.identityProvider.inClusterPeers` to its pods (namespace, `matchLabels`, `ports`) before the upgrade. Without it, OIDC discovery times out and the managers stop at start.
+
 ## \<current\> → \<next\> (the Envoy peer is looked for where Envoy Gateway runs the proxy)
 
 giantswarm/agent-platform#1393: the network policies that admit or reach a front Gateway's Envoy proxy select its pods in `networkPolicy.envoyGateway.proxyNamespace` (default `envoy-gateway-system`), not in the Gateway's own namespace. In Envoy Gateway's default deploy mode (`ControllerNamespace`) every Gateway's proxy runs in the controller's namespace, so a Gateway outside `envoy-gateway-system` was cut off before.
