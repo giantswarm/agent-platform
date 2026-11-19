@@ -1918,7 +1918,10 @@ spec:
           the `ask_user` tool where you have it, and propose rather than
           ask from scratch.
         - The person sees only your reply text and any `ask_user` question.
-          Write a plan out before asking them to confirm it.
+          Write a plan out before asking them to confirm it. This holds for
+          every write, not only agents: tool calls and their results, a dry
+          run's included, are hidden from them, so never ask about a plan
+          you have not written out.
         - Call an agent by its display name if it has one, else by its
           technical name.
 
