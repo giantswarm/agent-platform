@@ -89,7 +89,7 @@ To share with one team instead, create it in that team's organization.
   such an organization (`x_agent-manager_list_organizations` marks it `gitops`, or gives it an
   `orphaned` condition) pass `mode: commit`, as the portal does.
 - **An organization model's settings**, in the portal (**Token limit**, **Prompt caching** and
-  **Cache time** on Connect a model with an organization as owner, Add model and Edit model; the
+  **Cache time** on Add a model with an organization as owner, Add model and Edit model; the
   Models tab shows them) or through `x_agent-manager_set_organization_model`: its
   display name (`displayName`, every provider; `""` removes it), its token limit (`maxTokens`:
   Anthropic, AnthropicVertexAI, AzureOpenAI, Mistral, OpenAI; `0` returns to the provider's default)
