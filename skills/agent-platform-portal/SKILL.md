@@ -43,7 +43,7 @@ authentication method, separately from access status. Use **Sign in** where it
 is offered; an SSO failure can require an administrator instead. **Status
 unavailable** means access could not be checked, not that the connector has no
 tools.
-| **Models** | The models agents run on; **Connect a model** (OpenAI-compatible, Anthropic, Gemini, Ollama). |
+| **Models** | The models agents run on, each with its owner, provider, environment, the agents using it and its state, filtered by owner, provider, status and use; **Add a model** (OpenAI-compatible, Anthropic, Gemini, Ollama). |
 | **Workflows** | Read and run workflows; they are created by agents and Git, not in the portal. |
 | **Workspaces** | Only where the installation runs workspaces: choose which of an organization's repositories sessions work on. |
 | **Toolchains** | Only where the installation runs toolchains: browse them and their sources, **New toolchain** (a pull request). |
