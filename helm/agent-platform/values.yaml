@@ -1203,11 +1203,11 @@ components:  # @schema additionalProperties: true
     # false leaves it out, and agent-manager falls back to its own
     # (deprecated) skill discovery.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.2.2, the first release on mcp-oauth v1.13.18 (its Dex
-    # client follows HTTPS_PROXY and NO_PROXY). The ceiling is the next minor:
-    # a skill-manager minor rolls in with the chart release that renders its
-    # values.
-    versionRange: ">=0.2.2 <0.3.0"
+    # The floor is 0.3.0, which checks a private repository only with the
+    # person's grant (github.tokenExchange) and fails on github.enabled
+    # without it. The ceiling is the next minor: a skill-manager minor rolls
+    # in with the chart release that renders its values.
+    versionRange: ">=0.3.0 <0.4.0"
     valuesFrom: skill-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
     # app); the reference is dropped at render time when muster is off.

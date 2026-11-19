@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (skill-manager 0.3: the GitHub App pin is gone)
+
+`components.skill-manager.versionRange` selects `>=0.3.0 <0.4.0` (giantswarm/giantswarm#39225). skill-manager 0.3.0 checks a private skill repository only with the person's grant from muster's broker (`skill-manager.github.tokenExchange`). It no longer accepts the person's GitHub token with the ID token in `X-Muster-Id-Token`, and drops `skill-manager.muster.mcpServer.auth.github`. agent-manager 3.4.0, cluster-manager 0.38.0 and model-manager 1.21.0 drop the pin the same way, inside their current ranges.
+
+### Operator action
+
+- Remove `skill-manager.muster.mcpServer.auth.github` and `<manager>.github.authorizationServer` from the values, if set: the charts refuse them.
+- `<manager>.github.enabled` now needs `<manager>.github.tokenExchange`: the charts fail without it.
+- An installation that pins the BOM: move `skill-manager` to `0.3.0`.
+
 ## \<current\> → \<next\> (the identity provider egress reaches the Gateway's proxy pods, not the cluster entity)
 
 giantswarm/agent-platform#1383: in the Cilium flavour the egress policies of the services that validate the login's tokens (agent-, cluster-, model-, vm- and workspace-manager, the portal, an `networkPolicy.mcpBackends` entry with `identityProvider`) no longer open the `cluster` entity on 443 and 10443. They open the issuer's hosts by name on 443 and `networkPolicy.identityProvider.inClusterPeers`: unset, the proxy pods of the Gateway muster's route attaches to (`ingress.parentRefs`) on 443 and 10443, and, for an in-cluster issuer Service host, that namespace on the URL's port. The portal's calls to the edge get their own rule to the same Gateways' proxy pods.
@@ -72,7 +82,7 @@ The `substrate` component HelmRelease uses `spec.upgrade.strategy: {name: RetryO
 - Before admitting agent-manager 3.x, upgrade every portal calling it to Backstage 3.38.2 or later and migrate other callers of `replaceCredential`.
 - Where `agent-manager.githubTokenExchange` is configured, keep an explicit `components.agent-manager.versionRange` below `3.0.0` until the installation's reviewed migration moves it to `agent-manager.github.tokenExchange`. Move `endpoint` to `tokenEndpoint` and `secretName` to `existingSecret`, remove `grantApp`, and set `github.enabled: true`. The audience must equal the muster provider App and broker grant target names. Apply the values and version range together after the agentlab proof (giantswarm/giantswarm#39239).
 - agent-manager 3.1.0 serves Vertex service-account JSON keys and installation models through `agent-manager.credentials.uiURL` (giantswarm/agent-manager#409). Without `agentPlatformOrganizations.enabled`, a `uiURL` needs a `{namespace}` expression and no `{parent}` or `{organization}`. A `uiURL` naming `{namespace}`, with or without organizations, and any `uiURL` without organizations need a range floor of `3.1.0-rc.11` or later; `tenants.commit.platformModelsPath` needs the same floor. A `uiURL` containing `#` is refused.
-- The on-demand exchange needs agent-manager 3.0.0-rc.10 and muster 5.63.2 or later, which the meta chart validates from their range floors. muster 5.63.2 includes the Basic credential decoding fix in mcp-oauth (giantswarm/mcp-oauth#700), required for broker client credentials containing reserved characters. Installations still using the GitHub App pin keep it until their own rollout step.
+- The on-demand exchange needs agent-manager 3.0.0-rc.10 and muster 5.63.2 or later, which the meta chart validates from their range floors. muster 5.63.2 includes the Basic credential decoding fix in mcp-oauth (giantswarm/mcp-oauth#700), required for broker client credentials containing reserved characters.
 - Cluster-manager and model-manager derive broker egress from `github.tokenExchange.tokenEndpoint`, on its HTTPS origin and port, for both policy flavors. Use an external fully qualified hostname or IP address; Service aliases are refused. Native Kubernetes policies use the component's existing egress CIDRs or `networkPolicy.additionalEgressCIDRs` for private broker addresses.
 
 ## \<current\> → \<next\> (the Envoy peer of the network policies is the owning Gateway's proxy)

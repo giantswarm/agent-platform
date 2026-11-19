@@ -574,7 +574,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.skill-manager.chart | string | `"skill-manager"` |  |
 | components.skill-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.skill-manager.versionRange | string | `">=0.2.2 <0.3.0"` |  |
+| components.skill-manager.versionRange | string | `">=0.3.0 <0.4.0"` |  |
 | components.skill-manager.valuesFrom | string | `"skill-manager"` |  |
 | components.skill-manager.dependsOn[0] | string | `"muster"` |  |
 | components.skill-manager.gatedRoster | bool | `true` |  |
