@@ -107,6 +107,11 @@ function of its own (contract: the `agent-platform-tools` skill). Read each sche
 - **Yourself**: `x_agent-manager_get_agent` with your **technical** name — the release name, not the
   runtime's `<name>_<namespace>`; `x_agent-manager_list_agents` when unsure.
 
+The portal's **Configured** model status means kagent accepted the settings and resolved their
+references. It does not establish that a stored API key is valid or that a session can invoke the
+provider. A served model's readiness is a separate signal. An actual access check for a static key
+requires a provider request and cannot verify credentials supplied per session.
+
 ## Facts to keep straight
 
 - The platform never mints identity tokens: the identity provider issues every token that carries
