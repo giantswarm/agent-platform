@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (the workspace-manager and toolchain-manager are no longer pinned to a GitHub App)
+
+giantswarm/giantswarm#39393: with workspaces on, the chart no longer pins the workspace-manager's and toolchain-manager's muster registrations to the installation's agents GitHub App. muster keeps that App as a provider App under the pin's issuer and client Secret (`muster.muster.providerApps`), and both registrations name it: muster forwards the person's Dex ID token as the bearer and attaches their App token in `X-Muster-Grant-<instance>`. Before, the App token was the bearer of every call and the ID token travelled in `X-Muster-Id-Token`, which MCP 2025-11-25 forbids. People keep their grants: they are filed under the same issuer. One provider instance with sign-in now renders the same way two always did, and an own `workspace-manager.muster.mcpServer.auth.providerApps` replaces the pin too.
+
+### Operator action
+
+- With workspaces on, set `muster.muster.oauth.mcpClient.enabled` (with `publicUrl`): muster signs people in to its provider Apps in that role, and the render fails without it.
+- An installation that wants the pin back for now sets `workspace-manager.muster.mcpServer.auth.provider`, which still pins both registrations. It is deprecated, and a later release removes it.
+
 ## \<current\> → \<next\> (skill-manager 0.3: the GitHub App pin is gone)
 
 `components.skill-manager.versionRange` selects `>=0.3.0 <0.4.0` (giantswarm/giantswarm#39225). skill-manager 0.3.0 checks a private skill repository only with the person's grant from muster's broker (`skill-manager.github.tokenExchange`). It no longer accepts the person's GitHub token with the ID token in `X-Muster-Id-Token`, and drops `skill-manager.muster.mcpServer.auth.github`. agent-manager 3.4.0, cluster-manager 0.38.0 and model-manager 1.21.0 drop the pin the same way, inside their current ranges.

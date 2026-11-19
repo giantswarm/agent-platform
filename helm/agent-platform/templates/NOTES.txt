@@ -83,9 +83,16 @@ Next steps (docs/install.md "After the install"):
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "workspace-manager")) $wmBase }}
 
 Workspaces, base URL {{ $wmBase }} (routed: /.well-known/jwks.json):
+{{- $wmApps := include "agent-platform.workspaceManager.providerApps" . | fromJson }}
+{{- range ($wmApps.apps | default list) }}
+{{- if has (toString .name) ($wmApps.names | default list) }}
+  Provider sign-in: muster's provider App {{ .name }} (issuer {{ .issuer }}, OAuth client in Secret {{ .clientCredentialsSecretRef.name }}); a person grants it once in muster.
+  The App's callback URL is muster's <muster base URL>/oauth/proxy/callback.
+{{- end }}
+{{- end }}
 {{- with (include "agent-platform.workspaceManager.musterPin" . | fromJson) }}
 {{- if .provider }}
-  Provider sign-in: muster, pinned to provider instance {{ .provider }}'s App (issuer {{ .issuer }}, OAuth client in Secret {{ .secretName }}); a person grants it once in muster.
+  Provider sign-in (deprecated pin): muster, pinned to provider instance {{ .provider }}'s App (issuer {{ .issuer }}, OAuth client in Secret {{ .secretName }}); a person grants it once in muster.
   The App's callback URL is muster's <muster base URL>/oauth/proxy/callback.
 {{- end }}
 {{- end }}

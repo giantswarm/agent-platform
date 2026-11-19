@@ -182,14 +182,15 @@ def main(meta: str) -> int:
                        "gitUser: oauth2", "issuer: https://github.com/apps/ci-agents"), f"the muster chart {muster_pin}'s configuration")
     ok(f"the {NAME} chart {wm_pin} registers both Apps' grants unpinned; the muster chart {muster_pin} keeps both Apps")
 
-    # --- one instance with sign-in renders as before --------------------------------------
+    # --- one instance with sign-in: its provider App, no pin --------------------------------
     single = helm(meta, [*SINGLE, *SUBSTRATE])
-    if "providerApps" in single:
-        fail("a single instance with sign-in renders providerApps")
-    must_have(auth_block(single), ("          provider: github\n",), "the single-sign-in registration")
+    must_have(auth_block(single), ("          providerApps:\n          - github\n",), "the single-sign-in registration")
+    if re.search(r"^          provider:", auth_block(single), re.M):
+        fail(f"a single instance with sign-in still pins the registration:\n{auth_block(single)}")
+    must_have(block(muster_block(single), "providerApps", 6), ("        issuer: https://github.com/apps/ci-agents\n",), "the single-sign-in muster App")
     must_have(block(muster_block(single), "credentialProvider", 6), ("        releasable:\n          github: https://github.com/apps/ci-agents\n",),
               "the single-sign-in credentialProvider")
-    ok("one instance with sign-in: the registration pinned to it as before, no provider Apps")
+    ok("one instance with sign-in: muster keeps its App under the pin's issuer, the registration names it, no pin")
 
     # --- derivation -------------------------------------------------------------------------
     derived = muster_block(helm(meta, [*BOTH, "--set", f"{AUTH}.authorizationServer.issuer=",
@@ -210,14 +211,16 @@ def main(meta: str) -> int:
     named = helm(meta, [*BOTH, "--set", f"{AUTH}.providerApps={{gitlab}}"])
     if block(muster_block(named), "providerApps", 6) != "      providerApps:\n" + GITLAB_APP:
         fail(f"an own auth.providerApps [gitlab] keeps other Apps:\n{muster_block(named)}")
-    must_have(auth_block(named), ("          provider: github\n", "          providerApps:\n          - gitlab\n"), "the registration naming its own Apps")
+    must_have(auth_block(named), ("          providerApps:\n          - gitlab\n",), "the registration naming its own Apps")
+    if re.search(r"^          provider:", auth_block(named), re.M):
+        fail(f"own auth.providerApps still pin the registration:\n{auth_block(named)}")
     own = muster_block(helm(meta, [*BOTH, "--set", "muster.muster.providerApps[0].name=gitlab",
                                    "--set", "muster.muster.providerApps[0].issuer=https://gitlab.example.com:8443",
                                    "--set", "muster.muster.providerApps[0].clientCredentialsSecretRef.name=own-gitlab"]))
     apps = block(own, "providerApps", 6)
     if apps.count("name: gitlab") != 1 or "name: own-gitlab" not in apps or "name: github" not in apps:
         fail(f"an own muster App does not stand in place of the derived one:\n{apps}")
-    ok("an own pin derives no App; own auth.providerApps name the Apps beside the pin; an own muster App stands")
+    ok("an own pin derives no App; own auth.providerApps name the Apps in place of the pin; an own muster App stands")
 
     # --- guards -----------------------------------------------------------------------------
     must_fail(meta, [*BOTH, "--set", f"{AUTH}.providerApps={{bitbucket}}"], f"{AUTH}.providerApps names \"bitbucket\"", "an App of no instance")

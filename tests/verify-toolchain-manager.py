@@ -185,8 +185,14 @@ def main(meta: str, connectivity: str) -> int:
     must_have(vals, ("    caSecret:\n      key: ca.crt\n      name: dex-ca\n",), "the release values with global.identity.ca")
     ok("the login from muster's OAuth server without global.identity; the issuer's CA from global.identity.ca")
 
-    # --- the pin: the workspace-manager's github App ---------------------------
+    # --- the workspace-manager's github provider App ----------------------------
     _, vals, _ = release(meta, [*ON, *IDENTITY, *WORKSPACES])
+    must_have(vals, ("  grantApp: github\n",), "the release values with workspaces")
+    must_lack(vals, ("authorizationServer:",), "the release values with workspaces")
+    ok("with workspaces on the registration receives the workspace-manager's github provider App (github.grantApp), never a pin")
+
+    # The workspace-manager's own pin (auth.provider), deprecated, still pins both.
+    _, vals, _ = release(meta, [*ON, *IDENTITY, *WORKSPACES, "--set", "workspace-manager.muster.mcpServer.auth.provider=github"])
     must_have(vals, (
         "    authorizationServer:\n"
         "      authorizationEndpoint: https://github.com/login/oauth/authorize\n"
@@ -198,8 +204,9 @@ def main(meta: str, connectivity: str) -> int:
         "      expectedIssuer: https://github.com/login/oauth\n"
         "      issuer: https://github.com/apps/ci-agents\n"
         "      tokenEndpoint: https://github.com/login/oauth/access_token\n",
-    ), "the release values with workspaces")
-    ok("with workspaces on the registration is pinned to the workspace-manager's github App: its issuer, GitHub's endpoints and iss, its client Secret")
+    ), "the release values with the workspace-manager's own pin")
+    must_lack(vals, ("grantApp:",), "the release values with the workspace-manager's own pin")
+    ok("the workspace-manager's own pin (auth.provider) pins the registration to its App, as before")
 
     # --- own values stand ------------------------------------------------------
     _, vals, _ = release(meta, [*ON, *IDENTITY, *WORKSPACES,

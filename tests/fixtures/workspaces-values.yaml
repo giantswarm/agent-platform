@@ -1,8 +1,9 @@
 # Workspaces on with two provider instances, a GitHub one and a second kind:
 # every credential a Secret reference (tests/verify-workspace-manager.py); the
 # installation's read-write-many class named, not rendered. Only the GitHub
-# instance has person sign-in, so muster's registration stays pinned to its
-# App; tests/fixtures/workspaces-provider-apps-values.yaml adds the second.
+# instance has person sign-in, so muster keeps its App as the one provider App
+# the registration names; tests/fixtures/workspaces-provider-apps-values.yaml
+# adds the second. muster's OAuth client role signs people in to it.
 # The installation's Dex: the kagent controller (the kagent-extensions binary)
 # identifies people by its tokens.
 global:
@@ -35,11 +36,17 @@ workspace-manager:
   # than global.domain, which would move every other release.
   oauth:
     baseURL: https://workspaces.ci.example.com
-  # muster's pin: the github instance and its OAuth client Secret are derived,
-  # the App's issuer is the fixture's own (derived without it,
-  # tests/verify-workspace-manager.py).
+  # The github instance's provider App and its OAuth client Secret are
+  # derived; the App's issuer is the fixture's own, kept from the pin it
+  # replaces (derived without it, tests/verify-workspace-manager.py).
   muster:
     mcpServer:
       auth:
         authorizationServer:
           issuer: https://github.com/apps/ci-agents
+muster:
+  muster:
+    oauth:
+      mcpClient:
+        enabled: true
+        publicUrl: https://muster.ci.example.com
