@@ -1348,7 +1348,7 @@ components:  # @schema additionalProperties: true
     # person's disconnect in muster revokes their grant at the provider
     # (giantswarm/muster#1597), 0.10.0 the
     # person's provider token as muster's grant of the provider instance's App
-    # (muster.mcpServer.auth.provider, which this chart derives; an earlier
+    # (muster's provider App of the instance, which this chart derives; an earlier
     # release keeps its own sign-in store, which this chart no longer feeds:
     # agent-platform.workspaceManager.musterGrantFloor fails the render below
     # it with provider instances and OAuth),
@@ -5992,9 +5992,9 @@ workspaces:
   # .additionalProviders) and muster answers the person's current token for a
   # Session agent-manager bound to that person (muster.credentialProvider, on
   # with the switch). muster releases a grant only for a provider instance in
-  # muster.muster.credentialProvider.releasable, derived as the instance the
-  # workspace-manager's registration is pinned to (its name in
-  # workspace-manager.providers byte for byte) under the App's issuer
+  # muster.muster.credentialProvider.releasable, derived as each instance
+  # whose provider App the workspace-manager's registration names (its name
+  # in workspace-manager.providers byte for byte) under the App's issuer
   # (workspace-manager.muster.mcpServer.auth.authorizationServer.issuer, own
   # or derived as <url>/apps/<app.id>); an
   # own map stands beside it, and an instance missing there gets the
@@ -6322,14 +6322,15 @@ workspaces:
 # (giantswarm/workspace-manager), MCP only: tools appear as
 # x_workspace-manager_<tool> through the chart's own MCPServer CR, labelled for
 # the agent-platform tool group like every manager's and, with provider
-# instances, pinned to one instance's App (muster.mcpServer.auth below): the
-# person's provider token is muster's grant, never the manager's; no second
+# instances, receiving muster's provider App of each instance with sign-in
+# (muster.mcpServer.auth below): the person's provider token is muster's
+# grant, never the manager's; no second
 # MCPServer for any provider. The pinned Service name is what the wiring below (network policies)
 # targets.
 #
 # Identity as for cluster-manager above: an OAuth 2.1 resource server
 # validating the session's id_token muster forwards (the MCPServer CR's auth
-# block; pinned, beside the App token in X-Muster-Id-Token); the issuer, client, secret and CA fall back to global.identity and
+# block, the bearer of every call); the issuer, client, secret and CA fall back to global.identity and
 # the OAuth base URL to global.domain inside the chart. The manager writes the
 # workspace objects with its own ServiceAccount, so muster requests no extra
 # audience at login. The chart's own network policy stays off: the
@@ -6379,50 +6380,34 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
         # it changes.
         requiredAudiences:
           - dex-k8s-authenticator
-        # The muster pin (agent-platform.workspaceManager.musterPin): with
-        # providers and oauth.enabled the registration is pinned to one
-        # provider instance's App, so a person grants that App once in muster
-        # and muster attaches the person's App token to every call; muster
-        # holds the person's token, the manager none. Derived unless set:
-        # - provider: the instance, by default the only one of kind github
-        #   (several, or none of kind github: name it here);
-        # - authorizationServer.clientCredentialsSecretRef.name: the Secret
-        #   with the App's OAuth client under `client-id` and `client-secret`,
-        #   which muster reads, by default the Secret of the instance's
-        #   values.oauth.clientSecret (key client-secret; that Secret then
-        #   carries client-id too);
-        # - authorizationServer.issuer: the identity the person's grant of the
-        #   App is filed under, by default <url>/apps/<app.id> of a github
-        #   instance (https://github.com/apps/<app.id> without url), unique
-        #   per App; muster discovers nothing under it, since the endpoints
-        #   are pinned and GitHub's own `iss` is checked as expectedIssuer.
-        #   An own value (https://github.com/apps/<app slug>, say) stands;
-        #   changing it later asks every person to grant the App once more.
-        # The other authorizationServer keys default to
-        # GitHub's endpoints (the workspace-manager chart's values); a gitlab
-        # instance sets its own, revocationEndpoint
-        # (https://<gitlab>/oauth/revoke) among them, so a person's
-        # disconnect revokes the grant at GitLab; GitHub has no RFC 7009
-        # endpoint and leaves it empty. The render fails naming the key that
-        # is missing.
-        # GitHub and GitLab side by side
-        # (agent-platform.workspaceManager.providerApps): with two or more
-        # instances with person sign-in (values.oauth.clientSecret, key
-        # client-secret) and no own `provider`, nothing is pinned. muster
-        # keeps one provider App per instance (muster.muster.providerApps)
-        # and the registration receives the grants of each
-        # (`providerApps: [<instance>, …]`, one X-Muster-Grant-<instance>
-        # header per App the person granted); muster's credentialProvider
-        # releases each under its App's issuer. A github instance's App takes
-        # the issuer above and GitHub's endpoints on its url. A gitlab
-        # instance's App takes its url as issuer, GitLab's endpoints with
-        # revocationEndpoint <url>/oauth/revoke, values.oauth.scopes (default
-        # `api read_user read_repository write_repository`, exactly the
-        # scopes the GitLab application lists) and git user oauth2. It needs
-        # muster.muster.oauth.mcpClient.enabled. An own `providerApps` names
-        # the instances itself, and an own muster.muster.providerApps entry
-        # stands in place of the derived one. One instance with sign-in keeps
-        # the pin.
+        # Provider Apps (agent-platform.workspaceManager.providerApps): with
+        # providers and oauth.enabled, muster keeps one provider App per
+        # instance with person sign-in (values.oauth.clientSecret, key
+        # client-secret) in muster.muster.providerApps, and the registration
+        # names them (`providerApps: [<instance>, …]`): muster forwards the
+        # person's Dex ID token as the bearer and attaches the person's token
+        # of each App they granted in X-Muster-Grant-<instance>; muster's
+        # credentialProvider releases each under its App's issuer. A github
+        # instance's App takes the issuer <url>/apps/<app.id>
+        # (https://github.com/apps/<app.id> without url; an own
+        # authorizationServer.issuer below stands, and changing it later asks
+        # every person to grant the App once more), GitHub's endpoints on its
+        # url and, on github.com, expectedIssuer https://github.com/login/oauth.
+        # A gitlab instance's App takes its url as issuer, GitLab's endpoints
+        # with revocationEndpoint <url>/oauth/revoke, values.oauth.scopes
+        # (default `api read_user read_repository write_repository`, exactly
+        # the scopes the GitLab application lists) and git user oauth2. It
+        # needs muster.muster.oauth.mcpClient.enabled. An own `providerApps`
+        # names the instances itself, and an own muster.muster.providerApps
+        # entry stands in place of the derived one.
+        # Deprecated: an own `provider` pins the registration to that
+        # instance's App instead (agent-platform.workspaceManager.musterPin):
+        # the person's App token becomes the bearer and the Dex ID token
+        # moves to X-Muster-Id-Token, which MCP 2025-11-25 forbids (a server
+        # accepts only tokens issued for it). With it,
+        # authorizationServer.clientCredentialsSecretRef.name defaults to the
+        # instance's values.oauth.clientSecret Secret and
+        # authorizationServer.issuer to the App's issuer above.
   # The installation's provider instances, several at once: each a unique
   # `name` (a DNS label: the name workspaces refer to), a `kind`
   # and the kind's `values`, whose credentials (the sync credential, the OAuth
@@ -6615,11 +6600,12 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
 #     from global.identity.ca — the render fails without an issuer: the chart
 #     would serve its tools to anyone who reaches the Service;
 #   - muster.mcpServer.enabled while the muster component is on;
-#   - muster.mcpServer.authorizationServer, the pin of the registration to the
-#     installation's agents GitHub App, from the workspace-manager's pin to its
-#     github provider instance (agent-platform.workspaceManager.musterPin), so
-#     a person grants the App once for workspaces and toolchains: the App's
-#     issuer, GitHub's endpoints and the App's client credentials Secret;
+#   - github.grantApp, the workspace-manager's github provider App
+#     (agent-platform.workspaceManager.providerApps), so a person grants the
+#     installation's agents GitHub App once for workspaces and toolchains and
+#     muster attaches it in X-Muster-Grant-<instance>; with the
+#     workspace-manager's own deprecated pin (auth.provider),
+#     muster.mcpServer.authorizationServer pins this registration the same way;
 #   - sources: the block's sources followed by additionalSources;
 # and on the other side of a toolchain (agent-platform.toolchains.registries):
 #   - agent-manager.toolchains.repository, the first source's registry (an

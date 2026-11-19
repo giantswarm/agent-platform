@@ -133,7 +133,7 @@ def main(chart: str) -> int:
     ok("an own key of the provider entry and an own muster App chatgpt stand")
 
     config = component_render(release(on, "muster"), MUSTER_CHART)
-    if not re.search(r"providerApps:\n\s+- flow: chatgptDeviceCode\n\s+name: chatgpt", config):
+    if not re.search(r"providerApps:\n(?:\s+.*\n)*?\s+- flow: chatgptDeviceCode\n\s+name: chatgpt", config):
         fail(f"the muster chart {MUSTER_CHART[1]} does not keep the chatgpt App:\n{config}")
     controller = component_render(release(on, "kagent"), KAGENT_CHART).replace('\\"', '"')
     if '"chatgpt":{"hostname":"chatgpt.com","pathPrefix":"/backend-api/codex/","scheme":"Bearer"}' not in controller:
@@ -143,7 +143,8 @@ def main(chart: str) -> int:
     # --- without a prerequisite nothing is derived -------------------------------------
     for flags, case in (
         (["--set", "muster.muster.oauth.server.encryptionKey=false"], "token encryption off"),
-        (["--set", "muster.muster.oauth.mcpClient.enabled=false"], "muster's OAuth client off"),
+        # The workspace on the deprecated pin, whose sign-in needs no OAuth client role.
+        (["--set", "muster.muster.oauth.mcpClient.enabled=false", "--set", "workspace-manager.muster.mcpServer.auth.provider=github"], "muster's OAuth client off"),
         (["--set", "workspaces.enabled=false"], "the credential provider off"),
         (["--set", "components.kagent-crds.versionRange=>=1.23.0 <1.25.0", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"], "the kagent-crds floor"),
         (["--set", "components.muster.versionRange=>=5.50.0 <6.0.0"], "the muster floor"),
