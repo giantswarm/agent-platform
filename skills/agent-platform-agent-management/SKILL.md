@@ -110,14 +110,19 @@ never assume an argument. The agent tools drop an unknown key without an error: 
 - **An organization's connectors**: a kagent `RemoteMCPServer` in the organization namespace
   (`x_agent-manager_set_organization_connector`), not a Muster server, so no `toolset` selector
   reaches it. From agent-manager 3.3.0 (`connectors` in `x_agent-manager_create_agent`'s schema;
-  without it the agent takes none), pass the names that
+  without it the agent takes none), pass the names of the connectors that
   `x_agent-manager_list_organization_connectors` gives as `connectors` to `create_agent`,
   `validate_agent` or `update_agent`: each name alone, once. On update the list replaces the
   agent's connectors, `[]` removes them, and an absent argument keeps them; `get_agent` and
   `list_agents` return them. The agent calls the connector itself with the connector's credential;
   its host needs no `EgressPolicy`. Choose only a usable one (`agent-platform-tools`). Refused: a
   name that does not exist, an agent on a coding Harness, in the platform namespace or on a
-  workload cluster, and any agent's Muster `RemoteMCPServer` (named like its agent).
+  workload cluster, and an agent's binding to Muster: the `RemoteMCPServer` that one HelmRelease
+  renders with an agent of its name, which the list marks `musterBindingOf` from agent-manager
+  3.3.4 (how to tell it without the field: `agent-platform-tools`). From agent-manager 3.3.4,
+  `update_agent` and `validate_agent` refuse `connectors`, `[]` too, on an agent whose HelmRelease
+  has `spec.valuesFrom` (the message names it): tell the person that this agent's connectors are
+  set where its `valuesFrom` values are managed, not through the tool.
 - **Toolchains and workspace**: `defaultToolchains` and `defaultWorkspace`, the smallest set the job
   needs, and only where the installation offers them (both are opt-in: `x_toolchain-manager_*`,
   `x_workspace-manager_*` in `filter_tools`); otherwise leave them out.

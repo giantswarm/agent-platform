@@ -115,8 +115,12 @@ key) or `unknown` (the check failed, or you may not create that Secret: an edito
 and each connector's `accepted`, `reason` and `message` are kagent's tool discovery. Usable:
 `accepted: true` and no credential `missing`; `unknown` does not stop it. `accepted: false` is a
 connector that does not work (a missing key, say): tell the person its `message`.
-`accepted: null`: not reported yet. The list also holds the agents' own Muster
-`RemoteMCPServer`s, each named like its agent: they are no connectors.
+`accepted: null`: not reported yet. The list also holds each agent's binding to Muster: the
+`RemoteMCPServer` that one HelmRelease renders with an agent of its name. It is no connector:
+offer and use only the entries without `musterBindingOf`, which marks it with the agent's name
+from agent-manager 3.3.4 (`musterBindingOf` in the tool's description). When no entry carries
+the field (an older agent-manager, or you may not list the namespace's Agents), leave out each
+entry named like an agent of the namespace.
 
 To replace a model key or an egress credential, read its Secret from the list:
 `x_agent-manager_list_model_configs` (each model with a key) and
