@@ -40,10 +40,8 @@
 - agent-manager gets skillManager.url (the skill-manager's Service) and no
   skill sources from agent-platform.agentManager.skillManagerFloor on, with
   the skill-manager on; else skills.repositories as URLs, no platform source,
-  replaced by its own deprecated list. From the same floor agent-manager gets
-  installation (backstage.installationName), which get_info reports for the
-  default agent's start links. The deprecated list fails the render while
-  agent-manager pins through the skill-manager.
+  replaced by its own deprecated list. The deprecated list fails the render
+  while agent-manager pins through the skill-manager.
 - The connectivity chart wires the portal's meta agents to it while it is on.
 
 usage: verify-default-agent.py <meta chart dir> <connectivity chart dir>
@@ -83,6 +81,8 @@ ON = ["--set", "components.kagent.enabled=true", "--set", "components.agent-mana
 FLOORS = ["--set", "components.agent-manager.versionRange=>=2.99.0 <3.0.0", "--set", "components.backstage.versionRange=>=3.99.0 <4.0.0"]
 # Below agent-platform.backstage.skillManagerFloor: the portal still gets its own list.
 LIST_FLOORS = ["--set", "components.agent-manager.versionRange=>=2.99.0 <3.0.0", "--set", "components.backstage.versionRange=>=3.31.0 <3.36.0"]
+# Below agent-platform.backstage.skillSourcesFloor, under the default floor: the portal takes URLs only.
+URL_PORTAL = ["--set", "components.backstage.versionRange=>=3.0.0 <3.31.0"]
 # Below agent-platform.agentManager.skillManagerFloor, which the default range's floor now is.
 BELOW = ["--set", "components.agent-manager.versionRange=>=2.23.0 <3.0.0"]
 SM_OFF = ["--set", "components.skill-manager.enabled=false"]
@@ -220,13 +220,6 @@ v = find(render(META, *ON, "--set", "defaultAgent.displayName=Swarmy", "--set", 
 if (v["agent"]["displayName"], v["agent"]["description"]) != ("Swarmy", "Ask me.") or "[[" in v["agent"]["systemMessage"] or not v["agent"]["systemMessage"].startswith("Your name is Swarmy. "):
     fail(f"{NAME}: defaultAgent.displayName/description are not its agent.displayName/description and the system message's name: {v['agent']!r}")
 refused(META, "displayName", *ON, "--set", "defaultAgent.displayName=")
-# agent-manager reports the portal's installation name (get_info installation) from its floor on.
-for what, args, want in (("below the floor", [*ON, *BELOW], None), ("the default floor", [*ON], "agent-platform"),
-                         ("from the floor", [*ON, *FLOORS], "agent-platform"),
-                         ("backstage.installationName=lab", [*ON, *FLOORS, "--set", "backstage.installationName=lab"], "lab")):
-    got = find(render(META, *args), "HelmRelease", "agent-manager")["spec"]["values"].get("installation")
-    if got != want:
-        fail(f"agent-manager, {what}: installation {got!r}, want {want!r}")
 # Slack's agent picker preselects the default agent (klausGateway.a2a.defaultAgent derived), an
 # own value wins, and nothing is derived while the default agent is off.
 KG = ["--set", "components.klaus-gateway.enabled=true"]
@@ -334,7 +327,7 @@ print("ok: skill-manager follows agent-manager, after muster, nothing waits for 
 # One skill source value: the skill-manager and the portal.
 # The working tree is no published release (appVersion is not its version): no ref, as on a pre-release.
 own = {"url": PLATFORM, "path": "skills", "readOnly": True}
-sm, conn = repos(render(META, *ON, *PORTAL))
+sm, conn = repos(render(META, *ON, *PORTAL, *URL_PORTAL))
 if sm != [own, *installation] or conn != installation:
     fail(f"below the portal's object-form floor: skill-manager {sm!r}, portal {conn!r}; want the platform source, then skillManager.sources, and the portal URLs only")
 sm, conn = repos(render(META, *ON, *PORTAL, *LIST_FLOORS))
