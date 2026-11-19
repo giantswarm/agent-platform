@@ -475,6 +475,7 @@ components:  # @schema additionalProperties: true
     # spec.urlElicitation: Relay.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
+    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
     versionRange: ">=5.63.2 <6.0.0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
@@ -1096,6 +1097,7 @@ components:  # @schema additionalProperties: true
     # its ModelConfigs go to (api.kagent.dev first) with a bare apiVersion,
     # so no installation keeps a model-manager that writes kagent.dev
     # (giantswarm/model-manager#247).
+    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
     versionRange: ">=1.14.0 <2.0.0"
     valuesFrom: model-manager
     enabled: true
@@ -1179,6 +1181,7 @@ components:  # @schema additionalProperties: true
     # 3.1.0 serves Vertex service-account JSON keys and installation models
     # through the same credentials.uiURL, without tenancy too, and takes
     # tenants.commit.platformModelsPath (giantswarm/agent-manager#409).
+    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
     versionRange: ">=3.1.0 <4.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
@@ -1207,6 +1210,7 @@ components:  # @schema additionalProperties: true
     # person's grant (github.tokenExchange) and fails on github.enabled
     # without it. The ceiling is the next minor: a skill-manager minor rolls
     # in with the chart release that renders its values.
+    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
     versionRange: ">=0.3.0 <0.4.0"
     valuesFrom: skill-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
@@ -1274,6 +1278,7 @@ components:  # @schema additionalProperties: true
     # The floor is 0.26.10, the first release on mcp-oauth v1.13.18 (its Dex
     # client follows HTTPS_PROXY and NO_PROXY); the chart takes
     # observability.otel since 0.24.0 (giantswarm/giantswarm#36711).
+    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
     versionRange: ">=0.26.10 <0.27.0"
     valuesFrom: vm-manager
     enabled: false
@@ -1310,6 +1315,7 @@ components:  # @schema additionalProperties: true
     # each new cluster-manager line rolls in without a release of this chart. A
     # cluster-manager release that renames one of them must not ship until this
     # chart follows (UNCAPPED in tests/verify-range-ceilings.py).
+    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
     versionRange: ">=0.22.0"
     valuesFrom: cluster-manager
     enabled: false
@@ -1357,6 +1363,7 @@ components:  # @schema additionalProperties: true
     # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
     # minor: a workspace-manager minor rolls in with the chart release that
     # renders its values.
+    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
     versionRange: ">=0.15.9 <0.16.0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
@@ -1547,6 +1554,7 @@ components:  # @schema additionalProperties: true
     # mcpKubernetes.oauth.allowPrivateURLs has no effect: its Dex client reaches
     # a private issuer and follows HTTP_PROXY, HTTPS_PROXY and NO_PROXY without
     # it, so the block below does not set it. The next major is the ceiling.
+    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
     versionRange: ">=1.14.26 <2.0.0"
     valuesFrom: mcp-kubernetes
     # The connectivity chart's keys, not the chart's (which validates strictly):
@@ -4979,8 +4987,6 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
     provider: dex
     dex:
       allowPrivateURLs: false
-    sso:
-      allowPrivateIPs: true
     downstream:
       enabled: true
   muster:
@@ -5190,8 +5196,6 @@ vm-manager:  # @schema skipProperties: true; additionalProperties: true
     provider: dex
     dex:
       allowPrivateURLs: false
-    sso:
-      allowPrivateIPs: true
   muster:
     mcpServer:
       enabled: true
@@ -5324,8 +5328,6 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     provider: dex
     dex:
       allowPrivateURLs: false
-    sso:
-      allowPrivateIPs: true
     downstream:
       enabled: true
   muster:
@@ -5541,8 +5543,6 @@ skill-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     dex:
       allowPrivateURLs: false
-    sso:
-      allowPrivateIPs: true
   muster:
     mcpServer:
       enabled: true
@@ -5612,8 +5612,6 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
     provider: dex
     dex:
       allowPrivateURLs: false
-    sso:
-      allowPrivateIPs: true
     downstream:
       enabled: true
   muster:
@@ -6366,8 +6364,6 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
     baseURL: ""
     dex:
       allowPrivateURLs: false
-    sso:
-      allowPrivateIPs: true
   muster:
     mcpServer:
       enabled: true
@@ -6853,8 +6849,6 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
     oauth:
       enabled: true
       provider: dex
-      sso:
-        allowPrivateIPs: true
       enableDownstreamOAuth: true
   # The three boards the chart ships (administrator, security, cluster
   # operator), into the platform's own folder. `auto` follows the resolved

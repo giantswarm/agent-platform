@@ -89,8 +89,6 @@ spec:
         enabled: true
       enabled: true
       provider: dex
-      sso:
-        allowPrivateIPs: true
     observability:
       otel:
         endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -175,8 +173,6 @@ spec:
           enabled: true
         enabled: true
         provider: dex
-        sso:
-          allowPrivateIPs: true
       observability:
         otel:
           endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -1070,8 +1066,6 @@ spec:
           enableDownstreamOAuth: true
           enabled: true
           provider: dex
-          sso:
-            allowPrivateIPs: true
     model-manager:
       fullnameOverride: model-manager
       kagent:
@@ -1102,8 +1096,6 @@ spec:
           enabled: true
         enabled: true
         provider: dex
-        sso:
-          allowPrivateIPs: true
       observability:
         otel:
           endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -1596,8 +1588,6 @@ spec:
           allowPrivateURLs: false
         enabled: true
         provider: dex
-        sso:
-          allowPrivateIPs: true
       observability:
         otel:
           endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -2541,8 +2531,6 @@ spec:
         enabled: true
       enabled: true
       provider: dex
-      sso:
-        allowPrivateIPs: true
     observability:
       otel:
         endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -2792,8 +2780,6 @@ spec:
       dex:
         allowPrivateURLs: false
       enabled: true
-      sso:
-        allowPrivateIPs: true
     observability:
       otel:
         endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -3156,8 +3142,6 @@ spec:
         allowPrivateURLs: false
       enabled: true
       provider: dex
-      sso:
-        allowPrivateIPs: true
     observability:
       otel:
         endpoint: http://otlp-gateway.kube-system.svc:4317

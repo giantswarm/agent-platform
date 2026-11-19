@@ -1370,7 +1370,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | model-manager.oauth.enabled | bool | `true` |  |
 | model-manager.oauth.provider | string | `"dex"` |  |
 | model-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
-| model-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | model-manager.oauth.downstream.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1403,7 +1402,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | vm-manager.oauth.enabled | bool | `true` |  |
 | vm-manager.oauth.provider | string | `"dex"` |  |
 | vm-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
-| vm-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | vm-manager.muster.mcpServer.enabled | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.requiredAudiences | list | `[]` |  |
@@ -1432,7 +1430,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.oauth.enabled | bool | `true` |  |
 | agent-manager.oauth.provider | string | `"dex"` |  |
 | agent-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
-| agent-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | agent-manager.oauth.downstream.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1479,7 +1476,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | skill-manager.observability.otel.headers | string | `"auto"` |  |
 | skill-manager.oauth.enabled | bool | `true` |  |
 | skill-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
-| skill-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | skill-manager.muster.mcpServer.enabled | bool | `true` |  |
 | skill-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | skill-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
@@ -1495,7 +1491,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | cluster-manager.oauth.enabled | bool | `true` |  |
 | cluster-manager.oauth.provider | string | `"dex"` |  |
 | cluster-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
-| cluster-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | cluster-manager.oauth.downstream.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1609,7 +1604,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspace-manager.oauth.enabled | bool | `true` |  |
 | workspace-manager.oauth.baseURL | string | `""` |  |
 | workspace-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
-| workspace-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
@@ -1699,7 +1693,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.provider | string | `"dex"` |  |
-| mcp-kubernetes.mcpKubernetes.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enableDownstreamOAuth | bool | `true` |  |
 | mcp-kubernetes.grafanaDashboards.enabled | string | `"auto"` |  |
 | mcp-kubernetes.grafanaDashboards.folder | string | `"Agent Platform"` |  |
