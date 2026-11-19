@@ -302,7 +302,7 @@ def main(meta: str, connectivity: str) -> int:
         f"releaseName: {NAME}",
         "  dependsOn:\n    - name: muster\n    - name: agent-platform-connectivity\n",
         f"    fullnameOverride: {NAME}\n",
-        "    oauth:\n      baseURL: https://workspaces.ci.example.com\n      dex:\n        allowPrivateURLs: true\n      enabled: true\n      sso:\n        allowPrivateIPs: true\n",
+        "    oauth:\n      baseURL: https://workspaces.ci.example.com\n      dex:\n        allowPrivateURLs: false\n      enabled: true\n      sso:\n        allowPrivateIPs: true\n",
         "    muster:\n      mcpServer:\n        auth:\n          authorizationServer:\n            clientCredentialsSecretRef:\n              name: workspace-github\n"
         "            issuer: https://github.com/apps/ci-agents\n          forwardToken: true\n          provider: github\n"
         "          requiredAudiences:\n          - dex-k8s-authenticator\n        enabled: true\n",

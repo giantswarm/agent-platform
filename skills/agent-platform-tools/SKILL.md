@@ -2,7 +2,7 @@
 name: agent-platform-tools
 description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing or refused, connectors and signing in to one, workflows, or model-manager.
 metadata:
-  version: "3.3.0"
+  version: "3.3.1"
 ---
 
 # Tools on the Agent Platform
@@ -180,7 +180,7 @@ https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
 - "tool `x_…` not found" from the runtime: a backend tool was emitted as a function — go through
   `call_tool`.
 - An issuer discovery or TLS error is installation connectivity, not a request for the person to
-  sign in again. The five managers' `oauth.dex.allowPrivateURLs` stays `false`: Dex discovery
+  sign in again. The managers' `oauth.dex.allowPrivateURLs` (workspace-manager's included) stays `false`: Dex discovery
   reaches private addresses through the normal proxy settings without that opt-in. If a manager
   refuses an old `true`, remove it. Forwarded-token JWKS access is a separate permission; do not
   change `oauth.sso.allowPrivateIPs` to repair discovery. Muster names its remaining forwarded-token

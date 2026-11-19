@@ -1907,7 +1907,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspace-manager.fullnameOverride | string | `"workspace-manager"` |  |
 | workspace-manager.oauth.enabled | bool | `true` |  |
 | workspace-manager.oauth.baseURL | string | `""` |  |
-| workspace-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
+| workspace-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | workspace-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
