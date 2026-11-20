@@ -378,8 +378,6 @@ spec:
           enabled: true
         enabled: true
         provider: dex
-        sso:
-          allowPrivateIPs: true
       observability:
         otel:
           endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -1242,8 +1240,6 @@ spec:
           enableDownstreamOAuth: true
           enabled: true
           provider: dex
-          sso:
-            allowPrivateIPs: true
     model-manager:
       fullnameOverride: model-manager
       kagent:
@@ -1274,8 +1270,6 @@ spec:
           enabled: true
         enabled: true
         provider: dex
-        sso:
-          allowPrivateIPs: true
       observability:
         otel:
           endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -2021,8 +2015,6 @@ spec:
         enabled: true
       enabled: true
       provider: dex
-      sso:
-        allowPrivateIPs: true
     observability:
       otel:
         endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -2482,7 +2474,8 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.14.0 <2.0.0"
+    semver: ">=1.22.0-rc.1 <2.0.0-0"
+    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -2507,7 +2500,8 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=5.63.2 <6.0.0"
+    semver: ">=5.64.0-rc.2 <6.0.0-0"
+    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

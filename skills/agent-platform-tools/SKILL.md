@@ -186,8 +186,8 @@ https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
 - An issuer discovery or TLS error is installation connectivity, not a request for the person to
   sign in again. The managers' `oauth.dex.allowPrivateURLs` (workspace-manager's included) stays `false`: Dex discovery
   reaches private addresses through the normal proxy settings without that opt-in. If a manager
-  refuses an old `true`, remove it. Forwarded-token JWKS access is a separate permission; do not
-  change `oauth.sso.allowPrivateIPs` to repair discovery. Muster names its remaining forwarded-token
-  setting `dex.allowPrivateIPJWKS`; `dex.allowPrivateIPOIDC` remains a deprecated alias. Operator checks and migration:
+  refuses an old `true`, remove it. Each server fetches its own Dex's key set from a private address
+  without a setting: `oauth.sso.allowPrivateIPs` and muster's `dex.allowPrivateIPJWKS` (alias
+  `dex.allowPrivateIPOIDC`) are deprecated; do not set them to repair discovery. Operator checks and migration:
   [OAuth issuer connectivity](https://github.com/giantswarm/agent-platform/blob/main/docs/authentication.md#oauth-issuer-connectivity).
 - Everything else: https://docs.giantswarm.io/tutorials/agent-platform/troubleshooting/.
