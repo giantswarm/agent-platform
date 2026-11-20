@@ -475,8 +475,8 @@ components:  # @schema additionalProperties: true
     # spec.urlElicitation: Relay.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
-    versionRange: ">=5.63.2 <6.0.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=5.64.0-rc.2 <6.0.0-0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -1097,8 +1097,8 @@ components:  # @schema additionalProperties: true
     # its ModelConfigs go to (api.kagent.dev first) with a bare apiVersion,
     # so no installation keeps a model-manager that writes kagent.dev
     # (giantswarm/model-manager#247).
-    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
-    versionRange: ">=1.14.0 <2.0.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=1.22.0-rc.1 <2.0.0-0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -1181,8 +1181,8 @@ components:  # @schema additionalProperties: true
     # 3.1.0 serves Vertex service-account JSON keys and installation models
     # through the same credentials.uiURL, without tenancy too, and takes
     # tenants.commit.platformModelsPath (giantswarm/agent-manager#409).
-    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
-    versionRange: ">=3.1.0 <4.0.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=3.5.0-rc.1 <4.0.0-0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -1206,12 +1206,12 @@ components:  # @schema additionalProperties: true
     # false leaves it out, and agent-manager falls back to its own
     # (deprecated) skill discovery.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.3.0, which checks a private repository only with the
+    # From 0.3.0 it checks a private repository only with the
     # person's grant (github.tokenExchange) and fails on github.enabled
     # without it. The ceiling is the next minor: a skill-manager minor rolls
     # in with the chart release that renders its values.
-    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
-    versionRange: ">=0.3.0 <0.4.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=0.4.0-rc.1 <0.5.0-0"
     valuesFrom: skill-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
     # app); the reference is dropped at render time when muster is off.
@@ -1275,11 +1275,10 @@ components:  # @schema additionalProperties: true
     # the pod fetches (0.20.0 and 0.20.1 have no guest image: their
     # guest-image job failed; 0.19.x were on ghcr.io, with the guest image as
     # a node path).
-    # The floor is 0.26.10, the first release on mcp-oauth v1.13.18 (its Dex
-    # client follows HTTPS_PROXY and NO_PROXY); the chart takes
+    # From 0.26.10 the Dex client follows HTTPS_PROXY and NO_PROXY; the chart takes
     # observability.otel since 0.24.0 (giantswarm/giantswarm#36711).
-    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
-    versionRange: ">=0.26.10 <0.27.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=0.27.0-rc.1 <0.28.0-0"
     valuesFrom: vm-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
@@ -1306,7 +1305,7 @@ components:  # @schema additionalProperties: true
     # (list_clusters answers an empty list with a note, a dry run on a cluster
     # that does not exist is refused naming it, get_info reports clusterApi and
     # the real version).
-    # The floor is 0.22.0: the chart takes observability.otel, the OTLP trace
+    # From 0.22.0 the chart takes observability.otel, the OTLP trace
     # export global.observability.traces.otlp derives, and serviceMonitor
     # with observability.metrics, the metrics port its ServiceMonitor scrapes
     # (giantswarm/cluster-manager#138, giantswarm/giantswarm#36711).
@@ -1315,8 +1314,8 @@ components:  # @schema additionalProperties: true
     # each new cluster-manager line rolls in without a release of this chart. A
     # cluster-manager release that renames one of them must not ship until this
     # chart follows (UNCAPPED in tests/verify-range-ceilings.py).
-    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
-    versionRange: ">=0.22.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=0.39.0-rc.1"
     valuesFrom: cluster-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
@@ -1338,8 +1337,8 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.15.9, the first release on which oauth.dex.allowPrivateURLs
-    # has no effect: its Dex client reaches a private issuer and follows
+    # oauth.dex.allowPrivateURLs has no effect from 0.15.9:
+    # its Dex client reaches a private issuer and follows
     # HTTP_PROXY, HTTPS_PROXY and NO_PROXY without it, so the default below is
     # false. 0.14.0 is the first whose sync_workspace returns a request id that the
     # Workspace status names (its CRD gains that optional field; no values
@@ -1363,8 +1362,8 @@ components:  # @schema additionalProperties: true
     # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
     # minor: a workspace-manager minor rolls in with the chart release that
     # renders its values.
-    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
-    versionRange: ">=0.15.9 <0.16.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=0.16.0-rc.1 <0.17.0-0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
@@ -1550,12 +1549,12 @@ components:  # @schema additionalProperties: true
     # The mcp-kubernetes block below leaves the issuer, client, Secret and CA
     # to the chart's global.identity fallbacks. OAuth consent uses encrypted
     # shared state, and MCP requests require resource access tokens.
-    # The floor is 1.14.26, the first release on which
+    # From 1.14.26
     # mcpKubernetes.oauth.allowPrivateURLs has no effect: its Dex client reaches
     # a private issuer and follows HTTP_PROXY, HTTPS_PROXY and NO_PROXY without
     # it, so the block below does not set it. The next major is the ceiling.
-    # TODO(oauth-private-address, before merge): raise the floor to the first release on mcp-oauth v1.15.0 (giantswarm#39368).
-    versionRange: ">=1.14.26 <2.0.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=1.16.0-rc.1 <2.0.0-0"
     valuesFrom: mcp-kubernetes
     # The connectivity chart's keys, not the chart's (which validates strictly):
     # the upstream Kubernetes audience and the shape of the
