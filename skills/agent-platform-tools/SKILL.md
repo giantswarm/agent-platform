@@ -153,7 +153,7 @@ An empty result means it is not deployed here or you are not signed in to it. Th
 agents can use: `x_agent-manager_list_model_configs`. Bringing a model:
 https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
 
-## When a tool is missing or refused
+## Confidential gateway clients
 
 External gateways can register as separate confidential clients of muster's OAuth server using
 `client_secret_basic`, `client_secret_post` or `private_key_jwt`, once the supporting muster release
@@ -173,6 +173,8 @@ existing access tokens and refresh requests across replicas. After Valkey loss, 
 registration and obtain fresh user authorizations; restoring an old snapshot can restore retired
 clients. Procedure and version prerequisites:
 [Confidential clients](https://github.com/giantswarm/muster/blob/main/docs/how-to/confidential-clients.md).
+
+## When a tool is missing or refused
 
 - `filter_tools` with a `pattern` names, under `servers_requiring_auth`, each connector whose tools
   a sign-in would unlock, with its `auth_tool`: call `core_auth_login` with that `server` from this
