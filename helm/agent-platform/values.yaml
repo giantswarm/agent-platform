@@ -3978,7 +3978,14 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
           accountKeySecretRef:
             name: ""
             key: ""
-    # The Harness's environment. OTEL_EXPORTER_OTLP_HEADERS is the tenant
+    # The Harness's environment. With workspaces enabled, the platform adds
+    # inert git, gh and glab defaults to this and every additional Harness.
+    # Entries here override those defaults by name, including empty values.
+    # A single GitLab provider supplies its host; with several, set GITLAB_HOST
+    # on every Harness to select its intended host. With none, gitlab.com is
+    # the default. Session grants control access independently of these
+    # literals. Real credentials belong only in gateway bindings.
+    # OTEL_EXPORTER_OTLP_HEADERS is the tenant
     # header of the OTLP gateway kagent.otel names: the controller compiles the
     # rest of the actors' telemetry settings from kagent.otel and passes this
     # one through from the Harness, like the controller's own copy

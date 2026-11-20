@@ -94,6 +94,13 @@ never assume an argument. The agent tools drop an unknown key without an error: 
 
 ## The rules the tools do not tell you
 
+- Workspace CLI configuration belongs to the Harness's literal environment.
+  The platform supplies inert git, gh and glab values with workspaces enabled;
+  `kagent.harness.env` and each `kagent.harnesses[].env` override them by name.
+  One GitLab provider supplies its host; with several, explicitly select
+  `GITLAB_HOST` on every Harness. Never put a real provider token
+  there: the Session grant and gateway binding control access independently.
+
 - **Technical name**: DNS-1123, at most 63 characters, chosen by the person, never derived from the
   display name in silence. It names the release and the Agent; the display name and description are
   what the portal and Slack show.
