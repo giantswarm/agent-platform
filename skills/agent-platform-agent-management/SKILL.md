@@ -40,7 +40,9 @@ Where the reference lives — fetch it, never quote it from memory:
   their skills: `agent-platform-skill-authoring`.
 - The values schema and the manifests a set of values renders: `x_agent-manager_validate_agent` with
   the intended values returns the composed manifests and every violation, writing nothing. It is also
-  how a GitOps `HelmRelease` is drafted: validate, copy.
+  how a GitOps `HelmRelease` is drafted: validate, copy. A repeated skill name within one plugin's
+  selection produces one violation; name collisions between plugins or with standalone skills are
+  also refused.
 
 ## How an agent is managed
 
