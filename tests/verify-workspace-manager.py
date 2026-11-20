@@ -353,7 +353,7 @@ def main(meta: str, connectivity: str) -> int:
         if key == ("HelmRelease", "kagent"):
             environment = block(block(on or "", "harness", 4), "env", 6)
             configured = environment
-            for name in ("GH_TOKEN", "GITLAB_TOKEN", "GLAB_IS_OAUTH2", "GITLAB_HOST", "GLAB_CHECK_UPDATE", "GIT_TERMINAL_PROMPT", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+            for name in ("GH_TOKEN", "GITLAB_TOKEN", "GLAB_IS_OAUTH2", "GLAB_GIT_PROTOCOL", "GITLAB_HOST", "GLAB_CHECK_UPDATE", "GIT_TERMINAL_PROMPT", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
                 entry = re.search(rf"^      - name: {name}\n(?:        .*\n)+", configured, re.M)
                 if not entry:
                     fail(f"workspace Harness lacks declared CLI setting {name}")

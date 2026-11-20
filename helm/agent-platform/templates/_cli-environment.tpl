@@ -21,6 +21,7 @@ override these defaults by name.
   (dict "name" "GH_TOKEN" "value" "ghu_kagent-credential-injected")
   (dict "name" "GITLAB_TOKEN" "value" "kagent-credential-injected")
   (dict "name" "GLAB_IS_OAUTH2" "value" "true")
+  (dict "name" "GLAB_GIT_PROTOCOL" "value" "https")
   (dict "name" "GITLAB_HOST" "value" $gitlabHost)
   (dict "name" "GLAB_CHECK_UPDATE" "value" "false")
   (dict "name" "GIT_TERMINAL_PROMPT" "value" "0")

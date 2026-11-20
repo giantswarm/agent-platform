@@ -200,6 +200,8 @@ def main(connectivity: str, meta: str) -> int:
             fail(f"workspace Harness {harness.get('name', 'kagent')} lacks distinct CLI literals")
         if environment["GLAB_IS_OAUTH2"] != "true" or environment["GITLAB_HOST"] != "gitlab.example.com:8443":
             fail("workspace glab requires OAuth mode and a declared host")
+        if environment.get("GLAB_GIT_PROTOCOL") != "https":
+            fail("workspace glab must clone through HTTPS")
         if environment["GIT_CONFIG_KEY_0"] != "credential.helper" or "password=kagent-credential-injected" not in environment["GIT_CONFIG_VALUE_0"]:
             fail("workspace git lacks an inert credential helper")
         if not environment["GH_TOKEN"].startswith("ghu_") or environment["GITLAB_TOKEN"] != "kagent-credential-injected":
