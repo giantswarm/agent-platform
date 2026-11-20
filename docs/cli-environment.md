@@ -3,9 +3,10 @@
 With `workspaces.enabled`, the platform configures git, gh and glab through the
 existing upstream `Harness.spec.env` mechanism. The default and additional
 Harnesses receive only inert credential values. Git receives a credential
-helper, gh a non-empty token value, and glab a token, OAuth mode, HTTPS git
-protocol and host. The explicit git protocol preserves HTTPS cloning; glab's
-default is SSH.
+helper. A configured GitHub provider adds gh's token value; a configured GitLab
+provider adds glab's token, OAuth mode, HTTPS git protocol and host. Unconfigured
+providers add no CLI defaults. The explicit git protocol preserves HTTPS
+cloning; glab's default is SSH.
 The Go ADK also needs the generic declared-shell-environment implementation
 tracked by kagent-dev/kagent#3002; native Harnesses already receive their declared
 environment.
@@ -18,10 +19,11 @@ Keep model, MCP, source-artifact and per-turn gateway bindings independently.
 Customize the canonical `GH_TOKEN` and `GITLAB_TOKEN` entries when changing
 token values; another variable name does not replace those defaults.
 Empty values stay empty. One configured GitLab provider supplies its host,
-including a non-default port. With none, the default is gitlab.com. With multiple
-GitLab hosts, every Harness must explicitly select its `GITLAB_HOST`; use
-separate Harness configurations for distinct default hosts. Custom git environment configuration must supply a
-consistent `GIT_CONFIG_COUNT` and its indexed keys and values.
+including a non-default port. With no GitLab provider, no GitLab values are
+added. With multiple GitLab hosts, every Harness must explicitly select its
+`GITLAB_HOST`; use separate Harness configurations for distinct default hosts.
+Custom git environment configuration must supply a consistent
+`GIT_CONFIG_COUNT` and its indexed keys and values.
 
 ```yaml
 kagent:

@@ -95,7 +95,8 @@ never assume an argument. The agent tools drop an unknown key without an error: 
 ## The rules the tools do not tell you
 
 - Workspace CLI configuration belongs to the Harness's literal environment.
-  The platform supplies inert git, gh and glab values with workspaces enabled;
+  The platform supplies inert git values with workspaces enabled and forge CLI
+  values for its configured GitHub and GitLab providers;
   `kagent.harness.env` and each `kagent.harnesses[].env` override them by name.
   One GitLab provider supplies its host; with several, explicitly select
   `GITLAB_HOST` on every Harness. Never put a real provider token

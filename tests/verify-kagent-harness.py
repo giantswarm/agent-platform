@@ -193,7 +193,7 @@ def main(connectivity: str, meta: str) -> int:
     workspace_args = [*base, "-f", "tests/fixtures/workspaces-values.yaml", "-f", coding]
     workspace_values = kagent_values(render(meta, workspace_args))
     harnesses = [workspace_values["harness"], *workspace_values["harnesses"]]
-    required = {"GH_TOKEN", "GITLAB_TOKEN", "GLAB_IS_OAUTH2", "GITLAB_HOST", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_TERMINAL_PROMPT"}
+    required = {"GH_TOKEN", "GITLAB_TOKEN", "GLAB_IS_OAUTH2", "GITLAB_HOST", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"}
     for harness in harnesses:
         environment = {entry["name"]: entry["value"] for entry in harness["env"]}
         if len(environment) != len(harness["env"]) or not required <= environment.keys():
@@ -206,6 +206,20 @@ def main(connectivity: str, meta: str) -> int:
             fail("workspace git lacks an inert credential helper")
         if not environment["GH_TOKEN"].startswith("ghu_") or environment["GITLAB_TOKEN"] != "kagent-credential-injected":
             fail("workspace CLI defaults must contain inert literals")
+    providers = yaml.safe_load(pathlib.Path("tests/fixtures/workspaces-values.yaml").read_text())["workspace-manager"]["providers"]
+    github_providers = [provider for provider in providers if provider["kind"] == "github"]
+    github_values = kagent_values(render(meta, [*workspace_args, "--set-json", "workspace-manager.providers=" + json.dumps(github_providers)]))
+    for harness in [github_values["harness"], *github_values["harnesses"]]:
+        names = {entry["name"] for entry in harness["env"]}
+        if "GH_TOKEN" not in names or names & {"GITLAB_TOKEN", "GITLAB_HOST", "GLAB_IS_OAUTH2", "GLAB_GIT_PROTOCOL", "GLAB_CHECK_UPDATE"}:
+            fail("a GitHub-only installation must not spend its runtime environment on GitLab defaults")
+    gitlab_providers = [provider for provider in providers if provider["kind"] == "gitlab"]
+    gitlab_providers[0]["values"]["oauth"] = {"clientSecret": {"name": "gitlab-oauth", "key": "client-secret"}}
+    gitlab_values = kagent_values(render(meta, [*workspace_args, "--set-json", "workspace-manager.providers=" + json.dumps(gitlab_providers), "--set", "workspace-manager.muster.mcpServer.auth.provider=gitlab", "--set", "workspace-manager.muster.mcpServer.auth.authorizationServer.issuer=https://gitlab.example.com", "--set", "workspace-manager.muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name=gitlab-oauth"]))
+    for harness in [gitlab_values["harness"], *gitlab_values["harnesses"]]:
+        names = {entry["name"] for entry in harness["env"]}
+        if "GH_TOKEN" in names or not {"GITLAB_TOKEN", "GITLAB_HOST", "GLAB_IS_OAUTH2", "GLAB_GIT_PROTOCOL", "GLAB_CHECK_UPDATE"} <= names:
+            fail("a GitLab-only installation must receive its CLI defaults without GitHub defaults")
     explicit = [{"name": "GH_TOKEN", "value": ""}, {"name": "GITLAB_HOST", "value": "gitlab.example.com:8443"}, {"name": "SENTINEL", "value": "a=b"}]
     overrides = ["--set-json", "kagent.harness.env=" + json.dumps(explicit), "--set-json", "kagent.harnesses[0].env=" + json.dumps(explicit)]
     overridden = kagent_values(render(meta, [*workspace_args, *overrides]))
