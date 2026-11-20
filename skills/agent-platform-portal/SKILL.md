@@ -37,7 +37,12 @@ place by its label in **bold**, the path behind it after an arrow: **Customize**
 
 A connector's status describes your access. A family summarizes the access to
 its instances; **View instances** opens their individual states and recovery
-actions. The **Tools** tab explains unavailable tools and keeps available tools
+actions. The agent wizard allows Continue while its toolset check is pending or
+unavailable; local validation errors and explicit toolset refusals block Continue.
+The check times out after five seconds and offers a retry. Saving validates the
+toolset again through agent-manager.
+
+The **Tools** tab explains unavailable tools and keeps available tools
 visible when only some instances connect. **Company login** describes the
 authentication method, separately from access status. Use **Sign in** where it
 is offered; an SSO failure can require an administrator instead. **Status
