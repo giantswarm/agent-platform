@@ -155,6 +155,25 @@ https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
 
 ## When a tool is missing or refused
 
+External gateways can register as separate confidential clients of muster's OAuth server using
+`client_secret_basic`, `client_secret_post` or `private_key_jwt`, once the supporting muster release
+is deployed. Provisioning needs the operator's registration bearer token; never request or display
+it in a conversation. Use authorization code with PKCE S256, request the registered muster scope
+(`mcp` where configured), and send the canonical MCP `resource` in authorization and token requests.
+The authenticated client ID identifies the integration; each person's grant remains separate.
+Muster keeps the upstream identity-provider credentials and forwards or exchanges them according
+to the backend's configuration. Never send a muster access token directly to a backend.
+
+Client configuration management is opt-in through
+`muster.oauth.server.enableClientManagementEndpoint`. Store the registration access token in a
+secret manager and use the returned `registration_client_uri`, not a constructed management URL.
+Rotate by registering and verifying a replacement, then deleting the old registration with its
+own registration access token. With retirement-aware releases on every replica, deletion rejects
+existing access tokens and refresh requests across replicas. After Valkey loss, provision a new
+registration and obtain fresh user authorizations; restoring an old snapshot can restore retired
+clients. Procedure and version prerequisites:
+[Confidential clients](https://github.com/giantswarm/muster/blob/main/docs/how-to/confidential-clients.md).
+
 - `filter_tools` with a `pattern` names, under `servers_requiring_auth`, each connector whose tools
   a sign-in would unlock, with its `auth_tool`: call `core_auth_login` with that `server` from this
   conversation and give the person the sign-in link it returns. An entry with an `error` and no
