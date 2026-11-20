@@ -1711,7 +1711,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | model-manager.oauth.enabled | bool | `true` |  |
 | model-manager.oauth.provider | string | `"dex"` |  |
 | model-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
-| model-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | model-manager.oauth.downstream.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1739,7 +1738,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | vm-manager.oauth.enabled | bool | `true` |  |
 | vm-manager.oauth.provider | string | `"dex"` |  |
 | vm-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
-| vm-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | vm-manager.muster.mcpServer.enabled | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.requiredAudiences | list | `[]` |  |
@@ -1760,7 +1758,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agent-manager.oauth.enabled | bool | `true` |  |
 | agent-manager.oauth.provider | string | `"dex"` |  |
 | agent-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
-| agent-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | agent-manager.oauth.downstream.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1801,7 +1798,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | cluster-manager.oauth.enabled | bool | `true` |  |
 | cluster-manager.oauth.provider | string | `"dex"` |  |
 | cluster-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
-| cluster-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | cluster-manager.oauth.downstream.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1908,7 +1904,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspace-manager.oauth.enabled | bool | `true` |  |
 | workspace-manager.oauth.baseURL | string | `""` |  |
 | workspace-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
-| workspace-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |

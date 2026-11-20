@@ -161,12 +161,13 @@ def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> Non
                 continue
             manager_oauth = values[name]["oauth"]
             expect(f"{chart}: {name} obsolete Dex opt-in", manager_oauth["dex"].get("allowPrivateURLs"), False)
-            expect(f"{chart}: {name} separate JWKS policy", manager_oauth["sso"].get("allowPrivateIPs"), True)
+            expect(f"{chart}: {name} JWKS blanket unset", "sso" in manager_oauth, False)
         expect(f"{chart}: workspace-manager obsolete Dex opt-in", values["workspace-manager"]["oauth"]["dex"].get("allowPrivateURLs"), False)
-        expect(f"{chart}: workspace-manager separate JWKS policy", values["workspace-manager"]["oauth"]["sso"].get("allowPrivateIPs"), True)
+        expect(f"{chart}: workspace-manager JWKS blanket unset", "sso" in values["workspace-manager"]["oauth"], False)
     with open(f"{meta}/values.yaml") as source:
         values = yaml.safe_load(source)
     expect(f"{meta}: mcp-kubernetes obsolete Dex opt-in unset", "allowPrivateURLs" in values["mcp-kubernetes"]["mcpKubernetes"]["oauth"], False)
+    expect(f"{meta}: mcp-kubernetes JWKS blanket unset", "sso" in values["mcp-kubernetes"]["mcpKubernetes"]["oauth"], False)
 
     rels = releases(meta, [*base, *ALL_ON, *LOGIN])
     for name in MANAGERS:
@@ -174,7 +175,9 @@ def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> Non
         if name not in NOT_IN_CONNECTIVITY:
             forwarded = rels["agent-platform-connectivity"][name]["oauth"]
             expect(f"connectivity {name} obsolete Dex opt-in", forwarded["dex"].get("allowPrivateURLs"), False)
-    print("ok: the five manager releases and workspace-manager disable the obsolete Dex opt-in, mcp-kubernetes does not set it; independent JWKS policies remain separate")
+            expect(f"connectivity {name} JWKS blanket unset", "sso" in forwarded, False)
+        expect(f"{name} HelmRelease JWKS blanket unset", "sso" in oauth(rels, name), False)
+    print("ok: the five manager releases and workspace-manager disable the obsolete Dex opt-in and set no JWKS blanket; mcp-kubernetes sets neither")
 
 
 def main() -> None:

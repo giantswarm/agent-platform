@@ -2480,8 +2480,6 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
     provider: dex
     dex:
       allowPrivateURLs: false
-    sso:
-      allowPrivateIPs: true
     downstream:
       enabled: true
   muster:
@@ -2671,8 +2669,6 @@ vm-manager:  # @schema skipProperties: true; additionalProperties: true
     provider: dex
     dex:
       allowPrivateURLs: false
-    sso:
-      allowPrivateIPs: true
   muster:
     mcpServer:
       enabled: true
@@ -2762,8 +2758,6 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     provider: dex
     dex:
       allowPrivateURLs: false
-    sso:
-      allowPrivateIPs: true
     downstream:
       enabled: true
   muster:
@@ -2974,8 +2968,6 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
     provider: dex
     dex:
       allowPrivateURLs: false
-    sso:
-      allowPrivateIPs: true
     downstream:
       enabled: true
   muster:
@@ -3392,8 +3384,6 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
     baseURL: ""
     dex:
       allowPrivateURLs: false
-    sso:
-      allowPrivateIPs: true
   muster:
     mcpServer:
       enabled: true
