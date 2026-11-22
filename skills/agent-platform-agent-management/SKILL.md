@@ -2,7 +2,7 @@
 name: agent-platform-agent-management
 description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.2.0"
+  version: "3.3.0"
 ---
 
 # Managing agents and their building blocks
@@ -26,6 +26,12 @@ Its building blocks are separate resources the agent names: a `ModelConfig` (the
 the configured skill sources, a toolset (Muster selectors and presets), its organization's own
 connectors (`connectors`), `EgressPolicy`s (the origins it may reach), a Harness. agent-manager picks
 and pins them; it never writes model configs or egress policies.
+
+Runtime compute limits belong to the Harness. Platform owners set
+`kagent.harness.resources` or each `kagent.harnesses[].resources`; CPU and memory
+independently fall back to `kagent.config.runtimeDefaults` (1 CPU and 1Gi).
+Session limits stay pinned across Harness sizing changes. Create a Session to use
+new limits, and budget the shared worker pool for its actors and runtime overhead.
 
 A toolset's selector count is the `maxItems` of the `toolset` property in
 `x_agent-manager_create_agent`'s input schema (`describe_tool`); read it there. From Muster 5.63.7 and
