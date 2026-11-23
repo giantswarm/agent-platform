@@ -22,8 +22,11 @@ Empty values stay empty. One configured GitLab provider supplies its host,
 including a non-default port. With no GitLab provider, no GitLab values are
 added. With multiple GitLab hosts, every Harness must explicitly select its
 `GITLAB_HOST`; use separate Harness configurations for distinct default hosts.
-Custom git environment configuration must supply a consistent
-`GIT_CONFIG_COUNT` and its indexed keys and values.
+An `http://` GitLab provider also sets `GLAB_API_PROTOCOL=http`; a Harness that
+selects its own `GITLAB_HOST` sets the matching protocol itself. Git's indexed
+configuration is one unit: any explicit `GIT_CONFIG_*` entry replaces all git
+defaults, so custom configuration that still needs the inert credential helper
+declares it with a consistent `GIT_CONFIG_COUNT`.
 
 ```yaml
 kagent:
