@@ -9,7 +9,8 @@ cluster-manager and skill-manager; oauth.baseURL for the two routed managers.
 The connectivity release receives the same filled blocks (not skill-manager's,
 which only its own release reads), so each case renders the meta chart, then
 the connectivity chart with the values its HelmRelease carries — where the
-absence guard and the one-login guard fire.
+absence guard and the one-login guard fire. skill-manager's guards fire in the
+meta render (agent-platform.identity.validate, giantswarm/agent-platform#1382).
 
 Usage: verify-manager-identity.py <meta chart> <connectivity chart> [helm flags...]
 The helm flags (the Makefile's VM: API versions, required inputs) go to both renders.
@@ -31,11 +32,15 @@ ROUTED = {"model-manager": "/model-manager", "agent-manager": "/agent-manager"}
 ISSUER = "https://dex.ci.example.com"
 CLIENT = "muster-acme"
 SECRET = "muster-oauth"
-# agent-platform.idpEgress.cilium for a Dex issuer: its host by name, and the cluster entity on the
-# ports an in-cluster Gateway serves it on (a private installation's Dex resolves there).
+# agent-platform.idpEgress.cilium for a Dex issuer: its host by name, and the proxy pods of the
+# Gateway muster's route attaches to (ingress.parentRefs, x in the release namespace) on the ports
+# that Gateway serves it on (a private installation's Dex resolves there), never the cluster entity.
 IDP_EGRESS = [
     {"toFQDNs": [{"matchName": "dex.ci.example.com"}], "toPorts": [{"ports": [{"port": "443", "protocol": "TCP"}]}]},
-    {"toEntities": ["cluster"], "toPorts": [{"ports": [{"port": "443", "protocol": "TCP"}, {"port": "10443", "protocol": "TCP"}]}]},
+    {"toEndpoints": [{"matchLabels": {"app.kubernetes.io/name": "envoy", "gateway.envoyproxy.io/owning-gateway-name": "x",
+                                      "gateway.envoyproxy.io/owning-gateway-namespace": "agent-platform",
+                                      "io.kubernetes.pod.namespace": "envoy-gateway-system"}}],
+     "toPorts": [{"ports": [{"port": "443", "protocol": "TCP"}, {"port": "10443", "protocol": "TCP"}]}]},
 ]
 
 
@@ -135,18 +140,50 @@ def roster_covered(meta: str) -> None:
 
 
 def idp_rules(docs: list[dict], name: str) -> list[dict]:
-    """The identity-provider egress rules (toFQDNs, the cluster entity) of the Cilium policies selecting <name>'s pods."""
+    """The identity-provider egress rules (toFQDNs, the cluster entity, the Envoy edge) of the Cilium policies selecting <name>'s pods."""
     rules = []
     for d in docs:
         if d.get("kind") != "CiliumNetworkPolicy":
             continue
         if d["spec"].get("endpointSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/name") != name:
             continue
-        rules += [r for r in d["spec"].get("egress", []) if "toFQDNs" in r or "cluster" in r.get("toEntities", [])]
+        rules += [r for r in d["spec"].get("egress", []) if "toFQDNs" in r or "cluster" in r.get("toEntities", [])
+                  or any(e.get("matchLabels", {}).get("app.kubernetes.io/name") == "envoy" for e in r.get("toEndpoints", []))]
     return rules
 
 
+def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> None:
+    for chart in (meta, conn):
+        with open(f"{chart}/values.yaml") as source:
+            values = yaml.safe_load(source)
+        for name in MANAGERS:
+            if chart == conn and name in NOT_IN_CONNECTIVITY:
+                continue
+            manager_oauth = values[name]["oauth"]
+            expect(f"{chart}: {name} obsolete Dex opt-in", manager_oauth["dex"].get("allowPrivateURLs"), False)
+            expect(f"{chart}: {name} JWKS blanket unset", "sso" in manager_oauth, False)
+        expect(f"{chart}: workspace-manager obsolete Dex opt-in", values["workspace-manager"]["oauth"]["dex"].get("allowPrivateURLs"), False)
+        expect(f"{chart}: workspace-manager JWKS blanket unset", "sso" in values["workspace-manager"]["oauth"], False)
+    with open(f"{meta}/values.yaml") as source:
+        values = yaml.safe_load(source)
+    expect(f"{meta}: mcp-kubernetes obsolete Dex opt-in unset", "allowPrivateURLs" in values["mcp-kubernetes"]["mcpKubernetes"]["oauth"], False)
+    expect(f"{meta}: mcp-kubernetes JWKS blanket unset", "sso" in values["mcp-kubernetes"]["mcpKubernetes"]["oauth"], False)
+
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN])
+    for name in MANAGERS:
+        expect(f"{name} HelmRelease obsolete Dex opt-in", oauth(rels, name)["dex"].get("allowPrivateURLs"), False)
+        if name not in NOT_IN_CONNECTIVITY:
+            forwarded = rels["agent-platform-connectivity"][name]["oauth"]
+            expect(f"connectivity {name} obsolete Dex opt-in", forwarded["dex"].get("allowPrivateURLs"), False)
+            expect(f"connectivity {name} JWKS blanket unset", "sso" in forwarded, False)
+        expect(f"{name} HelmRelease JWKS blanket unset", "sso" in oauth(rels, name), False)
+    print("ok: the five manager releases and workspace-manager disable the obsolete Dex opt-in and set no JWKS blanket; mcp-kubernetes sets neither")
+
+
 def main() -> None:
+    if sys.argv[1] == "--oauth-settings-only":
+        verify_private_issuer_defaults(sys.argv[2], sys.argv[3], sys.argv[4:])
+        return
     meta, conn, base = sys.argv[1], sys.argv[2], sys.argv[3:]
 
     print("--> roster: every component that forwards an oauth block takes muster's login")
@@ -181,13 +218,15 @@ def main() -> None:
         sys.exit("FAIL: derived: model-manager's egress does not reach the derived issuer")
     print("ok: derived")
 
-    print("--> identity-provider egress: every manager's pods reach the login by name and through an in-cluster gateway (cluster on 443 and 10443)")
+    print("--> identity-provider egress: every manager's pods reach the login by name and through the in-cluster Gateway's proxy pods on 443 and 10443, not the cluster entity")
     docs = [d for d in yaml.safe_load_all(result.stdout) if d]
     for name in MANAGERS:
         rules = idp_rules(docs, name)
         for want in IDP_EGRESS:
             if want not in rules:
                 sys.exit(f"FAIL: idp egress: no Cilium policy gives {name}'s pods {want}; it has {rules}")
+        if any("cluster" in r.get("toEntities", []) for r in rules):
+            sys.exit(f"FAIL: idp egress: a Cilium policy gives {name}'s pods the cluster entity; it has {rules}")
     print("ok: idp egress")
 
     print("--> skill-manager off: no policy selects its pods")
@@ -206,7 +245,8 @@ def main() -> None:
     for what, extra, want in (
         ("muster's login", (), ISSUER),
         ("global.identity wins over muster's", ("global.identity.issuerUrl=https://global.example.com",), "https://global.example.com"),
-        ("its own issuer wins", ("global.identity.issuerUrl=https://global.example.com", "skill-manager.oauth.dex.issuerURL=https://own.example.com"), "https://own.example.com"),
+        # One that differs from global.identity fails the render (the one-login case below).
+        ("its own issuer wins over muster's", ("skill-manager.oauth.dex.issuerURL=https://own.example.com",), "https://own.example.com"),
     ):
         expect(f"skill-manager identityProvider, {what}", entry(*extra), {"provider": "dex", "issuerUrl": want})
     expect("skill-manager identityProvider with its OAuth off", entry("skill-manager.oauth.enabled=false"), None)
@@ -289,10 +329,39 @@ def main() -> None:
             sys.exit(f"FAIL: absent, {what}: the connectivity render did not fail naming {fragments}\n{result.stderr}")
         print(f"ok: absent, {what}")
 
+    # skill-manager's block reaches its own release only, so the meta render guards it.
+    print("--> one login, skill-manager: an own value that differs from global.identity fails the meta render naming both")
+    agreed = sets(f"global.identity.issuerUrl={ISSUER}", f"global.identity.clientId={CLIENT}", f"global.identity.existingSecret={SECRET}")
+    for key, global_key, value in (
+        ("dex.issuerURL", "issuerUrl", ISSUER),
+        ("dex.clientID", "clientId", CLIENT),
+        ("existingSecret", "existingSecret", SECRET),
+    ):
+        flags = [*base, *ALL_ON, *LOGIN, *agreed, *sets(f"skill-manager.oauth.{key}=other")]
+        result = helm(meta, flags)
+        want = f"skill-manager.oauth.{key} (other) differs from global.identity.{global_key} ({value})"
+        if result.returncode == 0 or want not in result.stderr:
+            sys.exit(f"FAIL: one login, skill-manager.oauth.{key}: the meta render did not fail with {want!r}\n{result.stderr}")
+        if helm(meta, [*flags, *sets("components.skill-manager.enabled=false")]).returncode != 0:
+            sys.exit(f"FAIL: one login, skill-manager.oauth.{key}: the guard fires with the skill-manager off")
+        releases(meta, [*base, *ALL_ON, *LOGIN, *agreed, *sets(f"skill-manager.oauth.{key}={value}")])
+        print(f"ok: one login, skill-manager.oauth.{key}")
+
+    print("--> absent, skill-manager: what cannot be derived fails the meta render naming the key")
+    for what, extra, fragments in (
+        ("no Secret", sets("muster.muster.oauth.server.existingSecret="), ("none of skill-manager.oauth.existingSecret", "set muster.muster.oauth.server.existingSecret")),
+        ("no client", sets("muster.muster.oauth.server.dex.clientId="), ("skill-manager.oauth.dex.clientID is empty", "set muster.muster.oauth.server.dex.clientId")),
+        ("no base URL (no domain)", sets("global.domain="), ("skill-manager.oauth.baseURL is empty", "set global.domain")),
+    ):
+        result = helm(meta, [*base, *ALL_ON, *LOGIN, *extra])
+        if result.returncode == 0 or not all(f in result.stderr for f in fragments):
+            sys.exit(f"FAIL: absent, skill-manager, {what}: the meta render did not fail naming {fragments}\n{result.stderr}")
+        print(f"ok: absent, skill-manager, {what}")
+
     print("--> no login named (muster's issuer unset): nothing filled, the guard stays silent")
     rels = releases(meta, [*base, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
                                         "kagent.controller.image.repository=giantswarm/kagent/controller")])
-    expect("model-manager oauth.dex", oauth(rels, "model-manager").get("dex"), {"allowPrivateURLs": True})
+    expect("model-manager oauth.dex", oauth(rels, "model-manager").get("dex"), {"allowPrivateURLs": False})
     result = connectivity(conn, rels["agent-platform-connectivity"], base)
     if result.returncode != 0:
         sys.exit(f"FAIL: no login: the connectivity render failed\n{result.stderr}")

@@ -2,7 +2,7 @@
 name: agent-platform-agent-management
 description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.1.1"
+  version: "3.3.0"
 ---
 
 # Managing agents and their building blocks
@@ -23,9 +23,21 @@ Muster. The Harness boots the agent into a golden snapshot and the Agent reports
 a new revision: running sessions keep theirs, new sessions start from the new one.
 
 Its building blocks are separate resources the agent names: a `ModelConfig` (the model), skills from
-the configured skill sources, a toolset (Muster selectors and presets), `EgressPolicy`s (the origins
-it may reach), a Harness. agent-manager picks and pins them; it never writes model configs or egress
-policies.
+the configured skill sources, a toolset (Muster selectors and presets), its organization's own
+connectors (`connectors`), `EgressPolicy`s (the origins it may reach), a Harness. agent-manager picks
+and pins them; it never writes model configs or egress policies.
+
+Runtime compute limits belong to the Harness. Platform owners set
+`kagent.harness.resources` or each `kagent.harnesses[].resources`; CPU and memory
+independently fall back to `kagent.config.runtimeDefaults` (1 CPU and 1Gi).
+Session limits stay pinned across Harness sizing changes. Create a Session to use
+new limits, and budget the shared worker pool for its actors and runtime overhead.
+
+A toolset's selector count is the `maxItems` of the `toolset` property in
+`x_agent-manager_create_agent`'s input schema (`describe_tool`); read it there. From Muster 5.63.7 and
+agent chart 2.6.1 it is 128 selectors and 8192 UTF-8 bytes joined with commas; before that, 32.
+agent-manager refuses a toolset over the limits: use a preset. The complete serialized Session binding
+must fit its 16 KiB JSON body limit, including escaped names and other fields.
 
 Where the reference lives — fetch it, never quote it from memory:
 
@@ -34,7 +46,9 @@ Where the reference lives — fetch it, never quote it from memory:
   their skills: `agent-platform-skill-authoring`.
 - The values schema and the manifests a set of values renders: `x_agent-manager_validate_agent` with
   the intended values returns the composed manifests and every violation, writing nothing. It is also
-  how a GitOps `HelmRelease` is drafted: validate, copy.
+  how a GitOps `HelmRelease` is drafted: validate, copy. A repeated skill name within one plugin's
+  selection produces one violation; name collisions between plugins or with standalone skills are
+  also refused.
 
 ## How an agent is managed
 
@@ -72,7 +86,8 @@ never assume an argument. The agent tools drop an unknown key without an error: 
    `x_agent-manager_list_egress_policies`, presets from `filter_tools {"include_presets": true}`. A
    skill whose name or description matches the agent's purpose settles what the purpose means:
    propose pinning it.
-2. `x_agent-manager_validate_agent` → `x_agent-manager_create_agent` →
+2. `x_agent-manager_validate_agent` → the plan written out and confirmed (below) →
+   `x_agent-manager_create_agent` →
    `x_agent-manager_get_agent_status` until `ready` (about a minute; the golden snapshot is the long
    part) → a first turn as the person (`x_agent-manager_start_session`, where offered). `valid: true`
    is not enough: `manifests.values` holds every field you meant to set, or a key was wrong. Poll the
@@ -90,13 +105,32 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   what the portal and Slack show.
 - **Model**: the cheapest config from the live list that can do the job, never invented — an agent
   on a missing or not-accepted config never boots. No suitable model: a hosted API model with a key is
-  `x_agent-manager_set_organization_model` (organization admin; the key goes into the credential
-  form it links); a local or Hugging Face model is model-manager (`agent-platform-tools`); a
+  `x_agent-manager_set_organization_model` (organization admin, or cluster admin
+  for the installation namespace; the key goes into the credential form it
+  links). Native Vertex models also take nonsecret `projectID` and `location`;
+  upload their JSON only in that credential form. Direct Vertex calls are
+  unmetered by the LLM gateway. A local or Hugging Face model is model-manager (`agent-platform-tools`); a
   subscription (OAuth) model — `openAI.credentialType: chatgptOAuth`, `apiFormat: responses` — is the
   platform's configuration in git, which no tool writes.
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only
   on an explicit request. An own-account (OAuth) connector without `grantScope: subject` needs a
   sign-in in each of the agent's conversations (`agent-platform-tools`); say so before choosing it.
+- **An organization's connectors**: a kagent `RemoteMCPServer` in the organization namespace
+  (`x_agent-manager_set_organization_connector`), not a Muster server, so no `toolset` selector
+  reaches it. From agent-manager 3.3.0 (`connectors` in `x_agent-manager_create_agent`'s schema;
+  without it the agent takes none), pass the names of the connectors that
+  `x_agent-manager_list_organization_connectors` gives as `connectors` to `create_agent`,
+  `validate_agent` or `update_agent`: each name alone, once. On update the list replaces the
+  agent's connectors, `[]` removes them, and an absent argument keeps them; `get_agent` and
+  `list_agents` return them. The agent calls the connector itself with the connector's credential;
+  its host needs no `EgressPolicy`. Choose only a usable one (`agent-platform-tools`). Refused: a
+  name that does not exist, an agent on a coding Harness, in the platform namespace or on a
+  workload cluster, and an agent's binding to Muster: the `RemoteMCPServer` that one HelmRelease
+  renders with an agent of its name, which the list marks `musterBindingOf` from agent-manager
+  3.3.4 (how to tell it without the field: `agent-platform-tools`). From agent-manager 3.3.4,
+  `update_agent` and `validate_agent` refuse `connectors`, `[]` too, on an agent whose HelmRelease
+  has `spec.valuesFrom` (the message names it): tell the person that this agent's connectors are
+  set where its `valuesFrom` values are managed, not through the tool.
 - **Toolchains and workspace**: `defaultToolchains` and `defaultWorkspace`, the smallest set the job
   needs, and only where the installation offers them (both are opt-in: `x_toolchain-manager_*`,
   `x_workspace-manager_*` in `filter_tools`); otherwise leave them out.
@@ -104,11 +138,23 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   `agent-platform-skill-authoring`.
 - **Egress**: none unless the job needs an origin; a named `EgressPolicy` where one fits, raw origins otherwise.
   Tenant admins write policies; a change to one reaches its agents from their next session.
+- **Credentials**: an existing model key or egress credential is named in the lists —
+  `x_agent-manager_list_model_configs` (each model with a key) and
+  `x_agent-manager_list_egress_policies` (each destination with a credential) give its Secret as
+  `credentialSecret` and `credentialKey`: names only, never a value. Pass them as `secret` and `key`
+  to `x_agent-manager_replace_organization_credential`, or as `credentialSecret` and `credentialKey`
+  to `x_agent-manager_set_organization_model` and `x_agent-manager_set_organization_egress_policy`;
+  never ask the person for them. A change of a model's provider, or of a Vertex model's project,
+  needs a new `credentialSecret` that does not exist yet.
 - **System prompt**: role, voice and rules; knowledge goes into skills. Every agent with tools carries
   the meta-tool paragraph from `references/system-prompt.md`.
 - **Icon**: `iconUrl` only where the installation serves avatars; omit it otherwise.
 - **Confirm every choice you made for the person** — the technical name above all, and the display
-  name, description and system prompt verbatim — and wait for a yes before writing. When a tool cannot
+  name, description and system prompt verbatim — and wait for a yes before writing. Write the plan in
+  your reply text first: owner (the organization), name, display name, description, harness, model,
+  toolset, connectors, skills, egress and system prompt. The person sees neither your tool calls' arguments nor `validate_agent`'s output,
+  and an `ask_user` question carries no plan, so never point at "the plan above" you have not written
+  out; when the person says they see none, write it out instead of asking again. When a tool cannot
   express what the person confirmed, stop and say so; never run a different write instead.
   Delete only on an explicit request that names the agent, one at a time.
 

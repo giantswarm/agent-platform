@@ -1273,6 +1273,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.flavor | string | `"auto"` | `auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor. |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
+| networkPolicy.envoyGateway.proxyNamespace | string | `"envoy-gateway-system"` | Where Envoy Gateway runs the Gateways' proxy pods. The default is the controller's namespace of Envoy Gateway's default deploy mode (ControllerNamespace); change it when Envoy Gateway runs in another namespace, and set it empty when it runs in the GatewayNamespace mode, which puts each proxy in its Gateway's own namespace. |
+| networkPolicy.identityProvider.inClusterPeers | string | `nil` | The in-cluster peers of the identity provider egress, each a namespace, optional pod labels (matchLabels) and its ports. Unset (null), the chart derives them: the proxy pods of the public Gateway muster's route attaches to (ingress.parentRefs, else the chart-owned edge, else global.gatewayApi.parentRefs) on 443 and 10443, and, for an issuer host <service>.<namespace>.svc[.cluster.local], that namespace on the URL's port. A list replaces the derived peers; [] renders no in-cluster leg. |
 | networkPolicy.substrate.credentialProvider.egressFQDNs | list | `[]` |  |
 | networkPolicy.substrate.egressGateway.privateCIDRs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
@@ -1708,8 +1710,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | model-manager.mcp.enabled | bool | `true` |  |
 | model-manager.oauth.enabled | bool | `true` |  |
 | model-manager.oauth.provider | string | `"dex"` |  |
-| model-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
-| model-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| model-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | model-manager.oauth.downstream.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1736,8 +1737,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | vm-manager.persistence.create | bool | `false` |  |
 | vm-manager.oauth.enabled | bool | `true` |  |
 | vm-manager.oauth.provider | string | `"dex"` |  |
-| vm-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
-| vm-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| vm-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | vm-manager.muster.mcpServer.enabled | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.requiredAudiences | list | `[]` |  |
@@ -1757,8 +1757,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |
 | agent-manager.oauth.provider | string | `"dex"` |  |
-| agent-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
-| agent-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| agent-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | agent-manager.oauth.downstream.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1769,6 +1768,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.route.hostname | string | `""` |  |
 | agentManager.route.parentRef.name | string | `"giantswarm-default"` |  |
 | agentManager.route.parentRef.namespace | string | `"envoy-gateway-system"` |  |
+| agentManager.route.timeouts.request | string | `"100s"` |  |
 | agentManager.route.jwtAuthentication.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.mode | string | `"Strict"` |  |
 | agentManager.route.jwtAuthentication.issuer | string | `""` |  |
@@ -1789,7 +1789,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.24.0"` |  |
+| agentManager.migration.image.tag | string | `"3.5.5"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
@@ -1797,8 +1797,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | cluster-manager.mcp.enabled | bool | `true` |  |
 | cluster-manager.oauth.enabled | bool | `true` |  |
 | cluster-manager.oauth.provider | string | `"dex"` |  |
-| cluster-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
-| cluster-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| cluster-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | cluster-manager.oauth.downstream.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1904,8 +1903,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | workspace-manager.fullnameOverride | string | `"workspace-manager"` |  |
 | workspace-manager.oauth.enabled | bool | `true` |  |
 | workspace-manager.oauth.baseURL | string | `""` |  |
-| workspace-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
-| workspace-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| workspace-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |

@@ -302,9 +302,9 @@ def main(meta: str, connectivity: str) -> int:
         f"releaseName: {NAME}",
         "  dependsOn:\n    - name: muster\n    - name: agent-platform-connectivity\n",
         f"    fullnameOverride: {NAME}\n",
-        "    oauth:\n      baseURL: https://workspaces.ci.example.com\n      dex:\n        allowPrivateURLs: true\n      enabled: true\n      sso:\n        allowPrivateIPs: true\n",
-        "    muster:\n      mcpServer:\n        auth:\n          authorizationServer:\n            clientCredentialsSecretRef:\n              name: workspace-github\n"
-        "            issuer: https://github.com/apps/ci-agents\n          forwardToken: true\n          provider: github\n"
+        "    oauth:\n      baseURL: https://workspaces.ci.example.com\n      dex:\n        allowPrivateURLs: false\n      enabled: true\n",
+        "    muster:\n      mcpServer:\n        auth:\n          authorizationServer:\n"
+        "            issuer: https://github.com/apps/ci-agents\n          forwardToken: true\n          providerApps:\n          - github\n"
         "          requiredAudiences:\n          - dex-k8s-authenticator\n        enabled: true\n",
         "    workspaces:\n      namespace: kagent\n",
         "    - kind: github\n      name: github\n",
@@ -330,8 +330,10 @@ def main(meta: str, connectivity: str) -> int:
         refs += 1
     if refs != 4:
         fail(f"expected the 4 credentials of the fixture as Secret references in the HelmRelease, found {refs}")
-    # The baseline of the comparison below: the agents on, workspaces off.
-    off_docs = documents(helm(meta, ["-f", AGENTS]))
+    # The baseline of the comparison below: the agents on, workspaces off, and
+    # muster's OAuth client role the workspace fixture sets for its provider App.
+    off_docs = documents(helm(meta, ["-f", AGENTS, "--set", "muster.muster.oauth.mcpClient.enabled=true",
+                                     "--set", "muster.muster.oauth.mcpClient.publicUrl=https://muster.ci.example.com"]))
     conn = off_docs[("HelmRelease", "agent-platform-connectivity")]
     conn_on = on_docs[("HelmRelease", "agent-platform-connectivity")]
     if f"      {NAME}:\n        enabled: true\n" not in conn_on:
@@ -406,12 +408,20 @@ def main(meta: str, connectivity: str) -> int:
             baseline = block(block(doc, "muster", 4), "credentialProvider", 6)
             if baseline:
                 doc = doc.replace(baseline, "", 1).replace("    disableWait: true\n", "", 2)
+            # And muster's provider App of the github instance, which the
+            # registration names in place of a pin
+            # (agent-platform.workspaceManager.providerApps).
+            apps = block(block(on or "", "muster", 4), "providerApps", 6)
+            for want in (" name: github\n", "issuer: https://github.com/apps/ci-agents\n", "name: workspace-github\n"):
+                if want not in apps:
+                    fail(f"switching workspaces on did not derive muster's github provider App ({want.strip()!r}) onto {key}:\n{apps}")
+            on = on.replace(apps, "", 1)
         if on != doc:
             fail(f"switching workspaces on changed {key} (muster.* included)")
     if any(kind == "MCPServer" for kind, _ in on_docs):
         fail("the meta chart renders an MCPServer: the registration is the component chart's own")
     ok(f"on: one OCIRepository ({rng.group(1)}) + one HelmRelease dependsOn muster and connectivity with the block forwarded "
-       "(Service name, OAuth, the muster registration pinned to the github instance's App, two provider instances, the grant's key, the class, cleanupAfter from kagent's TTL), "
+       "(Service name, OAuth, the muster registration receiving the github instance's provider App, two provider instances, the grant's key, the class, cleanupAfter from kagent's TTL), "
        f"{refs} credentials all Secret references, the namespace kagent's, empty keys not forwarded; nothing else moved, muster.* included; no MCPServer")
 
     # --- the storage slices' keys beside the switch ----------------------------------------
@@ -492,49 +502,52 @@ def main(meta: str, connectivity: str) -> int:
     must_fail(meta, [*ON, "--set", f"{NAME}.providers[1].kind="], "names no kind", "a provider without kind")
     ok("an inline credential, a duplicate or non-DNS name and a missing kind fail naming the path")
 
-    # --- muster's pin --------------------------------------------------------------------
+    # --- the provider App in place of a pin -------------------------------------------
     auth = f"{NAME}.muster.mcpServer.auth"
+    def muster_apps(flags: list) -> str:
+        return block(block(documents(helm(meta, flags))[("HelmRelease", "muster")], "muster", 4), "providerApps", 6)
+    two = documents(helm(meta, [*ON, *NO_GITLAB]))[("HelmRelease", NAME)]
+    must_have(two, ("          providerApps:\n          - github\n",), "the HelmRelease with two github instances, one with sign-in")
+    must_have(muster_apps([*ON, "--set", f"{auth}.authorizationServer.issuer="]), ("issuer: https://github.com/apps/123\n",),
+              "muster's provider App without an own issuer")
+    must_have(muster_apps([*ON, "--set", f"{auth}.authorizationServer.issuer=", "--set", f"{NAME}.providers[0].values.url=https://ghe.example.com/"]),
+              ("issuer: https://ghe.example.com/apps/123\n", "authorizationEndpoint: https://ghe.example.com/login/oauth/authorize\n"),
+              "muster's provider App of a GitHub Enterprise instance without an own issuer")
+    with open(BOM, encoding="utf-8") as f:
+        pin = re.search(rf'^\s*{re.escape(NAME)}:\s*\{{\s*versionRange:\s*"([^"]+)"', f.read(), re.M).group(1)
+    r = component_render(documents(helm(meta, [*ON, *IDENTITY]))[("HelmRelease", NAME)], pin)
+    if r.returncode != 0:
+        fail(f"the {NAME} chart {pin} refuses the forwarded provider Apps:\n{r.stderr}")
+    mcp = next((d for d in r.stdout.split("\n---\n") if re.search(r"^kind: MCPServer", d, re.M)), "")
+    must_have(mcp, ("  auth:\n    type: oauth\n    forwardToken: true\n    providerApps:\n      - github\n",), f"the {NAME} chart {pin}'s MCPServer")
+    for gone in ("authorizationServer", "forwardIdentity"):
+        if gone in mcp:
+            fail(f"the {NAME} chart {pin}'s MCPServer is still pinned ({gone})")
+    ok(f"provider Apps: one instance with sign-in is named as muster's provider App, its issuer the pin's (own, else <url>/apps/<app.id>); "
+       f"the component chart {pin} renders forwardToken and providerApps [github], no authorizationServer and no forwardIdentity")
+
+    # --- muster's pin, only on an own auth.provider (deprecated) -----------------------
     own = documents(helm(meta, [*ON, "--set", f"{auth}.provider=gitlab", "--set", f"{auth}.authorizationServer.clientCredentialsSecretRef.name=gitlab-app"]))[("HelmRelease", NAME)]
     must_have(own, ("              name: gitlab-app\n", "          provider: gitlab\n"), "the HelmRelease with an own provider and client Secret")
-    must_fail(meta, [*ON, *NO_GITLAB], f"{auth}.provider is empty and the provider instances (github, gitlab) have not exactly one of kind github",
-              "two github instances and no own provider")
-    must_fail(meta, [*ON, "--set", f"{NAME}.providers[0].kind=gitlab", "--set", f"{NAME}.providers[0].values.url=https://gl.example.com"],
-              f"{auth}.provider is empty", "no github instance and no own provider")
+    if "providerApps" in own:
+        fail("an own auth.provider still derives provider Apps beside the pin")
     must_fail(meta, [*ON, "--set", f"{auth}.provider=bitbucket"], f'{auth}.provider "bitbucket" names no provider instance', "a provider naming no instance")
-    must_fail(meta, [*ON, "--set", f"{NAME}.providers[0].values.oauth=null"],
-              f"{auth}.authorizationServer.clientCredentialsSecretRef.name is empty and provider instance github has no values.oauth.clientSecret", "an instance without an OAuth client")
-    must_fail(meta, [*ON, "--set", f"{NAME}.providers[0].values.oauth.clientSecret.key=secret"],
-              f"{auth}.authorizationServer.clientCredentialsSecretRef.name is empty", "an OAuth client Secret under another key than client-secret")
-    derived = documents(helm(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer="]))[("HelmRelease", NAME)]
-    must_have(derived, ("            issuer: https://github.com/apps/123\n",), "the HelmRelease without an own issuer")
-    ghes = documents(helm(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer=", "--set", f"{NAME}.providers[0].values.url=https://ghe.example.com/"]))[("HelmRelease", NAME)]
-    must_have(ghes, ("            issuer: https://ghe.example.com/apps/123\n",), "the HelmRelease of a GitHub Enterprise instance without an own issuer")
-    must_fail(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer=", "--set", f"{NAME}.providers[0].values.app.id="],
-              f"{auth}.authorizationServer.issuer is empty and provider instance github is no github instance with values.app.id", "no issuer and no App id")
+    for flag in (f"{NAME}.providers[0].values.oauth=null", f"{NAME}.providers[0].values.oauth.clientSecret.key=secret"):
+        must_fail(meta, [*ON, "--set", flag], "provider instance github has no values.oauth.clientSecret with key client-secret", f"no sign-in ({flag})")
+    gazelle = documents(helm(meta, [*ON, "--set-json", f'{auth}.providerApps=["github"]']))[("HelmRelease", NAME)]
+    must_have(gazelle, ("          providerApps:\n          - github\n",), "the HelmRelease with own provider Apps")
+    if "provider: github" in gazelle:
+        fail("own provider Apps still pin the registration")
+    pinned = documents(helm(meta, [*ON, "--set", f"{auth}.provider=github", "--set", f"{auth}.authorizationServer.issuer="]))[("HelmRelease", NAME)]
+    must_have(pinned, ("            issuer: https://github.com/apps/123\n", "              name: workspace-github\n"), "the HelmRelease with an own provider and no own issuer")
     must_fail(meta, [*ON, "--set", f"{auth}.authorizationServer.issuer=", "--set", f"{auth}.provider=gitlab",
                      "--set", f"{auth}.authorizationServer.clientCredentialsSecretRef.name=gitlab-app"],
               f"{auth}.authorizationServer.issuer is empty and provider instance gitlab", "no issuer for a gitlab instance")
     for below in (">=0.9.0 <1.0.0", "0.9.0"):
         must_fail(meta, [*ON, *NO_GITLAB, "--set", f"{auth}.provider=github", "--set", f"components.{NAME}.versionRange={below}"],
                   f"admits releases before {GRANT_FLOOR}", f"the range {below} below the muster grant floor")
-    with open(BOM, encoding="utf-8") as f:
-        pin = re.search(rf'^\s*{re.escape(NAME)}:\s*\{{\s*versionRange:\s*"([^"]+)"', f.read(), re.M).group(1)
-    r = component_render(documents(helm(meta, [*ON, *IDENTITY]))[("HelmRelease", NAME)], pin)
-    if r.returncode != 0:
-        fail(f"the {NAME} chart {pin} refuses the forwarded pin:\n{r.stderr}")
-    mcp = next((d for d in r.stdout.split("\n---\n") if re.search(r"^kind: MCPServer", d, re.M)), "")
-    must_have(mcp, (
-        "  auth:\n    type: oauth\n    authorizationServer:\n      issuer: \"https://github.com/apps/ci-agents\"\n",
-        "      clientCredentialsSecretRef:\n        name: \"workspace-github\"\n",
-        "      grantScope: \"subject\"\n    forwardIdentity: true\n",
-    ), f"the {NAME} chart {pin}'s MCPServer")
-    must_have(r.stdout, ("- --muster-provider=github\n", "- --muster-server=workspace-manager\n"), f"the {NAME} chart {pin}'s Deployment")
-    for gone in ("signin-keys", "token-exchange"):
-        if gone in r.stdout:
-            fail(f"the {NAME} chart {pin} still renders {gone}")
-    ok(f"muster's pin: the github instance, its OAuth client Secret and its issuer <url>/apps/<app.id> derived, an own provider, Secret and issuer stand; two or no github instances, an unknown "
-       f"provider, no client-secret key, no issuer to take (no App id, a gitlab instance) and a floor below {GRANT_FLOOR} fail naming the key; the component chart {pin} renders the pinned MCPServer "
-       "(the App's issuer and client Secret, grantScope subject, forwardIdentity) and --muster-provider github")
+    ok(f"muster's pin only on an own provider: its client Secret and issuer derived or own, no provider Apps beside it; an unknown provider, "
+       f"no issuer for a gitlab instance and a floor below {GRANT_FLOOR} fail naming the key")
 
     # --- the gitlab kind's floor ----------------------------------------------------------
     default = floors.range_of(NAME, meta)

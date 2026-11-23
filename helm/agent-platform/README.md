@@ -455,7 +455,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.flux.enabled | bool | `true` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `">=5.63.2 <6.0.0"` |  |
+| components.muster.versionRange | string | `">=5.64.0-rc.2 <6.0.0-0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.muster.dependsOn[0] | string | `"valkey"` |  |
@@ -485,7 +485,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.31.0 <1.32.0"` |  |
+| components.kagent.versionRange | string | `">=1.32.0 <1.33.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -508,7 +508,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.31.0 <1.32.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.32.0 <1.33.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
@@ -558,7 +558,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
 | components.model-manager.chart | string | `"model-manager"` |  |
 | components.model-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.model-manager.versionRange | string | `">=1.14.0 <2.0.0"` |  |
+| components.model-manager.versionRange | string | `">=1.22.0-rc.1 <2.0.0-0"` |  |
 | components.model-manager.valuesFrom | string | `"model-manager"` |  |
 | components.model-manager.enabled | bool | `true` |  |
 | components.model-manager.dependsOn[0] | string | `"muster"` |  |
@@ -566,7 +566,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `">=3.0.0 <4.0.0"` |  |
+| components.agent-manager.versionRange | string | `">=3.5.0-rc.1 <4.0.0-0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.omitEmptyKeys[0] | string | `"harness.egress"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
@@ -574,7 +574,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-manager.dependsOn[1] | string | `"kagent"` |  |
 | components.skill-manager.chart | string | `"skill-manager"` |  |
 | components.skill-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.skill-manager.versionRange | string | `">=0.1.0 <0.2.0"` |  |
+| components.skill-manager.versionRange | string | `">=0.4.0-rc.1 <0.5.0-0"` |  |
 | components.skill-manager.valuesFrom | string | `"skill-manager"` |  |
 | components.skill-manager.dependsOn[0] | string | `"muster"` |  |
 | components.skill-manager.gatedRoster | bool | `true` |  |
@@ -592,7 +592,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.default-agent.dependsOn[0] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.vm-manager.versionRange | string | `">=0.24.0 <0.25.0"` |  |
+| components.vm-manager.versionRange | string | `">=0.27.0-rc.1 <0.28.0-0"` |  |
 | components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |
@@ -600,7 +600,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.vm-manager.gatedValues[1] | string | `"vmManager"` |  |
 | components.cluster-manager.chart | string | `"cluster-manager"` |  |
 | components.cluster-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.cluster-manager.versionRange | string | `">=0.22.0"` |  |
+| components.cluster-manager.versionRange | string | `">=0.39.0-rc.1"` |  |
 | components.cluster-manager.valuesFrom | string | `"cluster-manager"` |  |
 | components.cluster-manager.enabled | bool | `false` |  |
 | components.cluster-manager.dependsOn[0] | string | `"muster"` |  |
@@ -608,7 +608,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.cluster-manager.gatedValues[1] | string | `"clusterManager"` |  |
 | components.workspace-manager.chart | string | `"workspace-manager"` |  |
 | components.workspace-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.workspace-manager.versionRange | string | `">=0.14.0 <0.16.0"` |  |
+| components.workspace-manager.versionRange | string | `">=0.16.0-rc.1 <0.17.0-0"` |  |
 | components.workspace-manager.valuesFrom | string | `"workspace-manager"` |  |
 | components.workspace-manager.dependsOn[0] | string | `"muster"` |  |
 | components.workspace-manager.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
@@ -663,7 +663,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
 | components.mcp-kubernetes.chart | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.mcp-kubernetes.versionRange | string | `">=1.14.0 <2.0.0"` |  |
+| components.mcp-kubernetes.versionRange | string | `">=1.16.0-rc.1 <2.0.0-0"` |  |
 | components.mcp-kubernetes.valuesFrom | string | `"mcp-kubernetes"` |  |
 | components.mcp-kubernetes.omitKeys[0] | string | `"kubernetesAudience"` |  |
 | components.mcp-kubernetes.omitKeys[1] | string | `"mcpServer"` |  |
@@ -846,6 +846,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | networkPolicy.flavor | string | `"auto"` | `auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor. |
 | networkPolicy.additionalEgressCIDRs | list | `[]` |  |
 | networkPolicy.additionalEgressFQDNs | list | `[]` |  |
+| networkPolicy.envoyGateway.proxyNamespace | string | `"envoy-gateway-system"` | Where Envoy Gateway runs the Gateways' proxy pods. The default is the controller's namespace of Envoy Gateway's default deploy mode (ControllerNamespace); change it when Envoy Gateway runs in another namespace, and set it empty when it runs in the GatewayNamespace mode, which puts each proxy in its Gateway's own namespace. |
+| networkPolicy.identityProvider.inClusterPeers | string | `nil` | The in-cluster peers of the identity provider egress, each a namespace, optional pod labels (matchLabels) and its ports. Unset (null), the chart derives them: the proxy pods of the public Gateway muster's route attaches to (ingress.parentRefs, else the chart-owned edge, else global.gatewayApi.parentRefs) on 443 and 10443, and, for an issuer host <service>.<namespace>.svc[.cluster.local], that namespace on the URL's port. A list replaces the derived peers; [] renders no in-cluster leg. |
 | networkPolicy.substrate.credentialProvider.egressFQDNs | list | `[]` |  |
 | networkPolicy.substrate.egressGateway.privateCIDRs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
@@ -1050,7 +1052,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.oauth2-proxy.fullnameOverride | string | `"kagent-oauth2-proxy"` |  |
 | kagent.oauth2-proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | kagent.oauth2-proxy.image.repository | string | `"giantswarm/oauth2-proxy"` |  |
-| kagent.oauth2-proxy.image.tag | string | `"v7.15.5"` |  |
+| kagent.oauth2-proxy.image.tag | string | `"v7.15.6"` |  |
 | kagent.oauth2-proxy.namespaceOverride | string | `"kagent"` |  |
 | kagent.oauth2-proxy.redis.enabled | bool | `false` |  |
 | kagent.oauth2-proxy.sessionStorage.type | string | `"cookie"` |  |
@@ -1367,8 +1369,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | model-manager.mcp.enabled | bool | `true` |  |
 | model-manager.oauth.enabled | bool | `true` |  |
 | model-manager.oauth.provider | string | `"dex"` |  |
-| model-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
-| model-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| model-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | model-manager.oauth.downstream.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1400,8 +1401,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | vm-manager.persistence.create | bool | `false` |  |
 | vm-manager.oauth.enabled | bool | `true` |  |
 | vm-manager.oauth.provider | string | `"dex"` |  |
-| vm-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
-| vm-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| vm-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | vm-manager.muster.mcpServer.enabled | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | vm-manager.muster.mcpServer.auth.requiredAudiences | list | `[]` |  |
@@ -1429,8 +1429,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |
 | agent-manager.oauth.provider | string | `"dex"` |  |
-| agent-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
-| agent-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| agent-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | agent-manager.oauth.downstream.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1444,6 +1443,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.route.hostname | string | `""` |  |
 | agentManager.route.parentRef.name | string | `"giantswarm-default"` |  |
 | agentManager.route.parentRef.namespace | string | `"envoy-gateway-system"` |  |
+| agentManager.route.timeouts.request | string | `"100s"` |  |
 | agentManager.route.jwtAuthentication.enabled | bool | `false` |  |
 | agentManager.route.jwtAuthentication.mode | string | `"Strict"` |  |
 | agentManager.route.jwtAuthentication.issuer | string | `""` |  |
@@ -1464,7 +1464,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"2.24.0"` |  |
+| agentManager.migration.image.tag | string | `"3.5.5"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | skills.platformSource.enabled | bool | `true` |  |
@@ -1475,8 +1475,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | skill-manager.observability.otel.protocol | string | `"auto"` |  |
 | skill-manager.observability.otel.headers | string | `"auto"` |  |
 | skill-manager.oauth.enabled | bool | `true` |  |
-| skill-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
-| skill-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| skill-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | skill-manager.muster.mcpServer.enabled | bool | `true` |  |
 | skill-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | skill-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
@@ -1491,8 +1490,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | cluster-manager.mcp.enabled | bool | `true` |  |
 | cluster-manager.oauth.enabled | bool | `true` |  |
 | cluster-manager.oauth.provider | string | `"dex"` |  |
-| cluster-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
-| cluster-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| cluster-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | cluster-manager.oauth.downstream.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1605,8 +1603,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | workspace-manager.observability.otel.headers | string | `"auto"` |  |
 | workspace-manager.oauth.enabled | bool | `true` |  |
 | workspace-manager.oauth.baseURL | string | `""` |  |
-| workspace-manager.oauth.dex.allowPrivateURLs | bool | `true` |  |
-| workspace-manager.oauth.sso.allowPrivateIPs | bool | `true` |  |
+| workspace-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | workspace-manager.muster.mcpServer.enabled | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
 | workspace-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
@@ -1696,8 +1693,6 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | mcp-kubernetes.mcpKubernetes.instrumentation.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.provider | string | `"dex"` |  |
-| mcp-kubernetes.mcpKubernetes.oauth.allowPrivateURLs | bool | `true` |  |
-| mcp-kubernetes.mcpKubernetes.oauth.sso.allowPrivateIPs | bool | `true` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enableDownstreamOAuth | bool | `true` |  |
 | mcp-kubernetes.grafanaDashboards.enabled | string | `"auto"` |  |
 | mcp-kubernetes.grafanaDashboards.folder | string | `"Agent Platform"` |  |

@@ -15,6 +15,64 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (per-actor runtime limits)
+
+The kagent and kagent-crds ranges select the 1.32 line, which resolves controller defaults and optional Harness resource overrides into each runtime revision. New runtimes default to 1 CPU and 1Gi. Existing Sessions retain their limits, including unsized Sessions; automatic lifecycle moves refuse a different compute envelope.
+
+### Operator action
+
+- Set `kagent.harness.resources` or the appropriate `kagent.harnesses[].resources` for runtimes that need more than the defaults. CPU and memory override independently and use positive Kubernetes quantities.
+- Size `kagent.substrateWorkerPool.template.resources` for the actors and runtime overhead. The worker budget is shared and does not replace a per-actor limit.
+- Create a new Session to use changed limits. A pinned BOM moves both `kagent` and `kagent-crds` to 1.32.0.
+
+## \<current\> → \<next\> (the workspace-manager and toolchain-manager are no longer pinned to a GitHub App)
+
+giantswarm/giantswarm#39393: with workspaces on, the chart no longer pins the workspace-manager's and toolchain-manager's muster registrations to the installation's agents GitHub App. muster keeps that App as a provider App under the pin's issuer and client Secret (`muster.muster.providerApps`), and both registrations name it: muster forwards the person's Dex ID token as the bearer and attaches their App token in `X-Muster-Grant-<instance>`. Before, the App token was the bearer of every call and the ID token travelled in `X-Muster-Id-Token`, which MCP 2025-11-25 forbids. People keep their grants: they are filed under the same issuer. One provider instance with sign-in now renders the same way two always did, and an own `workspace-manager.muster.mcpServer.auth.providerApps` replaces the pin too.
+
+### Operator action
+
+- With workspaces on, set `muster.muster.oauth.mcpClient.enabled` (with `publicUrl`): muster signs people in to its provider Apps in that role, and the render fails without it.
+- An installation that wants the pin back for now sets `workspace-manager.muster.mcpServer.auth.provider`, which still pins both registrations. It is deprecated, and a later release removes it.
+
+## \<current\> → \<next\> (skill-manager 0.3: the GitHub App pin is gone)
+
+`components.skill-manager.versionRange` selects `>=0.3.0 <0.4.0` (giantswarm/giantswarm#39225). skill-manager 0.3.0 checks a private skill repository only with the person's grant from muster's broker (`skill-manager.github.tokenExchange`). It no longer accepts the person's GitHub token with the ID token in `X-Muster-Id-Token`, and drops `skill-manager.muster.mcpServer.auth.github`. agent-manager 3.4.0, cluster-manager 0.38.0 and model-manager 1.21.0 drop the pin the same way, inside their current ranges.
+
+### Operator action
+
+- Remove `skill-manager.muster.mcpServer.auth.github` and `<manager>.github.authorizationServer` from the values, if set: the charts refuse them.
+- `<manager>.github.enabled` now needs `<manager>.github.tokenExchange`: the charts fail without it.
+- An installation that pins the BOM: move `skill-manager` to `0.3.0`.
+
+## \<current\> → \<next\> (the identity provider egress reaches the Gateway's proxy pods, not the cluster entity)
+
+giantswarm/agent-platform#1383: in the Cilium flavour the egress policies of the services that validate the login's tokens (agent-, cluster-, model-, vm- and workspace-manager, the portal, an `networkPolicy.mcpBackends` entry with `identityProvider`) no longer open the `cluster` entity on 443 and 10443. They open the issuer's hosts by name on 443 and `networkPolicy.identityProvider.inClusterPeers`: unset, the proxy pods of the Gateway muster's route attaches to (`ingress.parentRefs`) on 443 and 10443, and, for an in-cluster issuer Service host, that namespace on the URL's port. The portal's calls to the edge get their own rule to the same Gateways' proxy pods.
+
+### Operator action
+
+- **None** when Dex is served by the Gateway muster's route attaches to (`giantswarm-default` in `envoy-gateway-system` on every fleet installation), or by a public address outside the cluster.
+- **Dex behind another in-cluster Gateway or ingress controller whose address Cilium translates**: set `networkPolicy.identityProvider.inClusterPeers` to its pods (namespace, `matchLabels`, `ports`) before the upgrade. Without it, OIDC discovery times out and the managers stop at start.
+
+## \<current\> → \<next\> (the Envoy peer is looked for where Envoy Gateway runs the proxy)
+
+giantswarm/agent-platform#1393: the network policies that admit or reach a front Gateway's Envoy proxy select its pods in `networkPolicy.envoyGateway.proxyNamespace` (default `envoy-gateway-system`), not in the Gateway's own namespace. In Envoy Gateway's default deploy mode (`ControllerNamespace`) every Gateway's proxy runs in the controller's namespace, so a Gateway outside `envoy-gateway-system` was cut off before.
+
+### Operator action
+
+- **None** when the Gateways of `global.gatewayApi.parentRefs` (and of the routes' own parentRefs) live in `envoy-gateway-system`, as on every fleet installation: the policies select the same pods.
+- **Envoy Gateway in another namespace**: set `networkPolicy.envoyGateway.proxyNamespace` to that namespace.
+- **Envoy Gateway in the `GatewayNamespace` deploy mode**: set `networkPolicy.envoyGateway.proxyNamespace: ""`, so the policies look for each proxy in its Gateway's namespace, as before.
+- With either change, the mcp-* server charts that serve a public route still admit the proxies through their own `ciliumNetworkPolicy.ingress.gatewayPeers` (`envoy-gateway-system` by default): set the same namespace there, or add it to `networkPolicy.mcpBackends.<key>.additionalPeers` ([MCP backend network policy](docs/mcp-backend-network-policy.md)).
+
+## \<current\> → \<next\> (Secret deletes answered with the Secret are held in every namespace)
+
+giantswarm/agent-platform#1365: the ValidatingAdmissionPolicy `agent-platform-secret-deletes` (Fail, Deny) replaces `agent-platform-organization-secret-deletes`. It renders whenever kagent is on, `agentPlatformOrganizations.enabled` on or off, and matches Secret deletes in every namespace, not only in organization namespaces: `agent-platform:admin` can be bound anywhere. A delete the API server answers with the Secret (Orphan or Foreground propagation, `orphanDependents: true`, a Secret a finalizer holds, or a DeleteCollection) is made only by a requester that may already read that Secret (`get`, `list`, `watch` or `patch`), a dry run included.
+
+### Operator action
+
+- **None.** Requesters that may read a Secret (cluster-admin, the Kubernetes controllers, Flux, cert-manager, external-secrets, Cluster API) are not held, and a Background or default delete of a Secret no finalizer holds is not matched.
+- **A role of your own that deletes Secrets, or deletes collections of them, without `get`, `list`, `watch` or `patch`**: its Orphan or Foreground deletes, its deletes of a Secret a finalizer holds and its DeleteCollections are refused now. Add `get` on the Secrets it deletes, or delete with Background propagation.
+
 ## \<current\> → \<next\> (agent-platform-operator 0.4: warm workers follow the models and the agents)
 
 giantswarm/giantswarm#39250: `components.agent-platform-operator.versionRange` is `>=0.4.0 <0.5.0`. With `agentPlatformOrganizations.enabled`, agent-platform-operator 0.4.0 sizes each organization's WorkerPool by a new rule (giantswarm/agent-platform-operator#50): the pool runs `spec.workers.replicas` warm workers while the organization namespace holds a ModelConfig and an Agent (a curated copy counts), or a ModelConfig and a kagent session, and 0 otherwise; an `Orphaned` organization stays at 0. `spec.workers.replicas` is optional now: the CRD defaults it to 1 (`crds: CreateReplace` upgrades the CRD with the release), and a 0 set on purpose stays 0. Under 0.3.x a new organization ran 0 workers, so its agents stayed `ActorTemplatePending` and never became ready. The operator now watches Agent metadata in every namespace and asks kagent whether an organization with a ModelConfig and no Agent has a session, through the kagent target the erasure already uses. Its ClusterRole, the `agent-platform:organization-erasure` binding and the network policies already allow both, so nothing the chart renders changes besides the range. kagent admits the session question as a machine caller only with its controller-extensions controller (`kagent.controller.image.repository: giantswarm/kagent/controller-extensions`, the default).
@@ -36,13 +94,14 @@ The `substrate` component HelmRelease uses `spec.upgrade.strategy: {name: RetryO
 
 ## \<current\> → \<next\> (agent-manager 3.x)
 
-`components.agent-manager.versionRange` selects `>=3.0.0 <4.0.0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).
+`components.agent-manager.versionRange` selects `>=3.1.0 <4.0.0`. agent-manager 3.x removes `replaceCredential` from `set_organization_model`, `set_organization_connector` and `set_organization_egress_policy` (giantswarm/agent-manager#365). Rotate an existing credential with `replace_organization_credential`; callers still sending `replaceCredential` receive `invalid_request`. Backstage 3.38.2 contains the portal migration (giantswarm/backstage#3483).
 
 ### Operator action
 
 - Before admitting agent-manager 3.x, upgrade every portal calling it to Backstage 3.38.2 or later and migrate other callers of `replaceCredential`.
 - Where `agent-manager.githubTokenExchange` is configured, keep an explicit `components.agent-manager.versionRange` below `3.0.0` until the installation's reviewed migration moves it to `agent-manager.github.tokenExchange`. Move `endpoint` to `tokenEndpoint` and `secretName` to `existingSecret`, remove `grantApp`, and set `github.enabled: true`. The audience must equal the muster provider App and broker grant target names. Apply the values and version range together after the agentlab proof (giantswarm/giantswarm#39239).
-- The on-demand exchange needs agent-manager 3.0.0-rc.10 and muster 5.63.2 or later, which the meta chart validates from their range floors. muster 5.63.2 includes the Basic credential decoding fix in mcp-oauth (giantswarm/mcp-oauth#700), required for broker client credentials containing reserved characters. Installations still using the GitHub App pin keep it until their own rollout step.
+- agent-manager 3.1.0 serves Vertex service-account JSON keys and installation models through `agent-manager.credentials.uiURL` (giantswarm/agent-manager#409). Without `agentPlatformOrganizations.enabled`, a `uiURL` needs a `{namespace}` expression and no `{parent}` or `{organization}`. A `uiURL` naming `{namespace}`, with or without organizations, and any `uiURL` without organizations need a range floor of `3.1.0-rc.11` or later; `tenants.commit.platformModelsPath` needs the same floor. A `uiURL` containing `#` is refused.
+- The on-demand exchange needs agent-manager 3.0.0-rc.10 and muster 5.63.2 or later, which the meta chart validates from their range floors. muster 5.63.2 includes the Basic credential decoding fix in mcp-oauth (giantswarm/mcp-oauth#700), required for broker client credentials containing reserved characters.
 - Cluster-manager and model-manager derive broker egress from `github.tokenExchange.tokenEndpoint`, on its HTTPS origin and port, for both policy flavors. Use an external fully qualified hostname or IP address; Service aliases are refused. Native Kubernetes policies use the component's existing egress CIDRs or `networkPolicy.additionalEgressCIDRs` for private broker addresses.
 
 ## \<current\> → \<next\> (the Envoy peer of the network policies is the owning Gateway's proxy)

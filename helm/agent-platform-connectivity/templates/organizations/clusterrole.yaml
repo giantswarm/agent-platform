@@ -8,7 +8,12 @@ itself, which shows in the organization's members.
 
 RBAC cannot keep the RoleBinding writes in the organization namespaces, so
 the policy agent-platform-organizations-admin-rolebindings refuses them
-everywhere else (admission.yaml). The chart binds it to nobody: platform staff
+everywhere else (admission.yaml). Bound in an organization namespace, it
+holds every rule of this role there, and RBAC lets a requester bind a role
+whose rules it holds without `bind`: the policy
+agent-platform-organization-admin-mirrors refuses a binding of this role
+there by anyone but the operator, and agent-platform-organization-no-nesting
+refuses an AgentPlatformOrganization created there. The chart binds it to nobody: platform staff
 get it by a ClusterRoleBinding, a customer's platform team by a RoleBinding in
 its parent namespace, which agent-platform-operator mirrors into that parent's
 organization namespaces. From agent-platform-operator 0.2.0 the operator also

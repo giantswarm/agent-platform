@@ -2,7 +2,7 @@
 name: agent-platform-tools
 description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing or refused, connectors and signing in to one, workflows, or model-manager.
 metadata:
-  version: "3.1.1"
+  version: "3.3.1"
 ---
 
 # Tools on the Agent Platform
@@ -14,13 +14,14 @@ https://docs.giantswarm.io/reference/muster/toolsets/ (toolsets and the selector
 platform is belongs to the `agent-platform-overview` skill; agents and their building blocks to
 `agent-platform-agent-management`.
 
-## Muster is the only tool surface
+## Muster is the tool surface
 
 Every agent, IDE and portal session talks to one MCP endpoint, Muster, and sees a small fixed set of
 **meta-tools** instead of the hundreds of tools behind it: `filter_tools`, `describe_tool` and
 `call_tool` for discovery and execution; `list_tools` and `list_core_tools` for whole listings (large —
 prefer `filter_tools`); and list/filter/describe/get tools for MCP resources and prompts. The set you
-have is your own tool list.
+have is your own tool list. The one exception: an agent's organization connectors (below) are
+tools of their own beside the meta-tools, called as functions, not through `call_tool`.
 
 **The `call_tool` contract.** Every tool behind Muster runs as
 `call_tool {"name": "<exact name>", "arguments": {…}}`, `name` first. The name is a string argument,
@@ -45,11 +46,18 @@ management cluster is reachable only when it is in that `enum`; otherwise say so
 
 The catalogue is computed on every request as three filters in order: the servers **this person is
 signed in to**, the **workflows** available, and the **toolset** — the agent's selector list
-(`preset:<name>`, `server:<name>`, `workflow:<name>`, `tool:<name>`), sent as the `X-Muster-Toolset`
-header or bound to the session when it starts. `filter_tools`, `describe_tool`, `list_tools` and
+(`preset:<name>`, `server:<name>`, `workflow:<name>`, `tool:<name>`; a server in an organization
+namespace is `server:<namespace>/<name>`; a bare name selects only a server of muster's own
+namespace; an organization's own connector is no Muster server and no selector reaches it), sent as the `X-Muster-Toolset` header or bound to the session when it starts. `filter_tools`, `describe_tool`, `list_tools` and
 `call_tool` all answer within it; a call outside it is refused with an error naming the toolset. An
 unknown preset is an error on every meta-tool call, never a fall-back to everything. A request without
 any toolset sees the person's whole catalogue — an agent without a toolset has implicit full access.
+
+Inline toolsets allow at most 128 selectors and 8192 UTF-8 bytes when joined with commas, from Muster
+5.63.7 (32 selectors before; the `toolset.maxItems` of `x_agent-manager_create_agent` gives the current
+count). These limits apply to the header, `filter_tools` argument and Session binding. Larger selections use an
+existing preset or an admin-managed `toolsetPresets` entry; selecting All for a connector also
+includes its future tools. Count limits do not limit the number of tools a preset resolves to.
 
 **Composition, not authorization.** The toolset bounds the model. Every backend authorizes the
 **person** (Kubernetes RBAC, a service's own accounts): an agent acts within *its toolset ∩ the
@@ -71,6 +79,12 @@ with its description, `toolset_unmatched` the selectors that selected nothing, `
 https://docs.giantswarm.io/tutorials/agent-platform/toolset-presets/.
 
 ## Connectors (MCP servers)
+
+"Connector" names two things. A **Muster connector** is a Muster `MCPServer`, and an agent reaches
+its tools through its `toolset`. An **organization's own connector** is a kagent `RemoteMCPServer`
+in the organization namespace, and an agent of that organization takes it by name with
+`connectors` (`agent-platform-agent-management`); its calls go from the agent straight to the
+connector with the connector's credential, not through Muster.
 
 The Dev Portal calls MCP servers **connectors** (Customize → Connectors). Each is an `MCPServer`
 resource (`muster.giantswarm.io`); `core_mcpserver_list` shows them with their state. A
@@ -94,6 +108,28 @@ written once the person saves the form. No link: give the person the raw answer,
 explanation or a hand-made Secret. Check with `x_agent-manager_list_organization_connectors`
 (non-empty `credentials`); `core_mcpserver_detect` probes the URL.
 
+Whether an organization's connector is usable, from agent-manager 3.3.0: in
+`x_agent-manager_list_organization_connectors`, each credential's `state` is `present` or
+`missing` (whether its Secret exists, checked by a dry-run create as you; not whether it holds the
+key) or `unknown` (the check failed, or you may not create that Secret: an editor gets `unknown`),
+and each connector's `accepted`, `reason` and `message` are kagent's tool discovery. Usable:
+`accepted: true` and no credential `missing`; `unknown` does not stop it. `accepted: false` is a
+connector that does not work (a missing key, say): tell the person its `message`.
+`accepted: null`: not reported yet. The list also holds each agent's binding to Muster: the
+`RemoteMCPServer` that one HelmRelease renders with an agent of its name. It is no connector:
+offer and use only the entries without `musterBindingOf`, which marks it with the agent's name
+from agent-manager 3.3.4 (`musterBindingOf` in the tool's description). When no entry carries
+the field (an older agent-manager, or you may not list the namespace's Agents), leave out each
+entry named like an agent of the namespace.
+
+To replace a model key or an egress credential, read its Secret from the list:
+`x_agent-manager_list_model_configs` (each model with a key) and
+`x_agent-manager_list_egress_policies` (each destination with a credential) name it by
+`credentialSecret` and `credentialKey` — names only, never a value. Pass them as `secret` and `key`
+to `x_agent-manager_replace_organization_credential`, or as `credentialSecret` and `credentialKey`
+to `x_agent-manager_set_organization_model` and `x_agent-manager_set_organization_egress_policy`;
+never ask the person for them.
+
 Tools register live when a server connects. Adding connectors:
 https://docs.giantswarm.io/tutorials/agent-platform/managing-mcp-servers/ and
 https://docs.giantswarm.io/tutorials/agent-platform/connecting-custom-mcp-servers/.
@@ -116,6 +152,34 @@ registered at runtime. Its tools: `filter_tools {"pattern": "x_model-manager_*"}
 An empty result means it is not deployed here or you are not signed in to it. The model configs
 agents can use: `x_agent-manager_list_model_configs`. Bringing a model:
 https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
+
+## Confidential OAuth clients
+
+External integrations can register as separate confidential clients of muster's OAuth server using
+`client_secret_basic`, `client_secret_post` or `private_key_jwt`, once the supporting muster release
+is deployed. Provisioning needs the operator's registration bearer token; never request or display
+it in a conversation. Use authorization code with PKCE S256, request the registered muster scope
+(`mcp` where configured), and send the canonical MCP `resource` in authorization and token requests.
+The authenticated client ID identifies the integration; each person's grant remains separate.
+For `private_key_jwt`, sign each request with a fresh assertion whose sole `aud` is the authorization
+server's discovered issuer identifier. Multiple replicas require shared Valkey replay protection.
+Upgrading existing Valkey storage requires stopping OAuth traffic and old writers, migrating the
+family revocation index, then restarting every replica on the new release before restoring traffic.
+Use the linked operator procedure; old binaries must not write to migrated storage.
+Muster keeps the upstream identity-provider credentials and forwards or exchanges them according
+to the backend's configuration. Never send a muster access token directly to a backend.
+
+Client configuration management is opt-in through
+`muster.oauth.server.enableClientManagementEndpoint`. Store the registration access token in a
+secret manager and use the returned `registration_client_uri`, not a constructed management URL.
+Rotate by registering and verifying a replacement, then deleting the old registration with its
+own registration access token. With client deletion checks on every replica, deletion rejects
+existing access tokens and refresh requests across replicas. These guarantees apply to client-bound
+tokens; self-issued exchange JWTs without a client binding remain valid until expiry.
+After Valkey loss, provision a new
+registration and obtain fresh user authorizations; restoring an old snapshot can restore retired
+clients. Procedure and version prerequisites:
+[Confidential clients](https://github.com/giantswarm/muster/blob/main/docs/how-to/confidential-clients.md).
 
 ## When a tool is missing or refused
 
@@ -147,4 +211,11 @@ https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
   Do not send an authenticated person through sign-in again or blame them for this platform limit.
 - "tool `x_…` not found" from the runtime: a backend tool was emitted as a function — go through
   `call_tool`.
+- An issuer discovery or TLS error is installation connectivity, not a request for the person to
+  sign in again. The managers' `oauth.dex.allowPrivateURLs` (workspace-manager's included) stays `false`: Dex discovery
+  reaches private addresses through the normal proxy settings without that opt-in. If a manager
+  refuses an old `true`, remove it. Each server fetches its own Dex's key set from a private address
+  without a setting: `oauth.sso.allowPrivateIPs` and muster's `dex.allowPrivateIPJWKS` (alias
+  `dex.allowPrivateIPOIDC`) are deprecated; do not set them to repair discovery. Operator checks and migration:
+  [OAuth issuer connectivity](https://github.com/giantswarm/agent-platform/blob/main/docs/authentication.md#oauth-issuer-connectivity).
 - Everything else: https://docs.giantswarm.io/tutorials/agent-platform/troubleshooting/.

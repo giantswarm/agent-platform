@@ -13224,7 +13224,8 @@ rules:
     verbs: ["create", "update", "patch", "delete"]
   # No patch: its response is the stored Secret, data included. A delete
   # answered with the Secret (Orphan or Foreground propagation, a finalizer
-  # on it) is refused in admission (agent-platform-organization-secret-deletes).
+  # on it) is refused in admission in every namespace
+  # (agent-platform-secret-deletes).
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "update", "delete"]
@@ -14087,8 +14088,12 @@ spec:
               - matchPattern: "*"
     - toEntities:
         - kube-apiserver
-    - toEntities:
-        - cluster
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: envoy
+            gateway.envoyproxy.io/owning-gateway-name: x
+            gateway.envoyproxy.io/owning-gateway-namespace: default
+            io.kubernetes.pod.namespace: envoy-gateway-system
       toPorts:
         - ports:
             - port: "443"
@@ -14639,7 +14644,7 @@ spec:
             app.kubernetes.io/name: envoy
             gateway.envoyproxy.io/owning-gateway-name: x
             gateway.envoyproxy.io/owning-gateway-namespace: default
-            io.kubernetes.pod.namespace: default
+            io.kubernetes.pod.namespace: envoy-gateway-system
       toPorts:
         - ports:
             - port: "443"
@@ -15802,6 +15807,64 @@ spec:
         request.userInfo.username + ', who may not get at least one of: ' +
         variables.refs.map(n, n == '' ? '<no name>' : n).join(', ')
 ---
+# Source: agent-platform-connectivity/templates/tenants/secret-deletes-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-secret-deletes
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["DELETE"]
+        resources: ["secrets"]
+  matchConditions:
+    # A delete the API server answers with the stored object: the garbage
+    # collector's finalizer is added (Orphan, Foreground, orphanDependents),
+    # or a finalizer already holds the Secret; a background delete of a
+    # Secret without finalizers is answered with a Status. A DeleteCollection
+    # (a request with no name) is always answered with the list of its items.
+    - name: answered-with-the-secret
+      expression: >-
+        !has(request.name) || request.name == '' ||
+        (has(oldObject.metadata.finalizers) && size(oldObject.metadata.finalizers) > 0) ||
+        (has(request.options.propagationPolicy) && request.options.propagationPolicy in ['Orphan', 'Foreground']) ||
+        (has(request.options.orphanDependents) && request.options.orphanDependents == true)
+  # The Secret under delete is named by oldObject: a DeleteCollection runs
+  # admission once for each item with the collection request's attributes,
+  # which carry no name (request.name is unset), while oldObject is the
+  # stored item. On a single delete the two names are the same.
+  # The authorizer's cost allows two checks per expression
+  # (k8s.io/apiserver pkg/cel/library/cost.go): two variables of two each,
+  # evaluated only when the first does not admit.
+  variables:
+    - name: secret
+      expression: >-
+        authorizer.group('').resource('secrets').namespace(request.namespace).name(oldObject.metadata.name)
+    - name: readsOne
+      expression: >-
+        variables.secret.check('get').allowed() || variables.secret.check('patch').allowed()
+    - name: readsMany
+      expression: >-
+        variables.secret.check('list').allowed() || variables.secret.check('watch').allowed()
+  validations:
+    - expression: >-
+        variables.readsOne || variables.readsMany
+      reason: Forbidden
+      messageExpression: >-
+        'a delete answered with the Secret (Orphan or Foreground propagation, a finalizer on it, or a DeleteCollection) is made only by a requester that may read it (get, list, watch or patch); refused: ' +
+        request.namespace + '/' + oldObject.metadata.name
+---
 # Source: agent-platform-connectivity/templates/tenants/egress-policy-admission.yaml
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -15902,6 +15965,23 @@ metadata:
     helm.sh/chart: "agent-platform-connectivity-1.1.35"
 spec:
   policyName: agent-platform-platform-tenant-credential-refs
+  validationActions: [Deny]
+---
+# Source: agent-platform-connectivity/templates/tenants/secret-deletes-admission.yaml
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-secret-deletes
+  labels:
+    app: "agent-platform-connectivity"
+    app.kubernetes.io/name: "agent-platform-connectivity"
+    app.kubernetes.io/instance: "t"
+    app.kubernetes.io/managed-by: "Helm"
+    app.kubernetes.io/version: "0.1.0"
+    application.giantswarm.io/team: "bumblebee"
+    helm.sh/chart: "agent-platform-connectivity-1.1.35"
+spec:
+  policyName: agent-platform-secret-deletes
   validationActions: [Deny]
 ---
 # Source: agent-platform-connectivity/templates/substrate/hooks-rbac.yaml

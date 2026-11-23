@@ -439,6 +439,19 @@ timeouts:
 {{- end -}}
 
 {{/*
+HTTPRoute rule timeouts of the agent-manager routes: agentManager.route.timeouts,
+else the shared ingress.httpRoute.timeouts. The whole map replaces the shared one,
+so a shared backendRequest never meets a shorter request of this route. Usage as
+agent-platform.routeTimeouts.
+*/}}
+{{- define "agent-platform.agentManager.routeTimeouts" -}}
+{{- with (.Values.agentManager.route.timeouts | default .Values.ingress.httpRoute.timeouts) }}
+timeouts:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
+{{/*
 === Cluster shape ===
 
 The knobs that describe what the cluster can admit — Kyverno policies, the
@@ -1222,11 +1235,14 @@ Usage: include "agent-platform.route.toDataPlane" (dict "ctx" . "parentRefs" $re
 
 {{/*
 The front Gateways such a route attaches to, as a JSON list of
-{name, namespace}, in the order the route names its parents: its own
-parentRefs when pinned, else `global.gatewayApi.parentRefs`. A parentRef
-without a namespace attaches to a Gateway of the route's own namespace
-(Gateway API), so that is what an absent or empty key means here too:
-`routeNamespace` when the caller names it, else this release's namespace.
+{name, namespace, proxyNamespace}, in the order the route names its parents:
+its own parentRefs when pinned, else `global.gatewayApi.parentRefs`. A
+parentRef without a namespace attaches to a Gateway of the route's own
+namespace (Gateway API), so that is what an absent or empty key means here
+too: `routeNamespace` when the caller names it, else this release's namespace.
+`proxyNamespace` is where Envoy Gateway runs the Gateway's proxy pods, the
+namespace a network policy selects them in
+(agent-platform.route.envoyProxyNamespace).
 Empty when the route attaches to the chart-owned data plane — the data plane
 is then the peer, selected by the Gateway's own name. A network policy selects
 each one's proxy pods with agent-platform.route.envoyPeer.
@@ -1239,10 +1255,23 @@ Usage: include "agent-platform.route.edgeGateways" (dict "ctx" . "parentRefs" $r
 {{- $gateways := list -}}
 {{- if not (include "agent-platform.route.toDataPlane" .) -}}
 {{- range $refs -}}
-{{- $gateways = append $gateways (dict "name" (toString .name) "namespace" (dig "namespace" "" . | default $routeNamespace | toString)) -}}
+{{- $namespace := dig "namespace" "" . | default $routeNamespace | toString -}}
+{{- $gateways = append $gateways (dict "name" (toString .name) "namespace" $namespace "proxyNamespace" (include "agent-platform.route.envoyProxyNamespace" (dict "ctx" $ctx "namespace" $namespace))) -}}
 {{- end -}}
 {{- end -}}
 {{- $gateways | uniq | toJson -}}
+{{- end -}}
+
+{{/*
+The namespace Envoy Gateway runs a Gateway's proxy pods in:
+`networkPolicy.envoyGateway.proxyNamespace` (default envoy-gateway-system, the
+controller's namespace under Envoy Gateway's default deploy mode,
+ControllerNamespace), or the Gateway's own namespace when that value is empty
+(the GatewayNamespace deploy mode).
+Usage: include "agent-platform.route.envoyProxyNamespace" (dict "ctx" . "namespace" $gatewayNamespace)
+*/}}
+{{- define "agent-platform.route.envoyProxyNamespace" -}}
+{{- dig "envoyGateway" "proxyNamespace" "envoy-gateway-system" (.ctx.Values.networkPolicy | default dict) | default .namespace -}}
 {{- end -}}
 
 {{/*
@@ -1253,11 +1282,10 @@ labels Envoy Gateway stamps on the data-plane pods it runs for a Gateway
 selects its peer through this one helper, so a policy never admits the proxy
 of another Gateway of the same namespace (giantswarm/agent-platform#1292);
 `make verify-envoy-peers` fails a render that selects Envoy pods without the
-owning Gateway. The caller names the pods' namespace as the Gateway's own, as
-the policies did before: on the fleet the Gateways live in the Envoy Gateway
-controller's namespace, where the proxies run. A Gateway in another namespace
-under the controller-namespace deploy mode (the default) has its proxy in the
-controller's namespace, which these policies do not select.
+owning Gateway. The caller selects the pods in the Gateway's proxyNamespace
+(agent-platform.route.edgeGateways), not in the Gateway's own namespace: in
+Envoy Gateway's default deploy mode the proxies of every Gateway run in the
+controller's namespace (giantswarm/agent-platform#1393).
 Usage: include "agent-platform.route.envoyPeer" (dict "name" $name "namespace" $ns) | fromJson
 */}}
 {{- define "agent-platform.route.envoyPeer" -}}
@@ -1278,7 +1306,7 @@ Usage: include "agent-platform.route.edgePeers" (dict "ctx" . "parentRefs" $refs
 {{- $peers = append $peers (dict "namespace" .ctx.Release.Namespace "matchLabels" (dict "gateway.networking.k8s.io/gateway-name" .ctx.Values.gateway.name)) -}}
 {{- else -}}
 {{- range (include "agent-platform.route.edgeGateways" . | fromJsonArray) -}}
-{{- $peers = append $peers (dict "namespace" .namespace "matchLabels" (include "agent-platform.route.envoyPeer" . | fromJson)) -}}
+{{- $peers = append $peers (dict "namespace" .proxyNamespace "matchLabels" (include "agent-platform.route.envoyPeer" . | fromJson)) -}}
 {{- end -}}
 {{- end -}}
 {{- $peers | toJson -}}
@@ -1357,15 +1385,55 @@ Usage: include "agent-platform.backstage.edgeGateways" . | fromJsonArray
 {{- end -}}
 
 {{/*
+The in-cluster pods a platform service reaches the login identity provider at,
+as a JSON list of {namespace, matchLabels, ports}
+(giantswarm/agent-platform#1383). An issuer served through an in-cluster
+Gateway whose LoadBalancer address Cilium translates (a private installation)
+is, at policy time, that Gateway's proxy pods on their own port (the Envoy edge
+listens on 10443), not the issuer's name; an in-cluster issuer Service is its
+pods. networkPolicy.identityProvider.inClusterPeers, when set, is the list
+([] renders no in-cluster leg). Unset, the list is derived:
+- the pods of the public Gateway muster's route attaches to
+  (ingress.parentRefs, else the chart-owned edge, else
+  global.gatewayApi.parentRefs; agent-platform.route.edgePeers), on 443 and
+  10443: the Gateway that serves the platform's own hostnames, the one the
+  actors' egress reaches (agent-platform.substrate.egressEdge);
+- for an issuer host that names an in-cluster Service
+  (<service>.<namespace>.svc[.cluster.local], agent-platform.jwks.inCluster),
+  every pod of that namespace on the URL's port (443 for https, 80 for http).
+Usage: include "agent-platform.idpEgress.inClusterPeers" (dict "ctx" $ "issuerUrl" $url) | fromJsonArray
+*/}}
+{{- define "agent-platform.idpEgress.inClusterPeers" -}}
+{{- $ctx := .ctx -}}
+{{- $set := dig "identityProvider" "inClusterPeers" nil ($ctx.Values.networkPolicy | default dict) -}}
+{{- $peers := list -}}
+{{- if not (kindIs "invalid" $set) -}}
+{{- range $set -}}
+{{- $peers = append $peers (dict "namespace" .namespace "matchLabels" (.matchLabels | default dict) "ports" .ports) -}}
+{{- end -}}
+{{- else -}}
+{{- range (include "agent-platform.route.edgePeers" (dict "ctx" $ctx "parentRefs" ($ctx.Values.ingress.parentRefs | default list)) | fromJsonArray) -}}
+{{- $peers = append $peers (dict "namespace" .namespace "matchLabels" .matchLabels "ports" (list 443 10443)) -}}
+{{- end -}}
+{{- $url := urlParse (toString (.issuerUrl | default "")) -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" ($url.hostname | default "") -}}
+{{- if include "agent-platform.jwks.inCluster" $host -}}
+{{- $port := regexFind ":[0-9]+$" ($url.host | default "") | trimPrefix ":" | default (ternary "80" "443" (eq $url.scheme "http")) | int -}}
+{{- $peers = append $peers (dict "namespace" (index (splitList "." $host) 1) "matchLabels" dict "ports" (list $port)) -}}
+{{- end -}}
+{{- end -}}
+{{- $peers | toJson -}}
+{{- end -}}
+
+{{/*
 Cilium egress rules from a platform service to the login identity provider:
 the hosts of agent-platform.idpHosts (discovery, JWKS, userinfo, token) by
-name on 443 (through the DNS proxy rule the caller renders), plus the cluster
-entity on 443 and 10443 — an issuer served through an in-cluster Gateway whose
-LoadBalancer address Cilium translates to the data-plane pods (the Envoy edge
-listens on 10443), or an in-cluster issuer Service, is `cluster` at policy
-time, not the name. Mirrors the klaus-gateway OBO and oauth2-proxy egress.
+name on 443 (through the DNS proxy rule the caller renders), plus the
+in-cluster peers of agent-platform.idpEgress.inClusterPeers, each by its
+namespace and pod labels on its ports — never the cluster entity, which would
+open every in-cluster endpoint on those ports (giantswarm/agent-platform#1383).
 Rendered as YAML list items; the caller provides `egress:` and the indentation.
-Usage: include "agent-platform.idpEgress.cilium" (dict "provider" "dex" "issuerUrl" $url)
+Usage: include "agent-platform.idpEgress.cilium" (dict "ctx" $ "provider" "dex" "issuerUrl" $url)
 */}}
 {{- define "agent-platform.idpEgress.cilium" -}}
 {{- with (include "agent-platform.idpHosts" . | fromJsonArray) }}
@@ -1378,14 +1446,20 @@ Usage: include "agent-platform.idpEgress.cilium" (dict "provider" "dex" "issuerU
         - port: "443"
           protocol: TCP
 {{- end }}
-- toEntities:
-    - cluster
+{{- range (include "agent-platform.idpEgress.inClusterPeers" . | fromJsonArray) }}
+- toEndpoints:
+    - matchLabels:
+        {{- with .matchLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        io.kubernetes.pod.namespace: {{ .namespace }}
   toPorts:
     - ports:
-        - port: "443"
+        {{- range .ports }}
+        - port: {{ . | toString | quote }}
           protocol: TCP
-        - port: "10443"
-          protocol: TCP
+        {{- end }}
+{{- end }}
 {{- end -}}
 
 {{/*

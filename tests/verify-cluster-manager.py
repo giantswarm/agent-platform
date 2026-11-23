@@ -43,6 +43,7 @@ one property of that:
 Deliberately stdlib-only: the CI image has no PyYAML. HELM selects the binary.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -139,8 +140,12 @@ def main(meta: str, connectivity: str) -> int:
             fail(f"components.{NAME}.enabled=true rendered no {kind} named {NAME}")
     oci = on_docs[("OCIRepository", NAME)]
     must_have(oci, (f"url: {REPOSITORY}/{NAME}", f'semver: "{rng}"'), "the OCIRepository")
-    if "semverFilter" in oci or "insecure" in oci:
-        fail("the OCIRepository carries a dev-channel knob by default")
+    release_filter = r"^v?[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$" if "-" in floors.floor(NAME, meta) else ""
+    rendered_filter = re.search(r'^    semverFilter: (".*")$', oci, re.M)
+    if (json.loads(rendered_filter.group(1)) if rendered_filter else "") != release_filter:
+        fail("the OCIRepository must filter release candidates to release tags and stable ranges to no filter")
+    if "insecure" in oci:
+        fail("the OCIRepository disables registry TLS by default")
     hr = on_docs[("HelmRelease", NAME)]
     must_have(hr, (
         f"releaseName: {NAME}",
@@ -148,7 +153,7 @@ def main(meta: str, connectivity: str) -> int:
         f"    fullnameOverride: {NAME}\n",
         "    installation:\n      name: \"\"\n",
         "    modelManager:\n      namespace: default\n",
-        "    oauth:\n      dex:\n        allowPrivateURLs: true\n      downstream:\n        enabled: true\n      enabled: true\n      provider: dex\n",
+        "    oauth:\n      dex:\n        allowPrivateURLs: false\n      downstream:\n        enabled: true\n      enabled: true\n      provider: dex\n",
         "    muster:\n      mcpServer:\n        auth:\n          forwardToken: true\n          requiredAudiences:\n          - dex-k8s-authenticator\n        enabled: true\n",
         "\n    global:\n",
     ), "the HelmRelease")
@@ -199,7 +204,7 @@ def main(meta: str, connectivity: str) -> int:
     bom_file = f"{meta}/examples/customer-bom.yaml"
     with open(bom_file, encoding="utf-8") as f:
         bom = f.read()
-    m = re.search(rf'^\s*{re.escape(NAME)}:\s*\{{\s*versionRange:\s*"(\d+\.\d+\.\d+)"\s*\}}', bom, re.M)
+    m = re.search(rf'^\s*{re.escape(NAME)}:\s*\{{\s*versionRange:\s*"(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)"\s*\}}', bom, re.M)
     if not m:
         fail(f"{bom_file} does not pin components.{NAME}.versionRange to an exact version")
     pinned = documents(helm(meta, [*ON, "-f", bom_file]))[("OCIRepository", NAME)]

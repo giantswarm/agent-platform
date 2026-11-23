@@ -2627,6 +2627,17 @@
                 "enabled": {
                     "type": "boolean"
                 },
+                "envoyGateway": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "proxyNamespace": {
+                            "type": "string",
+                            "description": "Where Envoy Gateway runs the Gateways' proxy pods. The default is the controller's namespace of Envoy Gateway's default deploy mode (ControllerNamespace); change it when Envoy Gateway runs in another namespace, and set it empty when it runs in the GatewayNamespace mode, which puts each proxy in its Gateway's own namespace.",
+                            "pattern": "^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)?$"
+                        }
+                    }
+                },
                 "flavor": {
                     "type": "string",
                     "description": "`auto` (default) selects `cilium` when cilium.io/v2 is served on the cluster and `kubernetes` otherwise; `cilium` / `kubernetes` force the flavor.",
@@ -2635,6 +2646,48 @@
                         "cilium",
                         "kubernetes"
                     ]
+                },
+                "identityProvider": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "inClusterPeers": {
+                            "type": [
+                                "array",
+                                "null"
+                            ],
+                            "description": "The in-cluster peers of the identity provider egress, each a namespace, optional pod labels (matchLabels) and its ports. Unset (null), the chart derives them: the proxy pods of the public Gateway muster's route attaches to (ingress.parentRefs, else the chart-owned edge, else global.gatewayApi.parentRefs) on 443 and 10443, and, for an issuer host <service>.<namespace>.svc[.cluster.local], that namespace on the URL's port. A list replaces the derived peers; [] renders no in-cluster leg.",
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "namespace",
+                                    "ports"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "matchLabels": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "namespace": {
+                                        "type": "string",
+                                        "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+                                    },
+                                    "ports": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "integer",
+                                            "maximum": 65535,
+                                            "minimum": 1
+                                        },
+                                        "minItems": 1
+                                    }
+                                }
+                            }
+                        }
+                    }
                 },
                 "kubernetes": {
                     "type": "object",

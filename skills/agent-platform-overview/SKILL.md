@@ -21,7 +21,8 @@ For newcomers: `agent-platform-building-blocks`, `agent-platform-portal`, `agent
 The Agent Platform runs AI agents in production on the installation's own Kubernetes clusters. It has
 two capabilities on one foundation: **governed tool access** — every tool call, from an IDE, the Dev
 Portal, Slack or an agent, goes through one gateway path (agentgateway in front of **Muster**, the MCP
-aggregator that enforces sign-in and fans out to the MCP servers behind it) — and an **agent runtime**
+aggregator that enforces sign-in and fans out to the MCP servers behind it; an organization's own
+connector is the one exception, called by the agent directly) — and an **agent runtime**
 that runs agents as Kubernetes resources, each versioned as one unit (prompt, model, skills, toolset).
 The foundation is the cluster and the installation's identity provider: single sign-on, Kubernetes RBAC
 and GitOps apply to agents as they apply to people. On the tool path an agent holds no credential of
@@ -42,7 +43,8 @@ components. Otherwise `x_agent-manager_get_info` names the service version, char
 The Dev Portal calls MCP servers **connectors**; the platform's own are grouped into the
 `agent-platform` and `infrastructure` presets, everything else is registered by the installation or
 a person. Groups, states and sign-in: the `agent-platform-tools` skill; the live presets:
-`filter_tools {"include_presets": true}`.
+`filter_tools {"include_presets": true}`. An organization's own connectors are kagent
+`RemoteMCPServer`s in its namespace, not Muster servers (`agent-platform-tools`).
 
 ## How people reach agents
 
@@ -77,7 +79,9 @@ no credential of their own on the tool path and act with the person's identity e
 each person only the tools of the servers they are signed in to, and each backend's own authorization —
 Kubernetes RBAC, a service's own accounts — decides what a call may do. The audit log names the person.
 What an agent's model may discover and call is bounded by its toolset, which never widens what the
-person may reach (the `agent-platform-tools` skill has the mechanics).
+person may reach (the `agent-platform-tools` skill has the mechanics). The exception is an
+organization's own connector: the agent calls it with the connector's shared credential, not as the
+person.
 
 ## How an agent is built and runs
 
@@ -85,7 +89,7 @@ An agent is one Flux `HelmRelease` of the `agent` chart, rendered into a kagent 
 template and names the `Harness` that runs it. The Harness boots it once and takes a **golden
 snapshot**; the Agent reports `Ready`. Every conversation is an actor restored from that snapshot onto a
 Substrate worker, running its turns in a sandbox and sending tool calls to Muster as the person, within
-the agent's toolset. Any change is a new revision: running sessions keep theirs, new sessions start
+the agent's toolset (and to its organization's connectors directly). Any change is a new revision: running sessions keep theirs, new sessions start
 from the new one.
 
 ## Look at the live platform
@@ -102,6 +106,11 @@ function of its own (contract: the `agent-platform-tools` skill). Read each sche
 - **Workflows** the installation offers for whole questions: `filter_tools {"pattern": "workflow_*"}`.
 - **Yourself**: `x_agent-manager_get_agent` with your **technical** name — the release name, not the
   runtime's `<name>_<namespace>`; `x_agent-manager_list_agents` when unsure.
+
+The portal's **Configured** model status means kagent accepted the settings and resolved their
+references. It does not establish that a stored API key is valid or that a session can invoke the
+provider. A served model's readiness is a separate signal. An actual access check for a static key
+requires a provider request and cannot verify credentials supplied per session.
 
 ## Facts to keep straight
 

@@ -475,7 +475,8 @@ components:  # @schema additionalProperties: true
     # spec.urlElicitation: Relay.
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
-    versionRange: ">=5.63.2 <6.0.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=5.64.0-rc.2 <6.0.0-0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -697,7 +698,7 @@ components:  # @schema additionalProperties: true
     # (giantswarm/kagent-upstream#927). From 1.31.0 ListSessions filters by
     # the Agent's namespace (giantswarm/kagent-upstream#958), which the
     # operator's cleanup process asks for.
-    versionRange: ">=1.31.0 <1.32.0"
+    versionRange: ">=1.32.0 <1.33.0"
     valuesFrom: kagent
     # The CRDs come first — its own (the render refuses kagent on without
     # kagent-crds — agent-platform.validateKagentCrds) and Substrate's (the
@@ -814,7 +815,7 @@ components:  # @schema additionalProperties: true
     # `enabled: false` with kagent on fails the render. Its kmcp-crds and
     # substrate-crds subcharts stay off (kagent-crds: below).
     repository: oci://gsoci.azurecr.io/giantswarm/kagent/helm
-    versionRange: ">=1.31.0 <1.32.0"
+    versionRange: ">=1.32.0 <1.33.0"
     valuesFrom: kagent-crds
     # The chart takes only its two subchart switches; nothing reads `global`.
     injectGlobal: false
@@ -915,6 +916,10 @@ components:  # @schema additionalProperties: true
     versionRange: ">=1.18.0 <1.19.0"
     valuesFrom: substrate
     injectGlobal: false
+    # With agentPlatformOrganizations.enabled the render refuses any other
+    # namespace (agent-platform.validateOrganizations): the connectivity
+    # chart's operator egress rule and the operator-to-ate-api ingress policy
+    # name ate-system, where the operator calls ate-api.
     targetNamespace: ate-system
     dependsOn: [substrate-crds, agent-platform-connectivity]
     # atelet's pinned image set comes from the kagent release: its chart
@@ -1092,7 +1097,8 @@ components:  # @schema additionalProperties: true
     # its ModelConfigs go to (api.kagent.dev first) with a bare apiVersion,
     # so no installation keeps a model-manager that writes kagent.dev
     # (giantswarm/model-manager#247).
-    versionRange: ">=1.14.0 <2.0.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=1.22.0-rc.1 <2.0.0-0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -1172,7 +1178,11 @@ components:  # @schema additionalProperties: true
     # skills through the skill-manager and takes installation and
     # defaultAgentModel (giantswarm/agent-manager#290).
     # github.tokenExchange needs the on-demand grant contract and its schema.
-    versionRange: ">=3.0.0 <4.0.0"
+    # 3.1.0 serves Vertex service-account JSON keys and installation models
+    # through the same credentials.uiURL, without tenancy too, and takes
+    # tenants.commit.platformModelsPath (giantswarm/agent-manager#409).
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=3.5.0-rc.1 <4.0.0-0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -1196,10 +1206,12 @@ components:  # @schema additionalProperties: true
     # false leaves it out, and agent-manager falls back to its own
     # (deprecated) skill discovery.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is skill-manager's first release (giantswarm/giantswarm#38322).
-    # The ceiling is the next minor: a skill-manager minor rolls in with the
-    # chart release that renders its values.
-    versionRange: ">=0.1.0 <0.2.0"
+    # From 0.3.0 it checks a private repository only with the
+    # person's grant (github.tokenExchange) and fails on github.enabled
+    # without it. The ceiling is the next minor: a skill-manager minor rolls
+    # in with the chart release that renders its values.
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=0.4.0-rc.1 <0.5.0-0"
     valuesFrom: skill-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
     # app); the reference is dropped at render time when muster is off.
@@ -1263,9 +1275,10 @@ components:  # @schema additionalProperties: true
     # the pod fetches (0.20.0 and 0.20.1 have no guest image: their
     # guest-image job failed; 0.19.x were on ghcr.io, with the guest image as
     # a node path).
-    # The floor is 0.24.0: the chart takes observability.otel, the OTLP trace
-    # export global.observability.traces.otlp derives (giantswarm/giantswarm#36711).
-    versionRange: ">=0.24.0 <0.25.0"
+    # From 0.26.10 the Dex client follows HTTPS_PROXY and NO_PROXY; the chart takes
+    # observability.otel since 0.24.0 (giantswarm/giantswarm#36711).
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=0.27.0-rc.1 <0.28.0-0"
     valuesFrom: vm-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
@@ -1292,7 +1305,7 @@ components:  # @schema additionalProperties: true
     # (list_clusters answers an empty list with a note, a dry run on a cluster
     # that does not exist is refused naming it, get_info reports clusterApi and
     # the real version).
-    # The floor is 0.22.0: the chart takes observability.otel, the OTLP trace
+    # From 0.22.0 the chart takes observability.otel, the OTLP trace
     # export global.observability.traces.otlp derives, and serviceMonitor
     # with observability.metrics, the metrics port its ServiceMonitor scrapes
     # (giantswarm/cluster-manager#138, giantswarm/giantswarm#36711).
@@ -1301,7 +1314,8 @@ components:  # @schema additionalProperties: true
     # each new cluster-manager line rolls in without a release of this chart. A
     # cluster-manager release that renames one of them must not ship until this
     # chart follows (UNCAPPED in tests/verify-range-ceilings.py).
-    versionRange: ">=0.22.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=0.39.0-rc.1"
     valuesFrom: cluster-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
@@ -1323,7 +1337,10 @@ components:  # @schema additionalProperties: true
     # follows the one switch workspaces.enabled (below), and an explicit value
     # that disagrees with it fails the render (agent-platform.validateWorkspaces).
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # The floor is 0.14.0, whose sync_workspace returns a request id that the
+    # oauth.dex.allowPrivateURLs has no effect from 0.15.9:
+    # its Dex client reaches a private issuer and follows
+    # HTTP_PROXY, HTTPS_PROXY and NO_PROXY without it, so the default below is
+    # false. 0.14.0 is the first whose sync_workspace returns a request id that the
     # Workspace status names (its CRD gains that optional field; no values
     # change). 0.13.0 is the first whose list_repositories reports each
     # repository's owner login and host with facet counts, beside list_owners
@@ -1336,7 +1353,7 @@ components:  # @schema additionalProperties: true
     # person's disconnect in muster revokes their grant at the provider
     # (giantswarm/muster#1597), 0.10.0 the
     # person's provider token as muster's grant of the provider instance's App
-    # (muster.mcpServer.auth.provider, which this chart derives; an earlier
+    # (muster's provider App of the instance, which this chart derives; an earlier
     # release keeps its own sign-in store, which this chart no longer feeds:
     # agent-platform.workspaceManager.musterGrantFloor fails the render below
     # it with provider instances and OAuth),
@@ -1345,7 +1362,8 @@ components:  # @schema additionalProperties: true
     # (agent-platform.workspaceManager.kagentFloor). The ceiling is the next
     # minor: a workspace-manager minor rolls in with the chart release that
     # renders its values.
-    versionRange: ">=0.14.0 <0.16.0"
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=0.16.0-rc.1 <0.17.0-0"
     valuesFrom: workspace-manager
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
     # the reference is dropped at render time when the component is off. With
@@ -1533,8 +1551,12 @@ components:  # @schema additionalProperties: true
     # The mcp-kubernetes block below leaves the issuer, client, Secret and CA
     # to the chart's global.identity fallbacks. OAuth consent uses encrypted
     # shared state, and MCP requests require resource access tokens.
-    # The next major is the ceiling.
-    versionRange: ">=1.14.0 <2.0.0"
+    # From 1.14.26
+    # mcpKubernetes.oauth.allowPrivateURLs has no effect: its Dex client reaches
+    # a private issuer and follows HTTP_PROXY, HTTPS_PROXY and NO_PROXY without
+    # it, so the block below does not set it. The next major is the ceiling.
+    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
+    versionRange: ">=1.16.0-rc.1 <2.0.0-0"
     valuesFrom: mcp-kubernetes
     # The connectivity chart's keys, not the chart's (which validates strictly):
     # the upstream Kubernetes audience and the shape of the
@@ -2444,6 +2466,37 @@ networkPolicy:
   #   additionalEgressFQDNs:
   #     - matchName: dex.example.gigantic.io
   additionalEgressFQDNs: []
+  # The proxy pods of the front Gateways (the Envoy edge): the connectivity
+  # chart's policies that admit or reach a Gateway's proxy select its pods by
+  # the owning-Gateway labels in this namespace, where Envoy Gateway runs them.
+  # The mcp-* server charts admit the proxies through their own
+  # ciliumNetworkPolicy.ingress.gatewayPeers (docs/mcp-backend-network-policy.md):
+  # set the same namespace there.
+  envoyGateway:
+    # -- Where Envoy Gateway runs the Gateways' proxy pods. The default is the
+    # controller's namespace of Envoy Gateway's default deploy mode
+    # (ControllerNamespace); change it when Envoy Gateway runs in another
+    # namespace, and set it empty when it runs in the GatewayNamespace mode,
+    # which puts each proxy in its Gateway's own namespace.
+    proxyNamespace: envoy-gateway-system  # @schema pattern: ^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)?$
+  # The login identity provider's in-cluster leg (cilium flavour): the egress
+  # policies of the services that validate the login's tokens (the managers,
+  # the portal, an MCP backend entry with identityProvider) open the issuer's
+  # hosts by name on 443 and these pods, never the cluster entity
+  # (giantswarm/agent-platform#1383). An issuer served through an in-cluster
+  # Gateway whose LoadBalancer address Cilium translates (a private
+  # installation) is that Gateway's proxy pods at policy time, on their own
+  # port (10443 behind a 443 listener). A wrong peer cuts the login: OIDC
+  # discovery times out and the managers stop at start.
+  identityProvider:
+    # -- The in-cluster peers of the identity provider egress, each a
+    # namespace, optional pod labels (matchLabels) and its ports. Unset (null),
+    # the chart derives them: the proxy pods of the public Gateway muster's
+    # route attaches to (ingress.parentRefs, else the chart-owned edge, else
+    # global.gatewayApi.parentRefs) on 443 and 10443, and, for an issuer host
+    # <service>.<namespace>.svc[.cluster.local], that namespace on the URL's
+    # port. A list replaces the derived peers; [] renders no in-cluster leg.
+    inClusterPeers: null  # @schema type: [array, null]; item: object; itemRequired: [namespace, ports]; itemProperties: {"namespace": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"}, "matchLabels": {"type": "object", "additionalProperties": {"type": "string"}}, "ports": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1, "maximum": 65535}}}
   # Substrate's credential provider (k8s-credential-provider, ate-system),
   # cilium flavor: Cilium FQDN selectors (matchName, matchPattern) it reaches
   # on 443/TCP besides the apiserver and DNS, through the DNS proxy rule the
@@ -3652,7 +3705,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/oauth2-proxy
-      tag: v7.15.5
+      tag: v7.15.6
     # Co-locate with kagent resources so the templates ConfigMap (created in
     # kagent namespace by the kagent chart) is reachable.
     namespaceOverride: kagent
@@ -4934,9 +4987,7 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
-    sso:
-      allowPrivateIPs: true
+      allowPrivateURLs: false
     downstream:
       enabled: true
   muster:
@@ -5145,9 +5196,7 @@ vm-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
-    sso:
-      allowPrivateIPs: true
+      allowPrivateURLs: false
   muster:
     mcpServer:
       enabled: true
@@ -5279,9 +5328,7 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
-    sso:
-      allowPrivateIPs: true
+      allowPrivateURLs: false
     downstream:
       enabled: true
   muster:
@@ -5323,6 +5370,17 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     parentRef:
       name: giantswarm-default
       namespace: envoy-gateway-system
+    # Gateway API rule timeouts on both agent-manager routes (the public one on
+    # the edge Gateway and the data plane's inner one), in place of the shared
+    # ingress.httpRoute.timeouts. Without one, Envoy Gateway's default route
+    # timeout (15 s) cuts a credential save that opens a Git pull request.
+    # The request bound sits above agent-manager's own limit on a save (90 s)
+    # and below the portal backend's wait on it (120 s), so agent-manager
+    # answers first and the portal reads that answer. Override a key (request,
+    # backendRequest); a null here does not reach the connectivity release,
+    # which then keeps its own default.
+    timeouts:
+      request: 100s
     jwtAuthentication:
       enabled: false
       mode: Strict
@@ -5424,7 +5482,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 2.24.0
+      tag: 3.5.5
     dryRun: false
     gitopsNamespaces: []
 
@@ -5485,9 +5543,7 @@ skill-manager:  # @schema skipProperties: true; additionalProperties: true
   oauth:
     enabled: true
     dex:
-      allowPrivateURLs: true
-    sso:
-      allowPrivateIPs: true
+      allowPrivateURLs: false
   muster:
     mcpServer:
       enabled: true
@@ -5556,9 +5612,7 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
     enabled: true
     provider: dex
     dex:
-      allowPrivateURLs: true
-    sso:
-      allowPrivateIPs: true
+      allowPrivateURLs: false
     downstream:
       enabled: true
   muster:
@@ -5812,7 +5866,9 @@ musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemR
 # this switch, so it serves the organization tools (the floor of
 # components.agent-manager.versionRange must be 2.20.0 or later). Credential
 # forms use an explicit agent-manager.credentials.uiURL template containing
-# {operation}; credentials and github.tokenExchange need a manager floor of
+# {operation} and {namespace} ({namespace}, and no {parent} or {organization},
+# is required without this switch, with a manager floor of 3.1.0-rc.11);
+# credentials and github.tokenExchange need a manager floor of
 # 2.22.0 or later. With components.muster on, muster serves
 # the MCPServers of the namespaces labelled
 # agent-platform.giantswarm.io/organization (muster.mcpServerNamespaceSelector,
@@ -5935,9 +5991,9 @@ workspaces:
   # .additionalProviders) and muster answers the person's current token for a
   # Session agent-manager bound to that person (muster.credentialProvider, on
   # with the switch). muster releases a grant only for a provider instance in
-  # muster.muster.credentialProvider.releasable, derived as the instance the
-  # workspace-manager's registration is pinned to (its name in
-  # workspace-manager.providers byte for byte) under the App's issuer
+  # muster.muster.credentialProvider.releasable, derived as each instance
+  # whose provider App the workspace-manager's registration names (its name
+  # in workspace-manager.providers byte for byte) under the App's issuer
   # (workspace-manager.muster.mcpServer.auth.authorizationServer.issuer, own
   # or derived as <url>/apps/<app.id>); an
   # own map stands beside it, and an instance missing there gets the
@@ -6265,14 +6321,15 @@ workspaces:
 # (giantswarm/workspace-manager), MCP only: tools appear as
 # x_workspace-manager_<tool> through the chart's own MCPServer CR, labelled for
 # the agent-platform tool group like every manager's and, with provider
-# instances, pinned to one instance's App (muster.mcpServer.auth below): the
-# person's provider token is muster's grant, never the manager's; no second
+# instances, receiving muster's provider App of each instance with sign-in
+# (muster.mcpServer.auth below): the person's provider token is muster's
+# grant, never the manager's; no second
 # MCPServer for any provider. The pinned Service name is what the wiring below (network policies)
 # targets.
 #
 # Identity as for cluster-manager above: an OAuth 2.1 resource server
 # validating the session's id_token muster forwards (the MCPServer CR's auth
-# block; pinned, beside the App token in X-Muster-Id-Token); the issuer, client, secret and CA fall back to global.identity and
+# block, the bearer of every call); the issuer, client, secret and CA fall back to global.identity and
 # the OAuth base URL to global.domain inside the chart. The manager writes the
 # workspace objects with its own ServiceAccount, so muster requests no extra
 # audience at login. The chart's own network policy stays off: the
@@ -6307,9 +6364,7 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
     # port) is taken as it is: the route matches the host.
     baseURL: ""
     dex:
-      allowPrivateURLs: true
-    sso:
-      allowPrivateIPs: true
+      allowPrivateURLs: false
   muster:
     mcpServer:
       enabled: true
@@ -6322,50 +6377,34 @@ workspace-manager:  # @schema skipProperties: true; additionalProperties: true
         # it changes.
         requiredAudiences:
           - dex-k8s-authenticator
-        # The muster pin (agent-platform.workspaceManager.musterPin): with
-        # providers and oauth.enabled the registration is pinned to one
-        # provider instance's App, so a person grants that App once in muster
-        # and muster attaches the person's App token to every call; muster
-        # holds the person's token, the manager none. Derived unless set:
-        # - provider: the instance, by default the only one of kind github
-        #   (several, or none of kind github: name it here);
-        # - authorizationServer.clientCredentialsSecretRef.name: the Secret
-        #   with the App's OAuth client under `client-id` and `client-secret`,
-        #   which muster reads, by default the Secret of the instance's
-        #   values.oauth.clientSecret (key client-secret; that Secret then
-        #   carries client-id too);
-        # - authorizationServer.issuer: the identity the person's grant of the
-        #   App is filed under, by default <url>/apps/<app.id> of a github
-        #   instance (https://github.com/apps/<app.id> without url), unique
-        #   per App; muster discovers nothing under it, since the endpoints
-        #   are pinned and GitHub's own `iss` is checked as expectedIssuer.
-        #   An own value (https://github.com/apps/<app slug>, say) stands;
-        #   changing it later asks every person to grant the App once more.
-        # The other authorizationServer keys default to
-        # GitHub's endpoints (the workspace-manager chart's values); a gitlab
-        # instance sets its own, revocationEndpoint
-        # (https://<gitlab>/oauth/revoke) among them, so a person's
-        # disconnect revokes the grant at GitLab; GitHub has no RFC 7009
-        # endpoint and leaves it empty. The render fails naming the key that
-        # is missing.
-        # GitHub and GitLab side by side
-        # (agent-platform.workspaceManager.providerApps): with two or more
-        # instances with person sign-in (values.oauth.clientSecret, key
-        # client-secret) and no own `provider`, nothing is pinned. muster
-        # keeps one provider App per instance (muster.muster.providerApps)
-        # and the registration receives the grants of each
-        # (`providerApps: [<instance>, …]`, one X-Muster-Grant-<instance>
-        # header per App the person granted); muster's credentialProvider
-        # releases each under its App's issuer. A github instance's App takes
-        # the issuer above and GitHub's endpoints on its url. A gitlab
-        # instance's App takes its url as issuer, GitLab's endpoints with
-        # revocationEndpoint <url>/oauth/revoke, values.oauth.scopes (default
-        # `api read_user read_repository write_repository`, exactly the
-        # scopes the GitLab application lists) and git user oauth2. It needs
-        # muster.muster.oauth.mcpClient.enabled. An own `providerApps` names
-        # the instances itself, and an own muster.muster.providerApps entry
-        # stands in place of the derived one. One instance with sign-in keeps
-        # the pin.
+        # Provider Apps (agent-platform.workspaceManager.providerApps): with
+        # providers and oauth.enabled, muster keeps one provider App per
+        # instance with person sign-in (values.oauth.clientSecret, key
+        # client-secret) in muster.muster.providerApps, and the registration
+        # names them (`providerApps: [<instance>, …]`): muster forwards the
+        # person's Dex ID token as the bearer and attaches the person's token
+        # of each App they granted in X-Muster-Grant-<instance>; muster's
+        # credentialProvider releases each under its App's issuer. A github
+        # instance's App takes the issuer <url>/apps/<app.id>
+        # (https://github.com/apps/<app.id> without url; an own
+        # authorizationServer.issuer below stands, and changing it later asks
+        # every person to grant the App once more), GitHub's endpoints on its
+        # url and, on github.com, expectedIssuer https://github.com/login/oauth.
+        # A gitlab instance's App takes its url as issuer, GitLab's endpoints
+        # with revocationEndpoint <url>/oauth/revoke, values.oauth.scopes
+        # (default `api read_user read_repository write_repository`, exactly
+        # the scopes the GitLab application lists) and git user oauth2. It
+        # needs muster.muster.oauth.mcpClient.enabled. An own `providerApps`
+        # names the instances itself, and an own muster.muster.providerApps
+        # entry stands in place of the derived one.
+        # Deprecated: an own `provider` pins the registration to that
+        # instance's App instead (agent-platform.workspaceManager.musterPin):
+        # the person's App token becomes the bearer and the Dex ID token
+        # moves to X-Muster-Id-Token, which MCP 2025-11-25 forbids (a server
+        # accepts only tokens issued for it). With it,
+        # authorizationServer.clientCredentialsSecretRef.name defaults to the
+        # instance's values.oauth.clientSecret Secret and
+        # authorizationServer.issuer to the App's issuer above.
   # The installation's provider instances, several at once: each a unique
   # `name` (a DNS label: the name workspaces refer to), a `kind`
   # and the kind's `values`, whose credentials (the sync credential, the OAuth
@@ -6558,11 +6597,12 @@ workspaceManager:  # @schema skipProperties: true; additionalProperties: true
 #     from global.identity.ca — the render fails without an issuer: the chart
 #     would serve its tools to anyone who reaches the Service;
 #   - muster.mcpServer.enabled while the muster component is on;
-#   - muster.mcpServer.authorizationServer, the pin of the registration to the
-#     installation's agents GitHub App, from the workspace-manager's pin to its
-#     github provider instance (agent-platform.workspaceManager.musterPin), so
-#     a person grants the App once for workspaces and toolchains: the App's
-#     issuer, GitHub's endpoints and the App's client credentials Secret;
+#   - github.grantApp, the workspace-manager's github provider App
+#     (agent-platform.workspaceManager.providerApps), so a person grants the
+#     installation's agents GitHub App once for workspaces and toolchains and
+#     muster attaches it in X-Muster-Grant-<instance>; with the
+#     workspace-manager's own deprecated pin (auth.provider),
+#     muster.mcpServer.authorizationServer pins this registration the same way;
 #   - sources: the block's sources followed by additionalSources;
 # and on the other side of a toolchain (agent-platform.toolchains.registries):
 #   - agent-manager.toolchains.repository, the first source's registry (an
@@ -6810,9 +6850,6 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
     oauth:
       enabled: true
       provider: dex
-      allowPrivateURLs: true
-      sso:
-        allowPrivateIPs: true
       enableDownstreamOAuth: true
   # The three boards the chart ships (administrator, security, cluster
   # operator), into the platform's own folder. `auto` follows the resolved

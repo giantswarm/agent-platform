@@ -183,7 +183,7 @@ spec:
               protocol: TCP
     {{- end }}
     {{- if $oauthOn }}
-    {{- include "agent-platform.idpEgress.cilium" (dict "provider" (include "agent-platform.agentManager.oauthProvider" .) "issuerUrl" (include "agent-platform.agentManager.issuerUrl" .)) | trim | nindent 4 }}
+    {{- include "agent-platform.idpEgress.cilium" (dict "ctx" $ "provider" (include "agent-platform.agentManager.oauthProvider" .) "issuerUrl" (include "agent-platform.agentManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
     {{- with $broker }}
     # The HTTPS grant broker needs an explicit origin rule even when it
