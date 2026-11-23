@@ -44,6 +44,7 @@ included, and asserts every Harness it emits against the pinned Harness CRD.
 
 Usage: verify-kagent-harness.py <connectivity chart dir> <meta chart dir>
 """
+import json
 import pathlib
 import re
 import subprocess
@@ -188,6 +189,77 @@ def main(connectivity: str, meta: str) -> int:
     if incomplete := [e["name"] for e in entries if e.get("runtime") == "byo" and not all(e.get(k) for k in ("image", "command", "displayName"))]:
         fail(f"{coding}: the BYO entries {incomplete} lack an image, a command or a displayName; the kagent chart requires all three on a BYO entry")
     print("ok: kagent.harnesses (claude, codex and a BYO omp) reaches the kagent release unchanged, with no null; by default the release carries no further Harness")
+
+    workspace_args = [*base, "-f", "tests/fixtures/workspaces-values.yaml", "-f", coding]
+    workspace_values = kagent_values(render(meta, workspace_args))
+    harnesses = [workspace_values["harness"], *workspace_values["harnesses"]]
+    required = {"GH_TOKEN", "GITLAB_TOKEN", "GLAB_IS_OAUTH2", "GITLAB_HOST", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"}
+    for harness in harnesses:
+        environment = {entry["name"]: entry["value"] for entry in harness["env"]}
+        if len(environment) != len(harness["env"]) or not required <= environment.keys():
+            fail(f"workspace Harness {harness.get('name', 'kagent')} lacks distinct CLI literals")
+        if environment["GLAB_IS_OAUTH2"] != "true" or environment["GITLAB_HOST"] != "gitlab.example.com:8443":
+            fail("workspace glab requires OAuth mode and a declared host")
+        if environment.get("GLAB_GIT_PROTOCOL") != "https":
+            fail("workspace glab must clone through HTTPS")
+        if environment["GIT_CONFIG_KEY_0"] != "credential.helper" or "password=kagent-credential-injected" not in environment["GIT_CONFIG_VALUE_0"]:
+            fail("workspace git lacks an inert credential helper")
+        if not environment["GH_TOKEN"].startswith("ghu_") or environment["GITLAB_TOKEN"] != "kagent-credential-injected":
+            fail("workspace CLI defaults must contain inert literals")
+    providers = yaml.safe_load(pathlib.Path("tests/fixtures/workspaces-values.yaml").read_text())["workspace-manager"]["providers"]
+    github_providers = [provider for provider in providers if provider["kind"] == "github"]
+    github_values = kagent_values(render(meta, [*workspace_args, "--set-json", "workspace-manager.providers=" + json.dumps(github_providers)]))
+    for harness in [github_values["harness"], *github_values["harnesses"]]:
+        names = {entry["name"] for entry in harness["env"]}
+        if "GH_TOKEN" not in names or names & {"GITLAB_TOKEN", "GITLAB_HOST", "GLAB_IS_OAUTH2", "GLAB_GIT_PROTOCOL", "GLAB_CHECK_UPDATE"}:
+            fail("a GitHub-only installation must not spend its runtime environment on GitLab defaults")
+    gitlab_providers = [provider for provider in providers if provider["kind"] == "gitlab"]
+    gitlab_providers[0]["values"]["oauth"] = {"clientSecret": {"name": "gitlab-oauth", "key": "client-secret"}}
+    gitlab_values = kagent_values(render(meta, [*workspace_args, "--set-json", "workspace-manager.providers=" + json.dumps(gitlab_providers), "--set", "workspace-manager.muster.mcpServer.auth.provider=gitlab", "--set", "workspace-manager.muster.mcpServer.auth.authorizationServer.issuer=https://gitlab.example.com", "--set", "workspace-manager.muster.mcpServer.auth.authorizationServer.clientCredentialsSecretRef.name=gitlab-oauth"]))
+    for harness in [gitlab_values["harness"], *gitlab_values["harnesses"]]:
+        names = {entry["name"] for entry in harness["env"]}
+        if "GH_TOKEN" in names or not {"GITLAB_TOKEN", "GITLAB_HOST", "GLAB_IS_OAUTH2", "GLAB_GIT_PROTOCOL", "GLAB_CHECK_UPDATE"} <= names:
+            fail("a GitLab-only installation must receive its CLI defaults without GitHub defaults")
+    explicit = [{"name": "GH_TOKEN", "value": ""}, {"name": "GITLAB_HOST", "value": "gitlab.example.com:8443"}, {"name": "SENTINEL", "value": "a=b"}]
+    overrides = ["--set-json", "kagent.harness.env=" + json.dumps(explicit), "--set-json", "kagent.harnesses[0].env=" + json.dumps(explicit)]
+    overridden = kagent_values(render(meta, [*workspace_args, *overrides]))
+    for harness in [overridden["harness"], overridden["harnesses"][0]]:
+        environment = {entry["name"]: entry["value"] for entry in harness["env"]}
+        if len(environment) != len(harness["env"]) or any(environment.get(entry["name"]) != entry["value"] for entry in explicit):
+            fail("explicit Harness literals, including empty values, must override CLI defaults")
+    providers = yaml.safe_load(pathlib.Path("tests/fixtures/workspaces-values.yaml").read_text())["workspace-manager"]["providers"]
+    providers.append({"name": "gitlab-other", "kind": "gitlab", "values": {"url": "https://other.example.com", "token": {"name": "other-token", "key": "token"}}})
+    multiple = [*workspace_args, "--set-json", "workspace-manager.providers=" + json.dumps(providers)]
+    refused = subprocess.run(["helm", "template", "t", meta, *multiple], capture_output=True, text=True)
+    if refused.returncode == 0 or "explicit GITLAB_HOST" not in refused.stderr:
+        fail("multiple GitLab hosts must require explicit Harness host selection")
+    selected = [*multiple, *overrides, "--set-json", "kagent.harnesses[1].env=" + json.dumps(explicit), "--set-json", "kagent.harnesses[2].env=" + json.dumps(explicit)]
+    selected_values = kagent_values(render(meta, selected))
+    for harness in [selected_values["harness"], *selected_values["harnesses"]]:
+        if not any(entry == {"name": "GITLAB_HOST", "value": "gitlab.example.com:8443"} for entry in harness["env"]):
+            fail("explicit GitLab host selection did not reach every Harness")
+    for harness in [workspace_values["harness"], *workspace_values["harnesses"]]:
+        if any(entry["name"] == "GLAB_API_PROTOCOL" for entry in harness["env"]):
+            fail("an HTTPS GitLab host must keep glab's default API protocol")
+    custom_git = [{"name": "GIT_CONFIG_COUNT", "value": "1"}, {"name": "GIT_CONFIG_KEY_0", "value": "core.autocrlf"}, {"name": "GIT_CONFIG_VALUE_0", "value": "false"}]
+    partial_git = [{"name": "GIT_CONFIG_COUNT", "value": "0"}]
+    git_values = kagent_values(render(meta, [*workspace_args, "--set-json", "kagent.harness.env=" + json.dumps(custom_git), "--set-json", "kagent.harnesses[0].env=" + json.dumps(partial_git)]))
+    for harness, expected in [(git_values["harness"], custom_git), (git_values["harnesses"][0], partial_git)]:
+        git_entries = [entry for entry in harness["env"] if entry["name"].startswith("GIT_CONFIG_")]
+        if git_entries != expected:
+            fail("explicit GIT_CONFIG_* entries must replace every git default")
+        if not any(entry["name"] == "GH_TOKEN" for entry in harness["env"]):
+            fail("explicit git configuration must keep the forge CLI defaults")
+    http_providers = yaml.safe_load(pathlib.Path("tests/fixtures/workspaces-values.yaml").read_text())["workspace-manager"]["providers"]
+    for provider in http_providers:
+        if provider["kind"] == "gitlab":
+            provider["values"]["url"] = "http://gitlab.example.com:8080"
+    http_values = kagent_values(render(meta, [*workspace_args, "--set-json", "workspace-manager.providers=" + json.dumps(http_providers)]))
+    for harness in [http_values["harness"], *http_values["harnesses"]]:
+        environment = {entry["name"]: entry["value"] for entry in harness["env"]}
+        if environment.get("GITLAB_HOST") != "gitlab.example.com:8080" or environment.get("GLAB_API_PROTOCOL") != "http":
+            fail("an HTTP GitLab host must select glab's HTTP API protocol")
+    print("ok: workspace CLI configuration reaches all four Harnesses; explicit host, empty, git and sentinel values override defaults without duplicates; HTTP GitLab selects its API protocol")
 
     am_on = ["--set", "components.agent-manager.enabled=true"]
     egress = yaml.safe_load(open(coding))["agent-manager"]["harness"]["egress"]

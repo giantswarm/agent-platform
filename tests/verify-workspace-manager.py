@@ -351,9 +351,17 @@ def main(meta: str, connectivity: str) -> int:
             continue
         on = on_docs.get(key)
         if key == ("HelmRelease", "kagent"):
-            # The one change the switch makes outside the component: kagent's jwt
-            # Session admission, derived onto the kagent release while the manager
-            # signs grants (tests/verify-workspace-session-admission.py pins its values).
+            environment = block(block(on or "", "harness", 4), "env", 6)
+            configured = environment
+            for name in ("GH_TOKEN", "GITLAB_TOKEN", "GLAB_IS_OAUTH2", "GLAB_GIT_PROTOCOL", "GITLAB_HOST", "GLAB_CHECK_UPDATE", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+                entry = re.search(rf"^      - name: {name}\n(?:        .*\n)+", configured, re.M)
+                if not entry:
+                    fail(f"workspace Harness lacks declared CLI setting {name}")
+                configured = configured.replace(entry.group(0), "", 1)
+            if configured == "      env:\n":
+                configured = "      env: []\n"
+            on = on.replace(environment, configured, 1)
+            # Session admission follows the manager's workspace grants.
             session = block(block(on or "", "controller", 4), "session", 6)
             if not re.search(r"^        admission:\n          jwt:\n", session, re.M):
                 fail(f"switching workspaces on did not derive kagent's Session admission onto {key}:\n{session}")
