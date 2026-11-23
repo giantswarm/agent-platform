@@ -16,7 +16,7 @@ kagent:
     - name: omp
       runtime: byo
       displayName: oh-my-pi
-      image: gsoci.azurecr.io/giantswarm/kagent/omp-harness@sha256:92c442a23fc482a871c88adddaa4b06c6ca83373c09b171c5a230a20e5055b90
+      image: gsoci.azurecr.io/giantswarm/kagent/omp-harness@sha256:c12011328b5f37250481f485e75552b0638b1400b7483439a7a252fdb20ac683
       command: [/usr/local/bin/kagent-omp]
       snapshotLocation: s3://ci-agent-snapshots/omp
 agent-manager:
