@@ -1038,7 +1038,8 @@ def unauthenticated_mcp_challenge(mcp_url: str, base_url: str) -> Dict[str, Any]
     challenge = r.headers.get("WWW-Authenticate", "")
     prm_url = f"{base_url}/.well-known/oauth-protected-resource"
     assert f'resource_metadata="{prm_url}"' in challenge, challenge
-    assert 'error="invalid_token"' in challenge, challenge
+    # RFC 6750 section 3.1: a request without credentials gets no error code.
+    assert "error=" not in challenge, challenge
     prm = requests.get(prm_url, timeout=30)
     assert prm.status_code == 200, prm.text[:300]
     servers = prm.json()["authorization_servers"]
