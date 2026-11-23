@@ -15,6 +15,16 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (per-actor runtime limits)
+
+The kagent and kagent-crds ranges select the 1.32 line, which resolves controller defaults and optional Harness resource overrides into each runtime revision. New runtimes default to 1 CPU and 1Gi. Existing Sessions retain their limits, including unsized Sessions; automatic lifecycle moves refuse a different compute envelope.
+
+### Operator action
+
+- Set `kagent.harness.resources` or the appropriate `kagent.harnesses[].resources` for runtimes that need more than the defaults. CPU and memory override independently and use positive Kubernetes quantities.
+- Size `kagent.substrateWorkerPool.template.resources` for the actors and runtime overhead. The worker budget is shared and does not replace a per-actor limit.
+- Create a new Session to use changed limits. A pinned BOM moves both `kagent` and `kagent-crds` to 1.32.0.
+
 ## \<current\> → \<next\> (the workspace-manager and toolchain-manager are no longer pinned to a GitHub App)
 
 giantswarm/giantswarm#39393: with workspaces on, the chart no longer pins the workspace-manager's and toolchain-manager's muster registrations to the installation's agents GitHub App. muster keeps that App as a provider App under the pin's issuer and client Secret (`muster.muster.providerApps`), and both registrations name it: muster forwards the person's Dex ID token as the bearer and attaches their App token in `X-Muster-Grant-<instance>`. Before, the App token was the bearer of every call and the ID token travelled in `X-Muster-Id-Token`, which MCP 2025-11-25 forbids. People keep their grants: they are filed under the same issuer. One provider instance with sign-in now renders the same way two always did, and an own `workspace-manager.muster.mcpServer.auth.providerApps` replaces the pin too.

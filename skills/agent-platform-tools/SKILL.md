@@ -153,6 +153,34 @@ An empty result means it is not deployed here or you are not signed in to it. Th
 agents can use: `x_agent-manager_list_model_configs`. Bringing a model:
 https://docs.giantswarm.io/tutorials/agent-platform/bring-your-own-model/.
 
+## Confidential OAuth clients
+
+External integrations can register as separate confidential clients of muster's OAuth server using
+`client_secret_basic`, `client_secret_post` or `private_key_jwt`, once the supporting muster release
+is deployed. Provisioning needs the operator's registration bearer token; never request or display
+it in a conversation. Use authorization code with PKCE S256, request the registered muster scope
+(`mcp` where configured), and send the canonical MCP `resource` in authorization and token requests.
+The authenticated client ID identifies the integration; each person's grant remains separate.
+For `private_key_jwt`, sign each request with a fresh assertion whose sole `aud` is the authorization
+server's discovered issuer identifier. Multiple replicas require shared Valkey replay protection.
+Upgrading existing Valkey storage requires stopping OAuth traffic and old writers, migrating the
+family revocation index, then restarting every replica on the new release before restoring traffic.
+Use the linked operator procedure; old binaries must not write to migrated storage.
+Muster keeps the upstream identity-provider credentials and forwards or exchanges them according
+to the backend's configuration. Never send a muster access token directly to a backend.
+
+Client configuration management is opt-in through
+`muster.oauth.server.enableClientManagementEndpoint`. Store the registration access token in a
+secret manager and use the returned `registration_client_uri`, not a constructed management URL.
+Rotate by registering and verifying a replacement, then deleting the old registration with its
+own registration access token. With client deletion checks on every replica, deletion rejects
+existing access tokens and refresh requests across replicas. These guarantees apply to client-bound
+tokens; self-issued exchange JWTs without a client binding remain valid until expiry.
+After Valkey loss, provision a new
+registration and obtain fresh user authorizations; restoring an old snapshot can restore retired
+clients. Procedure and version prerequisites:
+[Confidential clients](https://github.com/giantswarm/muster/blob/main/docs/how-to/confidential-clients.md).
+
 ## When a tool is missing or refused
 
 - `filter_tools` with a `pattern` names, under `servers_requiring_auth`, each connector whose tools

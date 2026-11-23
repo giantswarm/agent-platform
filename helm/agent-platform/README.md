@@ -485,7 +485,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.31.0 <1.32.0"` |  |
+| components.kagent.versionRange | string | `">=1.32.0 <1.33.0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -508,7 +508,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.31.0 <1.32.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.32.0 <1.33.0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
@@ -1052,7 +1052,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.oauth2-proxy.fullnameOverride | string | `"kagent-oauth2-proxy"` |  |
 | kagent.oauth2-proxy.image.registry | string | `"gsoci.azurecr.io"` |  |
 | kagent.oauth2-proxy.image.repository | string | `"giantswarm/oauth2-proxy"` |  |
-| kagent.oauth2-proxy.image.tag | string | `"v7.15.5"` |  |
+| kagent.oauth2-proxy.image.tag | string | `"v7.15.6"` |  |
 | kagent.oauth2-proxy.namespaceOverride | string | `"kagent"` |  |
 | kagent.oauth2-proxy.redis.enabled | bool | `false` |  |
 | kagent.oauth2-proxy.sessionStorage.type | string | `"cookie"` |  |
@@ -1464,7 +1464,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"3.4.0"` |  |
+| agentManager.migration.image.tag | string | `"3.5.5"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | skills.platformSource.enabled | bool | `true` |  |

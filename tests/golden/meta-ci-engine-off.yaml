@@ -201,7 +201,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 3.4.0
+          tag: 3.5.5
       networkPolicy:
         egress:
           cidrs: []
@@ -838,7 +838,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/oauth2-proxy
-          tag: v7.15.5
+          tag: v7.15.6
         metrics:
           enabled: true
           serviceMonitor:
@@ -2234,7 +2234,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/oauth2-proxy
-        tag: v7.15.5
+        tag: v7.15.6
       metrics:
         enabled: true
         serviceMonitor:
@@ -3380,7 +3380,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.31.0 <1.32.0"
+    semver: ">=1.32.0 <1.33.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
@@ -3405,7 +3405,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.31.0 <1.32.0"
+    semver: ">=1.32.0 <1.33.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1
