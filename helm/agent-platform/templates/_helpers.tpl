@@ -974,6 +974,16 @@ sources' registries (agent-platform.kagent.sessionToolImages). */ -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "muster" -}}
+{{- /* The resource muster's OAuth server names in its protected resource
+metadata and binds tokens to: its MCP endpoint, oauth.server.baseUrl + /mcp,
+unless the installation names its own. Left empty, mcp-oauth falls back to the
+issuer, which is not the URL clients call, and RFC 9728 §3.3 has clients
+discard that metadata. */ -}}
+{{- $server := dig "muster" "oauth" "server" dict (.root.Values.muster | default dict) -}}
+{{- if and $server.baseUrl (not $server.resourceIdentifier) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $derived "muster" (mergeOverwrite $muster (dict "oauth" (dict "server" (dict "resourceIdentifier" (printf "%s/mcp" (trimSuffix "/" $server.baseUrl)))))) -}}
+{{- end -}}
 {{- /* The identity provider's private CA (global.identity.ca) is what muster's
 OAuth server trusts for its issuer: muster.extraCaFile.secret, unless the
 installation names its own. Without it a lab Dex fails muster's OIDC discovery

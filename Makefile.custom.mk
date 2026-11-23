@@ -1677,6 +1677,15 @@ verify-idp-egress: ## Assert the identity provider egress of the services that v
 	@echo "identity provider egress verified."
 
 .PHONY: verify-kagent-netpol
+verify-muster-resource: ## Assert the resource muster's OAuth server advertises (RFC 9728) and binds tokens to: oauth.server.baseUrl + /mcp when the installation names none, an own resourceIdentifier verbatim, none without a baseUrl.
+	@echo "====> $@ ($(CHART_DIR))"
+	@$(HELM) template t $(CHART_DIR) --set muster.muster.oauth.server.baseUrl=https://muster.example.org/ >$(VERIFY_TMP)/vmr-derived.out 2>&1 || { cat $(VERIFY_TMP)/vmr-derived.out; exit 1; }
+	@python3 tests/verify-muster-resource.py $(VERIFY_TMP)/vmr-derived.out https://muster.example.org/mcp
+	@$(HELM) template t $(CHART_DIR) --set muster.muster.oauth.server.baseUrl=https://muster.example.org --set muster.muster.oauth.server.resourceIdentifier=https://own.example.org/mcp >$(VERIFY_TMP)/vmr-own.out 2>&1 || { cat $(VERIFY_TMP)/vmr-own.out; exit 1; }
+	@python3 tests/verify-muster-resource.py $(VERIFY_TMP)/vmr-own.out https://own.example.org/mcp
+	@$(HELM) template t $(CHART_DIR) >$(VERIFY_TMP)/vmr-none.out 2>&1 || { cat $(VERIFY_TMP)/vmr-none.out; exit 1; }
+	@python3 tests/verify-muster-resource.py $(VERIFY_TMP)/vmr-none.out ""
+
 verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, no AOF; an installation's own fragment reaches the release verbatim. Its readers (giantswarm/agent-platform#851): ciliumNetworkPolicy.ingress.clients names exactly muster and klaus-gateway, by the pod labels the connectivity chart's muster-to-* and klausgateway-store-egress policies select.
 	@echo "====> $@ ($(CHART_DIR))"
 	@echo "--> default render: the fragment, the bound, the policy, the clients"

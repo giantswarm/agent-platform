@@ -249,6 +249,7 @@ These are the main non-component settings. Component switches are in [Enabling a
 | `kagent.controllerRoute.enabled` | `false` | Exposes the kagent controller's gRPC API as a `GRPCRoute` on the data plane. The route requires a JWT (`Strict`, on by default). See [Authentication](authentication.md#5-the-kagent-controller-route). |
 | `dicebear.route.enabled` | `auto` | The avatar route. Renders where `gateway.envoyproxy.io/v1alpha1` is served. When it renders, `dicebear.route.parentRefs` and `dicebear.route.hostnames` (for example `avatars.<domain>`) are required. |
 | `muster.muster.oauth.server.enabled` | `true` | OAuth protection on the muster API. Storage defaults to the bundled Valkey (`muster-valkey:6379`). |
+| `muster.muster.oauth.server.resourceIdentifier` | `baseUrl` + `/mcp` | The resource muster names in its protected resource metadata (RFC 9728) and binds tokens to. Set it only when clients reach muster's MCP endpoint at another URL. Changing it ends existing sign-ins: refresh answers `invalid_grant` and people sign in again. |
 | `agent-platform-mcps.mcpServers` | `[]` | MCP servers rendered as `MCPServer` / `AgentgatewayBackend` CRs. |
 | `extraObjects` | `[]` | Extra manifests, rendered through `tpl`. |
 | `gitops.hooks.image` / `gitops.hooks.helmImage` | `gsoci.azurecr.io/giantswarm/kubectl` / `alpine-k8s` | Images for the hook Jobs. |
