@@ -1528,6 +1528,10 @@ spec:
           requestedSize: 1Gi
         deploymentStrategy: Recreate
         fullnameOverride: muster-valkey
+        image:
+          registry: gsoci.azurecr.io
+          repository: giantswarm/valkey
+          tag: 9.1.3
         metrics:
           exporter:
             securityContext:
@@ -1571,6 +1575,8 @@ spec:
         valkeyConfig: |
           maxmemory 640mb
           maxmemory-policy volatile-lru
+          appendonly yes
+          appendfsync everysec
       vpa:
         enabled: false
     vm-manager:
@@ -3025,7 +3031,71 @@ spec:
         enabled: true
         requestedSize: 1Gi
       deploymentStrategy: Recreate
+      extraInitContainers:
+      - command:
+        - sh
+        - -c
+        - |-
+          set -eu
+          grep -Eq '^[[:space:]]*appendonly[[:space:]]+yes[[:space:]]*$' /data/conf/valkey.conf || exit 0
+          [ -e /data/appendonlydir ] && exit 0
+          [ -s /data/dump.rdb ] || exit 0
+          stage=/data/.append-only-conversion
+          rm -rf "$stage"
+          mkdir "$stage"
+          ln /data/dump.rdb "$stage/dump.rdb"
+          socket="$stage/valkey.sock"
+          valkey-server --dir "$stage" --dbfilename dump.rdb --appendonly no --save "" --port 0 --unixsocket "$socket" --unixsocketperm 700 &
+          server=$!
+          cli() { valkey-cli -s "$socket" "$@"; }
+          persistence() { cli INFO persistence | tr -d '
+          '; }
+          tries=0
+          until cli PING 2>/dev/null | grep -q PONG; do
+            tries=$((tries + 1)); [ "$tries" -lt 600 ] || { echo "snapshot did not load" >&2; exit 1; }
+            kill -0 "$server" || { echo "server exited while loading the snapshot" >&2; exit 1; }
+            sleep 1
+          done
+          keys=$(cli DBSIZE)
+          cli CONFIG SET appendonly yes >/dev/null
+          tries=0
+          until persistence | grep -qx 'aof_rewrite_in_progress:0' && persistence | grep -qx 'aof_rewrite_scheduled:0' && persistence | grep -qx 'aof_last_bgrewrite_status:ok' && [ -f "$stage/appendonlydir/appendonly.aof.manifest" ]; do
+            tries=$((tries + 1)); [ "$tries" -lt 600 ] || { echo "append-only rewrite did not complete" >&2; exit 1; }
+            persistence | grep -qx 'aof_last_bgrewrite_status:err' && { echo "append-only rewrite failed" >&2; exit 1; }
+            sleep 1
+          done
+          cli SHUTDOWN NOSAVE >/dev/null 2>&1 || true
+          wait "$server" || true
+          mv "$stage/appendonlydir" /data/appendonlydir
+          rm -rf "$stage"
+          echo "converted dump.rdb ($keys keys) into /data/appendonlydir"
+        image: gsoci.azurecr.io/giantswarm/valkey:9.1.3
+        name: append-only-conversion
+        resources:
+          limits:
+            cpu: 200m
+            memory: 1Gi
+          requests:
+            cpu: 50m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+        - mountPath: /data
+          name: valkey-data
       fullnameOverride: muster-valkey
+      image:
+        registry: gsoci.azurecr.io
+        repository: giantswarm/valkey
+        tag: 9.1.3
       metrics:
         exporter:
           securityContext:
@@ -3069,6 +3139,8 @@ spec:
       valkeyConfig: |
         maxmemory 640mb
         maxmemory-policy volatile-lru
+        appendonly yes
+        appendfsync everysec
     vpa:
       enabled: false
 ---

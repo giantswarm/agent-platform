@@ -947,13 +947,16 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | valkey.valkey.replicaCount | int | `1` |  |
 | valkey.valkey.deploymentStrategy | string | `"Recreate"` |  |
 | valkey.valkey.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
+| valkey.valkey.image.registry | string | `"gsoci.azurecr.io"` |  |
+| valkey.valkey.image.repository | string | `"giantswarm/valkey"` |  |
+| valkey.valkey.image.tag | string | `"9.1.3"` |  |
 | valkey.valkey.auth.enabled | bool | `true` |  |
 | valkey.valkey.auth.usersExistingSecret | string | `""` |  |
 | valkey.valkey.auth.aclUsers.default.permissions | string | `"~* &* +@all"` |  |
 | valkey.valkey.auth.aclUsers.default.passwordKey | string | `""` |  |
 | valkey.valkey.dataStorage.enabled | bool | `true` |  |
 | valkey.valkey.dataStorage.requestedSize | string | `"1Gi"` |  |
-| valkey.valkey.valkeyConfig | string | `"maxmemory 640mb\nmaxmemory-policy volatile-lru\n"` |  |
+| valkey.valkey.valkeyConfig | string | `"maxmemory 640mb\nmaxmemory-policy volatile-lru\nappendonly yes\nappendfsync everysec\n"` |  |
 | valkey.valkey.resources.requests.cpu | string | `"50m"` |  |
 | valkey.valkey.resources.requests.memory | string | `"256Mi"` |  |
 | valkey.valkey.resources.limits.cpu | string | `"200m"` |  |
