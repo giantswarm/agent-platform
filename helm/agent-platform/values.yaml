@@ -3021,7 +3021,7 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/valkey
-      tag: "9.1.3"
+      tag: "9.2.0"
     auth:
       enabled: true
       # Name of a pre-created Secret holding the default user's password under
