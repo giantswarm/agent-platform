@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.63.0"
+    app.kubernetes.io/version: "v0.63.1"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -28,7 +28,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.63.0"
+    app.kubernetes.io/version: "v0.63.1"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
 automountServiceAccountToken: false
@@ -59,7 +59,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.63.0"
+    app.kubernetes.io/version: "v0.63.1"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -83,7 +83,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.63.0"
+    app.kubernetes.io/version: "v0.63.1"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
 roleRef:
@@ -159,7 +159,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.63.0"
+    app.kubernetes.io/version: "v0.63.1"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
 spec:
@@ -183,7 +183,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.63.0"
+    app.kubernetes.io/version: "v0.63.1"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -204,7 +204,7 @@ spec:
         app.kubernetes.io/instance: "t"
         app.kubernetes.io/managed-by: "Helm"
         app.kubernetes.io/part-of: agent-platform
-        app.kubernetes.io/version: "v0.63.0"
+        app.kubernetes.io/version: "v0.63.1"
         application.giantswarm.io/team: "bumblebee"
         helm.sh/chart: "flux-engine-0.1.0"
     spec:
@@ -215,7 +215,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: manager
-          image: "gsoci.azurecr.io/giantswarm/flux-operator:v0.63.0"
+          image: "gsoci.azurecr.io/giantswarm/flux-operator:v0.63.1"
           imagePullPolicy: IfNotPresent
           args:
             - --log-level=info
@@ -291,7 +291,7 @@ metadata:
     app.kubernetes.io/instance: "t"
     app.kubernetes.io/managed-by: "Helm"
     app.kubernetes.io/part-of: agent-platform
-    app.kubernetes.io/version: "v0.63.0"
+    app.kubernetes.io/version: "v0.63.1"
     application.giantswarm.io/team: "bumblebee"
     helm.sh/chart: "flux-engine-0.1.0"
   annotations:
@@ -2286,8 +2286,7 @@ spec:
           valkey-server --dir "$stage" --dbfilename dump.rdb --appendonly no --save "" --port 0 --unixsocket "$socket" --unixsocketperm 700 &
           server=$!
           cli() { valkey-cli -s "$socket" "$@"; }
-          persistence() { cli INFO persistence | tr -d '
-          '; }
+          persistence() { cli INFO persistence | tr -d '\r'; }
           tries=0
           until cli PING 2>/dev/null | grep -q PONG; do
             tries=$((tries + 1)); [ "$tries" -lt 600 ] || { echo "snapshot did not load" >&2; exit 1; }
@@ -2763,7 +2762,7 @@ metadata:
 data:
   flux-operator.yaml: |
     # The four CustomResourceDefinitions of the Flux Operator, rendered from the
-    # upstream chart controlplaneio-fluxcd/flux-operator 0.63.0 (templates/crds.yaml
+    # upstream chart controlplaneio-fluxcd/flux-operator 0.63.1 (templates/crds.yaml
     # with installCRDs=true, the labels app.kubernetes.io/instance,
     # app.kubernetes.io/managed-by and helm.sh/chart removed). They live in
     # crds/ so Helm installs them before the FluxInstance template is validated.
@@ -2785,7 +2784,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.63.0'
+        app.kubernetes.io/version: 'v0.63.1'
       name: fluxinstances.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io
@@ -3666,7 +3665,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.63.0'
+        app.kubernetes.io/version: 'v0.63.1'
       name: fluxreports.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io
@@ -3968,7 +3967,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.63.0'
+        app.kubernetes.io/version: 'v0.63.1'
       name: resourcesetinputproviders.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io
@@ -4524,7 +4523,7 @@ data:
         helm.sh/resource-policy: keep
       labels:
         app.kubernetes.io/name: 'flux-operator'
-        app.kubernetes.io/version: 'v0.63.0'
+        app.kubernetes.io/version: 'v0.63.1'
       name: resourcesets.fluxcd.controlplane.io
     spec:
       group: fluxcd.controlplane.io

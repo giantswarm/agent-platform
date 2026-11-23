@@ -6396,8 +6396,7 @@ socket="$stage/valkey.sock"
 valkey-server --dir "$stage" --dbfilename dump.rdb --appendonly no --save "" --port 0 --unixsocket "$socket" --unixsocketperm 700 &
 server=$!
 cli() { valkey-cli -s "$socket" "$@"; }
-persistence() { cli INFO persistence | tr -d '
-'; }
+persistence() { cli INFO persistence | tr -d '\r'; }
 tries=0
 until cli PING 2>/dev/null | grep -q PONG; do
   tries=$((tries + 1)); [ "$tries" -lt 600 ] || { echo "snapshot did not load" >&2; exit 1; }
