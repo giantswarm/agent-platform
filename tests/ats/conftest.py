@@ -1031,17 +1031,21 @@ def unauthenticated_initialize(mcp_url: str) -> requests.Response:
 
 def unauthenticated_mcp_challenge(mcp_url: str, base_url: str) -> Dict[str, Any]:
     """No token on the MCP endpoint -> muster's 401 with the RFC 9728
-    WWW-Authenticate discovery chain, which points at muster's base URL;
-    returns the authorization-server metadata the chain leads to."""
+    WWW-Authenticate discovery chain, which points at the path-suffixed
+    metadata of muster's /mcp resource (RFC 9728 section 3.1); returns the
+    authorization-server metadata the chain leads to."""
     r = unauthenticated_initialize(mcp_url)
     assert r.status_code == 401, f"expected 401, got {r.status_code}: {r.text[:300]}"
     challenge = r.headers.get("WWW-Authenticate", "")
-    prm_url = f"{base_url}/.well-known/oauth-protected-resource"
+    prm_url = f"{base_url}/.well-known/oauth-protected-resource/mcp"
     assert f'resource_metadata="{prm_url}"' in challenge, challenge
     # RFC 6750 section 3.1: a request without credentials gets no error code.
     assert "error=" not in challenge, challenge
     prm = requests.get(prm_url, timeout=30)
     assert prm.status_code == 200, prm.text[:300]
+    # RFC 9728 section 3.3: a client discards metadata whose resource differs
+    # from the URL it called.
+    assert prm.json()["resource"] == f"{base_url}/mcp", prm.json()
     servers = prm.json()["authorization_servers"]
     assert servers == [base_url], servers
     asm = requests.get(f"{servers[0]}/.well-known/oauth-authorization-server", timeout=30)
