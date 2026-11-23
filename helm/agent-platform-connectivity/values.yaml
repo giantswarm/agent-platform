@@ -3346,7 +3346,7 @@ workspaces:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/livenessprobe
-          tag: v2.20.0
+          tag: v2.20.1
         nodePort: 29662
         resources:  # @schema additionalProperties: true
           requests:
