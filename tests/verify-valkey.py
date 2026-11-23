@@ -12,6 +12,14 @@ pages and the client buffers their headroom under `resources.limits.memory`
 (at or under two thirds of it), and an eviction policy that evicts TTL-carrying
 keys rather than refusing writes.
 
+The default fragment also enables the append-only file (appendonly yes,
+appendfsync everysec): losing writes since the last snapshot would bring a
+deleted client or a revoked grant back after a crash. Valkey started with
+appendonly on and no append-only file loads nothing and ignores dump.rdb, so
+the render must carry the append-only-conversion init container, running the
+server's own image with its resources and security context, whenever the
+fragment enables appendonly, and none when it does not.
+
 Reads a rendered meta-package manifest (stdout of `helm template`, PyYAML);
 with --override, the render with an installation's own valkeyConfig, which
 must reach the release verbatim.
@@ -72,6 +80,31 @@ def helm_release(manifest: str, name: str) -> dict:
     sys.exit(f"FAIL: no HelmRelease {name} in the render")
 
 
+CONVERSION = "append-only-conversion"
+
+
+def conversion_containers(vals: dict) -> list[dict]:
+    return [c for c in vals.get("extraInitContainers") or [] if c.get("name") == CONVERSION]
+
+
+def check_conversion(vals: dict) -> None:
+    found = conversion_containers(vals)
+    if len(found) != 1:
+        sys.exit(f"FAIL: valkeyConfig enables appendonly but the release carries {len(found)} {CONVERSION} init containers, expected one — the enabling restart would load an empty store")
+    container = found[0]
+    image = vals.get("image") or {}
+    want = f"{image.get('registry')}/{image.get('repository')}:{image.get('tag')}"
+    if not image.get("tag") or container.get("image") != want:
+        sys.exit(f"FAIL: {CONVERSION} runs {container.get('image')!r}, expected the server's own pinned image {want!r}")
+    if container.get("resources") != vals.get("resources"):
+        sys.exit(f"FAIL: {CONVERSION} resources {container.get('resources')!r} differ from the server's {vals.get('resources')!r} — it holds the whole dataset in memory")
+    if container.get("securityContext") != vals.get("securityContext"):
+        sys.exit(f"FAIL: {CONVERSION} securityContext differs from the server's")
+    if {"name": "valkey-data", "mountPath": "/data"} not in container.get("volumeMounts", []):
+        sys.exit(f"FAIL: {CONVERSION} does not mount the data volume at /data")
+    print(f"ok: {CONVERSION} runs {want} with the server's resources and security context")
+
+
 def check_clients(release: dict) -> None:
     clients = release.get("ciliumNetworkPolicy", {}).get("ingress", {}).get("clients")
     if clients != CLIENTS:
@@ -118,7 +151,9 @@ def main() -> None:
     if override:
         if fragment != OVERRIDE:
             sys.exit(f"FAIL: an installation's valkeyConfig did not reach the release verbatim: {fragment!r}")
-        print("ok: an installation's own valkeyConfig travels to the valkey release verbatim")
+        if conversion_containers(vals):
+            sys.exit(f"FAIL: an own valkeyConfig without appendonly still carries the {CONVERSION} init container")
+        print("ok: an installation's own valkeyConfig travels to the valkey release verbatim, without the append-only conversion")
         return
 
     check_clients(release)
@@ -127,8 +162,9 @@ def main() -> None:
         sys.exit(f"FAIL: valkeyConfig sets no maxmemory: {fragment!r}")
     if directives.get("maxmemory-policy") != "volatile-lru":
         sys.exit(f"FAIL: maxmemory-policy is {directives.get('maxmemory-policy')!r}, expected volatile-lru (evict TTL-carrying keys, never refuse writes)")
-    if directives.get("appendonly", "no") != "no":
-        sys.exit("FAIL: valkeyConfig enables AOF — the persistence note in values.yaml forbids it (data-loss footgun on the enabling deploy)")
+    if directives.get("appendonly") != "yes" or directives.get("appendfsync") != "everysec":
+        sys.exit(f"FAIL: valkeyConfig must enable the append-only file fsynced every second (appendonly yes, appendfsync everysec): {fragment!r}")
+    check_conversion(vals)
 
     limit = quantity(vals["resources"]["limits"]["memory"])
     request = quantity(vals["resources"]["requests"]["memory"])
@@ -137,7 +173,7 @@ def main() -> None:
         sys.exit(f"FAIL: maxmemory {directives['maxmemory']} is above two thirds of the {vals['resources']['limits']['memory']} limit — the BGSAVE fork's copy-on-write has no headroom under the cgroup")
     if maxmemory < request:
         sys.exit(f"FAIL: maxmemory {directives['maxmemory']} is below the {vals['resources']['requests']['memory']} request — the request would never be used")
-    print(f"ok: maxmemory {directives['maxmemory']} = {maxmemory / limit:.0%} of the {vals['resources']['limits']['memory']} limit, policy volatile-lru, no AOF")
+    print(f"ok: maxmemory {directives['maxmemory']} = {maxmemory / limit:.0%} of the {vals['resources']['limits']['memory']} limit, policy volatile-lru, append-only everysec")
 
 
 if __name__ == "__main__":

@@ -1686,7 +1686,7 @@ verify-muster-resource: ## Assert the resource muster's OAuth server advertises 
 	@$(HELM) template t $(CHART_DIR) >$(VERIFY_TMP)/vmr-none.out 2>&1 || { cat $(VERIFY_TMP)/vmr-none.out; exit 1; }
 	@python3 tests/verify-muster-resource.py $(VERIFY_TMP)/vmr-none.out ""
 
-verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, no AOF; an installation's own fragment reaches the release verbatim. Its readers (giantswarm/agent-platform#851): ciliumNetworkPolicy.ingress.clients names exactly muster and klaus-gateway, by the pod labels the connectivity chart's muster-to-* and klausgateway-store-egress policies select.
+verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, appendonly yes with appendfsync everysec and the append-only-conversion init container on the server's own image; an installation's own fragment reaches the release verbatim, without the conversion. Its readers (giantswarm/agent-platform#851): ciliumNetworkPolicy.ingress.clients names exactly muster and klaus-gateway, by the pod labels the connectivity chart's muster-to-* and klausgateway-store-egress policies select.
 	@echo "====> $@ ($(CHART_DIR))"
 	@echo "--> default render: the fragment, the bound, the policy, the clients"
 	@$(HELM) template t $(CHART_DIR) $(VM) >$(VERIFY_TMP)/vv-meta.out 2>&1 || { cat $(VERIFY_TMP)/vv-meta.out; exit 1; }
