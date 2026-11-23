@@ -392,6 +392,9 @@ in. false wins over the chart's map in coalescing and fails its
 `if .Values.providers` gate. */ -}}
 {{- if eq $key "kagent" }}
 {{- $_ := set $vals "providers" false }}
+{{- if (dig "enabled" false ($root.Values.workspaces | default dict)) }}
+{{- include "agent-platform.kagent.cliEnvironment" (dict "values" $vals "providers" (dig "providers" (list) (index $root.Values "workspace-manager" | default dict))) }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- /* On the mirror, every source reference of the release's values moves there.
