@@ -33,8 +33,11 @@ klausgateway-store-egress policies must select those same labels, so a
 renamed label cannot drift apart from the store's client list.
 """
 
+import os
 import re
+import subprocess
 import sys
+import tempfile
 
 import yaml
 
@@ -103,6 +106,58 @@ def check_conversion(vals: dict) -> None:
     if {"name": "valkey-data", "mountPath": "/data"} not in container.get("volumeMounts", []):
         sys.exit(f"FAIL: {CONVERSION} does not mount the data volume at /data")
     print(f"ok: {CONVERSION} runs {want} with the server's resources and security context")
+    run_conversion(container)
+
+
+# Stand-ins for the image's valkey-server and valkey-cli. INFO answers with
+# CRLF line endings, as the server does; CONFIG SET appendonly yes leaves the
+# rewritten append-only directory behind.
+FAKE_SERVER = """#!/bin/sh
+while [ "$1" != --dir ]; do shift; done
+until [ -e "$2/shutdown" ]; do sleep 0.1; done
+"""
+FAKE_CLI = """#!/bin/sh
+stage=$(dirname "$2"); shift 2
+case "$1" in
+  PING) echo PONG ;;
+  DBSIZE) echo 3 ;;
+  CONFIG) mkdir -p "$stage/appendonlydir" && : > "$stage/appendonlydir/appendonly.aof.manifest" ;;
+  INFO) printf '# Persistence\\r\\naof_rewrite_in_progress:0\\r\\naof_rewrite_scheduled:0\\r\\naof_last_bgrewrite_status:ok\\r\\n' ;;
+  SHUTDOWN) : > "$stage/shutdown" ;;
+esac
+"""
+
+
+def run_conversion(container: dict) -> None:
+    """Run the conversion script on a snapshot-only data directory and require
+    it to finish with the append-only directory in place."""
+    script = container["command"][-1]
+    with tempfile.TemporaryDirectory() as tmp:
+        data, bindir = os.path.join(tmp, "data"), os.path.join(tmp, "bin")
+        os.makedirs(os.path.join(data, "conf"))
+        os.makedirs(bindir)
+        with open(os.path.join(data, "conf", "valkey.conf"), "w", encoding="utf-8") as fh:
+            fh.write("appendonly yes\n")
+        with open(os.path.join(data, "dump.rdb"), "w", encoding="utf-8") as fh:
+            fh.write("REDIS")
+        for name, body in (("valkey-server", FAKE_SERVER), ("valkey-cli", FAKE_CLI)):
+            path = os.path.join(bindir, name)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(body)
+            os.chmod(path, 0o755)
+        env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
+        try:
+            done = subprocess.run(["sh", "-c", script.replace("/data", data)], env=env,
+                                  capture_output=True, text=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            sys.exit(f"FAIL: {CONVERSION} did not finish within 30s after the rewrite completed — it cannot read the server's INFO persistence")
+        if done.returncode != 0:
+            sys.exit(f"FAIL: {CONVERSION} exited {done.returncode}: {done.stderr.strip()}")
+        if not os.path.isfile(os.path.join(data, "appendonlydir", "appendonly.aof.manifest")):
+            sys.exit(f"FAIL: {CONVERSION} finished without moving appendonlydir into the data directory")
+        if os.path.exists(os.path.join(data, ".append-only-conversion")):
+            sys.exit(f"FAIL: {CONVERSION} left its staging directory behind")
+    print(f"ok: {CONVERSION} converts a snapshot-only data directory and reads CRLF INFO replies")
 
 
 def check_clients(release: dict) -> None:
