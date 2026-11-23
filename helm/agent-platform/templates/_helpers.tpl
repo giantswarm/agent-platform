@@ -850,7 +850,16 @@ the block otherwise: a klaus-gateway before 4.11.0 refuses it. */ -}}
 {{- if and $secret (not (dig "aclUsers" "default" "passwordKey" "" $auth)) -}}
 {{- $_ := set $out "aclUsers" (dict "default" (dict "passwordKey" (include "agent-platform.valkeyPasswordKey" .root))) -}}
 {{- end -}}
-{{- if $out -}}{{- $_ := set $derived "valkey" (dict "auth" $out) -}}{{- end -}}
+{{- $valkeyDerived := dict -}}
+{{- if $out -}}{{- $_ := set $valkeyDerived "auth" $out -}}{{- end -}}
+{{- $conversion := include "agent-platform.valkey.appendOnlyConversion" .root | fromJson -}}
+{{- if $conversion.container -}}
+{{- $own := dig "valkey" "extraInitContainers" list (.root.Values.valkey | default dict) -}}
+{{- $containers := list -}}
+{{- range $own -}}{{- if ne .name $conversion.container.name -}}{{- $containers = append $containers . -}}{{- end -}}{{- end -}}
+{{- $_ := set $valkeyDerived "extraInitContainers" (append $containers $conversion.container) -}}
+{{- end -}}
+{{- if $valkeyDerived -}}{{- $_ := set $derived "valkey" $valkeyDerived -}}{{- end -}}
 {{- $kubernetes := index .root.Values "mcp-kubernetes" | default dict -}}
 {{- $oauth := dig "mcpKubernetes" "oauth" dict $kubernetes -}}
 {{- if and (eq (include "agent-platform.componentEnabled" (dict "root" .root "name" "mcp-kubernetes")) "true") $oauth.enabled (eq (dig "storage" "type" "valkey" $oauth) "valkey") -}}
@@ -6328,4 +6337,74 @@ whose chart starts projecting podCertificate gets its row here.
 {{- $_ := set $dd "ignore" $ignore -}}
 {{- end -}}
 {{- toYaml $dd -}}
+{{- end -}}
+
+{{/*
+The init container that turns an existing snapshot into Valkey's append-only
+file, derived into valkey.extraInitContainers while valkey.valkeyConfig enables
+appendonly. Valkey started with appendonly on and no append-only file loads an
+empty dataset and ignores dump.rdb, so enabling it, or restoring a snapshot
+backup onto a volume without the file, would empty the store. The container
+acts only when the config enables appendonly, dump.rdb is present and
+appendonlydir is not: it loads the snapshot into a server reachable only on a
+socket on the volume, enables appendonly at runtime, waits for the rewrite to
+succeed and moves the finished directory into place, leaving dump.rdb
+unchanged. It runs the server's own image (valkey.image, whose tag must be set)
+with the server's resources, since it holds the whole dataset in memory.
+Emits JSON, {"container": …} or {}.
+*/}}
+{{- define "agent-platform.valkey.appendOnlyConversion" -}}
+{{- $v := dig "valkey" dict (.Values.valkey | default dict) -}}
+{{- $enabled := regexMatch "(?m)^[[:space:]]*appendonly[[:space:]]+yes[[:space:]]*$" (toString (dig "valkeyConfig" "" $v)) -}}
+{{- if not $enabled -}}{}
+{{- else -}}
+{{- $image := dig "image" dict $v -}}
+{{- if not $image.tag -}}
+{{- fail "valkey.valkey.valkeyConfig enables appendonly but valkey.valkey.image.tag is unset: the append-only conversion must run the server's own image, so pin the tag" -}}
+{{- end -}}
+{{- $container := dict
+  "name" "append-only-conversion"
+  "image" (printf "%s/%s:%s" $image.registry $image.repository $image.tag)
+  "command" (list "sh" "-c" (include "agent-platform.valkey.appendOnlyConversionScript" .))
+  "volumeMounts" (list (dict "name" "valkey-data" "mountPath" "/data")) -}}
+{{- with $v.securityContext -}}{{- $_ := set $container "securityContext" . -}}{{- end -}}
+{{- with $v.resources -}}{{- $_ := set $container "resources" . -}}{{- end -}}
+{{- dict "container" $container | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "agent-platform.valkey.appendOnlyConversionScript" -}}
+set -eu
+grep -Eq '^[[:space:]]*appendonly[[:space:]]+yes[[:space:]]*$' /data/conf/valkey.conf || exit 0
+[ -e /data/appendonlydir ] && exit 0
+[ -s /data/dump.rdb ] || exit 0
+stage=/data/.append-only-conversion
+rm -rf "$stage"
+mkdir "$stage"
+ln /data/dump.rdb "$stage/dump.rdb"
+socket="$stage/valkey.sock"
+valkey-server --dir "$stage" --dbfilename dump.rdb --appendonly no --save "" --port 0 --unixsocket "$socket" --unixsocketperm 700 &
+server=$!
+cli() { valkey-cli -s "$socket" "$@"; }
+persistence() { cli INFO persistence | tr -d '
+'; }
+tries=0
+until cli PING 2>/dev/null | grep -q PONG; do
+  tries=$((tries + 1)); [ "$tries" -lt 600 ] || { echo "snapshot did not load" >&2; exit 1; }
+  kill -0 "$server" || { echo "server exited while loading the snapshot" >&2; exit 1; }
+  sleep 1
+done
+keys=$(cli DBSIZE)
+cli CONFIG SET appendonly yes >/dev/null
+tries=0
+until persistence | grep -qx 'aof_rewrite_in_progress:0' && persistence | grep -qx 'aof_rewrite_scheduled:0' && persistence | grep -qx 'aof_last_bgrewrite_status:ok' && [ -f "$stage/appendonlydir/appendonly.aof.manifest" ]; do
+  tries=$((tries + 1)); [ "$tries" -lt 600 ] || { echo "append-only rewrite did not complete" >&2; exit 1; }
+  persistence | grep -qx 'aof_last_bgrewrite_status:err' && { echo "append-only rewrite failed" >&2; exit 1; }
+  sleep 1
+done
+cli SHUTDOWN NOSAVE >/dev/null 2>&1 || true
+wait "$server" || true
+mv "$stage/appendonlydir" /data/appendonlydir
+rm -rf "$stage"
+echo "converted dump.rdb ($keys keys) into /data/appendonlydir"
 {{- end -}}

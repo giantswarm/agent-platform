@@ -1677,7 +1677,7 @@ verify-idp-egress: ## Assert the identity provider egress of the services that v
 	@echo "identity provider egress verified."
 
 .PHONY: verify-kagent-netpol
-verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, no AOF; an installation's own fragment reaches the release verbatim. Its readers (giantswarm/agent-platform#851): ciliumNetworkPolicy.ingress.clients names exactly muster and klaus-gateway, by the pod labels the connectivity chart's muster-to-* and klausgateway-store-egress policies select.
+verify-valkey: ## Assert muster-valkey's memory bound (giantswarm/agent-platform#446): the valkey release carries a valkeyConfig fragment with maxmemory at or under two thirds of resources.limits.memory and maxmemory-policy volatile-lru, appendonly yes with appendfsync everysec and the append-only-conversion init container on the server's own image; an installation's own fragment reaches the release verbatim, without the conversion. Its readers (giantswarm/agent-platform#851): ciliumNetworkPolicy.ingress.clients names exactly muster and klaus-gateway, by the pod labels the connectivity chart's muster-to-* and klausgateway-store-egress policies select.
 	@echo "====> $@ ($(CHART_DIR))"
 	@echo "--> default render: the fragment, the bound, the policy, the clients"
 	@$(HELM) template t $(CHART_DIR) $(VM) >$(VERIFY_TMP)/vv-meta.out 2>&1 || { cat $(VERIFY_TMP)/vv-meta.out; exit 1; }
