@@ -15,6 +15,17 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (forge CLI configuration from the Harness only)
+
+The kagent and kagent-crds ranges select the 1.33 line. Its runtimes no longer generate git, gh or glab configuration in a workspace turn: no credential helper, no placeholder `GH_TOKEN` or `GITLAB_TOKEN` and no `GLAB_CONFIG_DIR`. The chart declares those inert values in `Harness.spec.env` with `workspaces.enabled`, and the Go ADK passes declared values to its shell tools while it still withholds every undeclared runtime variable. Session grants and gateway bindings keep deciding access; the values grant nothing.
+
+### Operator action
+
+- Keep the chart's CLI defaults, or name the values you replace in `kagent.harness.env` and each `kagent.harnesses[].env`. Any explicit `GIT_CONFIG_*` entry replaces all git defaults, so custom git configuration that still needs the credential helper declares it ([Workspace CLI configuration](docs/cli-environment.md)).
+- With several GitLab providers, set `GITLAB_HOST` on every Harness; the render refuses otherwise.
+- Move an explicitly pinned omp BYO image to the 1.33.0 `omp-harness` digest: the adapter runs the workspace setup in the Session's directory and puts mounted toolchains on PATH.
+- A pinned BOM moves both `kagent` and `kagent-crds` to 1.33.0, together with an agent-platform release that renders the CLI values.
+
 ## \<current\> → \<next\> (per-actor runtime limits)
 
 The kagent and kagent-crds ranges select the 1.32 line, which resolves controller defaults and optional Harness resource overrides into each runtime revision. New runtimes default to 1 CPU and 1Gi. Existing Sessions retain their limits, including unsized Sessions; automatic lifecycle moves refuse a different compute envelope.
