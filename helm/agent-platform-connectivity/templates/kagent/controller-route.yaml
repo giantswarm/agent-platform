@@ -93,7 +93,66 @@ spec:
     {{- include "agent-platform.kagent.grpcRules" (dict "ctx" . "backendRefs" $publicRefs) | trim | nindent 4 }}
     {{- include "agent-platform.kagent.healthRule" $publicRefs | nindent 4 }}
 {{- end }}
+---
+# HTTPRoute — the controller's A2A HTTP paths on the agentgateway Gateway:
+# JSON-RPC at POST /agents/<namespace>/<name> and the agent card at
+# GET /agents/<namespace>/<name>/.well-known/agent-card.json, on the same
+# controller port as the gRPC API. A card lists this JSON-RPC interface first,
+# then the gRPC one, both under controller.a2aGatewayUrl, which the meta chart
+# sets to https://<controller hostname>. Hostname-less and on the same parents
+# as the GRPCRoute above, for the same reasons. The /agents/ prefix outranks the
+# MCP catch-all's PathPrefix /, and no other route on the data plane matches it.
+# Behind the policy kagent-a2a-jwt, the GRPCRoute's policy applied to this
+# route (controller-jwt-policy.yaml).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kagent-a2a
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ .Release.Namespace }}
+      group: gateway.networking.k8s.io
+      kind: Gateway
+  rules:
+    {{- include "agent-platform.kagent.a2aRule" (dict "ctx" . "backendRefs" $innerRefs) | nindent 4 }}
+{{- if not (include "agent-platform.edgeIsDataPlane" .) }}
+---
+# HTTPRoute — the same A2A HTTP paths on the outer public Gateway, on the public
+# GRPCRoute's hostname and parents, forwarded to the agentgateway Service, where
+# the route above applies the JWT policy. Not rendered when the data plane is
+# the edge itself: the route above then serves the HTTPS listener.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kagent-a2a-public
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  parentRefs:
+    {{- $override := include "agent-platform.kagent.routeParentRefs" (dict "ctx" . "route" "controllerRoute") | fromJsonArray }}
+    {{- include "agent-platform.parentRefs" (dict "ctx" . "override" $override "key" "kagent.controllerRoute.parentRef") | nindent 4 }}
+  hostnames:
+    - {{ include "agent-platform.kagent.controllerHostname" . | quote }}
+  rules:
+    {{- include "agent-platform.kagent.a2aRule" (dict "ctx" . "backendRefs" $publicRefs) | nindent 4 }}
 {{- end }}
+{{- end }}
+{{- define "agent-platform.kagent.a2aRule" -}}
+- matches:
+    - path:
+        type: PathPrefix
+        value: /agents/
+  {{- with (include "agent-platform.routeTimeouts" .ctx) }}
+  {{- . | nindent 2 }}
+  {{- end }}
+  backendRefs:
+{{ .backendRefs | indent 4 }}
+{{- end -}}
 {{- define "agent-platform.kagent.healthRule" -}}
 - matches:
     - method:

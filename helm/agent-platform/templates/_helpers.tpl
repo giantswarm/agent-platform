@@ -345,6 +345,9 @@ overwrite would hide a values file that still spells the old key.
     audience its grant.audience — defaults as for klaus-gateway, the kagent
     block's own value stands per key; the kagent floor that takes the block,
     an issuer and the email claim are guarded (agent-platform.validateSessionAdmission).
+    And controller.a2aGatewayUrl, the public address the agent cards
+    advertise, while the controller route renders
+    (agent-platform.kagent.a2aGatewayUrl); an own value stands.
   skill-manager: sources, the platform's skill source and skillManager.sources
     (agent-platform.skills.repositories; an own list fails); agent-manager
     skillManager.url (agent-platform.skillManager.url) in place of
@@ -980,6 +983,10 @@ that takes the keys. */ -}}
 sources' registries (agent-platform.kagent.sessionToolImages). */ -}}
 {{- with (include "agent-platform.kagent.sessionToolImages" .root | fromJson) -}}
 {{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) .controller) -}}
+{{- end -}}
+{{- /* The address the agent cards advertise (agent-platform.kagent.a2aGatewayUrl). */ -}}
+{{- with (include "agent-platform.kagent.a2aGatewayUrl" .root) -}}
+{{- $_ := set $derived "controller" (mergeOverwrite (get $derived "controller" | default dict) (dict "a2aGatewayUrl" .)) -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "muster" -}}
@@ -5285,6 +5292,27 @@ Usage: include "agent-platform.kagent.controllerAddress" .
 {{- define "agent-platform.kagent.controllerAddress" -}}
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") -}}
 {{- printf "grpc://%s-controller.%s.svc:8083" (dig "fullnameOverride" "" (.Values.kagent | default dict) | default "kagent") (include "agent-platform.kagent.namespace" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The base URL the kagent controller's agent cards advertise
+(kagent.controller.a2aGatewayUrl): JSON-RPC at <url>/agents/<namespace>/<name>,
+gRPC at <url>. https://<kagent.controllerRoute.hostname, else
+agentgateway.<global.domain>>, the hostname the connectivity release's public
+controller routes serve (agent-platform.kagent.controllerHostname there), on
+the HTTPS default port like the Dev Portal's apiBaseUrl, while the controller
+route renders (agent-platform.kagentControllerTarget). "" while the block sets
+its own value, the route is off or no hostname derives: the kagent chart then
+advertises its own, the controller's in-cluster Service.
+Usage: include "agent-platform.kagent.a2aGatewayUrl" .
+*/}}
+{{- define "agent-platform.kagent.a2aGatewayUrl" -}}
+{{- $kagent := .Values.kagent | default dict -}}
+{{- if and (include "agent-platform.kagentControllerTarget" .) (not (dig "controller" "a2aGatewayUrl" "" $kagent)) -}}
+{{- $host := dig "controllerRoute" "hostname" "" $kagent -}}
+{{- if and (not $host) (dig "domain" "" (.Values.global | default dict)) }}{{ $host = printf "agentgateway.%s" .Values.global.domain }}{{ end -}}
+{{- with $host }}{{ printf "https://%s" . }}{{ end -}}
 {{- end -}}
 {{- end -}}
 
