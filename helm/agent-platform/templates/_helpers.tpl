@@ -3709,11 +3709,28 @@ the muster release's own, so .Values.muster.service is normally unset here.
 {{- end -}}
 
 {{/*
+The namespace muster lands in: the kagent component's namespace with
+components.muster.inKagentNamespace, else components.muster.targetNamespace,
+else the platform's (agent-platform.targetNamespace) — on a target cluster that
+is never the release's own org namespace on the installation.
+Usage: include "agent-platform.muster.namespace" .
+*/}}
+{{- define "agent-platform.muster.namespace" -}}
+{{- $c := dig "muster" dict (.Values.components | default dict) | default dict -}}
+{{- if $c.inKagentNamespace -}}
+{{- include "agent-platform.kagent.namespace" . -}}
+{{- else -}}
+{{- $c.targetNamespace | default (include "agent-platform.targetNamespace" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The in-cluster MCP URL of the platform's muster, the endpoint every agent's own
-RemoteMCPServer targets: http://<muster Service>.<target namespace>.svc.cluster.local:<port>/mcp
-while the muster component is on, "" otherwise. ONE helper, one consumer, one
-name in both charts: this copy derives agent-manager's chart value muster.url
-(componentDerivedValues, next to flux.helmReleaseServiceAccount); agent-manager
+RemoteMCPServer targets: http://<muster Service>.<muster namespace>.svc.cluster.local:<port>/mcp
+while the muster component is on, "" otherwise. One name in both charts (the
+connectivity chart's copy has no consumer); this one derives agent-manager's chart value muster.url (componentDerivedValues, next to
+flux.helmReleaseServiceAccount), the default agent's muster.url, kagent's actor
+JWT provider for muster and toolchain-manager's muster.mcpUrl; agent-manager
 hands it to the Generic agent chart 1.x as muster.url on every agent it
 composes and reports it in get_info. The portal sends none (create_agent takes
 no muster argument), so the connectivity chart's app-config carries no muster
@@ -3722,7 +3739,7 @@ Usage: include "agent-platform.musterMcpUrl" .
 */}}
 {{- define "agent-platform.musterMcpUrl" -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
-{{- printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) (include "agent-platform.targetNamespace" .) (include "agent-platform.musterServicePort" .) -}}
+{{- printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) (include "agent-platform.muster.namespace" .) (include "agent-platform.musterServicePort" .) -}}
 {{- end -}}
 {{- end -}}
 

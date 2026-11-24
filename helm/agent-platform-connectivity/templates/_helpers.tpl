@@ -284,11 +284,13 @@ owned by the muster release now (not merged into this chart's values), so
 
 {{/*
 The in-cluster MCP URL of the platform's muster, the endpoint every agent's own
-RemoteMCPServer targets: http://<muster Service>.<release namespace>.svc.cluster.local:<port>/mcp
-while the muster component is on, "" otherwise. ONE helper, one consumer, one
-name in both charts: the meta chart derives agent-manager's chart value
-muster.url from its copy (componentDerivedValues, next to
-flux.helmReleaseServiceAccount); agent-manager hands it to the Generic agent
+RemoteMCPServer targets: http://<muster Service>.<muster namespace>.svc.cluster.local:<port>/mcp
+while the muster component is on, "" otherwise; muster's namespace is
+components.muster.targetNamespace, else this release's, which is the
+platform's. One name in both charts: the meta chart derives agent-manager's
+chart value muster.url from its copy (componentDerivedValues, next to
+flux.helmReleaseServiceAccount), which also follows
+components.muster.inKagentNamespace; agent-manager hands it to the Generic agent
 chart 1.x as muster.url on every agent it composes and reports it in get_info.
 The portal sends none (create_agent takes no muster argument), so the app-config
 this chart renders carries no muster URL. The agent chart's own default is the
@@ -299,7 +301,8 @@ Usage: include "agent-platform.musterMcpUrl" .
 */}}
 {{- define "agent-platform.musterMcpUrl" -}}
 {{- if (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
-{{- printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) .Release.Namespace (include "agent-platform.musterServicePort" .) -}}
+{{- $ns := dig "muster" "targetNamespace" "" (.Values.components | default dict) | default .Release.Namespace -}}
+{{- printf "http://%s.%s.svc.cluster.local:%v/mcp" (include "agent-platform.musterFullname" .) $ns (include "agent-platform.musterServicePort" .) -}}
 {{- end -}}
 {{- end -}}
 
