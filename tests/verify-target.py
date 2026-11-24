@@ -129,7 +129,9 @@ def targeted(doc: str) -> str:
     and so is the namespace of a derived MCP backend entry
     (networkPolicy.mcpBackends.<key>.namespace: the component's pods) and the
     skill-manager's Service that agent-manager is pointed at (skillManager.url
-    and, on the connectivity release, agentManager.skillManager.namespace)."""
+    and, on the connectivity release, agentManager.skillManager.namespace), and
+    muster's in-cluster MCP URL agent-manager and the default agent are given
+    (muster.url)."""
     out, section, backends, skills = [], "", -1, -1
     for line in doc.split("\n"):
         if re.match(r"^  \S", line):
@@ -146,6 +148,8 @@ def targeted(doc: str) -> str:
         elif (backends >= 0 or skills >= 0) and re.match(r"^ +namespace: default$", line):
             line = line.replace(": default", ": agent-platform")
         elif skills >= 0 and re.match(r"^ +url: http://[^.]+\.default\.svc\.cluster\.local[:/]", line):
+            line = line.replace(".default.svc.", ".agent-platform.svc.", 1)
+        elif section == "values:" and re.match(r"^ +url: http://muster\.default\.svc\.cluster\.local:", line):
             line = line.replace(".default.svc.", ".agent-platform.svc.", 1)
         if re.match(r"^  name: ", line) and section.startswith("name:"):
             line = line.replace("name: ", "name: t-", 1)
@@ -463,6 +467,24 @@ def check_placement(meta: str) -> None:
     ok(f"a targeted release's {len(one)} Flux children are named after it, install and store into agent-platform, and share no name with a second targeted release in the namespace; gitops.target.name and gitops.targetNamespace override both")
 
 
+def check_muster_url(meta: str) -> None:
+    """muster's in-cluster MCP URL, which agent-manager and the default agent are
+    given, names the namespace muster lands in on the target, never the release's
+    org namespace on the installation."""
+    out = helm(meta, ["--namespace", "org-acme", "-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *KNOB, *PLATFORM,
+                      "--set", "gitops.targetNamespace=ai"])
+    want = "http://muster.ai.svc.cluster.local:8090/mcp"
+    for release in ("t-agent-manager", "t-default-agent"):
+        doc = documents(out).get(("HelmRelease", release))
+        if doc is None:
+            sys.exit(f"FAIL: HelmRelease {release} is not rendered")
+        if f"\n      url: {want}\n" not in f"\n{doc}\n":
+            sys.exit(f"FAIL: HelmRelease {release} does not give muster.url {want}")
+    if "muster.org-acme.svc" in out:
+        sys.exit("FAIL: a targeted release names muster in its own org namespace")
+    ok("a targeted release gives agent-manager and the default agent muster's URL in gitops.targetNamespace")
+
+
 def main(meta: str, connectivity: str) -> int:
     check_knob(meta)
     check_golden(meta, connectivity)
@@ -471,6 +493,7 @@ def main(meta: str, connectivity: str) -> int:
     check_hooks(meta)
     check_slices(meta)
     check_placement(meta)
+    check_muster_url(meta)
     return 0
 
 
