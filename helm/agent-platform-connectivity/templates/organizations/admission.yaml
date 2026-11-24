@@ -593,9 +593,15 @@ spec:
     - name: binding
       expression: "request.operation == 'DELETE' ? oldObject : object"
   validations:
-    # Everyone else is refused; the namespace controller empties a
-    # terminating namespace, and the garbage collector acts on owners.
-    - expression: {{ printf "request.operation == 'DELETE' && request.userInfo.username in %s" $collectors | quote }}
+    # Everyone else is refused. The namespace controller empties a
+    # terminating namespace and the garbage collector acts on owners: each
+    # deletes, and the garbage collector removes the finalizer of a
+    # foreground or orphan deletion by an update that keeps what the binding
+    # grants.
+    - expression: >-
+        request.userInfo.username in {{ $collectors }} && (request.operation == 'DELETE' ||
+        (object.roleRef == oldObject.roleRef &&
+        (has(object.subjects) ? object.subjects : []) == (has(oldObject.subjects) ? oldObject.subjects : [])))
       reason: Forbidden
       messageExpression: >-
         {{ printf "'only the agent-platform-operator (%s) writes a RoleBinding to agent-platform:admin in an organization namespace, from the organization admins (the Organization spec.admins); refused for '" $operator }} +

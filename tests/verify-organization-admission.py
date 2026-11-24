@@ -444,6 +444,10 @@ def fixtures():
         *(org(n, prune="enabled") for n in ORPHANED),
         rb("organization-admins", ORG, role="agent-platform:admin"), rb("organization-admins", OLD, role="agent-platform:admin"),
         rb("members", ORG),
+        # An admin binding being deleted in the foreground: the garbage
+        # collector removes its finalizer.
+        {**rb("leaving-admins", ORG, role="agent-platform:admin"),
+         "metadata": {"name": "leaving-admins", "namespace": ORG, "finalizers": ["foregroundDeletion"]}},
         # organizations-admin: alice by ClusterRoleBinding; bob an editor of
         # the organization; a binding of a namespace that is no organization's.
         crb("alice-organizations-admin", "agent-platform:organizations-admin", ALICE),
@@ -1045,11 +1049,15 @@ def prove_admin_bindings():
          delete("rolebinding", "organization-admins", OLD, as_=NS_CONTROLLER))
     case("a cluster-admin deletes no organization-admins of a terminating namespace",
          delete("rolebinding", "organization-admins", OLD, as_=PERSON), policy)
+    case("the garbage collector removes the finalizer of an admin binding's foreground deletion",
+         patch("rolebinding", "leaving-admins", ORG, {"metadata": {"finalizers": None}}, as_=GC))
+    case("the garbage collector changes no subject of an admin binding",
+         patch("rolebinding", "leaving-admins", ORG, {"subjects": admins}, as_=GC), policy, f"refused for {GC}: UPDATE {ORG}/leaving-admins")
     case("the namespace controller deletes the RoleBindings of an organization namespace as a collection",
          kubectl(["delete", "--raw", f"/apis/rbac.authorization.k8s.io/v1/namespaces/{ORG}/rolebindings?dryRun=All"], as_=NS_CONTROLLER))
-    case("a cluster-admin deletes no collection that holds organization-admins",
+    case("a cluster-admin deletes no collection that holds an admin binding",
          kubectl(["delete", "--raw", f"/apis/rbac.authorization.k8s.io/v1/namespaces/{ORG}/rolebindings?dryRun=All"], as_=PERSON), policy,
-         f"DELETE {ORG}/organization-admins")
+         f"refused for {PERSON}: DELETE {ORG}/")
 
 
 def prove_subjects():

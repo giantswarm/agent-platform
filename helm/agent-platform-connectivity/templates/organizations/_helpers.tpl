@@ -12,13 +12,13 @@ agents-<name>, the label of what it writes there, and its finalizer.
 {{/*
 "true" when the organizations' role and policies render
 (agentPlatformOrganizations.enabled), else empty. They need kagent: the
-organizations-admin role binds kagent's three tenant roles, and the
+organizations-admin role binds kagent's user and editor roles, and the
 HelmRelease lock names kagent.fluxServiceAccountName.
 */}}
 {{- define "agent-platform.organizations.enabled" -}}
 {{- if dig "enabled" false (.Values.agentPlatformOrganizations | default dict) -}}
 {{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "kagent")) -}}
-{{- fail "agentPlatformOrganizations.enabled needs kagent (components.kagent.enabled): the organizations-admin role binds agent-platform:user, editor and admin, which render with kagent" -}}
+{{- fail "agentPlatformOrganizations.enabled needs kagent (components.kagent.enabled): the organizations-admin role binds agent-platform:user and editor, which render with kagent" -}}
 {{- end -}}
 true
 {{- end -}}
