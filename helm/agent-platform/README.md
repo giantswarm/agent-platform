@@ -949,7 +949,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | valkey.valkey.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | valkey.valkey.image.registry | string | `"gsoci.azurecr.io"` |  |
 | valkey.valkey.image.repository | string | `"giantswarm/valkey"` |  |
-| valkey.valkey.image.tag | string | `"9.1.3"` |  |
+| valkey.valkey.image.tag | string | `"9.2.0"` |  |
 | valkey.valkey.auth.enabled | bool | `true` |  |
 | valkey.valkey.auth.usersExistingSecret | string | `""` |  |
 | valkey.valkey.auth.aclUsers.default.permissions | string | `"~* &* +@all"` |  |
