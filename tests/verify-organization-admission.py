@@ -439,6 +439,7 @@ def fixtures():
         org("kaas", enabled=None), org("off", enabled=False),
         org("finalized", finalizers=[FINALIZER]), org("held", finalizers=["example.com/hold", FINALIZER]),
         org("switched-off", enabled=False, finalizers=[FINALIZER]), org("dotted.io", enabled=None),
+        org("enabled.io"),  # enabled before the names policy existed
         *(org(n, prune="enabled") for n in ORPHANED),
         rb("organization-admins", ORG, role="agent-platform:admin"), rb("organization-admins", OLD, role="agent-platform:admin"),
         rb("members", ORG),
@@ -988,6 +989,8 @@ def prove_names():
     case("an Organization without the Agent Platform keeps a dotted name (not held)", create(org("acme.io", enabled=None), as_=PERSON))
     case("an Organization of a dotted name gets no Agent Platform", patch("organization", "dotted.io", None, {"spec": {"agentPlatform": {"enabled": True}}}, as_=PERSON),
          policy, "refused: dotted.io")
+    case("an Organization enabled with a dotted name before the policy still takes the prune annotation (only turning it on is held)",
+         patch("organization", "enabled.io", None, {"metadata": {"annotations": {"kustomize.toolkit.fluxcd.io/prune": "enabled"}}}, as_=PERSON))
 
 
 def prove_git_admins():

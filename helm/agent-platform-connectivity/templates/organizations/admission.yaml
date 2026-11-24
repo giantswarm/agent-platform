@@ -58,9 +58,10 @@ these.
     create Roles in a namespace that is no organization namespace (as a
     cluster-admin or the namespace's built-in admin may) writes no
     RoleBinding there.
-  * agent-platform-organization-names: an Organization with the Agent
-    Platform enabled has a name that makes agents-<name> a namespace name: a
-    DNS label of at most 63 characters, so no dot. The CRD does not hold it,
+  * agent-platform-organization-names: an Organization whose write turns
+    the Agent Platform on (a create, or an update from off) has a name that
+    makes agents-<name> a namespace name: a DNS label of at most 63
+    characters, so no dot. The CRD does not hold it,
     and the operator could create no namespace for it.
   * agent-platform-organization-admins-binding: the RoleBinding
     organization-admins of an organization namespace binds agent-platform:admin
@@ -909,6 +910,14 @@ spec:
       expression: >-
         has(object.spec) && has(object.spec.agentPlatform) &&
         has(object.spec.agentPlatform.enabled) && object.spec.agentPlatform.enabled
+    # Only the write that turns it on: a name is immutable, and one enabled
+    # before this policy must still take the prune annotation and the
+    # removal of the operator's finalizer.
+    - name: turned-on
+      expression: >-
+        request.operation == 'CREATE' ||
+        !(has(oldObject.spec) && has(oldObject.spec.agentPlatform) &&
+        has(oldObject.spec.agentPlatform.enabled) && oldObject.spec.agentPlatform.enabled)
   validations:
     - expression: "('agents-' + object.metadata.name).matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')"
       reason: Invalid
