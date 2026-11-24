@@ -18,8 +18,11 @@ policy holds:
 
 - organizations-admin (by ClusterRoleBinding) creates Organizations and binds
   user, editor and admin in organization namespaces, nothing else there, and
-  no RoleBinding elsewhere; a cluster-admin is not held; an organization
-  admin binds no organizations-admin;
+  no RoleBinding elsewhere, nor does one bound by a RoleBinding; a
+  cluster-admin is not held; an organization admin binds no
+  organizations-admin;
+- an Organization with the Agent Platform enabled has a name that makes
+  agents-<name> a namespace name;
 - an editor reads and never writes the agent chart's OCIRepository;
 - the operator's ServiceAccount creates only the namespace agents-<organization>
   with the labels, deletes only labelled ones, writes RoleBindings
@@ -51,7 +54,8 @@ policy holds:
   requester who may not get Secrets deletes no such collection
   (giantswarm/agent-platform#1362);
 - the HelmRelease field lock, also for the organization's Flux ServiceAccount;
-- an Organization with the Agent Platform enabled is deleted only with
+- an Organization with the Agent Platform enabled, or one switched off that
+  the operator still holds with its finalizer, is deleted only with
   prune: enabled, and one applied from git only once its delete pull request
   merged (Orphaned, reason DeleteMerged); any other Organization is not held;
 - the EgressPolicy floor;
@@ -96,6 +100,7 @@ SOURCE_CONTROLLER = f"system:serviceaccount:{FLUX_NS}:source-controller"
 NS_CONTROLLER = "system:serviceaccount:kube-system:namespace-controller"
 PERSON = "jose"  # with system:masters: a cluster-admin
 ALICE = "alice"  # organizations-admin by ClusterRoleBinding (platform staff)
+CAROL = "carol"  # organizations-admin by a RoleBinding in PLAIN
 BOB = "bob"  # agent-platform:editor in the organization namespace
 
 ORG = "agents-payments"
@@ -433,6 +438,7 @@ def fixtures():
         org("payments"), org("retired", prune="enabled"), org("kept", prune="disabled"),
         org("kaas", enabled=None), org("off", enabled=False),
         org("finalized", finalizers=[FINALIZER]), org("held", finalizers=["example.com/hold", FINALIZER]),
+        org("switched-off", enabled=False, finalizers=[FINALIZER]), org("dotted.io", enabled=None),
         *(org(n, prune="enabled") for n in ORPHANED),
         rb("organization-admins", ORG, role="agent-platform:admin"), rb("organization-admins", OLD, role="agent-platform:admin"),
         rb("members", ORG),
@@ -440,6 +446,8 @@ def fixtures():
         # the organization; a binding of a namespace that is no organization's.
         crb("alice-organizations-admin", "agent-platform:organizations-admin", ALICE),
         rb("team-a-devs", PLAIN),
+        rb("carol-organizations-admin", PLAIN, role="agent-platform:organizations-admin",
+           subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": CAROL}]),
         rb("bob-editor", ORG, subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": BOB}]),
         helmrelease("legacy", ORG, valuesFrom=[{"kind": "Secret", "name": "tenant-credential-x"}]),
         ocirepository(ORG),
@@ -495,6 +503,14 @@ def prove_roles():
     API.settle()
     case("organizations-admin who may create Roles in a namespace (its admin) writes RoleBindings there (not held)",
          create(rb("devs", PLAIN, role="namespace-admin", kind="Role"), as_=ALICE, groups=()))
+    # A RoleBinding of organizations-admin grants no Organization (cluster-
+    # scoped), but its RoleBinding writes in that namespace: held the same.
+    case("organizations-admin by a RoleBinding writes no RoleBinding in that namespace",
+         create(rb("carol-admin", PLAIN, role="agent-platform:admin",
+                   subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": CAROL}]), as_=CAROL, groups=()),
+         "agent-platform-organizations-admin-rolebindings", "refused for carol in " + PLAIN)
+    case("organizations-admin by a RoleBinding deletes no RoleBinding in that namespace",
+         delete("rolebinding", "team-a-devs", PLAIN, as_=CAROL, groups=()), "agent-platform-organizations-admin-rolebindings")
     # An organization admin holds neither bind on organizations-admin nor its
     # rules: RBAC refuses the binding.
     case("an organization admin writes no RoleBinding to organizations-admin",
@@ -933,8 +949,8 @@ def prove_secret_deletes():
 
 def prove_organizations():
     """The operator's writes of an Organization (the object, not its status):
-    its finalizer, nothing else. RBAC grants update on the whole object,
-    which a finalizer needs; a cluster-admin is not held."""
+    its finalizer, nothing else. A finalizer is a write of the whole object,
+    which RBAC cannot narrow; a cluster-admin is not held."""
     policy = "agent-platform-organization-operator-organizations"
     only = f"adds or removes its finalizer {FINALIZER} on an Organization and changes nothing else of it"
     case("the operator adds its finalizer to an Organization",
@@ -959,6 +975,19 @@ def prove_organizations():
                   "-p", json.dumps({"status": {"agentPlatform": {"namespace": ORG}, "conditions": [condition]}})], None, OP))
     case("a cluster-admin changes an Organization's spec (not held)",
          patch("organization", "payments", None, {"spec": {"agentPlatform": {"harnesses": ["default"]}}}, as_=PERSON))
+
+
+def prove_names():
+    """An Organization with the Agent Platform enabled has a name the
+    operator can make agents-<name> of; any other is not held."""
+    policy = "agent-platform-organization-names"
+    long = "a" * 57  # agents- + 57 = 64 characters
+    case("an Organization with the Agent Platform and a dotted name is refused", create(org("acme.io"), as_=PERSON), policy, "refused: acme.io")
+    case("an Organization with the Agent Platform whose agents-<name> passes 63 characters is refused", create(org(long), as_=PERSON), policy)
+    case("an Organization with the Agent Platform whose agents-<name> is 63 characters is created", create(org("a" * 56), as_=PERSON))
+    case("an Organization without the Agent Platform keeps a dotted name (not held)", create(org("acme.io", enabled=None), as_=PERSON))
+    case("an Organization of a dotted name gets no Agent Platform", patch("organization", "dotted.io", None, {"spec": {"agentPlatform": {"enabled": True}}}, as_=PERSON),
+         policy, "refused: dotted.io")
 
 
 def prove_git_admins():
@@ -1092,6 +1121,8 @@ def prove_delete_intent():
     case("an Organization with the Agent Platform and prune: enabled is deleted", delete("organization", "retired", None, as_=PERSON))
     case("an Organization without spec.agentPlatform is deleted (not held)", delete("organization", "kaas", None, as_=PERSON))
     case("an Organization with the Agent Platform disabled is deleted (not held)", delete("organization", "off", None, as_=PERSON))
+    case("an Organization switched off that the operator still holds with its finalizer is not deleted without prune: enabled",
+         delete("organization", "switched-off", None, as_=PERSON), policy, "on switched-off first")
     in_git = "erased only once its delete pull request merged"
     case("an Organization in git with prune: enabled is not deleted", delete("organization", "in-git", None, as_=PERSON), policy, in_git)
     case("an Organization missing from git with prune: enabled is not deleted", delete("organization", "lost", None, as_=PERSON), policy, in_git)
@@ -1168,7 +1199,7 @@ def main():
             must(kubectl(["wait", "--for=condition=Established", "crd", "--all", "--timeout=60s"]), "wait for the CRDs")
             fixtures()
             install(roles, policies)
-            for prove in (prove_roles, prove_operator, prove_organizations, prove_flux_role, prove_secret_deletes, prove_labels, prove_admins_binding, prove_subjects, prove_helmreleases,
+            for prove in (prove_roles, prove_operator, prove_organizations, prove_names, prove_flux_role, prove_secret_deletes, prove_labels, prove_admins_binding, prove_subjects, prove_helmreleases,
                           prove_delete_intent, prove_egress_floor, prove_copies, prove_sandbox,
                           prove_git_admins):  # last: it deletes ORG3
                 prove()

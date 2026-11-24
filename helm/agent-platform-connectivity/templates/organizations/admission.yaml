@@ -25,8 +25,8 @@ these.
     (agent-platform.organizations.finalizer) and nothing else: it creates
     and deletes none and changes no spec, label, annotation, owner reference
     or other finalizer. Its status is the status subresource, which this
-    policy does not match. RBAC grants `update` on the whole object, which a
-    finalizer needs.
+    policy does not match. A finalizer is a write of the whole object
+    (patch or update), which RBAC cannot narrow to it.
   * agent-platform-organization-operator-objects: the operator's ServiceAccount
     writes RoleBindings only in organization namespaces, ServiceAccounts only
     there or in agentPlatformOrganizations.fluxNamespace, and Kustomizations
@@ -54,9 +54,14 @@ these.
     and these policies select on them.
   * agent-platform-organizations-admin-rolebindings: a requester who may
     create Organizations (agent-platform:organizations-admin's own right, by
-    a ClusterRoleBinding) and may not create Roles in a namespace that is no
-    organization namespace (as a cluster-admin or the namespace's built-in
-    admin may) writes no RoleBinding there.
+    a ClusterRoleBinding or a RoleBinding of that namespace) and may not
+    create Roles in a namespace that is no organization namespace (as a
+    cluster-admin or the namespace's built-in admin may) writes no
+    RoleBinding there.
+  * agent-platform-organization-names: an Organization with the Agent
+    Platform enabled has a name that makes agents-<name> a namespace name: a
+    DNS label of at most 63 characters, so no dot. The CRD does not hold it,
+    and the operator could create no namespace for it.
   * agent-platform-organization-admins-binding: the RoleBinding
     organization-admins of an organization namespace binds agent-platform:admin
     to at least one subject; it is not deleted or emptied while the namespace
@@ -101,7 +106,8 @@ these.
     or run as another identity. An update that leaves the spec as it is passes
     (a finalizer, a reconcile request).
   * agent-platform-organization-delete-intent: an `Organization` with the
-    Agent Platform enabled (spec.agentPlatform.enabled) is deleted only when
+    Agent Platform enabled (spec.agentPlatform.enabled), or one the operator
+    still holds with its finalizer, is deleted only when
     it carries kustomize.toolkit.fluxcd.io/prune: enabled, Flux's own marker
     of an intended prune; any other `Organization` is not held. One the
     operator judges applied from git (it has an Orphaned condition) is
@@ -532,13 +538,14 @@ spec:
         operations: ["CREATE", "UPDATE", "DELETE"]
         resources: ["rolebindings"]
   matchConditions:
-    # agent-platform:organizations-admin's own right: Organizations are
-    # cluster-scoped, so a ClusterRoleBinding grants it. A requester who may
-    # create Roles here (a cluster-admin, the built-in admin of this
-    # namespace) is not held.
+    # agent-platform:organizations-admin's own right, asked in this namespace:
+    # a ClusterRoleBinding grants it, and a RoleBinding here holds its rule
+    # too (it grants no Organization, which is cluster-scoped, but the
+    # RoleBinding writes). A requester who may create Roles here (a
+    # cluster-admin, the built-in admin of this namespace) is not held.
     - name: organizations-admin
       expression: >-
-        authorizer.group('security.giantswarm.io').resource('organizations').check('create').allowed() &&
+        authorizer.group('security.giantswarm.io').resource('organizations').namespace(request.namespace).check('create').allowed() &&
         !authorizer.group('rbac.authorization.k8s.io').resource('roles').namespace(request.namespace).check('create').allowed()
   validations:
     - expression: "false"
@@ -848,12 +855,15 @@ spec:
         operations: ["DELETE"]
         resources: ["organizations"]
   matchConditions:
-    # An Organization with the Agent Platform enabled: its deletion erases the
-    # organization's Agent Platform. Any other Organization is not held.
-    - name: agent-platform-enabled
+    # An Organization with the Agent Platform enabled, or one the operator
+    # still holds with its finalizer (enabled before, switched off since):
+    # its deletion erases the organization's Agent Platform. Any other
+    # Organization is not held.
+    - name: agent-platform
       expression: >-
-        has(oldObject.spec) && has(oldObject.spec.agentPlatform) &&
-        has(oldObject.spec.agentPlatform.enabled) && oldObject.spec.agentPlatform.enabled
+        (has(oldObject.spec) && has(oldObject.spec.agentPlatform) &&
+        has(oldObject.spec.agentPlatform.enabled) && oldObject.spec.agentPlatform.enabled) ||
+        (has(oldObject.metadata.finalizers) && {{ squote $finalizer }} in oldObject.metadata.finalizers)
   validations:
     - expression: >-
         has(oldObject.metadata.annotations) && 'kustomize.toolkit.fluxcd.io/prune' in oldObject.metadata.annotations &&
@@ -878,6 +888,42 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   policyName: agent-platform-organization-delete-intent
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-names
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["security.giantswarm.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["organizations"]
+  matchConditions:
+    - name: agent-platform-enabled
+      expression: >-
+        has(object.spec) && has(object.spec.agentPlatform) &&
+        has(object.spec.agentPlatform.enabled) && object.spec.agentPlatform.enabled
+  validations:
+    - expression: "('agents-' + object.metadata.name).matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')"
+      reason: Invalid
+      messageExpression: >-
+        'an Organization with the Agent Platform enabled has a name that makes agents-<name> a namespace name (a DNS label of at most 63 characters, no dot); refused: ' +
+        object.metadata.name
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-names
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-names
   validationActions: [Deny]
 ---
 apiVersion: admissionregistration.k8s.io/v1
