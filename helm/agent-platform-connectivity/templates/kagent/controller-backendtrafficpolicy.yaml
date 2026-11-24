@@ -1,7 +1,7 @@
-{{- /* Targets the outer public GRPCRoute, so it is suppressed with it when the
-edge is the data plane (controller-route.yaml). A GRPCRoute rule carries no
-timeouts field, and Envoy's default route timeout would cut every A2A
-SendStreamingMessage turn; the same ingress.backendTrafficPolicy knob that keeps
+{{- /* Targets the outer public GRPCRoute and A2A HTTPRoute, so it is suppressed
+with them when the edge is the data plane (controller-route.yaml). A GRPCRoute
+rule carries no timeouts field, and Envoy's default route timeout would cut
+every A2A SendStreamingMessage turn and JSON-RPC message/stream turn; the same ingress.backendTrafficPolicy knob that keeps
 the /mcp streams alive applies here. */ -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "kagent")) .Values.kagent.controllerRoute.enabled (not (include "agent-platform.edgeIsDataPlane" .)) .Values.ingress.backendTrafficPolicy.enabled }}
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -23,6 +23,9 @@ spec:
     - group: gateway.networking.k8s.io
       kind: GRPCRoute
       name: kagent-controller-public
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: kagent-a2a-public
   timeout:
     http:
       requestTimeout: {{ .Values.ingress.backendTrafficPolicy.timeout | quote }}

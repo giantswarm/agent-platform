@@ -35,9 +35,10 @@ spec:
     host: {{ $jwt.jwks.host }}
     port: {{ $jwt.jwks.port }}
 {{- /* One policy per route: the CRD takes one kind of targetRef per policy.
-kagent-mcp-jwt is the same boundary in front of the controller's /mcp
-(mcpserver.yaml), rendered under that template's gates. */}}
-{{- $policies := list (dict "name" "kagent-controller-jwt" "kind" "GRPCRoute" "route" "kagent-controller") }}
+kagent-a2a-jwt is the same boundary in front of the controller's A2A HTTP
+paths (the kagent-a2a HTTPRoute, controller-route.yaml); kagent-mcp-jwt in
+front of its /mcp (mcpserver.yaml), rendered under that template's gates. */}}
+{{- $policies := list (dict "name" "kagent-controller-jwt" "kind" "GRPCRoute" "route" "kagent-controller") (dict "name" "kagent-a2a-jwt" "kind" "HTTPRoute" "route" "kagent-a2a") }}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) (dig "enabled" false ($route.mcp | default dict)) }}
 {{- $policies = append $policies (dict "name" "kagent-mcp-jwt" "kind" "HTTPRoute" "route" "kagent-mcp") }}
 {{- end }}
@@ -46,7 +47,8 @@ kagent-mcp-jwt is the same boundary in front of the controller's /mcp
 ---
 # AgentgatewayPolicy — the first of the two authentication layers in front of
 # the kagent controller (docs/authentication.md, "The kagent controller route").
-# On each route (the kagent-controller GRPCRoute, the kagent-mcp HTTPRoute) it
+# On each route (the kagent-controller GRPCRoute, the kagent-a2a and kagent-mcp
+# HTTPRoutes) it
 # verifies the bearer JWT (signature, issuer, expiry) against the issuer,
 # refuses a token that carries no identity claim, sets the identity header
 # the controller reads — x-user-id — from that claim, replacing whatever the

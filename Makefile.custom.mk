@@ -2073,7 +2073,7 @@ define kagent_route_doc
 endef
 
 .PHONY: verify-kagent-route
-verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by the kagent API v2 + A2A v1 services (one service-only match per service by default, one exact service/method match per listed RPC as the fallback) on both hops, the bearer passthrough without a protocol pin, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim, x-agent-name and x-user-groups removed) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, kagent's MCP server (the in-cluster /kagent/mcp HTTPRoute under a twin of the JWT policy, MCPServer kagent in the agent-platform tool group, named Kagent by its ui.giantswarm.io/display-name annotation, none with an empty kagent.controllerRoute.mcp.displayName, and described by spec.description, none with an empty kagent.controllerRoute.mcp.description, one over the CRD's 500 characters failing the render), and the guards.
+verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute matched by the kagent API v2 + A2A v1 services (one service-only match per service by default, one exact service/method match per listed RPC as the fallback) on both hops, the A2A HTTP paths (PathPrefix /agents/ on the hostname-less kagent-a2a HTTPRoute behind kagent-a2a-jwt, the GRPCRoute policy's twin, and on kagent-a2a-public with the public GRPCRoute's hostname, parents and backend, under its timeout policy, absent in edge mode; no other HTTPRoute on /agents), the bearer passthrough without a protocol pin, the JWT policy on by default in Strict mode with the identity transformation (x-user-id from the verified claim, x-agent-name and x-user-groups removed) and the claim requirement, the UI route's identity-header strip, the controller's network policy admission (data plane + UI only), the off switch, the Envoy timeout policy on the public hop, kagent's MCP server (the in-cluster /kagent/mcp HTTPRoute under a twin of the JWT policy, MCPServer kagent in the agent-platform tool group, named Kagent by its ui.giantswarm.io/display-name annotation, none with an empty kagent.controllerRoute.mcp.displayName, and described by spec.description, none with an empty kagent.controllerRoute.mcp.description, one over the CRD's 500 characters failing the render), and the guards.
 	@echo "====> $@ ($(CONNECTIVITY_DIR))"
 	@echo "--> the default shape: GRPCRoutes on both hops, no REST route, no path prefix"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set ingress.backendTrafficPolicy.enabled=true >$(VERIFY_TMP)/vkr.out 2>&1 || { cat $(VERIFY_TMP)/vkr.out; exit 1; }
@@ -2098,6 +2098,11 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@grep -A2 'backendRefs:' $(VERIFY_TMP)/vkr-public.out | grep -q 'name: agentgateway' || { echo "FAIL: the public GRPCRoute does not forward to the agentgateway Service"; exit 1; }
 	@grep -A2 'backendRefs:' $(VERIFY_TMP)/vkr-public.out | grep -q 'port: 8080' || { echo "FAIL: the public GRPCRoute does not forward to port 8080"; exit 1; }
 	@echo "ok: GRPCRoutes"
+	@echo "--> the A2A HTTP paths (/agents/): kagent-a2a on the data plane behind kagent-a2a-jwt, kagent-a2a-public on the public GRPCRoute's hostname and parents"
+	@python3 tests/verify-kagent-a2a-route.py $(VERIFY_TMP)/vkr.out
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set components.muster.enabled=true --set ingress.backendTrafficPolicy.enabled=true >$(VERIFY_TMP)/vkr-a2a-muster.out 2>&1 || { cat $(VERIFY_TMP)/vkr-a2a-muster.out; exit 1; }
+	@python3 tests/verify-kagent-a2a-route.py $(VERIFY_TMP)/vkr-a2a-muster.out
+	@echo "ok: A2A HTTP routes"
 	@echo "--> the controller backend: passthrough of the bearer, no protocol pin (h2c inferred for gRPC, HTTP/1.1 kept for gRPC-Web)"
 	$(call kagent_route_doc,AgentgatewayBackend,kagent,$(VERIFY_TMP)/vkr.out,$(VERIFY_TMP)/vkr-backend.out)
 	@grep -q 'passthrough: {}' $(VERIFY_TMP)/vkr-backend.out || { echo "FAIL: the kagent backend no longer passes the bearer through"; exit 1; }
@@ -2136,6 +2141,7 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(EDGE_VM) --set components.kagent.enabled=true --set kagent.controllerRoute.enabled=true --set gateway.jwksEgress.enabled=true --set global.identity.issuerUrl=https://dex.ci.example.com --set ingress.backendTrafficPolicy.enabled=true >$(VERIFY_TMP)/vkr-edge.out 2>&1 || { cat $(VERIFY_TMP)/vkr-edge.out; exit 1; }
 	@if grep -q 'kagent-controller-public' $(VERIFY_TMP)/vkr-edge.out; then echo "FAIL: the public GRPCRoute or its BackendTrafficPolicy renders with the edge as data plane"; exit 1; fi
 	@grep -A3 '^kind: AgentgatewayPolicy$$' $(VERIFY_TMP)/vkr-edge.out | grep -q 'name: kagent-controller-jwt' || { echo "FAIL: the JWT policy is missing in edge mode"; exit 1; }
+	@python3 tests/verify-kagent-a2a-route.py --edge $(VERIFY_TMP)/vkr-edge.out
 	@echo "ok: public-hop timeout policy + edge mode"
 	@echo "--> every BackendTrafficPolicy targets its route locally: no targetRefs[].namespace (Envoy Gateway >= 1.1 declares none; a server-side apply refuses it, #377)"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set ingress.backendTrafficPolicy.enabled=true --set kagent.uiRoute.enabled=true --set kagent.oauth2-proxy.enabled=false >$(VERIFY_TMP)/vkr-btps.out 2>&1 || { cat $(VERIFY_TMP)/vkr-btps.out; exit 1; }
@@ -2145,6 +2151,7 @@ verify-kagent-route: ## Assert the kagent controller route (4.0): a GRPCRoute ma
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KAGENT_ROUTE) --set kagent.controllerRoute.jwtAuthentication.enabled=false --set gateway.jwksEgress.enabled=false >$(VERIFY_TMP)/vkr-off.out 2>&1 || { cat $(VERIFY_TMP)/vkr-off.out; exit 1; }
 	@if grep -qE 'kagent-controller-jwt|kagent-controller-jwks|name: x-user-id' $(VERIFY_TMP)/vkr-off.out; then echo "FAIL: JWT objects render with jwtAuthentication.enabled=false"; exit 1; fi
 	@grep -A3 '^kind: GRPCRoute$$' $(VERIFY_TMP)/vkr-off.out | grep -q '^  name: kagent-controller$$' || { echo "FAIL: the GRPCRoute is gone with the JWT policy off"; exit 1; }
+	@python3 tests/verify-kagent-a2a-route.py --no-jwt $(VERIFY_TMP)/vkr-off.out
 	@echo "ok: off switch"
 	@echo "--> the UI route strips the identity header, with and without oauth2-proxy"
 	@for proxy in true false; do \
@@ -4493,6 +4500,13 @@ verify-kagent-authorization: ## Assert the kagent controller's authorizer (giant
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-kagent-authorization.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "ok: $@"
+
+.PHONY: verify-kagent-a2a-url
+verify-kagent-a2a-url: ## Assert the address the kagent controller's agent cards advertise: while kagent, agentgateway and kagent.controllerRoute are on, the kagent release carries controller.a2aGatewayUrl https://<kagent.controllerRoute.hostname, else agentgateway.<global.domain>>, the hostname the connectivity release's public A2A HTTPRoute serves, in edge mode too; an own value stands; nothing with the route or agentgateway off; the kagent chart at the range's floor hands it to the controller as KAGENT_GATEWAY_URL. Needs PyYAML. Network: gsoci.azurecr.io (the kagent chart at the floor). HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
+	@HELM="$(HELM)" python3 tests/verify-kagent-a2a-url.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-extensions
