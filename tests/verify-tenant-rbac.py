@@ -15,7 +15,7 @@ Each case pins one property of the render:
   the admin also writes ModelConfigs, EgressPolicies and RoleBindings, places
   Secrets (create, update, delete) and reads none (a patch answers with the
   stored Secret, so it reads too), may `bind` the
-  three roles only, and no role carries `escalate` or reads a Secret;
+  user and editor roles only, and no role carries `escalate` or reads a Secret;
   agent-platform:platform-user holds the user's rules but the EgressPolicies
   and the RoleBindings;
 - the ValidatingAdmissionPolicy agent-platform-tenant-egress-credentials
@@ -190,10 +190,10 @@ def check_roles(docs: list) -> None:
             if (g, res, v, None) not in admin:
                 fail(f"agent-platform:admin cannot {v} {res}.{g}")
     binds = {t[3] for t in admin if t[2] == "bind"}
-    if binds != set(ROLES):
-        fail(f"agent-platform:admin binds {sorted(binds, key=str)}, want the three roles only")
+    if binds != {"agent-platform:user", "agent-platform:editor"}:
+        fail(f"agent-platform:admin binds {sorted(binds, key=str)}, want user and editor only: only agent-platform-operator binds the admins")
     ok("agent-platform:admin writes ModelConfigs, EgressPolicies and RoleBindings, places Secrets it cannot read, "
-       "and binds the three roles only")
+       "and binds user and editor only")
     role = find(docs, "ClusterRole", "agent-platform:platform-user")
     if role is None:
         fail("ClusterRole agent-platform:platform-user missing with kagent on")

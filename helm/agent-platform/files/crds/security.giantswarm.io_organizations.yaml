@@ -54,6 +54,40 @@ spec:
           spec:
             description: OrganizationSpec defines the desired state of Organization
             properties:
+              admins:
+                description: |-
+                  Admins are the Users and Groups the organization is handed over to.
+                  Each product derives its admin binding in the organization from this
+                  list. No admins means the platform team manages the organization.
+                  organization-operator does not read it.
+                items:
+                  description: |-
+                    OrganizationAdmin is one admin of the organization: a User or a Group, by
+                    the name the API server authenticates it with. A ServiceAccount is not an
+                    admin, and neither is a name of the API server's own identities (system:).
+                  properties:
+                    kind:
+                      description: Kind is User or Group.
+                      enum:
+                      - User
+                      - Group
+                      type: string
+                    name:
+                      description: Name is the user's or the group's name.
+                      minLength: 1
+                      type: string
+                      x-kubernetes-validations:
+                      - message: 'a system: name is not an admin'
+                        rule: '!self.startsWith(''system:'')'
+                  required:
+                  - kind
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - kind
+                - name
+                x-kubernetes-list-type: map
               agentPlatform:
                 description: |-
                   AgentPlatform is the organization's share of the installation's Agent

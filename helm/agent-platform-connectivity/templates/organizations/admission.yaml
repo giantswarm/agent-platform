@@ -63,14 +63,14 @@ these.
     makes agents-<name> a namespace name: a DNS label of at most 63
     characters, so no dot. The CRD does not hold it,
     and the operator could create no namespace for it.
-  * agent-platform-organization-admins-binding: the RoleBinding
-    organization-admins of an organization namespace binds agent-platform:admin
-    to at least one subject; it is not deleted or emptied while the namespace
-    is not terminating. A policy cannot count the other admin bindings, so
-    this one name is held; a lockout is a cluster-admin's to fix. Applied
-    from git (labelled kustomize.toolkit.fluxcd.io/name), it carries
-    kustomize.toolkit.fluxcd.io/prune: disabled: Flux never prunes it, and the
-    namespace's deletion removes it.
+  * agent-platform-organization-admin-bindings: in an organization namespace
+    only the operator's ServiceAccount creates, changes or deletes a
+    RoleBinding to the ClusterRole agent-platform:admin, a cluster-admin held
+    too; the namespace and garbage collectors delete one. The organization's
+    admins are its spec.admins, which the operator binds by the RoleBinding
+    organization-admins (giantswarm/giantswarm#39501). RBAC lets a holder of
+    a role bind it without `bind`, so an admin could otherwise make another
+    admin.
   * agent-platform-organization-rolebinding-subjects: a RoleBinding in an
     organization namespace binds no system:* group or user and no
     ServiceAccount of another namespace, whoever writes it; only the operator
@@ -80,12 +80,12 @@ these.
   * agent-platform-organization-flux-writes: what an organization's Flux
     ServiceAccount (agents-* in fluxNamespace, not the operator) writes in an
     organization namespace: a RoleBinding binds the ClusterRole
-    agent-platform:user, editor or admin (RBAC lets an identity bind any role
+    agent-platform:user or editor (RBAC lets an identity bind any role
     whose rules it holds without `bind`, agent-platform:organization-flux
     itself among them, which reads every Secret of the namespace); it changes
     or deletes only a RoleBinding its own Kustomization applied (labelled
-    kustomize.toolkit.fluxcd.io/name with its name), never organization-admins
-    or another binding people wrote; and a Secret is no ServiceAccount token.
+    kustomize.toolkit.fluxcd.io/name with its name), never a binding people
+    or the operator wrote; and a Secret is no ServiceAccount token.
   * agent-platform-organization-git-secrets: a Secret in an organization
     namespace that an organization's Kustomization applied (labelled
     kustomize.toolkit.fluxcd.io/name and namespace fluxNamespace) is changed
@@ -566,7 +566,7 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: agent-platform-organization-admins-binding
+  name: agent-platform-organization-admin-bindings
   labels:
     {{- include "labels.common" . | nindent 4 }}
 spec:
@@ -580,43 +580,35 @@ spec:
         operations: ["CREATE", "UPDATE", "DELETE"]
         resources: ["rolebindings"]
   matchConditions:
-    - name: organization-admins
-      expression: "has(request.name) ? request.name == 'organization-admins' : request.operation == 'DELETE'"
+    # A RoleBinding to agent-platform:admin, before or after the write (a
+    # DELETE carries no object).
+    - name: binds-admin
+      expression: >-
+        [dyn(object), dyn(oldObject)].exists(o, o != null &&
+        o.roleRef.kind == 'ClusterRole' && o.roleRef.name == 'agent-platform:admin')
+    - name: not-operator
+      expression: {{ printf "request.userInfo.username != '%s'" $operator | quote }}
+  variables:
+    # The binding written; a DeleteCollection's request carries no name.
+    - name: binding
+      expression: "request.operation == 'DELETE' ? oldObject : object"
   validations:
-    - expression: >-
-        has(namespaceObject.metadata.deletionTimestamp) ||
-        (request.operation != 'DELETE' && has(object.subjects) && size(object.subjects) > 0)
+    # Everyone else is refused; the namespace controller empties a
+    # terminating namespace, and the garbage collector acts on owners.
+    - expression: {{ printf "request.operation == 'DELETE' && request.userInfo.username in %s" $collectors | quote }}
       reason: Forbidden
       messageExpression: >-
-        'the RoleBinding organization-admins of an organization namespace keeps at least one subject until its namespace is deleted; refused: ' +
-        request.operation + (request.operation == 'DELETE' ? '' : ' without subjects') + ' in ' + request.namespace
-    - expression: "request.operation == 'DELETE' || (object.roleRef.kind == 'ClusterRole' && object.roleRef.name == 'agent-platform:admin')"
-      reason: Forbidden
-      messageExpression: "'the RoleBinding organization-admins of an organization namespace binds the ClusterRole agent-platform:admin, not ' + object.roleRef.kind + ' ' + object.roleRef.name"
-    # Applied from git (commit mode: the first admins are a file of the
-    # organization's path), it carries Flux's prune: disabled, on create and
-    # on every update. Flux then never prunes it, which the first rule would
-    # refuse while the namespace lives: the organization's Kustomization,
-    # which the erasure deletes first and waits for, would keep its finalizer
-    # for good. The namespace's deletion removes the binding.
-    - expression: >-
-        request.operation == 'DELETE' ||
-        !(has(object.metadata.labels) && 'kustomize.toolkit.fluxcd.io/name' in object.metadata.labels) ||
-        (has(object.metadata.annotations) && 'kustomize.toolkit.fluxcd.io/prune' in object.metadata.annotations &&
-        object.metadata.annotations['kustomize.toolkit.fluxcd.io/prune'] == 'disabled')
-      reason: Forbidden
-      messageExpression: >-
-        'the RoleBinding organization-admins applied from git carries kustomize.toolkit.fluxcd.io/prune: disabled, so the erasure of its organization never waits on its prune; refused: ' +
-        request.operation + ' in ' + request.namespace
+        {{ printf "'only the agent-platform-operator (%s) writes a RoleBinding to agent-platform:admin in an organization namespace, from the organization admins (the Organization spec.admins); refused for '" $operator }} +
+        request.userInfo.username + ': ' + request.operation + ' ' + request.namespace + '/' + variables.binding.metadata.name
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: agent-platform-organization-admins-binding
+  name: agent-platform-organization-admin-bindings
   labels:
     {{- include "labels.common" . | nindent 4 }}
 spec:
-  policyName: agent-platform-organization-admins-binding
+  policyName: agent-platform-organization-admin-bindings
   validationActions: [Deny]
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -696,8 +688,8 @@ spec:
     # A binding that exists is changed or deleted only when this
     # ServiceAccount's own Kustomization (of its name, in fluxNamespace)
     # applied it, as kustomize-controller labels what it applies: a file in
-    # git never takes over organization-admins or another binding people
-    # wrote, and prune never deletes one.
+    # git never takes over a binding people or the operator wrote, and prune
+    # never deletes one.
     - expression: >-
         request.resource.resource != 'rolebindings' || request.operation == 'CREATE' ||
         (has(oldObject.metadata.labels) &&
@@ -712,10 +704,10 @@ spec:
     - expression: >-
         request.resource.resource != 'rolebindings' || request.operation == 'DELETE' ||
         (object.roleRef.kind == 'ClusterRole' &&
-        object.roleRef.name in ['agent-platform:user', 'agent-platform:editor', 'agent-platform:admin'])
+        object.roleRef.name in ['agent-platform:user', 'agent-platform:editor'])
       reason: Forbidden
       messageExpression: >-
-        'a RoleBinding from an organization path in git binds agent-platform:user, editor or admin; refused: ' +
+        'a RoleBinding from an organization path in git binds agent-platform:user or editor; refused: ' +
         request.namespace + '/' + object.metadata.name + ' to ' + object.roleRef.kind + ' ' + object.roleRef.name
     # A ServiceAccount token Secret would hand out a token, without expiry, of
     # any ServiceAccount of the namespace (the Helm ServiceAccount, the
@@ -865,14 +857,22 @@ spec:
         (has(oldObject.spec) && has(oldObject.spec.agentPlatform) &&
         has(oldObject.spec.agentPlatform.enabled) && oldObject.spec.agentPlatform.enabled) ||
         (has(oldObject.metadata.finalizers) && {{ squote $finalizer }} in oldObject.metadata.finalizers)
+  variables:
+    - name: enabled
+      expression: >-
+        has(oldObject.spec) && has(oldObject.spec.agentPlatform) &&
+        has(oldObject.spec.agentPlatform.enabled) && oldObject.spec.agentPlatform.enabled
   validations:
     - expression: >-
         has(oldObject.metadata.annotations) && 'kustomize.toolkit.fluxcd.io/prune' in oldObject.metadata.annotations &&
         oldObject.metadata.annotations['kustomize.toolkit.fluxcd.io/prune'] == 'enabled'
       reason: Forbidden
+      # Switched off and still held by the finalizer, the organization still
+      # has its namespace, sessions and snapshots, which the erasure removes.
       messageExpression: >-
-        'deleting an Organization with the Agent Platform enabled erases its Agent Platform: set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on ' +
-        oldObject.metadata.name + ' first'
+        (variables.enabled ? 'deleting an Organization with the Agent Platform enabled erases its Agent Platform' :
+        'deleting an Organization that still holds Agent Platform data (its Agent Platform switched off, its erasure not done) erases that data') +
+        ': set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on ' + oldObject.metadata.name + ' first'
     - expression: >-
         !(has(oldObject.status) && has(oldObject.status.conditions) && oldObject.status.conditions.exists(c, c.type == 'Orphaned')) ||
         oldObject.status.conditions.exists(c, c.type == 'Orphaned' && c.status == 'True' && c.reason == 'DeleteMerged')

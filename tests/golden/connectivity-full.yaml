@@ -13232,13 +13232,13 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # The admin binds members to the three roles and nothing else: the API
+  # The admin binds members to user and editor and nothing else: the API
   # server refuses a RoleBinding to any other role whose rights the admin does
   # not hold.
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
     verbs: ["bind"]
-    resourceNames: ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
+    resourceNames: ["agent-platform:user", "agent-platform:editor"]
 ---
 # Source: agent-platform-connectivity/templates/agentgateway/clusterrole-listenerset.yaml
 apiVersion: rbac.authorization.k8s.io/v1

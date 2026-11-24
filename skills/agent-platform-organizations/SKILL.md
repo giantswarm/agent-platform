@@ -34,12 +34,12 @@ A role bound in the agent's namespace:
 |---|---|
 | `agent-platform:user` | see the agents and start sessions with them |
 | `agent-platform:editor` | the above, and create, change and delete agents |
-| `agent-platform:admin` | the above, and manage models, egress policies, credentials and members |
+| `agent-platform:admin` | the above, and manage models, egress policies, credentials and members (users and editors) |
 
 - **Platform namespace**: everyone signed in is a user (the installation can narrow it to a group);
   the platform's operators and the customer's platform team are editors.
-- **Organization**: its admins add members by role (portal: **Organizations** → the organization →
-  **Members**). A person in no organization sees who can add them on the **Organizations** page.
+- **Organization**: its admins add users and editors (portal: **Organizations** → the organization →
+  **Members**). The admins themselves are the organization's `spec.admins`, which the platform team sets. A person in no organization sees who can add them on the **Organizations** page.
 
 Each list holds only what the person may see, so two people get different lists. An agent someone
 cannot find is a missing role, not a bug: name the owner, and who grants the role there.

@@ -11,8 +11,9 @@ A value, not detection, as for the Flux CRDs of the bundled engine (the
 glossary's "Bundled Flux"): off by default, so this chart never takes over the
 CRD of a cluster whose KaaS stack installed it. files/crds/ holds
 organization-operator's CRD as generated
-(giantswarm/organization-operator@12b648ac1332eb3c9c642ea55cb0f160aa59fd8b,
-config/crd/bases/security.giantswarm.io_organizations.yaml).
+(giantswarm/organization-operator@de1bb4efe3753169aba06e6d389a4286b664709b,
+config/crd/bases/security.giantswarm.io_organizations.yaml; spec.admins from
+giantswarm/organization-operator#673).
 
 A template, not a crds/ subchart: nothing in this chart is an `Organization`,
 so no ordering needs crds/; Helm upgrades a template with the chart, and on a

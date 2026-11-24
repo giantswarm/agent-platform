@@ -17,7 +17,7 @@ refuses it, and each refusal has a passing twin that differs only in what the
 policy holds:
 
 - organizations-admin (by ClusterRoleBinding) creates Organizations and binds
-  user, editor and admin in organization namespaces, nothing else there, and
+  user and editor in organization namespaces, nothing else there, and
   no RoleBinding elsewhere, nor does one bound by a RoleBinding; a
   cluster-admin is not held; an organization admin binds no
   organizations-admin;
@@ -33,12 +33,15 @@ policy holds:
   ServiceAccount only in the namespace of its name;
 - agent-platform:organization-flux, bound there, lets the organization's Flux
   ServiceAccount write the organization's kinds in its namespace only, and
-  bind no role but user, editor and admin;
+  bind no role but user and editor;
 - only the operator sets, changes or removes the organization labels, and
   creates a namespace named agents-*;
 - on an Organization the operator adds and removes its finalizer and writes
   the status, and changes nothing else of it;
-- organization-admins is not deleted or emptied while its namespace lives;
+- in an organization namespace only the operator writes a RoleBinding to
+  agent-platform:admin (an admin binds user and editor, not admin; a
+  cluster-admin is held too), and the namespace controller deletes one in a
+  terminating namespace (giantswarm/giantswarm#39501);
 - a RoleBinding there binds no system: identity and no ServiceAccount of
   another namespace;
 - the operator binds each credential provider's ServiceAccount alone to its
@@ -56,8 +59,9 @@ policy holds:
 - the HelmRelease field lock, also for the organization's Flux ServiceAccount;
 - an Organization with the Agent Platform enabled, or one switched off that
   the operator still holds with its finalizer, is deleted only with
-  prune: enabled, and one applied from git only once its delete pull request
-  merged (Orphaned, reason DeleteMerged); any other Organization is not held;
+  prune: enabled, the refusal naming which of the two it is, and one applied
+  from git only once its delete pull request merged (Orphaned, reason
+  DeleteMerged); any other Organization is not held;
 - the EgressPolicy floor;
 - the operator's copies are the operator's;
 - the sandbox shape holds with a Kyverno PolicyException for agents-* in place.
@@ -105,8 +109,6 @@ BOB = "bob"  # agent-platform:editor in the organization namespace
 
 ORG = "agents-payments"
 ORG2 = "agents-billing"
-ORG3 = "agents-treasury"  # commit mode: its first admins come from git
-FLUX_SA3 = f"system:serviceaccount:{FLUX_NS}:{ORG3}"
 OLD = "agents-old"  # terminating
 PLAIN = "team-a"
 # The credential providers in Substrate's namespace and their Secret readers.
@@ -430,8 +432,7 @@ def fixtures():
     """What exists before the policies: the namespaces, the platform's pool,
     a HelmRelease written before the lock, the objects each case acts on."""
     for n, labels in ((PLAIN, None), (FLUX_NS, None), ("kagent", None), (RELEASE_NS, None),
-                      (ORG, LABELS), (ORG2, {**LABELS, "agent-platform.giantswarm.io/organization": "billing"}), (OLD, LABELS),
-                      (ORG3, {**LABELS, "agent-platform.giantswarm.io/organization": "treasury"})):
+                      (ORG, LABELS), (ORG2, {**LABELS, "agent-platform.giantswarm.io/organization": "billing"}), (OLD, LABELS)):
         must(create(ns(n, labels), dry=False), f"create namespace {n}")
     objects = [
         workerpool("kagent", replicas=1),
@@ -480,8 +481,9 @@ def install(roles, policies):
 def prove_roles():
     case("organizations-admin (ClusterRoleBinding) creates an Organization", create(org("new"), as_=ALICE, groups=()))
     case("organizations-admin binds agent-platform:editor in an organization namespace", create(rb("devs", ORG), as_=ALICE, groups=()))
-    for role in ("agent-platform:user", "agent-platform:admin"):
-        case(f"organizations-admin binds {role} in an organization namespace", create(rb("devs", ORG, role=role), as_=ALICE, groups=()))
+    case("organizations-admin binds agent-platform:user in an organization namespace", create(rb("devs", ORG, role="agent-platform:user"), as_=ALICE, groups=()))
+    case("organizations-admin cannot bind agent-platform:admin (the admins are the Organization's spec.admins)",
+         create(rb("devs", ORG, role="agent-platform:admin"), as_=ALICE, groups=()), "RBAC:attempting to grant RBAC permissions not currently held")
     case("organizations-admin cannot bind cluster-admin in an organization namespace",
          create(rb("devs", ORG, role="cluster-admin"), as_=ALICE, groups=()), "RBAC:attempting to grant RBAC permissions not currently held")
     held = [f"{v} {r}" for v, r in (("get", "secrets"), ("create", "helmreleases.helm.toolkit.fluxcd.io"), ("get", "agents.api.kagent.dev"),
@@ -507,7 +509,7 @@ def prove_roles():
     # A RoleBinding of organizations-admin grants no Organization (cluster-
     # scoped), but its RoleBinding writes in that namespace: held the same.
     case("organizations-admin by a RoleBinding writes no RoleBinding in that namespace",
-         create(rb("carol-admin", PLAIN, role="agent-platform:admin",
+         create(rb("carol-admin", PLAIN, role="agent-platform:editor",
                    subjects=[{"apiGroup": "rbac.authorization.k8s.io", "kind": "User", "name": CAROL}]), as_=CAROL, groups=()),
          "agent-platform-organizations-admin-rolebindings", "refused for carol in " + PLAIN)
     case("organizations-admin by a RoleBinding deletes no RoleBinding in that namespace",
@@ -688,11 +690,14 @@ def prove_flux_role():
     case("a merged Secret is refused in another organization's namespace",
          create({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "tenant-credential-a", "namespace": ORG2}}, as_=FLUX_SA, groups=()),
          "RBAC:cannot create resource \"secrets\"")
-    for role in ("agent-platform:user", "agent-platform:editor", "agent-platform:admin"):
+    for role in ("agent-platform:user", "agent-platform:editor"):
         case(f"a merged RoleBinding binds {role}", create(rb("members-git", ORG, role=role), as_=FLUX_SA, groups=()))
+    case("a merged RoleBinding binds no agent-platform:admin (the admins are the Organization's spec.admins)",
+         create(rb("members-git", ORG, role="agent-platform:admin"), as_=FLUX_SA, groups=()),
+         "RBAC:attempting to grant RBAC permissions not currently held")
     # What git applied carries kustomize-controller's labels of the
-    # organization's Kustomization; organization-admins (a fixture written by
-    # people) carries none.
+    # organization's Kustomization; members (a fixture written by people)
+    # carries none.
     took = "agent-platform-organization-flux-writes"
     def applied_by(name, ks):
         b = rb(name, ORG)
@@ -701,12 +706,9 @@ def prove_flux_role():
     applied_by("members-from-git", ORG)
     applied_by("members-other-git", ORG2)
     more = {"subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "acme-git"}]}
-    case("a file in git takes over no RoleBinding people wrote (organization-admins)",
-         patch("rolebinding", "organization-admins", ORG, more, as_=FLUX_SA, groups=()), took,
-         f"changes or deletes only a RoleBinding that git applied; refused: UPDATE {ORG}/organization-admins")
-    # organization-admins itself is not deleted while its namespace lives
-    # (agent-platform-organization-admins-binding); members is another
-    # binding people wrote.
+    case("a file in git takes over no RoleBinding people wrote (members)",
+         patch("rolebinding", "members", ORG, more, as_=FLUX_SA, groups=()), took,
+         f"changes or deletes only a RoleBinding that git applied; refused: UPDATE {ORG}/members")
     case("prune deletes no RoleBinding people wrote (members)",
          delete("rolebinding", "members", ORG, as_=FLUX_SA, groups=()), took,
          f"changes or deletes only a RoleBinding that git applied; refused: DELETE {ORG}/members")
@@ -993,46 +995,6 @@ def prove_names():
          patch("organization", "enabled.io", None, {"metadata": {"annotations": {"kustomize.toolkit.fluxcd.io/prune": "enabled"}}}, as_=PERSON))
 
 
-def prove_git_admins():
-    """Commit mode: ORG3's first admins are a file of its path, applied by its
-    Flux ServiceAccount (with no group, as kustomize-controller impersonates
-    it), which kustomize-controller labels with the Kustomization. The erasure
-    deletes that Kustomization first and waits for it: Flux must never try to
-    prune organization-admins, which is not deleted while the namespace
-    lives, so the binding carries prune: disabled and goes with the
-    namespace."""
-    must(create(rb("organization-flux", ORG3, role="agent-platform:organization-flux",
-                   subjects=[{"kind": "ServiceAccount", "name": ORG3, "namespace": FLUX_NS}]), as_=OP, dry=False),
-         "bind ORG3's Flux ServiceAccount")
-    API.settle()
-    admins = rb("organization-admins", ORG3, role="agent-platform:admin")
-    admins["metadata"]["labels"] = {"kustomize.toolkit.fluxcd.io/name": ORG3, "kustomize.toolkit.fluxcd.io/namespace": FLUX_NS}
-    policy = "agent-platform-organization-admins-binding"
-    keep = "applied from git carries kustomize.toolkit.fluxcd.io/prune: disabled, so the erasure of its organization never waits on its prune"
-    case("a first-admins file without prune: disabled is refused", create(admins, as_=FLUX_SA3, groups=()), policy,
-         keep + f"; refused: CREATE in {ORG3}")
-    admins["metadata"]["annotations"] = {"kustomize.toolkit.fluxcd.io/prune": "disabled"}
-    case("a first-admins file with prune: disabled is applied", create(admins, as_=FLUX_SA3, groups=(), dry=False))
-    case("a file in git that drops prune: disabled from organization-admins is refused",
-         patch("rolebinding", "organization-admins", ORG3, {"metadata": {"annotations": {"kustomize.toolkit.fluxcd.io/prune": None}}},
-               as_=FLUX_SA3, groups=()), policy, keep + f"; refused: UPDATE in {ORG3}")
-    case("a file in git changes the first admins and keeps prune: disabled",
-         patch("rolebinding", "organization-admins", ORG3,
-               {"subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "treasury-leads"}]}, as_=FLUX_SA3, groups=()))
-    # Flux skips an object annotated prune: disabled; were it to prune it
-    # while the namespace lives, the delete would be refused and the
-    # Kustomization would keep its finalizer: hence the annotation.
-    case("a prune of organization-admins while its namespace lives is refused", delete("rolebinding", "organization-admins", ORG3, as_=FLUX_SA3, groups=()),
-         policy, f"refused: DELETE in {ORG3}")
-    # The erasure's namespace step: the namespace controller removes it.
-    must(kubectl(["delete", "namespace", ORG3, "--wait=false"]), f"delete namespace {ORG3}")
-    # The policy reads the namespace's deletionTimestamp from the API
-    # server's namespace cache, which settle() waits for.
-    API.settle()
-    case("the namespace controller deletes the git-applied organization-admins once its namespace terminates",
-         delete("rolebinding", "organization-admins", ORG3, as_=NS_CONTROLLER, groups=()))
-
-
 def prove_labels():
     case("a cluster-admin creates a namespace without the organization labels", create(ns("team-b"), as_=PERSON))
     case("a cluster-admin creates no namespace with them", create(ns("team-b", LABELS), as_=PERSON), "agent-platform-organization-labels")
@@ -1051,23 +1013,43 @@ def prove_labels():
     case("the operator changes an organization label", patch("namespace", ORG, None, {"metadata": {"labels": {"agent-platform.giantswarm.io/organization": "other"}}}, as_=OP))
 
 
-def prove_admins_binding():
-    for namespace, denied in ((ORG, "agent-platform-organization-admins-binding"), (OLD, None)):
-        case(f"RoleBinding DELETE collection in {namespace}",
-             kubectl(["delete", "--raw", f"/apis/rbac.authorization.k8s.io/v1/namespaces/{namespace}/rolebindings?dryRun=All"], as_=NS_CONTROLLER), denied)
-    case("organization-admins is not deleted while its namespace lives", delete("rolebinding", "organization-admins", ORG, as_=PERSON),
-         "agent-platform-organization-admins-binding")
-    case("organization-admins is not emptied while its namespace lives", patch("rolebinding", "organization-admins", ORG, {"subjects": []}, as_=PERSON),
-         "agent-platform-organization-admins-binding")
-    case("organization-admins gets another subject",
-         patch("rolebinding", "organization-admins", ORG, {"subjects": [{"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "acme-devs"},
-                                                                         {"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "acme-leads"}]}, as_=PERSON))
-    case("another binding of an organization namespace is deleted", delete("rolebinding", "members", ORG, as_=PERSON))
-    case("organization-admins is deleted while its namespace terminates", delete("rolebinding", "organization-admins", OLD, as_=PERSON))
-    case("organization-admins is emptied while its namespace terminates", patch("rolebinding", "organization-admins", OLD, {"subjects": []}, as_=PERSON))
-    case("organization-admins binds agent-platform:admin", create(rb("organization-admins", ORG2, role="agent-platform:admin"), as_=PERSON))
-    case("organization-admins binds nothing else", create(rb("organization-admins", ORG2, role="agent-platform:user"), as_=PERSON),
-         "agent-platform-organization-admins-binding")
+def prove_admin_bindings():
+    """Only the operator writes a RoleBinding to agent-platform:admin in an
+    organization namespace: it derives organization-admins from the
+    Organization's spec.admins. An admin holds the role's rules, so RBAC lets
+    it bind the role without `bind`; the policy refuses it."""
+    policy = "agent-platform-organization-admin-bindings"
+    admins = [{"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "acme-devs"},
+              {"apiGroup": "rbac.authorization.k8s.io", "kind": "Group", "name": "acme-leads"}]
+    for role in ("agent-platform:user", "agent-platform:editor"):
+        case(f"an organization admin binds {role}", create(rb("members-new", ORG, role=role), *ADMIN))
+    case("an organization admin binds no agent-platform:admin, whose rules it holds",
+         create(rb("admins-new", ORG, role="agent-platform:admin"), *ADMIN), policy,
+         f"refused for dana: CREATE {ORG}/admins-new")
+    case("an organization admin adds no subject to organization-admins",
+         patch("rolebinding", "organization-admins", ORG, {"subjects": admins}, *ADMIN), policy, f"UPDATE {ORG}/organization-admins")
+    case("a cluster-admin binds no agent-platform:admin in an organization namespace",
+         create(rb("admins-new", ORG, role="agent-platform:admin"), as_=PERSON), policy, f"refused for {PERSON}: CREATE {ORG}/admins-new")
+    case("a cluster-admin changes no subject of organization-admins",
+         patch("rolebinding", "organization-admins", ORG, {"subjects": admins}, as_=PERSON), policy)
+    case("a cluster-admin deletes no organization-admins", delete("rolebinding", "organization-admins", ORG, as_=PERSON), policy,
+         f"DELETE {ORG}/organization-admins")
+    case("a cluster-admin deletes another binding of an organization namespace", delete("rolebinding", "members", ORG, as_=PERSON))
+    case("a cluster-admin binds agent-platform:admin outside organization namespaces (not held)",
+         create(rb("admins-new", PLAIN, role="agent-platform:admin"), as_=PERSON))
+    case("the operator binds the organization's admins", create(rb("admins-new", ORG2, role="agent-platform:admin"), as_=OP))
+    case("the operator changes the admins", patch("rolebinding", "organization-admins", ORG, {"subjects": admins}, as_=OP))
+    case("the operator empties the admins", patch("rolebinding", "organization-admins", ORG, {"subjects": []}, as_=OP))
+    case("the operator deletes the admins", delete("rolebinding", "organization-admins", ORG, as_=OP))
+    case("the namespace controller deletes organization-admins of a terminating namespace",
+         delete("rolebinding", "organization-admins", OLD, as_=NS_CONTROLLER))
+    case("a cluster-admin deletes no organization-admins of a terminating namespace",
+         delete("rolebinding", "organization-admins", OLD, as_=PERSON), policy)
+    case("the namespace controller deletes the RoleBindings of an organization namespace as a collection",
+         kubectl(["delete", "--raw", f"/apis/rbac.authorization.k8s.io/v1/namespaces/{ORG}/rolebindings?dryRun=All"], as_=NS_CONTROLLER))
+    case("a cluster-admin deletes no collection that holds organization-admins",
+         kubectl(["delete", "--raw", f"/apis/rbac.authorization.k8s.io/v1/namespaces/{ORG}/rolebindings?dryRun=All"], as_=PERSON), policy,
+         f"DELETE {ORG}/organization-admins")
 
 
 def prove_subjects():
@@ -1119,13 +1101,15 @@ def prove_helmreleases():
 def prove_delete_intent():
     policy = "agent-platform-organization-delete-intent"
     case("an Organization with the Agent Platform and without prune: enabled is not deleted", delete("organization", "payments", None, as_=PERSON),
-         policy, "set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on payments first")
+         policy, "with the Agent Platform enabled erases its Agent Platform: set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on payments first")
     case("an Organization with the Agent Platform and prune: disabled is not deleted", delete("organization", "kept", None, as_=PERSON), policy)
     case("an Organization with the Agent Platform and prune: enabled is deleted", delete("organization", "retired", None, as_=PERSON))
     case("an Organization without spec.agentPlatform is deleted (not held)", delete("organization", "kaas", None, as_=PERSON))
     case("an Organization with the Agent Platform disabled is deleted (not held)", delete("organization", "off", None, as_=PERSON))
     case("an Organization switched off that the operator still holds with its finalizer is not deleted without prune: enabled",
-         delete("organization", "switched-off", None, as_=PERSON), policy, "on switched-off first")
+         delete("organization", "switched-off", None, as_=PERSON), policy,
+         "that still holds Agent Platform data (its Agent Platform switched off, its erasure not done) erases that data: "
+         "set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on switched-off first")
     in_git = "erased only once its delete pull request merged"
     case("an Organization in git with prune: enabled is not deleted", delete("organization", "in-git", None, as_=PERSON), policy, in_git)
     case("an Organization missing from git with prune: enabled is not deleted", delete("organization", "lost", None, as_=PERSON), policy, in_git)
@@ -1202,9 +1186,8 @@ def main():
             must(kubectl(["wait", "--for=condition=Established", "crd", "--all", "--timeout=60s"]), "wait for the CRDs")
             fixtures()
             install(roles, policies)
-            for prove in (prove_roles, prove_operator, prove_organizations, prove_names, prove_flux_role, prove_secret_deletes, prove_labels, prove_admins_binding, prove_subjects, prove_helmreleases,
-                          prove_delete_intent, prove_egress_floor, prove_copies, prove_sandbox,
-                          prove_git_admins):  # last: it deletes ORG3
+            for prove in (prove_roles, prove_operator, prove_organizations, prove_names, prove_flux_role, prove_secret_deletes, prove_labels, prove_admin_bindings, prove_subjects, prove_helmreleases,
+                          prove_delete_intent, prove_egress_floor, prove_copies, prove_sandbox):
                 prove()
         finally:
             API.stop()
