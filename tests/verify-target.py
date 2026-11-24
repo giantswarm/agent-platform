@@ -129,7 +129,9 @@ def targeted(doc: str) -> str:
     and so is the namespace of a derived MCP backend entry
     (networkPolicy.mcpBackends.<key>.namespace: the component's pods) and the
     skill-manager's Service that agent-manager is pointed at (skillManager.url
-    and, on the connectivity release, agentManager.skillManager.namespace)."""
+    and, on the connectivity release, agentManager.skillManager.namespace), and
+    muster's in-cluster address its consumers are given (muster.url, muster.mcpUrl,
+    kagent's actor JWT provider hostname)."""
     out, section, backends, skills = [], "", -1, -1
     for line in doc.split("\n"):
         if re.match(r"^  \S", line):
@@ -146,6 +148,8 @@ def targeted(doc: str) -> str:
         elif (backends >= 0 or skills >= 0) and re.match(r"^ +namespace: default$", line):
             line = line.replace(": default", ": agent-platform")
         elif skills >= 0 and re.match(r"^ +url: http://[^.]+\.default\.svc\.cluster\.local[:/]", line):
+            line = line.replace(".default.svc.", ".agent-platform.svc.", 1)
+        elif section == "values:" and re.match(r"^ +(url|mcpUrl): http://muster\.default\.svc\.cluster\.local:|^ +hostname: muster\.default\.svc\.cluster\.local$", line):
             line = line.replace(".default.svc.", ".agent-platform.svc.", 1)
         if re.match(r"^  name: ", line) and section.startswith("name:"):
             line = line.replace("name: ", "name: t-", 1)
@@ -463,6 +467,36 @@ def check_placement(meta: str) -> None:
     ok(f"a targeted release's {len(one)} Flux children are named after it, install and store into agent-platform, and share no name with a second targeted release in the namespace; gitops.target.name and gitops.targetNamespace override both")
 
 
+def check_muster_url(meta: str) -> None:
+    """muster's in-cluster MCP URL, which agent-manager, the default agent, kagent's
+    actor JWT provider and toolchain-manager are given, names the namespace muster
+    lands in on the target, never the release's org namespace on the installation;
+    muster's own namespace (components.muster.targetNamespace) wins."""
+    base = ["--namespace", "org-acme", "-f", f"{meta}/ci/ci-values.yaml", *ENGINE_OFF, *KNOB, *PLATFORM,
+            "--set", "global.identity.clientId=agent-platform", "--set", "gitops.targetNamespace=ai",
+            "--set", "components.kagent.enabled=true", "--set", "kagent.harness.snapshotLocation=s3://ci/kagent",
+            "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
+            "--set", "muster.muster.oauth.server.enabled=true", "--set", "muster.muster.oauth.server.baseUrl=https://muster.ci.example.com",
+            "--set", "components.toolchain-manager.enabled=true"]
+    consumers = {
+        "t-agent-manager": "      url: http://muster.{ns}.svc.cluster.local:8090/mcp",
+        "t-default-agent": "      url: http://muster.{ns}.svc.cluster.local:8090/mcp",
+        "t-kagent": "            hostname: muster.{ns}.svc.cluster.local",
+        "t-toolchain-manager": "      mcpUrl: http://muster.{ns}.svc.cluster.local:8090/mcp",
+    }
+    for ns, extra in (("ai", []), ("mcp", ["--set", "components.muster.targetNamespace=mcp"])):
+        out = helm(meta, [*base, *extra])
+        docs = documents(out)
+        for release, line in consumers.items():
+            doc = docs.get(("HelmRelease", release))
+            if doc is None:
+                sys.exit(f"FAIL: HelmRelease {release} is not rendered")
+            if f"\n{line.format(ns=ns)}\n" not in f"\n{doc}\n":
+                sys.exit(f"FAIL: HelmRelease {release} does not name muster in {ns}: `{line.format(ns=ns).strip()}` missing")
+        if "muster.org-acme.svc" in out:
+            sys.exit("FAIL: a targeted release names muster in its own org namespace")
+    ok("a targeted release gives agent-manager, the default agent, kagent and toolchain-manager muster's address in its namespace: gitops.targetNamespace, or components.muster.targetNamespace")
+
 def main(meta: str, connectivity: str) -> int:
     check_knob(meta)
     check_golden(meta, connectivity)
@@ -471,6 +505,7 @@ def main(meta: str, connectivity: str) -> int:
     check_hooks(meta)
     check_slices(meta)
     check_placement(meta)
+    check_muster_url(meta)
     return 0
 
 
