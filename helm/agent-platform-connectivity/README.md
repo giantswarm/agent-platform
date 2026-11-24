@@ -1147,6 +1147,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | global.identity.existingSecret | string | `""` |  |
 | global.identity.ca.secretName | string | `""` |  |
 | global.identity.ca.key | string | `"ca.crt"` |  |
+| global.identity.type | string | `""` |  |
+| global.identity.kubernetes.audiences | list | `[]` |  |
 | global.gatewayApi.parentRefs | list | `[]` |  |
 | global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |

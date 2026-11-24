@@ -946,6 +946,14 @@
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": [
+                                "",
+                                "dex",
+                                "google"
+                            ]
+                        },
                         "ca": {
                             "type": "object",
                             "additionalProperties": false,
@@ -966,6 +974,18 @@
                         },
                         "issuerUrl": {
                             "type": "string"
+                        },
+                        "kubernetes": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "audiences": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
                         }
                     }
                 },

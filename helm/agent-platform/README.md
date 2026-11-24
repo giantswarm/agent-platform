@@ -416,6 +416,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | global.identity.issuerUrl | string | `""` |  |
 | global.identity.clientId | string | `""` |  |
 | global.identity.existingSecret | string | `""` |  |
+| global.identity.type | string | `""` |  |
+| global.identity.kubernetes.audiences | list | `[]` |  |
 | global.gatewayApi.parentRefs | list | `[]` |  |
 | global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster, detected once by the meta chart (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |

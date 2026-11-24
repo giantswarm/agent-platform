@@ -768,6 +768,9 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences: []
+        type: ""
       imagePullSecrets: []
       observability:
         metrics:
@@ -1836,6 +1839,9 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences: []
+        type: ""
       imagePullSecrets: []
       observability:
         metrics:
@@ -1978,6 +1984,9 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences: []
+        type: ""
       imagePullSecrets: []
       observability:
         metrics:
@@ -2095,6 +2104,9 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences: []
+        type: ""
       imagePullSecrets: []
       observability:
         metrics:
@@ -2241,6 +2253,9 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences: []
+        type: ""
       imagePullSecrets: []
       observability:
         metrics:
