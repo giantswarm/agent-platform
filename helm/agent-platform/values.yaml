@@ -1417,8 +1417,8 @@ components:  # @schema additionalProperties: true
     chart: agent-platform-operator
     # The Agent Platform organizations' operator
     # (giantswarm/agent-platform-operator, giantswarm/giantswarm#38891): it
-    # reconciles each AgentPlatformOrganization (agent-platform.giantswarm.io)
-    # into its organization namespace, with the curated copies, and cleans up a
+    # reconciles each Organization (security.giantswarm.io) with the Agent
+    # Platform enabled into its organization namespace, with the curated copies, and cleans up a
     # deleted organization behind a finalizer. No `enabled` here: the
     # component follows the one switch agentPlatformOrganizations.enabled
     # (below), and an explicit value that disagrees with it fails the render
@@ -1846,6 +1846,9 @@ components:  # @schema additionalProperties: true
       # The operator's names reach the connectivity release derived
       # (agent-platform.organizations.operator), never as declared here.
       - agentPlatformOrganizations.operator
+      # The Organization CRD switch is this chart's own
+      # (templates/organization-crd.yaml).
+      - agentPlatformOrganizations.organizationCRD
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -5845,10 +5848,10 @@ tenants:
 musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
 
 # === Agent Platform organizations (giantswarm/giantswarm#38891) ===
-# An AgentPlatformOrganization (agent-platform.giantswarm.io/v1alpha1, the
-# agent-platform-operator's) in a parent namespace owns an organization
-# namespace, agents-<name>-<random>, labelled
-# agent-platform.giantswarm.io/organization, /parent and /organization-uid.
+# An Organization (security.giantswarm.io/v1alpha1, cluster-scoped) whose
+# spec.agentPlatform.enabled is true owns an organization namespace,
+# agents-<name>, labelled agent-platform.giantswarm.io/organization and
+# /organization-uid (giantswarm/giantswarm#39492).
 # Off, the default, nothing of it renders. On (with kagent and Agent Substrate
 # on), the meta chart installs agent-platform-operator
 # (components.agent-platform-operator, which follows this switch) into the
@@ -5931,9 +5934,9 @@ agentPlatformOrganizations:
     name: ""
   # -- The start of every organization's path in the installation's source
   # (the fixed part of agent-platform-operator's commitMode.path, which must
-  # be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies
-  # exactly this prefix, its parent and its name, from the labels the
-  # operator writes on it. ./<segments>/ with no empty, . or .. segment; the
+  # be <fluxPathPrefix>{name}): an operator Kustomization applies exactly
+  # this prefix and its organization's name, from the label the operator
+  # writes on it. ./<segments>/ with no empty, . or .. segment; the
   # render fails otherwise.
   fluxPathPrefix: ./agent-platform/organizations/
   # -- The installation's SOPS key Secret in fluxNamespace
@@ -5947,6 +5950,19 @@ agentPlatformOrganizations:
   # covers one, beside the cluster-internal and host-local names it never
   # names. The render fails while both are empty.
   apiHostnames: []  # @schema item: string
+  # The Organization CRD (organizations.security.giantswarm.io), for a
+  # cluster without KaaS (giantswarm/giantswarm#39496). Read by this chart
+  # alone (components.agent-platform-connectivity.omitKeys).
+  organizationCRD:
+    # -- Install the `Organization` CRD (security.giantswarm.io), which the
+    # organizations are, from this chart (templates/organization-crd.yaml).
+    # Off by default: on a management cluster the KaaS stack installs it.
+    # Turn it on only on a cluster without KaaS: where the CRD exists
+    # under another owner, the release fails. A value, not detection. The
+    # CRD stays when the value turns off or the release goes
+    # (helm.sh/resource-policy: keep): its removal would delete every
+    # Organization.
+    enabled: false
   # -- agent-platform-operator's names, which this chart derives onto the
   # connectivity release while the organizations are on
   # (agent-platform.organizations.operator, giantswarm/agent-platform#1278).

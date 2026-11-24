@@ -1,25 +1,19 @@
 {{- /*
 agent-platform:organizations-admin (giantswarm/agent-platform#1267): manages
-AgentPlatformOrganizations and their members. It creates, changes and deletes
-AgentPlatformOrganizations in the namespaces it is bound in, and writes
-RoleBindings that bind agent-platform:user, editor or admin. Nothing else of
-an organization: it reads agents, sessions or credentials only after binding
-itself, which shows in the organization's members.
+organizations and their members. It creates, changes and deletes
+`Organization` objects (security.giantswarm.io, cluster-scoped; an
+organization has the Agent Platform while spec.agentPlatform.enabled is
+true), and writes RoleBindings that bind agent-platform:user, editor or
+admin. Nothing else of an organization: it reads agents, sessions or
+credentials only after binding itself, which shows in the organization's
+members.
 
-RBAC cannot keep the RoleBinding writes in the organization namespaces, so
-the policy agent-platform-organizations-admin-rolebindings refuses them
-everywhere else (admission.yaml). Bound in an organization namespace, it
-holds every rule of this role there, and RBAC lets a requester bind a role
-whose rules it holds without `bind`: the policy
-agent-platform-organization-admin-mirrors refuses a binding of this role
-there by anyone but the operator, and agent-platform-organization-no-nesting
-refuses an AgentPlatformOrganization created there. The chart binds it to nobody: platform staff
-get it by a ClusterRoleBinding, a customer's platform team by a RoleBinding in
-its parent namespace, which agent-platform-operator mirrors into that parent's
-organization namespaces. From agent-platform-operator 0.2.0 the operator also
-mirrors, bound to this role, the Users and Groups of rbac-operator's
-cluster-admin RoleBindings in the parent namespace (the installation's
-customer admin groups). A cluster-admin already holds every right it grants.
+An `Organization` is cluster-scoped, so only a ClusterRoleBinding grants its
+rules on them: platform staff get the role that way. The chart binds it to
+nobody. RBAC cannot keep the RoleBinding writes in the organization
+namespaces, so the policy agent-platform-organizations-admin-rolebindings
+refuses them everywhere else (admission.yaml). A cluster-admin already holds
+every right it grants.
 */ -}}
 {{- if include "agent-platform.organizations.enabled" . }}
 ---
@@ -30,8 +24,8 @@ metadata:
   labels:
     {{- include "labels.common" . | nindent 4 }}
 rules:
-  - apiGroups: ["agent-platform.giantswarm.io"]
-    resources: ["agentplatformorganizations"]
+  - apiGroups: ["security.giantswarm.io"]
+    resources: ["organizations"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]

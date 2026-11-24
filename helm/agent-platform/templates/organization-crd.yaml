@@ -1,0 +1,30 @@
+{{- /*
+The `Organization` CRD (organizations.security.giantswarm.io) on a cluster
+without KaaS (agentPlatformOrganizations.organizationCRD.enabled,
+giantswarm/giantswarm#39496). An organization of the Agent Platform is an
+`Organization` with spec.agentPlatform.enabled (giantswarm/giantswarm#39492);
+on a management cluster the KaaS stack installs this CRD, on a cluster
+without KaaS nothing does, and organization-operator and rbac-operator do not
+run there.
+
+A value, not detection, as for the Flux CRDs of the bundled engine (the
+glossary's "Bundled Flux"): off by default, so this chart never takes over the
+CRD of a cluster whose KaaS stack installed it. files/crds/ holds
+organization-operator's CRD as generated
+(giantswarm/organization-operator@12b648ac1332eb3c9c642ea55cb0f160aa59fd8b,
+config/crd/bases/security.giantswarm.io_organizations.yaml).
+
+A template, not a crds/ subchart: nothing in this chart is an `Organization`,
+so no ordering needs crds/; Helm upgrades a template with the chart, and on a
+cluster where the CRD already exists under another owner the release fails
+instead of carrying it over. helm.sh/resource-policy: keep leaves it in place
+when the value turns off or the release is uninstalled: removing the CRD
+would delete every `Organization`.
+*/ -}}
+{{- if dig "organizationCRD" "enabled" false (.Values.agentPlatformOrganizations | default dict) }}
+{{- $crd := .Files.Get "files/crds/security.giantswarm.io_organizations.yaml" | fromYaml }}
+{{- $_ := set $crd.metadata "annotations" (merge (dict "helm.sh/resource-policy" "keep") ($crd.metadata.annotations | default dict)) }}
+{{- $_ := set $crd.metadata "labels" (include "labels.common" . | fromYaml) }}
+---
+{{ toYaml $crd }}
+{{- end }}

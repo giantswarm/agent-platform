@@ -353,7 +353,7 @@ def agreement(m, c):
     cm = ov.get("commitMode")
     if cm:
         objects = flat(vaps.get("agent-platform-organization-operator-objects", {}))
-        prefix = cm["path"].split("{parent}")[0]
+        prefix = cm["path"].split("{name}")[0]
         for cel, which in ((f"object.spec.sourceRef.kind == '{cm['sourceRef']['kind']}'", "source kind"),
                            (f"object.spec.sourceRef.name == '{cm['sourceRef']['name']}'", "source name"),
                            (f"object.spec.path == '{prefix}' +", "path prefix"),

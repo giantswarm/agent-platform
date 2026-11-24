@@ -1,10 +1,12 @@
 {{/* vim: set filetype=mustache: */}}
 {{/*
 Helpers of the Agent Platform organizations' role and admission policies
-(templates/organizations/, giantswarm/agent-platform#1267). The names are the
-agent-platform-operator's (giantswarm/agent-platform-operator, api/v1alpha1
-and internal/controller): the labels it puts on an organization namespace,
-the label of what it writes there, and the generateName prefix.
+(templates/organizations/, giantswarm/agent-platform#1267). An organization
+is an `Organization` (security.giantswarm.io/v1alpha1, cluster-scoped) with
+spec.agentPlatform.enabled (giantswarm/giantswarm#39492). The names are the
+agent-platform-operator's (giantswarm/agent-platform-operator,
+internal/controller): the labels it puts on the organization namespace
+agents-<name>, the label of what it writes there, and its finalizer.
 */}}
 
 {{/*
@@ -22,14 +24,24 @@ true
 {{- end -}}
 {{- end -}}
 
-{{/* The label that marks an organization namespace: the AgentPlatformOrganization's name. */}}
+{{/* The label that marks an organization namespace: the Organization's name. */}}
 {{- define "agent-platform.organizations.label" -}}
 agent-platform.giantswarm.io/organization
 {{- end -}}
 
-{{/* The three labels of an organization namespace, as a JSON list. */}}
+{{/* The two labels of an organization namespace, as a JSON list: the Organization's name and UID. */}}
 {{- define "agent-platform.organizations.labels" -}}
-{{- list "agent-platform.giantswarm.io/organization" "agent-platform.giantswarm.io/parent" "agent-platform.giantswarm.io/organization-uid" | toJson -}}
+{{- list "agent-platform.giantswarm.io/organization" "agent-platform.giantswarm.io/organization-uid" | toJson -}}
+{{- end -}}
+
+{{/*
+The finalizer agent-platform-operator puts on an Organization with the Agent
+Platform enabled, which holds its deletion until the operator erased the
+organization's Agent Platform: the one change it makes to an Organization
+besides its status.
+*/}}
+{{- define "agent-platform.organizations.finalizer" -}}
+agent-platform.giantswarm.io/erasure
 {{- end -}}
 
 {{/*
