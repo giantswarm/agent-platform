@@ -5010,7 +5010,7 @@ Usage: include "agent-platform.muster.redirectAllowlist" $root | fromJsonArray
 {{- $host := dig "hostname" "" $backstage -}}
 {{- if and (not $host) .Values.global.domain -}}{{- $host = printf "backstage.%s" .Values.global.domain -}}{{- end -}}
 {{- $port := toString (dig "publicPort" "" $backstage | default "") -}}
-{{- if and $port (not (regexMatch "^[1-9][0-9]{0,4}$" $port)) -}}
+{{- if and $port (or (not (regexMatch "^[1-9][0-9]{0,4}$" $port)) (gt (atoi $port) 65535)) -}}
 {{- fail (printf "backstage.publicPort %q: want the port the portal's public URL carries (1-65535), or empty for 443" $port) -}}
 {{- end -}}
 {{- if $host -}}{{- $derived = append $derived (printf "https://%s%s/sessions" $host (ternary (printf ":%s" $port) "" (and (ne $port "") (ne $port "443")))) -}}{{- end -}}
