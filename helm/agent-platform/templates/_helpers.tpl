@@ -1076,6 +1076,13 @@ browser to after an approval, from the same muster floor. */ -}}
 {{- $_ := set $muster "approval" . -}}
 {{- $_ := set $derived "muster" $muster -}}
 {{- end -}}
+{{- /* agent-manager's ServiceAccount, the one sender of approval settings,
+bound to muster-approval-binder by the muster chart in muster's namespace. */ -}}
+{{- with (include "agent-platform.muster.approvalBinderSubjects" .root | fromJsonArray) -}}
+{{- $rbac := get $derived "rbac" | default dict -}}
+{{- $_ := set $rbac "approvalBinder" (dict "subjects" .) -}}
+{{- $_ := set $derived "rbac" $rbac -}}
+{{- end -}}
 {{- with (include "agent-platform.muster.redirectAllowlist" .root | fromJsonArray) -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $derived "muster" (mergeOverwrite $muster (dict "oauth" (dict "mcpClient" (dict "postLoginRedirectAllowlist" .)))) -}}
@@ -4782,32 +4789,178 @@ Usage: include "agent-platform.governance" $root
 {{- end -}}
 
 {{/*
+The namespace a component's release installs its workloads (and its muster
+MCPServer) into, as components.yaml places it: the kagent namespace with
+components.<name>.inKagentNamespace, else components.<name>.targetNamespace,
+else the platform's (agent-platform.targetNamespace).
+Usage: include "agent-platform.componentNamespace" (dict "root" $ "name" "model-manager")
+*/}}
+{{- define "agent-platform.componentNamespace" -}}
+{{- $c := index (.root.Values.components | default dict) .name | default dict -}}
+{{- if $c.inKagentNamespace -}}
+{{- include "agent-platform.kagent.namespace" .root -}}
+{{- else -}}
+{{- $c.targetNamespace | default (include "agent-platform.targetNamespace" .root) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+muster's key for an MCPServer (muster's api.MCPServerKey): the name for a
+server in muster's own namespace (muster.muster.namespace, else the muster
+release's), namespace/name for one outside it.
+Usage: include "agent-platform.muster.serverKey" (dict "root" $ "namespace" $ns "name" $name)
+*/}}
+{{- define "agent-platform.muster.serverKey" -}}
+{{- $musterNs := dig "muster" "namespace" "" (.root.Values.muster | default dict) | default (include "agent-platform.muster.namespace" .root) -}}
+{{- if or (not .namespace) (eq .namespace $musterNs) -}}{{- .name -}}{{- else -}}{{- printf "%s/%s" .namespace .name -}}{{- end -}}
+{{- end -}}
+
+{{/*
+The muster server keys of a governedServers source (top-level
+governedServers.<source>), as a JSON list: the MCPServers the platform ships
+for it while they render.
+  - the manager components (agent-manager, model-manager, vm-manager,
+    cluster-manager, workspace-manager, toolchain-manager, skill-manager):
+    <component>.muster.mcpServer.name (default the component's name) in the
+    component's namespace, while the component is on;
+  - kagent: the connectivity chart's MCPServer kagent (kagent's session and
+    sandbox tools), while the kagent component is on;
+  - mcp-kubernetes: the connectivity chart's [<managementCluster>-]mcp-kubernetes
+    while the mcp-kubernetes component and mcp-kubernetes.mcpServer.enabled are
+    on, and every agent-platform-mcps.mcpServers entry of group kubernetes
+    (its name, else <cluster>-mcp-kubernetes, in its namespace, else the
+    component's);
+  - any other source is a server key itself (giantswarm-platform-manager, the
+    Platform Manager's registration, or an installation's own server).
+Usage: include "agent-platform.muster.governedKeys" (dict "root" $ "source" $source) | fromJsonArray
+*/}}
+{{- define "agent-platform.muster.governedKeys" -}}
+{{- $root := .root -}}
+{{- $keys := list -}}
+{{- $managers := list "agent-manager" "model-manager" "vm-manager" "cluster-manager" "workspace-manager" "toolchain-manager" "skill-manager" -}}
+{{- $connNs := dig "agent-platform-connectivity" "targetNamespace" "" ($root.Values.components | default dict) | default (include "agent-platform.targetNamespace" $root) -}}
+{{- if has .source $managers -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" .source)) (dig "muster" "mcpServer" "enabled" true (index $root.Values .source | default dict)) -}}
+{{- $name := dig "muster" "mcpServer" "name" .source (index $root.Values .source | default dict) -}}
+{{- $keys = append $keys (include "agent-platform.muster.serverKey" (dict "root" $root "namespace" (include "agent-platform.componentNamespace" (dict "root" $root "name" .source)) "name" $name)) -}}
+{{- end -}}
+{{- else if eq .source "kagent" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent") -}}
+{{- $keys = append $keys (include "agent-platform.muster.serverKey" (dict "root" $root "namespace" $connNs "name" "kagent")) -}}
+{{- end -}}
+{{- else if eq .source "mcp-kubernetes" -}}
+{{- $mcpk := index $root.Values "mcp-kubernetes" | default dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" "mcp-kubernetes")) (dig "mcpServer" "enabled" true $mcpk) -}}
+{{- $cluster := dig "mcpServer" "managementCluster" "" $mcpk -}}
+{{- $keys = append $keys (include "agent-platform.muster.serverKey" (dict "root" $root "namespace" $connNs "name" (printf "%smcp-kubernetes" (ternary (printf "%s-" $cluster) "" (ne $cluster ""))))) -}}
+{{- end -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" $root "name" "agent-platform-mcps") -}}
+{{- $mcpsNs := include "agent-platform.componentNamespace" (dict "root" $root "name" "agent-platform-mcps") -}}
+{{- range (dig "mcpServers" list (index $root.Values "agent-platform-mcps" | default dict)) -}}
+{{- if eq (toString .group) "kubernetes" -}}
+{{- $name := .name | default (printf "%s-mcp-%s" .cluster .group) -}}
+{{- $key := include "agent-platform.muster.serverKey" (dict "root" $root "namespace" (.namespace | default $mcpsNs) "name" $name) -}}
+{{- if not (has $key $keys) -}}{{- $keys = append $keys $key -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- else -}}
+{{- $keys = append $keys .source -}}
+{{- end -}}
+{{- $keys | toJson -}}
+{{- end -}}
+
+{{/*
 muster's governance configuration (Governing tool calls,
 giantswarm/giantswarm#38902), rendered from the platform's governance mode:
-`mode` (governance) and `servers`, the MCPServer names muster treats as each
-role's: agentManager (agent-manager.muster.mcpServer.name, default
-agent-manager) and platformManager (giantswarm-platform-manager, the Platform
-Manager's registration). The floors are built into muster; this configuration
-only adds the governed entries and tells muster which servers offer the names
-it matches. An own muster.muster.governance.servers.<role> stands; an own
-mode that differs from `governance` fails (single source). Only from the
-muster floor agent-platform.muster.governanceFloor; {} below it.
+`mode` (governance) and `governedServers`, one entry {server, role, safe} per
+MCPServer the platform ships for each source of the top-level governedServers
+(agent-platform.muster.governedKeys): its role names the floors muster asks
+agents for in both modes, its safe list the tools agents call unasked on
+governed (every other tool of a governed server asks agents there, new and
+renamed ones too). A source set to null governs nothing (the coverage test,
+tests/verify-tool-approval.py, then wants it in governanceExempt). An own
+muster.muster.governance.governedServers entry stands for its server key,
+first; an own mode that differs from `governance` fails (single source), and
+so does an own muster.muster.governance.servers (the earlier shape, which
+muster refuses beside governedServers). Only from the muster floor
+agent-platform.muster.governanceFloor; {} below it, where `governed` fails the
+render rather than silently asking nothing.
 Usage: include "agent-platform.muster.governance" $root | fromJson
 */}}
 {{- define "agent-platform.muster.governance" -}}
+{{- $root := . -}}
 {{- $mode := include "agent-platform.governance" . -}}
 {{- $out := dict -}}
-{{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.governanceFloor" .)) -}}
+{{- $floor := include "agent-platform.muster.governanceFloor" . -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" $floor) -}}
 {{- $own := dig "muster" "governance" dict (.Values.muster | default dict) | default dict -}}
 {{- with $own.mode -}}
 {{- if ne (toString .) $mode -}}
 {{- fail (printf "muster.muster.governance.mode (%v) differs from governance (%s): the platform's governance mode is the top-level governance value; leave muster.muster.governance.mode unset" . $mode) -}}
 {{- end -}}
 {{- end -}}
-{{- $amName := dig "muster" "mcpServer" "name" "agent-manager" (index .Values "agent-manager" | default dict) -}}
-{{- $servers := dict "agentManager" (list $amName) "platformManager" (list "giantswarm-platform-manager") -}}
-{{- $servers = mergeOverwrite $servers ($own.servers | default dict) -}}
-{{- $out = dict "mode" $mode "servers" $servers -}}
+{{- if $own.servers -}}
+{{- fail "muster.muster.governance.servers is the earlier governance shape, which muster does not read beside governedServers: name a server's role and safe list in the top-level governedServers (or muster.muster.governance.governedServers entries {server, role, safe})" -}}
+{{- end -}}
+{{- $servers := list -}}
+{{- $seen := list -}}
+{{- range ($own.governedServers | default list) -}}
+{{- $servers = append $servers . -}}
+{{- $seen = append $seen (toString .server) -}}
+{{- end -}}
+{{- range $source, $entry := (.Values.governedServers | default dict) -}}
+{{- if $entry -}}
+{{- if not (kindIs "map" $entry) -}}
+{{- fail (printf "governedServers.%s: want {role, safe} or null, got %v" $source $entry) -}}
+{{- end -}}
+{{- range $k, $_ := $entry -}}
+{{- if not (has $k (list "role" "safe")) -}}
+{{- fail (printf "governedServers.%s.%s: unknown key (want role and safe)" $source $k) -}}
+{{- end -}}
+{{- end -}}
+{{- range (include "agent-platform.muster.governedKeys" (dict "root" $root "source" $source) | fromJsonArray) -}}
+{{- if not (has . $seen) -}}
+{{- $server := dict "server" . "safe" ($entry.safe | default list) -}}
+{{- with $entry.role -}}{{- $_ := set $server "role" . -}}{{- end -}}
+{{- $servers = append $servers $server -}}
+{{- $seen = append $seen . -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out = dict "mode" $mode "governedServers" $servers -}}
+{{- else if ne $mode "trusted" -}}
+{{- fail (printf "governance %s needs muster %s or later (the first release that reads the governance configuration), but components.muster.versionRange %q allows earlier releases: below it nothing would ask agents. Move components.muster.versionRange to >=%s, or keep governance trusted" $mode $floor (dig "muster" "versionRange" "" .Values.components) $floor) -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+muster's approval-binder subjects (muster.rbac.approvalBinder.subjects): the
+muster chart ships the Role muster-approval-binder and binds it, in muster's
+namespace where muster's sender review asks, to these subjects. The platform
+binds agent-manager's ServiceAccount and nothing else, while agent-manager is
+on: agent-manager.serviceAccount.name, else agent-manager.fullnameOverride,
+in agent-manager's namespace. A ServiceAccount the chart does not create
+needs its name (the namespace's `default` would let every pod using it send
+approval settings). An own muster.rbac.approvalBinder.subjects stands. Only
+from the muster floor agent-platform.muster.governanceFloor; [] below it.
+Usage: include "agent-platform.muster.approvalBinderSubjects" $root | fromJsonArray
+*/}}
+{{- define "agent-platform.muster.approvalBinderSubjects" -}}
+{{- $out := list -}}
+{{- if and (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.governanceFloor" .))) (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) (not (dig "rbac" "approvalBinder" "subjects" list (.Values.muster | default dict))) -}}
+{{- $am := index .Values "agent-manager" | default dict -}}
+{{- $name := dig "serviceAccount" "name" "" $am -}}
+{{- if not (dig "serviceAccount" "create" true $am) -}}
+{{- if not $name -}}
+{{- fail "agent-manager.serviceAccount.create is false without agent-manager.serviceAccount.name: muster-approval-binder would bind the namespace's default ServiceAccount, so every pod using it could send approval settings; name agent-manager's ServiceAccount" -}}
+{{- end -}}
+{{- else -}}
+{{- $name = $name | default (required "agent-manager.fullnameOverride must be set" (dig "fullnameOverride" "" $am)) -}}
+{{- end -}}
+{{- $out = list (dict "kind" "ServiceAccount" "name" $name "namespace" (include "agent-platform.componentNamespace" (dict "root" . "name" "agent-manager"))) -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}
@@ -4832,15 +4985,19 @@ Usage: include "agent-platform.muster.approval" $root | fromJson
 
 {{/*
 The pages muster may send the browser back to after an approval
-(muster.oauth.mcpClient.postLoginRedirectAllowlist; an entry admits its path
-and everything below it at a segment boundary): the portal's Sessions pages,
-https://<portal host>/sessions, while the portal is on and has a host
-(backstage.hostname, else backstage.<global.domain>), and klaus-gateway's
-return, <klausGateway.obo.callbackBaseUrl>/auth/slack/return, while
-klaus-gateway is on and names its callbackBaseUrl. An own list's entries stay,
-first, each entry once. Only from the muster floor
-agent-platform.muster.governanceFloor; [] below it. muster renders the list
-only while muster.muster.oauth.mcpClient.enabled is on.
+(muster.oauth.mcpClient.postLoginRedirectAllowlist; muster compares scheme and
+host with its port exactly, and an entry admits its path and everything below
+it at a segment boundary): the portal's Sessions pages,
+https://<portal host>[:<backstage.publicPort>]/sessions, while the portal is on
+and has a host (backstage.hostname, else backstage.<global.domain>; the port
+only when backstage.publicPort is set and not 443, as on a lab edge on 8443),
+and klaus-gateway's return, <klausGateway.obo.callbackBaseUrl>/auth/slack/return
+(scheme, host and port as written; an http(s) URL with a host, else the
+render fails naming the key), while klaus-gateway is on and names its
+callbackBaseUrl. An own list's entries stay, first, each entry once. Only
+from the muster floor agent-platform.muster.governanceFloor; [] below it.
+muster renders the list only while muster.muster.oauth.mcpClient.enabled is
+on (NOTES.txt says so when the list is not empty and it is off).
 Usage: include "agent-platform.muster.redirectAllowlist" $root | fromJsonArray
 */}}
 {{- define "agent-platform.muster.redirectAllowlist" -}}
@@ -4852,11 +5009,21 @@ Usage: include "agent-platform.muster.redirectAllowlist" $root | fromJsonArray
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "backstage") -}}
 {{- $host := dig "hostname" "" $backstage -}}
 {{- if and (not $host) .Values.global.domain -}}{{- $host = printf "backstage.%s" .Values.global.domain -}}{{- end -}}
-{{- if $host -}}{{- $derived = append $derived (printf "https://%s/sessions" $host) -}}{{- end -}}
+{{- $port := toString (dig "publicPort" "" $backstage | default "") -}}
+{{- if and $port (not (regexMatch "^[1-9][0-9]{0,4}$" $port)) -}}
+{{- fail (printf "backstage.publicPort %q: want the port the portal's public URL carries (1-65535), or empty for 443" $port) -}}
+{{- end -}}
+{{- if $host -}}{{- $derived = append $derived (printf "https://%s%s/sessions" $host (ternary (printf ":%s" $port) "" (and (ne $port "") (ne $port "443")))) -}}{{- end -}}
 {{- end -}}
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway") -}}
 {{- $base := dig "obo" "callbackBaseUrl" "" (.Values.klausGateway | default dict) | trimSuffix "/" -}}
-{{- if $base -}}{{- $derived = append $derived (printf "%s/auth/slack/return" $base) -}}{{- end -}}
+{{- if $base -}}
+{{- $u := urlParse $base -}}
+{{- if or (not (has $u.scheme (list "http" "https"))) (not $u.host) $u.userinfo $u.query $u.fragment -}}
+{{- fail (printf "klausGateway.obo.callbackBaseUrl %q: want an http(s) URL with a host (and port, if not the scheme's default), no user, query or fragment, e.g. https://gw.example.com" $base) -}}
+{{- end -}}
+{{- $derived = append $derived (printf "%s/auth/slack/return" $base) -}}
+{{- end -}}
 {{- end -}}
 {{- range $derived -}}{{- if not (has . $out) -}}{{- $out = append $out . -}}{{- end -}}{{- end -}}
 {{- end -}}

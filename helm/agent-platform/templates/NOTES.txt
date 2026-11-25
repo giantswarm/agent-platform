@@ -107,3 +107,9 @@ Workspaces, base URL {{ $wmBase }} (routed: /.well-known/jwks.json):
 {{- end }}
 {{- end }}
 {{- end }}
+{{- with (include "agent-platform.muster.redirectAllowlist" . | fromJsonArray) }}
+{{- if not (dig "muster" "oauth" "mcpClient" "enabled" false ($.Values.muster | default dict)) }}
+
+Tool approval: muster renders its redirect allowlist ({{ join ", " . }}) only with muster.muster.oauth.mcpClient.enabled on, which is off. Until it is, the approval page records an answer but never sends the browser back to the portal or Slack: the person returns by hand (Done in the portal, or Slack).
+{{- end }}
+{{- end }}

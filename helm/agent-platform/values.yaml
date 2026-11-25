@@ -1521,6 +1521,7 @@ components:  # @schema additionalProperties: true
     # top-level block and are dropped on the way out, the kagent shape.
     omitKeys:
       - hostname
+      - publicPort
       - parentRefs
       - installationName
       - extraScopes
@@ -1819,6 +1820,10 @@ components:  # @schema additionalProperties: true
       # as its governance configuration (agent-platform.muster.governance);
       # no wiring of the connectivity chart reads it.
       - governance
+      # The governed servers and the exempt list are the meta chart's too
+      # (muster.governance.governedServers and its coverage test).
+      - governedServers
+      - governanceExempt
       # Read by the meta chart alone (merged into the four components' own
       # scheduling knobs before their releases render, agent-platform.scheduling.apply);
       # the connectivity chart never sees it.
@@ -5801,31 +5806,100 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # === Governance mode (Governing tool calls, giantswarm/giantswarm#38902) ===
 # -- The platform's governance mode: trusted (the default) or governed. It
 # changes no tool approval setting's meaning; it adds asking for agent
-# callers. Governed asks a person before an agent creates an agent
-# (agent-manager's create_agent), changes an agent's tools
-# (update_agent_access), starts another agent (start_session) or pauses a
-# connector, and the Dev Portal's connector wizard pre-selects the
-# Recommended preset (read-only tools run, the rest ask); trusted lets agents
-# do those freely and pre-selects Allow all. In both modes muster's built-in
-# floors ask a person before an agent adds or repoints a connector, changes
-# approval settings, gives an agent an exception or changes muster's own
-# configuration. The meta chart renders muster's governance configuration
-# from it (muster.governance: the mode, and the servers muster treats as
-# agent-manager and the Platform Manager), from the muster release that reads
-# it (agent-platform.muster.governanceFloor); an earlier muster gets none and
-# asks nothing. From that release the meta chart also renders
-# muster.approval.installation (backstage.installationName, the name the
-# approval page shows) and the pages muster may return the browser to after an approval in
-# muster.oauth.mcpClient.postLoginRedirectAllowlist (the portal's /sessions,
-# klausGateway.obo.callbackBaseUrl + /auth/slack/return; an own list's entries
-# stay). Approval itself needs muster's OAuth server with Dex sign-in, Valkey
-# storage (the default) and muster.muster.oauth.mcpClient.publicUrl on the
-# OAuth server's origin with mcpClient.enabled for the allowlist; the chart
-# does not fail without them, muster refuses asking calls with the reason.
-# Only admins switch it, through the Platform Manager with a
-# second person's approval; never an agent. Anything else fails the render.
+# callers. Governed asks a person before an agent runs any tool of a governed
+# server (governedServers below) that is not on that server's safe list (new
+# and renamed tools too), and before any of muster's own tools but its reads;
+# the Dev Portal's connector wizard pre-selects the Recommended preset
+# (read-only tools run, the rest ask). Trusted lets agents run what the
+# connectors' own settings allow and pre-selects Allow all. In both modes
+# muster's built-in floors ask a person before an agent adds or repoints a
+# connector, changes approval settings, grants access, adds a model, egress
+# origin, credential or backend, approves an action or a toolchain source, or
+# changes muster's own configuration; the role floors hold on the governed
+# servers of that role, so governedServers names them in both modes. The meta
+# chart renders muster's governance configuration from it
+# (muster.governance: the mode and governedServers), from the muster release
+# that reads it (agent-platform.muster.governanceFloor); below it `governed`
+# fails the render and trusted renders nothing. From that release the meta
+# chart also renders muster.approval.installation (backstage.installationName,
+# the name the approval page shows), muster-approval-binder's subject
+# (agent-manager's ServiceAccount, muster.rbac.approvalBinder.subjects) and
+# the pages muster may return the browser to after an approval in
+# muster.oauth.mcpClient.postLoginRedirectAllowlist (the portal's /sessions
+# with backstage.publicPort, klausGateway.obo.callbackBaseUrl +
+# /auth/slack/return; an own list's entries stay). Approval itself needs
+# muster's OAuth server with Dex sign-in, Valkey storage (the default) and
+# muster.muster.oauth.mcpClient.publicUrl on the OAuth server's origin with
+# mcpClient.enabled for the allowlist; the chart does not fail without them,
+# muster refuses asking calls with the reason. Only admins switch it, through
+# the Platform Manager with a second person's approval; never an agent.
+# Anything else fails the render.
 # Concept: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
 governance: trusted  # @schema enum: [trusted, governed]
+
+# -- The servers muster governs (muster.governance.governedServers), per
+# source the platform ships: `role` (which of muster's role floors hold on
+# it: agentManager, platformManager, connectorManager, sessionManager,
+# modelManager, clusterManager, vmManager, workspaceManager,
+# toolchainManager, skillManager, infrastructure) and `safe`, the server's
+# own tool names agents call unasked on governed (reads only; a floor never,
+# muster refuses to start on one). Every other tool of a governed server asks
+# agents on governed. A source renders one entry per MCPServer it ships
+# while that renders (agent-platform.muster.governedKeys): a manager
+# component's <component>.muster.mcpServer.name in its namespace; kagent the
+# connectivity chart's kagent server; mcp-kubernetes the connectivity chart's
+# and every agent-platform-mcps kubernetes entry; any other key is a muster
+# server key itself (giantswarm-platform-manager). null drops a source (then
+# list it in governanceExempt with the reason). make verify-tool-approval
+# fails on a shipped MCPServer that is neither here nor in governanceExempt,
+# and on a safe entry that names a floor or no tool of its server. Safe
+# lists: tool-approval governed-safe-list-proposal (giantswarm/giantswarm#38902).
+governedServers:  # @schema additionalProperties: true
+  agent-manager:
+    role: agentManager
+    safe: [get_info, list_agents, get_agent, get_agent_status, validate_agent, list_model_configs, list_egress_policies, list_skills, list_sessions, get_session, get_session_turn, toolchain_users, list_organizations, get_organization, list_organization_members, list_organization_connectors]
+  kagent:
+    role: sessionManager
+    safe: [list_sessions, list_session_checkpoints, list_sandbox_templates, list_sandboxes, get_sandbox, get_sandbox_process, read_sandbox_outputs, read_sandbox_file]
+  model-manager:
+    role: modelManager
+    safe: [get_info, get_backend, list_backends, list_models, get_model, list_loaded_models, list_presets, search_models, check_fit, list_nodes, list_jobs, get_job]
+  cluster-manager:
+    role: clusterManager
+    safe: [get_info, list_clusters, list_releases, list_node_pools]
+  vm-manager:
+    role: vmManager
+    # get_vm_console is left off: a console can carry secrets.
+    safe: [get_info, get_host, list_images, get_image, list_networks, get_network, list_vms, get_vm, get_vm_metrics, get_vm_attestation]
+  toolchain-manager:
+    role: toolchainManager
+    # add_packages, add_binary and init_source write nothing but render files
+    # an agent could feed elsewhere: they ask until their asks prove noisy.
+    safe: [list_sources, list_toolchains, describe_toolchain, toolchain_build_status, search_packages]
+  workspace-manager:
+    role: workspaceManager
+    # authorize_workspace returns a repository grant for start_session.
+    safe: [list_providers, list_owners, list_workspaces, get_workspace, list_repositories, preview_workspace]
+  skill-manager:
+    role: skillManager
+    safe: [list_skill_sources, list_skills, resolve_skills, get_skill, get_skill_file]
+  mcp-kubernetes:
+    role: infrastructure
+    # The write tools (create, apply, delete, patch, scale, exec,
+    # port_forward, context_use, the stop tools) and the deprecated
+    # kubernetes_* aliases ask agents on governed.
+    safe: [logs, list_port_forward_sessions, context_list, context_get_current, can_i, api_resources, cluster_health, capi_list_clusters, capi_get_cluster, capi_resolve_cluster, capi_cluster_health, get, list, describe]
+  giantswarm-platform-manager:
+    role: platformManager
+    # Not inventoried yet: every tool but the floors' asks agents on governed.
+    safe: []
+
+# -- MCPServer sources the platform ships that muster deliberately does not
+# govern, each with its reason (make verify-tool-approval wants every shipped
+# source in governedServers or here). Read by the meta chart's tests only.
+governanceExempt:  # @schema additionalProperties: {type: string}
+  prometheus: "agent-platform-mcps' prometheus family (mcp-prometheus): every tool reads"
+  capi: "agent-platform-mcps' capi family (mcp-kubernetes' CAPI tools): every tool reads"
 
 tenants:
   platform:
@@ -6781,6 +6855,12 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # --- Wiring (read by the connectivity chart, not passed to the backstage chart) ---
   # Public hostname; empty derives backstage.<global.domain>.
   hostname: ""
+  # publicPort: the port of the portal's public URL when it is not 443 (a
+  # lab edge on 8443): read by the meta chart alone, for the portal entry of
+  # muster's redirect allowlist (https://<hostname>:<publicPort>/sessions;
+  # muster compares the port exactly). Unset or 443 writes none. Unset by
+  # default (it is no key of the backstage chart: components.backstage.omitKeys).
+  # publicPort: 8443
   # Gateway of the Backstage route; empty follows the platform default (the
   # chart-owned edge, else global.gatewayApi.parentRefs).
   parentRefs: []
