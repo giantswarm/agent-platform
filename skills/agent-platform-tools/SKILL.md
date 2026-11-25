@@ -2,7 +2,7 @@
 name: agent-platform-tools
 description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing or refused, connectors and signing in to one, workflows, or model-manager.
 metadata:
-  version: "3.3.1"
+  version: "3.4.0"
 ---
 
 # Tools on the Agent Platform
@@ -119,16 +119,17 @@ connector that does not work (a missing key, say): tell the person its `message`
 `RemoteMCPServer` that one HelmRelease renders with an agent of its name. It is no connector:
 offer and use only the entries without `musterBindingOf`, which marks it with the agent's name
 from agent-manager 3.3.4 (`musterBindingOf` in the tool's description). When no entry carries
-the field (an older agent-manager, or you may not list the namespace's Agents), leave out each
-entry named like an agent of the namespace.
+the field (an older agent-manager, or you may not list the organization's Agents), leave out each
+entry named like an agent of the organization. Every organization tool takes the organization by
+its name, `organization` (`agent-platform-organizations`).
 
 To replace a model key or an egress credential, read its Secret from the list:
 `x_agent-manager_list_model_configs` (each model with a key) and
 `x_agent-manager_list_egress_policies` (each destination with a credential) name it by
 `credentialSecret` and `credentialKey` — names only, never a value. Pass them as `secret` and `key`
 to `x_agent-manager_replace_organization_credential`, or as `credentialSecret` and `credentialKey`
-to `x_agent-manager_set_organization_model` and `x_agent-manager_set_organization_egress_policy`;
-never ask the person for them.
+to `x_agent-manager_set_organization_model` and `x_agent-manager_set_organization_egress_policy`,
+with the same `organization` as the list; never ask the person for them.
 
 Tools register live when a server connects. Adding connectors:
 https://docs.giantswarm.io/tutorials/agent-platform/managing-mcp-servers/ and
