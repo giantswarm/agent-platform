@@ -1478,6 +1478,12 @@ verify-mcp-kubernetes-registration: ## Assert the bundled mcp-kubernetes registr
 	@python3 tests/verify-mcp-kubernetes-registration.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "mcp-kubernetes registration shapes verified."
 
+.PHONY: verify-tool-approval
+verify-tool-approval: ## Assert the platform side of Governing tool calls (giantswarm/giantswarm#38902): the top-level governance value renders muster's governance configuration into the muster release (muster.governance: mode trusted by default or governed, servers agentManager following agent-manager.muster.mcpServer.name and platformManager giantswarm-platform-manager, an own servers entry standing) from the muster floor agent-platform.muster.governanceFloor, none below it and none to the connectivity release; an unknown mode fails in the schema and the template, an own muster.muster.governance.mode that differs fails naming both keys; the connector-admin role (muster's mcpserver-editor) binds the Giant Swarm admin groups plus tenants.platformTeam, an own list standing; the connectivity release binds muster's Role muster-approval-binder to agent-manager's ServiceAccount only (following agent-manager.serviceAccount.name), in muster's namespace, none with agent-manager or muster off; the MCPServers the connectivity chart renders carry explicit approval settings (mcp-kubernetes the Recommended preset, kagent's session tools Allow all), a per-tool override reaching spec.approval, null rendering none and a value outside the CRD's enums or an unknown key failing naming the key. Stdlib only. HELM selects the binary.
+	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
+	@HELM="$(HELM)" python3 tests/verify-tool-approval.py $(CHART_DIR) $(CONNECTIVITY_DIR)
+	@echo "tool approval verified."
+
 .PHONY: verify-self
 verify-self: ## Assert self-management's shapes: engine off renders nothing of it; engine on renders the self OCIRepository + suspended HelmRelease, the -6/-5/0 hooks, the identity and the admission policy (CLI day-0 only); engine on with self off (lab, hand-back) renders the -6/-5 hooks at pre-upgrade too and nothing else; the guards and knobs. HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR))"
