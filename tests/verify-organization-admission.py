@@ -441,7 +441,7 @@ def fixtures():
         org("payments"), org("retired", prune="enabled"), org("kept", prune="disabled"),
         org("kaas", enabled=None), org("off", enabled=False),
         org("finalized", finalizers=[FINALIZER]), org("held", finalizers=["example.com/hold", FINALIZER]),
-        org("dotted.io", enabled=None),
+        org("switched-off", enabled=False, finalizers=[FINALIZER]), org("dotted.io", enabled=None),
         org("enabled.io"),  # enabled before the names policy existed
         *(org(n, prune="enabled") for n in ORPHANED),
         rb("organization-admins", ORG, role="agent-platform:admin"), rb("organization-admins", OLD, role="agent-platform:admin"),
@@ -1131,6 +1131,8 @@ def prove_delete_intent():
     case("an Organization with the Agent Platform and prune: enabled is deleted", delete("organization", "retired", None, as_=PERSON))
     case("an Organization without spec.agentPlatform is deleted (not held)", delete("organization", "kaas", None, as_=PERSON))
     case("an Organization with the Agent Platform disabled is deleted (not held)", delete("organization", "off", None, as_=PERSON))
+    case("an Organization with the Agent Platform off that still carries the operator's finalizer is deleted (not held: no hold)",
+         delete("organization", "switched-off", None, as_=PERSON))
     in_git = "erased only once its delete pull request merged"
     case("an Organization in git with prune: enabled is not deleted", delete("organization", "in-git", None, as_=PERSON), policy, in_git)
     case("an Organization missing from git with prune: enabled is not deleted", delete("organization", "lost", None, as_=PERSON), policy, in_git)
