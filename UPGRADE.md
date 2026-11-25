@@ -15,6 +15,20 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (tool approval and the governance mode)
+
+giantswarm/giantswarm#38902: muster decides Allow, Ask or Block for every tool call, and the chart renders muster's governance configuration (`governance`, `governedServers`: per shipped MCPServer its role and its safe list of reads), the approval page's installation name, the redirect allowlist and the approval binder ([chart README, "Tool approval and the governance mode"](helm/agent-platform/README.md#tool-approval-and-the-governance-mode)). None of it reaches a muster below `agent-platform.muster.governanceFloor`.
+
+### Operator action
+
+- Move `components.muster.versionRange` to the muster release that carries tool approval with this chart. `governance: governed` below it fails the render.
+- After muster's CRD upgrade, force a reconcile of the releases that render MCPServers (connectivity, agent-platform-mcps, the managers) if any of them was applied while the old CRD was served (its `spec.approval` was pruned): `flux reconcile helmrelease <name> -n <ns> --force`. Until the CRD knows `spec.approval`, muster refuses every server tool.
+- Keep `muster.rbac.mcpServerEditor.subjects` non-empty (the chart's default, the Giant Swarm admin groups and `tenants.platformTeam`): muster's chart no longer binds `system:authenticated` and fails the upgrade with an empty list while the old binding exists (`muster.rbac.mcpServerEditor.allowRemovingBinding: true` drops it).
+- Replace an own `muster.muster.governance.servers.<role>` with `governedServers` entries (the render fails on the earlier shape).
+- An edge not on 443: set `backstage.publicPort`, and remove a hand-written portal entry from `muster.muster.oauth.mcpClient.postLoginRedirectAllowlist`. The allowlist reaches muster only with `muster.muster.oauth.mcpClient.enabled`.
+- An agent-manager ServiceAccount the chart does not create (`agent-manager.serviceAccount.create: false`) needs `agent-manager.serviceAccount.name`.
+- Clients (portal, klaus-gateway, kagent) retry an approved call over the same MCP session; another connection asks anew.
+
 ## \<current\> → \<next\> (forge CLI configuration from the Harness only)
 
 The kagent and kagent-crds ranges select the 1.33 line. Its runtimes no longer generate git, gh or glab configuration in a workspace turn: no credential helper, no placeholder `GH_TOKEN` or `GITLAB_TOKEN` and no `GLAB_CONFIG_DIR`. The chart declares those inert values in `Harness.spec.env` with `workspaces.enabled`, and the Go ADK passes declared values to its shell tools while it still withholds every undeclared runtime variable. Session grants and gateway bindings keep deciding access; the values grant nothing.

@@ -141,38 +141,55 @@ agent, the portal, Slack, Claude Code):
 
 - **Allow** runs. **Ask**: a person confirms the exact call on Muster's approval page first; the
   call then runs once. **Block**: hidden, absent from `filter_tools`, refused as not found.
-- A connector carries `spec.approval`: a `rule` (`Allow` or `Ask`) that every tool without its own
-  entry follows — **new tools follow the rule** — and per-tool entries by the server's own tool
-  name (no `x_<server>_` prefix). A connector without `approval` runs everything and is shown as
-  *not reviewed*. An agent's settings can only tighten them; the strictest wins.
-- `filter_tools` and `describe_tool` report each tool's `approval` (`setting`, `source`: `tool`,
-  `connector`, `agent`, `agent-exception`, `builtin`, `governance` or `unreviewed`; `new` for a tool
-  without its own entry) and `connectorAdmin`, whether you may change that connector's settings.
+- A connector carries `spec.approval`: a `rule` (`Allow`, `Ask` or `Block`) that every tool without
+  its own entry follows — **new tools follow the rule**, so a `Block` rule hides every tool nobody
+  has reviewed yet — and per-tool entries by the server's own tool name (no `x_<server>_` prefix).
+  A connector without `approval` runs everything and is shown as *not reviewed*. An agent's
+  settings can only tighten them (agent-manager's tool lists, when its schema has `tools`); the
+  strictest wins.
+- `filter_tools` and `describe_tool` report each tool's `approval` (`setting`; `source`: `tool`,
+  `connector`, `unreviewed`, `builtin`, `governance`, `unavailable`, and with agent tool lists
+  `agent`, `agent-exception`; `new` for a tool without its own entry; `unavailable` with the reason
+  when asking calls are refused here) for **you**, the caller, and `connectorAdmin`, whether you
+  may change that connector's settings. The `filter_tools` result's `governance` field says
+  whether the platform is `trusted` or `governed`.
 - **Presets** fill in every tool once, on save, from the tools listed at that moment: *Recommended*
   (rule Ask, tools annotated read-only Allow, the rest Ask), *Allow all*, *Ask all*. Creating a
   connector over MCP (`core_mcpserver_create`) requires `preset` or explicit `approval`;
-  `core_mcpserver_set_approval` changes them. Only a connector admin (whoever may update
-  `mcpservers` in its namespace: the `connector-admin` role) may write them, and an agent writing
-  them always asks a person. The portal's wizard pre-selects *Allow all* on a trusted platform and
-  *Recommended* on a governed one. The platform's own connectors arrive reviewed: its management
-  servers (agent-manager, the other managers, kagent's session tools) on *Allow all*, the
-  infrastructure servers (Kubernetes, Prometheus, Cluster API) on *Recommended*.
+  `core_mcpserver_set_approval` changes them (pass the `generation` from `core_mcpserver_get` as
+  `expectedGeneration`; a conflict means someone changed it: read again). Only a connector admin
+  (whoever may update `mcpservers` in its namespace: the `connector-admin` role) may write them,
+  and an agent writing them always asks a person. The portal's wizard pre-selects *Allow all* on a
+  trusted platform and *Recommended* on a governed one. The platform's own connectors arrive
+  reviewed: its management servers (agent-manager, the other managers, kagent's session tools) on
+  *Allow all*, the infrastructure servers (Kubernetes, Prometheus, Cluster API) on *Recommended*.
 - **When a call asks**, you get an approval link (or, in a client without the prompt, an
   `approval_required` text with the URL). Give the person the link as is, wait, then call the tool
-  again with the same arguments: approved, it runs once; declined, you get a declined result —
-  accept it, never retry another way. A workflow asks once, up front, for all its steps.
-  Never press *Approve* yourself, and never ask the person to approve something you did not show
-  them; with no person to open the link the call expires and is refused.
-- **Built in, every mode**: an agent is asked before it adds or repoints a connector, changes
-  approval on a connector or an agent, gives an agent an exception, creates, changes or deletes a
-  workflow, or changes Muster's configuration (that one asks every caller). A **governed** platform
-  also asks before an agent creates an agent, changes an agent's tools, starts another agent's
-  session or pauses a connector; a **trusted** one (the default) lets agents do those freely.
+  again with the same arguments **over the same connection** (the same MCP session): approved, it
+  runs once; declined, you get a declined result — accept it, never retry another way. A retry
+  from another connection asks anew. A workflow asks once, up front, for all its steps. At most 3
+  calls of one connection (10 of one person) wait for a decision at a time. Never press *Approve*
+  yourself, and never ask the person to approve something you did not show them; with no person
+  to open the link the call expires and is refused.
+- **Built in, every mode** (agents only): an agent is asked before it adds or repoints a connector,
+  changes approval settings, creates, changes or deletes a workflow, grants or changes access
+  (organization members, connectors, models, egress, credentials), adds a model backend, approves
+  an action or a toolchain source, or changes Muster's configuration (that one asks every caller).
+  A **governed** platform also asks an agent before **every tool of the platform's own servers that
+  is not a read on their safe list** (creating, changing, starting or deleting agents and sessions,
+  VMs, clusters, models, workspaces, toolchains, Kubernetes writes, new tools too) and before
+  Muster's own tools other than its reads (pausing, deleting, starting or stopping a connector).
+  A **trusted** one (the default) leaves those to the connectors' settings. A person is never asked
+  by the mode, only by the connectors' settings.
 - Missing prerequisites (Muster's Valkey store, its OAuth server with browser sign-in, a public URL
   on that server's origin) make every asking call refused with the reason, reported as
   `approval.unavailable` on each tool that asks; tell the person, it is the installation's to fix
-  (the platform chart does not fail a render over it). The approval page returns the browser to the
-  portal or Slack only where the installation's redirect allowlist names them; the chart derives it.
+  (the platform chart does not fail a render over it). So does a cluster whose MCPServer CRD does
+  not know `spec.approval` yet (every server tool refused until it is upgraded). The approval page
+  returns the browser to the portal or Slack only where the installation's redirect allowlist names
+  them: the chart derives the entries (with the portal's port, `backstage.publicPort`), and Muster
+  renders them only with `muster.muster.oauth.mcpClient.enabled`; otherwise the person returns by
+  hand.
 
 ## Workflows
 

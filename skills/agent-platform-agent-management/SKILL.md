@@ -123,22 +123,26 @@ never assume an argument. The agent tools drop an unknown key without an error: 
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only
   on an explicit request. An own-account (OAuth) connector without `grantScope: subject` needs a
   sign-in in each of the agent's conversations (`agent-platform-tools`); say so before choosing it.
-- **Tool approval** (https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/): once agent-manager's `create_agent` schema has `tools`, the toolset
-  becomes the agent's **tool list**: the same selectors, each optionally `Allow`, `Ask` or `Block`,
-  plus a `default` for every listed tool without its own setting; at most 32 entries; an unlisted
-  tool is invisible. An agent's settings only tighten its connectors' (the strictest wins) and apply
-  to everyone who uses the agent. `Allow` over a tool its connector sets to `Ask`, or an allowing
-  `default`, is an **exception**: only a connector admin of that connector may grant it, and only
-  through `x_agent-manager_set_agent_approval` (`create_agent` and `update_agent_access` refuse
-  it); when you, an agent, call it, it asks the person, on every platform. Saving an agent
-  (`update_agent`, `update_agent_access`, `set_agent_approval`) drops each exception the saver is
-  not connector admin for, and the tool asks again: say so before saving. The tools split:
-  `update_agent` (name, description, prompt, model), `update_agent_access` (`tools` and everything
-  that widens reach: skills, plugins, egress, harness, workspace, toolchains),
-  `set_agent_approval` (the settings). On a **governed** platform `create_agent`,
-  `update_agent_access` and `start_session` ask the person when an agent calls them; on a trusted
-  one (the default) they don't. `muster.requireApproval: true` keeps asking before every call
-  until agent chart 3.0 moves it to `default: Ask`; never set it together with tool settings.
+- **Tool approval** (https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
+  today an agent's toolset only selects tools; their Allow/Ask/Block settings are the connectors'
+  (`agent-platform-tools`). On a **governed** platform every agent-manager tool that is not a read
+  (`create_agent`, `update_agent`, `delete_agent`, `start_session`, `delete_session`, the
+  organization writes) asks the person when an agent calls it; on a trusted one (the default) they
+  run, except the floors that ask in both modes (`set_organization_connector`,
+  `add_organization_member`, `set_organization_model`, `set_organization_egress_policy`,
+  `replace_organization_credential`). Check the `filter_tools` `approval` of the tool before you
+  promise an outcome. **Only once agent-manager ships per-agent tool lists** (its `create_agent`
+  schema has `tools`, and `x_agent-manager_update_agent_access` and
+  `x_agent-manager_set_agent_approval` exist; describe them first): the toolset becomes the agent's
+  **tool list**, the same selectors each optionally `Allow`, `Ask` or `Block` plus a `default`, at
+  most 32 entries, an unlisted tool invisible; an agent's settings only tighten its connectors'
+  (the strictest wins); `Allow` over a connector's `Ask` is an **exception** only a connector admin
+  of that connector grants, through `set_agent_approval`, which asks the person whenever an agent
+  calls it, and a save drops the exceptions the saver is not connector admin for (say so before
+  saving). Until then `update_agent` still takes `toolset`, skills, plugins and egress. A governed
+  platform's asks cannot be lifted per agent. `muster.requireApproval: true` keeps asking before
+  every call until agent chart 3.0 moves it to `default: Ask`; never set it together with tool
+  settings.
 - **An organization's connectors**: a kagent `RemoteMCPServer` in the organization namespace
   (`x_agent-manager_set_organization_connector`), not a Muster server, so no `toolset` selector
   reaches it. From agent-manager 3.3.0 (`connectors` in `x_agent-manager_create_agent`'s schema;
