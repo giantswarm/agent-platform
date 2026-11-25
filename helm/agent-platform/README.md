@@ -880,6 +880,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
 | kyvernoPolicyExceptions.enabled | bool | `true` | Renders the PolicyExceptions, both API groups. |
 | kyvernoPolicyExceptions.legacy.enabled | bool | `true` | Renders the kyverno.io/v2 PolicyException, which applies to ClusterPolicies only. Will be used as a global switch in a future release. |
+| kyvernoPolicyExceptions.cel.enabled | string | `"auto"` | `auto` (default) follows kyvernoPolicies.enabled; left at `auto` there, renders the policies.kyverno.io/v1 PolicyExceptions when policies.kyverno.io/v1/PolicyException is served on the cluster, with or without kyverno.io/v1; `true` / `false` force them on or off. |
 | scheduling.singletons.nodeSelector | object | `{}` | Node labels the four stateful singletons (muster, muster-valkey, the kagent controller, klaus-gateway) must land on, merged into each component's own nodeSelector (its keys win). On a Karpenter spot installation: `karpenter.sh/capacity-type: on-demand`. Empty = as before. |
 | scheduling.singletons.tolerations | list | `[]` | Tolerations appended to the four singletons' own, for a dedicated, tainted on-demand pool. The fleet's NodePools carry no taint. |
 | extraObjects | list | `[]` |  |

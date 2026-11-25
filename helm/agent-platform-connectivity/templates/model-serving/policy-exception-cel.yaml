@@ -8,7 +8,7 @@ of disallow-capabilities-strict, the kyverno.io/v2 exception names
 require-drop-all only. A pre-install, pre-upgrade hook, so it exists before the
 workloads it excepts reach admission.
 */ -}}
-{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.modelServing.policyException.enabled .Values.kyvernoPolicyExceptions.enabled }}
+{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoCelPolicyExceptions" .) .Values.modelServing.policyException.enabled .Values.kyvernoPolicyExceptions.enabled }}
 {{- $ns := include "agent-platform.modelServing.namespace" . }}
 {{- $shape := include "agent-platform.modelServing.podShape" . | fromJson }}
 apiVersion: policies.kyverno.io/v1

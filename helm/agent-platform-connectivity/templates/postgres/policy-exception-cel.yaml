@@ -6,7 +6,7 @@ same match as matchConditions. It applies to the CEL ValidatingPolicy of the
 same name. A pre-install, pre-upgrade hook, so it exists before the pods it
 excepts reach admission.
 */ -}}
-{{- if and .Values.postgres.enabled (include "agent-platform.kyvernoPolicies" .) .Values.kyvernoPolicyExceptions.enabled }}
+{{- if and .Values.postgres.enabled (include "agent-platform.kyvernoCelPolicyExceptions" .) .Values.kyvernoPolicyExceptions.enabled }}
 {{- if and .Values.postgres.vector.enabled .Values.postgres.vector.extensionImage.reference }}
 {{- $ns := .Values.postgres.namespace | default .Release.Namespace }}
 {{- $clusterName := .Values.postgres.clusterName }}

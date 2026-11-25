@@ -35,11 +35,12 @@ VERIFY_TMP := $(patsubst %/,%,$(or $(TMPDIR),/tmp))
 # The API groups a Giant Swarm management cluster serves and the cluster-shape
 # knobs detect (kyvernoPolicies.enabled, networkPolicy.flavor,
 # global.observability.metrics.serviceMonitor.enabled, dicebear.route.enabled,
-# agentSandbox.podSecurity.enabled default to `auto`): Kyverno, Cilium,
+# agentSandbox.podSecurity.enabled, kyvernoPolicyExceptions.cel.enabled default
+# to `auto`): Kyverno (both its ClusterPolicy and its CEL API), Cilium,
 # prometheus-operator, Gateway API, Envoy Gateway. `helm template` alone serves
 # Helm's built-in set, i.e. renders the vanilla shape; the assertions below that
 # expect the fleet shape pass these. verify-auto covers the resolution itself.
-FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1 --api-versions autoscaling.k8s.io/v1
+FLEET_APIS := --api-versions kyverno.io/v1 --api-versions policies.kyverno.io/v1 --api-versions policies.kyverno.io/v1/PolicyException --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1 --api-versions autoscaling.k8s.io/v1
 # parentRefs[0].name satisfies the ingress guard so a single guard is
 # isolated under test, and the fleet's API groups are served so the fleet shape
 # renders. Neither chart has subcharts anymore, so no `helm dependency build`
@@ -307,6 +308,16 @@ verify-modes: ## Assert the single ingress topology (agentgateway in front of mu
 	elif [ "$$(grep -A3 '^kind: PolicyException' $(VERIFY_TMP)/vm-pe-substrate.out | grep -c '^  namespace: kube-system$$')" != "10" ]; then \
 		echo "FAIL: the PolicyExceptions are not all in kube-system, the default kyvernoPolicies.policyExceptionNamespace"; exit 1; \
 	else echo "ok: kyvernoPolicyExceptions toggles; every exception in kube-system"; fi
+	@echo "--> kyvernoPolicies.enabled=auto resolves per API group: the kyverno.io/v2 exceptions with kyverno.io/v1, the policies.kyverno.io/v1 ones with policies.kyverno.io/v1/PolicyException (connectivity: the five Substrate ones; meta: the CSI companion's two)"
+	@for case in "none::0:0" "kyverno:--api-versions kyverno.io/v1:1:0" "cel:--api-versions policies.kyverno.io/v1 --api-versions policies.kyverno.io/v1/PolicyException:0:1" "both:--api-versions kyverno.io/v1 --api-versions policies.kyverno.io/v1 --api-versions policies.kyverno.io/v1/PolicyException:1:1"; do \
+		name=$${case%%:*}; rest=$${case#*:}; apis=$${rest%%:*}; rest=$${rest#*:}; v2=$${rest%%:*}; cel=$${rest#*:}; \
+		$(HELM) template t $(CONNECTIVITY_DIR) $(filter-out $(FLEET_APIS),$(KYVERNO_ALL)) $(SUBSTRATE_ON) $$apis >$(VERIFY_TMP)/vm-pe-auto-$$name.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-auto-$$name.out; exit 1; }; \
+		$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.flux.enabled=false --set muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents --namespace agent-platform -f tests/fixtures/workspaces-csi-companion-efs-values.yaml $$apis >$(VERIFY_TMP)/vm-pe-auto-meta-$$name.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-auto-meta-$$name.out; exit 1; }; \
+		got="$$(grep -c '^apiVersion: kyverno.io/v2$$' $(VERIFY_TMP)/vm-pe-auto-$$name.out) $$(grep -c '^apiVersion: policies.kyverno.io/v1$$' $(VERIFY_TMP)/vm-pe-auto-$$name.out) $$(grep -c '^apiVersion: kyverno.io/v2$$' $(VERIFY_TMP)/vm-pe-auto-meta-$$name.out) $$(grep -c '^apiVersion: policies.kyverno.io/v1$$' $(VERIFY_TMP)/vm-pe-auto-meta-$$name.out)"; \
+		want="$$((v2 * 5)) $$((cel * 5)) $$((v2 * 2)) $$((cel * 2))"; \
+		if [ "$$got" != "$$want" ]; then echo "FAIL: auto, $$name served: kyverno.io/v2, policies.kyverno.io/v1 exceptions (connectivity, meta) = $$got, want $$want"; exit 1; fi; \
+		echo "ok: auto, $$name served: $$got"; \
+	done
 	@echo "--> the CNPG ImageVolume exception renders only with an extension image"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true >$(VERIFY_TMP)/vm-pe-noimg.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-noimg.out; exit 1; }
 	@if grep -q "image-volume" $(VERIFY_TMP)/vm-pe-noimg.out; then \

@@ -3404,7 +3404,7 @@ own csiDriver while its name is set, else the companion's driver.
 {{- if not (hasPrefix "/var/lib/kubelet/plugins/" $socketDir) -}}
 {{- fail (printf "workspaces.substrate.csiCompanion.node.socketDir is %q: atelet reaches a node plugin's socket under /var/lib/kubelet/plugins, the directory it mounts" $socketDir) -}}
 {{- end -}}
-{{- if and (eq (include "agent-platform.shape.kyvernoPolicies" .) "true") (include "agent-platform.targetSecretName" .) -}}
+{{- if and (or (eq (include "agent-platform.shape.kyvernoPolicies" .) "true") (eq (include "agent-platform.shape.kyvernoCelPolicyExceptions" .) "true")) (include "agent-platform.targetSecretName" .) -}}
 {{- fail "workspaces.substrate.csiCompanion is on with gitops.target and Kyverno policies: the companion's PolicyExceptions must exist before its workloads, and this chart renders them on its own cluster, not the target; provide them on the target cluster and set kyvernoPolicies.enabled false, or run the companion without a target" -}}
 {{- end -}}
 {{- end -}}
@@ -3828,7 +3828,7 @@ Rendered as a YAML list item; the caller must provide the surrounding `egress:` 
 The knobs that describe what the cluster can admit — Kyverno policies, the
 network-policy flavor, ServiceMonitors/PodMonitors, dicebear's Envoy route
 filter, the agent-sandbox pod-security policy, the model-serving cache
-policies — accept `auto` (the default):
+policies, the policies.kyverno.io/v1 PolicyExceptions — accept `auto` (the default):
 the object renders when its API group is served. `.Capabilities.APIVersions` is
 the live discovery under helm-controller, the Helm CLI and `--dry-run=server`;
 under `helm template` it is Helm's built-in set unless `--api-versions` names
@@ -3868,6 +3868,22 @@ kyverno.io/v1 served).
 */}}
 {{- define "agent-platform.shape.kyvernoPolicies" -}}
 {{- include "agent-platform.shape.resolve" (dict "root" . "key" "kyvernoPolicies.enabled" "value" .Values.kyvernoPolicies.enabled "api" "kyverno.io/v1") -}}
+{{- end -}}
+
+{{/*
+kyvernoPolicyExceptions.cel.enabled resolved: "true" when the
+policies.kyverno.io/v1 PolicyExceptions render. `auto` follows
+kyvernoPolicies.enabled: an explicit true / false there forces these too; left
+at `auto`, they render when policies.kyverno.io/v1/PolicyException is served,
+whether or not kyverno.io/v1 is (Kyverno serves the two APIs independently).
+*/}}
+{{- define "agent-platform.shape.kyvernoCelPolicyExceptions" -}}
+{{- $v := dig "cel" "enabled" "auto" (.Values.kyvernoPolicyExceptions | default dict) -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "kyvernoPolicies.enabled" "value" .Values.kyvernoPolicies.enabled "api" "policies.kyverno.io/v1/PolicyException") -}}
+{{- else -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "kyvernoPolicyExceptions.cel.enabled" "value" $v "api" "policies.kyverno.io/v1/PolicyException") -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -3981,8 +3997,9 @@ Resolve every cluster-shape knob in .values (a deep copy of .Values) IN PLACE,
 once, before the component loop inlines them. Emits nothing.
 
 The six knobs (the five above and modelServing.policies.enabled, a Kyverno
-mutate policy that follows the resolved kyvernoPolicies.enabled) are written
-with their resolved value. The component-level
+mutate policy that follows the resolved kyvernoPolicies.enabled) and
+kyvernoPolicyExceptions.cel.enabled (the policies.kyverno.io/v1 exceptions) are
+written with their resolved value. The component-level
 copies the standalone overlay used to flip by hand are derived from the same
 answers, but only where the leaf is left at `auto`:
   networkPolicy.flavor      -> muster.networkPolicy.flavor,
@@ -4038,6 +4055,7 @@ Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 {{- $root := .root -}}
 {{- $v := .values -}}
 {{- $kyverno := eq (include "agent-platform.shape.kyvernoPolicies" $root) "true" -}}
+{{- $celExceptions := eq (include "agent-platform.shape.kyvernoCelPolicyExceptions" $root) "true" -}}
 {{- $flavor := include "agent-platform.shape.networkPolicyFlavor" $root -}}
 {{- $monitors := eq (include "agent-platform.shape.serviceMonitor" $root) "true" -}}
 {{- $dicebearRoute := eq (include "agent-platform.shape.dicebearRoute" $root) "true" -}}
@@ -4046,6 +4064,13 @@ Usage: include "agent-platform.shape.apply" (dict "root" $ "values" $shaped)
 {{- $controllerVpa := eq (include "agent-platform.shape.kagentControllerVpa" $root) "true" -}}
 {{- /* The knobs themselves: written resolved whatever they held. */ -}}
 {{- $_ := set $v.kyvernoPolicies "enabled" $kyverno -}}
+{{- /* kyvernoPolicyExceptions.cel.enabled: the policies.kyverno.io/v1 gate,
+written whatever it held. The connectivity release reads kyvernoPolicies.enabled
+resolved, so its own `auto` here would follow that kyverno.io/v1 answer, not
+the CEL API's. */ -}}
+{{- if not (kindIs "map" (index $v "kyvernoPolicyExceptions")) -}}{{- $_ := set $v "kyvernoPolicyExceptions" dict -}}{{- end -}}
+{{- if not (kindIs "map" (index $v.kyvernoPolicyExceptions "cel")) -}}{{- $_ := set $v.kyvernoPolicyExceptions "cel" dict -}}{{- end -}}
+{{- $_ := set $v.kyvernoPolicyExceptions.cel "enabled" $celExceptions -}}
 {{- $_ := set $v.networkPolicy "flavor" $flavor -}}
 {{- $_ := set $v.global.observability.metrics.serviceMonitor "enabled" $monitors -}}
 {{- if kindIs "map" (dig "route" nil (index $v "dicebear" | default dict)) -}}

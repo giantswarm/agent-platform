@@ -243,6 +243,7 @@ These are the main non-component settings. Component switches are in [Enabling a
 | `networkPolicy.envoyGateway.proxyNamespace` | `envoy-gateway-system` | The namespace where the network policies look for a front Gateway's Envoy proxy pods (by the owning-Gateway labels). Change it when Envoy Gateway runs in another namespace; set it empty when Envoy Gateway runs in its `GatewayNamespace` mode, which puts each proxy in its Gateway's own namespace. The mcp-* server charts admit the proxies through their own `ciliumNetworkPolicy.ingress.gatewayPeers`: set the same namespace there ([MCP backend network policy](mcp-backend-network-policy.md)). |
 | `networkPolicy.identityProvider.inClusterPeers` | derived | Cilium flavour: the in-cluster pods the services that validate the login's tokens reach the identity provider at, each a namespace, optional `matchLabels` and `ports`. Unset, the proxy pods of the public Gateway muster's route attaches to on 443 and 10443, and, for an issuer host `<service>.<namespace>.svc`, that namespace on the URL's port. A list replaces them; `[]` renders no in-cluster leg. A wrong peer cuts the login: OIDC discovery times out and the managers stop at start. |
 | `kyvernoPolicies.enabled` | `auto` | Renders the Kyverno objects where `kyverno.io/v1` is served. |
+| `kyvernoPolicyExceptions.cel.enabled` | `auto` | Follows `kyvernoPolicies.enabled`. Left at `auto` there, renders the `policies.kyverno.io/v1` PolicyExceptions where `policies.kyverno.io/v1/PolicyException` is served. |
 | `global.observability.metrics.serviceMonitor.enabled` | `auto` | Renders monitors where `monitoring.coreos.com/v1` is served. See [Observability](#observability). |
 | `agentManager.route.enabled` | `false` | Exposes agent-manager's REST API at `https://agentgateway.<domain>/agent-manager`. |
 | `agentManager.route.timeouts` | `request: 100s` | Gateway API rule timeouts of both agent-manager routes, in place of `ingress.httpRoute.timeouts`. The request bound is above agent-manager's limit on a credential save (90 s) and below the portal backend's wait (120 s). Override it by key (`request`, `backendRequest`) on the meta chart. |
@@ -765,6 +766,7 @@ The platform needs Kubernetes 1.36 or later. Agent Substrate also needs the PodC
 These knobs default to `auto` and resolve from the API groups the cluster serves:
 
 - `kyvernoPolicies.enabled`: on when `kyverno.io/v1` is served.
+- `kyvernoPolicyExceptions.cel.enabled`: on when `policies.kyverno.io/v1/PolicyException` is served, with or without `kyverno.io/v1`. An explicit `kyvernoPolicies.enabled` sets it too.
 - `networkPolicy.flavor`: `cilium` when `cilium.io/v2` is served, otherwise `kubernetes`.
 - `global.observability.metrics.serviceMonitor.enabled`: on when `monitoring.coreos.com/v1` is served.
 - `dicebear.route.enabled`: on when Envoy Gateway's `gateway.envoyproxy.io/v1alpha1` is served.
@@ -783,7 +785,7 @@ The connectivity chart renders Kyverno objects only where Kyverno is enabled:
 
 Exceptions name policies this chart does not own. `kyvernoPolicies.rules` maps each rule to its ClusterPolicy, using the default Giant Swarm names. A cluster with other policy names overrides the map, and a rule missing from it fails the render. Exceptions go to `kyvernoPolicies.policyExceptionNamespace` (default `kube-system`).
 
-Each `kyverno.io/v2` PolicyException has a `policies.kyverno.io/v1` sibling of the same name and match, which applies to the CEL (ValidatingPolicy) versions of the policies. A CEL exception references whole policies, not rules: where a workload violates only some rules of a policy, its CEL sibling excepts the whole policy. The CEL siblings are `pre-install,pre-upgrade` hooks, so Helm does not delete them with the release. `kyvernoPolicyExceptions.enabled: false` renders neither; `kyvernoPolicyExceptions.legacy.enabled: false` renders the CEL ones alone.
+Each `kyverno.io/v2` PolicyException has a `policies.kyverno.io/v1` sibling of the same name and match, which applies to the CEL (ValidatingPolicy) versions of the policies. A CEL exception references whole policies, not rules: where a workload violates only some rules of a policy, its CEL sibling excepts the whole policy. The CEL siblings are `pre-install,pre-upgrade` hooks, so Helm does not delete them with the release. `kyvernoPolicyExceptions.enabled: false` renders neither; `kyvernoPolicyExceptions.legacy.enabled: false` renders the CEL ones alone. Under `auto`, each API group renders where the cluster serves it: the `kyverno.io/v2` exceptions with `kyverno.io/v1`, the CEL ones with `policies.kyverno.io/v1/PolicyException`.
 
 ## Development
 

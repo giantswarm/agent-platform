@@ -471,8 +471,9 @@ once with the same helpers and forwards concrete values, so the wiring rendered
 here and every component's own copy come from one answer. The helpers below
 are what a render of this chart on its own uses; on the same cluster they give
 the same answer. Templates read the truthy wrappers underneath
-(agent-platform.kyvernoPolicies, .networkPolicyFlavor, .serviceMonitor,
-.agentSandboxPodSecurity, .modelServingPolicies), never the raw values.
+(agent-platform.kyvernoPolicies, .kyvernoCelPolicyExceptions,
+.networkPolicyFlavor, .serviceMonitor, .agentSandboxPodSecurity,
+.modelServingPolicies), never the raw values.
 */}}
 
 {{/*
@@ -500,6 +501,23 @@ kyverno.io/v1 served).
 */}}
 {{- define "agent-platform.shape.kyvernoPolicies" -}}
 {{- include "agent-platform.shape.resolve" (dict "root" . "key" "kyvernoPolicies.enabled" "value" .Values.kyvernoPolicies.enabled "api" "kyverno.io/v1") -}}
+{{- end -}}
+
+{{/*
+kyvernoPolicyExceptions.cel.enabled resolved: "true" when the
+policies.kyverno.io/v1 PolicyExceptions render. `auto` follows
+kyvernoPolicies.enabled: an explicit true / false there forces these too; left
+at `auto`, they render when policies.kyverno.io/v1/PolicyException is served,
+whether or not kyverno.io/v1 is (Kyverno serves the two APIs independently).
+Under the meta chart this arrives resolved, next to kyvernoPolicies.enabled.
+*/}}
+{{- define "agent-platform.shape.kyvernoCelPolicyExceptions" -}}
+{{- $v := dig "cel" "enabled" "auto" (.Values.kyvernoPolicyExceptions | default dict) -}}
+{{- if or (kindIs "invalid" $v) (and (kindIs "string" $v) (eq $v "auto")) -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "kyvernoPolicies.enabled" "value" .Values.kyvernoPolicies.enabled "api" "policies.kyverno.io/v1/PolicyException") -}}
+{{- else -}}
+{{- include "agent-platform.shape.resolve" (dict "root" . "key" "kyvernoPolicyExceptions.cel.enabled" "value" $v "api" "policies.kyverno.io/v1/PolicyException") -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -583,6 +601,15 @@ Truthy (emits "true") when the kyverno.io objects render. Gated templates use:
 */}}
 {{- define "agent-platform.kyvernoPolicies" -}}
 {{- if eq (include "agent-platform.shape.kyvernoPolicies" .) "true" -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy (emits "true") when the policies.kyverno.io/v1 PolicyExceptions render.
+Gated templates use:
+  {{- if (include "agent-platform.kyvernoCelPolicyExceptions" .) }}
+*/}}
+{{- define "agent-platform.kyvernoCelPolicyExceptions" -}}
+{{- if eq (include "agent-platform.shape.kyvernoCelPolicyExceptions" .) "true" -}}true{{- end -}}
 {{- end -}}
 
 {{/*

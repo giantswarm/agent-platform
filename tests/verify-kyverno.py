@@ -72,8 +72,10 @@ _spec = importlib.util.spec_from_file_location("charts", HERE / "verify-componen
 charts = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(charts)
 
-FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2", "--api-versions", "monitoring.coreos.com/v1",
-              "--api-versions", "gateway.networking.k8s.io/v1", "--api-versions", "gateway.envoyproxy.io/v1alpha1"]
+FLEET_APIS = ["--api-versions", "kyverno.io/v1", "--api-versions", "policies.kyverno.io/v1",
+              "--api-versions", "policies.kyverno.io/v1/PolicyException", "--api-versions", "cilium.io/v2",
+              "--api-versions", "monitoring.coreos.com/v1", "--api-versions", "gateway.networking.k8s.io/v1",
+              "--api-versions", "gateway.envoyproxy.io/v1alpha1"]
 # muster's credential provider releases an instance while workspaces and Substrate are on
 # (agent-platform.validateWorkspaceAuth): no provider instance to pin here, so the renders name it.
 RELEASABLE = ["--set", "muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents"]

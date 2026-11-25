@@ -9,7 +9,7 @@ plugin's kyverno.io/v2 exception names require-drop-all only. A pre-install,
 pre-upgrade hook, so they exist before the connectivity release's workloads
 reach admission.
 */ -}}
-{{- if and (include "agent-platform.workspaces.csiCompanion.enabled" .) (eq (include "agent-platform.shape.kyvernoPolicies" .) "true") (not (include "agent-platform.targetSecretName" .)) .Values.kyvernoPolicyExceptions.enabled }}
+{{- if and (include "agent-platform.workspaces.csiCompanion.enabled" .) (eq (include "agent-platform.shape.kyvernoCelPolicyExceptions" .) "true") (not (include "agent-platform.targetSecretName" .)) .Values.kyvernoPolicyExceptions.enabled }}
 {{- $polexNs := .Values.kyvernoPolicies.policyExceptionNamespace }}
 {{- $connectivity := index (.Values.components | default dict) "agent-platform-connectivity" | default dict }}
 {{- $releaseNs := $connectivity.targetNamespace | default (include "agent-platform.targetNamespace" .) }}

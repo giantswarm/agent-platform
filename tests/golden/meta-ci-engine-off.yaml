@@ -1011,6 +1011,8 @@ spec:
         run-as-non-root: require-run-as-nonroot
         run-as-non-root-user: require-run-as-non-root-user
     kyvernoPolicyExceptions:
+      cel:
+        enabled: false
       enabled: true
       legacy:
         enabled: true

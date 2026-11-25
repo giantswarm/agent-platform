@@ -1310,6 +1310,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
 | kyvernoPolicyExceptions.enabled | bool | `true` | Renders the PolicyExceptions, both API groups. |
 | kyvernoPolicyExceptions.legacy.enabled | bool | `true` | Renders the kyverno.io/v2 PolicyException, which applies to ClusterPolicies only. Will be used as a global switch in a future release. |
+| kyvernoPolicyExceptions.cel.enabled | string | `"auto"` | `auto` (default) follows kyvernoPolicies.enabled; left at `auto` there, renders the policies.kyverno.io/v1 PolicyExceptions when policies.kyverno.io/v1/PolicyException is served on the cluster, with or without kyverno.io/v1; `true` / `false` force them on or off. |
 | hooks.kubectlImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.kubectlImage.repository | string | `"giantswarm/alpine-k8s"` |  |
 | hooks.kubectlImage.tag | string | `"1.37.2"` |  |

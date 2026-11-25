@@ -2389,6 +2389,24 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
+                "cel": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": [
+                                "boolean",
+                                "string"
+                            ],
+                            "description": "`auto` (default) follows kyvernoPolicies.enabled; left at `auto` there, renders the policies.kyverno.io/v1 PolicyExceptions when policies.kyverno.io/v1/PolicyException is served on the cluster, with or without kyverno.io/v1; `true` / `false` force them on or off.",
+                            "enum": [
+                                "auto",
+                                true,
+                                false
+                            ]
+                        }
+                    }
+                },
                 "enabled": {
                     "type": "boolean",
                     "description": "Renders the PolicyExceptions, both API groups."

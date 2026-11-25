@@ -11,7 +11,7 @@ of disallow-capabilities-strict), the CEL sibling excepts the whole policy.
 A pre-install, pre-upgrade hook, so it exists before the workloads it excepts
 reach admission.
 */ -}}
-{{- if and (include "agent-platform.substrate.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.kyvernoPolicyExceptions.enabled }}
+{{- if and (include "agent-platform.substrate.enabled" .) (include "agent-platform.kyvernoCelPolicyExceptions" .) .Values.kyvernoPolicyExceptions.enabled }}
 {{- $ns := include "agent-platform.substrate.namespace" . }}
 {{- $pcNs := include "agent-platform.substrate.podcertNamespace" . }}
 {{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
