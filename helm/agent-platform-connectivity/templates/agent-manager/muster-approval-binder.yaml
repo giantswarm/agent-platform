@@ -1,0 +1,32 @@
+{{- /*
+agent-manager sends a Session's agent tool list (per-entry Allow/Ask/Block,
+`default`, grant marks) to muster with its own projected ServiceAccount token
+(audience muster) beside the person's. muster takes those settings only from a
+sender whose token passes a TokenReview and whose identity a
+SubjectAccessReview allows verb `bind` on `toolapprovals`
+(muster.giantswarm.io) in muster's namespace (Governing tool calls,
+giantswarm/giantswarm#38902). The muster chart ships that permission as the
+Role muster-approval-binder, bound to nobody; this RoleBinding grants it to
+agent-manager's ServiceAccount, and only to it, in muster's namespace (this
+release's, as agent-platform:mcpserver-viewer). Rendered while agent-manager
+and muster are on; a muster that does not ship the Role yet leaves it inert.
+*/ -}}
+{{- if and (include "agent-platform.agentManager.enabled" .) (include "agent-platform.componentEnabled" (dict "root" $ "name" "muster")) }}
+{{- $user := include "agent-platform.agentManager.serviceAccountUser" . }}
+{{- $parts := splitList ":" $user }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agent-platform:muster-approval-binder
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-platform.agentManager.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: muster-approval-binder
+subjects:
+  - kind: ServiceAccount
+    name: {{ index $parts 3 }}
+    namespace: {{ index $parts 2 }}
+{{- end }}
