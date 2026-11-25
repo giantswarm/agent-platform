@@ -314,6 +314,44 @@ def tools_map(text: str, header: re.Pattern[str]) -> dict[str, str]:
     return out
 
 
+# A safe entry whose name starts with one of these verbs looks like a write:
+# refused unless the source's block says why it is a read with a comment
+# `# safe-write: <tool>: <reason>`.
+WRITE_VERBS = {
+    "create", "update", "delete", "patch", "apply", "scale", "exec", "set", "add", "remove", "approve",
+    "grant", "revoke", "write", "start", "stop", "kill", "invoke", "fork", "merge", "deprecate",
+    "authorize", "sync", "wire", "unwire", "load", "unload", "pull", "push", "cancel", "replace",
+    "suspend", "resume", "reboot", "run", "send", "mint", "init", "enable", "disable", "port",
+    "forward", "rename", "move", "restart", "upgrade", "install", "uninstall", "edit", "import",
+}
+
+
+def write_like_safe(vtext: str) -> dict[str, str]:
+    """source -> why, for safe entries that look like writes and carry no safe-write annotation."""
+    out = {}
+    for m in re.finditer(r"\n  ([a-z0-9-]+):\n    role: \S+\n((?:    #.*\n)*)    safe: \[(.*)\]\n", "\n" + "\n".join(values_block(vtext, "governedServers")) + "\n"):
+        src, comments, listed = m.group(1), m.group(2), m.group(3)
+        annotated = set(re.findall(r"# safe-write: ([A-Za-z0-9_]+): \S", comments))
+        for tool in (t.strip() for t in listed.split(",") if t.strip()):
+            tokens = tool.lower().split("_")
+            if (tokens[0] in WRITE_VERBS or tool.lower() in WRITE_VERBS) and tool not in annotated:
+                out[src] = f"{tool} looks like a write ({tokens[0]}): take it off the safe list, or say why it is a read in a `# safe-write: {tool}: <reason>` comment above `safe:`"
+    return out
+
+
+def check_write_like() -> None:
+    base = "governedServers:\n  mcp-kubernetes:\n    role: infrastructure\n{c}    safe: [get, {t}, list]\nnext: x\n"
+    for tool in ("delete", "authorize_workspace", "create_vm", "exec"):
+        if not write_like_safe(base.format(c="", t=tool)):
+            fail(f"{tool} on a safe list must be refused as write-like")
+    if write_like_safe(base.format(c=f"    # safe-write: delete: dry run only here\n", t="delete")):
+        fail("an annotated write-like entry must pass")
+    for tool in ("list_port_forward_sessions", "get_vm_console", "read_sandbox_file", "toolchain_users", "can_i"):
+        if write_like_safe(base.format(c="", t=tool)):
+            fail(f"{tool} is a read and must pass")
+    print("ok: safe entries that look like writes (delete, authorize_workspace, create_vm, exec) are refused unless annotated with safe-write; reads pass")
+
+
 def check_coverage() -> None:
     governed, exempt = sources(META_DIR)
     covered = {k for k, role in governed.items() if role} | set(exempt)
@@ -378,6 +416,8 @@ def check_coverage() -> None:
         else:
             maps[repo] = tools_map(text, re.compile(r"^  mcpServer:\s*$"))
     vtext = open(os.path.join(META_DIR, "values.yaml")).read()
+    for src, why in write_like_safe(vtext).items():
+        fail(f"governedServers.{src}.safe: {why}")
     for src, role in governed.items():
         if not role or src not in maps:
             continue
@@ -441,10 +481,15 @@ def check_approval_config() -> None:
     if [l.strip() for l in ported.split("\n")[1:]] != ["- https://backstage.ci.example.com:8443/sessions", "- https://gw.ci.example.com:8443/auth/slack/return"]:
         fail(f"a non-default port must stay in both entries (M1-1):\n{ported}")
     default_port = block(release(mc + portal + ["--set", "backstage.publicPort=443"]), list_header)
+    top = block(release(mc + portal + ["--set", "backstage.publicPort=65535"]), list_header)
+    if "- https://backstage.ci.example.com:65535/sessions" not in top:
+        fail(f"port 65535 is a port:\n{top}")
     if "- https://backstage.ci.example.com/sessions" not in default_port:
         fail(f"port 443 writes no port:\n{default_port}")
     for args, want in (
         (["--set", "backstage.publicPort=84a3"], 'backstage.publicPort "84a3"'),
+        (["--set", "backstage.publicPort=65536"], 'backstage.publicPort "65536"'),
+        (["--set", "backstage.publicPort=99999"], 'backstage.publicPort "99999"'),
         (["--set", "components.klaus-gateway.enabled=true", "--set", "klausGateway.obo.callbackBaseUrl=gw.ci.example.com"], 'klausGateway.obo.callbackBaseUrl "gw.ci.example.com": want an http(s) URL'),
     ):
         err = render(META_DIR, META + ["--set", FLOOR_RANGE, "--set", "global.domain=ci.example.com", *mc, *portal, *args], expect_fail=True)
@@ -566,6 +611,7 @@ if __name__ == "__main__":
     META_DIR, CONN_DIR = sys.argv[1], sys.argv[2]
     FLOOR_RANGE = f"components.muster.versionRange=>={governance_floor(META_DIR)} <6.0.0-0"
     check_governance()
+    check_write_like()
     check_coverage()
     check_approval_config()
     check_connector_admin()

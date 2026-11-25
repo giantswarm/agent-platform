@@ -5852,7 +5852,10 @@ governance: trusted  # @schema enum: [trusted, governed]
 # server key itself (giantswarm-platform-manager). null drops a source (then
 # list it in governanceExempt with the reason). make verify-tool-approval
 # fails on a shipped MCPServer that is neither here nor in governanceExempt,
-# and on a safe entry that names a floor or no tool of its server. Safe
+# and on a safe entry that names a floor or no tool of its server, or whose
+# name starts with a write verb (create, delete, exec, set, approve, ...)
+# unless a `# safe-write: <tool>: <reason>` comment above `safe:` says why
+# it reads. Safe
 # lists: tool-approval governed-safe-list-proposal (giantswarm/giantswarm#38902).
 governedServers:  # @schema additionalProperties: true
   agent-manager:
