@@ -2558,3 +2558,45 @@ string, so `with` gates a caller's comment). Include with nindent under
 {{- include "agent-platform.otlpEgressRule" (dict "target" $t "who" "kagent's exporters send to") -}}
 {{- end }}
 {{- end -}}
+
+{{/*
+An MCPServer's spec.approval from a values block (Governing tool calls,
+giantswarm/giantswarm#38902), validated the way the CRD's CEL rules check it so
+a wrong value fails the render naming the key: `rule` Allow or Ask, `tools` a
+map of at most 512 tool names to Allow, Ask or Block, nothing else. Renders the
+`approval:` block at two spaces of indentation, nothing for an empty or null
+block.
+Usage: include "agent-platform.mcpServerApproval" (dict "approval" $block "key" "<values path>")
+*/}}
+{{- define "agent-platform.mcpServerApproval" -}}
+{{- $a := .approval | default dict -}}
+{{- if $a -}}
+{{- if not (kindIs "map" $a) -}}
+{{- fail (printf "%s: want a map with rule and tools" .key) -}}
+{{- end -}}
+{{- range $k, $_ := $a -}}
+{{- if not (has $k (list "rule" "tools")) -}}
+{{- fail (printf "%s.%s: unknown key, want rule or tools" $.key $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if hasKey $a "rule" -}}
+{{- if not (has (toString $a.rule) (list "Allow" "Ask")) -}}
+{{- fail (printf "%s.rule %q: want Allow or Ask" .key (toString $a.rule)) -}}
+{{- end -}}
+{{- end -}}
+{{- $tools := $a.tools | default dict -}}
+{{- if not (kindIs "map" $tools) -}}
+{{- fail (printf "%s.tools: want a map of tool name to Allow, Ask or Block" .key) -}}
+{{- end -}}
+{{- if gt (len $tools) 512 -}}
+{{- fail (printf "%s.tools: %d tools, want at most 512 (the MCPServer CRD's maxProperties)" .key (len $tools)) -}}
+{{- end -}}
+{{- range $tool, $v := $tools -}}
+{{- if not (has (toString $v) (list "Allow" "Ask" "Block")) -}}
+{{- fail (printf "%s.tools.%s %q: want Allow, Ask or Block" $.key $tool (toString $v)) -}}
+{{- end -}}
+{{- end }}
+approval:
+  {{- toYaml $a | nindent 2 }}
+{{- end -}}
+{{- end -}}

@@ -1797,6 +1797,39 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # The line the Dev Portal shows under the server's name (the MCPServer's
       # spec.description, at most 500 characters); empty renders none.
       description: "Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"
+      # The connector's tool approval (the MCPServer's spec.approval; Governing
+      # tool calls, https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
+      # `rule` (Allow | Ask) for a tool without its own entry, new tools
+      # included, and `tools`, the server's own tool names -> Allow | Ask |
+      # Block (Block hides the tool), at most 512. Written out for every tool
+      # of the kagent line as the Allow all preset: the platform's own session
+      # tools, which every session with the agent-platform preset uses as the
+      # person who ran the turn and which carry no MCP annotations (Recommended
+      # would make reads ask too); agent callers are asked by muster's floors
+      # and the governance mode, not here. An installation tightens a tool
+      # here; null renders none (the connector runs every tool, not reviewed).
+      # A muster whose CRD lacks spec.approval drops the field.
+      approval:
+        rule: Allow
+        tools:
+          list_sessions: Allow
+          invoke_session: Allow
+          create_session_checkpoint: Allow
+          list_session_checkpoints: Allow
+          fork_session: Allow
+          list_sandbox_templates: Allow
+          create_sandbox: Allow
+          list_sandboxes: Allow
+          get_sandbox: Allow
+          suspend_sandbox: Allow
+          resume_sandbox: Allow
+          delete_sandbox: Allow
+          start_sandbox_process: Allow
+          get_sandbox_process: Allow
+          kill_sandbox_process: Allow
+          read_sandbox_outputs: Allow
+          read_sandbox_file: Allow
+          write_sandbox_file: Allow
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
@@ -3645,6 +3678,45 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
     # What the Dev Portal shows under the name (the MCPServer's
     # spec.description), at most 500 characters. Empty renders none.
     description: "Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"
+    # The connector's tool approval (the MCPServer's spec.approval; Governing
+    # tool calls, https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
+    # `rule` (Allow | Ask) for a tool without its own entry, new tools
+    # included, and `tools`, the server's own tool names -> Allow | Ask | Block
+    # (Block hides the tool), at most 512. Written out for every tool of
+    # mcp-kubernetes as the Recommended preset, as agent-platform-mcps'
+    # kubernetes family: the tools annotated read-only run, every other one
+    # asks a person (the mutating ones are registered only when the server's
+    # non-destructive mode is off), new tools ask until listed. An
+    # installation changes a tool here; null renders none (the connector
+    # runs every tool, not reviewed). A muster whose CRD lacks spec.approval
+    # drops the field.
+    approval:
+      rule: Ask
+      tools:
+        get: Allow
+        list: Allow
+        describe: Allow
+        logs: Allow
+        api_resources: Allow
+        cluster_health: Allow
+        can_i: Allow
+        context_list: Allow
+        context_get_current: Allow
+        list_port_forward_sessions: Allow
+        capi_list_clusters: Allow
+        capi_get_cluster: Allow
+        capi_resolve_cluster: Allow
+        capi_cluster_health: Allow
+        context_use: Ask
+        create: Ask
+        apply: Ask
+        delete: Ask
+        patch: Ask
+        scale: Ask
+        exec: Ask
+        port_forward: Ask
+        stop_port_forward_session: Ask
+        stop_all_port_forward_sessions: Ask
 
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
 # The kagent-crds component's values (kagent main ships its CRDs as their own

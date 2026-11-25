@@ -21,7 +21,9 @@ agent-platform, stamped by their charts) and the servers an installation
 registers (no label). The portal's MCP servers page, the toolset presets and
 the docs group servers by it; it names the server by mcpServer.displayName
 (the ui.giantswarm.io/display-name annotation) when set, and shows
-mcpServer.description (spec.description) under the name when set.
+mcpServer.description (spec.description) under the name when set, and its
+tool approval mcpServer.approval as spec.approval (the Recommended preset by
+default, as agent-platform-mcps' kubernetes family).
 
 mcp-kubernetes.mcpServer picks one of three shapes:
   - enabled: false renders no CR; the registration is agent-platform-mcps'
@@ -82,5 +84,8 @@ spec:
   family:
     name: kubernetes
     instanceArg: management_cluster
+  {{- end }}
+  {{- with include "agent-platform.mcpServerApproval" (dict "approval" (dig "approval" dict $reg) "key" "mcp-kubernetes.mcpServer.approval") }}
+  {{- . | trim | nindent 2 }}
   {{- end }}
 {{- end }}

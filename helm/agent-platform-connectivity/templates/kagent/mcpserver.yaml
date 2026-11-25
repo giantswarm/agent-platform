@@ -8,7 +8,8 @@ and the checkpoint and fork tools. Registered, every session whose toolset inclu
 preset lists and messages the person's other sessions as x_kagent_<tool>, and
 the Dev Portal's MCP servers page lists it in the Agent Platform group, by
 mcp.displayName (the ui.giantswarm.io/display-name annotation) when set, with
-mcp.description (spec.description) under the name when set.
+mcp.description (spec.description) under the name when set. mcp.approval is
+its tool approval (spec.approval, agent-platform.mcpServerApproval).
 
 The path is the data plane's, never the controller's directly: an HTTPRoute at
 pathPrefix, rewritten to /mcp, on the kagent AgentgatewayBackend
@@ -95,4 +96,7 @@ spec:
   auth:
     type: oauth
     forwardToken: true
+  {{- with include "agent-platform.mcpServerApproval" (dict "approval" $mcp.approval "key" "kagent.controllerRoute.mcp.approval") }}
+  {{- . | trim | nindent 2 }}
+  {{- end }}
 {{- end }}
