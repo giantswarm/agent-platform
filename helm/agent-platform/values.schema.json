@@ -2164,6 +2164,14 @@
             "type": "object",
             "additionalProperties": true
         },
+        "governance": {
+            "type": "string",
+            "description": "The platform's governance mode: trusted (the default) or governed. It changes no tool approval setting's meaning; it adds asking for agent callers. Governed asks a person before an agent creates an agent (agent-manager's create_agent), changes an agent's tools (update_agent_access), starts another agent (start_session) or pauses a connector, and the Dev Portal's connector wizard pre-selects the Recommended preset (read-only tools run, the rest ask); trusted lets agents do those freely and pre-selects Allow all. In both modes muster's built-in floors ask a person before an agent adds or repoints a connector, changes approval settings, gives an agent an exception or changes muster's own configuration. The meta chart renders muster's governance configuration from it (muster.governance: the mode, and the servers muster treats as agent-manager and the Platform Manager), from the muster release that reads it (agent-platform.muster.governanceFloor); an earlier muster gets none and asks nothing. Only admins switch it, through the Platform Manager with a second person's approval; never an agent. Anything else fails the render. Concept: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/",
+            "enum": [
+                "trusted",
+                "governed"
+            ]
+        },
         "gpu-operator": {
             "type": "object",
             "additionalProperties": true

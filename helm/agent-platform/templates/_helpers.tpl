@@ -1062,6 +1062,13 @@ repeating the admin groups. */ -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $derived "muster" (mergeOverwrite $muster (dict "toolsetPresets" .)) -}}
 {{- end -}}
+{{- /* muster's governance configuration from the platform's governance mode
+(agent-platform.muster.governance), from the muster floor that reads it. */ -}}
+{{- with (include "agent-platform.muster.governance" .root | fromJson) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $muster "governance" . -}}
+{{- $_ := set $derived "muster" $muster -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
 {{- $_ := set $derived "kagent" (dict "disableWiring" true) -}}
@@ -4736,6 +4743,60 @@ The first muster release that takes toolsetPresets.<name>.icon. One line, no
 comment inside the define.
 */}}
 {{- define "agent-platform.muster.presetIconsFloor" -}}5.61.0{{- end -}}
+
+{{/*
+The first muster release that reads the governance configuration
+(muster.governance: the mode and the servers it names per role) and enforces
+tool approval (Governing tool calls, slice 2 of giantswarm/giantswarm#38902).
+UNRELEASED: a placeholder for the release that carries it; below it the meta
+chart forwards no governance block, which an older muster chart's closed
+schema would refuse. One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.muster.governanceFloor" -}}5.65.0{{- end -}}
+
+{{/*
+The platform's governance mode (top-level `governance`: trusted, the default,
+or governed), validated: anything else fails the render naming the key.
+Usage: include "agent-platform.governance" $root
+*/}}
+{{- define "agent-platform.governance" -}}
+{{- $mode := toString (.Values.governance | default "trusted") -}}
+{{- if not (has $mode (list "trusted" "governed")) -}}
+{{- fail (printf "governance %q: want trusted or governed (Governing tool calls: trusted lets agents create and start agents freely, governed asks a person first)" $mode) -}}
+{{- end -}}
+{{- $mode -}}
+{{- end -}}
+
+{{/*
+muster's governance configuration (Governing tool calls,
+giantswarm/giantswarm#38902), rendered from the platform's governance mode:
+`mode` (governance) and `servers`, the MCPServer names muster treats as each
+role's: agentManager (agent-manager.muster.mcpServer.name, default
+agent-manager) and platformManager (giantswarm-platform-manager, the Platform
+Manager's registration). The floors are built into muster; this configuration
+only adds the governed entries and tells muster which servers offer the names
+it matches. An own muster.muster.governance.servers.<role> stands; an own
+mode that differs from `governance` fails (single source). Only from the
+muster floor agent-platform.muster.governanceFloor; {} below it.
+Usage: include "agent-platform.muster.governance" $root | fromJson
+*/}}
+{{- define "agent-platform.muster.governance" -}}
+{{- $mode := include "agent-platform.governance" . -}}
+{{- $out := dict -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.governanceFloor" .)) -}}
+{{- $own := dig "muster" "governance" dict (.Values.muster | default dict) | default dict -}}
+{{- with $own.mode -}}
+{{- if ne (toString .) $mode -}}
+{{- fail (printf "muster.muster.governance.mode (%v) differs from governance (%s): the platform's governance mode is the top-level governance value; leave muster.muster.governance.mode unset" . $mode) -}}
+{{- end -}}
+{{- end -}}
+{{- $amName := dig "muster" "mcpServer" "name" "agent-manager" (index .Values "agent-manager" | default dict) -}}
+{{- $servers := dict "agentManager" (list $amName) "platformManager" (list "giantswarm-platform-manager") -}}
+{{- $servers = mergeOverwrite $servers ($own.servers | default dict) -}}
+{{- $out = dict "mode" $mode "servers" $servers -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
 
 {{/*
 Icons of the shipped presets (infrastructure, agent-platform), for each one

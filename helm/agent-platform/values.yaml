@@ -1815,6 +1815,10 @@ components:  # @schema additionalProperties: true
       # The flux-engine subchart's values are the engine's, not wiring: never
       # forwarded (Helm coalesces the subchart's defaults into this block).
       - flux-engine
+      # The governance mode is read by the meta chart alone: it reaches muster
+      # as its governance configuration (agent-platform.muster.governance);
+      # no wiring of the connectivity chart reads it.
+      - governance
       # Read by the meta chart alone (merged into the four components' own
       # scheduling knobs before their releases render, agent-platform.scheduling.apply);
       # the connectivity chart never sees it.
@@ -2724,14 +2728,25 @@ muster:  # @schema skipProperties: true; additionalProperties: true
   crds:
     install: false
   # Who may register MCPServers and author Workflows through muster's
-  # writes-as-caller path. The muster sub-chart defaults both editor
-  # RoleBindings to system:authenticated (single-team fit); on a shared
-  # platform MC every registered server and authored workflow is visible to
-  # and routed through by other users, so the umbrella narrows both bindings
-  # explicitly to the Giant Swarm admin groups (the same groups the config
-  # default layer feeds rbac-operator as oidc.giantswarm.write_all_group/
-  # _groups). Installations wanting customer self-service widen subjects via
-  # their gitops values.
+  # writes-as-caller path. On a shared platform MC every registered server
+  # and authored workflow is visible to and routed through by other users,
+  # so the umbrella binds both editor Roles explicitly to the Giant Swarm
+  # admin groups (the same groups the config default layer feeds
+  # rbac-operator as oidc.giantswarm.write_all_group/_groups); the meta
+  # chart appends tenants.platformTeam to both. Installations wanting
+  # customer self-service widen subjects via their gitops values.
+  #
+  # mcpServerEditor is the platform's connector-admin role (Governing tool
+  # calls, https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
+  # whoever holds muster's mcpserver-editor Role in muster's namespace edits
+  # every connector there, sets its tool approval (MCPServer spec.approval:
+  # Allow, Ask or Block per tool, and the rule new tools follow) and is the
+  # only one who may let an agent run a tool the connector asks for. Its
+  # subjects are the connector admins: by default the Giant Swarm admin
+  # groups plus tenants.platformTeam. The muster chart itself binds nobody by
+  # default (it bound system:authenticated before), so this list is what
+  # keeps connector admins on an upgrade; binding system:authenticated makes
+  # everyone a connector admin.
   rbac:
     mcpServerEditor:
       subjects:
@@ -4076,6 +4091,12 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # The line the Dev Portal shows under the server's name (the MCPServer's
       # spec.description, at most 500 characters); empty renders none.
       description: "Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"
+      # The connector's tool approval (the MCPServer's spec.approval) is
+      # approval: its default, the Allow all preset written out for every tool
+      # of the kagent line, is the connectivity chart's
+      # (kagent.controllerRoute.mcp.approval there, which says why); set it here
+      # to tighten a tool (Ask or Block). Governing tool calls:
+      # https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
@@ -5777,6 +5798,26 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # sessions.api.kagent.dev cluster-wide (the ClusterRole
 # agent-platform:workspace-manager-sessions): the manager lists every creator's
 # Sessions for the session directories' cleanup, which no tenant role grants.
+# === Governance mode (Governing tool calls, giantswarm/giantswarm#38902) ===
+# -- The platform's governance mode: trusted (the default) or governed. It
+# changes no tool approval setting's meaning; it adds asking for agent
+# callers. Governed asks a person before an agent creates an agent
+# (agent-manager's create_agent), changes an agent's tools
+# (update_agent_access), starts another agent (start_session) or pauses a
+# connector, and the Dev Portal's connector wizard pre-selects the
+# Recommended preset (read-only tools run, the rest ask); trusted lets agents
+# do those freely and pre-selects Allow all. In both modes muster's built-in
+# floors ask a person before an agent adds or repoints a connector, changes
+# approval settings, gives an agent an exception or changes muster's own
+# configuration. The meta chart renders muster's governance configuration
+# from it (muster.governance: the mode, and the servers muster treats as
+# agent-manager and the Platform Manager), from the muster release that reads
+# it (agent-platform.muster.governanceFloor); an earlier muster gets none and
+# asks nothing. Only admins switch it, through the Platform Manager with a
+# second person's approval; never an agent. Anything else fails the render.
+# Concept: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
+governance: trusted  # @schema enum: [trusted, governed]
+
 tenants:
   platform:
     # -- Every signed-in person: bound to agent-platform:platform-user in the
