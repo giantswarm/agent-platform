@@ -106,9 +106,13 @@ these.
     an editor's release could read the namespace's Secrets through valuesFrom
     or run as another identity. An update that leaves the spec as it is passes
     (a finalizer, a reconcile request).
+  * agent-platform-organization-switch-off: an update of an `Organization`
+    whose Agent Platform was enabled keeps spec.agentPlatform.enabled true,
+    for every writer: nothing defines yet what a switch-off does (decision
+    D10 of giantswarm/giantswarm#39492), so a write that sets it to false,
+    removes it or removes spec.agentPlatform is refused.
   * agent-platform-organization-delete-intent: an `Organization` with the
-    Agent Platform enabled (spec.agentPlatform.enabled), or one the operator
-    still holds with its finalizer, is deleted only when
+    Agent Platform enabled (spec.agentPlatform.enabled) is deleted only when
     it carries kustomize.toolkit.fluxcd.io/prune: enabled, Flux's own marker
     of an intended prune; any other `Organization` is not held. One the
     operator judges applied from git (it has an Orphaned condition) is
@@ -854,17 +858,10 @@ spec:
         operations: ["DELETE"]
         resources: ["organizations"]
   matchConditions:
-    # An Organization with the Agent Platform enabled, or one the operator
-    # still holds with its finalizer (enabled before, switched off since):
-    # its deletion erases the organization's Agent Platform. Any other
-    # Organization is not held.
+    # An Organization with the Agent Platform enabled: its deletion erases
+    # the organization's Agent Platform. Any other Organization is not held
+    # (the switch does not go off: agent-platform-organization-switch-off).
     - name: agent-platform
-      expression: >-
-        (has(oldObject.spec) && has(oldObject.spec.agentPlatform) &&
-        has(oldObject.spec.agentPlatform.enabled) && oldObject.spec.agentPlatform.enabled) ||
-        (has(oldObject.metadata.finalizers) && {{ squote $finalizer }} in oldObject.metadata.finalizers)
-  variables:
-    - name: enabled
       expression: >-
         has(oldObject.spec) && has(oldObject.spec.agentPlatform) &&
         has(oldObject.spec.agentPlatform.enabled) && oldObject.spec.agentPlatform.enabled
@@ -873,12 +870,9 @@ spec:
         has(oldObject.metadata.annotations) && 'kustomize.toolkit.fluxcd.io/prune' in oldObject.metadata.annotations &&
         oldObject.metadata.annotations['kustomize.toolkit.fluxcd.io/prune'] == 'enabled'
       reason: Forbidden
-      # Switched off and still held by the finalizer, the organization still
-      # has its namespace, sessions and snapshots, which the erasure removes.
       messageExpression: >-
-        (variables.enabled ? 'deleting an Organization with the Agent Platform enabled erases its Agent Platform' :
-        'deleting an Organization that still holds Agent Platform data (its Agent Platform switched off, its erasure not done) erases that data') +
-        ': set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on ' + oldObject.metadata.name + ' first'
+        'deleting an Organization with the Agent Platform enabled erases its Agent Platform: set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on ' +
+        oldObject.metadata.name + ' first'
     - expression: >-
         !(has(oldObject.status) && has(oldObject.status.conditions) && oldObject.status.conditions.exists(c, c.type == 'Orphaned')) ||
         oldObject.status.conditions.exists(c, c.type == 'Orphaned' && c.status == 'True' && c.reason == 'DeleteMerged')
@@ -939,6 +933,47 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   policyName: agent-platform-organization-names
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-switch-off
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["security.giantswarm.io"]
+        apiVersions: ["*"]
+        operations: ["UPDATE"]
+        resources: ["organizations"]
+  matchConditions:
+    # An Organization whose Agent Platform was on before the write.
+    - name: was-enabled
+      expression: >-
+        has(oldObject.spec) && has(oldObject.spec.agentPlatform) &&
+        has(oldObject.spec.agentPlatform.enabled) && oldObject.spec.agentPlatform.enabled
+  validations:
+    # Nothing defines yet what a switch-off does (decision D10 of the plan,
+    # giantswarm/giantswarm#39492): the switch stays on, for every writer.
+    - expression: >-
+        has(object.spec) && has(object.spec.agentPlatform) &&
+        has(object.spec.agentPlatform.enabled) && object.spec.agentPlatform.enabled
+      reason: Forbidden
+      messageExpression: >-
+        'the Agent Platform cannot be switched off for an organization yet: keep spec.agentPlatform.enabled: true; refused: ' +
+        object.metadata.name
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-switch-off
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-switch-off
   validationActions: [Deny]
 ---
 apiVersion: admissionregistration.k8s.io/v1

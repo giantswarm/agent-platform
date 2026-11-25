@@ -23,6 +23,9 @@ policy holds:
   organizations-admin;
 - an Organization with the Agent Platform enabled has a name that makes
   agents-<name> a namespace name;
+- an Organization's Agent Platform, once enabled, is not switched off: no
+  write sets spec.agentPlatform.enabled to false or removes the block, a
+  cluster-admin's neither; an Organization without it is not held;
 - an editor reads and never writes the agent chart's OCIRepository;
 - the operator's ServiceAccount creates only the namespace agents-<organization>
   with the labels, deletes only labelled ones, writes RoleBindings
@@ -57,9 +60,8 @@ policy holds:
   requester who may not get Secrets deletes no such collection
   (giantswarm/agent-platform#1362);
 - the HelmRelease field lock, also for the organization's Flux ServiceAccount;
-- an Organization with the Agent Platform enabled, or one switched off that
-  the operator still holds with its finalizer, is deleted only with
-  prune: enabled, the refusal naming which of the two it is, and one applied
+- an Organization with the Agent Platform enabled is deleted only with
+  prune: enabled, and one applied
   from git only once its delete pull request merged (Orphaned, reason
   DeleteMerged); any other Organization is not held;
 - the EgressPolicy floor;
@@ -439,7 +441,7 @@ def fixtures():
         org("payments"), org("retired", prune="enabled"), org("kept", prune="disabled"),
         org("kaas", enabled=None), org("off", enabled=False),
         org("finalized", finalizers=[FINALIZER]), org("held", finalizers=["example.com/hold", FINALIZER]),
-        org("switched-off", enabled=False, finalizers=[FINALIZER]), org("dotted.io", enabled=None),
+        org("dotted.io", enabled=None),
         org("enabled.io"),  # enabled before the names policy existed
         *(org(n, prune="enabled") for n in ORPHANED),
         rb("organization-admins", ORG, role="agent-platform:admin"), rb("organization-admins", OLD, role="agent-platform:admin"),
@@ -969,7 +971,7 @@ def prove_organizations():
     case("the operator removes no other finalizer from an Organization",
          patch("organization", "held", None, {"metadata": {"finalizers": [FINALIZER]}}, as_=OP), policy, only)
     case("the operator changes no Organization's spec",
-         patch("organization", "payments", None, {"spec": {"agentPlatform": {"enabled": False}}}, as_=OP), policy, only)
+         patch("organization", "payments", None, {"spec": {"agentPlatform": {"harnesses": ["default"]}}}, as_=OP), policy, only)
     case("the operator changes no Organization's labels",
          patch("organization", "payments", None, {"metadata": {"labels": {"team": "x"}}}, as_=OP), policy, only)
     case("the operator changes no Organization's annotations",
@@ -997,6 +999,21 @@ def prove_names():
          policy, "refused: dotted.io")
     case("an Organization enabled with a dotted name before the policy still takes the prune annotation (only turning it on is held)",
          patch("organization", "enabled.io", None, {"metadata": {"annotations": {"kustomize.toolkit.fluxcd.io/prune": "enabled"}}}, as_=PERSON))
+
+
+def prove_switch_off():
+    """Once enabled, an Organization's Agent Platform stays on: a switch-off
+    is refused for every writer, a cluster-admin too."""
+    policy = "agent-platform-organization-switch-off"
+    off = "the Agent Platform cannot be switched off for an organization yet"
+    case("a cluster-admin does not set an enabled Organization's spec.agentPlatform.enabled to false",
+         patch("organization", "payments", None, {"spec": {"agentPlatform": {"enabled": False}}}, as_=PERSON), policy, off + ": keep spec.agentPlatform.enabled: true; refused: payments")
+    case("a cluster-admin does not remove an enabled Organization's spec.agentPlatform.enabled",
+         patch("organization", "payments", None, {"spec": {"agentPlatform": {"enabled": None}}}, as_=PERSON), policy, off)
+    case("a cluster-admin does not remove an enabled Organization's spec.agentPlatform",
+         patch("organization", "payments", None, {"spec": {"agentPlatform": None}}, as_=PERSON), policy, off)
+    case("an Organization without the Agent Platform takes spec.agentPlatform.enabled: false (not held)",
+         patch("organization", "kaas", None, {"spec": {"agentPlatform": {"enabled": False}}}, as_=PERSON))
 
 
 def prove_labels():
@@ -1114,10 +1131,6 @@ def prove_delete_intent():
     case("an Organization with the Agent Platform and prune: enabled is deleted", delete("organization", "retired", None, as_=PERSON))
     case("an Organization without spec.agentPlatform is deleted (not held)", delete("organization", "kaas", None, as_=PERSON))
     case("an Organization with the Agent Platform disabled is deleted (not held)", delete("organization", "off", None, as_=PERSON))
-    case("an Organization switched off that the operator still holds with its finalizer is not deleted without prune: enabled",
-         delete("organization", "switched-off", None, as_=PERSON), policy,
-         "that still holds Agent Platform data (its Agent Platform switched off, its erasure not done) erases that data: "
-         "set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on switched-off first")
     in_git = "erased only once its delete pull request merged"
     case("an Organization in git with prune: enabled is not deleted", delete("organization", "in-git", None, as_=PERSON), policy, in_git)
     case("an Organization missing from git with prune: enabled is not deleted", delete("organization", "lost", None, as_=PERSON), policy, in_git)
@@ -1194,7 +1207,7 @@ def main():
             must(kubectl(["wait", "--for=condition=Established", "crd", "--all", "--timeout=60s"]), "wait for the CRDs")
             fixtures()
             install(roles, policies)
-            for prove in (prove_roles, prove_operator, prove_organizations, prove_names, prove_flux_role, prove_secret_deletes, prove_labels, prove_admin_bindings, prove_subjects, prove_helmreleases,
+            for prove in (prove_roles, prove_operator, prove_organizations, prove_names, prove_switch_off, prove_flux_role, prove_secret_deletes, prove_labels, prove_admin_bindings, prove_subjects, prove_helmreleases,
                           prove_delete_intent, prove_egress_floor, prove_copies, prove_sandbox):
                 prove()
         finally:
