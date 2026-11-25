@@ -2,7 +2,7 @@
 name: agent-platform-tools
 description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing, refused or asks for approval, a connector's Allow/Ask/Block settings and presets, connectors and signing in to one, workflows, or model-manager.
 metadata:
-  version: "3.4.0"
+  version: "3.4.1"
 ---
 
 # Tools on the Agent Platform
@@ -168,8 +168,11 @@ agent, the portal, Slack, Claude Code):
   workflow, or changes Muster's configuration (that one asks every caller). A **governed** platform
   also asks before an agent creates an agent, changes an agent's tools, starts another agent's
   session or pauses a connector; a **trusted** one (the default) lets agents do those freely.
-- Missing prerequisites (Muster's Valkey store, its browser sign-in) make every asking call
-  refused, with the reason; tell the person, it is the installation's to fix.
+- Missing prerequisites (Muster's Valkey store, its OAuth server with browser sign-in, a public URL
+  on that server's origin) make every asking call refused with the reason, reported as
+  `approval.unavailable` on each tool that asks; tell the person, it is the installation's to fix
+  (the platform chart does not fail a render over it). The approval page returns the browser to the
+  portal or Slack only where the installation's redirect allowlist names them; the chart derives it.
 
 ## Workflows
 
