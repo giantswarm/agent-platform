@@ -31,13 +31,14 @@ can do it, the default agent included.
   instructions that job needs, so each turn has less context to pay for.
 - **Security**: least privilege — a toolset and toolchains limited to the job, a model fit for the
   data it handles, and an owner who answers for it.
-- **Autonomy**: because its toolset is limited to the job, people can let it act without reviewing
-  each tool call. More agents can then run unattended and finish their work outside business hours
-  instead of waiting for a person's approval.
+- **Autonomy**: the narrower an agent's toolset, the more likely people are to let it act without
+  reviewing each tool call. Whether they do depends on what it may change and on their security
+  expectations. Agents that run unattended can finish their work outside business hours instead of
+  waiting for a person's approval.
 
 To a newcomer, in two sentences: "An agent built for this job does it better and cheaper, because it
 carries only what the job needs. It also reaches only the tools the job needs, so it can do less harm
-and can be left to work without anyone approving each step."
+and is more likely to be trusted to work without anyone approving each step."
 
 Why the default agent is broad: it handles a wide range of simple tasks, so someone with a one-off
 task needn't create an agent and start a new session first. That is convenience over efficiency; a
