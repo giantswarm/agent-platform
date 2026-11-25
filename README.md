@@ -121,6 +121,7 @@ Then point any MCP client at `https://muster.<your-domain>/mcp`. Its traffic cro
 | [Operator reference](docs/reference.md) | Every component and value: GitOps engine, self-management, serving and runtime slices, network policies, observability, CRD lifecycle |
 | [Authentication](docs/authentication.md) | The request path, OAuth discovery, token forwarding and exchange, edge JWT validation |
 | [Toolset presets](docs/toolset-presets.md) | Choosing which tools an agent gets |
+| [Governing tool calls](https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/) | Allow, Ask or Block per connector and tool, the governance mode and who sets what ([chart values](helm/agent-platform/README.md#tool-approval-and-the-governance-mode)) |
 | [Serving presets](docs/serving-presets.md) | Adding and benchmarking a model recipe |
 | [ChatGPT login](docs/chatgpt-login.md) | Running codex on each person's own ChatGPT subscription |
 | [Agent Substrate security](docs/substrate-security.md) | What the agent runtime changes on the cluster, and what protects it |

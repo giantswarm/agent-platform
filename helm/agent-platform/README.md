@@ -376,6 +376,42 @@ Karpenter relaxes a preferred term and launches the node. An installation's own
 `podAffinity` stands instead of the derived one (keep the atelet term in it, never
 required); below `1.3.0` the key is refused.
 
+## Tool approval and the governance mode
+
+Every tool behind muster is **Allow**, **Ask** (a person confirms the call first) or **Block**
+(hidden); the concept, who sets what and the prompts are on
+[Governing tool calls](https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/). What this chart configures:
+
+- **`governance`** (`trusted`, the default, or `governed`): the platform's governance mode. The meta
+  chart renders it into muster's governance configuration (`muster.governance`: the mode and the
+  servers muster treats as agent-manager, `agent-manager.muster.mcpServer.name`, and the Platform
+  Manager, `giantswarm-platform-manager`; an own `muster.muster.governance.servers.<role>` stands)
+  from the muster release that reads it (`agent-platform.muster.governanceFloor`); an earlier muster
+  gets none. Governed asks a person before an agent creates an agent, changes an agent's tools,
+  starts another agent or pauses a connector; the floors (an agent adding or repointing a
+  connector, changing approval settings, granting an exception, changing a workflow or muster's
+  configuration) ask on both. Only admins switch it, through the Platform Manager with a second
+  person's approval. Anything but the two values fails the render.
+- **The `connector-admin` role** is muster's `mcpserver-editor` Role in muster's namespace, bound to
+  `muster.rbac.mcpServerEditor.subjects` (the Giant Swarm admin groups) plus `tenants.platformTeam`.
+  Whoever holds it edits the namespace's connectors, sets their tool approval and may let an agent
+  skip a tool's `Ask`. The muster chart binds nobody by default, so this list is what keeps
+  connector admins on an upgrade; `system:authenticated` makes everyone one.
+- **`muster-approval-binder`**: muster takes an agent's tool settings in a Session binding only from
+  a sender allowed to `bind` `toolapprovals`. The muster chart ships that Role; the connectivity
+  release binds it to agent-manager's ServiceAccount, and only to it, in muster's namespace.
+- **Explicit settings on every shipped connector** (`spec.approval`): the MCPServers this chart
+  renders carry them as values — `mcp-kubernetes.mcpServer.approval` (the *Recommended* preset:
+  read-only tools Allow, the rest Ask, rule Ask) and `kagent.controllerRoute.mcp.approval` (*Allow
+  all*: kagent's session tools carry no annotations, and agents use them as the person); the
+  component charts set theirs under `<component>.muster.mcpServer.approval` (*Allow all* for the
+  managers, whose tools the portal calls as the person) and agent-platform-mcps per family
+  (`agent-platform-mcps.muster.families.<group>.approval`, *Recommended*). An installation tightens
+  a tool there (`Ask`, `Block`); `null` removes the block (the connector runs everything, shown as
+  *not reviewed*). A muster whose CRD lacks `spec.approval` drops the field.
+
+`make verify-tool-approval` asserts all four.
+
 ## Voluntary disruption
 
 The platform's core runs as single replicas — the agentgateway data plane, muster, the kagent controller, klaus-gateway, agent-manager — and each carries long-lived streams (MCP sessions, A2A and portal SSE turns, the LLM listener). A voluntary eviction (Karpenter consolidation, a node drain) cuts them mid-turn (giantswarm/agent-platform#431). Two guards, both on by default:
@@ -727,16 +763,17 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.forwardAllValues | bool | `true` |  |
 | components.agent-platform-connectivity.disableWaitForJobs | bool | `true` |  |
 | components.agent-platform-connectivity.omitKeys[0] | string | `"flux-engine"` |  |
-| components.agent-platform-connectivity.omitKeys[1] | string | `"scheduling"` |  |
-| components.agent-platform-connectivity.omitKeys[2] | string | `"gpu-operator"` |  |
-| components.agent-platform-connectivity.omitKeys[3] | string | `"toolchain-manager"` |  |
-| components.agent-platform-connectivity.omitKeys[4] | string | `"kserve-runtime-configs"` |  |
-| components.agent-platform-connectivity.omitKeys[5] | string | `"skills"` |  |
-| components.agent-platform-connectivity.omitKeys[6] | string | `"skillManager"` |  |
-| components.agent-platform-connectivity.omitKeys[7] | string | `"skill-manager"` |  |
-| components.agent-platform-connectivity.omitKeys[8] | string | `"defaultAgent"` |  |
-| components.agent-platform-connectivity.omitKeys[9] | string | `"agent-platform-operator"` |  |
-| components.agent-platform-connectivity.omitKeys[10] | string | `"agentPlatformOrganizations.operator"` |  |
+| components.agent-platform-connectivity.omitKeys[1] | string | `"governance"` |  |
+| components.agent-platform-connectivity.omitKeys[2] | string | `"scheduling"` |  |
+| components.agent-platform-connectivity.omitKeys[3] | string | `"gpu-operator"` |  |
+| components.agent-platform-connectivity.omitKeys[4] | string | `"toolchain-manager"` |  |
+| components.agent-platform-connectivity.omitKeys[5] | string | `"kserve-runtime-configs"` |  |
+| components.agent-platform-connectivity.omitKeys[6] | string | `"skills"` |  |
+| components.agent-platform-connectivity.omitKeys[7] | string | `"skillManager"` |  |
+| components.agent-platform-connectivity.omitKeys[8] | string | `"skill-manager"` |  |
+| components.agent-platform-connectivity.omitKeys[9] | string | `"defaultAgent"` |  |
+| components.agent-platform-connectivity.omitKeys[10] | string | `"agent-platform-operator"` |  |
+| components.agent-platform-connectivity.omitKeys[11] | string | `"agentPlatformOrganizations.operator"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -1513,6 +1550,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| governance | string | `"trusted"` | The platform's governance mode: trusted (the default) or governed. It changes no tool approval setting's meaning; it adds asking for agent callers. Governed asks a person before an agent creates an agent (agent-manager's create_agent), changes an agent's tools (update_agent_access), starts another agent (start_session) or pauses a connector, and the Dev Portal's connector wizard pre-selects the Recommended preset (read-only tools run, the rest ask); trusted lets agents do those freely and pre-selects Allow all. In both modes muster's built-in floors ask a person before an agent adds or repoints a connector, changes approval settings, gives an agent an exception or changes muster's own configuration. The meta chart renders muster's governance configuration from it (muster.governance: the mode, and the servers muster treats as agent-manager and the Platform Manager), from the muster release that reads it (agent-platform.muster.governanceFloor); an earlier muster gets none and asks nothing. Only admins switch it, through the Platform Manager with a second person's approval; never an agent. Anything else fails the render. Concept: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/ |
 | tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: bound to agent-platform:platform-user in the kagent namespace, and, while musterMcpServerViewers is unset, to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, gives this to every user. It also gives it to every ServiceAccount, so every pod in the cluster can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. To give it to people only, replace the default with an OIDC group that every user belongs to, written as the API server sees it (with the installation's OIDC groups prefix). |
 | tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects. |
 | tenants.platform.kagentRelease.name | string | `""` | The name of kagent's HelmRelease in the kagent namespace. Empty, the default, admits none. |
