@@ -1,8 +1,8 @@
 ---
 name: agent-platform-agent-management
-description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
+description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset (its tool list and Allow/Ask/Block settings) or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.3.0"
+  version: "3.4.0"
 ---
 
 # Managing agents and their building blocks
@@ -123,6 +123,22 @@ never assume an argument. The agent tools drop an unknown key without an error: 
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only
   on an explicit request. An own-account (OAuth) connector without `grantScope: subject` needs a
   sign-in in each of the agent's conversations (`agent-platform-tools`); say so before choosing it.
+- **Tool approval** (https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/): once agent-manager's `create_agent` schema has `tools`, the toolset
+  becomes the agent's **tool list**: the same selectors, each optionally `Allow`, `Ask` or `Block`,
+  plus a `default` for every listed tool without its own setting; at most 32 entries; an unlisted
+  tool is invisible. An agent's settings only tighten its connectors' (the strictest wins) and apply
+  to everyone who uses the agent. `Allow` over a tool its connector sets to `Ask`, or an allowing
+  `default`, is an **exception**: only a connector admin of that connector may grant it, and only
+  through `x_agent-manager_set_agent_approval` (`create_agent` and `update_agent_access` refuse
+  it); when you, an agent, call it, it asks the person, on every platform. Saving an agent
+  (`update_agent`, `update_agent_access`, `set_agent_approval`) drops each exception the saver is
+  not connector admin for, and the tool asks again: say so before saving. The tools split:
+  `update_agent` (name, description, prompt, model), `update_agent_access` (`tools` and everything
+  that widens reach: skills, plugins, egress, harness, workspace, toolchains),
+  `set_agent_approval` (the settings). On a **governed** platform `create_agent`,
+  `update_agent_access` and `start_session` ask the person when an agent calls them; on a trusted
+  one (the default) they don't. `muster.requireApproval: true` keeps asking before every call
+  until agent chart 3.0 moves it to `default: Ask`; never set it together with tool settings.
 - **An organization's connectors**: a kagent `RemoteMCPServer` in the organization namespace
   (`x_agent-manager_set_organization_connector`), not a Muster server, so no `toolset` selector
   reaches it. From agent-manager 3.3.0 (`connectors` in `x_agent-manager_create_agent`'s schema;

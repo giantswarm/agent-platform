@@ -2,7 +2,7 @@
 name: agent-platform-building-blocks
 description: Use when someone new asks what connectors, toolsets, toolchains or workspaces are, how they differ, or which one they need — or when a person's goal needs one they have not set up, so you can suggest it before the mechanics.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Connectors, toolsets, toolchains, workspaces
@@ -26,6 +26,10 @@ Each connector of **Customize** → **Connectors** offers tools behind Muster, t
 gateway. Every call runs as the
 person: what they may do in the service is what the agent may do there. Some connectors ask the
 person to sign in once with their own account; until then their tools are hidden for that person.
+
+Each tool of a connector is **Allow** (runs), **Ask** (a person confirms the call first) or
+**Block** (hidden); the strictest of the connector's and the agent's settings wins
+(https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/).
 
 **Suggest one** when the goal needs a system no connector reaches yet ("read our Jira tickets"):
 someone registers it with **Add connector**. A connector that exists but whose tools are missing

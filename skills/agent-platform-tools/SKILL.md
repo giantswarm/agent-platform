@@ -1,8 +1,8 @@
 ---
 name: agent-platform-tools
-description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing or refused, connectors and signing in to one, workflows, or model-manager.
+description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing, refused or asks for approval, a connector's Allow/Ask/Block settings and presets, connectors and signing in to one, workflows, or model-manager.
 metadata:
-  version: "3.3.1"
+  version: "3.4.0"
 ---
 
 # Tools on the Agent Platform
@@ -134,6 +134,43 @@ Tools register live when a server connects. Adding connectors:
 https://docs.giantswarm.io/tutorials/agent-platform/managing-mcp-servers/ and
 https://docs.giantswarm.io/tutorials/agent-platform/connecting-custom-mcp-servers/.
 
+## Tool approval: Allow, Ask, Block
+
+Concept: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/. Every tool has one setting, decided by Muster on every call, whoever calls (an
+agent, the portal, Slack, Claude Code):
+
+- **Allow** runs. **Ask**: a person confirms the exact call on Muster's approval page first; the
+  call then runs once. **Block**: hidden, absent from `filter_tools`, refused as not found.
+- A connector carries `spec.approval`: a `rule` (`Allow` or `Ask`) that every tool without its own
+  entry follows — **new tools follow the rule** — and per-tool entries by the server's own tool
+  name (no `x_<server>_` prefix). A connector without `approval` runs everything and is shown as
+  *not reviewed*. An agent's settings can only tighten them; the strictest wins.
+- `filter_tools` and `describe_tool` report each tool's `approval` (`setting`, `source`: `tool`,
+  `connector`, `agent`, `agent-exception`, `builtin`, `governance` or `unreviewed`; `new` for a tool
+  without its own entry) and `connectorAdmin`, whether you may change that connector's settings.
+- **Presets** fill in every tool once, on save, from the tools listed at that moment: *Recommended*
+  (rule Ask, tools annotated read-only Allow, the rest Ask), *Allow all*, *Ask all*. Creating a
+  connector over MCP (`core_mcpserver_create`) requires `preset` or explicit `approval`;
+  `core_mcpserver_set_approval` changes them. Only a connector admin (whoever may update
+  `mcpservers` in its namespace: the `connector-admin` role) may write them, and an agent writing
+  them always asks a person. The portal's wizard pre-selects *Allow all* on a trusted platform and
+  *Recommended* on a governed one. The platform's own connectors arrive reviewed: its management
+  servers (agent-manager, the other managers, kagent's session tools) on *Allow all*, the
+  infrastructure servers (Kubernetes, Prometheus, Cluster API) on *Recommended*.
+- **When a call asks**, you get an approval link (or, in a client without the prompt, an
+  `approval_required` text with the URL). Give the person the link as is, wait, then call the tool
+  again with the same arguments: approved, it runs once; declined, you get a declined result —
+  accept it, never retry another way. A workflow asks once, up front, for all its steps.
+  Never press *Approve* yourself, and never ask the person to approve something you did not show
+  them; with no person to open the link the call expires and is refused.
+- **Built in, every mode**: an agent is asked before it adds or repoints a connector, changes
+  approval on a connector or an agent, gives an agent an exception, creates, changes or deletes a
+  workflow, or changes Muster's configuration (that one asks every caller). A **governed** platform
+  also asks before an agent creates an agent, changes an agent's tools, starts another agent's
+  session or pauses a connector; a **trusted** one (the default) lets agents do those freely.
+- Missing prerequisites (Muster's Valkey store, its browser sign-in) make every asking call
+  refused, with the reason; tell the person, it is the installation's to fix.
+
 ## Workflows
 
 A `Workflow` resource is a list of tool calls Muster runs server-side, returning one shaped answer; it
@@ -209,6 +246,8 @@ clients. Procedure and version prerequisites:
   grant backend permissions. A successful agent-manager read with `releaseWithheld` is a partial
   answer, not an error: use the readable Agent data and explain which release details are unavailable.
   Do not send an authenticated person through sign-in again or blame them for this platform limit.
+- `approval_required`, or an approval link instead of a result: the tool's setting is Ask (above).
+  A tool that `filter_tools` no longer lists may be blocked for you: its connector's admins decide.
 - "tool `x_…` not found" from the runtime: a backend tool was emitted as a function — go through
   `call_tool`.
 - An issuer discovery or TLS error is installation connectivity, not a request for the person to
