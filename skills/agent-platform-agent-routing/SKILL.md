@@ -2,7 +2,7 @@
 name: agent-platform-agent-routing
 description: Use when a task might suit another agent than the one in this session, when someone asks which agent to use or whether one exists for a task, when a task repeats, or when you write a link that starts a session with an agent.
 metadata:
-  version: "1.0.1"
+  version: "1.1.0"
 ---
 
 # Routing a task to the right agent
@@ -31,9 +31,13 @@ can do it, the default agent included.
   instructions that job needs, so each turn has less context to pay for.
 - **Security**: least privilege — a toolset and toolchains limited to the job, a model fit for the
   data it handles, and an owner who answers for it.
+- **Autonomy**: because its toolset is limited to the job, people can let it act without reviewing
+  each tool call. More agents can then run unattended and finish their work outside business hours
+  instead of waiting for a person's approval.
 
 To a newcomer, in two sentences: "An agent built for this job does it better and cheaper, because it
-carries only what the job needs. It also reaches only the tools the job needs, so it can do less harm."
+carries only what the job needs. It also reaches only the tools the job needs, so it can do less harm
+and can be left to work without anyone approving each step."
 
 Why the default agent is broad: it handles a wide range of simple tasks, so someone with a one-off
 task needn't create an agent and start a new session first. That is convenience over efficiency; a
