@@ -378,6 +378,25 @@ Every tool behind muster is **Allow**, **Ask** (a person confirms the call first
   connector, changing approval settings, granting an exception, changing a workflow or muster's
   configuration) ask on both. Only admins switch it, through the Platform Manager with a second
   person's approval. Anything but the two values fails the render.
+- **What approval needs, and what this chart renders for it.** Asking calls refuse with the reason
+  unless muster's shared store is Valkey, muster runs its OAuth server (the browser sign-in through
+  Dex) and has a public URL on that server's origin. The bundled Valkey and
+  `muster.muster.oauth.server.storage.type: valkey` are the defaults; the OAuth server is on by
+  default but needs the installation's `oauth.server.baseUrl`, `dex.issuerUrl`, `dex.clientId` and
+  `existingSecret`; `muster.muster.oauth.mcpClient.enabled` with `publicUrl` (on the origin of
+  `oauth.server.baseUrl`) is the installation's to set (muster takes the OAuth server's base URL
+  when `publicUrl` is empty, but renders the allowlist below only with `mcpClient.enabled`). The
+  chart does not fail a `governed` render without them: muster refuses each asking call with the
+  reason and `filter_tools` reports `approval.unavailable`. From the same muster release as
+  `governance` (`agent-platform.muster.governanceFloor`) the meta chart also renders
+  `muster.approval.installation` (the name the approval page shows: `backstage.installationName`,
+  default `agent-platform`; an own `muster.muster.approval.installation` stands) and
+  `muster.oauth.mcpClient.postLoginRedirectAllowlist`, where muster may send the browser back after
+  a decision: `https://<portal host>/sessions` while the portal is on and has a host
+  (`backstage.hostname`, else `backstage.<global.domain>`) and
+  `<klausGateway.obo.callbackBaseUrl>/auth/slack/return` while klaus-gateway is on and names it; an
+  own list's entries stay. Without an entry the person sees muster's own "answer recorded" page and
+  answers *Done* in the portal or Slack.
 - **The `connector-admin` role** is muster's `mcpserver-editor` Role in muster's namespace, bound to
   `muster.rbac.mcpServerEditor.subjects` (the Giant Swarm admin groups) plus `tenants.platformTeam`.
   Whoever holds it edits the namespace's connectors, sets their tool approval and may let an agent

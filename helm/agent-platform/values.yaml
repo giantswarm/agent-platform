@@ -5813,7 +5813,16 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # from it (muster.governance: the mode, and the servers muster treats as
 # agent-manager and the Platform Manager), from the muster release that reads
 # it (agent-platform.muster.governanceFloor); an earlier muster gets none and
-# asks nothing. Only admins switch it, through the Platform Manager with a
+# asks nothing. From that release the meta chart also renders
+# muster.approval.installation (backstage.installationName, the name the
+# approval page shows) and the pages muster may return the browser to after an approval in
+# muster.oauth.mcpClient.postLoginRedirectAllowlist (the portal's /sessions,
+# klausGateway.obo.callbackBaseUrl + /auth/slack/return; an own list's entries
+# stay). Approval itself needs muster's OAuth server with Dex sign-in, Valkey
+# storage (the default) and muster.muster.oauth.mcpClient.publicUrl on the
+# OAuth server's origin with mcpClient.enabled for the allowlist; the chart
+# does not fail without them, muster refuses asking calls with the reason.
+# Only admins switch it, through the Platform Manager with a
 # second person's approval; never an agent. Anything else fails the render.
 # Concept: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
 governance: trusted  # @schema enum: [trusted, governed]

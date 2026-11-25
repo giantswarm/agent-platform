@@ -1069,6 +1069,17 @@ repeating the admin groups. */ -}}
 {{- $_ := set $muster "governance" . -}}
 {{- $_ := set $derived "muster" $muster -}}
 {{- end -}}
+{{- /* muster's approval configuration and the pages it may return the
+browser to after an approval, from the same muster floor. */ -}}
+{{- with (include "agent-platform.muster.approval" .root | fromJson) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $muster "approval" . -}}
+{{- $_ := set $derived "muster" $muster -}}
+{{- end -}}
+{{- with (include "agent-platform.muster.redirectAllowlist" .root | fromJsonArray) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $derived "muster" (mergeOverwrite $muster (dict "oauth" (dict "mcpClient" (dict "postLoginRedirectAllowlist" .)))) -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
 {{- $_ := set $derived "kagent" (dict "disableWiring" true) -}}
@@ -4748,9 +4759,12 @@ comment inside the define.
 The first muster release that reads the governance configuration
 (muster.governance: the mode and the servers it names per role) and enforces
 tool approval (Governing tool calls, slice 2 of giantswarm/giantswarm#38902).
-UNRELEASED: a placeholder for the release that carries it; below it the meta
-chart forwards no governance block, which an older muster chart's closed
-schema would refuse. One line, no comment inside the define.
+UNRELEASED: PLACEHOLDER-GOVERNANCE-FLOOR, the one value to move to the release
+that carries it (muster's tool-approval branch, giantswarm/giantswarm#38902); the
+same floor gates the approval block and the redirect allowlist entries below
+(agent-platform.muster.approval, agent-platform.muster.redirectAllowlist), and
+tests/verify-tool-approval.py takes it from here. Below it the meta chart
+forwards none of them. One line, no comment inside the define.
 */}}
 {{- define "agent-platform.muster.governanceFloor" -}}5.65.0{{- end -}}
 
@@ -4794,6 +4808,57 @@ Usage: include "agent-platform.muster.governance" $root | fromJson
 {{- $servers := dict "agentManager" (list $amName) "platformManager" (list "giantswarm-platform-manager") -}}
 {{- $servers = mergeOverwrite $servers ($own.servers | default dict) -}}
 {{- $out = dict "mode" $mode "servers" $servers -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+muster's approval configuration (muster.approval, rendered as `approval` into
+config.yaml): installation, the name the approval page shows, from
+backstage.installationName (the name the portal shows for this platform,
+default agent-platform) unless muster.muster.approval.installation names its
+own; any other own key (ttl) is kept. Only from the muster floor
+agent-platform.muster.governanceFloor; {} below it.
+Usage: include "agent-platform.muster.approval" $root | fromJson
+*/}}
+{{- define "agent-platform.muster.approval" -}}
+{{- $out := dict -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.governanceFloor" .)) -}}
+{{- $own := dig "muster" "approval" dict (.Values.muster | default dict) | default dict -}}
+{{- $out = mergeOverwrite (dict "installation" (include "agent-platform.portalInstallationName" .)) $own -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The pages muster may send the browser back to after an approval
+(muster.oauth.mcpClient.postLoginRedirectAllowlist; an entry admits its path
+and everything below it at a segment boundary): the portal's Sessions pages,
+https://<portal host>/sessions, while the portal is on and has a host
+(backstage.hostname, else backstage.<global.domain>), and klaus-gateway's
+return, <klausGateway.obo.callbackBaseUrl>/auth/slack/return, while
+klaus-gateway is on and names its callbackBaseUrl. An own list's entries stay,
+first, each entry once. Only from the muster floor
+agent-platform.muster.governanceFloor; [] below it. muster renders the list
+only while muster.muster.oauth.mcpClient.enabled is on.
+Usage: include "agent-platform.muster.redirectAllowlist" $root | fromJsonArray
+*/}}
+{{- define "agent-platform.muster.redirectAllowlist" -}}
+{{- $out := list -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.governanceFloor" .)) -}}
+{{- $out = dig "muster" "oauth" "mcpClient" "postLoginRedirectAllowlist" list (.Values.muster | default dict) | default list -}}
+{{- $derived := list -}}
+{{- $backstage := .Values.backstage | default dict -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "backstage") -}}
+{{- $host := dig "hostname" "" $backstage -}}
+{{- if and (not $host) .Values.global.domain -}}{{- $host = printf "backstage.%s" .Values.global.domain -}}{{- end -}}
+{{- if $host -}}{{- $derived = append $derived (printf "https://%s/sessions" $host) -}}{{- end -}}
+{{- end -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway") -}}
+{{- $base := dig "obo" "callbackBaseUrl" "" (.Values.klausGateway | default dict) | trimSuffix "/" -}}
+{{- if $base -}}{{- $derived = append $derived (printf "%s/auth/slack/return" $base) -}}{{- end -}}
+{{- end -}}
+{{- range $derived -}}{{- if not (has . $out) -}}{{- $out = append $out . -}}{{- end -}}{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}
