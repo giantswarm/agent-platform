@@ -1799,16 +1799,22 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       description: "Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"
       # The connector's tool approval (the MCPServer's spec.approval; Governing
       # tool calls, https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
-      # `rule` (Allow | Ask) for a tool without its own entry, new tools
-      # included, and `tools`, the server's own tool names -> Allow | Ask |
+      # `rule` (Allow | Ask | Block; a Block rule hides and refuses every
+      # tool without its own entry, new ones included) for a tool without its
+      # own entry, and `tools`, the server's own tool names -> Allow | Ask |
       # Block (Block hides the tool), at most 512. Written out for every tool
       # of the kagent line as the Allow all preset: the platform's own session
       # tools, which every session with the agent-platform preset uses as the
       # person who ran the turn and which carry no MCP annotations (Recommended
-      # would make reads ask too); agent callers are asked by muster's floors
-      # and the governance mode, not here. An installation tightens a tool
-      # here; null renders none (the connector runs every tool, not reviewed).
-      # A muster whose CRD lacks spec.approval drops the field.
+      # would make reads ask too). These settings apply on a trusted platform
+      # (invoke_session and fork_session included: no floor covers them); on a
+      # governed one muster asks agents before every tool of this server that
+      # is not on its safe list (the meta chart's governedServers.kagent, role
+      # sessionManager: the list and read tools), whatever these say. An
+      # installation tightens a tool here; null renders none (the connector
+      # runs every tool, not reviewed). A muster whose CRD lacks spec.approval
+      # drops the field, and muster then refuses the server's tools until the
+      # CRD is upgraded.
       approval:
         rule: Allow
         tools:
@@ -3680,7 +3686,8 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
     description: "Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"
     # The connector's tool approval (the MCPServer's spec.approval; Governing
     # tool calls, https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
-    # `rule` (Allow | Ask) for a tool without its own entry, new tools
+    # `rule` (Allow | Ask | Block; a Block rule hides and refuses every tool
+    # without its own entry) for a tool without its own entry, new tools
     # included, and `tools`, the server's own tool names -> Allow | Ask | Block
     # (Block hides the tool), at most 512. Written out for every tool of
     # mcp-kubernetes as the Recommended preset, as agent-platform-mcps'
@@ -3688,8 +3695,15 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
     # asks a person (the mutating ones are registered only when the server's
     # non-destructive mode is off), new tools ask until listed. An
     # installation changes a tool here; null renders none (the connector
-    # runs every tool, not reviewed). A muster whose CRD lacks spec.approval
-    # drops the field.
+    # runs every tool, not reviewed). The 15 deprecated kubernetes_* aliases
+    # the server registers beside these are not listed: they follow the rule
+    # (Ask). This map equals agent-platform-mcps' kubernetes family's (make
+    # verify-tool-approval compares them where that checkout is beside this
+    # one). On a governed platform muster asks agents before every tool not on
+    # the meta chart's governedServers.mcp-kubernetes safe list (role
+    # infrastructure), whatever these say. A muster whose CRD lacks
+    # spec.approval drops the field, and muster then refuses the server's
+    # tools until the CRD is upgraded.
     approval:
       rule: Ask
       tools:

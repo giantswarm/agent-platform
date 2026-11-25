@@ -2562,7 +2562,8 @@ string, so `with` gates a caller's comment). Include with nindent under
 {{/*
 An MCPServer's spec.approval from a values block (Governing tool calls,
 giantswarm/giantswarm#38902), validated the way the CRD's CEL rules check it so
-a wrong value fails the render naming the key: `rule` Allow or Ask, `tools` a
+a wrong value fails the render naming the key: `rule` Allow, Ask or Block (a
+Block rule hides and refuses every tool without its own entry), `tools` a
 map of at most 512 tool names to Allow, Ask or Block, nothing else. Renders the
 `approval:` block at two spaces of indentation, nothing for an empty or null
 block.
@@ -2580,8 +2581,8 @@ Usage: include "agent-platform.mcpServerApproval" (dict "approval" $block "key" 
 {{- end -}}
 {{- end -}}
 {{- if hasKey $a "rule" -}}
-{{- if not (has (toString $a.rule) (list "Allow" "Ask")) -}}
-{{- fail (printf "%s.rule %q: want Allow or Ask" .key (toString $a.rule)) -}}
+{{- if not (has (toString $a.rule) (list "Allow" "Ask" "Block")) -}}
+{{- fail (printf "%s.rule %q: want Allow, Ask or Block" .key (toString $a.rule)) -}}
 {{- end -}}
 {{- end -}}
 {{- $tools := $a.tools | default dict -}}
