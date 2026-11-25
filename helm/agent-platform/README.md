@@ -425,10 +425,11 @@ who sets what and the prompts are on
   URL with a host fails) while klaus-gateway is on and names it; an own list's entries stay.
   Without an entry the person sees muster's own "answer recorded" page and answers *Done* in the
   portal or Slack.
-- **Retry over the same MCP session.** muster binds a pending approval to the client's MCP session
-  (`Mcp-Session-Id`) within muster's session: after the person decides, the client retries over the
-  connection that got the prompt; another connection of the same person asks anew. At most 3
-  pending approvals per MCP connection and 10 per person.
+- **Retry as the same client.** muster binds a pending approval to the person and the calling
+  client (the OAuth client id `azp` of a person's client, the acting party of a delegated token,
+  or the agent's own Session for an actor JWT), not to the MCP session: after the person decides,
+  the same client retries, over any MCP session; another client of the same person asks anew.
+  At most 3 pending approvals per client and 10 per person.
 - **The `connector-admin` role** is muster's `mcpserver-editor` Role in muster's namespace, bound to
   `muster.rbac.mcpServerEditor.subjects` (the Giant Swarm admin groups) plus `tenants.platformTeam`.
   Whoever holds it edits the namespace's connectors, sets their tool approval and may let an agent
@@ -473,7 +474,7 @@ who sets what and the prompts are on
   it); the muster release binds `muster-approval-binder` in muster's namespace instead.
 - On a lab or any edge not on 443, set `backstage.publicPort` and drop a hand-written portal entry
   from `muster.muster.oauth.mcpClient.postLoginRedirectAllowlist`.
-- Clients retry an approved call over the same MCP session (see above).
+- Clients retry an approved call as the same client (see above).
 
 `make verify-tool-approval` asserts the governance configuration and its coverage (every shipped
 MCPServer governed or exempt, no floor safe, every safe entry a tool of its server), the

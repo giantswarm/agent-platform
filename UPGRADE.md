@@ -27,7 +27,7 @@ giantswarm/giantswarm#38902: muster decides Allow, Ask or Block for every tool c
 - Replace an own `muster.muster.governance.servers.<role>` with `governedServers` entries (the render fails on the earlier shape).
 - An edge not on 443: set `backstage.publicPort`, and remove a hand-written portal entry from `muster.muster.oauth.mcpClient.postLoginRedirectAllowlist`. The allowlist reaches muster only with `muster.muster.oauth.mcpClient.enabled`.
 - An agent-manager ServiceAccount the chart does not create (`agent-manager.serviceAccount.create: false`) needs `agent-manager.serviceAccount.name`.
-- Clients (portal, klaus-gateway, kagent) retry an approved call over the same MCP session; another connection asks anew.
+- Clients (portal, klaus-gateway, kagent) retry an approved call as the same client of the same person (any MCP session of it); another client of the person asks anew.
 
 ## \<current\> → \<next\> (forge CLI configuration from the Harness only)
 

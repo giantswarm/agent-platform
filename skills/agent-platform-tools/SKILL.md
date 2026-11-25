@@ -165,10 +165,10 @@ agent, the portal, Slack, Claude Code):
   *Allow all*, the infrastructure servers (Kubernetes, Prometheus, Cluster API) on *Recommended*.
 - **When a call asks**, you get an approval link (or, in a client without the prompt, an
   `approval_required` text with the URL). Give the person the link as is, wait, then call the tool
-  again with the same arguments **over the same connection** (the same MCP session): approved, it
-  runs once; declined, you get a declined result — accept it, never retry another way. A retry
-  from another connection asks anew. A workflow asks once, up front, for all its steps. At most 3
-  calls of one connection (10 of one person) wait for a decision at a time. Never press *Approve*
+  again with the same arguments **as the same client** (any MCP session of it will do): approved,
+  it runs once; declined, you get a declined result — accept it, never retry another way. A retry
+  from another client of the person asks anew. A workflow asks once, up front, for all its steps. At
+  most 3 calls of one client (10 of one person) wait for a decision at a time. Never press *Approve*
   yourself, and never ask the person to approve something you did not show them; with no person
   to open the link the call expires and is refused.
 - **Built in, every mode** (agents only): an agent is asked before it adds or repoints a connector,
