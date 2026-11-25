@@ -9,6 +9,16 @@
   (giantswarm-platform-manager); an own servers entry stands; an own mode that
   differs fails naming both keys; an unknown mode fails in the schema and, past
   it, in the template; below the floor nothing is forwarded.
+- approval configuration: from the same floor the muster release carries
+  muster.approval.installation (backstage.installationName, default
+  agent-platform; an own value and an own ttl stand) and the redirect allowlist
+  muster.oauth.mcpClient.postLoginRedirectAllowlist: the portal's
+  https://<portal host>/sessions while the portal is on and has a host, and
+  klaus-gateway's <obo.callbackBaseUrl>/auth/slack/return while klaus-gateway is
+  on and names it; own entries stay, first, once each; none below the floor.
+- governance floor: one marked placeholder value (PLACEHOLDER-GOVERNANCE-FLOOR in
+  agent-platform.muster.governanceFloor), which this test reads, so moving it to
+  the real release needs no other edit.
 - connector-admin: muster's mcpserver-editor Role (the platform's
   connector-admin role) is bound to the configured groups: the Giant Swarm admin
   groups by default, tenants.platformTeam appended, an installation's own list
@@ -30,11 +40,12 @@ Usage: verify-tool-approval.py <meta chart dir> <connectivity chart dir>
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 
 HELM = os.environ.get("HELM", "helm")
-FLOOR_RANGE = "components.muster.versionRange=>=5.65.0 <6.0.0-0"
+FLOOR_RANGE = ""  # set in main from agent-platform.muster.governanceFloor
 META = ["--set", "components.flux.enabled=false"]
 CONN = [
     "--namespace", "agent-platform",
@@ -52,6 +63,20 @@ CONN = [
 AGENT_MANAGER = ["--set", "components.agent-manager.enabled=true"]
 KAGENT_MCP = ["--set", "kagent.controllerRoute.enabled=true"]
 MCPK = ["--set", "components.mcp-kubernetes.enabled=true"]
+
+
+def governance_floor(meta_dir: str) -> str:
+    """The value of agent-platform.muster.governanceFloor, and its one marker."""
+    text = open(os.path.join(meta_dir, "templates", "_helpers.tpl")).read()
+    m = re.search(r'define "agent-platform\.muster\.governanceFloor" -\}\}([0-9]+\.[0-9]+\.[0-9]+)\{\{-', text)
+    if not m:
+        fail("agent-platform.muster.governanceFloor must be one line holding one X.Y.Z")
+    if text.count("PLACEHOLDER-GOVERNANCE-FLOOR") != 1:
+        fail("the governance floor placeholder must be marked exactly once (PLACEHOLDER-GOVERNANCE-FLOOR) next to its define")
+    values = open(os.path.join(meta_dir, "values.yaml")).read()
+    if f">={m.group(1)}" in values:
+        fail(f"values.yaml repeats the governance floor {m.group(1)}: it lives in agent-platform.muster.governanceFloor alone")
+    return m.group(1)
 
 
 def fail(msg: str) -> None:
@@ -148,6 +173,59 @@ def check_governance() -> None:
     print("ok: governance renders muster's governance configuration (trusted by default, governed, servers, own entries), none below the floor, unknown and conflicting modes fail")
 
 
+def check_approval_config() -> None:
+    def release(args: list[str]) -> str:
+        return muster_release(["--set", FLOOR_RANGE, "--set", "global.domain=ci.example.com", *args])
+
+    default = release([])
+    approval = block(default, "      approval:")
+    if approval.rstrip() != "      approval:\n        installation: agent-platform":
+        fail(f"default approval, want installation agent-platform:\n{approval}")
+    named = block(release(["--set", "backstage.installationName=lab-1"]), "      approval:")
+    if "installation: lab-1" not in named:
+        fail(f"approval.installation must follow backstage.installationName:\n{named}")
+    own = block(release(["--set", "muster.muster.approval.installation=mine", "--set", "muster.muster.approval.ttl=10m"]), "      approval:")
+    if "installation: mine" not in own or "ttl: 10m" not in own or "agent-platform" in own:
+        fail(f"an own installation and ttl must stand:\n{own}")
+    # the allowlist renders only for muster's OAuth client role, as muster's chart does
+    mc = ["--set", "muster.muster.oauth.mcpClient.enabled=true"]
+    portal = ["--set", "components.backstage.enabled=true"]
+    kg = ["--set", "components.klaus-gateway.enabled=true", "--set", "klausGateway.obo.callbackBaseUrl=https://gw.ci.example.com/"]
+    list_header = "          postLoginRedirectAllowlist:"
+    if block(release(mc), list_header):
+        fail("with the portal and klaus-gateway off there is nothing to allow: no allowlist expected")
+    both = block(release(mc + portal + kg), list_header)
+    want = list_header + "\n          - https://backstage.ci.example.com/sessions\n          - https://gw.ci.example.com/auth/slack/return"
+    if both.rstrip() != want:
+        fail(f"allowlist with the portal and klaus-gateway, want:\n{want}\ngot:\n{both}")
+    only_portal = block(release(mc + portal + ["--set", "klausGateway.obo.callbackBaseUrl=https://gw.ci.example.com"]), list_header)
+    if "auth/slack/return" in only_portal:
+        fail(f"no klaus-gateway entry while klaus-gateway is off:\n{only_portal}")
+    off = block(release(mc + kg), list_header)
+    if "sessions" in off or "https://gw.ci.example.com/auth/slack/return" not in off:
+        fail(f"klaus-gateway alone must give its return and no portal entry:\n{off}")
+    no_url = block(release(mc + ["--set", "components.klaus-gateway.enabled=true"]), list_header)
+    if no_url:
+        fail(f"klaus-gateway without a callbackBaseUrl names nothing to allow:\n{no_url}")
+    host = block(release(mc + portal + ["--set", "backstage.hostname=portal.example.org"]), list_header)
+    if "https://portal.example.org/sessions" not in host or "backstage.ci.example.com" in host:
+        fail(f"backstage.hostname must win over the global.domain derivation:\n{host}")
+    merged = block(release(mc + portal + kg + [
+        "--set", "muster.muster.oauth.mcpClient.postLoginRedirectAllowlist[0]=https://own.example.com/x",
+        "--set", "muster.muster.oauth.mcpClient.postLoginRedirectAllowlist[1]=https://backstage.ci.example.com/sessions",
+    ]), list_header)
+    lines = [l.strip() for l in merged.split("\n")[1:]]
+    if lines != ["- https://own.example.com/x", "- https://backstage.ci.example.com/sessions", "- https://gw.ci.example.com/auth/slack/return"]:
+        fail(f"own entries stay first, each entry once:\n{merged}")
+    below = muster_release(["--set", "global.domain=ci.example.com", *mc, *portal, *kg])
+    if block(below, "      approval:") or "auth/slack/return" in below or "/sessions" in below:
+        fail("below the muster floor the muster release must carry neither approval nor derived allowlist entries")
+    connectivity = doc(render_meta(["--set", FLOOR_RANGE, *portal]), "HelmRelease", "agent-platform-connectivity")
+    if connectivity and "\n      approval:\n        installation:" in connectivity:
+        fail("the approval block must not reach the connectivity release")
+    print("ok: muster.approval.installation follows backstage.installationName, the redirect allowlist names the portal's /sessions and klaus-gateway's /auth/slack/return where they are on, own values stand, none below the floor")
+
+
 def check_connector_admin() -> None:
     editor = block(muster_release([]), "      mcpServerEditor:")
     for group in ("giantswarm-ad:giantswarm-admins", "giantswarm-github:giantswarm:giantswarm-admins"):
@@ -235,7 +313,9 @@ def check_approval() -> None:
 
 if __name__ == "__main__":
     META_DIR, CONN_DIR = sys.argv[1], sys.argv[2]
+    FLOOR_RANGE = f"components.muster.versionRange=>={governance_floor(META_DIR)} <6.0.0-0"
     check_governance()
+    check_approval_config()
     check_connector_admin()
     check_binder()
     check_approval()
