@@ -1168,7 +1168,7 @@ spec:
           createGIECRDs: true
     kyvernoPolicies:
       enabled: false
-      policyExceptionNamespace: policy-exceptions
+      policyExceptionNamespace: kube-system
       rules:
         adding-capabilities: disallow-capabilities
         adding-capabilities-strict: disallow-capabilities-strict
@@ -1184,6 +1184,10 @@ spec:
         restricted-volumes: restrict-volume-types
         run-as-non-root: require-run-as-nonroot
         run-as-non-root-user: require-run-as-non-root-user
+    kyvernoPolicyExceptions:
+      enabled: true
+      legacy:
+        enabled: true
     llmRouting:
       enabled: false
       external:

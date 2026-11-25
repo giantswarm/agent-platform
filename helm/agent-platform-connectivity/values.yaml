@@ -899,7 +899,7 @@ kyvernoPolicies:
   enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
   # PolicyExceptions must live in policy-exceptions, giantswarm, flux-giantswarm
   # or kube-system on a Giant Swarm cluster (restrict-polex-namespaces).
-  policyExceptionNamespace: policy-exceptions
+  policyExceptionNamespace: kube-system
   # The Pod Security Standards policies the cluster's Kyverno enforces (Giant
   # Swarm: the upstream kyverno-policies chart with podSecurityStandard
   # restricted — the baseline and restricted ClusterPolicies under their
@@ -927,6 +927,19 @@ kyvernoPolicies:
     check-seccomp: restrict-seccomp
     check-seccomp-strict: restrict-seccomp-strict
     app-armor: restrict-apparmor-profiles
+
+# The chart's Kyverno PolicyExceptions come in two API groups: each
+# kyverno.io/v2 exception (which applies to ClusterPolicies only) has a
+# policies.kyverno.io/v1 sibling of the same name and match, which applies to
+# the CEL ValidatingPolicies of the same names and excepts each policy whole
+# (giantswarm/giantswarm#39201). Both render wherever kyvernoPolicies renders
+# the exceptions, in kyvernoPolicies.policyExceptionNamespace.
+kyvernoPolicyExceptions:
+  # -- Renders the PolicyExceptions, both API groups.
+  enabled: true
+  legacy:
+    # -- Renders the kyverno.io/v2 PolicyException, which applies to ClusterPolicies only. Will be used as a global switch in a future release.
+    enabled: true
 
 # The hook Jobs of this release (templates/_hooks.tpl): the Substrate bootstrap
 # (pre-install, pre-upgrade — the CA and JWT pools, the actor-identity trust

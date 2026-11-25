@@ -258,11 +258,12 @@ def check_ingress_guard(connectivity: str, base: list[str]) -> None:
 
 def check_policy_exception(connectivity: str, base: list[str]) -> None:
     """The model pods' PolicyException (#498): the four restricted-PSS rules the root vLLM image violates, in the serving namespace."""
-    docs = documents(helm(connectivity, base))
+    # The kyverno.io/v2 exception; its policies.kyverno.io/v1 sibling of the same name is held by verify-kyverno.
+    docs = documents("\n---\n".join(d for d in helm(connectivity, base).split("\n---\n") if "\napiVersion: policies.kyverno.io/" not in "\n" + d))
     pe = docs.get(("PolicyException", "model-serving-predictors"))
     if not pe:
         sys.exit("FAIL: no PolicyException model-serving-predictors: the fleet's restricted PSS policies deny the predictor Deployment")
-    for needle in ("  namespace: policy-exceptions", "  - policyName: disallow-capabilities-strict", "      - require-drop-all", "      - autogen-require-drop-all",
+    for needle in ("  namespace: kube-system", "  - policyName: disallow-capabilities-strict", "      - require-drop-all", "      - autogen-require-drop-all",
                    "  - policyName: disallow-privilege-escalation", "      - autogen-privilege-escalation", "  - policyName: require-run-as-nonroot", "      - autogen-run-as-non-root",
                    "  - policyName: restrict-seccomp-strict", "      - autogen-check-seccomp-strict", "        - model-serving\n", "          - key: app.kubernetes.io/component", "            - llminferenceservice-workload-worker\n", "        - StatefulSet\n", "          - key: app.kubernetes.io/part-of",
                    "            - llminferenceservice",

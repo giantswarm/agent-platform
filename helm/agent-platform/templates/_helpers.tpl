@@ -5987,6 +5987,63 @@ Usage: include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list 
 {{- end -}}
 
 {{/*
+The `policyRefs:` list of a CEL PolicyException (policies.kyverno.io/v1), from
+the same rules agent-platform.kyverno.exceptions takes: each rule is looked up
+in kyvernoPolicies.rules (a rule without an entry fails the render the same
+way) and each policy is referenced once, as the ValidatingPolicy of the same
+name, in the order the kyverno.io/v2 exception lists them. A CEL exception
+names policies, not rules: it excepts every rule of each policy it
+references. Rendered as YAML list items; the caller provides the
+`policyRefs:` key.
+Usage: include "agent-platform.kyverno.policyRefs" (dict "root" $ "rules" (list "host-path" "privileged-containers"))
+*/}}
+{{- define "agent-platform.kyverno.policyRefs" -}}
+{{- $root := .root -}}
+{{- $policies := dict -}}
+{{- range .rules -}}
+{{- $policy := index ($root.Values.kyvernoPolicies.rules | default dict) . -}}
+{{- if not $policy -}}
+{{- fail (printf "kyvernoPolicies.rules names no ClusterPolicy for the rule %q; add `%s: <policy>` (the PSS policy of the cluster's kyverno-policies chart that carries the rule)" . .) -}}
+{{- end -}}
+{{- $_ := set $policies $policy true -}}
+{{- end -}}
+{{- range $policy, $_ := $policies }}
+- name: {{ $policy }}
+  kind: ValidatingPolicy
+{{- end }}
+{{- end -}}
+
+{{/*
+A label selector of a kyverno.io/v2 PolicyException's match (matchLabels, and
+matchExpressions with In or Exists) as the CEL condition of a CEL
+PolicyException's matchConditions over the labels of .object: "object" (the
+resource under admission, a controller's OWN labels at its admission, as
+Kyverno matches a selector) or "namespaceObject" (its namespace, for a
+namespaceSelector). One line, the clauses AND-ed, every access guarded so the
+condition never errors; another operator fails the render.
+Usage: include "agent-platform.kyverno.celLabels" (dict "object" "object" "selector" (dict "matchLabels" (dict "app" "atelet")))
+*/}}
+{{- define "agent-platform.kyverno.celLabels" -}}
+{{- $labels := printf "%s.metadata.labels" .object -}}
+{{- $clauses := list (printf "%s != null" .object) (printf "has(%s)" $labels) -}}
+{{- range $k, $v := .selector.matchLabels | default dict -}}
+{{- $clauses = append $clauses (printf "'%s' in %s && %s['%s'] == '%s'" $k $labels $labels $k $v) -}}
+{{- end -}}
+{{- range .selector.matchExpressions | default list -}}
+{{- if eq .operator "Exists" -}}
+{{- $clauses = append $clauses (printf "'%s' in %s" .key $labels) -}}
+{{- else if eq .operator "In" -}}
+{{- $values := list -}}
+{{- range .values }}{{ $values = append $values (printf "'%s'" .) }}{{ end -}}
+{{- $clauses = append $clauses (printf "'%s' in %s && %s['%s'] in [%s]" .key $labels $labels .key (join ", " $values)) -}}
+{{- else -}}
+{{- fail (printf "agent-platform.kyverno.celLabels translates the operators In and Exists, not %s (key %s)" .operator .key) -}}
+{{- end -}}
+{{- end -}}
+{{- join " && " $clauses -}}
+{{- end -}}
+
+{{/*
 "true" while agentPlatformOrganizations.enabled is on, else empty; the label of
 the organizations' namespaces, as the connectivity chart selects them.
 */}}

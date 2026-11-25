@@ -1,0 +1,56 @@
+{{- /*
+The policies.kyverno.io/v1 siblings of the CSI companion's PolicyExceptions
+(csi-companion-policy-exceptions.yaml, which says what each workload violates
+and why this chart renders them): the same names, labels and namespace, the
+same rules looked up in kyvernoPolicies.rules, the same match as
+matchConditions. They apply to the CEL ValidatingPolicies of the same names,
+and except each policy whole: of disallow-capabilities-strict, the node
+plugin's kyverno.io/v2 exception names require-drop-all only. A pre-install,
+pre-upgrade hook, so they exist before the connectivity release's workloads
+reach admission.
+*/ -}}
+{{- if and (include "agent-platform.workspaces.csiCompanion.enabled" .) (eq (include "agent-platform.shape.kyvernoPolicies" .) "true") (not (include "agent-platform.targetSecretName" .)) .Values.kyvernoPolicyExceptions.enabled }}
+{{- $polexNs := .Values.kyvernoPolicies.policyExceptionNamespace }}
+{{- $connectivity := index (.Values.components | default dict) "agent-platform-connectivity" | default dict }}
+{{- $releaseNs := $connectivity.targetNamespace | default (include "agent-platform.targetNamespace" .) }}
+---
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: csi-companion-controller
+  namespace: {{ $polexNs }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  policyRefs:
+  {{- include "agent-platform.kyverno.policyRefs" (dict "root" $ "rules" (list "run-as-non-root" "run-as-non-root-user")) | nindent 2 }}
+  matchConditions:
+  - name: csi-companion-controller
+    expression: >-
+      request.kind.kind in ['Pod', 'Deployment', 'ReplicaSet'] &&
+      request.namespace == '{{ $releaseNs }}' &&
+      {{ include "agent-platform.kyverno.celLabels" (dict "object" "object" "selector" (dict "matchLabels" (dict "app.kubernetes.io/name" "csi-companion" "app.kubernetes.io/component" "controller"))) }}
+---
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: csi-companion-node
+  namespace: {{ $polexNs }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    app.kubernetes.io/component: node
+spec:
+  policyRefs:
+  {{- include "agent-platform.kyverno.policyRefs" (dict "root" $ "rules" (list "privileged-containers" "host-namespaces" "host-path" "restricted-volumes" "require-drop-all" "privilege-escalation" "run-as-non-root")) | nindent 2 }}
+  matchConditions:
+  - name: csi-companion-node
+    expression: >-
+      request.kind.kind in ['Pod', 'DaemonSet'] &&
+      request.namespace == '{{ $releaseNs }}' &&
+      {{ include "agent-platform.kyverno.celLabels" (dict "object" "object" "selector" (dict "matchLabels" (dict "app.kubernetes.io/name" "csi-companion" "app.kubernetes.io/component" "node"))) }}
+{{- end }}

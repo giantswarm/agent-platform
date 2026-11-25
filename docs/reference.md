@@ -781,7 +781,9 @@ The connectivity chart renders Kyverno objects only where Kyverno is enabled:
 - the model-serving policies and exception
 - the Postgres exception, when `postgres.vector.extensionImage.reference` is set
 
-Exceptions name policies this chart does not own. `kyvernoPolicies.rules` maps each rule to its ClusterPolicy, using the default Giant Swarm names. A cluster with other policy names overrides the map, and a rule missing from it fails the render. Exceptions go to `kyvernoPolicies.policyExceptionNamespace` (default `policy-exceptions`).
+Exceptions name policies this chart does not own. `kyvernoPolicies.rules` maps each rule to its ClusterPolicy, using the default Giant Swarm names. A cluster with other policy names overrides the map, and a rule missing from it fails the render. Exceptions go to `kyvernoPolicies.policyExceptionNamespace` (default `kube-system`).
+
+Each `kyverno.io/v2` PolicyException has a `policies.kyverno.io/v1` sibling of the same name and match, which applies to the CEL (ValidatingPolicy) versions of the policies. A CEL exception references whole policies, not rules: where a workload violates only some rules of a policy, its CEL sibling excepts the whole policy. The CEL siblings are `pre-install,pre-upgrade` hooks, so Helm does not delete them with the release. `kyvernoPolicyExceptions.enabled: false` renders neither; `kyvernoPolicyExceptions.legacy.enabled: false` renders the CEL ones alone.
 
 ## Development
 

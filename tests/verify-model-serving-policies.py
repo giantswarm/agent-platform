@@ -320,6 +320,11 @@ def one(docs: list[dict], kind: str, suffix: str) -> dict:
     return hits[0]
 
 
+def legacy(docs: list[dict]) -> list[dict]:
+    """The render without the policies.kyverno.io/v1 PolicyExceptions: the kyverno.io/v2 sibling is the one `kyverno apply` holds to the ClusterPolicies."""
+    return [d for d in docs if not (d.get("kind") == "PolicyException" and d.get("apiVersion", "").startswith("policies.kyverno.io/"))]
+
+
 def suffixes(docs: list[dict], prefix: str) -> list[str]:
     """The documents' names past the release prefix, sorted."""
     return sorted(d["metadata"]["name"].split(prefix, 1)[1] for d in docs)
@@ -603,7 +608,7 @@ def check_deployments(deployments_policy: dict) -> None:
 
 
 def check_selectors(cilium: list[dict], k8s: list[dict]) -> None:
-    exception = one(k8s, "PolicyException", "model-serving-predictors")
+    exception = one(legacy(k8s), "PolicyException", "model-serving-predictors")
     exception_selectors = [m["resources"]["selector"] for m in exception["spec"]["match"]["any"]
                            if "selector" in m["resources"] and "Pod" in m["resources"]["kinds"] and NS in m["resources"]["namespaces"]]
     agents = one(cilium, "CiliumNetworkPolicy", "-kagent-agents-to-model-serving")
@@ -1253,7 +1258,7 @@ def main(connectivity: str, meta: str) -> int:
     docs = render(connectivity, [])
     pods_policy = one(docs, "ClusterPolicy", "-model-serving-pods")
     deployments_policy = one(docs, "ClusterPolicy", "-model-serving-deployments")
-    exception = one(docs, "PolicyException", "model-serving-predictors")
+    exception = one(legacy(docs), "PolicyException", "model-serving-predictors")
     rules = [r["name"] for r in pods_policy["spec"]["rules"]]
     expected = [f"redirect-model-storage-{s}" for s in SHAPES] + [f"model-pod-env-{s}" for s in SHAPES] + ["storage-initializer-memory"] + [f"emptydir-size-limits-{s}" for s in SHAPES]
     if rules != expected:

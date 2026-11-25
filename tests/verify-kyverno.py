@@ -34,6 +34,11 @@ exceptions are hand-written; this check computes them.
     names a rule the workload does not violate fails (an over-broad
     exception); an exception that matches no Substrate workload fails unless
     it is the CNPG ImageVolume exception, whose one rule is checked too.
+  * Each kyverno.io/v2 exception has a policies.kyverno.io/v1 (CEL) sibling
+    of the same name and namespace that references, as ValidatingPolicies,
+    exactly the policies the sibling names (a CEL exception excepts whole
+    policies; its match is the sibling's, as matchConditions), and no CEL
+    exception stands alone.
   * No exception may select app: kagent (the v1alpha2 agent Deployments' label;
     nothing carries it on kagent API v2).
   * The workspaces' CSI companion (the connectivity chart's
@@ -269,6 +274,37 @@ def rules_named(pe: dict) -> set[str]:
     return named
 
 
+LEGACY = "kyverno.io/v2"
+CEL = "policies.kyverno.io/v1"
+
+
+def split(docs: list[dict]) -> tuple[list[dict], list[dict]]:
+    """The PolicyExceptions of a render: the kyverno.io/v2 ones and their CEL siblings."""
+    pes = [d for d in docs if d["kind"] == "PolicyException"]
+    other = [pe["apiVersion"] for pe in pes if pe["apiVersion"] not in (LEGACY, CEL)]
+    if other:
+        fail(f"PolicyExceptions of an unexpected API version: {other}")
+    return [pe for pe in pes if pe["apiVersion"] == LEGACY], [pe for pe in pes if pe["apiVersion"] == CEL]
+
+
+def hold_cel(legacy: list[dict], cel: list[dict]) -> None:
+    """Each kyverno.io/v2 exception's CEL sibling references exactly its policies."""
+    by_name = {(pe["metadata"]["name"], pe["metadata"]["namespace"]): pe for pe in cel}
+    for pe in legacy:
+        key = (pe["metadata"]["name"], pe["metadata"]["namespace"])
+        sibling = by_name.pop(key, None)
+        if sibling is None:
+            fail(f"PolicyException {key[1]}/{key[0]} has no {CEL} sibling: the CEL ValidatingPolicies would deny its workload")
+        want = [{"name": ex["policyName"], "kind": "ValidatingPolicy"} for ex in pe["spec"]["exceptions"]]
+        if sibling["spec"].get("policyRefs") != want:
+            fail(f"the {CEL} PolicyException {key[0]} references {sibling['spec'].get('policyRefs')}, its sibling names {want}")
+        if not sibling["spec"].get("matchConditions"):
+            fail(f"the {CEL} PolicyException {key[0]} has no matchConditions: it would except every resource")
+        print(f"ok: {key[0]}: the {CEL} sibling references {[w['name'] for w in want]}")
+    if by_name:
+        fail(f"{CEL} PolicyExceptions without a {LEGACY} sibling: {sorted(by_name)}")
+
+
 def substrate_release(meta: str) -> tuple[str, str, str]:
     """The substrate component's OCI url, version constraint and forwarded values."""
     docs = render(meta, ["-f", f"{meta}/ci/ci-values.yaml", "--set", "components.flux.enabled=false", *ON])
@@ -353,7 +389,8 @@ def companion(meta: str, connectivity: str, preset: str, fixture: str) -> None:
         fail(f"the CSI companion ({preset}) renders {[w['name'] for w in workloads]}, not one Deployment and one DaemonSet")
     meta_docs = render(meta, ["-f", f"{meta}/ci/ci-values.yaml", "--set", "components.flux.enabled=false", "--namespace", COMPANION_NAMESPACE,
                               "--set", "kyvernoPolicies.enabled=true", *FLEET_APIS, *ON, "-f", fixture, *RELEASABLE])
-    pes = [d for d in meta_docs if d["kind"] == "PolicyException" and d["metadata"]["name"].startswith(COMPANION)]
+    pes, cel = split([d for d in meta_docs if d["kind"] == "PolicyException" and d["metadata"]["name"].startswith(COMPANION)])
+    hold_cel(pes, cel)
     used = hold(workloads, pes)
     if used != {pe["metadata"]["name"] for pe in pes}:
         fail(f"the CSI companion's exceptions {sorted(pe['metadata']['name'] for pe in pes)} are not all used by its workloads ({sorted(used)})")
@@ -362,11 +399,12 @@ def companion(meta: str, connectivity: str, preset: str, fixture: str) -> None:
 def main(meta: str, connectivity: str) -> int:
     url, constraint, values = substrate_release(meta)
     workloads = [*substrate_workloads(url, constraint, values), WORKER_POD]
-    pes = [d for d in render(connectivity, [*CONNECTIVITY_ON, *FLEET_APIS]) if d["kind"] == "PolicyException"]
+    pes, cel = split(render(connectivity, [*CONNECTIVITY_ON, *FLEET_APIS]))
     if not pes:
         fail("the connectivity render carries no PolicyException with kagent, Substrate and Kyverno on")
-    if any(pe["metadata"]["name"].startswith(COMPANION) for pe in pes):
+    if any(pe["metadata"]["name"].startswith(COMPANION) for pe in pes + cel):
         fail("a CSI companion exception renders without the companion's block")
+    hold_cel(pes, cel)
     used = hold(workloads, pes)
     for pe in pes:
         name = pe["metadata"]["name"]
@@ -380,6 +418,9 @@ def main(meta: str, connectivity: str) -> int:
     for pe in pes:
         if re.search(r"\bapp: kagent\b", yaml.safe_dump(pe["spec"]["match"])):
             fail(f"PolicyException {pe['metadata']['name']} selects app: kagent, the v1alpha2 agent Deployments' label; nothing carries it on kagent API v2")
+    for pe in cel:
+        if "['app'] == 'kagent'" in yaml.safe_dump(pe["spec"]["matchConditions"], width=10000):
+            fail(f"the {CEL} PolicyException {pe['metadata']['name']} selects app: kagent")
     print("ok: no exception selects app: kagent")
     for preset, fixture in COMPANION_FIXTURES.items():
         companion(meta, connectivity, preset, fixture)

@@ -27,7 +27,7 @@ namespace, Pod and controller kinds. With gitops.target the companion and
 Kyverno policies are refused together (agent-platform.workspaces.csiCompanion.validate):
 these objects land on this cluster, not the target.
 */ -}}
-{{- if and (include "agent-platform.workspaces.csiCompanion.enabled" .) (eq (include "agent-platform.shape.kyvernoPolicies" .) "true") (not (include "agent-platform.targetSecretName" .)) }}
+{{- if and (include "agent-platform.workspaces.csiCompanion.enabled" .) (eq (include "agent-platform.shape.kyvernoPolicies" .) "true") (not (include "agent-platform.targetSecretName" .)) .Values.kyvernoPolicyExceptions.enabled .Values.kyvernoPolicyExceptions.legacy.enabled }}
 {{- $polexNs := .Values.kyvernoPolicies.policyExceptionNamespace }}
 {{- $connectivity := index (.Values.components | default dict) "agent-platform-connectivity" | default dict }}
 {{- $releaseNs := $connectivity.targetNamespace | default (include "agent-platform.targetNamespace" .) }}
@@ -40,6 +40,7 @@ metadata:
   labels:
     {{- include "labels.common" . | nindent 4 }}
     app.kubernetes.io/component: controller
+    policy.giantswarm.io/migrated-to-cel: "true"
 spec:
   exceptions:
   {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "run-as-non-root" "run-as-non-root-user")) | nindent 2 }}
@@ -65,6 +66,7 @@ metadata:
   labels:
     {{- include "labels.common" . | nindent 4 }}
     app.kubernetes.io/component: node
+    policy.giantswarm.io/migrated-to-cel: "true"
 spec:
   exceptions:
   {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "privileged-containers" "host-namespaces" "host-path" "restricted-volumes" "require-drop-all" "privilege-escalation" "run-as-non-root")) | nindent 2 }}

@@ -1,0 +1,160 @@
+{{- /*
+The policies.kyverno.io/v1 siblings of the Substrate PolicyExceptions
+(policy-exceptions.yaml, which says what each workload violates): the same
+names, labels and namespace, the same rules looked up in kyvernoPolicies.rules
+(agent-platform.kyverno.policyRefs), the same match as matchConditions. They
+apply to the CEL ValidatingPolicies of the same names, which a kyverno.io/v2
+exception does not reach. A CEL exception references whole policies, not
+rules: where a workload violates only some rules of a policy (atelet's and the
+workers' adding-capabilities-strict, the control plane's require-drop-all, both
+of disallow-capabilities-strict), the CEL sibling excepts the whole policy.
+A pre-install, pre-upgrade hook, so it exists before the workloads it excepts
+reach admission.
+*/ -}}
+{{- if and (include "agent-platform.substrate.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.kyvernoPolicyExceptions.enabled }}
+{{- $ns := include "agent-platform.substrate.namespace" . }}
+{{- $pcNs := include "agent-platform.substrate.podcertNamespace" . }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $polexNs := .Values.kyvernoPolicies.policyExceptionNamespace }}
+{{- $workerRules := (list "host-path" "restricted-volumes" "adding-capabilities" "adding-capabilities-strict" "run-as-non-root" "run-as-non-root-user" "privilege-escalation" "check-seccomp" "check-seccomp-strict" "app-armor") }}
+{{- $workerPool := dict "matchExpressions" (list (dict "key" "ate.dev/worker-pool" "operator" "Exists")) }}
+---
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: substrate-atelet
+  namespace: {{ $polexNs }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/substrate-workload: atelet
+spec:
+  policyRefs:
+  {{- include "agent-platform.kyverno.policyRefs" (dict "root" $ "rules" (list "host-ports-none" "host-path" "restricted-volumes" "adding-capabilities-strict" "run-as-non-root" "run-as-non-root-user" "privilege-escalation" "check-seccomp-strict")) | nindent 2 }}
+  matchConditions:
+  - name: substrate-atelet
+    expression: >-
+      request.kind.kind in ['Pod', 'DaemonSet'] &&
+      request.namespace == '{{ $ns }}' &&
+      {{ include "agent-platform.kyverno.celLabels" (dict "object" "object" "selector" (dict "matchLabels" (dict "app" "atelet"))) }}
+---
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: substrate-workers
+  namespace: {{ $polexNs }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/substrate-workload: workers
+spec:
+  policyRefs:
+  {{- include "agent-platform.kyverno.policyRefs" (dict "root" $ "rules" $workerRules) | nindent 2 }}
+  matchConditions:
+  - name: substrate-workers
+    expression: >-
+      request.kind.kind in ['Pod', 'Deployment', 'ReplicaSet'] &&
+      request.namespace == '{{ $kagentNs }}' &&
+      {{ include "agent-platform.kyverno.celLabels" (dict "object" "object" "selector" $workerPool) }}
+{{- if include "agent-platform.orgNamespaces.enabled" . }}
+{{- /* The workers of the organizations' namespaces, only when Substrate's
+controller chain writes them (see policy-exceptions.yaml): one block per kind,
+OR-ed, the namespace selected by its label (namespaceObject) and the writer by
+its ServiceAccount's user name. A CEL exception has no background switch: a
+background scan has no writer (request.userInfo is empty), so, as with the
+kyverno.io/v2 sibling's background: false, the scans do not apply it. */}}
+{{- $orgNamespaces := dict "matchExpressions" (list (dict "key" (include "agent-platform.orgNamespaces.label" .) "operator" "Exists")) }}
+{{- $blocks := list }}
+{{- range $kind, $writers := include "agent-platform.tenants.workerWriters" . | fromJson }}
+{{- $users := list }}
+{{- range $writers }}
+{{- $users = append $users (printf "'system:serviceaccount:%s:%s'" .namespace .name) }}
+{{- end }}
+{{- $blocks = append $blocks (printf "(request.kind.kind == '%s' && %s && %s && request.userInfo.username in [%s])" $kind (include "agent-platform.kyverno.celLabels" (dict "object" "namespaceObject" "selector" $orgNamespaces)) (include "agent-platform.kyverno.celLabels" (dict "object" "object" "selector" $workerPool)) (join ", " $users)) }}
+{{- end }}
+---
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: substrate-workers-tenants
+  namespace: {{ $polexNs }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/substrate-workload: workers
+spec:
+  policyRefs:
+  {{- include "agent-platform.kyverno.policyRefs" (dict "root" $ "rules" $workerRules) | nindent 2 }}
+  matchConditions:
+  - name: substrate-workers-tenants
+    expression: >-
+      {{ join " || " $blocks }}
+{{- end }}
+---
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: substrate-control-plane
+  namespace: {{ $polexNs }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/substrate-workload: control-plane
+spec:
+  policyRefs:
+  {{- include "agent-platform.kyverno.policyRefs" (dict "root" $ "rules" (list "require-drop-all" "run-as-non-root" "privilege-escalation" "check-seccomp-strict")) | nindent 2 }}
+  # Matched by resource name (policy-exceptions.yaml says why). Each name
+  # prefix (ate-api-server*, ...) matches the workload's own name and the
+  # names of its ReplicaSets and Pods (<name>-...), not a look-alike name.
+  matchConditions:
+  - name: substrate-control-plane
+    expression: >-
+      request.kind.kind in ['Pod', 'Deployment', 'ReplicaSet'] &&
+      request.namespace == '{{ $ns }}' &&
+      has(object.metadata.name) &&
+      ({{- range $i, $name := list "ate-api-server" "ate-controller" "atenet-router" "atenet-egress" "dns" }}{{ if $i }} || {{ end }}object.metadata.name == '{{ $name }}' || object.metadata.name.startsWith('{{ $name }}-'){{ end }})
+---
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: substrate-podcertificate-controller
+  namespace: {{ $polexNs }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/substrate-workload: podcertificate-controller
+spec:
+  policyRefs:
+  {{- include "agent-platform.kyverno.policyRefs" (dict "root" $ "rules" (list "run-as-non-root" "check-seccomp-strict")) | nindent 2 }}
+  matchConditions:
+  - name: substrate-podcertificate-controller
+    expression: >-
+      request.kind.kind in ['Pod', 'Deployment', 'ReplicaSet'] &&
+      request.namespace == '{{ $pcNs }}' &&
+      {{ include "agent-platform.kyverno.celLabels" (dict "object" "object" "selector" (dict "matchLabels" (dict "app" "podcertificate-controller"))) }}
+---
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: substrate-credential-provider
+  namespace: {{ $polexNs }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+    agent-platform.giantswarm.io/substrate-workload: credential-provider
+spec:
+  policyRefs:
+  {{- include "agent-platform.kyverno.policyRefs" (dict "root" $ "rules" (list "check-seccomp-strict")) | nindent 2 }}
+  matchConditions:
+  - name: substrate-credential-provider
+    expression: >-
+      request.kind.kind in ['Pod', 'Deployment', 'ReplicaSet'] &&
+      request.namespace == '{{ $ns }}' &&
+      {{ include "agent-platform.kyverno.celLabels" (dict "object" "object" "selector" (dict "matchLabels" (dict "app" "k8s-credential-provider"))) }}
+{{- end }}

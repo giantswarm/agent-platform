@@ -1,0 +1,32 @@
+{{- /*
+The policies.kyverno.io/v1 sibling of <clusterName>-image-volume
+(policy-exception.yaml, which says why the CNPG pods need it): the same name,
+labels and namespace, the same rule looked up in kyvernoPolicies.rules, the
+same match as matchConditions. It applies to the CEL ValidatingPolicy of the
+same name. A pre-install, pre-upgrade hook, so it exists before the pods it
+excepts reach admission.
+*/ -}}
+{{- if and .Values.postgres.enabled (include "agent-platform.kyvernoPolicies" .) .Values.kyvernoPolicyExceptions.enabled }}
+{{- if and .Values.postgres.vector.enabled .Values.postgres.vector.extensionImage.reference }}
+{{- $ns := .Values.postgres.namespace | default .Release.Namespace }}
+{{- $clusterName := .Values.postgres.clusterName }}
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: {{ $clusterName }}-image-volume
+  namespace: {{ .Values.kyvernoPolicies.policyExceptionNamespace }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyRefs:
+  {{- include "agent-platform.kyverno.policyRefs" (dict "root" $ "rules" (list "restricted-volumes")) | nindent 2 }}
+  matchConditions:
+  - name: cnpg-pods
+    expression: >-
+      request.kind.kind in ['Pod', 'Job'] &&
+      request.namespace == '{{ $ns }}' &&
+      {{ include "agent-platform.kyverno.celLabels" (dict "object" "object" "selector" (dict "matchExpressions" (list (dict "key" "cnpg.io/cluster" "operator" "In" "values" (list $clusterName (printf "%s-restore" $clusterName)))))) }}
+{{- end }}
+{{- end }}

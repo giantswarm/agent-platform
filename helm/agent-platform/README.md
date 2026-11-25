@@ -863,7 +863,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | networkPolicy.kubernetes.ipv6.enabled | bool | `false` |  |
 | networkPolicy.kubernetes.ipv6.excludedCIDRs | list | `[]` |  |
 | kyvernoPolicies.enabled | string | `"auto"` | `auto` (default) renders the Kyverno objects when kyverno.io/v1 is served on the cluster, detected once by the meta chart (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
-| kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
+| kyvernoPolicies.policyExceptionNamespace | string | `"kube-system"` |  |
 | kyvernoPolicies.rules.privileged-containers | string | `"disallow-privileged-containers"` |  |
 | kyvernoPolicies.rules.host-ports-none | string | `"disallow-host-ports"` |  |
 | kyvernoPolicies.rules.host-namespaces | string | `"disallow-host-namespaces"` |  |
@@ -878,6 +878,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kyvernoPolicies.rules.check-seccomp | string | `"restrict-seccomp"` |  |
 | kyvernoPolicies.rules.check-seccomp-strict | string | `"restrict-seccomp-strict"` |  |
 | kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
+| kyvernoPolicyExceptions.enabled | bool | `true` | Renders the PolicyExceptions, both API groups. |
+| kyvernoPolicyExceptions.legacy.enabled | bool | `true` | Renders the kyverno.io/v2 PolicyException, which applies to ClusterPolicies only. Will be used as a global switch in a future release. |
 | scheduling.singletons.nodeSelector | object | `{}` | Node labels the four stateful singletons (muster, muster-valkey, the kagent controller, klaus-gateway) must land on, merged into each component's own nodeSelector (its keys win). On a Karpenter spot installation: `karpenter.sh/capacity-type: on-demand`. Empty = as before. |
 | scheduling.singletons.tolerations | list | `[]` | Tolerations appended to the four singletons' own, for a dedicated, tainted on-demand pool. The fleet's NodePools carry no taint. |
 | extraObjects | list | `[]` |  |

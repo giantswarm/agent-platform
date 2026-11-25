@@ -1,0 +1,38 @@
+{{- /*
+The policies.kyverno.io/v1 sibling of model-serving-predictors
+(policy-exception.yaml, which says why the model pods need it): the same name,
+labels and namespace, the same rules looked up in kyvernoPolicies.rules, the
+same match as matchConditions — the two resource blocks OR-ed. It applies to
+the CEL ValidatingPolicies of the same names, and excepts each policy whole:
+of disallow-capabilities-strict, the kyverno.io/v2 exception names
+require-drop-all only. A pre-install, pre-upgrade hook, so it exists before the
+workloads it excepts reach admission.
+*/ -}}
+{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.modelServing.policyException.enabled .Values.kyvernoPolicyExceptions.enabled }}
+{{- $ns := include "agent-platform.modelServing.namespace" . }}
+{{- $shape := include "agent-platform.modelServing.podShape" . | fromJson }}
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: model-serving-predictors
+  namespace: {{ .Values.kyvernoPolicies.policyExceptionNamespace }}
+  annotations:
+    "helm.sh/hook": "pre-install,pre-upgrade"
+  labels:
+    {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+spec:
+  policyRefs:
+  {{- include "agent-platform.kyverno.policyRefs" (dict "root" $ "rules" (list "require-drop-all" "privilege-escalation" "run-as-non-root" "check-seccomp-strict")) | nindent 2 }}
+  # {{ $shape.kind }} pods, their ReplicaSets and Deployments and the
+  # StatefulSets of a LeaderWorkerSet by their labels, or the workload by the
+  # name the llm-d controller gives it (*-kserve*).
+  matchConditions:
+  - name: model-serving-predictors
+    expression: >-
+      (request.kind.kind in ['Pod', 'ReplicaSet', 'Deployment', 'StatefulSet'] &&
+      request.namespace == '{{ $ns }}' &&
+      {{ include "agent-platform.kyverno.celLabels" (dict "object" "object" "selector" (dict "matchExpressions" $shape.matchExpressions)) }}) ||
+      (request.kind.kind in ['Deployment', 'ReplicaSet', 'Pod', 'StatefulSet'] &&
+      request.namespace == '{{ $ns }}' &&
+      has(object.metadata.name) && object.metadata.name.matches('^.*-kserve.*$'))
+{{- end }}
