@@ -2,7 +2,7 @@
 name: agent-platform-overview
 description: Use when someone asks what the Agent Platform is, how it is built or works — components, connectors, how people reach agents (Dev Portal, Slack, IDE), identity, how an agent runs, what the default agent is, or how to look at the live platform or yourself.
 metadata:
-  version: "3.0.0"
+  version: "3.1.0"
 ---
 
 # The Agent Platform
@@ -97,7 +97,8 @@ from the new one.
 Every `x_*`, `core_*` and `workflow_*` name is the `name` argument of Muster's `call_tool`, never a
 function of its own (contract: the `agent-platform-tools` skill). Read each schema with `describe_tool`.
 
-- **The agents**: `x_agent-manager_list_agents` — model, Harness, toolset, readiness and `managed`.
+- **The agents**: `x_agent-manager_list_agents` — model, Harness, toolset, readiness and `managed`;
+  without `organization` the Platform's, with it an organization's.
 - **One agent's readiness**: `x_agent-manager_get_agent_status`.
 - **The connectors**: `core_mcpserver_list` — every MCP server with its state.
 - **The models**: `x_agent-manager_list_model_configs`; serving: the `agent-platform-tools` skill.
@@ -105,7 +106,9 @@ function of its own (contract: the `agent-platform-tools` skill). Read each sche
 - **Capabilities**: `x_agent-manager_get_info`.
 - **Workflows** the installation offers for whole questions: `filter_tools {"pattern": "workflow_*"}`.
 - **Yourself**: `x_agent-manager_get_agent` with your **technical** name — the release name, not the
-  runtime's `<name>_<namespace>`; `x_agent-manager_list_agents` when unsure.
+  runtime's `<name>_<namespace>` — and, when you belong to an organization, its name as
+  `organization`: the one whose `namespace` in `x_agent-manager_list_organizations` is your
+  runtime's namespace. `x_agent-manager_list_agents` when unsure.
 
 The portal's **Configured** model status means kagent accepted the settings and resolved their
 references. It does not establish that a stored API key is valid or that a session can invoke the
