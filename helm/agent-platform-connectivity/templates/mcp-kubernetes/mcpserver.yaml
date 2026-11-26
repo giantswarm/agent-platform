@@ -69,7 +69,11 @@ spec:
   autoStart: true
   type: streamable-http
   {{- if $oauthOn }}
-  {{- $baseURL := dig "mcpKubernetes" "oauth" "baseURL" "" $mcpk | default (printf "https://%s.%s" (dig "fullnameOverride" "mcp-kubernetes" $mcpk) .Values.global.domain) }}
+  {{- $baseURL := dig "mcpKubernetes" "oauth" "baseURL" "" $mcpk }}
+  {{- if not $baseURL }}
+  {{- $domain := required "mcp-kubernetes OAuth registration needs mcp-kubernetes.mcpKubernetes.oauth.baseURL or global.domain" .Values.global.domain }}
+  {{- $baseURL = printf "https://%s.%s" (dig "fullnameOverride" "mcp-kubernetes" $mcpk) $domain }}
+  {{- end }}
   url: {{ printf "%s/mcp" (trimSuffix "/" $baseURL) | quote }}
   {{- else }}
   url: http://{{ dig "fullnameOverride" "mcp-kubernetes" $mcpk }}.{{ .Release.Namespace }}.svc.cluster.local:{{ dig "service" "port" 8080 $mcpk }}/mcp
