@@ -152,9 +152,11 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   save it. A save's `sessionsUpdated: false` and `warnings` mean running sessions still carry a
   dropped exception until agent-manager tells muster again: say so. A governed platform's asks
   cannot be lifted per agent. To make an agent ask before every call, set `default: Ask`
-  (`set_agent_approval`). Agent chart 3.0 removed `muster.requireApproval`: agent-manager's
-  migrate rewrote `true` to `default: Ask`, and a release that still carries the key fails its 3.x
-  render and stays on its 2.x revision; never write it.
+  (`set_agent_approval`). Agent chart 3.0 removes `muster.requireApproval`: agent-manager's
+  migrate rewrites `true` to `default: Ask` in the releases it owns and reports the others
+  (GitOps, `valuesFrom`, organization namespaces) in its report: check it. A release that still
+  carries the key fails its 3.x render and stays on its 2.x revision; the fix is replacing it with
+  `default: Ask`, never deleting it. Never write the key.
 - **An organization's connectors**: a kagent `RemoteMCPServer` in the organization namespace
   (`x_agent-manager_set_organization_connector`), not a Muster server, so no `toolset` selector
   reaches it. From agent-manager 3.3.0 (`connectors` in `x_agent-manager_create_agent`'s schema;
