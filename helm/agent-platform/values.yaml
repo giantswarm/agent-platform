@@ -2548,6 +2548,10 @@ networkPolicy:
   # from muster's floor. 0 (the default) opens no egress for it: agent-manager
   # then binds on muster's aggregator port.
   musterSessionBindingsPort: 0
+  # Namespace muster runs in, for that egress rule; set by the meta chart from
+  # muster's namespace (components.muster.targetNamespace). Empty selects the
+  # release's own namespace.
+  musterSessionBindingsNamespace: ""
   # In-cluster MCP backends an installation registers with muster (its own
   # MCPServer entries, e.g. through agent-platform-mcps). A ClusterIP Service
   # without a policy admits every pod on the cluster, and a direct call skips

@@ -1279,6 +1279,7 @@ spec:
       musterInClusterMcpPorts:
       - 8080
       - 8443
+      musterSessionBindingsNamespace: ""
       musterSessionBindingsPort: 0
       substrate:
         credentialProvider:

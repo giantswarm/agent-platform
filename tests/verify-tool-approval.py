@@ -650,6 +650,27 @@ def check_session_bindings() -> None:
     _, am = releases([*floor, "--set", "agent-manager.muster.bindingsUrl=https://bindings.example.com/session-bindings"])
     if "bindingsUrl: https://bindings.example.com/session-bindings" not in am or ":8091/session-bindings" in am:
         fail(f"an own agent-manager.muster.bindingsUrl must stand:\n{am}")
+    # muster in a namespace of its own: the egress rule selects that namespace,
+    # in both policy flavours, not the connectivity release's.
+    ns_args = [*floor, "--set", "components.muster.targetNamespace=muster-only"]
+    out = render_meta([*base, *ns_args])
+    conn = doc(out, "HelmRelease", "agent-platform-connectivity") or ""
+    if "musterSessionBindingsNamespace: muster-only" not in conn:
+        fail(f"the connectivity release must carry muster's namespace for the session bindings egress rule:\n{conn}")
+    _, am = releases(ns_args)
+    if "muster.muster-only.svc.cluster.local:8091/session-bindings" not in am:
+        fail(f"agent-manager's bindingsUrl must name muster's namespace:\n{am}")
+    for flavor, want in (("cilium", "io.kubernetes.pod.namespace: muster-only"), ("kubernetes", "kubernetes.io/metadata.name: muster-only")):
+        for ns_value, expect in (("muster-only", want), ("", "")):
+            rendered = render(CONN_DIR, CONN + AGENT_MANAGER + ["--set", f"networkPolicy.flavor={flavor}", "--set", "networkPolicy.musterSessionBindingsPort=8091", "--set", f"networkPolicy.musterSessionBindingsNamespace={ns_value}"])
+            rule = rendered.split("session bindings API on its own port", 1)
+            if len(rule) != 2:
+                fail(f"{flavor}: no session bindings egress rule rendered")
+            snippet = rule[1][:400]
+            if expect and expect not in snippet:
+                fail(f"{flavor}: the session bindings egress rule must select muster's namespace ({expect}):\n{snippet}")
+            if not expect and ("muster-only" in snippet or ("metadata.name" not in snippet and flavor == "kubernetes") or ("io.kubernetes.pod.namespace: agent-platform" not in snippet and flavor == "cilium")):
+                fail(f"{flavor}: without a namespace the rule must select the release's own (agent-platform):\n{snippet}")
     print("ok: from muster's session bindings floor muster serves the session bindings API on its own port, off the aggregator port, its network policy admitting agent-manager's pods alone, and agent-manager's bindingsUrl names that port; none below the floor; own values stand")
 
 
@@ -725,6 +746,54 @@ def with_test_floors(meta_dir: str, dst: str) -> str:
     return chart
 
 
+def chart_with_floors(meta_dir: str, dst: str, floors: dict[str, str]) -> str:
+    """A copy of the meta chart with exactly these floors set; every other
+    floor of TEST_FLOORS unset."""
+    chart = os.path.join(dst, "agent-platform")
+    shutil.copytree(meta_dir, chart)
+    path = os.path.join(chart, "templates", "_helpers.tpl")
+    text = open(path).read()
+    for name in list(TEST_FLOORS) + ["agentManager.agentChartV3Floor"]:
+        text, n = re.subn(r'(\{\{- define "agent-platform\.' + re.escape(name) + r'" -\}\})[^{]*(\{\{- end -\}\})', r"\g<1>" + floors.get(name, "") + r"\g<2>", text)
+        if n != 1:
+            fail(f"agent-platform.{name}: no one-line define")
+    open(path, "w").write(text)
+    return chart
+
+
+def check_floor_dependencies() -> None:
+    """The floors that need the governance wiring fail the render while the
+    governance floor is unset, whichever of them is set; governed mode and role
+    floors fail with muster off."""
+    dependent = ["agentManager.toolApprovalFloor", "muster.agentApprovalFloor", "muster.sessionBindingsPortFloor", "agentManager.agentChartV3Floor"]
+    values = {**TEST_FLOORS, "agentManager.agentChartV3Floor": "3.6.0"}
+    with tempfile.TemporaryDirectory(prefix="verify-floor-deps-") as tmp:
+        for i, name in enumerate(dependent):
+            os.makedirs(os.path.join(tmp, str(i)))
+            chart = chart_with_floors(META_DIR, os.path.join(tmp, str(i)), {name: values[name]})
+            err = render(chart, META, expect_fail=True)
+            want = f"agent-platform.{name} is set while agent-platform.muster.governanceFloor is unset"
+            if want not in err:
+                fail(f"floor {name} set with the governance floor unset must fail the render naming both:\n{err}")
+        os.makedirs(os.path.join(tmp, "all"))
+        chart = chart_with_floors(META_DIR, os.path.join(tmp, "all"), {n: v for n, v in values.items() if n != "muster.governanceFloor"})
+        err = render(chart, META, expect_fail=True)
+        if "agent-platform.muster.governanceFloor is unset" not in err:
+            fail(f"every floor but the governance floor set must fail naming it:\n{err}")
+        os.makedirs(os.path.join(tmp, "ok"))
+        chart = chart_with_floors(META_DIR, os.path.join(tmp, "ok"), values)
+        render(chart, META)
+        for args, want in (
+            (["--set", "components.muster.enabled=false", "--set", "governance.mode=governed"], "governance.mode governed needs muster as a component of this release"),
+            (["--set", "components.muster.enabled=false", "--set-json", 'governance.roleFloors={"exampleManager":["approve_change"]}'], "governance.roleFloors is set while muster is off"),
+        ):
+            err = render(chart, META + args, expect_fail=True)
+            if want not in err:
+                fail(f"{args}: want {want!r}, got:\n{err}")
+        render(chart, META + ["--set", "components.muster.enabled=false"])
+    print("ok: a floor that needs the governance wiring fails the render while the governance floor is unset, naming both; governed mode and role floors fail with muster off, trusted renders")
+
+
 def check_unset_floors_keep_everything_off() -> None:
     """On the chart as it is: a floor whose release does not exist gates its
     wiring off whatever the component ranges say."""
@@ -764,6 +833,7 @@ if __name__ == "__main__":
     META_DIR, CONN_DIR = sys.argv[1], sys.argv[2]
     governance_floor(META_DIR)
     check_unset_floors_keep_everything_off()
+    check_floor_dependencies()
     _tmp = tempfile.mkdtemp(prefix="verify-tool-approval-")
     atexit.register(shutil.rmtree, _tmp, True)
     META_DIR = with_test_floors(META_DIR, _tmp)

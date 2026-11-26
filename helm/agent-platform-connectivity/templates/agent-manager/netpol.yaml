@@ -188,7 +188,7 @@ spec:
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: muster
-            io.kubernetes.pod.namespace: {{ $.Release.Namespace }}
+            io.kubernetes.pod.namespace: {{ $.Values.networkPolicy.musterSessionBindingsNamespace | default $.Release.Namespace }}
       toPorts:
         - ports:
             - port: {{ . | quote }}
@@ -418,7 +418,10 @@ spec:
     # muster's session bindings API on its own port (start_session's binds,
     # grant drops), which muster admits from agent-manager alone.
     - to:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.networkPolicy.musterSessionBindingsNamespace | default $.Release.Namespace }}
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: muster
       ports:

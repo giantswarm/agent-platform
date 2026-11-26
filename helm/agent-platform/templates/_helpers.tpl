@@ -639,6 +639,7 @@ renders (networkPolicy.mcpBackends). */ -}}
 {{- with (include "agent-platform.muster.sessionBindings" .root | fromJson).sessionBindings -}}
 {{- $np := get $derived "networkPolicy" | default dict -}}
 {{- $_ := set $np "musterSessionBindingsPort" (int (dig "port" 8091 .)) -}}
+{{- $_ := set $np "musterSessionBindingsNamespace" (include "agent-platform.muster.namespace" $.root) -}}
 {{- $_ := set $derived "networkPolicy" $np -}}
 {{- end -}}
 {{- /* agent-manager's migrate run pins through the skill-manager too: its
@@ -2187,6 +2188,37 @@ agent-platform.agentManager.toolApprovalFloor; UNSET until it exists,
 which keeps every 3.x line refused. One line, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.agentChartV3Floor" -}}{{- end -}}
+
+{{/*
+The release floors depend on one another: the governance floor
+(agent-platform.muster.governanceFloor) gates the binder, the approval block
+and the redirect allowlist that muster's approval enforcement needs, and the
+floors of tool approval per agent, of the session bindings port and of the
+agent chart 3.x line each make agent-manager bind settings muster refuses
+without them. A floor set while the governance floor is unset (a release that
+sets them in two steps) renders agent-manager against a muster wired for none
+of it: no Session starts. Fails naming the floor that is set and the one that
+is missing. Governance itself (governance.mode governed, governance.roleFloors)
+needs muster as a component of this release: with muster off (an external one)
+nothing here would enforce it, so it fails too. Emits nothing.
+*/}}
+{{- define "agent-platform.validateReleaseFloors" -}}
+{{- if not (include "agent-platform.muster.governanceFloor" .) -}}
+{{- range $name := list "agentManager.toolApprovalFloor" "muster.agentApprovalFloor" "muster.sessionBindingsPortFloor" "agentManager.agentChartV3Floor" -}}
+{{- if include (printf "agent-platform.%s" $name) $ -}}
+{{- fail (printf "agent-platform.%s is set while agent-platform.muster.governanceFloor is unset: the muster approval binder, approval block and redirect allowlist render only from the governance floor, so agent-manager would bind settings that muster refuses from it and no Session would start; set agent-platform.muster.governanceFloor in the same release" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
+{{- if ne (include "agent-platform.governance" .) "trusted" -}}
+{{- fail (printf "governance.mode %s needs muster as a component of this release (components.muster.enabled): with muster off nothing here enforces governance, so the platform would claim a governed state it does not have; enable components.muster, or keep governance.mode trusted" (include "agent-platform.governance" .)) -}}
+{{- end -}}
+{{- if dig "roleFloors" nil (.Values.governance | default dict) -}}
+{{- fail "governance.roleFloors is set while muster is off (components.muster.enabled): the role floors are rendered into muster's governance configuration, so they would be dropped and the servers of those roles would not ask; enable components.muster, or remove governance.roleFloors" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 
 {{/*
 The release majors a range admits, as a JSON list of strings, decided as

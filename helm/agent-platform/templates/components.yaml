@@ -267,6 +267,7 @@ knowledge:
 {{- include "agent-platform.validateInlineSecrets" . -}}
 {{- include "agent-platform.validatePinnedLoginConnector" . -}}
 {{- include "agent-platform.validateToolsetPresets" . -}}
+{{- include "agent-platform.validateReleaseFloors" . -}}
 {{- include "agent-platform.validateAgentChartLine" . -}}
 {{- $root := . -}}
 {{- $g := .Values.gitops -}}

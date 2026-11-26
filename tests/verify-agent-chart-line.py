@@ -22,7 +22,15 @@ agent-platform-operator (every organization's chart source), so:
   the hop's or muster's floor is unset every 3.x range is refused, whatever
   its form (~3.2, 3.1.x, bounds), a pre-release alone and >=3.0.0 (spans
   majors, as migrate says) too; the gated paths run on a copy of the chart
-  with test floors.
+  with test floors;
+- a floor that needs the governance wiring (agent approval, the hop, tool
+  approval, session bindings) set while the governance floor is unset fails
+  the render naming both, 3.x line or not;
+- the bounds that admit a pre-release of the next major: the probes serve
+  Helm 4 and the textual read of the upper bounds Helm 3.17 (whose semver
+  never matches a pre-release against a range with no pre-release lower
+  bound); HELM_LEGACY, the Helm 3.17 binary, runs the bound cases once more
+  under it (`make` passes the one in .bin/ when it is there).
 
 Stdlib only: documents are matched by text.
 Usage: verify-agent-chart-line.py <meta chart dir>
@@ -109,12 +117,12 @@ def floor_value(chart: str, name: str) -> str | None:
     return m.group(1)
 
 
-def with_floors(dst: str) -> str:
+def with_floors(dst: str, floors: dict[str, str] | None = None) -> str:
     chart = os.path.join(dst, "agent-platform")
     shutil.copytree(META_ORIG, chart)
     path = os.path.join(chart, "templates", "_helpers.tpl")
     text = open(path, encoding="utf-8").read()
-    for name, v in TEST_FLOORS.items():
+    for name, v in (TEST_FLOORS if floors is None else floors).items():
         text, n = re.subn(r'(\{\{- define "agent-platform\.' + re.escape(name) + r'" -\}\})[^{]*(\{\{- end -\}\})', r"\g<1>" + v + r"\g<2>", text)
         if n != 1:
             fail(f"agent-platform.{name}: cannot set the test floor")
@@ -233,10 +241,40 @@ if CONN:
     if '"get", "list"]\n' in rules.split('resources: ["agents"]', 1)[-1][:40]:
         fail("the run lists Agents in organization namespaces, it gets none")
 
+# A floor that needs the governance wiring, set while the governance floor is
+# unset (a release that sets its floors in two steps): the render fails naming
+# both, not an agent-manager that binds what muster refuses.
+for dependent in ("muster.agentApprovalFloor", "agentManager.agentChartV3Floor", "agentManager.toolApprovalFloor", "muster.sessionBindingsPortFloor"):
+    with tempfile.TemporaryDirectory() as tmp:
+        META = with_floors(tmp, {dependent: TEST_FLOORS[dependent]} | {"muster.governanceFloor": ""})
+        refused(f"{dependent} set, governance floor unset", f"agent-platform.{dependent} is set while agent-platform.muster.governanceFloor is unset")
+        refused(f"{dependent} set, governance floor unset, 2.x line", "agent-platform.muster.governanceFloor is unset", "--set", "agent-manager.agentChart.semver=2.6.1")
+META = META_ORIG
+with tempfile.TemporaryDirectory() as tmp:
+    META = with_floors(tmp, {n: v for n, v in TEST_FLOORS.items() if n != "muster.governanceFloor"} | {"muster.governanceFloor": ""})
+    refused("every floor but the governance floor set", "agent-platform.muster.governanceFloor is unset", *LINE, "--set", "components.default-agent.versionRange=" + V3)
+META = META_ORIG
+
+
 # A bound that admits a pre-release of the next major, and range
-# shapes that are no semver range.
-refused("<=3.0.0-rc.1 bound", "admits 3.0.0-0, a pre-release of the next agent chart major", "--set", "agent-manager.agentChart.semver=>=2.6.0 <=3.0.0-rc.1")
-refused("<3.0.0-rc.1 bound", "a pre-release of the next agent chart major", "--set", "agent-manager.agentChart.semver=>=2.6.0 <3.0.0-rc.1")
+# shapes that are no semver range. Run under the Helm of the run, and once more
+# under Helm 3.17 (HELM_LEGACY), whose semver library never matches a
+# pre-release against a range with no pre-release lower bound, so only the
+# textual read of the upper bounds (nextMajorPreRelease) can see them there.
+def bound_cases() -> None:
+    refused("<=3.0.0-rc.1 bound", "admits 3.0.0-0, a pre-release of the next agent chart major", "--set", "agent-manager.agentChart.semver=>=2.6.0 <=3.0.0-rc.1")
+    refused("<3.0.0-rc.1 bound", "a pre-release of the next agent chart major", "--set", "agent-manager.agentChart.semver=>=2.6.0 <3.0.0-rc.1")
+    refused("<3.0.0-0.1 bound (not the -0 exception)", "a pre-release of the next agent chart major", "--set", "agent-manager.agentChart.semver=>=2.6.0 <3.0.0-0.1")
+    renders("<3.0.0-0 bound (the exception)", "--set", "agent-manager.agentChart.semver=>=2.6.0 <3.0.0-0")
+
+
+bound_cases()
+if os.environ.get("HELM_LEGACY"):
+    HELM = os.environ["HELM_LEGACY"]
+    bound_cases()
+    HELM = os.environ.get("HELM") or "helm"
+elif not failures:
+    print("note: HELM_LEGACY (Helm 3.17) is not set: the textual read of pre-release upper bounds ran only where the probes find them", file=sys.stderr)
 refused("majors beyond 5", "admits agent chart majors 3, 6", "--set", "agent-manager.agentChart.semver=>=3.0.0 <4.0.0 || 6.x")
 refused("latest", "is not a semver range", "--set", "agent-manager.agentChart.semver=latest")
 refused("empty", "is not a semver range", "--set-string", "agent-manager.agentChart.semver=")

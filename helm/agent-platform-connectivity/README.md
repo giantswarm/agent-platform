@@ -1280,6 +1280,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
 | networkPolicy.musterInClusterMcpPorts[1] | int | `8443` |  |
 | networkPolicy.musterSessionBindingsPort | int | `0` |  |
+| networkPolicy.musterSessionBindingsNamespace | string | `""` |  |
 | networkPolicy.mcpBackends | object | `{}` |  |
 | networkPolicy.mcpBackendScrapers[0].namespace | string | `"kube-system"` |  |
 | networkPolicy.mcpBackendScrapers[0].matchLabels."app.kubernetes.io/instance" | string | `"alloy-metrics"` |  |
