@@ -365,125 +365,56 @@ required); below `1.3.0` the key is refused.
 ## Tool approval and the governance mode
 
 Every tool behind muster is **Allow**, **Ask** (a person confirms the call first) or **Block**
-(hidden and refused); a connector's `rule` (Allow, Ask or Block) is what a tool without its own
-entry gets, new tools included, so a Block rule lets nobody add an unreviewed tool. muster's
-documentation describes the settings and the prompts; further reading (optional):
-[Governing tool calls](https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/). What this chart configures:
+(hidden and refused). A connector's `rule` applies to tools without their own entry, new ones
+included. Concepts and prompts: [Governing tool calls](https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/).
 
-- **`governance.mode`** (`trusted`, the default, or `governed`) and **`governedServers`**: the meta
-  chart renders muster's governance configuration (`muster.governance`: `mode` and
-  `governedServers`, one `{server, role, safe}` per MCPServer the platform ships while it renders)
-  from the muster release that reads it (`agent-platform.muster.governanceFloor`). On governed,
-  muster asks a person before an agent runs any tool of a governed server that is not on that
-  server's safe list (new and renamed tools too) and any of muster's own tools but its reads; the
-  safe lists are the read tools (`governedServers.<source>.safe`). A role's floors (granting access,
-  adding a model, egress origin, credential or backend, approving an action or a toolchain source,
-  adding or repointing a connector, changing approval settings) ask agents in both modes, on the
-  governed server of that role, so the servers are named on trusted as well. Sources: the manager
-  components (their `muster.mcpServer.name` in their namespace), `kagent` (the connectivity chart's
-  session tools), `mcp-kubernetes` (the connectivity chart's and every agent-platform-mcps
-  kubernetes entry), and any other key as a muster server key itself (a server the installation
-  registers); a server outside muster's namespace is keyed `namespace/name`. `null` drops a source; `governanceExempt` names the shipped sources that are
-  deliberately not governed (prometheus, capi: reads only). An own
-  `muster.muster.governance.governedServers` entry stands for its server; the earlier
-  `muster.muster.governance.servers.<role>` shape fails the render, as does `governed` below the
-  muster floor (it would ask nothing). Persons get the connector settings only. The mode is set
-  with this chart value; no agent tool changes it. `governance` mirrors muster's own governance
-  configuration (`{mode, roleFloors}`); a string there fails the render. Anything but the two values fails the render.
-- **`governance.roleFloors`** (default `{}`): role name to the server's own tool names that ask agents
-  in both modes on the governed servers of that role, rendered as `muster.governance.roleFloors` and
-  added to muster's built-in floors (config never removes one). Set while the chart renders no
-  governance configuration (below the muster governance floor) it fails the render. A role declared here is a valid
-  `role` in `governedServers`, so an installation governs a server of its own:
+| Value | What it does |
+|-------|--------------|
+| `governance.mode` | `trusted` (default) or `governed`; anything else fails the render. `governed` asks a person before an agent runs any tool of a governed server that is not on its safe list (new tools too) and any muster tool but its reads; it fails the render below `agent-platform.muster.governanceFloor`. |
+| `governedServers` | Per source `{role, safe}`: `safe` is the read tools agents call unasked. Sources: the manager components, `kagent`, `mcp-kubernetes`, or any other key as a muster server key (`namespace/name` outside muster's namespace). `null` drops a source; `governanceExempt` lists shipped sources left ungoverned. The earlier `muster.muster.governance.servers.<role>` shape fails the render. |
+| `governance.roleFloors` | Role to tool names that ask agents in both modes, added to muster's built-in floors. A role declared here is valid in `governedServers`. |
 
-  ```yaml
-  governance:
-    roleFloors:
-      exampleManager: [approve_change, merge_change]
-  governedServers:
-    example-manager:
-      role: exampleManager
-      safe: [get_info, list_changes]
-  ```
-- **What approval needs, and what this chart renders for it.** Asking calls refuse with the reason
-  unless muster's shared store is Valkey, muster runs its OAuth server (the browser sign-in through
-  Dex) and has a public URL on that server's origin. The bundled Valkey and
-  `muster.muster.oauth.server.storage.type: valkey` are the defaults; the OAuth server is on by
-  default but needs the installation's `oauth.server.baseUrl`, `dex.issuerUrl`, `dex.clientId` and
-  `existingSecret`; `muster.muster.oauth.mcpClient.enabled` with `publicUrl` (on the origin of
-  `oauth.server.baseUrl`) is the installation's to set (muster takes the OAuth server's base URL
-  when `publicUrl` is empty, but renders the allowlist below only with `mcpClient.enabled`; the
-  release notes say so while it is off). The chart does not fail a `governed` render without them:
-  muster refuses each asking call with the reason and `filter_tools` reports
-  `approval.unavailable`. From the same muster release the meta chart also renders
-  `muster.approval.installation` (the name the approval page shows: `backstage.installationName`,
-  default `agent-platform`; an own `muster.muster.approval.installation` stands) and
-  `muster.oauth.mcpClient.postLoginRedirectAllowlist`, where muster may send the browser back after
-  a decision (scheme, host and port must match exactly): `https://<portal host>[:<port>]/sessions`
-  while the portal is on and has a host (`backstage.hostname`, else `backstage.<global.domain>`;
-  the port from `backstage.publicPort` when it is not 443) and
-  `<klausGateway.obo.callbackBaseUrl>/auth/slack/return` (its port kept; anything but an http(s)
-  URL with a host fails) while klaus-gateway is on and names it; an own list's entries stay.
-  Without an entry the person sees muster's own "answer recorded" page and answers *Done* in the
-  portal or Slack.
-- **Retry as the same client.** muster binds a pending approval to the person and the calling
-  client (the OAuth client id `azp` of a person's client, the acting party of a delegated token,
-  or the agent's own Session for an actor JWT), not to the MCP session: after the person decides,
-  the same client retries, over any MCP session; another client of the same person asks anew.
-  At most 3 pending approvals per client and 10 per person.
-- **The `connector-admin` role** is muster's `mcpserver-editor` Role in muster's namespace, bound to
-  `muster.rbac.mcpServerEditor.subjects` plus `tenants.platformTeam`. Whoever holds it edits the
-  namespace's connectors, sets their tool approval and may let an agent skip a tool's `Ask`. The
-  default binds no person: a ServiceAccount subject the chart never creates and no identity provider
-  can issue a token for (`kube-system/agent-platform-unset-connector-admins`;
-  `muster.rbac.workflowEditor.subjects` likewise `agent-platform-unset-workflow-editors`), so a
-  real IdP group can never match it. Until the installation names its admin groups (as the API
-  server sees them, with the OIDC groups prefix), only cluster admins edit connectors. The muster
-  chart no longer binds `system:authenticated` and fails an upgrade with an empty list while its
-  old binding exists; the placeholder keeps the list non-empty (`system:authenticated` makes
-  everyone a connector admin).
-- **`muster-approval-binder`**: muster takes an agent's tool settings in a Session binding only from
-  a sender allowed to `bind` `toolapprovals` in muster's namespace. The muster chart ships that Role
-  and binds it there, to `muster.rbac.approvalBinder.subjects`, which the meta chart sets to
-  agent-manager's ServiceAccount (its name and namespace), and only it; an own list stands, and an
-  agent-manager ServiceAccount the chart does not create must be named. muster reviews the sender
-  with its own `tokenreviews` ClusterRole and a `localsubjectaccessreviews` Role in its namespace
-  (`muster.rbac.approvalBinder.reviews`, on by default), not `system:auth-delegator`.
-- **Explicit settings on every shipped connector** (`spec.approval`): the MCPServers this chart
-  renders carry them as values — `mcp-kubernetes.mcpServer.approval` (the *Recommended* preset:
-  read-only tools Allow, the rest Ask, rule Ask) and `kagent.controllerRoute.mcp.approval` (*Allow
-  all*: kagent's session tools carry no annotations, and agents use them as the person); the
-  component charts set theirs under `<component>.muster.mcpServer.approval` (*Allow all* for the
-  managers, whose tools the portal calls as the person) and agent-platform-mcps per family
-  (`agent-platform-mcps.muster.families.<group>.approval`, *Recommended*). These are what trusted
-  platforms and persons get; governed platforms ask agents by the safe lists above. An
-  installation tightens a tool there (`Ask`, `Block`) or the rule (`Block`); `null` removes the
-  block (the connector runs everything, shown as *not reviewed*).
+Persons get the connectors' settings only; no agent tool changes the mode. `governance` is a map
+(`{mode, roleFloors}`); a string fails the render. Registering a server of your own:
 
-### Upgrading to tool approval
+```yaml
+governance:
+  roleFloors:
+    exampleManager: [approve_change, merge_change]
+governedServers:
+  example-manager:
+    role: exampleManager
+    safe: [get_info, list_changes]
+```
 
-- Move `components.muster.versionRange` to the muster release that carries tool approval
-  (`agent-platform.muster.governanceFloor`) together with this chart: below it nothing is
-  forwarded and `governed` fails the render. muster's CRDs upgrade with the muster release
-  (`CreateReplace`) and every consumer of them `dependsOn` muster.
-- While the served MCPServer CRD lacks `spec.approval`, muster refuses every server tool
-  (`approval_unavailable`) rather than run them unreviewed. A release applied while the old CRD
-  was served lost its `spec.approval` (the API server prunes unknown fields) and Helm does not
-  re-apply an unchanged release: after the CRD upgrade, reconcile the connectivity, agent-platform-mcps and
-  manager releases with `flux reconcile helmrelease <name> --force`, then check
-  `kubectl get mcpservers -A -o custom-columns=NAME:.metadata.name,RULE:.spec.approval.rule`.
-- `muster.rbac.mcpServerEditor.subjects` must stay non-empty (the default) or the muster chart
-  fails the upgrade while the old `system:authenticated` binding exists
-  (`muster.rbac.mcpServerEditor.allowRemovingBinding: true` drops it deliberately).
-- The connectivity release no longer renders `agent-platform:muster-approval-binder` (Helm deletes
-  it); the muster release binds `muster-approval-binder` in muster's namespace instead.
-- On a lab or any edge not on 443, set `backstage.publicPort` and drop a hand-written portal entry
-  from `muster.muster.oauth.mcpClient.postLoginRedirectAllowlist`.
-- Clients retry an approved call as the same client (see above).
+- **Prerequisites.** Asking calls are refused (reported as `approval.unavailable`) unless muster
+  runs on Valkey (default), has its OAuth server with Dex sign-in (`oauth.server.baseUrl`,
+  `dex.issuerUrl`, `dex.clientId`, `existingSecret`) and a public URL on that server's origin
+  (`muster.muster.oauth.mcpClient.enabled` with `publicUrl`). The chart does not fail a render
+  without them.
+- **Rendered for muster.** `approval.installation` (`backstage.installationName`) and
+  `oauth.mcpClient.postLoginRedirectAllowlist`: the portal's `/sessions` (`backstage.publicPort`
+  when not 443) and `<klausGateway.obo.callbackBaseUrl>/auth/slack/return`; an own list's entries
+  stay. Without an entry the person answers in the portal or Slack by hand.
+- **Retry as the same client.** An approval binds to the person and the calling client, not the MCP
+  session; another client of the person asks anew. At most 3 pending per client, 10 per person.
+- **`connector-admin`** is muster's `mcpserver-editor` Role, bound to
+  `muster.rbac.mcpServerEditor.subjects` plus `tenants.platformTeam`. Its holders edit connectors,
+  set tool approval and may let an agent skip an `Ask`. The default subject is a ServiceAccount
+  nobody can authenticate as (fail closed; `workflowEditor` likewise): set your admin groups,
+  with the OIDC groups prefix. Binding `system:authenticated` makes everyone an admin.
+- **`muster-approval-binder`** lets agent-manager's ServiceAccount (and only it) bind an agent's
+  tool settings to a Session (`muster.rbac.approvalBinder.subjects`; an own list stands; name an
+  agent-manager ServiceAccount the chart does not create).
+- **Shipped connectors carry `spec.approval`.** `mcp-kubernetes.mcpServer.approval` is
+  *Recommended* (read-only Allow, rest Ask), `kagent.controllerRoute.mcp.approval` and the managers'
+  `<component>.muster.mcpServer.approval` are *Allow all*, agent-platform-mcps families
+  `muster.families.<group>.approval` *Recommended*. Tighten a tool or the rule there; `null`
+  renders none (the connector runs everything, shown as *not reviewed*).
 
-`make verify-tool-approval` asserts the governance configuration and its coverage (every shipped
-MCPServer governed or exempt, no floor safe, every safe entry a tool of its server), the
-allowlist, the connector admins, the binder and the connectors' settings.
+Operator steps: [UPGRADE.md](../../UPGRADE.md). `make verify-tool-approval` asserts the governance configuration, its coverage (every shipped
+MCPServer governed or exempt, no floor safe), the allowlist, the admins, the binder and the
+connectors' settings.
 
 ## Voluntary disruption
 

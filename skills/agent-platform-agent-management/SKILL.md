@@ -127,37 +127,34 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   on an explicit request. An own-account (OAuth) connector without `grantScope: subject` needs a
   sign-in in each of the agent's conversations (`agent-platform-tools`); say so before choosing it.
 - **Tool approval** (further reading, optional: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
-  today an agent's toolset only selects tools; their Allow/Ask/Block settings are the connectors'
+  today a toolset only selects tools; their Allow/Ask/Block settings are the connectors'
   (`agent-platform-tools`). On a **governed** platform every agent-manager tool that is not a read
-  (`create_agent`, `update_agent`, `delete_agent`, `start_session`, `delete_session`, the
-  organization writes) asks the person when an agent calls it; on a trusted one (the default) they
-  run, except the floors that ask in both modes (`set_organization_connector`,
-  `add_organization_member`, `set_organization_model`, `set_organization_egress_policy`,
-  `replace_organization_credential`). Check the `filter_tools` `approval` of the tool before you
-  promise an outcome. **Only once agent-manager ships per-agent tool lists** (its `create_agent`
-  schema has `tools`, and `x_agent-manager_update_agent_access` and
-  `x_agent-manager_set_agent_approval` exist; describe them first): the toolset becomes the agent's
-  **tool list**, the same selectors each optionally `Allow`, `Ask` or `Block` plus a `default`, at
-  most 32 entries, an unlisted tool invisible; an agent's settings only tighten its connectors'
-  (the strictest wins); `Allow` over a connector's `Ask` is an **exception** only a connector admin
-  of that connector grants, through `set_agent_approval`, which asks the person whenever an agent
-  calls it, and a save drops the exceptions the saver is not connector admin for (say so before
-  saving). `set_agent_approval` takes `settings` (`{"<entry>": "Allow"|"Ask"|"Block"|""}` for
-  entries already in `tools`) and `default`; `create_agent` and `update_agent_access` refuse an
-  `Allow` over a connector's `Ask` and any `default: Allow`. `get_agent` and `list_agents` return
-  the list as `toolSettings` (their `tools` stays the kagent MCP bindings), with `defaultApproval`,
-  `grants` (with `grantedBy`) and `approvalSettings` (false: this installation does not bind
-  settings and refuses them); `x_agent-manager_list_approval_grants` lists a namespace's grants, per
-  connector with `server`; `filter_tools` with `agentTools` shows how a list resolves before you
-  save it. A save's `sessionsUpdated: false` and `warnings` mean running sessions still carry a
-  dropped exception until agent-manager tells muster again: say so. A governed platform's asks
-  cannot be lifted per agent. To make an agent ask before every call, set `default: Ask`
-  (`set_agent_approval`). Agent chart 3.0 removes `muster.requireApproval`: agent-manager's
-  migrate rewrites `true` to `default: Ask` in the releases it owns, organization namespaces
-  included, and reports the others (GitOps, `valuesFrom`) in its report: check it. An
-  organization stays on chart 2.x (`Ready=False`, `ChartSourceHeld`) until every release there is
-  on 3.x values and migrate ran again; the fix is replacing the key with `default: Ask`, never
-  deleting it. Never write the key.
+  asks the person when an agent calls it; on a trusted one (the default) they run, except the floors
+  that ask in both modes (`set_organization_connector`, `add_organization_member`,
+  `set_organization_model`, `set_organization_egress_policy`, `replace_organization_credential`).
+  Check the `filter_tools` `approval` of the tool before you promise an outcome.
+  **Only once agent-manager ships per-agent tool lists** (`create_agent`'s schema has `tools`;
+  `update_agent_access` and `set_agent_approval` exist; `describe_tool` them first): the toolset
+  becomes the agent's **tool list**, the same selectors each optionally `Allow`, `Ask` or `Block`,
+  plus a `default`; at most 32 entries, an unlisted tool invisible.
+  - An agent's settings only tighten its connectors' (the strictest wins). `Allow` over a
+    connector's `Ask` is an **exception** only a connector admin of that connector grants, through
+    `set_agent_approval` (it asks the person whenever an agent calls it); a save drops the
+    exceptions the saver may not grant, so say so before saving. `create_agent` and
+    `update_agent_access` refuse such an `Allow` and any `default: Allow`.
+  - `set_agent_approval` takes `settings` (`{"<entry>": "Allow"|"Ask"|"Block"|""}` for entries
+    already in `tools`) and `default`. `get_agent`/`list_agents` return the list as `toolSettings`
+    (`tools` stays the kagent MCP bindings), plus `defaultApproval`, `grants` (`grantedBy`) and
+    `approvalSettings` (false: this installation refuses settings). `list_approval_grants` lists a
+    namespace's grants; `filter_tools` with `agentTools` shows how a list resolves before you save.
+  - `sessionsUpdated: false` or `warnings` on a save mean running sessions still carry a dropped
+    exception until agent-manager tells muster again: say so. A governed platform's asks cannot be
+    lifted per agent; to make an agent ask before every call, set `default: Ask`.
+  - Agent chart 3.0 removes `muster.requireApproval`: agent-manager's migrate rewrites `true` to
+    `default: Ask` in the releases it owns and reports the others (GitOps, `valuesFrom`); check its
+    report. An organization stays on chart 2.x (`Ready=False`, `ChartSourceHeld`) until every
+    release there is on 3.x values and migrate ran again. The fix is replacing the key with
+    `default: Ask`, never deleting it; never write the key.
 - **An organization's connectors**: a kagent `RemoteMCPServer` in the organization namespace
   (`x_agent-manager_set_organization_connector`), not a Muster server, so no `toolset` selector
   reaches it. From agent-manager 3.3.0 (`connectors` in `x_agent-manager_create_agent`'s schema;

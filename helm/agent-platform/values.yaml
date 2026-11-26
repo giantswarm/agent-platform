@@ -2545,10 +2545,9 @@ networkPolicy:
   musterInClusterMcpPorts:
     - 8080
     - 8443
-  # Port of muster's session bindings API, which agent-manager calls on its
-  # own port and muster admits from agent-manager alone; the chart sets it
-  # from muster's floor. 0 (the default) opens no egress for it: agent-manager
-  # then binds on muster's aggregator port.
+  # Port of muster's session bindings API (agent-manager only); set from
+  # muster's floor. 0 opens no egress for it: agent-manager binds on muster's
+  # aggregator port.
   musterSessionBindingsPort: 0
   # Namespace muster runs in, for that egress rule; set by the meta chart from
   # muster's namespace (components.muster.targetNamespace). Empty selects the
@@ -2744,28 +2743,16 @@ muster:  # @schema skipProperties: true; additionalProperties: true
   # with the crds/-dir copy. Stays as a guard regardless of the muster version below.
   crds:
     install: false
-  # Who may register MCPServers and author Workflows through muster's
-  # writes-as-caller path. Every registered server and authored workflow is
-  # visible to and routed through by other users, so the chart binds both
-  # editor Roles explicitly. The defaults bind no person: a ServiceAccount
-  # subject (agent-platform-unset-connector-admins,
-  # agent-platform-unset-workflow-editors in kube-system) that the chart never
-  # creates and no identity provider can issue a token for (a group name could
-  # be matched by a real IdP group). Until an installation names its own
-  # subjects, nobody but a cluster admin registers servers, authors workflows
-  # or changes tool approval: fail closed. Replace them with the
-  # installation's admin groups, written as the API server sees them (with the
-  # OIDC groups prefix); the meta chart appends tenants.platformTeam to both. An empty list fails muster's render.
-  #
-  # mcpServerEditor is the platform's connector-admin role: whoever holds
-  # muster's mcpserver-editor Role in muster's namespace edits every connector
-  # there, sets its tool approval (MCPServer spec.approval: Allow, Ask or
-  # Block per tool, and the rule new tools follow) and is the only one who may
-  # let an agent run a tool the connector asks for. The muster chart itself
-  # binds nobody by default (it bound system:authenticated before), so this
-  # list is what keeps connector admins on an upgrade; binding
-  # system:authenticated makes everyone a connector admin. Further reading
-  # (optional): https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
+  # Who may register MCPServers and author Workflows (muster's writes-as-caller
+  # path). The defaults bind no person: a ServiceAccount nobody can
+  # authenticate as, so only cluster admins register servers, author workflows
+  # or change tool approval (fail closed). Set the installation's admin groups
+  # as the API server sees them (with the OIDC groups prefix); tenants.platformTeam
+  # is appended to both; an empty list fails muster's render.
+  # mcpServerEditor is the connector-admin role: its holders edit connectors,
+  # set their tool approval and alone may let an agent skip an Ask. Binding
+  # system:authenticated makes everyone a connector admin. See
+  # https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
   rbac:
     mcpServerEditor:
       subjects:
@@ -4104,12 +4091,9 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # The line the Dev Portal shows under the server's name (the MCPServer's
       # spec.description, at most 500 characters); empty renders none.
       description: "Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"
-      # The connector's tool approval (the MCPServer's spec.approval) is
-      # approval: its default, the Allow all preset written out for every tool
-      # of the kagent line, is the connectivity chart's
-      # (kagent.controllerRoute.mcp.approval there, which says why); set it here
-      # to tighten a tool (Ask or Block). Further reading (optional):
-      # https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
+      # The connector's tool approval (spec.approval): the Allow all preset,
+      # the connectivity chart's (kagent.controllerRoute.mcp.approval there).
+      # Set it here to tighten a tool (Ask or Block).
       approval:
         rule: Allow
         tools:
@@ -5386,19 +5370,14 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # the v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases
     # of the line reach the agents on their own; the major is the API boundary
     # and moves only with this chart. The floor moves with components.kagent
-    # and components.default-agent.versionRange. The same range reaches
-    # agent-manager's migrate run and the agent-platform-operator, which moves
-    # every organization's chart source at once. 3.x (chart 3.0 removes
-    # muster.requireApproval) renders only with
-    # components.agent-manager.versionRange at
-    # agent-platform.agentManager.agentChartV3Floor (its migrate rewrites
-    # requireApproval to default: Ask before it moves a namespace's source),
-    # components.muster.versionRange at agent-platform.muster.agentApprovalFloor
-    # (muster enforces default: Ask), agent-manager's tool approval on and the
-    # default agent's range on 3.x: move all of them in one change
-    # (agent-platform.validateAgentChartLine, make verify-agent-chart-line).
-    # Both floors are unset until those releases exist, so every 3.x range is
-    # refused for now (UPGRADE.md).
+    # and components.default-agent.versionRange. The same range drives
+    # agent-manager's migrate run and the agent-platform-operator. 3.x renders
+    # only with agent-manager and muster at their floors
+    # (agent-platform.agentManager.agentChartV3Floor,
+    # agent-platform.muster.agentApprovalFloor), agent-manager's tool approval on
+    # and the default agent's range on 3.x, moved together
+    # (make verify-agent-chart-line). Both floors are unset until those releases
+    # exist, so every 3.x range is refused for now (UPGRADE.md).
     semver: ">=2.6.0 <3.0.0"
   # Deprecated: set skillManager.sources. Read only while agent-manager does
   # not pin through the skill-manager (components.skill-manager off, or
@@ -5568,12 +5547,8 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       repository: giantswarm/agent-manager
       tag: 3.5.6
     dryRun: false
-    # preflightSemver (unset): forwarded when set, the connectivity chart's
-    # values.yaml documents it (UPGRADE.md, the dry run before the agent chart
-    # line moves to 3.x).
-    # cutover (unset): forwarded when set; true only while the organizations'
-    # 2.x -> 3.x cut-over runs (the connectivity chart's values.yaml,
-    # UPGRADE.md).
+    # preflightSemver and cutover (unset): forwarded when set; documented in
+    # the connectivity chart's values.yaml and UPGRADE.md.
     gitopsNamespaces: []
 
 # === Skill repositories ===
@@ -5851,50 +5826,27 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # agent-platform:workspace-manager-sessions): the manager lists every creator's
 # Sessions for the session directories' cleanup, which no tenant role grants.
 # === Governance mode (Governing tool calls) ===
-# -- The platform's governance (mode and role floors). The mode, trusted (the
-# default) or governed, changes no tool approval setting's meaning; it adds asking for agent
-# callers. Governed asks a person before an agent runs any tool of a governed
-# server (governedServers below) that is not on that server's safe list (new
-# and renamed tools too), and before any of muster's own tools but its reads;
-# the Dev Portal's connector wizard pre-selects the Recommended preset
-# (read-only tools run, the rest ask). Trusted lets agents run what the
-# connectors' own settings allow and pre-selects Allow all. In both modes
-# muster's built-in floors ask a person before an agent adds or repoints a
-# connector, changes approval settings, grants access, adds a model, egress
-# origin, credential or backend, approves an action or a toolchain source, or
-# changes muster's own configuration; the role floors hold on the governed
-# servers of that role, so governedServers names them in both modes. The meta
-# chart renders muster's governance configuration from it
-# (muster.governance: the mode and governedServers), from the muster release
-# that reads it (agent-platform.muster.governanceFloor); below it `governed`
-# fails the render and trusted renders nothing. From that release the meta
-# chart also renders muster.approval.installation (backstage.installationName,
-# the name the approval page shows; and trustedClients, the portal's own
-# client, with backstage.oidcClientId and backstage.signInHandoff), muster-approval-binder's subject
-# (agent-manager's ServiceAccount, muster.rbac.approvalBinder.subjects),
-# muster-approval-decider's subject (the portal's ServiceAccount,
-# muster.rbac.approvalDecider.subjects, with its token projected into the
-# portal for audience muster, while muster trusts the portal's client) and
-# the pages muster may return the browser to after an approval in
-# muster.oauth.mcpClient.postLoginRedirectAllowlist (the portal's /sessions
-# with backstage.publicPort, klausGateway.obo.callbackBaseUrl +
-# /auth/slack/return; an own list's entries stay). Approval itself needs
-# muster's OAuth server with Dex sign-in, Valkey storage (the default) and
-# muster.muster.oauth.mcpClient.publicUrl on the OAuth server's origin with
-# mcpClient.enabled for the allowlist; the chart does not fail without them,
-# muster refuses asking calls with the reason. The mode is set with this chart
-# value (no agent tool changes it). The block mirrors muster's own governance
-# configuration; a string here (the earlier scalar) fails the render. Further
-# reading (optional): https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
+# -- The platform's governance (mode and role floors). `trusted` (default) lets
+# agents run what the connectors' settings allow; `governed` also asks a person
+# before an agent runs any tool of a governed server (governedServers) that is
+# not on its safe list, and any muster tool but its reads. In both modes
+# muster's built-in floors ask before an agent adds or repoints a connector,
+# changes approval settings, grants access, adds a model, egress origin,
+# credential or backend, approves an action or toolchain source, or changes
+# muster's configuration. Rendered as muster.governance from
+# agent-platform.muster.governanceFloor; below it `governed` fails the render.
+# Approval needs muster's OAuth server with Dex sign-in, Valkey storage and
+# muster.muster.oauth.mcpClient.publicUrl (with mcpClient.enabled for the
+# redirect allowlist); without them muster refuses asking calls with the reason.
+# No agent tool changes the mode. A string here (the earlier scalar) fails the
+# render. See https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
 governance:  # @schema additionalProperties: false
   # -- trusted (the default) or governed; anything else fails the render.
   mode: trusted  # @schema enum: [trusted, governed]
-  # -- Floors per governance role (muster.governance.roleFloors): role -> the
-  # server's own tool names that ask agents in both modes on the governed
-  # servers of that role, added to muster's built-in floors (config can only
-  # add: a built-in floor is never removed). A role named here is a valid
-  # `role` of governedServers. For a server the installation registers
-  # itself, e.g.:
+  # -- Floors per governance role (muster.governance.roleFloors): role -> tool
+  # names that ask agents in both modes on the governed servers of that role,
+  # added to muster's built-in floors. A role named here is valid in
+  # governedServers. Example for a server the installation registers:
   #   governance:
   #     roleFloors:
   #       exampleManager: [approve_change, merge_change]
@@ -5902,31 +5854,21 @@ governance:  # @schema additionalProperties: false
   #     example-manager:
   #       role: exampleManager
   #       safe: [get_info, list_changes]
-  # Rendered from the muster release that reads the governance configuration
-  # (agent-platform.muster.governanceFloor), like governedServers.
   roleFloors: {}  # @schema additionalProperties: {type: array, items: {type: string}}
 
-# -- The servers muster governs (muster.governance.governedServers), per
-# source the platform ships: `role` (which of muster's role floors hold on
-# it: agentManager, connectorManager, sessionManager, modelManager,
-# clusterManager, vmManager, workspaceManager, toolchainManager,
-# skillManager, infrastructure, or a role governance.roleFloors declares) and
-# `safe`, the server's
-# own tool names agents call unasked on governed (reads only; a floor never,
-# muster refuses to start on one). Every other tool of a governed server asks
-# agents on governed. A source renders one entry per MCPServer it ships
-# while that renders (agent-platform.muster.governedKeys): a manager
-# component's <component>.muster.mcpServer.name in its namespace; kagent the
-# connectivity chart's kagent server; mcp-kubernetes the connectivity chart's
-# and every agent-platform-mcps kubernetes entry; any other key is a muster
-# server key itself (a server the installation registers, e.g.
-# example-manager). null drops a source (then
-# list it in governanceExempt with the reason). make verify-tool-approval
-# fails on a shipped MCPServer that is neither here nor in governanceExempt,
-# and on a safe entry that names a floor or no tool of its server, or whose
-# name starts with a write verb (create, delete, exec, set, approve, ...)
-# unless a `# safe-write: <tool>: <reason>` comment above `safe:` says why
-# it reads.
+# -- The servers muster governs (muster.governance.governedServers), per source:
+# `role` (agentManager, connectorManager, sessionManager, modelManager,
+# clusterManager, vmManager, workspaceManager, toolchainManager, skillManager,
+# infrastructure, or a role governance.roleFloors declares) and `safe`, the
+# server's own read tools that agents call unasked on governed (never a floor).
+# Every other tool asks agents on governed. A source renders one entry per
+# MCPServer it ships: a manager component's <component>.muster.mcpServer.name;
+# kagent; mcp-kubernetes (the connectivity chart's and every agent-platform-mcps
+# kubernetes entry); any other key is a muster server key itself. null drops a
+# source (list it in governanceExempt). make verify-tool-approval fails on a
+# shipped MCPServer in neither place, and on a safe entry that names a floor,
+# no tool of its server, or starts with a write verb unless a
+# `# safe-write: <tool>: <reason>` comment above `safe:` says why.
 governedServers:  # @schema additionalProperties: true
   agent-manager:
     role: agentManager
@@ -5963,9 +5905,8 @@ governedServers:  # @schema additionalProperties: true
     # kubernetes_* aliases ask agents on governed.
     safe: [logs, list_port_forward_sessions, context_list, context_get_current, can_i, api_resources, cluster_health, capi_list_clusters, capi_get_cluster, capi_resolve_cluster, capi_cluster_health, get, list, describe]
 
-# -- MCPServer sources the platform ships that muster deliberately does not
-# govern, each with its reason (make verify-tool-approval wants every shipped
-# source in governedServers or here). Read by the meta chart's tests only.
+# -- Shipped MCPServer sources muster deliberately does not govern, each with its
+# reason. Read by the meta chart's tests only.
 governanceExempt:  # @schema additionalProperties: {type: string}
   prometheus: "agent-platform-mcps' prometheus family (mcp-prometheus): every tool reads"
   capi: "agent-platform-mcps' capi family (mcp-kubernetes' CAPI tools): every tool reads"
@@ -5987,9 +5928,8 @@ tenants:
         kind: Group
         name: system:authenticated
     # -- The platform's operators: bound to agent-platform:editor in the
-    # kagent namespace. RBAC subjects. The default names two admin groups of
-    # the chart's original deployment, kept from before tool approval: replace
-    # them with the installation's own.
+    # kagent namespace. RBAC subjects. The default names two admin groups kept
+    # from before tool approval: replace them with the installation's own.
     editors:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
       - apiGroup: rbac.authorization.k8s.io
         kind: Group
@@ -6925,11 +6865,9 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # --- Wiring (read by the connectivity chart, not passed to the backstage chart) ---
   # Public hostname; empty derives backstage.<global.domain>.
   hostname: ""
-  # publicPort: the port of the portal's public URL when it is not 443 (a
-  # lab edge on 8443): read by the meta chart alone, for the portal entry of
-  # muster's redirect allowlist (https://<hostname>:<publicPort>/sessions;
-  # muster compares the port exactly). Unset or 443 writes none. Unset by
-  # default (it is no key of the backstage chart: components.backstage.omitKeys).
+  # publicPort: the port of the portal's public URL when it is not 443 (a lab
+  # edge on 8443); read by the meta chart alone, for the portal's entry in
+  # muster's redirect allowlist. Unset or 443 writes none.
   # publicPort: 8443
   # Gateway of the Backstage route; empty follows the platform default (the
   # chart-owned edge, else global.gatewayApi.parentRefs).
@@ -6945,38 +6883,29 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   extraScopes:
     - federated:id
     - audience:server:client_id:dex-k8s-authenticator
-  # The portal's own OAuth client at the identity provider. Empty (the default)
-  # signs people in with the platform's shared client (global.identity
-  # .clientId), as before. Set, the portal signs in with this client: its
-  # secret is the key portal-dex-client-secret of global.identity
-  # .existingSecret, the provider registers only the portal's redirect URI
-  # (https://<portal>/api/auth/oidc-agent-platform/handler/frame) for it, and
-  # the portal also requests the platform client's audience
-  # (audience:server:client_id:<global.identity.clientId>, added to
-  # extraScopes unless they are empty), so muster, the managers and the API
-  # server accept its tokens as before. On Dex, the platform client and every
-  # client whose audience extraScopes request (dex-k8s-authenticator) list
-  # this client under trustedPeers. muster and the managers key a person's
-  # sessions by the token's client too, so a person's connector sign-ins of
-  # the shared client are not the portal's (subject-scoped ones are).
+  # The portal's own OAuth client at the identity provider. Empty (default)
+  # signs in with the platform's shared client (global.identity.clientId). Set,
+  # its secret is the key portal-dex-client-secret of
+  # global.identity.existingSecret, the provider registers only the portal's
+  # redirect URI (https://<portal>/api/auth/oidc-agent-platform/handler/frame)
+  # for it, and audience:server:client_id:<global.identity.clientId> is added to
+  # extraScopes so tokens keep the platform client's audience. On Dex, the
+  # platform client and every client whose audience extraScopes request list
+  # this client under trustedPeers. Sessions are keyed by client too: a person's
+  # connector sign-ins made through the shared client are not the portal's
+  # (subject-scoped ones are).
   oidcClientId: ""
-  # muster trusts the portal with a person's approvals: with a dedicated
-  # oidcClientId the chart lists it in muster.approval.trustedClients, so the
-  # portal shows a tool approval in chat and decides it on the person's click
-  # (Approve / Decline, with the person's token), and opens muster's connector
-  # sign-in signed in through a one-time ticket (muster still asks the browser
-  # "Connect <connector> as <person>?" first). muster takes a person's portal
-  # token there only with the portal backend's own ServiceAccount token
-  # (audience muster, projected into the portal; the chart binds the portal's
-  # ServiceAccount to muster-approval-decider), so a portal token held
-  # elsewhere (the browser, a forwardToken server, an agent runtime) decides
-  # nothing. The trade-off: the portal backend can approve a person's pending
-  # requests without muster's browser sign-in; it decides only on the
-  # person's click. false keeps every decision and sign-in on muster's own
-  # pages. Without a dedicated client nothing is listed: the shared client is
-  # held by muster, agents and CLIs as well. An own
-  # muster.muster.approval.trustedClients may name this client only; any
-  # other id fails the render.
+  # With a dedicated oidcClientId, the chart lists it in
+  # muster.approval.trustedClients: the portal then shows a tool approval in
+  # chat and decides it on the person's click, and opens muster's connector
+  # sign-in through a one-time ticket. muster accepts the person's portal token
+  # there only together with the portal backend's own ServiceAccount token
+  # (audience muster; the chart projects it and binds the ServiceAccount to
+  # muster-approval-decider). Trade-off: the portal backend can approve a
+  # person's pending requests without muster's browser sign-in, on the person's
+  # click only. false keeps every decision on muster's own pages. Without a
+  # dedicated client nothing is listed; an own muster.muster.approval.trustedClients
+  # may name this client only.
   signInHandoff: true
   # Extra query parameters on the login provider's authorize request. Dex needs
   # none; Google needs access_type: offline and prompt: consent for a refresh
