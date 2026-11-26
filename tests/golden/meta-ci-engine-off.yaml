@@ -1904,6 +1904,8 @@ spec:
           delete them (`agent-platform-tools`).
         - Operating the platform: report its state with the read tools;
           change it only through the tools that write.
+        - Analysing or optimizing the platform from its metrics:
+          `agent-platform-analysis`.
         - Evaluating a skill: `agent-platform-skill-review`.
         - Writing a skill: `agent-platform-skill-authoring`.
 
