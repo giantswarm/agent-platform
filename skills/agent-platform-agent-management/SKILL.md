@@ -94,7 +94,10 @@ never assume an argument. The agent tools drop an unknown key without an error: 
    status about every 30 s for up to about five minutes; still `progressing`, tell the person its summary and call it
    again at the start of your next turn.
 3. `x_agent-manager_update_agent` for follow-ups: only the fields passed change; `skills`, `plugins`,
-   `egress` and `toolset` replace their whole list. `refreshSkills: true` re-pins every git skill and
+   `egress` and `toolset` replace their whole list. Where `x_agent-manager_update_agent_access`
+   exists, `update_agent` takes only name, description, prompt, model, tags, icon, labels and
+   annotations; the tool list, skills, plugins, egress, connectors, Harness and toolchains go to
+   `update_agent_access`, and settings to `set_agent_approval`. `refreshSkills: true` re-pins every git skill and
    plugin to the head of its ref, as you: it fails when you cannot read one of the agent's
    repositories.
 
@@ -139,7 +142,11 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   (the strictest wins); `Allow` over a connector's `Ask` is an **exception** only a connector admin
   of that connector grants, through `set_agent_approval`, which asks the person whenever an agent
   calls it, and a save drops the exceptions the saver is not connector admin for (say so before
-  saving). Until then `update_agent` still takes `toolset`, skills, plugins and egress. A governed
+  saving). `set_agent_approval` takes `settings` (`{"<entry>": "Allow"|"Ask"|"Block"|""}` for
+  entries already in `tools`) and `default`; `create_agent` and `update_agent_access` refuse an
+  `Allow` over a connector's `Ask` and any `default: Allow`. `get_agent` and `list_agents` return
+  `tools`, `defaultApproval` and `grants` (with `grantedBy`); `filter_tools` with `agentTools`
+  shows how a list resolves before you save it. Until then `update_agent` still takes `toolset`, skills, plugins and egress. A governed
   platform's asks cannot be lifted per agent. `muster.requireApproval: true` keeps asking before
   every call until agent chart 3.0 moves it to `default: Ask`; never set it together with tool
   settings.
