@@ -1181,8 +1181,17 @@ components:  # @schema additionalProperties: true
     # 3.1.0 serves Vertex service-account JSON keys and installation models
     # through the same credentials.uiURL, without tenancy too, and takes
     # tenants.commit.platformModelsPath (giantswarm/agent-manager#409).
-    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
-    versionRange: ">=3.5.0-rc.1 <4.0.0-0"
+    # 3.5.0 is the first release on mcp-oauth v1.15, which permits private
+    # issuer JWKS without a blanket allowance, so this chart sets no
+    # oauth.sso.allowPrivateIPs for it.
+    # The floor is the stable 3.5.8, the version the cut-over Job runs
+    # (agentManager.migration.image.tag): an installation with
+    # gitops.prereleases off follows agent-manager's stable releases only,
+    # and gitops.prereleases admits its release candidates. The ceiling stays
+    # below 4.0.0: agent-manager 4.x serves the tools of the Organization
+    # kind, which only the chart release of giantswarm/agent-platform#1489
+    # admits.
+    versionRange: ">=3.5.8 <4.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
