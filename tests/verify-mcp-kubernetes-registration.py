@@ -62,6 +62,15 @@ def main() -> None:
     if len(default) != 1:
         fail(f"default: want one mcp-kubernetes MCPServer, got {len(default)}")
     single = default[0]
+    public = mcpservers(render(conn, CONN_BASE + ["--set", "global.domain=example.com"]))[0]
+    if public["spec"]["url"] != "https://mcp-kubernetes.example.com/mcp":
+        fail("OAuth registration must use the public protected-resource origin")
+    explicit = mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpKubernetes.oauth.baseURL=https://kubernetes.example.com:8443/"]))[0]
+    if explicit["spec"]["url"] != "https://kubernetes.example.com:8443/mcp":
+        fail("OAuth registration must preserve an explicit public base URL and port")
+    anonymous = mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpKubernetes.oauth.enabled=false", "--set", "mcp-kubernetes.fullnameOverride=kubernetes", "--set", "mcp-kubernetes.service.port=9090"]))[0]
+    if anonymous["spec"]["url"] != "http://kubernetes.default.svc.cluster.local:9090/mcp" or "auth" in anonymous["spec"]:
+        fail("anonymous registration must use the configured in-cluster Service")
     if single["spec"].get("auth", {}).get("forwardToken") is not False:
         fail("OAuth registration must explicitly disable ID-token forwarding")
     if single["metadata"]["name"] != "mcp-kubernetes" or CLUSTER_LABEL in single["metadata"]["labels"] or "family" in single["spec"]:

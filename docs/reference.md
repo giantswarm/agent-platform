@@ -455,6 +455,7 @@ Optional components for a cluster that has none of these. All are **off by defau
   - Backstage and mcp-kubernetes need `global.domain` and `global.identity` (`issuerUrl`, `clientId`, `existingSecret` with `dex-client-secret`, plus `backstage-session-secret` for Backstage).
   - `kserve-llmisvc-resources` needs cert-manager and is the platform's one KServe controller.
   - On a cluster without Cilium, set `mcp-kubernetes.ciliumNetworkPolicy.enabled: false`.
+  - With OAuth enabled, muster registers mcp-kubernetes at `mcp-kubernetes.mcpKubernetes.oauth.baseURL` plus `/mcp`, defaulting to `https://<fullnameOverride>.<global.domain>/mcp`. The endpoint and protected-resource metadata must share an origin. Muster needs network access and TLS trust for this public endpoint; OAuth-disabled registrations use the in-cluster Service.
 - **Order.**
   - `agent-platform-connectivity` dependsOn `cloudnative-pg` (for the CNPG `Cluster`) and `muster` (for the `MCPServer` CRD).
   - `model-manager` dependsOn `kserve-llmisvc-resources`.

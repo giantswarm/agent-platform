@@ -169,6 +169,10 @@ Use the linked operator procedure; old binaries must not write to migrated stora
 Muster keeps the upstream identity-provider credentials and forwards or exchanges them according
 to the backend's configuration. Never send a muster access token directly to a backend.
 
+The bundled Kubernetes server uses its public HTTPS MCP endpoint when OAuth is enabled.
+Operators configure `mcp-kubernetes.mcpKubernetes.oauth.baseURL`; its origin must match the
+server's protected-resource metadata, and muster must trust its certificate and reach it.
+
 Client configuration management is opt-in through
 `muster.oauth.server.enableClientManagementEndpoint`. Store the registration access token in a
 secret manager and use the returned `registration_client_uri`, not a constructed management URL.

@@ -3,9 +3,9 @@ Registers the mcp-kubernetes component with muster. The standalone umbrella
 rendered this CR next to its mcp-kubernetes dependency; here it gates on the
 component toggle the meta chart forwards (components.mcp-kubernetes.enabled)
 and on muster being on (the MCPServer CRD ships with the muster component, and
-the connectivity release dependsOn it). The Service name is pinned by
-mcp-kubernetes.fullnameOverride (values.yaml) so the URL survives any release
-name; the port follows the mcp-kubernetes chart's service.port.
+the connectivity release dependsOn it). OAuth uses the public base URL so the
+endpoint and its protected-resource metadata have the same origin. Anonymous
+connections use the pinned Service name and the chart's service.port.
 
 With the server's OAuth on (mcp-kubernetes.mcpKubernetes.oauth.enabled, the
 default) muster obtains an access token from the server's authorization
@@ -68,7 +68,12 @@ spec:
   {{- end }}
   autoStart: true
   type: streamable-http
+  {{- if $oauthOn }}
+  {{- $baseURL := dig "mcpKubernetes" "oauth" "baseURL" "" $mcpk | default (printf "https://%s.%s" (dig "fullnameOverride" "mcp-kubernetes" $mcpk) .Values.global.domain) }}
+  url: {{ printf "%s/mcp" (trimSuffix "/" $baseURL) | quote }}
+  {{- else }}
   url: http://{{ dig "fullnameOverride" "mcp-kubernetes" $mcpk }}.{{ .Release.Namespace }}.svc.cluster.local:{{ dig "service" "port" 8080 $mcpk }}/mcp
+  {{- end }}
   {{- if $oauthOn }}
   auth:
     type: oauth
