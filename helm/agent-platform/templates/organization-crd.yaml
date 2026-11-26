@@ -10,8 +10,7 @@ organization-operator and rbac-operator do not run there.
 A value, not detection, as for the Flux CRDs of the bundled engine (the
 glossary's "Bundled Flux"): off by default, so this chart never takes over the
 CRD of a cluster whose KaaS stack installed it. files/crds/ holds
-organization-operator's CRD as generated
-(giantswarm/organization-operator@fe4507764d200afc5b02998e5d3c639aae78b0cf,
+organization-operator's CRD as released (organization-operator v2.2.0,
 config/crd/bases/security.giantswarm.io_organizations.yaml; spec.admins,
 spec.capabilities and the status of each capability from
 giantswarm/organization-operator#673).
