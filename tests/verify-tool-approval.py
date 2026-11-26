@@ -857,20 +857,23 @@ def check_default_agent_release_readable() -> None:
             fail(f"no agent-manager HelmRelease with {args}")
         return block(hr, "        platformReleases:")
 
-    def items(text: str) -> list[str]:
-        return [line.strip().lstrip("- ").strip() for line in text.split("\n")[1:] if line.strip()]
+    def entries(text: str) -> list[str]:
+        return [line.strip() for line in text.split("\n")[1:] if line.strip()]
 
+    # The release, and the Agent it renders: the only release the Agent's Flux
+    # labels may name (agent-manager refuses any other, and a missing one).
+    want = ["- agent:", "name: default-agent", "namespace: kagent", "name: default-agent", "namespace: agent-platform"]
     got = releases(["--set", am, "--set", musters])
-    if sorted(items(got)) != ["name: default-agent", "namespace: agent-platform"]:
-        fail(f"agent-manager must be granted the default agent's release agent-platform/default-agent:\n{got}")
+    if entries(got) != want:
+        fail(f"agent-manager must be granted the default agent's release agent-platform/default-agent, and be told it renders the Agent kagent/default-agent (the only release its Agent's labels may name):\n{got}")
     got = releases(["--set", am, "--set", musters, "--set", "gitops.namespace=flux-giantswarm"])
-    if "namespace: flux-giantswarm" not in got:
+    if entries(got) != [*want[:-1], "namespace: flux-giantswarm"]:
         fail(f"the default agent's release lives in gitops.namespace:\n{got}")
     if releases(["--set", am, "--set", musters, "--set", "components.default-agent.enabled=false"]):
         fail("no default agent, no platform release to read")
     if releases([]):
         fail("below agent-manager's tool approval floor its chart takes no muster.toolApproval")
-    print("ok: agent-manager may get the default agent's release (muster.toolApproval.platformReleases: <Flux namespace>/default-agent) from its tool approval floor, none without the default agent or below the floor")
+    print("ok: agent-manager may get the default agent's release (muster.toolApproval.platformReleases: <Flux namespace>/default-agent, with the Agent kagent/default-agent it renders) from its tool approval floor, none without the default agent or below the floor")
 
 
 def check_default_agent_on_remote_target() -> None:

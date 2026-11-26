@@ -548,7 +548,9 @@ its chart has no such key); an own value stands. */ -}}
 {{- /* The default agent's settings live in its release, which this chart
 renders in its own Flux namespace, not in the kagent namespace agent-manager
 manages: agent-manager reads it by the Agent's Flux labels and gets get on
-it by name (muster.toolApproval.platformReleases), so every person who may
+it by name (muster.toolApproval.platformReleases, with the Agent it renders:
+an agent-manager that reads the release only for the listed agent, and refuses
+it when the Agent's labels name another release), so every person who may
 start a session with the default agent can. With a remote target the release
 is on this cluster and agent-manager on the target, where it cannot read it:
 agent-manager gets the release's approval values instead
@@ -559,10 +561,11 @@ the Agent's Flux labels and the agent chart's X-Muster-Tool-Approval header. */ 
 {{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "default-agent") -}}
 {{- $ta := get $musterValues "toolApproval" | default dict -}}
 {{- $release := dict "namespace" (dig "namespace" "" (.root.Values.gitops | default dict) | default .root.Release.Namespace) "name" (include "agent-platform.childName" (dict "root" .root "name" "default-agent")) -}}
+{{- $agent := include "agent-platform.defaultAgent.approval" (dict "root" .root "release" $release) | fromJson -}}
 {{- if include "agent-platform.targetSecretName" .root -}}
-{{- $_ := set $ta "platformAgents" (list (include "agent-platform.defaultAgent.approval" (dict "root" .root "release" $release) | fromJson)) -}}
+{{- $_ := set $ta "platformAgents" (list $agent) -}}
 {{- else -}}
-{{- $_ := set $ta "platformReleases" (list $release) -}}
+{{- $_ := set $ta "platformReleases" (list (dict "namespace" $release.namespace "name" $release.name "agent" (dict "namespace" $agent.namespace "name" $agent.name))) -}}
 {{- end -}}
 {{- $_ := set $musterValues "toolApproval" $ta -}}
 {{- end -}}
