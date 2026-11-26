@@ -2984,6 +2984,9 @@
                         "type": "integer"
                     }
                 },
+                "musterSessionBindingsPort": {
+                    "type": "integer"
+                },
                 "substrate": {
                     "type": "object",
                     "additionalProperties": false,

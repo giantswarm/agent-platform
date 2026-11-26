@@ -891,6 +891,27 @@ spec:
               enabled: false
           mode: Strict
         mcp:
+          approval:
+            rule: Allow
+            tools:
+              create_sandbox: Allow
+              create_session_checkpoint: Allow
+              delete_sandbox: Allow
+              fork_session: Allow
+              get_sandbox: Allow
+              get_sandbox_process: Allow
+              invoke_session: Allow
+              kill_sandbox_process: Allow
+              list_sandbox_templates: Allow
+              list_sandboxes: Allow
+              list_session_checkpoints: Allow
+              list_sessions: Allow
+              read_sandbox_file: Allow
+              read_sandbox_outputs: Allow
+              resume_sandbox: Allow
+              start_sandbox_process: Allow
+              suspend_sandbox: Allow
+              write_sandbox_file: Allow
           description: 'Your agent sessions on this installation, as the signed-in person:
             list them, send one a message, and checkpoint or fork them'
           displayName: Kagent
@@ -1429,6 +1450,7 @@ spec:
       musterInClusterMcpPorts:
       - 8080
       - 8443
+      musterSessionBindingsPort: 0
       substrate:
         credentialProvider:
           egressFQDNs: []

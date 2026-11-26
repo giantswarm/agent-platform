@@ -2543,6 +2543,11 @@ networkPolicy:
   musterInClusterMcpPorts:
     - 8080
     - 8443
+  # Port of muster's session bindings API, which agent-manager calls on its
+  # own port and muster admits from agent-manager alone; the chart sets it
+  # from muster's floor. 0 (the default) opens no egress for it: agent-manager
+  # then binds on muster's aggregator port.
+  musterSessionBindingsPort: 0
   # In-cluster MCP backends an installation registers with muster (its own
   # MCPServer entries, e.g. through agent-platform-mcps). A ClusterIP Service
   # without a policy admits every pod on the cluster, and a direct call skips
@@ -4103,6 +4108,27 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # (kagent.controllerRoute.mcp.approval there, which says why); set it here
       # to tighten a tool (Ask or Block). Governing tool calls:
       # https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
+      approval:
+        rule: Allow
+        tools:
+          list_sessions: Allow
+          invoke_session: Allow
+          create_session_checkpoint: Allow
+          list_session_checkpoints: Allow
+          fork_session: Allow
+          list_sandbox_templates: Allow
+          create_sandbox: Allow
+          list_sandboxes: Allow
+          get_sandbox: Allow
+          suspend_sandbox: Allow
+          resume_sandbox: Allow
+          delete_sandbox: Allow
+          start_sandbox_process: Allow
+          get_sandbox_process: Allow
+          kill_sandbox_process: Allow
+          read_sandbox_outputs: Allow
+          read_sandbox_file: Allow
+          write_sandbox_file: Allow
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for

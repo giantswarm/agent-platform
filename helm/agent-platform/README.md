@@ -960,6 +960,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | networkPolicy.substrate.egressGateway.privateCIDRs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
 | networkPolicy.musterInClusterMcpPorts[1] | int | `8443` |  |
+| networkPolicy.musterSessionBindingsPort | int | `0` |  |
 | networkPolicy.mcpBackends | object | `{}` |  |
 | networkPolicy.mcpBackendScrapers[0].namespace | string | `"kube-system"` |  |
 | networkPolicy.mcpBackendScrapers[0].matchLabels."app.kubernetes.io/instance" | string | `"alloy-metrics"` |  |
@@ -1266,6 +1267,25 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controllerRoute.mcp.timeout | int | `300` |  |
 | kagent.controllerRoute.mcp.displayName | string | `"Kagent"` |  |
 | kagent.controllerRoute.mcp.description | string | `"Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"` |  |
+| kagent.controllerRoute.mcp.approval.rule | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_sessions | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.invoke_session | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.create_session_checkpoint | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_session_checkpoints | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.fork_session | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_sandbox_templates | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.create_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_sandboxes | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.get_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.suspend_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.resume_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.delete_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.start_sandbox_process | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.get_sandbox_process | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.kill_sandbox_process | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.read_sandbox_outputs | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.read_sandbox_file | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.write_sandbox_file | string | `"Allow"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
