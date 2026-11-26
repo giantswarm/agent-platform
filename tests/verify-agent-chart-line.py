@@ -17,7 +17,12 @@ agent-platform-operator (every organization's chart source), so:
   its floor, with agent-manager.muster.toolApproval.enabled false, with the
   default agent's range on the other major, and a range spanning both majors
   is refused; the default agent on 3.x with the line on 2.x is refused too;
-- agentChartV3Floor is the tool approval floor's release (one X.Y.Z each).
+- the placeholder floors (agent approval, the hop, governance, session
+  bindings) are unset or above the last release without the feature; while
+  the hop's or muster's floor is unset every 3.x range is refused, whatever
+  its form (~3.2, 3.1.x, bounds), a pre-release alone and >=3.0.0 (spans
+  majors, as migrate says) too; the gated paths run on a copy of the chart
+  with test floors.
 
 Stdlib only: documents are matched by text.
 Usage: verify-agent-chart-line.py <meta chart dir>
@@ -27,10 +32,13 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 META = sys.argv[1]
+CONN = sys.argv[2] if len(sys.argv) > 2 else ""
 HELM = os.environ.get("HELM") or "helm"
 BASE = [
     "--namespace", "agent-platform",
@@ -77,21 +85,54 @@ def refused(what: str, needle: str, *args: str) -> None:
         fail(f"{what}: not refused with {needle!r}:\n{r.stderr[-600:]}")
 
 
-def floor(name: str) -> str:
-    text = open(os.path.join(META, "templates", "_helpers.tpl"), encoding="utf-8").read()
+# The releases that do not carry what the 3.x line needs: a floor at or below
+# them would let a 3.x line through against a muster that ignores default: Ask
+# or an agent-manager whose migrate has no 2.x -> 3.x hop (M3-S8-01).
+LAST_WITHOUT = {"muster.agentApprovalFloor": (5, 67, 0), "agentManager.agentChartV3Floor": (3, 5, 8),
+                "agentManager.toolApprovalFloor": (3, 5, 8), "muster.governanceFloor": (5, 67, 0),
+                "muster.sessionBindingsPortFloor": (5, 67, 0)}
+PLACEHOLDERS = list(LAST_WITHOUT)
+# Test values for the floors in a copy of the chart, so the paths they gate
+# are exercised while the chart itself keeps them unset.
+TEST_FLOORS = {"muster.agentApprovalFloor": "5.68.0", "agentManager.agentChartV3Floor": "3.6.0",
+               "agentManager.toolApprovalFloor": "3.6.0", "muster.governanceFloor": "5.68.0",
+               "muster.sessionBindingsPortFloor": "5.68.0"}
+BYPASS = ["~3.2", "3.1.x", ">=3.1.0 <3.6.0", "3.0.0-rc.6", ">=3.0.0", "3.x", V3]
+
+
+def floor_value(chart: str, name: str) -> str | None:
+    text = open(os.path.join(chart, "templates", "_helpers.tpl"), encoding="utf-8").read()
     m = re.search(r'\{\{- define "agent-platform\.' + re.escape(name) + r'" -\}\}([^{]*)\{\{- end -\}\}', text)
-    if not m or not re.fullmatch(r"\d+\.\d+\.\d+", m.group(1)):
-        fail(f"agent-platform.{name} is not one X.Y.Z")
-        return "0.0.0"
+    if not m:
+        fail(f"agent-platform.{name}: no one-line define")
+        return None
     return m.group(1)
 
 
-am_floor = floor("agentManager.agentChartV3Floor")
-muster_floor = floor("muster.agentApprovalFloor")
-if am_floor != floor("agentManager.toolApprovalFloor"):
-    fail(f"agentManager.agentChartV3Floor {am_floor} is not the tool approval floor's release")
-am = [a.replace("{floor}", am_floor) for a in AM]
-muster = [a.replace("{floor}", muster_floor) for a in MUSTER]
+def with_floors(dst: str) -> str:
+    chart = os.path.join(dst, "agent-platform")
+    shutil.copytree(META, chart)
+    path = os.path.join(chart, "templates", "_helpers.tpl")
+    text = open(path, encoding="utf-8").read()
+    for name, v in TEST_FLOORS.items():
+        text, n = re.subn(r'(\{\{- define "agent-platform\.' + re.escape(name) + r'" -\}\})[^{]*(\{\{- end -\}\})', r"\g<1>" + v + r"\g<2>", text)
+        if n != 1:
+            fail(f"agent-platform.{name}: cannot set the test floor")
+    open(path, "w", encoding="utf-8").write(text)
+    return chart
+
+
+# The chart's own floors: unset until the releases exist, else above the last
+# release without the feature.
+for name in PLACEHOLDERS:
+    v = floor_value(META, name)
+    if v is None or v == "":
+        continue
+    if not re.fullmatch(r"\d+\.\d+\.\d+", v):
+        fail(f"agent-platform.{name} {v!r} is neither unset nor one X.Y.Z")
+    elif tuple(map(int, v.split("."))) <= LAST_WITHOUT[name]:
+        fail(f"agent-platform.{name} {v} admits a release without the feature (last without it: {'.'.join(map(str, LAST_WITHOUT[name]))})")
+unset = not floor_value(META, "agentManager.agentChartV3Floor") or not floor_value(META, "muster.agentApprovalFloor")
 
 out = renders("default")
 if V3 in out:
@@ -99,17 +140,68 @@ if V3 in out:
 if "'>=2.6.0 <3.0.0'" not in out and '">=2.6.0 <3.0.0"' not in out:
     fail("the default render does not carry the 2.x line")
 
-out = renders("3.x line with its floors", *LINE, *am, *muster, *DEFAULT_AGENT)
-if out.count(V3) < 3:
-    fail(f"the 3.x line reaches {out.count(V3)} places; want agent-manager's release, the connectivity release and the default agent's source")
+# Ranges the guard must read as migrate does, on the chart as it is.
+for r in ["~3.2", "3.1.x", ">=3.1.0 <3.6.0", "3.x", V3]:
+    if unset:
+        refused(f"{r} while the floors are unset", "are unset; keep the 2.x line", "--set", f"agent-manager.agentChart.semver={r}")
+    else:
+        refused(f"{r} below the floors", "admits a release below", "--set", f"agent-manager.agentChart.semver={r}")
+refused("a pre-release alone", "admits no release version", "--set", "agent-manager.agentChart.semver=3.0.0-rc.6")
+refused(">=3.0.0 spans majors as for migrate", "admits agent chart majors 3, 4, 5, 99", "--set", "agent-manager.agentChart.semver=>=3.0.0")
+refused("range spanning 2.x and 3.x", "admits agent chart majors 2, 3", "--set", "agent-manager.agentChart.semver=>=2.6.0")
+refused("3.x with agent-manager off: the operator still gets the range", "keep the 2.x line" if unset else "admits a release below",
+        "--set", "components.agent-manager.enabled=false", "--set", f"agent-manager.agentChart.semver={V3}")
 
-refused("3.x line, agent-manager below its floor", f"admits a release below {am_floor}", *LINE, *muster, *DEFAULT_AGENT)
-refused("3.x line, muster below its floor", f"admits a release below {muster_floor}", *LINE, *am, *DEFAULT_AGENT)
-refused("3.x line, tool approval off", "agent-manager.muster.toolApproval.enabled is false",
-        *LINE, *am, *muster, *DEFAULT_AGENT, "--set", "agent-manager.muster.toolApproval.enabled=false")
-refused("3.x line, default agent on 2.x", "select different agent chart majors", *LINE, *am, *muster)
-refused("2.x line, default agent on 3.x", "select different agent chart majors", *DEFAULT_AGENT)
-refused("range spanning both majors", "admits agent chart 2.x and 3.x", "--set", "agent-manager.agentChart.semver=>=2.6.0")
+# With the floors set (a copy of the chart), the gated paths.
+with tempfile.TemporaryDirectory() as tmp:
+    META = with_floors(tmp)
+    am = [a.replace("{floor}", TEST_FLOORS["agentManager.agentChartV3Floor"]) for a in AM]
+    muster = [a.replace("{floor}", TEST_FLOORS["muster.agentApprovalFloor"]) for a in MUSTER]
+    out = renders("3.x line with its floors", *LINE, *am, *muster, *DEFAULT_AGENT)
+    if out.count(V3) < 3:
+        fail(f"the 3.x line reaches {out.count(V3)} places; want agent-manager's release, the connectivity release and the default agent's source")
+    for r in ["~3.2", "3.1.x", ">=3.1.0 <3.6.0"]:
+        renders(f"{r} with its floors", "--set", f"agent-manager.agentChart.semver={r}", *am, *muster, "--set", f"components.default-agent.versionRange={r}")
+        refused(f"{r}, muster below its floor", "admits a release below 5.68.0", "--set", f"agent-manager.agentChart.semver={r}", *am, "--set", f"components.default-agent.versionRange={r}")
+    refused("3.x line, agent-manager below its floor", "admits a release below 3.6.0", *LINE, *muster, *DEFAULT_AGENT)
+    refused("3.x line, muster below its floor", "admits a release below 5.68.0", *LINE, *am, *DEFAULT_AGENT)
+    refused("3.x line, tool approval off", "agent-manager.muster.toolApproval.enabled is false",
+            *LINE, *am, *muster, *DEFAULT_AGENT, "--set", "agent-manager.muster.toolApproval.enabled=false")
+    refused("3.x line, default agent on 2.x", "select different agent chart majors", *LINE, *am, *muster)
+    refused("2.x line, default agent on 3.x", "select different agent chart majors", *DEFAULT_AGENT)
+
+# The migrate run reads organization namespaces on the 3.x path (M3-S8-06):
+# list on namespaces always, cluster-wide reads of releases, sources and Agents
+# with organizations on, no write anywhere outside its own namespaces.
+if CONN:
+    conn_base = [HELM, "template", "t", CONN, "-n", "agent-platform", "-f", f"{CONN}/ci/test-substrate-values.yaml",
+                 "-f", f"{CONN}/ci/test-llm-routing-values.yaml", "-f", os.path.join(os.path.dirname(__file__), "fixtures", "organizations-operator-values.yaml"),
+                 "--set", "kagent.fluxServiceAccountName=kagent-flux", "--set", "global.domain=ci.example.com",
+                 "--set", "components.agent-manager.enabled=true", "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+                 "--set", "global.identity.clientId=platform", "--set", "global.identity.existingSecret=platform-oauth",
+                 "--api-versions", "admissionregistration.k8s.io/v1/MutatingAdmissionPolicy"]
+
+    def migrate_cluster_rules(*args: str) -> str:
+        r = subprocess.run([*conn_base, *args], capture_output=True, text=True)
+        if r.returncode != 0:
+            fail(f"connectivity render {args} failed:\n{r.stderr[-600:]}")
+            return ""
+        found = [d for d in r.stdout.split("\n---\n") if "\nkind: ClusterRole\n" in "\n" + d and "-agent-manager-migrate-crds\n" in d]
+        return found[0] if found else ""
+
+    off = migrate_cluster_rules()
+    on = migrate_cluster_rules("--set", "agentPlatformOrganizations.enabled=true")
+    if 'resources: ["namespaces"]\n    verbs: ["list"]' not in off or 'resources: ["namespaces"]\n    verbs: ["list"]' not in on:
+        fail("the migrate run may not list namespaces (it must see the organization namespaces on the 3.x path)")
+    if "helm.toolkit.fluxcd.io" in off:
+        fail("without organizations the migrate run needs no cluster-wide release read")
+    for want in ('resources: ["helmreleases"]\n    verbs: ["get", "list"]', 'resources: ["ocirepositories"]\n    verbs: ["get", "list"]', 'resources: ["agents"]\n    verbs: ["get", "list"]'):
+        if want not in on:
+            fail(f"with organizations the migrate run's ClusterRole lacks {want!r}")
+    for verb in ("create", "update", "patch", "delete"):
+        rules = on.split("Organization namespaces", 1)[-1]
+        if f'"{verb}"' in rules:
+            fail(f"the migrate run's organization reads carry {verb}")
 
 if failures:
     for f in failures:

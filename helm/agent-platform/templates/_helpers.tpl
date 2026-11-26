@@ -1702,12 +1702,13 @@ Usage: include "agent-platform.agentManager.installationModelsFloor" $root
 {{/*
 Whether the floor of components.<name>.versionRange is at least version, a
 release candidate of it included: "true", else empty (a range without a floor
-too).
+too, and an empty version: a floor whose release does not exist yet admits
+nothing, so what it gates stays off).
 Usage: include "agent-platform.componentFloorAtLeast" (dict "root" $root "name" "<component>" "version" "X.Y.Z")
 */}}
 {{- define "agent-platform.componentFloorAtLeast" -}}
 {{- $floor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig .name "versionRange" "" .root.Values.components)) "" -}}
-{{- if and $floor (ge ((semver $floor).Compare (semver .version)) 0) -}}true{{- end -}}
+{{- if and $floor .version (ge ((semver $floor).Compare (semver .version)) 0) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -2136,14 +2137,20 @@ each, no comment inside the define.
 {{/*
 The floors of tool approval per agent (slice 3): the first agent-manager
 whose chart takes muster.toolApproval, and the first muster that takes an
-agent's approval settings with a Session binding. Placeholders until those
-releases exist. One line each, no comment inside the define.
+agent's approval settings with a Session binding. UNSET until those releases
+exist (giantswarm/giantswarm#38902 decision #89): an empty floor admits no
+release, so what it gates stays off and the agent chart line cannot move to
+3.x; the platform release that pins those versions sets them. A guess would
+switch the wiring on against released versions without the feature (muster
+5.66.x and 5.67.0-rc.1 have no agent approval). One line each, no comment
+inside the define.
 */}}
-{{- define "agent-platform.agentManager.toolApprovalFloor" -}}3.6.0{{- end -}}
-{{- define "agent-platform.muster.agentApprovalFloor" -}}5.66.0{{- end -}}
+{{- define "agent-platform.agentManager.toolApprovalFloor" -}}{{- end -}}
+{{- define "agent-platform.muster.agentApprovalFloor" -}}{{- end -}}
 {{- /* The first muster serving the session bindings API on its own port
-(muster.credentialProvider.sessionBindings, decision #88). */ -}}
-{{- define "agent-platform.muster.sessionBindingsPortFloor" -}}5.66.0{{- end -}}
+(muster.credentialProvider.sessionBindings, decision #88); UNSET until it
+exists (#89). */ -}}
+{{- define "agent-platform.muster.sessionBindingsPortFloor" -}}{{- end -}}
 
 {{/*
 The session bindings API muster serves agent-manager alone (decision #88):
@@ -2176,24 +2183,29 @@ The first agent-manager whose migrate has the Generic chart 2.x -> 3.x hop
 (giantswarm/giantswarm#38902, slice 8): agent chart 3.0 removes
 muster.requireApproval, and that migrate rewrites it to default: Ask before
 it moves a namespace's chart source. The same release as
-agent-platform.agentManager.toolApprovalFloor; a placeholder until it exists.
-One line, no comment inside the define.
+agent-platform.agentManager.toolApprovalFloor; UNSET until it exists (#89),
+which keeps every 3.x line refused. One line, no comment inside the define.
 */}}
-{{- define "agent-platform.agentManager.agentChartV3Floor" -}}3.6.0{{- end -}}
+{{- define "agent-platform.agentManager.agentChartV3Floor" -}}{{- end -}}
 
 {{/*
-The majors a range admits among 2 and 3, as a JSON list of strings: probed with each
-major's first, a middle and a late release version, which covers the forms
-the agent chart line takes (x-ranges, bounds, carets, tildes).
+The release majors a range admits among 0-5 and 99, as a JSON list of
+strings, decided as agent-manager's migrate decides its target major
+(TargetMajor): every minor 0-199 probed with its first and a late patch, and a
+late minor, so x-ranges, carets, tildes and bounds all count. A range that
+admits only pre-releases admits no major. Release versions only, as Flux's
+semver admits them without a pre-release comparator.
 Usage: include "agent-platform.agentChart.majors" "<range>" | fromJsonArray
 */}}
 {{- define "agent-platform.agentChart.majors" -}}
 {{- $range := toString . -}}
 {{- $out := list -}}
-{{- range $m := list 2 3 -}}
-{{- $hit := false -}}
-{{- range $v := list (printf "%d.0.0" $m) (printf "%d.6.0" $m) (printf "%d.999.999" $m) -}}
-{{- if semverCompare $range $v -}}{{- $hit = true -}}{{- end -}}
+{{- range $m := list 0 1 2 3 4 5 99 -}}
+{{- $hit := semverCompare $range (printf "%d.999999.999999" $m) -}}
+{{- if not $hit -}}
+{{- range $n := until 200 -}}
+{{- if and (not $hit) (or (semverCompare $range (printf "%d.%d.0" $m $n)) (semverCompare $range (printf "%d.%d.999999" $m $n))) -}}{{- $hit = true -}}{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- if $hit -}}{{- $out = append $out (toString $m) -}}{{- end -}}
 {{- end -}}
@@ -2210,23 +2222,35 @@ agent-manager binding it (agent-manager.muster.toolApproval, derived on from
 those floors). The same range reaches the agent-platform-operator, which moves
 every organization's chart source at once, and the migrate run; the default
 agent's range (components.default-agent.versionRange) moves with it. A range
-spanning 2.x and 3.x is refused: migrate moves releases to one major. Emits
-nothing; fails naming the key and the fix.
+spanning majors, or admitting no release version, is refused, decided as
+migrate decides it (agent-platform.agentChart.majors); while the two floors
+are unset (#89) every 3.x line is refused. Checked whether or not agent-manager
+is on: the range reaches the operator either way. Emits nothing; fails naming
+the key and the fix.
 */}}
 {{- define "agent-platform.validateAgentChartLine" -}}
 {{- $am := index .Values "agent-manager" | default dict -}}
 {{- $range := dig "agentChart" "semver" "2.x" $am | toString -}}
 {{- $majors := include "agent-platform.agentChart.majors" $range | fromJsonArray -}}
-{{- if gt (len $majors) 1 -}}
-{{- fail (printf "agent-manager.agentChart.semver %q admits agent chart 2.x and 3.x: agent-manager's migrate moves an installation's agents to exactly one major; use \">=3.0.0 <4.0.0\" (or a 2.x range)" $range) -}}
+{{- if not $majors -}}
+{{- fail (printf "agent-manager.agentChart.semver %q admits no release version of the agent chart: name the line as a range of one major (\">=2.6.0 <3.0.0\"; \">=3.0.0 <4.0.0\" once it may move), never a pre-release alone" $range) -}}
 {{- end -}}
-{{- $v3 := has "3" $majors -}}
-{{- if and $v3 (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) -}}
+{{- if gt (len $majors) 1 -}}
+{{- fail (printf "agent-manager.agentChart.semver %q admits agent chart majors %s: agent-manager's migrate moves an installation's agents to exactly one major; bound the range below the next major (\">=3.0.0 <4.0.0\", or a 2.x range)" $range (join ", " $majors)) -}}
+{{- end -}}
+{{- $major := first $majors -}}
+{{- if not (has $major (list "2" "3")) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q selects agent chart %s.x: this chart renders agents of the 2.x and 3.x lines only" $range $major) -}}
+{{- end -}}
+{{- if eq $major "3" -}}
 {{- $amFloor := include "agent-platform.agentManager.agentChartV3Floor" . -}}
+{{- $musterFloor := include "agent-platform.muster.agentApprovalFloor" . -}}
+{{- if not (and $amFloor $musterFloor) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q moves the agents to agent chart 3.x, which removes muster.requireApproval: this chart does not know yet which releases make that safe — the agent-manager whose migrate rewrites requireApproval to default: Ask (agent-platform.agentManager.agentChartV3Floor) and the muster that enforces default: Ask (agent-platform.muster.agentApprovalFloor) are unset; keep the 2.x line until a platform release sets them" $range) -}}
+{{- end -}}
 {{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" $amFloor)) -}}
 {{- fail (printf "agent-manager.agentChart.semver %q moves the agents to agent chart 3.x, but components.agent-manager.versionRange %q admits a release below %s: agent chart 3.0 removes muster.requireApproval, and only agent-manager %s's migrate rewrites it to default: Ask before it moves a namespace's chart source; move components.agent-manager.versionRange to %s or later in the same change" $range (dig "agent-manager" "versionRange" "" .Values.components) $amFloor $amFloor $amFloor) -}}
 {{- end -}}
-{{- $musterFloor := include "agent-platform.muster.agentApprovalFloor" . -}}
 {{- if not (and (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" $musterFloor))) -}}
 {{- fail (printf "agent-manager.agentChart.semver %q moves the agents to agent chart 3.x, but muster is off or components.muster.versionRange %q admits a release below %s: chart 3.0 replaces muster.requireApproval with default: Ask, which only muster %s enforces; move components.muster.versionRange to %s or later in the same change" $range (dig "muster" "versionRange" "" .Values.components) $musterFloor $musterFloor $musterFloor) -}}
 {{- end -}}
@@ -2237,8 +2261,11 @@ nothing; fails naming the key and the fix.
 {{- end -}}
 {{- if include "agent-platform.componentEnabled" (dict "root" . "name" "default-agent") -}}
 {{- $da := dig "default-agent" "versionRange" "" .Values.components | toString -}}
-{{- if and $da (ne (has "3" (include "agent-platform.agentChart.majors" $da | fromJsonArray)) $v3) -}}
-{{- fail (printf "components.default-agent.versionRange %q and agent-manager.agentChart.semver %q select different agent chart majors: the default agent is a release of the same chart and moves with the line (\">=3.0.0 <4.0.0\" for both, or a 2.x range for both)" $da $range) -}}
+{{- if $da -}}
+{{- $daMajors := include "agent-platform.agentChart.majors" $da | fromJsonArray -}}
+{{- if ne (toJson $daMajors) (toJson $majors) -}}
+{{- fail (printf "components.default-agent.versionRange %q and agent-manager.agentChart.semver %q select different agent chart majors (%s and %s): the default agent is a release of the same chart and moves with the line (\">=3.0.0 <4.0.0\" for both, or a 2.x range for both)" $da $range (join ", " $daMajors) $major) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -4905,14 +4932,16 @@ comment inside the define.
 The first muster release that reads the governance configuration
 (muster.governance: the mode and the servers it names per role) and enforces
 tool approval (Governing tool calls, slice 2 of giantswarm/giantswarm#38902).
-UNRELEASED: PLACEHOLDER-GOVERNANCE-FLOOR, the one value to move to the release
-that carries it (muster's tool-approval branch, giantswarm/giantswarm#38902); the
+UNRELEASED: PLACEHOLDER-GOVERNANCE-FLOOR, UNSET until the release that carries
+it exists (muster's tool-approval branch, giantswarm/giantswarm#38902 decision
+#89: a guessed floor would render the configuration for a muster that ignores
+it, so a `governed` platform would not be governed); the
 same floor gates the approval block and the redirect allowlist entries below
 (agent-platform.muster.approval, agent-platform.muster.redirectAllowlist), and
 tests/verify-tool-approval.py takes it from here. Below it the meta chart
 forwards none of them. One line, no comment inside the define.
 */}}
-{{- define "agent-platform.muster.governanceFloor" -}}5.65.0{{- end -}}
+{{- define "agent-platform.muster.governanceFloor" -}}{{- end -}}
 
 {{/*
 The platform's governance mode (top-level `governance`: trusted, the default,

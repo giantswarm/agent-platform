@@ -56,10 +56,13 @@ looked for; the checks that need them say when they are skipped.
 """
 from __future__ import annotations
 
+import atexit
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 HELM = os.environ.get("HELM", "helm")
 FLOOR_RANGE = ""  # set in main from agent-platform.muster.governanceFloor
@@ -85,13 +88,16 @@ MCPK = ["--set", "components.mcp-kubernetes.enabled=true"]
 def governance_floor(meta_dir: str) -> str:
     """The value of agent-platform.muster.governanceFloor, and its one marker."""
     text = open(os.path.join(meta_dir, "templates", "_helpers.tpl")).read()
-    m = re.search(r'define "agent-platform\.muster\.governanceFloor" -\}\}([0-9]+\.[0-9]+\.[0-9]+)\{\{-', text)
+    m = re.search(r'define "agent-platform\.muster\.governanceFloor" -\}\}((?:[0-9]+\.[0-9]+\.[0-9]+)?)\{\{-', text)
     if not m:
-        fail("agent-platform.muster.governanceFloor must be one line holding one X.Y.Z")
+        fail("agent-platform.muster.governanceFloor must be one line holding one X.Y.Z, or nothing while its release does not exist")
+    if not m.group(1):
+        print("note: the governance floor is unset (PLACEHOLDER-GOVERNANCE-FLOOR): nothing it gates renders; set it in the platform release that pins the muster release carrying tool approval")
+        return ""
     markers = text.count("PLACEHOLDER-GOVERNANCE-FLOOR")
     if markers > 1:
         fail("the governance floor placeholder must be marked at most once (PLACEHOLDER-GOVERNANCE-FLOOR) next to its define")
-    if markers:
+    if markers and m.group(1):
         print(f"note: the governance floor {m.group(1)} is still a placeholder (PLACEHOLDER-GOVERNANCE-FLOOR): move it to the muster release that carries tool approval before releasing")
     values = open(os.path.join(meta_dir, "values.yaml")).read()
     if f">={m.group(1)}" in values:
@@ -669,8 +675,62 @@ def check_approval() -> None:
     print("ok: mcp-kubernetes carries the Recommended settings, kagent the Allow all settings, a Block rule renders, overrides reach spec.approval (also from the meta chart), null renders none, invalid values fail naming the key")
 
 
+# Test values for the floors this file's checks need, set in a copy of the
+# chart while the chart keeps them unset until their releases exist
+# (giantswarm/giantswarm#38902 decision #89).
+TEST_FLOORS = {"muster.governanceFloor": "5.65.0", "muster.agentApprovalFloor": "5.66.0",
+               "agentManager.toolApprovalFloor": "3.6.0", "muster.sessionBindingsPortFloor": "5.66.0"}
+
+
+def with_test_floors(meta_dir: str, dst: str) -> str:
+    """A copy of the meta chart with every unset floor of TEST_FLOORS set."""
+    chart = os.path.join(dst, "agent-platform")
+    shutil.copytree(meta_dir, chart)
+    path = os.path.join(chart, "templates", "_helpers.tpl")
+    text = open(path).read()
+    for name, v in TEST_FLOORS.items():
+        text, n = re.subn(r'(\{\{- define "agent-platform\.' + re.escape(name) + r'" -\}\})(\{\{- end -\}\})', r"\g<1>" + v + r"\g<2>", text)
+        if n == 0 and f'define "agent-platform.{name}" -}}}}{{{{- end' not in text and not re.search(r'define "agent-platform\.' + re.escape(name) + r'" -\}\}[0-9]', text):
+            fail(f"agent-platform.{name}: no one-line define")
+    open(path, "w").write(text)
+    return chart
+
+
+def check_unset_floors_keep_everything_off() -> None:
+    """On the chart as it is: a floor whose release does not exist gates its
+    wiring off whatever the component ranges say (M3-S8-01)."""
+    high = ["--set", "components.muster.versionRange=>=5.99.0 <6.0.0-0", "--set", "components.agent-manager.versionRange=>=3.99.0 <4.0.0-0",
+            "--set", "components.agent-manager.enabled=true"]
+    text = open(os.path.join(META_DIR, "templates", "_helpers.tpl")).read()
+    unset = [n for n in TEST_FLOORS if re.search(r'define "agent-platform\.' + re.escape(n) + r'" -\}\}\{\{- end', text)]
+    if not unset:
+        return
+    out = render_meta(high)
+    muster, am = doc(out, "HelmRelease", "muster"), doc(out, "HelmRelease", "agent-manager")
+    if "muster.governanceFloor" in unset:
+        if block(muster, "      governance:"):
+            fail("with the governance floor unset the muster release must carry no governance configuration")
+        err = render_meta_fail(high + ["--set", "governance=governed"])
+        if "governed" not in err:
+            fail(f"with the governance floor unset `governed` must fail:\n{err}")
+    if "muster.agentApprovalFloor" in unset and "enabled: true" in block(am, "      toolApproval:"):
+        fail("with muster's agent approval floor unset agent-manager must bind no settings")
+    if "muster.sessionBindingsPortFloor" in unset and block(muster, "        sessionBindings:"):
+        fail("with the session bindings floor unset muster must keep its earlier bindings wiring")
+    print(f"ok: unset floors ({', '.join(unset)}) keep what they gate off for any muster and agent-manager range; `governed` fails")
+
+
+def render_meta_fail(args: list[str]) -> str:
+    return render(META_DIR, META + args, expect_fail=True)
+
+
 if __name__ == "__main__":
     META_DIR, CONN_DIR = sys.argv[1], sys.argv[2]
+    governance_floor(META_DIR)
+    check_unset_floors_keep_everything_off()
+    _tmp = tempfile.mkdtemp(prefix="verify-tool-approval-")
+    atexit.register(shutil.rmtree, _tmp, True)
+    META_DIR = with_test_floors(META_DIR, _tmp)
     FLOOR_RANGE = f"components.muster.versionRange=>={governance_floor(META_DIR)} <6.0.0-0"
     check_governance()
     check_write_like()

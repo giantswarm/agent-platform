@@ -5395,6 +5395,8 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # (muster enforces default: Ask), agent-manager's tool approval on and the
     # default agent's range on 3.x: move all of them in one change
     # (agent-platform.validateAgentChartLine, make verify-agent-chart-line).
+    # Both floors are unset until those releases exist, so every 3.x range is
+    # refused for now (UPGRADE.md).
     semver: ">=2.6.0 <3.0.0"
   # Deprecated: set skillManager.sources. Read only while agent-manager does
   # not pin through the skill-manager (components.skill-manager off, or
