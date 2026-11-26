@@ -126,7 +126,7 @@ never assume an argument. The agent tools drop an unknown key without an error: 
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only
   on an explicit request. An own-account (OAuth) connector without `grantScope: subject` needs a
   sign-in in each of the agent's conversations (`agent-platform-tools`); say so before choosing it.
-- **Tool approval** (https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
+- **Tool approval** (further reading, optional: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
   today an agent's toolset only selects tools; their Allow/Ask/Block settings are the connectors'
   (`agent-platform-tools`). On a **governed** platform every agent-manager tool that is not a read
   (`create_agent`, `update_agent`, `delete_agent`, `start_session`, `delete_session`, the

@@ -30,8 +30,8 @@ person to sign in once with their own account; until then their tools are hidden
 Each tool of a connector is **Allow** (runs), **Ask** (a person confirms the call first) or
 **Block** (hidden); a connector's rule decides for tools nobody has set yet, new ones included, and
 the strictest setting wins. A governed platform also asks before an agent changes anything through
-the platform's own connectors
-(https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/).
+the platform's own connectors (further reading, optional:
+https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/).
 
 **Suggest one** when the goal needs a system no connector reaches yet ("read our Jira tickets"):
 someone registers it with **Add connector**. A connector that exists but whose tools are missing

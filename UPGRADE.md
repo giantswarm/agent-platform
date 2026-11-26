@@ -17,7 +17,7 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ## \<current\> → \<next\> (agent chart 3.0: `muster.requireApproval` becomes `default: Ask`)
 
-giantswarm/giantswarm#38902, slice 8: agent chart 3.0 removes `muster.requireApproval` (kagent's flag that paused an agent before every tool call) and the default of `modelConfig.name`. `default: Ask` replaces `requireApproval: true`: muster asks a person before every tool call the agent makes through it, from every client; once migrated, nothing asks twice (until then see *Running Sessions* below). `agent-manager.agentChart.semver` moves the agents of the whole installation: agent-manager composes new agents on it, its migrate run (the connectivity release's start hook) moves the existing ones, and the agent-platform-operator moves every organization's chart source at once.
+agent chart 3.0 removes `muster.requireApproval` (kagent's flag that paused an agent before every tool call) and the default of `modelConfig.name`. `default: Ask` replaces `requireApproval: true`: muster asks a person before every tool call the agent makes through it, from every client; once migrated, nothing asks twice (until then see *Running Sessions* below). `agent-manager.agentChart.semver` moves the agents of the whole installation: agent-manager composes new agents on it, its migrate run (the connectivity release's start hook) moves the existing ones, and the agent-platform-operator moves every organization's chart source at once.
 
 The render allows the 3.x line only together with what makes it safe (`make verify-agent-chart-line`): agent-manager at `agent-platform.agentManager.agentChartV3Floor`, whose migrate has the 2.x → 3.x hop, muster at `agent-platform.muster.agentApprovalFloor`, which enforces `default: Ask`, agent-manager's tool approval on (`agent-manager.muster.toolApproval.enabled` unset) and the default agent's range on the same major. **Both floors are unset in this chart** until the muster and agent-manager releases carrying tool approval exist, so every 3.x range is refused for now, whatever its form (`3.x`, `~3.2`, `>=3.1.0 <3.6.0`); the platform release that pins those versions sets them. They are chart code, not values, on purpose: a floor states which released version carries a feature, and a value would let one installation's configuration claim it for a release that lacks it (a lab tests a branch build on a copy of the chart, as the verify scripts do). The same goes for the other floors of tool approval (`agent-platform.agentManager.toolApprovalFloor`, `agent-platform.muster.governanceFloor`, `agent-platform.muster.sessionBindingsPortFloor`): unset, what they gate stays off and `governance: governed` fails. The range is read as agent-manager's migrate reads it: a range admitting two majors (`>=3.0.0`) or only pre-releases fails.
 
@@ -34,13 +34,25 @@ The migrate run writes each release's 3.x values (`muster.requireApproval: true`
 
 ## \<current\> → \<next\> (tool approval and the governance mode)
 
-giantswarm/giantswarm#38902: muster decides Allow, Ask or Block for every tool call, and the chart renders muster's governance configuration (`governance`, `governedServers`: per shipped MCPServer its role and its safe list of reads), the approval page's installation name, the redirect allowlist and the approval binder ([chart README, "Tool approval and the governance mode"](helm/agent-platform/README.md#tool-approval-and-the-governance-mode)). None of it reaches a muster below `agent-platform.muster.governanceFloor`.
+muster decides Allow, Ask or Block for every tool call, and the chart renders muster's governance configuration (`governance` — `{mode, roleFloors}` —, `governedServers`: per shipped MCPServer its role and its safe list of reads), the approval page's installation name, the redirect allowlist and the approval binder ([chart README, "Tool approval and the governance mode"](helm/agent-platform/README.md#tool-approval-and-the-governance-mode)). None of it reaches a muster below `agent-platform.muster.governanceFloor`.
 
 ### Operator action
 
-- Move `components.muster.versionRange` to the muster release that carries tool approval with this chart. `governance: governed` below it fails the render.
+- Move `components.muster.versionRange` to the muster release that carries tool approval with this chart. `governance.mode: governed` below it fails the render.
 - After muster's CRD upgrade, force a reconcile of the releases that render MCPServers (connectivity, agent-platform-mcps, the managers) if any of them was applied while the old CRD was served (its `spec.approval` was pruned): `flux reconcile helmrelease <name> -n <ns> --force`. Until the CRD knows `spec.approval`, muster refuses every server tool.
-- Keep `muster.rbac.mcpServerEditor.subjects` non-empty (the chart's default, the Giant Swarm admin groups and `tenants.platformTeam`): muster's chart no longer binds `system:authenticated` and fails the upgrade with an empty list while the old binding exists (`muster.rbac.mcpServerEditor.allowRemovingBinding: true` drops it).
+- **Editor defaults changed.** `muster.rbac.mcpServerEditor.subjects` (the connector admins) and `muster.rbac.workflowEditor.subjects` default to placeholder groups nobody belongs to (`agent-platform:connector-admins`, `agent-platform:workflow-editors`); they were two Giant Swarm admin groups. Set both to your admin groups in the installation's values (as the API server sees them, with the OIDC groups prefix); `tenants.platformTeam` is still appended. Until then only cluster admins register servers, author workflows or change tool approval. Keep the lists non-empty: muster's chart no longer binds `system:authenticated` and fails the upgrade with an empty list while the old binding exists (`muster.rbac.mcpServerEditor.allowRemovingBinding: true` drops it).
+- **`governance` is a map** mirroring muster's governance configuration: `governance: {mode: trusted|governed, roleFloors: {}}`. Write `governance.mode: governed` where you wrote `governance: governed`; a string fails the render with that hint.
+- **No server outside the platform's components is governed by default.** The default `governedServers` entry for `giantswarm-platform-manager` is gone, and role floors beyond muster's built-in ones come from `governance.roleFloors`. An installation that registers a server of its own (for example `giantswarm-platform-manager`) names it with its role and safe list in `governedServers` and its floors in `governance.roleFloors`, in the installation's values:
+
+  ```yaml
+  governance:
+    roleFloors:
+      platformManager: [approve_action, merge_action]
+  governedServers:
+    giantswarm-platform-manager:
+      role: platformManager
+      safe: [get_info, list_installations, list_actions, get_action, verify_capability]
+  ```
 - Replace an own `muster.muster.governance.servers.<role>` with `governedServers` entries (the render fails on the earlier shape).
 - An edge not on 443: set `backstage.publicPort`, and remove a hand-written portal entry from `muster.muster.oauth.mcpClient.postLoginRedirectAllowlist`. The allowlist reaches muster only with `muster.muster.oauth.mcpClient.enabled`.
 - An agent-manager ServiceAccount the chart does not create (`agent-manager.serviceAccount.create: false`) needs `agent-manager.serviceAccount.name`.
