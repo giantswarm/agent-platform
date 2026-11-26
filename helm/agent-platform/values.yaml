@@ -1184,13 +1184,13 @@ components:  # @schema additionalProperties: true
     # 3.5.0 is the first release on mcp-oauth v1.15, which permits private
     # issuer JWKS without a blanket allowance, so this chart sets no
     # oauth.sso.allowPrivateIPs for it.
-    # The floor is the stable 3.5.8, the version the cut-over Job runs
-    # (agentManager.migration.image.tag): an installation with
-    # gitops.prereleases off follows agent-manager's stable releases only,
-    # and gitops.prereleases admits its release candidates. The ceiling stays
-    # below 4.0.0: agent-manager 4.x serves the tools of the Organization
-    # kind, which only the chart release of giantswarm/agent-platform#1489
-    # admits.
+    # The floor is a stable release, 3.5.8, the newest one when the floor
+    # left release candidates (giantswarm/agent-platform#1497): an
+    # installation with gitops.prereleases off follows agent-manager's stable
+    # releases only, and gitops.prereleases admits its release candidates.
+    # The ceiling stays below 4.0.0: agent-manager 4.x serves the tools of
+    # the Organization kind, which only the chart release of
+    # giantswarm/agent-platform#1489 admits.
     versionRange: ">=3.5.8 <4.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager

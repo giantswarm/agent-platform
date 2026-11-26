@@ -21,7 +21,7 @@ A CRD version change that needs more than an apply (a stored version dropped, as
 
 ### Operator action
 
-- To keep agent-manager's release candidates, set `gitops.prereleases: true`, or keep an explicit `components.agent-manager.versionRange` whose floor is a release candidate.
+- To keep agent-manager's release candidates, set an explicit `components.agent-manager.versionRange` whose floor is a release candidate. `gitops.prereleases: true` admits them too, but it admits the release candidates of every component and of this chart itself as well.
 - An installation that pins the BOM: move `agent-manager` to `3.5.8`.
 
 ## \<current\> → \<next\> (forge CLI configuration from the Harness only)
