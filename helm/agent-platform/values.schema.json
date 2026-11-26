@@ -2230,7 +2230,10 @@
                             "type": "string"
                         },
                         "safe": {
-                            "type": "array"
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
                         }
                     }
                 },

@@ -5933,8 +5933,13 @@ governedServers:  # @schema additionalProperties: true
     safe: [logs, list_port_forward_sessions, context_list, context_get_current, can_i, api_resources, cluster_health, capi_list_clusters, capi_get_cluster, capi_resolve_cluster, capi_cluster_health, get, list, describe]
   giantswarm-platform-manager:
     role: platformManager
-    # Not inventoried yet: every tool but the floors' asks agents on governed.
-    safe: []
+    # Its reads (giantswarm-platform-manager docs/governance.md). get_action,
+    # list_actions and list_installations bring Action records up to date
+    # with GitHub as the caller and may post the facts to the review thread
+    # or the standup channel; they decide nothing. The dry runs share their
+    # tools with the commits (enable, reconcile, disable_capability) and ask,
+    # as do verify_installation, watch_action, deny_action and the floors.
+    safe: [get_info, list_installations, list_actions, get_action, verify_capability]
 
 # -- MCPServer sources the platform ships that muster deliberately does not
 # govern, each with its reason (make verify-tool-approval wants every shipped
