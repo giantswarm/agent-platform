@@ -416,8 +416,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | global.identity.issuerUrl | string | `""` |  |
 | global.identity.clientId | string | `""` |  |
 | global.identity.existingSecret | string | `""` |  |
-| global.identity.type | string | `""` |  |
-| global.identity.kubernetes.audiences | list | `[]` |  |
+| global.identity.type | string | `"dex"` |  |
+| global.identity.kubernetes.audiences[0] | string | `"dex-k8s-authenticator"` |  |
 | global.gatewayApi.parentRefs | list | `[]` |  |
 | global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster, detected once by the meta chart (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |
@@ -1373,11 +1373,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | model-manager.kagent.disableWiring | bool | `false` |  |
 | model-manager.mcp.enabled | bool | `true` |  |
 | model-manager.oauth.enabled | bool | `true` |  |
-| model-manager.oauth.provider | string | `"dex"` |  |
 | model-manager.oauth.downstream.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
-| model-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | model-manager.networkPolicy.enabled | bool | `false` |  |
 | model-manager.serviceMonitor.enabled | string | `"auto"` |  |
 | model-manager.serviceMonitor.interval | string | `"60s"` |  |
@@ -1432,12 +1430,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.skills.repositories | list | `[]` |  |
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |
-| agent-manager.oauth.provider | string | `"dex"` |  |
 | agent-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | agent-manager.oauth.downstream.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
-| agent-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | agent-manager.networkPolicy.enabled | bool | `false` |  |
 | agent-manager.serviceMonitor.enabled | string | `"auto"` |  |
 | agent-manager.serviceMonitor.interval | string | `"60s"` |  |
@@ -1493,12 +1489,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | cluster-manager.installation.name | string | `""` |  |
 | cluster-manager.mcp.enabled | bool | `true` |  |
 | cluster-manager.oauth.enabled | bool | `true` |  |
-| cluster-manager.oauth.provider | string | `"dex"` |  |
 | cluster-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | cluster-manager.oauth.downstream.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
-| cluster-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | cluster-manager.serviceMonitor.enabled | string | `"auto"` |  |
 | cluster-manager.serviceMonitor.interval | string | `"60s"` |  |
 | cluster-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |

@@ -124,7 +124,7 @@ staticClients:
       - agent-platform
 ```
 
-The kube-apiserver has to trust the same issuer (`--oidc-issuer-url`, `--oidc-client-id=dex-k8s-authenticator`) for the upstream identity to carry a person's RBAC. A cluster whose apiserver trusts another audience sets it in `mcp-kubernetes.kubernetesAudience`. The Kubernetes MCP obtains that identity through its own authorization-code flow; its MCP endpoint requires its own resource access token. Other components' forwarded-token integrations need independent compatibility checks when their OAuth library changes.
+The kube-apiserver has to trust the same issuer (`--oidc-issuer-url`, `--oidc-client-id=dex-k8s-authenticator`) for the upstream identity to carry a person's RBAC. A cluster whose apiserver trusts another audience sets it in `global.identity.kubernetes.audiences`, which model-manager, agent-manager and cluster-manager request at login, and in `mcp-kubernetes.kubernetesAudience`. A Google installation sets `global.identity.type: google` and its client ID as the audience. The Kubernetes MCP obtains that identity through its own authorization-code flow; its MCP endpoint requires its own resource access token. Other components' forwarded-token integrations need independent compatibility checks when their OAuth library changes.
 
 With the Kubernetes MCP enabled, the chart publishes its OAuth HTTPRoute through the platform's public Gateway and uses encrypted shared Valkey storage from the existing platform Secret. No consent flag or separate consent key is needed. Register the exact callback at the identity provider before upgrading. An installation that supplies its own public route can set `mcp-kubernetes.gatewayAPI` explicitly.
 

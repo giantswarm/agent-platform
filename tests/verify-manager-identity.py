@@ -30,6 +30,8 @@ NOT_IN_CONNECTIVITY = ("skill-manager",)
 DEX_OPT_IN_UNSET = ("model-manager",)
 # Components with an oauth block that this script does not render, and where they are covered.
 EXEMPT = {"workspace-manager": "needs the workspaces fixture; verify-workspace-manager and verify-idp-egress cover it"}
+# The managers that call the Kubernetes API as the person (oauth.downstream).
+DOWNSTREAM = ("model-manager", "agent-manager", "cluster-manager")
 ROUTED = {"model-manager": "/model-manager", "agent-manager": "/agent-manager"}
 ISSUER = "https://dex.ci.example.com"
 CLIENT = "muster-acme"
@@ -98,6 +100,10 @@ def oauth(rels: dict[str, dict], name: str) -> dict:
     if name not in rels:
         sys.exit(f"FAIL: no {name} HelmRelease in the render")
     return rels[name].get("oauth", {})
+
+
+def required_audiences(rels: dict[str, dict], name: str):
+    return rels[name].get("muster", {}).get("mcpServer", {}).get("auth", {}).get("requiredAudiences")
 
 
 def merge(dst: dict, src: dict) -> None:
@@ -241,6 +247,24 @@ def main() -> None:
     if egress is None or "dex.ci.example.com" not in yaml.safe_dump(egress):
         sys.exit("FAIL: derived: model-manager's egress does not reach the derived issuer")
     print("ok: derived")
+
+    print("--> global.identity: the managers that call the Kubernetes API as the person take its provider and audiences where their blocks leave them unset")
+    for name in DOWNSTREAM:
+        expect(f"{name} oauth.provider from global.identity.type", oauth(rels, name).get("provider"), "dex")
+        expect(f"{name} requiredAudiences from global.identity.kubernetes.audiences", required_audiences(rels, name), ["dex-k8s-authenticator"])
+    expect("skill-manager requiredAudiences (its own)", required_audiences(rels, "skill-manager"), ["dex-k8s-authenticator"])
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets(
+        "global.identity.kubernetes.audiences={api-a,api-b}",
+        "agent-manager.muster.mcpServer.auth.requiredAudiences={own}",
+    ), "--set-json", "cluster-manager.muster.mcpServer.auth.requiredAudiences=[]"])
+    expect("model-manager requiredAudiences from a set global", required_audiences(rels, "model-manager"), ["api-a", "api-b"])
+    expect("agent-manager requiredAudiences (its own wins)", required_audiences(rels, "agent-manager"), ["own"])
+    expect("cluster-manager requiredAudiences (its own empty list wins)", required_audiences(rels, "cluster-manager"), [])
+    expect("skill-manager requiredAudiences (not filled)", required_audiences(rels, "skill-manager"), ["dex-k8s-authenticator"])
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets("global.identity.type=google", "model-manager.oauth.provider=dex")])
+    expect("agent-manager oauth.provider from global.identity.type google", oauth(rels, "agent-manager").get("provider"), "google")
+    expect("model-manager oauth.provider (its own wins)", oauth(rels, "model-manager").get("provider"), "dex")
+    print("ok: global.identity")
 
     print("--> identity-provider egress: every manager's pods reach the login by name and through the in-cluster Gateway's proxy pods on 443 and 10443, not the cluster entity")
     docs = [d for d in yaml.safe_load_all(result.stdout) if d]

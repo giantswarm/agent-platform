@@ -769,8 +769,9 @@ spec:
         existingSecret: ""
         issuerUrl: ""
         kubernetes:
-          audiences: []
-        type: ""
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -1840,8 +1841,9 @@ spec:
         existingSecret: ""
         issuerUrl: ""
         kubernetes:
-          audiences: []
-        type: ""
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -1985,8 +1987,9 @@ spec:
         existingSecret: ""
         issuerUrl: ""
         kubernetes:
-          audiences: []
-        type: ""
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2105,8 +2108,9 @@ spec:
         existingSecret: ""
         issuerUrl: ""
         kubernetes:
-          audiences: []
-        type: ""
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2254,8 +2258,9 @@ spec:
         existingSecret: ""
         issuerUrl: ""
         kubernetes:
-          audiences: []
-        type: ""
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
