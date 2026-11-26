@@ -37,7 +37,7 @@ import subprocess
 import sys
 import tempfile
 
-META = sys.argv[1]
+META = META_ORIG = sys.argv[1]
 CONN = sys.argv[2] if len(sys.argv) > 2 else ""
 HELM = os.environ.get("HELM") or "helm"
 BASE = [
@@ -111,7 +111,7 @@ def floor_value(chart: str, name: str) -> str | None:
 
 def with_floors(dst: str) -> str:
     chart = os.path.join(dst, "agent-platform")
-    shutil.copytree(META, chart)
+    shutil.copytree(META_ORIG, chart)
     path = os.path.join(chart, "templates", "_helpers.tpl")
     text = open(path, encoding="utf-8").read()
     for name, v in TEST_FLOORS.items():
@@ -147,7 +147,7 @@ for r in ["~3.2", "3.1.x", ">=3.1.0 <3.6.0", "3.x", V3]:
     else:
         refused(f"{r} below the floors", "admits a release below", "--set", f"agent-manager.agentChart.semver={r}")
 refused("a pre-release alone", "admits no release version", "--set", "agent-manager.agentChart.semver=3.0.0-rc.6")
-refused(">=3.0.0 spans majors as for migrate", "admits agent chart majors 3, 4, 5, 99", "--set", "agent-manager.agentChart.semver=>=3.0.0")
+refused(">=3.0.0 spans majors as for migrate", "admits agent chart majors 3, 4, 5, 6, 7, …", "--set", "agent-manager.agentChart.semver=>=3.0.0")
 refused("range spanning 2.x and 3.x", "admits agent chart majors 2, 3", "--set", "agent-manager.agentChart.semver=>=2.6.0")
 refused("3.x with agent-manager off: the operator still gets the range", "keep the 2.x line" if unset else "admits a release below",
         "--set", "components.agent-manager.enabled=false", "--set", f"agent-manager.agentChart.semver={V3}")
@@ -170,6 +170,8 @@ with tempfile.TemporaryDirectory() as tmp:
     refused("3.x line, default agent on 2.x", "select different agent chart majors", *LINE, *am, *muster)
     refused("2.x line, default agent on 3.x", "select different agent chart majors", *DEFAULT_AGENT)
 
+META = META_ORIG
+
 # The migrate run reads organization namespaces on the 3.x path (M3-S8-06):
 # list on namespaces always, cluster-wide reads of releases, sources and Agents
 # with organizations on, no write anywhere outside its own namespaces.
@@ -189,19 +191,46 @@ if CONN:
         found = [d for d in r.stdout.split("\n---\n") if "\nkind: ClusterRole\n" in "\n" + d and "-agent-manager-migrate-crds\n" in d]
         return found[0] if found else ""
 
-    off = migrate_cluster_rules()
-    on = migrate_cluster_rules("--set", "agentPlatformOrganizations.enabled=true")
-    if 'resources: ["namespaces"]\n    verbs: ["list"]' not in off or 'resources: ["namespaces"]\n    verbs: ["list"]' not in on:
-        fail("the migrate run may not list namespaces (it must see the organization namespaces on the 3.x path)")
-    if "helm.toolkit.fluxcd.io" in off:
-        fail("without organizations the migrate run needs no cluster-wide release read")
-    for want in ('resources: ["helmreleases"]\n    verbs: ["get", "list"]', 'resources: ["ocirepositories"]\n    verbs: ["get", "list"]', 'resources: ["agents"]\n    verbs: ["get", "list"]'):
-        if want not in on:
-            fail(f"with organizations the migrate run's ClusterRole lacks {want!r}")
-    for verb in ("create", "update", "patch", "delete"):
-        rules = on.split("Organization namespaces", 1)[-1]
+    v3 = ("--set", f"agent-manager.agentChart.semver={V3}")
+    ns_rule = 'resources: ["namespaces"]\n    verbs: ["list"]'
+    two = migrate_cluster_rules()
+    two_orgs = migrate_cluster_rules("--set", "agentPlatformOrganizations.enabled=true")
+    three = migrate_cluster_rules(*v3)
+    three_orgs = migrate_cluster_rules(*v3, "--set", "agentPlatformOrganizations.enabled=true")
+    for what, text in (("2.x line", two), ("2.x line with organizations", two_orgs)):
+        if ns_rule in text or "helm.toolkit.fluxcd.io" in text:
+            fail(f"{what}: the migrate run reads no organization namespace, so its identity gets no namespace list and no cluster-wide release read")
+    if ns_rule not in three or "helm.toolkit.fluxcd.io" in three:
+        fail("3.x line without organizations: the run lists namespaces (and finds none) and reads no release cluster-wide")
+    for want in ('resources: ["helmreleases"]\n    verbs: ["get", "list"]', 'resources: ["ocirepositories"]\n    verbs: ["get", "list"]', 'resources: ["agents"]\n    verbs: ["list"]', ns_rule):
+        if want not in three_orgs:
+            fail(f"3.x line with organizations: the migrate run's ClusterRole lacks {want!r}")
+    rules = three_orgs.split("cluster-wide list on their kagent.dev", 1)[-1].split('resources: ["namespaces"]', 1)[-1]
+    for verb in ("create", "update", "patch", "delete", "watch"):
         if f'"{verb}"' in rules:
             fail(f"the migrate run's organization reads carry {verb}")
+    if '"get", "list"]\n' in rules.split('resources: ["agents"]', 1)[-1][:40]:
+        fail("the run lists Agents in organization namespaces, it gets none")
+
+# A bound that admits a pre-release of the next major (M3-S8-R-05), and range
+# shapes that are no semver range.
+refused("<=3.0.0-rc.1 bound", "admits 3.0.0-0, a pre-release of the next agent chart major", "--set", "agent-manager.agentChart.semver=>=2.6.0 <=3.0.0-rc.1")
+refused("<3.0.0-rc.1 bound", "a pre-release of the next agent chart major", "--set", "agent-manager.agentChart.semver=>=2.6.0 <3.0.0-rc.1")
+refused("majors beyond 5", "admits agent chart majors 3, 6", "--set", "agent-manager.agentChart.semver=>=3.0.0 <4.0.0 || 6.x")
+refused("latest", "is not a semver range", "--set", "agent-manager.agentChart.semver=latest")
+refused("empty", "is not a semver range", "--set-string", "agent-manager.agentChart.semver=")
+renders("prerelease-widened 2.x line", "--set", "agent-manager.agentChart.semver=>=2.6.0-0 <3.0.0-0")
+
+# An || range is held to its lowest alternative's floor (M3-S8-R-08).
+with tempfile.TemporaryDirectory() as tmp:
+    META = with_floors(tmp)
+    am = [a.replace("{floor}", TEST_FLOORS["agentManager.agentChartV3Floor"]) for a in AM]
+    muster = [a.replace("{floor}", TEST_FLOORS["muster.agentApprovalFloor"]) for a in MUSTER]
+    for what, args in (("muster", ["--set", "components.muster.versionRange=>=5.68.0 <6.0.0 || >=5.0.0", *am]),
+                       ("muster, exact alternatives", ["--set", "components.muster.versionRange=5.68.0 || 5.66.2", *am]),
+                       ("agent-manager", ["--set", "components.agent-manager.versionRange=>=3.6.0 || >=3.5.0", *muster])):
+        refused(f"|| range of {what} below its floor", "admits a release below", *LINE, *DEFAULT_AGENT, *args)
+META = META_ORIG
 
 if failures:
     for f in failures:

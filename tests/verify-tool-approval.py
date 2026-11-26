@@ -711,8 +711,12 @@ def check_unset_floors_keep_everything_off() -> None:
         if block(muster, "      governance:"):
             fail("with the governance floor unset the muster release must carry no governance configuration")
         err = render_meta_fail(high + ["--set", "governance=governed"])
-        if "governed" not in err:
-            fail(f"with the governance floor unset `governed` must fail:\n{err}")
+        if "no muster release this chart knows reads the governance configuration yet" not in err or ">= " in err or "muster  or" in err:
+            fail(f"with the governance floor unset `governed` must fail naming why, with no empty floor:\n{err}")
+        for own in (["--set", "muster.muster.governance.mode=governed"], ["--set", "muster.muster.governance.servers.platformManager[0]=pm"]):
+            err = render_meta_fail(high + own)
+            if "muster.muster.governance is set" not in err:
+                fail(f"with the governance floor unset an own {own[1]} must fail (governed, governing nothing):\n{err}")
     if "muster.agentApprovalFloor" in unset and "enabled: true" in block(am, "      toolApproval:"):
         fail("with muster's agent approval floor unset agent-manager must bind no settings")
     if "muster.sessionBindingsPortFloor" in unset and block(muster, "        sessionBindings:"):

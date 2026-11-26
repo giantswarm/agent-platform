@@ -2189,20 +2189,20 @@ which keeps every 3.x line refused. One line, no comment inside the define.
 {{- define "agent-platform.agentManager.agentChartV3Floor" -}}{{- end -}}
 
 {{/*
-The release majors a range admits among 0-5 and 99, as a JSON list of
-strings, decided as agent-manager's migrate decides its target major
-(TargetMajor): every minor 0-199 probed with its first and a late patch, and a
-late minor, so x-ranges, carets, tildes and bounds all count. A range that
-admits only pre-releases admits no major. Release versions only, as Flux's
-semver admits them without a pre-release comparator.
+The release majors a range admits, as a JSON list of strings, decided as
+agent-manager's migrate decides its target major (TargetMajor): majors 0-99,
+each probed with its first and a very late version, majors 0-9 also with every
+minor 0-199 (first and late patch), so x-ranges, carets, tildes and bounds all
+count. A range that admits only pre-releases admits no major. Release versions
+only, as Flux's semver admits them without a pre-release comparator.
 Usage: include "agent-platform.agentChart.majors" "<range>" | fromJsonArray
 */}}
 {{- define "agent-platform.agentChart.majors" -}}
 {{- $range := toString . -}}
 {{- $out := list -}}
-{{- range $m := list 0 1 2 3 4 5 99 -}}
-{{- $hit := semverCompare $range (printf "%d.999999.999999" $m) -}}
-{{- if not $hit -}}
+{{- range $m := until 100 -}}
+{{- $hit := or (semverCompare $range (printf "%d.0.0" $m)) (semverCompare $range (printf "%d.999999.999999" $m)) -}}
+{{- if and (not $hit) (lt $m 10) -}}
 {{- range $n := until 200 -}}
 {{- if and (not $hit) (or (semverCompare $range (printf "%d.%d.0" $m $n)) (semverCompare $range (printf "%d.%d.999999" $m $n))) -}}{{- $hit = true -}}{{- end -}}
 {{- end -}}
@@ -2210,6 +2210,21 @@ Usage: include "agent-platform.agentChart.majors" "<range>" | fromJsonArray
 {{- if $hit -}}{{- $out = append $out (toString $m) -}}{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The first pre-release of the next major a range admits (e.g. 3.0.0-rc.1 under
+">=2.6.0 <=3.0.0-rc.1"), or empty: Flux would serve that chart under a range
+read as the lower major. Takes a dict: range, major (the one major found).
+*/}}
+{{- define "agent-platform.agentChart.nextMajorPreRelease" -}}
+{{- $next := add1 (atoi .major) -}}
+{{- $found := "" -}}
+{{- range $pre := list "0" "alpha.0" "rc.1" "rc.999" -}}
+{{- $v := printf "%d.0.0-%s" $next $pre -}}
+{{- if and (not $found) (semverCompare $.range $v) -}}{{- $found = $v -}}{{- end -}}
+{{- end -}}
+{{- $found -}}
 {{- end -}}
 
 {{/*
@@ -2231,14 +2246,22 @@ the key and the fix.
 {{- define "agent-platform.validateAgentChartLine" -}}
 {{- $am := index .Values "agent-manager" | default dict -}}
 {{- $range := dig "agentChart" "semver" "2.x" $am | toString -}}
+{{- if not (and (regexMatch "^[\\s0-9A-Za-z.<>=!~^*|,+-]+$" $range) (regexMatch "[0-9]" $range) (not (regexMatch "(^|[\\s|,<>=~^])[A-Za-uwyzA-WYZ]" $range))) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q is not a semver range: name the line as a range of one major (\">=2.6.0 <3.0.0\")" $range) -}}
+{{- end -}}
 {{- $majors := include "agent-platform.agentChart.majors" $range | fromJsonArray -}}
 {{- if not $majors -}}
 {{- fail (printf "agent-manager.agentChart.semver %q admits no release version of the agent chart: name the line as a range of one major (\">=2.6.0 <3.0.0\"; \">=3.0.0 <4.0.0\" once it may move), never a pre-release alone" $range) -}}
 {{- end -}}
 {{- if gt (len $majors) 1 -}}
-{{- fail (printf "agent-manager.agentChart.semver %q admits agent chart majors %s: agent-manager's migrate moves an installation's agents to exactly one major; bound the range below the next major (\">=3.0.0 <4.0.0\", or a 2.x range)" $range (join ", " $majors)) -}}
+{{- $shown := join ", " $majors -}}
+{{- if gt (len $majors) 5 -}}{{- $shown = printf "%s, …" (join ", " (slice $majors 0 5)) -}}{{- end -}}
+{{- fail (printf "agent-manager.agentChart.semver %q admits agent chart majors %s: agent-manager's migrate moves an installation's agents to exactly one major; bound the range below the next major (\">=3.0.0 <4.0.0\", or a 2.x range)" $range $shown) -}}
 {{- end -}}
 {{- $major := first $majors -}}
+{{- with include "agent-platform.agentChart.nextMajorPreRelease" (dict "range" $range "major" $major) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q admits %s, a pre-release of the next agent chart major: Flux would serve it under a range read as %s.x; bound it below %d.0.0-0" $range . $major (add1 (atoi $major))) -}}
+{{- end -}}
 {{- if not (has $major (list "2" "3")) -}}
 {{- fail (printf "agent-manager.agentChart.semver %q selects agent chart %s.x: this chart renders agents of the 2.x and 3.x lines only" $range $major) -}}
 {{- end -}}
@@ -2820,8 +2843,11 @@ source-controller uses).
 Usage: include "agent-platform.semverRangeFloor" "<range>"
 */}}
 {{- define "agent-platform.semverRangeFloor" -}}
+{{- $lowest := "" -}}
+{{- $open := false -}}
+{{- range $alt := splitList "||" (toString .) -}}
 {{- $floor := "" -}}
-{{- range splitList " " (. | replace "," " " | trim) -}}
+{{- range splitList " " ($alt | replace "," " " | trim) -}}
 {{- $term := trim . -}}
 {{- if and (not $floor) $term (not (hasPrefix "<" $term)) -}}
 {{- $v := $term | trimPrefix ">=" | trimPrefix ">" | trimPrefix "^" | trimPrefix "~" | trimPrefix "=" | trimPrefix "v" -}}
@@ -2830,7 +2856,13 @@ Usage: include "agent-platform.semverRangeFloor" "<range>"
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- $floor -}}
+{{- if not $floor -}}
+{{- $open = true -}}
+{{- else if or (not $lowest) (lt ((semver $floor).Compare (semver $lowest)) 0) -}}
+{{- $lowest = $floor -}}
+{{- end -}}
+{{- end -}}
+{{- if not $open -}}{{- $lowest -}}{{- end -}}
 {{- end -}}
 
 {{/*
@@ -5098,8 +5130,16 @@ Usage: include "agent-platform.muster.governance" $root | fromJson
 {{- end -}}
 {{- end -}}
 {{- $out = dict "mode" $mode "governedServers" $servers -}}
-{{- else if ne $mode "trusted" -}}
+{{- else -}}
+{{- if dig "muster" "governance" nil (.Values.muster | default dict) -}}
+{{- fail "muster.muster.governance is set, but this chart renders muster's governance configuration only from the muster release that reads it (agent-platform.muster.governanceFloor), and none is pinned: a mode passed to muster directly would claim a governed platform that governs nothing. Remove muster.muster.governance; the platform's mode is the top-level governance value" -}}
+{{- end -}}
+{{- if ne $mode "trusted" -}}
+{{- if not $floor -}}
+{{- fail (printf "governance %s: no muster release this chart knows reads the governance configuration yet (agent-platform.muster.governanceFloor is unset until one is released and pinned), so nothing would ask agents; keep governance trusted" $mode) -}}
+{{- end -}}
 {{- fail (printf "governance %s needs muster %s or later (the first release that reads the governance configuration), but components.muster.versionRange %q allows earlier releases: below it nothing would ask agents. Move components.muster.versionRange to >=%s, or keep governance trusted" $mode $floor (dig "muster" "versionRange" "" .Values.components) $floor) -}}
+{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
 {{- end -}}

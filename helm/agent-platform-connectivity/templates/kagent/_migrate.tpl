@@ -127,3 +127,20 @@ fi
 kubectl -n {{ .namespace }} create job {{ .job }} --from=cronjob/{{ .cronJob }}
 echo "{{ .job }} started; its outcome: kubectl -n {{ .namespace }} get job {{ .job }}, the ConfigMap agent-manager-migrate-report"
 {{- end -}}
+
+{{/*
+Truthy when agent-manager.agentChart.semver (as the migrate run takes it) is a
+3.x line: the run then takes the 2.x -> 3.x path and reads the organization
+namespaces (migrate-rbac.yaml). Probes 3.x as agent-manager's migrate does.
+*/}}
+{{- define "agent-platform.kagent.migration.v3Line" -}}
+{{- $am := include "agent-platform.agentManager.chartValues" . | fromJson -}}
+{{- $range := dig "agentChart" "semver" "2.x" $am | toString -}}
+{{- if and (regexMatch "[0-9]" $range) (not (regexMatch "(^|[\\s|,<>=~^])[A-Za-uwyzA-WYZ]" $range)) -}}
+{{- $hit := or (semverCompare $range "3.0.0") (semverCompare $range "3.999999.999999") -}}
+{{- range $n := until 200 -}}
+{{- if and (not $hit) (or (semverCompare $range (printf "3.%d.0" $n)) (semverCompare $range (printf "3.%d.999999" $n))) -}}{{- $hit = true -}}{{- end -}}
+{{- end -}}
+{{- if $hit -}}true{{- end -}}
+{{- end -}}
+{{- end -}}

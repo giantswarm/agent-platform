@@ -17,7 +17,16 @@ ClusterRoleBinding to this ServiceAccount, holds exactly that: get and delete
 on customresourcedefinitions confined by resourceNames to those nine CRDs, and
 a cluster-wide list on their kagent.dev resources, which proves a CRD empty
 before it goes. verify-flux-identity asserts these rights and no other
-cluster-scoped binding of the identity.
+cluster-scoped binding of the identity on the 2.x line.
+
+Only while agent-manager.agentChart.semver is a 3.x line (the 2.x -> 3.x path,
+giantswarm/giantswarm#38902 slice 8) the same ClusterRole also lets the run
+list namespaces (it finds the organization namespaces by label and fails when
+it may not) and, with agentPlatformOrganizations.enabled, list and get the
+HelmReleases and OCIRepositories and list the Agents it reads there, never
+writing them (agent-platform.kagent.migration.v3Line). The operator mirrors no
+binding of this identity into organization namespaces, so the reads are
+cluster-wide; they exist only for the cut-over run.
 
 Per namespace in agentManager.migration.gitopsNamespaces (the fleet:
 flux-giantswarm, where the GitOps-owned agents' HelmReleases and
@@ -111,6 +120,7 @@ rules:
   # organization's and fails when it may not; it reads their releases, chart
   # sources and Agents, never writes them, and reports what needs changing
   # before the agent-platform-operator moves their sources.
+  {{- if include "agent-platform.kagent.migration.v3Line" . }}
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["list"]
@@ -123,7 +133,8 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: ["api.kagent.dev"]
     resources: ["agents"]
-    verbs: ["get", "list"]
+    verbs: ["list"]
+  {{- end }}
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
