@@ -556,6 +556,27 @@ def check_binder() -> None:
     print("ok: muster-approval-binder is bound by the muster chart to agent-manager's ServiceAccount only (name and namespace following agent-manager), an own list stands, an unnamed external ServiceAccount fails, none with agent-manager off or below the floor, none in the connectivity chart")
 
 
+def check_agent_manager_tool_approval() -> None:
+    def release(args: list[str]) -> str:
+        hr = doc(render_meta(["--set", "components.agent-manager.enabled=true", *args]), "HelmRelease", "agent-manager")
+        if hr is None:
+            fail(f"no agent-manager HelmRelease with {args}")
+        return block(hr, "      toolApproval:")
+
+    am = "components.agent-manager.versionRange=>=3.6.0 <4.0.0-0"
+    if release(["--set", am]).split() != ["toolApproval:", "enabled:", "false"]:
+        fail(f"below muster's agent approval floor agent-manager must bind no settings (toolApproval.enabled false):\n{release(['--set', am])}")
+    on = release(["--set", am, "--set", "components.muster.versionRange=>=5.66.0 <6.0.0-0"])
+    if on.split() != ["toolApproval:", "enabled:", "true"]:
+        fail(f"from both floors agent-manager must bind approval settings:\n{on}")
+    if release([]):
+        fail("below agent-manager's tool approval floor its chart takes no muster.toolApproval")
+    own = release(["--set", am, "--set", "components.muster.versionRange=>=5.66.0 <6.0.0-0", "--set", "agent-manager.muster.toolApproval.enabled=false"])
+    if "true" in own:
+        fail(f"an own agent-manager.muster.toolApproval.enabled must stand:\n{own}")
+    print("ok: agent-manager's muster.toolApproval.enabled is on from its floor and muster's, off below muster's, absent below its own, an own value stands")
+
+
 def approval_of(out: str, name: str) -> str:
     cr = doc(out, "MCPServer", name)
     if cr is None:
@@ -616,4 +637,5 @@ if __name__ == "__main__":
     check_approval_config()
     check_connector_admin()
     check_binder()
+    check_agent_manager_tool_approval()
     check_approval()

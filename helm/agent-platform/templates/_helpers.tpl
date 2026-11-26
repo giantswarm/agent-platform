@@ -526,6 +526,19 @@ takes the key (agent-platform.agentManager.toolchainsFloor). */ -}}
 {{- $_ := set $musterValues "toolchainsToolsPrefix" $prefix -}}
 {{- end -}}
 {{- end -}}
+{{- /* Tool approval per agent (giantswarm/giantswarm#38902, slice 3):
+agent-manager binds an agent's approval settings with every Session and
+refuses settings while it does not. On while muster takes them, from the
+floors agent-platform.muster.agentApprovalFloor and
+agent-platform.agentManager.toolApprovalFloor (below the agent-manager floor
+its chart has no such key); an own value stands. */ -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "agent-manager" "version" (include "agent-platform.agentManager.toolApprovalFloor" .root)) -}}
+{{- $ownTa := dig "muster" "toolApproval" "enabled" nil (index .root.Values "agent-manager" | default dict) -}}
+{{- if kindIs "invalid" $ownTa -}}
+{{- $musterTakes := and (include "agent-platform.componentEnabled" (dict "root" .root "name" "muster")) (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "muster" "version" (include "agent-platform.muster.agentApprovalFloor" .root))) -}}
+{{- $_ := set $musterValues "toolApproval" (dict "enabled" (ternary true false (not (empty $musterTakes)))) -}}
+{{- end -}}
+{{- end -}}
 {{- $_ := set $derived "muster" $musterValues -}}
 {{- /* The installation's toolchains, while the toolchain-manager is on:
 toolchains.repository the first source's registry (an own value stands), and
@@ -2102,6 +2115,15 @@ earlier muster refuses such a binding, so a Session would not start. One line
 each, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.toolsetBindingFloor" -}}2.9.0{{- end -}}
+
+{{/*
+The floors of tool approval per agent (slice 3): the first agent-manager
+whose chart takes muster.toolApproval, and the first muster that takes an
+agent's approval settings with a Session binding. Placeholders until those
+releases exist. One line each, no comment inside the define.
+*/}}
+{{- define "agent-platform.agentManager.toolApprovalFloor" -}}3.6.0{{- end -}}
+{{- define "agent-platform.muster.agentApprovalFloor" -}}5.66.0{{- end -}}
 {{- define "agent-platform.muster.toolsetBindingFloor" -}}5.49.0{{- end -}}
 
 {{/*

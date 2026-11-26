@@ -145,9 +145,13 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   saving). `set_agent_approval` takes `settings` (`{"<entry>": "Allow"|"Ask"|"Block"|""}` for
   entries already in `tools`) and `default`; `create_agent` and `update_agent_access` refuse an
   `Allow` over a connector's `Ask` and any `default: Allow`. `get_agent` and `list_agents` return
-  `tools`, `defaultApproval` and `grants` (with `grantedBy`); `filter_tools` with `agentTools`
-  shows how a list resolves before you save it. Until then `update_agent` still takes `toolset`, skills, plugins and egress. A governed
-  platform's asks cannot be lifted per agent. `muster.requireApproval: true` keeps asking before
+  the list as `toolSettings` (their `tools` stays the kagent MCP bindings), with `defaultApproval`,
+  `grants` (with `grantedBy`) and `approvalSettings` (false: this installation does not bind
+  settings and refuses them); `x_agent-manager_list_approval_grants` lists a namespace's grants, per
+  connector with `server`; `filter_tools` with `agentTools` shows how a list resolves before you
+  save it. A save's `sessionsUpdated: false` and `warnings` mean running sessions still carry a
+  dropped exception until agent-manager tells muster again: say so. A governed platform's asks
+  cannot be lifted per agent. `muster.requireApproval: true` keeps asking before
   every call until agent chart 3.0 moves it to `default: Ask`; never set it together with tool
   settings.
 - **An organization's connectors**: a kagent `RemoteMCPServer` in the organization namespace
@@ -155,7 +159,8 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   reaches it. From agent-manager 3.3.0 (`connectors` in `x_agent-manager_create_agent`'s schema;
   without it the agent takes none), pass the names of the connectors that
   `x_agent-manager_list_organization_connectors` gives as `connectors` to `create_agent`,
-  `validate_agent` or `update_agent`: each name alone, once. On update the list replaces the
+  `validate_agent` or `update_agent_access` (`update_agent` before agent-manager split its update
+  tools): each name alone, once. On update the list replaces the
   agent's connectors, `[]` removes them, and an absent argument keeps them; `get_agent` and
   `list_agents` return them. The agent calls the connector itself with the connector's credential;
   its host needs no `EgressPolicy`. Choose only a usable one (`agent-platform-tools`). Refused: a
@@ -163,7 +168,7 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   workload cluster, and an agent's binding to Muster: the `RemoteMCPServer` that one HelmRelease
   renders with an agent of its name, which the list marks `musterBindingOf` from agent-manager
   3.3.4 (how to tell it without the field: `agent-platform-tools`). From agent-manager 3.3.4,
-  `update_agent` and `validate_agent` refuse `connectors`, `[]` too, on an agent whose HelmRelease
+  the update tool and `validate_agent` refuse `connectors`, `[]` too, on an agent whose HelmRelease
   has `spec.valuesFrom` (the message names it): tell the person that this agent's connectors are
   set where its `valuesFrom` values are managed, not through the tool.
 - **Toolchains and workspace**: `defaultToolchains` and `defaultWorkspace`, the smallest set the job
