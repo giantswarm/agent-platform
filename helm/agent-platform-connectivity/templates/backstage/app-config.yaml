@@ -8,6 +8,21 @@ route hostname. */}}
 {{- $issuer := include "agent-platform.issuerUrl" (dict "ctx" . "for" "the Backstage login provider") }}
 {{- $installation := include "agent-platform.backstage.installationName" . }}
 {{- $provider := "oidc-agent-platform" }}
+{{- /* The portal's own OAuth client (backstage.oidcClientId), else the
+platform's shared one. A dedicated client reads its secret from its own env
+var (the meta chart's backstage values mount portal-dex-client-secret) and
+also requests the platform client's audience, so every component that trusts
+that audience accepts the portal's tokens as before. */}}
+{{- $platformClient := toString (.Values.global.identity.clientId | default "") }}
+{{- $portalClient := toString ($backstage.oidcClientId | default "") }}
+{{- $dedicated := and $portalClient (ne $portalClient $platformClient) }}
+{{- $extraScopes := $backstage.extraScopes | default list }}
+{{- if and $dedicated $platformClient $extraScopes }}
+{{- $platformScope := printf "audience:server:client_id:%s" $platformClient }}
+{{- if not (has $platformScope $extraScopes) }}
+{{- $extraScopes = append $extraScopes $platformScope }}
+{{- end }}
+{{- end }}
 {{- $musterHostname := "" }}
 {{- if .Values.ingress.hostnames }}
 {{- $musterHostname = index .Values.ingress.hostnames 0 }}
@@ -103,8 +118,13 @@ data:
         {{ $provider }}:
           production:
             metadataUrl: {{ $issuer }}/.well-known/openid-configuration
+            {{- if $dedicated }}
+            clientId: {{ $portalClient }}
+            clientSecret: ${AGENT_PLATFORM_PORTAL_OIDC_CLIENT_SECRET}
+            {{- else }}
             clientId: {{ .Values.global.identity.clientId }}
             clientSecret: ${AGENT_PLATFORM_OIDC_CLIENT_SECRET}
+            {{- end }}
             {{- /* Unset, the Backstage oidc authenticator sends prompt=none
             on every authorize request. Dex ignores it, but a spec-strict
             IdP (Google) answers a fresh login with error=interaction_required
@@ -124,7 +144,7 @@ data:
             {{- end }}
     gs:
       authProvider: {{ $provider }}
-      {{- with $backstage.extraScopes }}
+      {{- with $extraScopes }}
       auth:
         extraScopes:
           {{- toYaml . | nindent 10 }}

@@ -2176,6 +2176,9 @@ inside the define.
 (muster.credentialProvider.sessionBindings); UNSET until it
 exists. */ -}}
 {{- define "agent-platform.muster.sessionBindingsPortFloor" -}}{{- end -}}
+{{- /* The first muster issuing sign-in handoff tickets to the clients of
+approval.handoffClients (POST /handoff-tickets); UNSET until it exists. */ -}}
+{{- define "agent-platform.muster.handoffFloor" -}}{{- end -}}
 
 {{/*
 The session bindings API muster serves agent-manager alone:
@@ -2228,7 +2231,7 @@ nothing here would enforce it, so it fails too. Emits nothing.
 */}}
 {{- define "agent-platform.validateReleaseFloors" -}}
 {{- if not (include "agent-platform.muster.governanceFloor" .) -}}
-{{- range $name := list "agentManager.toolApprovalFloor" "muster.agentApprovalFloor" "muster.sessionBindingsPortFloor" "agentManager.agentChartV3Floor" -}}
+{{- range $name := list "agentManager.toolApprovalFloor" "muster.agentApprovalFloor" "muster.sessionBindingsPortFloor" "agentManager.agentChartV3Floor" "muster.handoffFloor" -}}
 {{- if include (printf "agent-platform.%s" $name) $ -}}
 {{- fail (printf "agent-platform.%s is set while agent-platform.muster.governanceFloor is unset: the muster approval binder, approval block and redirect allowlist render only from the governance floor, so agent-manager would bind settings that muster refuses from it and no Session would start; set agent-platform.muster.governanceFloor in the same release" $name) -}}
 {{- end -}}
@@ -5289,8 +5292,16 @@ muster's approval configuration (muster.approval, rendered as `approval` into
 config.yaml): installation, the name the approval page shows, from
 backstage.installationName (the name the portal shows for this platform,
 default agent-platform) unless muster.muster.approval.installation names its
-own; any other own key (ttl) is kept. Only from the muster floor
-agent-platform.muster.governanceFloor; {} below it.
+own; any other own key (ttl) is kept. handoffClients, the OAuth clients
+whose bearers may ask muster for a one-time sign-in handoff ticket (the
+portal opens muster's approval page and connector sign-in signed in): the
+portal's own client (agent-platform.backstage.oidcClient) while the portal is
+on with a dedicated client, backstage.signInHandoff is on and muster is at
+least agent-platform.muster.handoffFloor; an own list stands. A list naming
+the platform's shared client (global.identity.clientId, else muster's login
+client) fails the render: every holder of such a token (muster, an agent's
+delegation, a CLI) could then skip the page's own sign-in. Only from the muster
+floor agent-platform.muster.governanceFloor; {} below it.
 Usage: include "agent-platform.muster.approval" $root | fromJson
 */}}
 {{- define "agent-platform.muster.approval" -}}
@@ -5298,8 +5309,31 @@ Usage: include "agent-platform.muster.approval" $root | fromJson
 {{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.governanceFloor" .)) -}}
 {{- $own := dig "muster" "approval" dict (.Values.muster | default dict) | default dict -}}
 {{- $out = mergeOverwrite (dict "installation" (include "agent-platform.portalInstallationName" .)) $own -}}
+{{- $portal := include "agent-platform.backstage.oidcClient" . | fromJson -}}
+{{- if and (not (hasKey $own "handoffClients")) $portal.dedicated (dig "signInHandoff" true (.Values.backstage | default dict)) (include "agent-platform.componentEnabled" (dict "root" . "name" "backstage")) (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.handoffFloor" .))) -}}
+{{- $_ := set $out "handoffClients" (list $portal.clientId) -}}
+{{- end -}}
+{{- if and $portal.platformClientId (has $portal.platformClientId (get $out "handoffClients" | default list)) -}}
+{{- fail (printf "muster.muster.approval.handoffClients lists %q, the platform's shared OAuth client: every holder of a token of that client (muster itself, agents acting for a person, CLIs) could open a person's approval page without its sign-in; list only the portal's own client (backstage.oidcClientId)" $portal.platformClientId) -}}
+{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The OAuth client the portal signs people in with: backstage.oidcClientId, else
+the platform's shared client (global.identity.clientId). dedicated is true when
+the portal's client is set and differs from the platform's client (global
+.identity.clientId, else muster's login client); only a dedicated client may
+be trusted for sign-in handoff (agent-platform.muster.approval). Emits JSON
+{clientId, platformClientId, dedicated}.
+Usage: include "agent-platform.backstage.oidcClient" $root | fromJson
+*/}}
+{{- define "agent-platform.backstage.oidcClient" -}}
+{{- $login := include "agent-platform.identity.musterLogin" .Values | fromJson -}}
+{{- $platform := toString (dig "identity" "clientId" "" (.Values.global | default dict) | default ($login.clientID | default "")) -}}
+{{- $own := toString (dig "oidcClientId" "" (.Values.backstage | default dict) | default "") -}}
+{{- dict "clientId" ($own | default $platform) "platformClientId" $platform "dedicated" (and (ne $own "") (ne $own $platform)) | toJson -}}
 {{- end -}}
 
 {{/*

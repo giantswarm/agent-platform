@@ -1944,6 +1944,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | backstage.installationName | string | `"agent-platform"` |  |
 | backstage.extraScopes[0] | string | `"federated:id"` |  |
 | backstage.extraScopes[1] | string | `"audience:server:client_id:dex-k8s-authenticator"` |  |
+| backstage.oidcClientId | string | `""` |  |
 | backstage.startUrlSearchParams | object | `{}` |  |
 | backstage.enabledExtensions | list | `[]` |  |
 | backstage.disabledExtensions[0] | string | `"page:gs/clusters"` |  |

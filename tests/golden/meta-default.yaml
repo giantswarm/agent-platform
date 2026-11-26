@@ -539,6 +539,12 @@ spec:
             secretKeyRef:
               key: dex-client-secret
               name: '{{ .Values.global.identity.existingSecret }}'
+        - name: AGENT_PLATFORM_PORTAL_OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: portal-dex-client-secret
+              name: '{{ .Values.global.identity.existingSecret }}'
+              optional: true
         - name: NODE_EXTRA_CA_CERTS
           value: '{{ with (dig "identity" "ca" "secretName" "" .Values.global) }}/etc/agent-platform/idp-ca/{{
             dig "identity" "ca" "key" "ca.crt" $.Values.global }}{{ end }}'
@@ -585,10 +591,12 @@ spec:
           endpoint: http://otlp-gateway.kube-system.svc:4317
           headers: X-Scope-OrgID=giantswarm
           protocol: grpc
+      oidcClientId: ""
       parentRefs: []
       resources:
         verticalPodAutoscaler:
           enabled: false
+      signInHandoff: true
       skillsRepositories:
       - https://github.com/giantswarm/agent-skills
       startUrlSearchParams: {}

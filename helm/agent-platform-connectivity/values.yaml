@@ -3591,6 +3591,16 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   extraScopes:
     - federated:id
     - audience:server:client_id:dex-k8s-authenticator
+  # The portal's own OAuth client. Empty (the default) signs in with
+  # global.identity.clientId and the env AGENT_PLATFORM_OIDC_CLIENT_SECRET.
+  # Set and different from it, the login provider takes this client id and
+  # the env AGENT_PLATFORM_PORTAL_OIDC_CLIENT_SECRET (the meta chart mounts
+  # the key portal-dex-client-secret of global.identity.existingSecret), and
+  # audience:server:client_id:<global.identity.clientId> is added to the
+  # extraScopes (unless they are empty), so the portal's tokens keep the
+  # platform client's audience. The meta chart's values.yaml says what the
+  # identity provider needs for it (backstage.oidcClientId there).
+  oidcClientId: ""
   # Extra query parameters on the login provider's authorize request (the
   # oidc authenticator's startUrlSearchParams). Dex needs none. Google models
   # offline access as authorize parameters, not as the offline_access scope

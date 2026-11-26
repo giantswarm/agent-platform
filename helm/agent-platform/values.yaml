@@ -1533,6 +1533,8 @@ components:  # @schema additionalProperties: true
       - skillPullRequests
       - metaAgents
       - configReload
+      - oidcClientId
+      - signInHandoff
     enabled: false
     # Renders a CNPG Cluster for its database when backstage.database.engine is
     # postgresql (the chart's default is sqlite); dropped at render time while
@@ -5867,7 +5869,8 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # that reads it (agent-platform.muster.governanceFloor); below it `governed`
 # fails the render and trusted renders nothing. From that release the meta
 # chart also renders muster.approval.installation (backstage.installationName,
-# the name the approval page shows), muster-approval-binder's subject
+# the name the approval page shows; and handoffClients, the portal's own
+# client, with backstage.oidcClientId and backstage.signInHandoff), muster-approval-binder's subject
 # (agent-manager's ServiceAccount, muster.rbac.approvalBinder.subjects) and
 # the pages muster may return the browser to after an approval in
 # muster.oauth.mcpClient.postLoginRedirectAllowlist (the portal's /sessions
@@ -6939,6 +6942,32 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   extraScopes:
     - federated:id
     - audience:server:client_id:dex-k8s-authenticator
+  # The portal's own OAuth client at the identity provider. Empty (the default)
+  # signs people in with the platform's shared client (global.identity
+  # .clientId), as before. Set, the portal signs in with this client: its
+  # secret is the key portal-dex-client-secret of global.identity
+  # .existingSecret, the provider registers only the portal's redirect URI
+  # (https://<portal>/api/auth/oidc-agent-platform/handler/frame) for it, and
+  # the portal also requests the platform client's audience
+  # (audience:server:client_id:<global.identity.clientId>, added to
+  # extraScopes unless they are empty), so muster, the managers and the API
+  # server accept its tokens as before. On Dex, the platform client and every
+  # client whose audience extraScopes request (dex-k8s-authenticator) list
+  # this client under trustedPeers. muster and the managers key a person's
+  # sessions by the token's client too, so a person's connector sign-ins of
+  # the shared client are not the portal's (subject-scoped ones are).
+  oidcClientId: ""
+  # Sign-in handoff: with a dedicated oidcClientId, muster gives the portal's
+  # backend a one-time ticket (muster.approval.handoffClients) when a person
+  # clicks Open on an approval or connector sign-in prompt in chat, and the
+  # page opens signed in instead of asking the person to sign in to muster
+  # again. The trade-off: whoever holds a portal token of a person (only the
+  # portal backend, by design) can open that person's approval page without
+  # a browser sign-in; deciding still takes the click on muster's page, with
+  # its anti-forgery and origin checks. false keeps muster's own sign-in on
+  # every page. Without a dedicated client nothing is listed: the shared
+  # client is held by muster, agents and CLIs as well.
+  signInHandoff: true
   # Extra query parameters on the login provider's authorize request. Dex needs
   # none; Google needs access_type: offline and prompt: consent for a refresh
   # token.
@@ -7006,6 +7035,14 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
           secretKeyRef:
             name: "{{ .Values.global.identity.existingSecret }}"
             key: dex-client-secret
+      # The portal's own client secret, read while backstage.oidcClientId
+      # names a dedicated client (optional: absent otherwise).
+      - name: AGENT_PLATFORM_PORTAL_OIDC_CLIENT_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: "{{ .Values.global.identity.existingSecret }}"
+            key: portal-dex-client-secret
+            optional: true
       - name: NODE_EXTRA_CA_CERTS
         value: "{{ with (dig \"identity\" \"ca\" \"secretName\" \"\" .Values.global) }}/etc/agent-platform/idp-ca/{{ dig \"identity\" \"ca\" \"key\" \"ca.crt\" $.Values.global }}{{ end }}"
     extraVolumes:

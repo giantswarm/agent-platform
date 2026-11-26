@@ -27,6 +27,13 @@
   <obo.callbackBaseUrl>/auth/slack/return with its port while klaus-gateway is
   on and names it; invalid ports and URLs fail; own entries stay, first, once
   each; none below the floor.
+- sign-in handoff: muster.approval.handoffClients is the portal's own client
+  (backstage.oidcClientId, when it differs from the platform's shared client)
+  while the portal is on, backstage.signInHandoff is on and muster is at least
+  agent-platform.muster.handoffFloor; an own list stands; a list naming the
+  shared client fails; the backstage release mounts portal-dex-client-secret
+  and the connectivity app-config signs in with that client, requesting the
+  platform client's audience.
 - governance floor: agent-platform.muster.governanceFloor is one X.Y.Z; its
   PLACEHOLDER-GOVERNANCE-FLOOR marker, while it is still there, appears once.
 - connector-admin: muster's mcpserver-editor Role (the platform's
@@ -729,7 +736,8 @@ def check_approval() -> None:
 # chart while the chart keeps them unset until their releases exist
 #.
 TEST_FLOORS = {"muster.governanceFloor": "5.65.0", "muster.agentApprovalFloor": "5.66.0",
-               "agentManager.toolApprovalFloor": "3.6.0", "muster.sessionBindingsPortFloor": "5.66.0"}
+               "agentManager.toolApprovalFloor": "3.6.0", "muster.sessionBindingsPortFloor": "5.66.0",
+               "muster.handoffFloor": "5.68.0"}
 
 
 def with_test_floors(meta_dir: str, dst: str) -> str:
@@ -765,7 +773,7 @@ def check_floor_dependencies() -> None:
     """The floors that need the governance wiring fail the render while the
     governance floor is unset, whichever of them is set; governed mode and role
     floors fail with muster off."""
-    dependent = ["agentManager.toolApprovalFloor", "muster.agentApprovalFloor", "muster.sessionBindingsPortFloor", "agentManager.agentChartV3Floor"]
+    dependent = ["agentManager.toolApprovalFloor", "muster.agentApprovalFloor", "muster.sessionBindingsPortFloor", "agentManager.agentChartV3Floor", "muster.handoffFloor"]
     values = {**TEST_FLOORS, "agentManager.agentChartV3Floor": "3.6.0"}
     with tempfile.TemporaryDirectory(prefix="verify-floor-deps-") as tmp:
         for i, name in enumerate(dependent):
@@ -822,6 +830,10 @@ def check_unset_floors_keep_everything_off() -> None:
         fail("with muster's agent approval floor unset agent-manager must bind no settings")
     if "muster.sessionBindingsPortFloor" in unset and block(muster, "        sessionBindings:"):
         fail("with the session bindings floor unset muster must keep its earlier bindings wiring")
+    if "muster.handoffFloor" in unset:
+        portal = render_meta(high + PORTAL_CLIENT + ["--set", "backstage.oidcClientId=platform-portal"])
+        if "handoffClients" in (doc(portal, "HelmRelease", "muster") or ""):
+            fail("with the handoff floor unset muster must list no sign-in handoff client")
     print(f"ok: unset floors ({', '.join(unset)}) keep what they gate off for any muster and agent-manager range; `governed` fails")
 
 
@@ -915,6 +927,84 @@ def check_default_agent_on_remote_target() -> None:
     print("ok: with a remote target agent-manager gets the default agent's approval values (muster.toolApproval.platformAgents: kagent/default-agent, release <Flux namespace>/<target>-default-agent, the release's toolset) instead of platformReleases; none without the default agent")
 
 
+# The portal on with the platform's identity (client `platform`).
+PORTAL_CLIENT = [
+    "--set", "global.domain=ci.example.com",
+    "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+    "--set", "global.identity.clientId=platform",
+    "--set", "global.identity.existingSecret=platform-oauth",
+    "--set", "components.backstage.enabled=true",
+]
+
+
+def check_handoff_clients() -> None:
+    """muster.approval.handoffClients lists the portal's own client
+    (backstage.oidcClientId) while it differs from the platform's shared
+    client, the portal is on, backstage.signInHandoff is on and muster is at
+    least agent-platform.muster.handoffFloor; an own list stands; a list
+    naming the shared client fails the render."""
+    handoff = f"components.muster.versionRange=>={TEST_FLOORS['muster.handoffFloor']} <6.0.0-0"
+    header = "        handoffClients:"
+
+    def clients(args: list[str], floor: str = handoff) -> list[str]:
+        got = block(muster_release(["--set", floor, *PORTAL_CLIENT, *args]), header)
+        return [l.strip() for l in got.split("\n")[1:] if l.strip()]
+
+    dedicated = ["--set", "backstage.oidcClientId=platform-portal"]
+    if clients(dedicated) != ["- platform-portal"]:
+        fail(f"a dedicated portal client must be muster's one handoff client, got {clients(dedicated)}")
+    for args, why in (
+        ([], "the portal on the shared client"),
+        (["--set", "backstage.oidcClientId=platform"], "backstage.oidcClientId equal to the shared client"),
+        (dedicated + ["--set", "backstage.signInHandoff=false"], "backstage.signInHandoff false"),
+        (dedicated + ["--set", "components.backstage.enabled=false"], "the portal off"),
+    ):
+        if clients(args):
+            fail(f"{why}: no handoff client expected, got {clients(args)}")
+    if clients(dedicated, FLOOR_RANGE):
+        fail("below the handoff floor muster must list no handoff client")
+    own = clients(dedicated + ["--set", "muster.muster.approval.handoffClients[0]=other-portal"])
+    if own != ["- other-portal"]:
+        fail(f"an own handoffClients list must stand, got {own}")
+    if clients(dedicated + ["--set-json", "muster.muster.approval.handoffClients=[]"]):
+        fail("an own empty handoffClients list must stand (no tickets)")
+    err = render(META_DIR, META + ["--set", handoff, *PORTAL_CLIENT, "--set", "muster.muster.approval.handoffClients[0]=platform"], expect_fail=True)
+    if 'handoffClients lists "platform", the platform\'s shared OAuth client' not in err:
+        fail(f"a handoff list naming the shared client must fail the render:\n{err}")
+    rel = doc(render_meta(["--set", handoff, *PORTAL_CLIENT, *dedicated]), "HelmRelease", "backstage") or ""
+    if "key: portal-dex-client-secret" not in rel or "optional: true" not in rel:
+        fail("the backstage release must mount the portal's own client secret (portal-dex-client-secret, optional)")
+    print("ok: muster.approval.handoffClients is the portal's dedicated client from the handoff floor (none on the shared client, with signInHandoff false, the portal off or below the floor), an own list stands, the shared client fails")
+
+
+def check_portal_client_app_config() -> None:
+    """The connectivity chart's app-config signs the portal in with
+    backstage.oidcClientId and its own secret env, and requests the platform
+    client's audience on top of extraScopes; the shared client renders as
+    before."""
+    base = CONN + ["--set", "components.backstage.enabled=true", "--set", "backstage.parentRefs[0].name=x"]
+
+    def cfg(args: list[str]) -> str:
+        out = render(CONN_DIR, base + args)
+        cm = doc(out, "ConfigMap", "agent-platform-backstage-app-config")
+        if cm is None:
+            fail(f"no backstage app-config with {args}")
+        return cm
+
+    shared = cfg([])
+    if "clientId: platform\n" not in shared or "${AGENT_PLATFORM_OIDC_CLIENT_SECRET}" not in shared or "audience:server:client_id:platform\n" in shared:
+        fail(f"the shared client must render as before:\n{shared}")
+    own = cfg(["--set", "backstage.oidcClientId=platform-portal"])
+    if "clientId: platform-portal\n" not in own or "${AGENT_PLATFORM_PORTAL_OIDC_CLIENT_SECRET}" not in own:
+        fail(f"a dedicated client must sign in with its id and its own secret env:\n{own}")
+    if "- audience:server:client_id:platform\n" not in own or "- audience:server:client_id:dex-k8s-authenticator\n" not in own:
+        fail(f"a dedicated client must request the platform client's audience on top of extraScopes:\n{own}")
+    bare = cfg(["--set", "backstage.oidcClientId=platform-portal", "--set-json", "backstage.extraScopes=[]"])
+    if "audience:server:client_id:" in bare:
+        fail(f"empty extraScopes (a provider without Dex's cross-client scopes) must stay empty:\n{bare}")
+    print("ok: the portal signs in with backstage.oidcClientId and AGENT_PLATFORM_PORTAL_OIDC_CLIENT_SECRET, requesting the platform client's audience; the shared client renders as before")
+
+
 def render_meta_fail(args: list[str]) -> str:
     return render(META_DIR, META + args, expect_fail=True)
 
@@ -932,6 +1022,8 @@ if __name__ == "__main__":
     check_write_like()
     check_coverage()
     check_approval_config()
+    check_handoff_clients()
+    check_portal_client_app_config()
     check_connector_admin()
     check_binder()
     check_agent_manager_tool_approval()
