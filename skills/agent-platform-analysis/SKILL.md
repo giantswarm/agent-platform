@@ -23,8 +23,11 @@ portal's **Usage** page (`agent-platform-portal`): point there instead of rebuil
   selector; in the queries below, `c` stands for it.
 - Metric names and labels change with releases: confirm them first with
   `x_prometheus_list_label_values` (`label: "__name__"`, `matches: ["{__name__=~\"muster_.*\"}"]`).
-- Output is capped: aggregate (`sum by`, `topk`) instead of listing raw series. When a long instant
-  `increase(…[30d])` fails, use `x_prometheus_execute_range_query` with a `1d` step and sum the steps.
+- The backend behind the Prometheus API is usually Mimir. Its query frontend splits range queries,
+  but an instant query over a long window (`increase(…[30d])`) is one long read that fails when the
+  store degrades: then use `x_prometheus_execute_range_query` with a `1d` step and sum the steps.
+  `org_id` picks the Mimir tenant when the default one lacks a series.
+- Output is capped: aggregate (`sum by`, `topk`) instead of listing raw series.
 
 ## The signals
 
