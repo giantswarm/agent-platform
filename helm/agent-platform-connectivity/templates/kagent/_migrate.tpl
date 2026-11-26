@@ -169,12 +169,17 @@ is, for the dry run before the line moves.
 
 {{/*
 Truthy while the organizations' cut-over runs: agentManager.migration.cutover
-set, agent-manager.agentChart.semver a 3.x line (not the preflight dry run)
+true (a boolean: a string such as "false" fails the render, it would read as
+set), agent-manager.agentChart.semver a 3.x line (not the preflight dry run)
 and organizations on. Only then the run writes organization releases and its
 report there (migrate-rbac.yaml, organizations/migrate-scope.yaml); unset
 afterwards, the identity keeps its reads on the 3.x line and no write there.
 */}}
 {{- define "agent-platform.kagent.migration.v3Writes" -}}
 {{- $am := include "agent-platform.agentManager.chartValues" . | fromJson -}}
-{{- if and (dig "migration" "cutover" false (.Values.agentManager | default dict)) (include "agent-platform.organizations.enabled" .) (include "agent-platform.kagent.migration" .) (include "agent-platform.kagent.migration.isV3" (dig "agentChart" "semver" "2.x" $am)) -}}true{{- end -}}
+{{- $cutover := dig "migration" "cutover" false (.Values.agentManager | default dict) -}}
+{{- if not (or (kindIs "bool" $cutover) (kindIs "invalid" $cutover)) -}}
+{{- fail (printf "agentManager.migration.cutover must be the boolean true or false, got the %s %q: only a boolean true grants the migration its organization writes" (kindOf $cutover) (toString $cutover)) -}}
+{{- end -}}
+{{- if and (eq (toString $cutover) "true") (include "agent-platform.organizations.enabled" .) (include "agent-platform.kagent.migration" .) (include "agent-platform.kagent.migration.isV3" (dig "agentChart" "semver" "2.x" $am)) -}}true{{- end -}}
 {{- end -}}

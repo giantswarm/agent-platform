@@ -282,6 +282,19 @@ if CONN:
         if scope_policy(*args):
             fail(f"{what}: the migrate scope policy renders without the writes it holds")
 
+    # D-GO-38: only a boolean true grants the writes. A string, also "false",
+    # fails the render naming the key; a boolean false and an unset value
+    # grant none.
+    for text in ("false", "true", "no", ""):
+        r = subprocess.run([*conn_base, *v3, "--set-string", f"agentManager.migration.cutover={text}", "--set", "agentPlatformOrganizations.enabled=true"],
+                           capture_output=True, text=True)
+        if r.returncode == 0 or "agentManager.migration.cutover must be the boolean" not in r.stderr:
+            fail(f"agentManager.migration.cutover as the string {text!r} is not refused:\n{r.stderr[-400:]}")
+    if scope_policy(*v3, "--set", "agentManager.migration.cutover=false", "--set", "agentPlatformOrganizations.enabled=true"):
+        fail("a boolean false cutover renders the migrate scope policy")
+    if not scope_policy(*v3, "--set-json", "agentManager.migration.cutover=true", "--set", "agentPlatformOrganizations.enabled=true"):
+        fail("a boolean true cutover (set as JSON) renders no migrate scope policy")
+
     # D-GO-08: every alternative of a || range and every version a range
     # names counts, here as in migrate and the agent-platform-operator.
     refused("an alternative on another major", "admits agent chart majors 2, 3", "--set", "agent-manager.agentChart.semver=3.0.1 || 2.6.0")
