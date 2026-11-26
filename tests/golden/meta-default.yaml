@@ -1264,8 +1264,7 @@ spec:
       networkPolicy:
         enabled: false
       oauth:
-        dex:
-          allowPrivateURLs: false
+        dex: {}
         downstream:
           enabled: true
         enabled: true
@@ -2015,8 +2014,7 @@ spec:
     networkPolicy:
       enabled: false
     oauth:
-      dex:
-        allowPrivateURLs: false
+      dex: {}
       downstream:
         enabled: true
       enabled: true

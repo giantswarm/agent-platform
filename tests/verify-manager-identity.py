@@ -26,6 +26,7 @@ import yaml
 MANAGERS = ("model-manager", "agent-manager", "vm-manager", "cluster-manager", "skill-manager")
 # Blocks the connectivity release does not receive (components.agent-platform-connectivity.omitKeys).
 NOT_IN_CONNECTIVITY = ("skill-manager",)
+DEX_OPT_IN_UNSET = ("model-manager",)
 # Components with an oauth block that this script does not render, and where they are covered.
 EXEMPT = {"workspace-manager": "needs the workspaces fixture; verify-workspace-manager and verify-idp-egress cover it"}
 ROUTED = {"model-manager": "/model-manager", "agent-manager": "/agent-manager"}
@@ -152,6 +153,14 @@ def idp_rules(docs: list[dict], name: str) -> list[dict]:
     return rules
 
 
+def expect_no_dex_opt_in(label: str, name: str, manager_oauth: dict) -> None:
+    """model-manager's chart defaults the no-op opt-in to false, so its block leaves the key out; the others set it to false."""
+    if name in DEX_OPT_IN_UNSET:
+        expect(f"{label} obsolete Dex opt-in unset", "allowPrivateURLs" in manager_oauth.get("dex", {}), False)
+    else:
+        expect(f"{label} obsolete Dex opt-in", manager_oauth["dex"].get("allowPrivateURLs"), False)
+
+
 def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> None:
     for chart in (meta, conn):
         with open(f"{chart}/values.yaml") as source:
@@ -160,7 +169,7 @@ def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> Non
             if chart == conn and name in NOT_IN_CONNECTIVITY:
                 continue
             manager_oauth = values[name]["oauth"]
-            expect(f"{chart}: {name} obsolete Dex opt-in", manager_oauth["dex"].get("allowPrivateURLs"), False)
+            expect_no_dex_opt_in(f"{chart}: {name}", name, manager_oauth)
             expect(f"{chart}: {name} JWKS blanket unset", "sso" in manager_oauth, False)
         expect(f"{chart}: workspace-manager obsolete Dex opt-in", values["workspace-manager"]["oauth"]["dex"].get("allowPrivateURLs"), False)
         expect(f"{chart}: workspace-manager JWKS blanket unset", "sso" in values["workspace-manager"]["oauth"], False)
@@ -171,13 +180,13 @@ def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> Non
 
     rels = releases(meta, [*base, *ALL_ON, *LOGIN])
     for name in MANAGERS:
-        expect(f"{name} HelmRelease obsolete Dex opt-in", oauth(rels, name)["dex"].get("allowPrivateURLs"), False)
+        expect_no_dex_opt_in(f"{name} HelmRelease", name, oauth(rels, name))
         if name not in NOT_IN_CONNECTIVITY:
             forwarded = rels["agent-platform-connectivity"][name]["oauth"]
-            expect(f"connectivity {name} obsolete Dex opt-in", forwarded["dex"].get("allowPrivateURLs"), False)
+            expect_no_dex_opt_in(f"connectivity {name}", name, forwarded)
             expect(f"connectivity {name} JWKS blanket unset", "sso" in forwarded, False)
         expect(f"{name} HelmRelease JWKS blanket unset", "sso" in oauth(rels, name), False)
-    print("ok: the five manager releases and workspace-manager disable the obsolete Dex opt-in and set no JWKS blanket; mcp-kubernetes sets neither")
+    print("ok: the five manager releases and workspace-manager disable or leave out the obsolete Dex opt-in and set no JWKS blanket; mcp-kubernetes sets neither")
 
 
 def main() -> None:
@@ -361,7 +370,7 @@ def main() -> None:
     print("--> no login named (muster's issuer unset): nothing filled, the guard stays silent")
     rels = releases(meta, [*base, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
                                         "kagent.controller.image.repository=giantswarm/kagent/controller")])
-    expect("model-manager oauth.dex", oauth(rels, "model-manager").get("dex"), {"allowPrivateURLs": False})
+    expect("model-manager oauth.dex", oauth(rels, "model-manager").get("dex") or {}, {})
     result = connectivity(conn, rels["agent-platform-connectivity"], base)
     if result.returncode != 0:
         sys.exit(f"FAIL: no login: the connectivity render failed\n{result.stderr}")
