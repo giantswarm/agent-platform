@@ -545,6 +545,17 @@ its chart has no such key); an own value stands. */ -}}
 {{- $musterTakes := and (include "agent-platform.componentEnabled" (dict "root" .root "name" "muster")) (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "muster" "version" (include "agent-platform.muster.agentApprovalFloor" .root))) -}}
 {{- $_ := set $musterValues "toolApproval" (dict "enabled" (ternary true false (not (empty $musterTakes)))) -}}
 {{- end -}}
+{{- /* The default agent's settings live in its release, which this chart
+renders in its own Flux namespace, not in the kagent namespace agent-manager
+manages: agent-manager reads it by the Agent's Flux labels and gets get on
+it by name (muster.toolApproval.platformReleases), so every person who may
+start a session with the default agent can. Not with a remote target: the
+release is on this cluster, agent-manager on the target. */ -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" .root "name" "default-agent")) (not (include "agent-platform.targetSecretName" .root)) -}}
+{{- $ta := get $musterValues "toolApproval" | default dict -}}
+{{- $_ := set $ta "platformReleases" (list (dict "namespace" (dig "namespace" "" (.root.Values.gitops | default dict) | default .root.Release.Namespace) "name" (include "agent-platform.childName" (dict "root" .root "name" "default-agent")))) -}}
+{{- $_ := set $musterValues "toolApproval" $ta -}}
+{{- end -}}
 {{- end -}}
 {{- $_ := set $derived "muster" $musterValues -}}
 {{- /* The installation's toolchains, while the toolchain-manager is on:

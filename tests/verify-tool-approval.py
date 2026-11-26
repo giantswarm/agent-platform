@@ -825,6 +825,54 @@ def check_unset_floors_keep_everything_off() -> None:
     print(f"ok: unset floors ({', '.join(unset)}) keep what they gate off for any muster and agent-manager range; `governed` fails")
 
 
+# The default agent: kagent, muster and agent-manager on (componentEnabled).
+DEFAULT_AGENT_ON = [
+    "--namespace", "agent-platform",
+    "--set", "global.domain=example.com",
+    "--set", "global.identity.issuerUrl=https://dex.example.com",
+    "--set", "global.identity.clientId=agent-platform",
+    "--set", "global.identity.existingSecret=agent-platform-idp",
+    "--set", "global.gatewayApi.parentRefs[0].name=example-gateway",
+    "--set", "model-manager.ollama.endpoint=http://ollama.example.com:11434",
+    "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+    "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
+    "--set", "postgres.enabled=true",
+    "--set", "components.kagent.enabled=true",
+    "--set", "components.agent-manager.enabled=true",
+]
+
+
+def check_default_agent_release_readable() -> None:
+    """The default agent's release lives in the chart's Flux namespace, not in
+    the kagent namespace agent-manager manages: agent-manager gets get on it
+    by name (muster.toolApproval.platformReleases), so a session of the
+    default agent can read its tool approval settings for every person."""
+    am = "components.agent-manager.versionRange=>=3.6.0 <4.0.0-0"
+    musters = "components.muster.versionRange=>=5.66.0 <6.0.0-0"
+
+    def releases(args: list[str]) -> str:
+        out = render_meta([*DEFAULT_AGENT_ON, *args])
+        hr = doc(out, "HelmRelease", "agent-manager")
+        if hr is None:
+            fail(f"no agent-manager HelmRelease with {args}")
+        return block(hr, "        platformReleases:")
+
+    def items(text: str) -> list[str]:
+        return [line.strip().lstrip("- ").strip() for line in text.split("\n")[1:] if line.strip()]
+
+    got = releases(["--set", am, "--set", musters])
+    if sorted(items(got)) != ["name: default-agent", "namespace: agent-platform"]:
+        fail(f"agent-manager must be granted the default agent's release agent-platform/default-agent:\n{got}")
+    got = releases(["--set", am, "--set", musters, "--set", "gitops.namespace=flux-giantswarm"])
+    if "namespace: flux-giantswarm" not in got:
+        fail(f"the default agent's release lives in gitops.namespace:\n{got}")
+    if releases(["--set", am, "--set", musters, "--set", "components.default-agent.enabled=false"]):
+        fail("no default agent, no platform release to read")
+    if releases([]):
+        fail("below agent-manager's tool approval floor its chart takes no muster.toolApproval")
+    print("ok: agent-manager may get the default agent's release (muster.toolApproval.platformReleases: <Flux namespace>/default-agent) from its tool approval floor, none without the default agent or below the floor")
+
+
 def render_meta_fail(args: list[str]) -> str:
     return render(META_DIR, META + args, expect_fail=True)
 
@@ -845,5 +893,6 @@ if __name__ == "__main__":
     check_connector_admin()
     check_binder()
     check_agent_manager_tool_approval()
+    check_default_agent_release_readable()
     check_session_bindings()
     check_approval()
