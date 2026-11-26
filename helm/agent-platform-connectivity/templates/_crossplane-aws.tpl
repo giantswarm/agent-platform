@@ -89,9 +89,10 @@ metadata:
     app.kubernetes.io/component: storage
   annotations:
     crossplane.io/external-name: {{ $bucket }}
+    helm.sh/resource-policy: keep
 spec:
   managementPolicies:
-    {{- include "agent-platform.crossplane.managementPolicies" (dict "xp" $xp) | nindent 4 }}
+    {{- include "agent-platform.crossplane.managementPoliciesNoDelete" (dict "xp" $xp) | nindent 4 }}
   forProvider:
     bucketRef:
       name: {{ $bucket }}
@@ -113,9 +114,10 @@ metadata:
     app.kubernetes.io/component: storage
   annotations:
     crossplane.io/external-name: {{ $bucket }}
+    helm.sh/resource-policy: keep
 spec:
   managementPolicies:
-    {{- include "agent-platform.crossplane.managementPolicies" (dict "xp" $xp) | nindent 4 }}
+    {{- include "agent-platform.crossplane.managementPoliciesNoDelete" (dict "xp" $xp) | nindent 4 }}
   forProvider:
     bucketRef:
       name: {{ $bucket }}
