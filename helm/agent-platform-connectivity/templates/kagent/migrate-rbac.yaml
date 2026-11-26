@@ -106,6 +106,25 @@ rules:
   - apiGroups: ["kagent.dev"]
     resources: {{ $legacyCRDs | toJson }}
     verbs: ["list"]
+  # Organization namespaces (giantswarm/giantswarm#38902, slice 8): on the
+  # agent chart 2.x -> 3.x path the run lists the namespaces labelled as an
+  # organization's and fails when it may not; it reads their releases, chart
+  # sources and Agents, never writes them, and reports what needs changing
+  # before the agent-platform-operator moves their sources.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["list"]
+  {{- if include "agent-platform.organizations.enabled" . }}
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["ocirepositories"]
+    verbs: ["get", "list"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents"]
+    verbs: ["get", "list"]
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
