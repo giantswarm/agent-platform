@@ -436,7 +436,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gitops.target.kubeConfig.secretRef.key | string | `""` |  |
 | gitops.hooks.image.registry | string | `"gsoci.azurecr.io"` |  |
 | gitops.hooks.image.repository | string | `"giantswarm/kubectl"` |  |
-| gitops.hooks.image.tag | string | `"v1.37.2"` |  |
+| gitops.hooks.image.tag | string | `"v1.37.3"` |  |
 | gitops.hooks.helmImage.registry | string | `"gsoci.azurecr.io"` |  |
 | gitops.hooks.helmImage.repository | string | `"giantswarm/alpine-k8s"` |  |
 | gitops.hooks.helmImage.tag | string | `"1.37.2"` |  |
@@ -1663,7 +1663,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |
-| backstage.configReload.image.version | string | `"v1.37.2"` |  |
+| backstage.configReload.image.version | string | `"v1.37.3"` |  |
 | backstage.ingress.enabled | bool | `false` |  |
 | backstage.resources.verticalPodAutoscaler.enabled | bool | `false` |  |
 | backstage.backstage.args[0] | string | `"--config"` |  |
