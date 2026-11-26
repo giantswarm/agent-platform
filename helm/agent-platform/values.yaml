@@ -5871,7 +5871,10 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # chart also renders muster.approval.installation (backstage.installationName,
 # the name the approval page shows; and trustedClients, the portal's own
 # client, with backstage.oidcClientId and backstage.signInHandoff), muster-approval-binder's subject
-# (agent-manager's ServiceAccount, muster.rbac.approvalBinder.subjects) and
+# (agent-manager's ServiceAccount, muster.rbac.approvalBinder.subjects),
+# muster-approval-decider's subject (the portal's ServiceAccount,
+# muster.rbac.approvalDecider.subjects, with its token projected into the
+# portal for audience muster, while muster trusts the portal's client) and
 # the pages muster may return the browser to after an approval in
 # muster.oauth.mcpClient.postLoginRedirectAllowlist (the portal's /sessions
 # with backstage.publicPort, klausGateway.obo.callbackBaseUrl +
@@ -6961,12 +6964,19 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # oidcClientId the chart lists it in muster.approval.trustedClients, so the
   # portal shows a tool approval in chat and decides it on the person's click
   # (Approve / Decline, with the person's token), and opens muster's connector
-  # sign-in signed in through a one-time ticket. The trade-off: whoever holds a
-  # portal token of a person (only the portal backend, by design) can approve
-  # that person's pending requests without muster's browser sign-in; the
-  # portal decides only on the person's click. false keeps every decision and
-  # sign-in on muster's own pages. Without a dedicated client nothing is
-  # listed: the shared client is held by muster, agents and CLIs as well.
+  # sign-in signed in through a one-time ticket (muster still asks the browser
+  # "Connect <connector> as <person>?" first). muster takes a person's portal
+  # token there only with the portal backend's own ServiceAccount token
+  # (audience muster, projected into the portal; the chart binds the portal's
+  # ServiceAccount to muster-approval-decider), so a portal token held
+  # elsewhere (the browser, a forwardToken server, an agent runtime) decides
+  # nothing. The trade-off: the portal backend can approve a person's pending
+  # requests without muster's browser sign-in; it decides only on the
+  # person's click. false keeps every decision and sign-in on muster's own
+  # pages. Without a dedicated client nothing is listed: the shared client is
+  # held by muster, agents and CLIs as well. An own
+  # muster.muster.approval.trustedClients may name this client only; any
+  # other id fails the render.
   signInHandoff: true
   # Extra query parameters on the login provider's authorize request. Dex needs
   # none; Google needs access_type: offline and prompt: consent for a refresh

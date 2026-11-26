@@ -32,10 +32,18 @@
   while the portal is on, backstage.signInHandoff is on and muster is at least
   agent-platform.muster.trustedClientsFloor; from
   agent-platform.muster.handoffFloor below it the list renders as
-  handoffClients; an own list under either name stands; a list naming the
-  shared client fails; the backstage release mounts portal-dex-client-secret
-  and the connectivity app-config signs in with that client, requesting the
-  platform client's audience.
+  handoffClients; an own list under either name stands while it names only
+  the dedicated portal client (any other id fails: the shared client,
+  dex-k8s-authenticator, any client people sign in to); the backstage release
+  mounts portal-dex-client-secret and the connectivity app-config signs in
+  with that client, requesting the platform client's audience.
+- approval decider: from the trusted-clients floor, while muster trusts the
+  portal's client, the muster release binds muster-approval-decider to the
+  portal's ServiceAccount (backstage.name in the portal's namespace) and
+  nothing else (an own list stands), and the backstage release projects that
+  ServiceAccount's token for audience muster where the portal's muster
+  backend reads it, beside its own extra volumes; none without a trusted
+  client or below the floor.
 - governance floor: agent-platform.muster.governanceFloor is one X.Y.Z; its
   PLACEHOLDER-GOVERNANCE-FLOOR marker, while it is still there, appears once.
 - connector-admin: muster's mcpserver-editor Role (the platform's
@@ -974,11 +982,11 @@ def check_handoff_clients() -> None:
             fail(f"{why}: no trusted client expected, got {clients(args)}")
     if clients(dedicated, FLOOR_RANGE) or clients(dedicated, FLOOR_RANGE, "handoffClients"):
         fail("below the handoff floor muster must list no trusted client")
-    own = clients(dedicated + ["--set", "muster.muster.approval.trustedClients[0]=other-portal"])
-    if own != ["- other-portal"]:
-        fail(f"an own trustedClients list must stand, got {own}")
-    own = clients(dedicated + ["--set", "muster.muster.approval.handoffClients[0]=other-portal"], key="handoffClients")
-    if own != ["- other-portal"]:
+    own = clients(dedicated + ["--set", "muster.muster.approval.trustedClients[0]=platform-portal"])
+    if own != ["- platform-portal"]:
+        fail(f"an own trustedClients list naming the portal's client must stand, got {own}")
+    own = clients(dedicated + ["--set", "muster.muster.approval.handoffClients[0]=platform-portal"], key="handoffClients")
+    if own != ["- platform-portal"]:
         fail(f"an own handoffClients list (the earlier name) must stand, got {own}")
     if clients(dedicated + ["--set-json", "muster.muster.approval.trustedClients=[]"]):
         fail("an own empty trustedClients list must stand (no trusted client)")
@@ -986,10 +994,73 @@ def check_handoff_clients() -> None:
         err = render(META_DIR, META + ["--set", trusted, *PORTAL_CLIENT, "--set", f"muster.muster.approval.{key}[0]=platform"], expect_fail=True)
         if f'{key} lists "platform", the platform\'s shared OAuth client' not in err:
             fail(f"a {key} list naming the shared client must fail the render:\n{err}")
+    # IA-06: only the portal's dedicated client may be trusted; any other id
+    # (a client people sign in to with tokens of their own) fails, in an own
+    # list and through backstage.oidcClientId alike.
+    for args, client, key in (
+        (dedicated + ["--set", "muster.muster.approval.trustedClients[0]=dex-k8s-authenticator"], "dex-k8s-authenticator", "trustedClients"),
+        (dedicated + ["--set", "muster.muster.approval.trustedClients[0]=platform-portal", "--set", "muster.muster.approval.trustedClients[1]=kubectl-gs"], "kubectl-gs", "trustedClients"),
+        (dedicated + ["--set", "muster.muster.approval.handoffClients[0]=muster-cli"], "muster-cli", "handoffClients"),
+        (["--set", "muster.muster.approval.handoffClients[0]=muster-cli"], "muster-cli", "handoffClients"),
+        (["--set", "muster.muster.approval.trustedClients[0]=other-portal"], "other-portal", "trustedClients"),
+    ):
+        err = render(META_DIR, META + ["--set", trusted, *PORTAL_CLIENT, *args], expect_fail=True)
+        if f'{key} lists "{client}", which is not the portal\'s own OAuth client' not in err:
+            fail(f"{args}: a {key} list naming {client} must fail the render:\n{err}")
     rel = doc(render_meta(["--set", trusted, *PORTAL_CLIENT, *dedicated]), "HelmRelease", "backstage") or ""
     if "key: portal-dex-client-secret" not in rel or "optional: true" not in rel:
         fail("the backstage release must mount the portal's own client secret (portal-dex-client-secret, optional)")
-    print("ok: muster.approval.trustedClients is the portal's dedicated client from the trusted-clients floor (handoffClients from the handoff floor below it; none on the shared client, with signInHandoff false, the portal off or below the floors), an own list under either name stands, the shared client fails")
+    print("ok: muster.approval.trustedClients is the portal's dedicated client from the trusted-clients floor (handoffClients from the handoff floor below it; none on the shared client, with signInHandoff false, the portal off or below the floors), an own list under either name naming it stands, the shared client and any other client fail")
+
+
+def check_approval_decider() -> None:
+    """From the trusted-clients floor, while muster trusts the portal's
+    client, muster-approval-decider binds the portal's ServiceAccount only,
+    and the portal's pod projects its token for audience muster where its
+    muster backend reads it (IA-01)."""
+    trusted = f"components.muster.versionRange=>={TEST_FLOORS['muster.trustedClientsFloor']} <6.0.0-0"
+    handoff = f"components.muster.versionRange=>={TEST_FLOORS['muster.handoffFloor']} <{TEST_FLOORS['muster.trustedClientsFloor']}"
+    dedicated = ["--set", "backstage.oidcClientId=platform-portal"]
+
+    def decider(args: list[str]) -> str:
+        return block(muster_release([*PORTAL_CLIENT, *args]), "      approvalDecider:")
+
+    def backstage(args: list[str]) -> str:
+        return doc(render_meta([*PORTAL_CLIENT, *args]), "HelmRelease", "backstage") or ""
+
+    got = decider(["--set", trusted, *dedicated])
+    want = "\n".join([
+        "      approvalDecider:",
+        "        subjects:",
+        "        - kind: ServiceAccount",
+        "          name: backstage",
+        "          namespace: default",
+    ])
+    if got.rstrip() != want:
+        fail(f"muster-approval-decider must bind the portal's ServiceAccount only, want:\n{want}\ngot:\n{got}")
+    moved = decider(["--set", trusted, *dedicated, "--set", "components.backstage.targetNamespace=portal", "--set", "backstage.name=portal-sa"])
+    if "name: portal-sa" not in moved or "namespace: portal" not in moved:
+        fail(f"the subject must follow the portal's ServiceAccount name and namespace:\n{moved}")
+    own = decider(["--set", trusted, *dedicated, "--set", "muster.rbac.approvalDecider.subjects[0].kind=ServiceAccount", "--set", "muster.rbac.approvalDecider.subjects[0].name=other", "--set", "muster.rbac.approvalDecider.subjects[0].namespace=x"])
+    if "name: other" not in own or "name: backstage" in own:
+        fail(f"an own approvalDecider list must stand:\n{own}")
+    for args, why in (
+        (["--set", trusted], "the portal on the shared client (no trusted client)"),
+        (["--set", trusted, *dedicated, "--set", "backstage.signInHandoff=false"], "signInHandoff false"),
+        (["--set", handoff, *dedicated], "below the trusted-clients floor"),
+        (["--set", trusted, *dedicated, "--set-json", "muster.muster.approval.trustedClients=[]"], "an own empty trustedClients list"),
+    ):
+        if decider(args):
+            fail(f"{why}: no approvalDecider subjects expected")
+        if "muster-workload-token" in backstage(args):
+            fail(f"{why}: no workload token projected into the portal")
+    rel = backstage(["--set", trusted, *dedicated])
+    for want in ("name: muster-workload-token", "audience: muster", "path: token", "expirationSeconds: 3600",
+                 "mountPath: /var/run/secrets/muster.giantswarm.io/serviceaccount",
+                 "name: idp-ca", "mountPath: /etc/agent-platform/idp-ca"):
+        if want not in rel:
+            fail(f"the backstage release must project the portal's workload token beside its own volumes ({want!r} missing):\n{rel}")
+    print("ok: muster-approval-decider binds the portal's ServiceAccount only (name and namespace following the portal, an own list standing) and the portal projects its token for audience muster where its muster backend reads it, beside its own volumes; none without a trusted client or below the trusted-clients floor")
 
 
 def check_portal_client_app_config() -> None:
@@ -1038,6 +1109,7 @@ if __name__ == "__main__":
     check_coverage()
     check_approval_config()
     check_handoff_clients()
+    check_approval_decider()
     check_portal_client_app_config()
     check_connector_admin()
     check_binder()

@@ -696,6 +696,19 @@ connectivity release's values stay those of a chart without the operator. */ -}}
 {{- $_ := set $derived "agentPlatformOrganizations" (dict "operator" (include "agent-platform.organizations.operator" .root | fromJson)) -}}
 {{- end -}}
 {{- end -}}
+{{- if eq .name "backstage" -}}
+{{- /* The portal backend's own workload token for muster (audience muster),
+projected where its muster backend reads it, while the platform binds the
+portal's ServiceAccount to muster-approval-decider
+(agent-platform.backstage.musterWorkloadToken). Appended to the block's own
+extraVolumes and extraVolumeMounts, which derived values would replace. */ -}}
+{{- with (include "agent-platform.backstage.musterWorkloadToken" .root | fromJson) -}}
+{{- $own := dig "backstage" dict ($.root.Values.backstage | default dict) | default dict -}}
+{{- $volumes := append (dig "extraVolumes" list $own | default list) .volume -}}
+{{- $mounts := append (dig "extraVolumeMounts" list $own | default list) .mount -}}
+{{- $_ := set $derived "backstage" (dict "extraVolumes" $volumes "extraVolumeMounts" $mounts) -}}
+{{- end -}}
+{{- end -}}
 {{- if eq .name "toolchain-manager" -}}
 {{- $derived = include "agent-platform.toolchainManager.derived" .root | fromJson -}}
 {{- end -}}
@@ -1136,6 +1149,14 @@ bound to muster-approval-binder by the muster chart in muster's namespace. */ -}
 {{- with (include "agent-platform.muster.approvalBinderSubjects" .root | fromJsonArray) -}}
 {{- $rbac := get $derived "rbac" | default dict -}}
 {{- $_ := set $rbac "approvalBinder" (dict "subjects" .) -}}
+{{- $_ := set $derived "rbac" $rbac -}}
+{{- end -}}
+{{- /* The portal's ServiceAccount, the one workload muster takes a person's
+approval decision and handoff request from (beside the person's token),
+bound to muster-approval-decider by the muster chart in muster's namespace. */ -}}
+{{- with (include "agent-platform.muster.approvalDeciderSubjects" .root | fromJsonArray) -}}
+{{- $rbac := get $derived "rbac" | default dict -}}
+{{- $_ := set $rbac "approvalDecider" (dict "subjects" .) -}}
 {{- $_ := set $derived "rbac" $rbac -}}
 {{- end -}}
 {{- with (include "agent-platform.muster.redirectAllowlist" .root | fromJsonArray) -}}
@@ -2181,8 +2202,10 @@ approval.handoffClients (POST /handoff-tickets); UNSET until it exists. */ -}}
 {{- define "agent-platform.muster.handoffFloor" -}}{{- end -}}
 {{- /* The first muster reading approval.trustedClients (handoffClients
 renamed; the trusted client also decides approvals inline, POST
-/approvals/{id}/decision); UNSET until it exists. Below it, from
-handoffFloor, the list renders as handoffClients. */ -}}
+/approvals/{id}/decision) and reviewing the trusted client's own workload
+token (verb decide, muster-approval-decider; giantswarm/muster#1912); UNSET
+until it exists. Below it, from handoffFloor, the list renders as
+handoffClients. */ -}}
 {{- define "agent-platform.muster.trustedClientsFloor" -}}{{- end -}}
 
 {{/*
@@ -5293,6 +5316,49 @@ Usage: include "agent-platform.muster.approvalBinderSubjects" $root | fromJsonAr
 {{- end -}}
 
 {{/*
+muster's approval-decider subjects (muster.rbac.approvalDecider.subjects): the
+muster chart ships the Role muster-approval-decider (verb decide on
+toolapprovals) and binds it, in muster's namespace where muster's workload
+review asks, to these subjects. muster takes a trusted client's decision or
+handoff request only with that client's own workload token beside the
+person's (IA-01 of the inline approval security review). The platform binds
+the portal's ServiceAccount (backstage.name, default backstage, in the
+portal's namespace) and nothing else, while the portal is on and muster's
+approval trusts a client (agent-platform.muster.approval renders
+trustedClients) from agent-platform.muster.trustedClientsFloor, the first
+muster that reviews the workload. An own muster.rbac.approvalDecider.subjects
+stands. [] otherwise.
+Usage: include "agent-platform.muster.approvalDeciderSubjects" $root | fromJsonArray
+*/}}
+{{- define "agent-platform.muster.approvalDeciderSubjects" -}}
+{{- $out := list -}}
+{{- if and (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.trustedClientsFloor" .))) (include "agent-platform.componentEnabled" (dict "root" . "name" "backstage")) (not (dig "rbac" "approvalDecider" "subjects" list (.Values.muster | default dict))) -}}
+{{- with (include "agent-platform.muster.approval" . | fromJson).trustedClients -}}
+{{- $name := dig "name" "backstage" ($.Values.backstage | default dict) | default "backstage" -}}
+{{- $out = list (dict "kind" "ServiceAccount" "name" $name "namespace" (include "agent-platform.componentNamespace" (dict "root" $ "name" "backstage"))) -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The portal backend's projected ServiceAccount token for muster (audience
+muster, an hour, rotated by the kubelet), at the path its muster backend
+reads by default (/var/run/secrets/muster.giantswarm.io/serviceaccount/token),
+while the platform binds the portal's ServiceAccount to muster-approval-decider
+(agent-platform.muster.approvalDeciderSubjects). Emits JSON {volume, mount},
+or {} otherwise.
+Usage: include "agent-platform.backstage.musterWorkloadToken" $root | fromJson
+*/}}
+{{- define "agent-platform.backstage.musterWorkloadToken" -}}
+{{- if include "agent-platform.muster.approvalDeciderSubjects" . | fromJsonArray -}}
+{{- dict "volume" (dict "name" "muster-workload-token" "projected" (dict "sources" (list (dict "serviceAccountToken" (dict "audience" "muster" "expirationSeconds" 3600 "path" "token"))))) "mount" (dict "name" "muster-workload-token" "mountPath" "/var/run/secrets/muster.giantswarm.io/serviceaccount" "readOnly" true) | toJson -}}
+{{- else -}}
+{{- dict | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 muster's approval configuration (muster.approval, rendered as `approval` into
 config.yaml): installation, the name the approval page shows, from
 backstage.installationName (the name the portal shows for this platform,
@@ -5306,10 +5372,12 @@ client, backstage.signInHandoff is on and muster is at least
 agent-platform.muster.trustedClientsFloor; from
 agent-platform.muster.handoffFloor up to it the same list renders under its
 earlier name handoffClients (that muster reads no trustedClients). An own
-list under either name stands. A list naming the platform's shared client
-(global.identity.clientId, else muster's login client) fails the render:
-every holder of such a token (muster, an agent's delegation, a CLI) could then
-approve without the page's own sign-in. Only from the muster floor
+list under either name stands, but every entry must be the portal's dedicated
+client: one naming the platform's shared client (global.identity.clientId,
+else muster's login client) fails the render (every holder of such a token,
+muster, an agent's delegation, a CLI, could then approve without the page's
+own sign-in), and so does any other id (dex-k8s-authenticator, the kagent
+UI's or klaus-gateway's client, a CLI's: people hold tokens of those too). Only from the muster floor
 agent-platform.muster.governanceFloor; {} below it.
 Usage: include "agent-platform.muster.approval" $root | fromJson
 */}}
@@ -5327,8 +5395,13 @@ Usage: include "agent-platform.muster.approval" $root | fromJson
 {{- end -}}
 {{- end -}}
 {{- range $key := list "trustedClients" "handoffClients" -}}
-{{- if and $portal.platformClientId (has $portal.platformClientId (get $out $key | default list)) -}}
+{{- range $client := (get $out $key | default list) -}}
+{{- if and $portal.platformClientId (eq (toString $client) $portal.platformClientId) -}}
 {{- fail (printf "muster.muster.approval.%s lists %q, the platform's shared OAuth client: every holder of a token of that client (muster itself, agents acting for a person, CLIs) could approve a person's requests without muster's sign-in; list only the portal's own client (backstage.oidcClientId)" $key $portal.platformClientId) -}}
+{{- end -}}
+{{- if not (and $portal.dedicated (eq (toString $client) $portal.clientId)) -}}
+{{- fail (printf "muster.muster.approval.%s lists %q, which is not the portal's own OAuth client (backstage.oidcClientId, set and other than the platform's shared client): muster trusts a listed client with a person's approvals, and people sign in to other clients (dex-k8s-authenticator, the kagent UI, klaus-gateway, CLIs) with tokens of their own; list only the portal's dedicated client" $key (toString $client)) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
