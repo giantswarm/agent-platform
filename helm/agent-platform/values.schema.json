@@ -2066,6 +2066,14 @@
                     "type": "object",
                     "additionalProperties": true,
                     "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": [
+                                "",
+                                "dex",
+                                "google"
+                            ]
+                        },
                         "clientId": {
                             "type": "string"
                         },
@@ -2074,6 +2082,18 @@
                         },
                         "issuerUrl": {
                             "type": "string"
+                        },
+                        "kubernetes": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                                "audiences": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
                         }
                     }
                 },

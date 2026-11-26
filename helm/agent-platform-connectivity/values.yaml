@@ -31,6 +31,22 @@ global:
     ca:
       secretName: ""
       key: ca.crt
+    # The kind of OpenID Provider: dex or google. Empty: dex. Charts that
+    # follow mcp-oauth's values layout (model-manager) use it where their own
+    # oauth.authorizationServer.upstream.type and oauth.provider are empty.
+    # The meta chart fills the managers' oauth.provider from it.
+    type: ""  # @schema enum: ["", dex, google]
+    kubernetes:
+      # The audiences the Kubernetes API server accepts on this provider's
+      # tokens (AuthenticationConfiguration jwt[].issuer.audiences, or the
+      # flag oidc-client-id): a forwarded ID token passes when its aud holds
+      # at least one. muster requests them from Dex as cross-client audiences
+      # at login. [dex-k8s-authenticator] on Giant Swarm clusters; with
+      # Google, the login client id, since Google adds no audiences.
+      # Charts that follow mcp-oauth's values layout (model-manager) use it
+      # where their own muster.mcpServer.auth.requiredAudiences is empty.
+      # The meta chart fills the managers' requiredAudiences from it.
+      audiences: []  # @schema item: string
   gatewayApi:
     # The public Gateway every route attaches to when neither the route's own
     # parentRefs/parentRef override nor the chart-owned edge

@@ -50,6 +50,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -571,6 +575,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -1748,6 +1756,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2170,6 +2182,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2394,6 +2410,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2494,6 +2514,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2612,6 +2636,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2756,6 +2784,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -3003,6 +3035,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -3184,6 +3220,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:

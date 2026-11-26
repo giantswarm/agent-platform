@@ -33,6 +33,22 @@ global:
     # (dex-client-secret, registration-token, oauth-encryption-key,
     # valkey-password; backstage-session-secret for the portal).
     existingSecret: ""
+    # The kind of OpenID Provider: dex or google. The meta chart fills
+    # oauth.provider of model-manager, agent-manager and cluster-manager with
+    # it where their blocks leave it unset.
+    type: dex  # @schema enum: ["", dex, google]
+    kubernetes:
+      # The audiences the Kubernetes API server accepts on this provider's
+      # tokens (AuthenticationConfiguration jwt[].issuer.audiences, or the
+      # flag oidc-client-id): a forwarded ID token passes when its aud holds
+      # at least one. muster requests them from Dex as cross-client audiences
+      # at login. [dex-k8s-authenticator] on Giant Swarm clusters; with
+      # Google, the login client id, since Google adds no audiences.
+      # The meta chart fills muster.mcpServer.auth.requiredAudiences of
+      # model-manager, agent-manager and cluster-manager, which call the API
+      # server as the person (oauth.downstream), with it where their blocks
+      # leave it unset; an empty list there requests none.
+      audiences: [dex-k8s-authenticator]  # @schema item: string
   gatewayApi:
     # The public Gateway every route attaches to when neither the route's own
     # parentRefs/parentRef override nor the chart-owned edge
@@ -5009,9 +5025,10 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
     disableWiring: false
   mcp:
     enabled: true
+  # oauth.provider and muster.mcpServer.auth.requiredAudiences come from
+  # global.identity (agent-platform.identity.defaults) unless set here.
   oauth:
     enabled: true
-    provider: dex
     downstream:
       enabled: true
   muster:
@@ -5019,8 +5036,6 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       auth:
         forwardToken: true
-        requiredAudiences:
-          - dex-k8s-authenticator
   networkPolicy:
     enabled: false
   # `auto` (the default) follows the resolved
@@ -5348,9 +5363,10 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     repositories: []
   mcp:
     enabled: true
+  # oauth.provider and muster.mcpServer.auth.requiredAudiences come from
+  # global.identity (agent-platform.identity.defaults) unless set here.
   oauth:
     enabled: true
-    provider: dex
     dex:
       allowPrivateURLs: false
     downstream:
@@ -5360,8 +5376,6 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       auth:
         forwardToken: true
-        requiredAudiences:
-          - dex-k8s-authenticator
   networkPolicy:
     enabled: false
   # `auto` (the default) follows the resolved
@@ -5632,9 +5646,10 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
     name: ""
   mcp:
     enabled: true
+  # oauth.provider and muster.mcpServer.auth.requiredAudiences come from
+  # global.identity (agent-platform.identity.defaults) unless set here.
   oauth:
     enabled: true
-    provider: dex
     dex:
       allowPrivateURLs: false
     downstream:
@@ -5644,8 +5659,6 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       auth:
         forwardToken: true
-        requiredAudiences:
-          - dex-k8s-authenticator
   # `auto` (the default) follows the resolved
   # global.observability.metrics.serviceMonitor.enabled, like every other
   # monitor of this platform; `true` / `false` force it. The chart's metrics

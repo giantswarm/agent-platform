@@ -768,6 +768,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -1836,6 +1840,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -1978,6 +1986,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2095,6 +2107,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2241,6 +2257,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:

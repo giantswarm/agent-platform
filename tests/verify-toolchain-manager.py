@@ -223,7 +223,8 @@ def main(meta: str, connectivity: str) -> int:
         _, vals, _ = release(meta, [*ON, *IDENTITY,
                                     "--set-json", f"toolchain-manager.muster.mcpServer.requiredAudiences={audiences}"])
         must_have(vals, (expected,), "the release values with own required audiences")
-        must_lack(vals, ("dex-k8s-authenticator",), "the release values with own required audiences")
+        # global.identity.kubernetes.audiences carries it six spaces deep; muster.mcpServer.requiredAudiences entries sit at four.
+        must_lack(vals, ("\n    - dex-k8s-authenticator\n",), "the release values with own required audiences")
     ok("the registration requests the portal cross-client audience by default; an own audience list or empty list stands")
 
     # --- additionalSources ------------------------------------------------------
