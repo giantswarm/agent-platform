@@ -406,7 +406,8 @@ documentation describes the settings and the prompts; further reading (optional)
   configuration (`{mode, roleFloors}`); a string there fails the render. Anything but the two values fails the render.
 - **`governance.roleFloors`** (default `{}`): role name to the server's own tool names that ask agents
   in both modes on the governed servers of that role, rendered as `muster.governance.roleFloors` and
-  added to muster's built-in floors (config never removes one). A role declared here is a valid
+  added to muster's built-in floors (config never removes one). Set while the chart renders no
+  governance configuration (below the muster governance floor) it fails the render. A role declared here is a valid
   `role` in `governedServers`, so an installation governs a server of its own:
 
   ```yaml
@@ -447,9 +448,10 @@ documentation describes the settings and the prompts; further reading (optional)
 - **The `connector-admin` role** is muster's `mcpserver-editor` Role in muster's namespace, bound to
   `muster.rbac.mcpServerEditor.subjects` plus `tenants.platformTeam`. Whoever holds it edits the
   namespace's connectors, sets their tool approval and may let an agent skip a tool's `Ask`. The
-  default is a placeholder group nobody belongs to unless the identity provider says so
-  (`agent-platform:connector-admins`; `muster.rbac.workflowEditor.subjects` likewise
-  `agent-platform:workflow-editors`): until the installation names its admin groups (as the API
+  default binds no person: a ServiceAccount subject the chart never creates and no identity provider
+  can issue a token for (`kube-system/agent-platform-unset-connector-admins`;
+  `muster.rbac.workflowEditor.subjects` likewise `agent-platform-unset-workflow-editors`), so a
+  real IdP group can never match it. Until the installation names its admin groups (as the API
   server sees them, with the OIDC groups prefix), only cluster admins edit connectors. The muster
   chart no longer binds `system:authenticated` and fails an upgrade with an empty list while its
   old binding exists; the placeholder keeps the list non-empty (`system:authenticated` makes
@@ -1011,12 +1013,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.image.registry | string | `"gsoci.azurecr.io"` |  |
 | muster.fullnameOverride | string | `"muster"` |  |
 | muster.crds.install | bool | `false` |  |
-| muster.rbac.mcpServerEditor.subjects[0].apiGroup | string | `"rbac.authorization.k8s.io"` |  |
-| muster.rbac.mcpServerEditor.subjects[0].kind | string | `"Group"` |  |
-| muster.rbac.mcpServerEditor.subjects[0].name | string | `"agent-platform:connector-admins"` |  |
-| muster.rbac.workflowEditor.subjects[0].apiGroup | string | `"rbac.authorization.k8s.io"` |  |
-| muster.rbac.workflowEditor.subjects[0].kind | string | `"Group"` |  |
-| muster.rbac.workflowEditor.subjects[0].name | string | `"agent-platform:workflow-editors"` |  |
+| muster.rbac.mcpServerEditor.subjects[0].kind | string | `"ServiceAccount"` |  |
+| muster.rbac.mcpServerEditor.subjects[0].name | string | `"agent-platform-unset-connector-admins"` |  |
+| muster.rbac.mcpServerEditor.subjects[0].namespace | string | `"kube-system"` |  |
+| muster.rbac.workflowEditor.subjects[0].kind | string | `"ServiceAccount"` |  |
+| muster.rbac.workflowEditor.subjects[0].name | string | `"agent-platform-unset-workflow-editors"` |  |
+| muster.rbac.workflowEditor.subjects[0].namespace | string | `"kube-system"` |  |
 | muster.networkPolicy.enabled | bool | `true` |  |
 | muster.networkPolicy.flavor | string | `"auto"` |  |
 | muster.networkPolicy.cilium.allowClusterIngress | bool | `true` |  |
@@ -1658,7 +1660,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | governedServers | object | `{"agent-manager":{"role":"agentManager","safe":["get_info","list_agents","get_agent","get_agent_status","validate_agent","list_model_configs","list_egress_policies","list_skills","list_sessions","get_session","get_session_turn","toolchain_users","list_organizations","get_organization","list_organization_members","list_organization_connectors"]},"cluster-manager":{"role":"clusterManager","safe":["get_info","list_clusters","list_releases","list_node_pools"]},"kagent":{"role":"sessionManager","safe":["list_sessions","list_session_checkpoints","list_sandbox_templates","list_sandboxes","get_sandbox","get_sandbox_process","read_sandbox_outputs","read_sandbox_file"]},"mcp-kubernetes":{"role":"infrastructure","safe":["logs","list_port_forward_sessions","context_list","context_get_current","can_i","api_resources","cluster_health","capi_list_clusters","capi_get_cluster","capi_resolve_cluster","capi_cluster_health","get","list","describe"]},"model-manager":{"role":"modelManager","safe":["get_info","get_backend","list_backends","list_models","get_model","list_loaded_models","list_presets","search_models","check_fit","list_nodes","list_jobs","get_job"]},"skill-manager":{"role":"skillManager","safe":["list_skill_sources","list_skills","resolve_skills","get_skill","get_skill_file"]},"toolchain-manager":{"role":"toolchainManager","safe":["list_sources","list_toolchains","describe_toolchain","toolchain_build_status","search_packages"]},"vm-manager":{"role":"vmManager","safe":["get_info","get_host","list_images","get_image","list_networks","get_network","list_vms","get_vm","get_vm_metrics","get_vm_attestation"]},"workspace-manager":{"role":"workspaceManager","safe":["list_providers","list_owners","list_workspaces","get_workspace","list_repositories","preview_workspace"]}}` | The servers muster governs (muster.governance.governedServers), per source the platform ships: `role` (which of muster's role floors hold on it: agentManager, connectorManager, sessionManager, modelManager, clusterManager, vmManager, workspaceManager, toolchainManager, skillManager, infrastructure, or a role governance.roleFloors declares) and `safe`, the server's own tool names agents call unasked on governed (reads only; a floor never, muster refuses to start on one). Every other tool of a governed server asks agents on governed. A source renders one entry per MCPServer it ships while that renders (agent-platform.muster.governedKeys): a manager component's <component>.muster.mcpServer.name in its namespace; kagent the connectivity chart's kagent server; mcp-kubernetes the connectivity chart's and every agent-platform-mcps kubernetes entry; any other key is a muster server key itself (a server the installation registers, e.g. example-manager). null drops a source (then list it in governanceExempt with the reason). make verify-tool-approval fails on a shipped MCPServer that is neither here nor in governanceExempt, and on a safe entry that names a floor or no tool of its server, or whose name starts with a write verb (create, delete, exec, set, approve, ...) unless a `# safe-write: <tool>: <reason>` comment above `safe:` says why it reads. |
 | governanceExempt | object | `{"capi":"agent-platform-mcps' capi family (mcp-kubernetes' CAPI tools): every tool reads","prometheus":"agent-platform-mcps' prometheus family (mcp-prometheus): every tool reads"}` | MCPServer sources the platform ships that muster deliberately does not govern, each with its reason (make verify-tool-approval wants every shipped source in governedServers or here). Read by the meta chart's tests only. |
 | tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: bound to agent-platform:platform-user in the kagent namespace, and, while musterMcpServerViewers is unset, to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, gives this to every user. It also gives it to every ServiceAccount, so every pod in the cluster can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. To give it to people only, replace the default with an OIDC group that every user belongs to, written as the API server sees it (with the installation's OIDC groups prefix). |
-| tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. |
+| tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The default names two admin groups of the chart's original deployment, kept from before tool approval: replace them with the installation's own. |
 | tenants.platform.kagentRelease.name | string | `""` | The name of kagent's HelmRelease in the kagent namespace. Empty, the default, admits none. |
 | tenants.platform.kagentRelease.writers | list | `[]` | The identities that write it: RBAC-style subjects of kind User, Group or ServiceAccount (with its namespace), as the API server sees them (a kubeconfig's user or group, a Flux ServiceAccount). |
 | tenants.platformTeam | list | `[]` | The customer's platform team, per installation: RBAC subjects bound to agent-platform:editor in the kagent namespace beside `platform.editors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation). |

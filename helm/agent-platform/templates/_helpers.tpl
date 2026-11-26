@@ -5163,6 +5163,9 @@ Usage: include "agent-platform.muster.governance" $root | fromJson
 {{- $_ := set $out "roleFloors" $floors -}}
 {{- end -}}
 {{- else -}}
+{{- if dig "roleFloors" nil (.Values.governance | default dict) -}}
+{{- fail (printf "governance.roleFloors is set, but this chart renders muster's governance configuration only from the muster release that reads it (agent-platform.muster.governanceFloor%s), so the floors would be dropped and the servers of those roles would not ask: remove governance.roleFloors until then" (ternary ", unset in this chart" (printf " %s, above components.muster.versionRange" $floor) (not $floor))) -}}
+{{- end -}}
 {{- if dig "muster" "governance" nil (.Values.muster | default dict) -}}
 {{- fail "muster.muster.governance is set, but this chart renders muster's governance configuration only from the muster release that reads it (agent-platform.muster.governanceFloor), and none is pinned: a mode passed to muster directly would claim a governed platform that governs nothing. Remove muster.muster.governance; the platform's governance is the governance value (mode, roleFloors)" -}}
 {{- end -}}

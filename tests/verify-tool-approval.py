@@ -30,9 +30,10 @@
 - governance floor: agent-platform.muster.governanceFloor is one X.Y.Z; its
   PLACEHOLDER-GOVERNANCE-FLOOR marker, while it is still there, appears once.
 - connector-admin: muster's mcpserver-editor Role (the platform's
-  connector-admin role) is bound to the configured groups: a placeholder group
-  nobody belongs to by default (agent-platform:connector-admins; never empty,
-  so muster's upgrade guard passes, never everyone), tenants.platformTeam
+  connector-admin role) is bound to the configured groups: by default a
+  ServiceAccount subject no identity provider can issue a token for
+  (kube-system/agent-platform-unset-connector-admins; never empty, so muster's
+  upgrade guard passes, never everyone, never a group name), tenants.platformTeam
   appended, an installation's own list standing.
 - role floors: governance.roleFloors renders muster.governance.roleFloors (a
   role an installation declares for its own server, usable in
@@ -544,17 +545,17 @@ def check_approval_config() -> None:
 
 def check_connector_admin() -> None:
     editor = block(muster_release([]), "      mcpServerEditor:")
-    if "name: agent-platform:connector-admins" not in editor or editor.count("name: ") != 1:
-        fail(f"connector admins by default are the placeholder group agent-platform:connector-admins alone:\n{editor}")
+    if "kind: ServiceAccount" not in editor or "name: agent-platform-unset-connector-admins" not in editor or "namespace: kube-system" not in editor or editor.count("name: ") != 1 or "kind: Group" in editor:
+        fail(f"connector admins by default are the unissuable ServiceAccount subject agent-platform-unset-connector-admins alone (no group an IdP could emit):\n{editor}")
     if "system:authenticated" in editor:
         fail(f"connector admins must not default to everyone:\n{editor}")
     team = block(muster_release(["--set", "tenants.platformTeam[0].kind=Group", "--set", "tenants.platformTeam[0].name=customer:platform"]), "      mcpServerEditor:")
-    if "name: customer:platform" not in team or "agent-platform:connector-admins" not in team:
+    if "name: customer:platform" not in team or "agent-platform-unset-connector-admins" not in team:
         fail(f"tenants.platformTeam must be appended to the connector admins:\n{team}")
     own = block(muster_release(["--set", "muster.rbac.mcpServerEditor.subjects[0].kind=Group", "--set", "muster.rbac.mcpServerEditor.subjects[0].name=ops"]), "      mcpServerEditor:")
-    if "name: ops" not in own or "agent-platform:connector-admins" in own:
+    if "name: ops" not in own or "agent-platform-unset-connector-admins" in own:
         fail(f"an installation's own connector admins must stand:\n{own}")
-    print("ok: the connector-admin role (muster's mcpserver-editor) binds a placeholder group nobody is in by default plus tenants.platformTeam, an own list standing")
+    print("ok: the connector-admin role (muster's mcpserver-editor) binds a ServiceAccount nobody holds by default plus tenants.platformTeam, an own list standing")
 
 
 def check_binder() -> None:
@@ -685,7 +686,7 @@ def check_approval() -> None:
         fail(f"a rule Block must render:\n{blocked}")
     forwarded = doc(render_meta(["--set", "mcp-kubernetes.mcpServer.approval.tools.exec=Block", "--set", "kagent.controllerRoute.mcp.approval.tools.invoke_session=Ask"]), "HelmRelease", "agent-platform-connectivity")
     if forwarded is None or "exec: Block" not in forwarded or "invoke_session: Ask" not in forwarded:
-        fail("per-connector overrides in the meta chart's values must reach the connectivity release (M1-AP-12)")
+        fail("per-connector overrides in the meta chart's values must reach the connectivity release")
     cleared = render(CONN_DIR, CONN + MCPK + ["--set-json", "mcp-kubernetes.mcpServer.approval=null"])
     if approval_of(cleared, "mcp-kubernetes"):
         fail("approval null must render no spec.approval")
@@ -741,6 +742,9 @@ def check_unset_floors_keep_everything_off() -> None:
         err = render_meta_fail(high + ["--set", "governance.mode=governed"])
         if "no muster release this chart knows reads the governance configuration yet" not in err or ">= " in err or "muster  or" in err:
             fail(f"with the governance floor unset `governed` must fail naming why, with no empty floor:\n{err}")
+        err = render_meta_fail(high + ["--set-json", 'governance.roleFloors={"exampleManager":["approve_change"]}'])
+        if "governance.roleFloors is set, but this chart renders muster's governance configuration only from" not in err:
+            fail(f"with the governance floor unset governance.roleFloors must fail, not be dropped:\n{err}")
         for own in (["--set", "muster.muster.governance.mode=governed"], ["--set", "muster.muster.governance.servers.agentManager[0]=am"]):
             err = render_meta_fail(high + own)
             if "muster.muster.governance is set" not in err:

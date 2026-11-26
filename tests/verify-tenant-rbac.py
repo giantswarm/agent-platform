@@ -379,14 +379,15 @@ def check_meta(chart: str) -> None:
             if d.get("kind") == "HelmRelease" and d["metadata"]["name"] == "muster":
                 return d["spec"]["values"].get("rbac", {})
         fail("no muster HelmRelease in the meta render")
-    defaults = {"mcpServerEditor": ["agent-platform:connector-admins"], "workflowEditor": ["agent-platform:workflow-editors"]}
+    defaults = {"mcpServerEditor": ["agent-platform-unset-connector-admins"], "workflowEditor": ["agent-platform-unset-workflow-editors"]}
+    team_names = [a.split("=", 1)[1] for a in TEAM if a.startswith("tenants.platformTeam[") and ".name=" in a]
     for role, want in defaults.items():
         if subject_names(muster_rbac([])[role]) != want:
             fail(f"muster.rbac.{role} changed without tenants.platformTeam")
     rbac = muster_rbac(TEAM)
     for role, want in defaults.items():
-        if subject_names(rbac[role]) != want + ["acme:platform", "giantswarm-ad:giantswarm-admins"]:
-            fail(f"muster.rbac.{role}.subjects are {subject_names(rbac[role])}, want the placeholder group and the platform team once each")
+        if subject_names(rbac[role]) != want + team_names:
+            fail(f"muster.rbac.{role}.subjects are {subject_names(rbac[role])}, want the placeholder subject and the platform team once each")
     ok("the meta chart appends tenants.platformTeam to muster's two editor bindings, each subject once")
 
 

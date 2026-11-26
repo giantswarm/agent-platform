@@ -392,7 +392,8 @@ documentation describes the settings and the prompts; further reading (optional)
   configuration (`{mode, roleFloors}`); a string there fails the render. Anything but the two values fails the render.
 - **`governance.roleFloors`** (default `{}`): role name to the server's own tool names that ask agents
   in both modes on the governed servers of that role, rendered as `muster.governance.roleFloors` and
-  added to muster's built-in floors (config never removes one). A role declared here is a valid
+  added to muster's built-in floors (config never removes one). Set while the chart renders no
+  governance configuration (below the muster governance floor) it fails the render. A role declared here is a valid
   `role` in `governedServers`, so an installation governs a server of its own:
 
   ```yaml
@@ -433,9 +434,10 @@ documentation describes the settings and the prompts; further reading (optional)
 - **The `connector-admin` role** is muster's `mcpserver-editor` Role in muster's namespace, bound to
   `muster.rbac.mcpServerEditor.subjects` plus `tenants.platformTeam`. Whoever holds it edits the
   namespace's connectors, sets their tool approval and may let an agent skip a tool's `Ask`. The
-  default is a placeholder group nobody belongs to unless the identity provider says so
-  (`agent-platform:connector-admins`; `muster.rbac.workflowEditor.subjects` likewise
-  `agent-platform:workflow-editors`): until the installation names its admin groups (as the API
+  default binds no person: a ServiceAccount subject the chart never creates and no identity provider
+  can issue a token for (`kube-system/agent-platform-unset-connector-admins`;
+  `muster.rbac.workflowEditor.subjects` likewise `agent-platform-unset-workflow-editors`), so a
+  real IdP group can never match it. Until the installation names its admin groups (as the API
   server sees them, with the OIDC groups prefix), only cluster admins edit connectors. The muster
   chart no longer binds `system:authenticated` and fails an upgrade with an empty list while its
   old binding exists; the placeholder keeps the list non-empty (`system:authenticated` makes

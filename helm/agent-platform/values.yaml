@@ -2741,14 +2741,15 @@ muster:  # @schema skipProperties: true; additionalProperties: true
   # Who may register MCPServers and author Workflows through muster's
   # writes-as-caller path. Every registered server and authored workflow is
   # visible to and routed through by other users, so the chart binds both
-  # editor Roles explicitly. The defaults are placeholder groups
-  # (agent-platform:connector-admins, agent-platform:workflow-editors) that
-  # nobody belongs to unless the installation's identity provider puts them
-  # there: until an installation names its own groups, nobody but a cluster
-  # admin registers servers, authors workflows or changes tool approval. Set
-  # the subjects to the installation's admin groups, written as the API server
-  # sees them (with the OIDC groups prefix); the meta chart appends
-  # tenants.platformTeam to both. An empty list fails muster's render.
+  # editor Roles explicitly. The defaults bind no person: a ServiceAccount
+  # subject (agent-platform-unset-connector-admins,
+  # agent-platform-unset-workflow-editors in kube-system) that the chart never
+  # creates and no identity provider can issue a token for (a group name could
+  # be matched by a real IdP group). Until an installation names its own
+  # subjects, nobody but a cluster admin registers servers, authors workflows
+  # or changes tool approval: fail closed. Replace them with the
+  # installation's admin groups, written as the API server sees them (with the
+  # OIDC groups prefix); the meta chart appends tenants.platformTeam to both. An empty list fails muster's render.
   #
   # mcpServerEditor is the platform's connector-admin role: whoever holds
   # muster's mcpserver-editor Role in muster's namespace edits every connector
@@ -2762,14 +2763,14 @@ muster:  # @schema skipProperties: true; additionalProperties: true
   rbac:
     mcpServerEditor:
       subjects:
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: agent-platform:connector-admins
+        - kind: ServiceAccount
+          name: agent-platform-unset-connector-admins
+          namespace: kube-system
     workflowEditor:
       subjects:
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: agent-platform:workflow-editors
+        - kind: ServiceAccount
+          name: agent-platform-unset-workflow-editors
+          namespace: kube-system
   # Muster's NetworkPolicy mirrors the umbrella's flavor split (`cilium` vs
   # `kubernetes`). `auto` (the default) is replaced by the resolved top-level
   # `networkPolicy.flavor` before the block is forwarded, so muster and the
@@ -5973,7 +5974,9 @@ tenants:
         kind: Group
         name: system:authenticated
     # -- The platform's operators: bound to agent-platform:editor in the
-    # kagent namespace. RBAC subjects.
+    # kagent namespace. RBAC subjects. The default names two admin groups of
+    # the chart's original deployment, kept from before tool approval: replace
+    # them with the installation's own.
     editors:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
       - apiGroup: rbac.authorization.k8s.io
         kind: Group

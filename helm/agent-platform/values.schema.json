@@ -3596,7 +3596,7 @@
                     "properties": {
                         "editors": {
                             "type": "array",
-                            "description": "The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects.",
+                            "description": "The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The default names two admin groups of the chart's original deployment, kept from before tool approval: replace them with the installation's own.",
                             "items": {
                                 "type": "object",
                                 "required": [

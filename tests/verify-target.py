@@ -393,7 +393,10 @@ def check_hooks(meta: str) -> None:
     if jobs(helm(meta, runtime)):
         sys.exit("FAIL: the runtime shape (engine off) renders a hook Job; a cluster's own Flux gets no hook of the kagent line")
     with_knob = helm(meta, [*runtime, "-f", f"{meta}/ci/test-target-values.yaml"])
-    if jobs(with_knob) or "kind: ServiceAccount" in with_knob:
+    # A ServiceAccount object (a document), not a subject named in a
+    # release's values (muster's editor placeholders are ServiceAccount
+    # subjects).
+    if jobs(with_knob) or any(kind == "ServiceAccount" for kind, _ in documents(with_knob)):
         sys.exit("FAIL: a hook Job or its identity renders with the target knob; hooks run on the installation, not on the target")
     ok("no hook Job renders with the target knob, none without it on the runtime shape")
 

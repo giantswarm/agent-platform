@@ -1407,14 +1407,14 @@ spec:
       rbac:
         mcpServerEditor:
           subjects:
-          - apiGroup: rbac.authorization.k8s.io
-            kind: Group
-            name: agent-platform:connector-admins
+          - kind: ServiceAccount
+            name: agent-platform-unset-connector-admins
+            namespace: kube-system
         workflowEditor:
           subjects:
-          - apiGroup: rbac.authorization.k8s.io
-            kind: Group
-            name: agent-platform:workflow-editors
+          - kind: ServiceAccount
+            name: agent-platform-unset-workflow-editors
+            namespace: kube-system
       replicaCount: 2
     musterMcpServerViewers: null
     networkPolicy:
@@ -2192,14 +2192,14 @@ spec:
     rbac:
       mcpServerEditor:
         subjects:
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: agent-platform:connector-admins
+        - kind: ServiceAccount
+          name: agent-platform-unset-connector-admins
+          namespace: kube-system
       workflowEditor:
         subjects:
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: agent-platform:workflow-editors
+        - kind: ServiceAccount
+          name: agent-platform-unset-workflow-editors
+          namespace: kube-system
     replicaCount: 2
 ---
 # Source: agent-platform/templates/components.yaml
