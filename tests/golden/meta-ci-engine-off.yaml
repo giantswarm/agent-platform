@@ -50,6 +50,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -201,7 +205,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 3.5.8
+          tag: 3.5.10
       networkPolicy:
         egress:
           cidrs: []
@@ -356,7 +360,7 @@ spec:
         image:
           name: giantswarm/kubectl
           registry: gsoci.azurecr.io
-          version: v1.37.2
+          version: v1.37.3
       disabledExtensions:
       - page:gs/clusters
       - nav-item:gs/clusters
@@ -571,6 +575,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -1090,8 +1098,7 @@ spec:
       networkPolicy:
         enabled: false
       oauth:
-        dex:
-          allowPrivateURLs: false
+        dex: {}
         downstream:
           enabled: true
         enabled: true
@@ -1749,6 +1756,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2171,6 +2182,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2395,6 +2410,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2495,6 +2514,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2531,8 +2554,7 @@ spec:
     networkPolicy:
       enabled: false
     oauth:
-      dex:
-        allowPrivateURLs: false
+      dex: {}
       downstream:
         enabled: true
       enabled: true
@@ -2614,6 +2636,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2758,6 +2784,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -3005,6 +3035,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -3186,6 +3220,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: https://dex.ci.example.com
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -3250,8 +3288,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=3.5.0-rc.1 <4.0.0-0"
-    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
+    semver: ">=3.5.8 <4.0.0"
 ---
 # Source: agent-platform/templates/components.yaml
 apiVersion: source.toolkit.fluxcd.io/v1

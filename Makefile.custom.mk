@@ -4679,6 +4679,14 @@ verify-manager-grant-broker-egress: ## Assert cluster/model manager grant broker
 	  done; \
 	done
 
+.PHONY: verify-s3-retention
+verify-s3-retention: ## Assert AWS backup and snapshot stores retain their bucket and security controls in managed and observe-only modes; exercise the remediation script's guards.
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_XP_AWS) -f $(SUBSTRATE_STORE_CI) --set kagent.harness.snapshotLocation= >$(VERIFY_TMP)/s3-retention.yaml
+	@bash tests/verify-s3-retention.sh $(VERIFY_TMP)/s3-retention.yaml managed
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_XP_AWS) -f $(SUBSTRATE_STORE_CI) --set kagent.harness.snapshotLocation= --set postgres.backup.crossplane.observeOnly=true --set kagent.harness.snapshotStore.crossplane.observeOnly=true >$(VERIFY_TMP)/s3-retention-observe.yaml
+	@bash tests/verify-s3-retention.sh $(VERIFY_TMP)/s3-retention-observe.yaml observe
+	@bash tests/verify-orphan-s3-public-access-block.sh
+
 # --- verify-all --------------------------------------------------------------
 # Every offline assertion of this repository in one target, which is what CI
 # runs. The list is read out of this file, so a new verify-* target reaches CI

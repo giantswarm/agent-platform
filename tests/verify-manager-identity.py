@@ -16,6 +16,7 @@ Usage: verify-manager-identity.py <meta chart> <connectivity chart> [helm flags.
 The helm flags (the Makefile's VM: API versions, required inputs) go to both renders.
 """
 
+import copy
 import re
 import subprocess
 import sys
@@ -26,8 +27,11 @@ import yaml
 MANAGERS = ("model-manager", "agent-manager", "vm-manager", "cluster-manager", "skill-manager")
 # Blocks the connectivity release does not receive (components.agent-platform-connectivity.omitKeys).
 NOT_IN_CONNECTIVITY = ("skill-manager",)
+DEX_OPT_IN_UNSET = ("model-manager",)
 # Components with an oauth block that this script does not render, and where they are covered.
 EXEMPT = {"workspace-manager": "needs the workspaces fixture; verify-workspace-manager and verify-idp-egress cover it"}
+# The managers that call the Kubernetes API as the person (oauth.downstream).
+DOWNSTREAM = ("model-manager", "agent-manager", "cluster-manager")
 ROUTED = {"model-manager": "/model-manager", "agent-manager": "/agent-manager"}
 ISSUER = "https://dex.ci.example.com"
 CLIENT = "muster-acme"
@@ -98,6 +102,24 @@ def oauth(rels: dict[str, dict], name: str) -> dict:
     return rels[name].get("oauth", {})
 
 
+def required_audiences(rels: dict[str, dict], name: str):
+    return rels[name].get("muster", {}).get("mcpServer", {}).get("auth", {}).get("requiredAudiences")
+
+
+def merge(dst: dict, src: dict) -> None:
+    for key, value in src.items():
+        if isinstance(value, dict) and isinstance(dst.get(key), dict):
+            merge(dst[key], value)
+        else:
+            dst[key] = copy.deepcopy(value)
+
+
+def layout_value(layout: dict) -> str:
+    while isinstance(layout, dict):
+        layout = next(iter(layout.values()))
+    return layout
+
+
 def expect(what: str, got, want) -> None:
     if got != want:
         sys.exit(f"FAIL: {what}: got {got!r}, want {want!r}")
@@ -152,6 +174,14 @@ def idp_rules(docs: list[dict], name: str) -> list[dict]:
     return rules
 
 
+def expect_no_dex_opt_in(label: str, name: str, manager_oauth: dict) -> None:
+    """model-manager's chart defaults the no-op opt-in to false, so its block leaves the key out; the others set it to false."""
+    if name in DEX_OPT_IN_UNSET:
+        expect(f"{label} obsolete Dex opt-in unset", "allowPrivateURLs" in manager_oauth.get("dex", {}), False)
+    else:
+        expect(f"{label} obsolete Dex opt-in", manager_oauth["dex"].get("allowPrivateURLs"), False)
+
+
 def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> None:
     for chart in (meta, conn):
         with open(f"{chart}/values.yaml") as source:
@@ -160,7 +190,7 @@ def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> Non
             if chart == conn and name in NOT_IN_CONNECTIVITY:
                 continue
             manager_oauth = values[name]["oauth"]
-            expect(f"{chart}: {name} obsolete Dex opt-in", manager_oauth["dex"].get("allowPrivateURLs"), False)
+            expect_no_dex_opt_in(f"{chart}: {name}", name, manager_oauth)
             expect(f"{chart}: {name} JWKS blanket unset", "sso" in manager_oauth, False)
         expect(f"{chart}: workspace-manager obsolete Dex opt-in", values["workspace-manager"]["oauth"]["dex"].get("allowPrivateURLs"), False)
         expect(f"{chart}: workspace-manager JWKS blanket unset", "sso" in values["workspace-manager"]["oauth"], False)
@@ -171,13 +201,13 @@ def verify_private_issuer_defaults(meta: str, conn: str, base: list[str]) -> Non
 
     rels = releases(meta, [*base, *ALL_ON, *LOGIN])
     for name in MANAGERS:
-        expect(f"{name} HelmRelease obsolete Dex opt-in", oauth(rels, name)["dex"].get("allowPrivateURLs"), False)
+        expect_no_dex_opt_in(f"{name} HelmRelease", name, oauth(rels, name))
         if name not in NOT_IN_CONNECTIVITY:
             forwarded = rels["agent-platform-connectivity"][name]["oauth"]
-            expect(f"connectivity {name} obsolete Dex opt-in", forwarded["dex"].get("allowPrivateURLs"), False)
+            expect_no_dex_opt_in(f"connectivity {name}", name, forwarded)
             expect(f"connectivity {name} JWKS blanket unset", "sso" in forwarded, False)
         expect(f"{name} HelmRelease JWKS blanket unset", "sso" in oauth(rels, name), False)
-    print("ok: the five manager releases and workspace-manager disable the obsolete Dex opt-in and set no JWKS blanket; mcp-kubernetes sets neither")
+    print("ok: the five manager releases and workspace-manager disable or leave out the obsolete Dex opt-in and set no JWKS blanket; mcp-kubernetes sets neither")
 
 
 def main() -> None:
@@ -217,6 +247,24 @@ def main() -> None:
     if egress is None or "dex.ci.example.com" not in yaml.safe_dump(egress):
         sys.exit("FAIL: derived: model-manager's egress does not reach the derived issuer")
     print("ok: derived")
+
+    print("--> global.identity: the managers that call the Kubernetes API as the person take its provider and audiences where their blocks leave them unset")
+    for name in DOWNSTREAM:
+        expect(f"{name} oauth.provider from global.identity.type", oauth(rels, name).get("provider"), "dex")
+        expect(f"{name} requiredAudiences from global.identity.kubernetes.audiences", required_audiences(rels, name), ["dex-k8s-authenticator"])
+    expect("skill-manager requiredAudiences (its own)", required_audiences(rels, "skill-manager"), ["dex-k8s-authenticator"])
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets(
+        "global.identity.kubernetes.audiences={api-a,api-b}",
+        "agent-manager.muster.mcpServer.auth.requiredAudiences={own}",
+    ), "--set-json", "cluster-manager.muster.mcpServer.auth.requiredAudiences=[]"])
+    expect("model-manager requiredAudiences from a set global", required_audiences(rels, "model-manager"), ["api-a", "api-b"])
+    expect("agent-manager requiredAudiences (its own wins)", required_audiences(rels, "agent-manager"), ["own"])
+    expect("cluster-manager requiredAudiences (its own empty list wins)", required_audiences(rels, "cluster-manager"), [])
+    expect("skill-manager requiredAudiences (not filled)", required_audiences(rels, "skill-manager"), ["dex-k8s-authenticator"])
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets("global.identity.type=google", "model-manager.oauth.provider=dex")])
+    expect("agent-manager oauth.provider from global.identity.type google", oauth(rels, "agent-manager").get("provider"), "google")
+    expect("model-manager oauth.provider (its own wins)", oauth(rels, "model-manager").get("provider"), "dex")
+    print("ok: global.identity")
 
     print("--> identity-provider egress: every manager's pods reach the login by name and through the in-cluster Gateway's proxy pods on 443 and 10443, not the cluster entity")
     docs = [d for d in yaml.safe_load_all(result.stdout) if d]
@@ -316,6 +364,47 @@ def main() -> None:
         sys.exit(f"FAIL: one login: the differing client did not fail the render by that guard\n{result.stderr}")
     print("ok: one login")
 
+    print("--> model-manager's values layout: the connectivity guard reads oauth.authorizationServer before the deprecated keys and names the key that differs")
+    agreed = sets(f"global.identity.issuerUrl={ISSUER}", f"global.identity.clientId={CLIENT}", f"global.identity.existingSecret={SECRET}")
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *agreed])
+    for key, layout, global_key, value in (
+        ("authorizationServer.upstream.issuer", {"authorizationServer": {"upstream": {"issuer": "https://other.example.com"}}}, "issuerUrl", ISSUER),
+        ("authorizationServer.upstream.client.id", {"authorizationServer": {"upstream": {"client": {"id": "other"}}}}, "clientId", CLIENT),
+        ("authorizationServer.upstream.client.secretKeyRef.name", {"authorizationServer": {"upstream": {"client": {"secretKeyRef": {"name": "other"}}}}}, "existingSecret", SECRET),
+        ("dex.clientID", {"dex": {"clientID": "other"}}, "clientId", CLIENT),
+    ):
+        values = copy.deepcopy(rels["agent-platform-connectivity"])
+        merge(values["model-manager"]["oauth"], layout)
+        result = connectivity(conn, values, base)
+        got = layout_value(layout)
+        want = f"model-manager.oauth.{key} ({got}) differs from global.identity.{global_key} ({value})"
+        if result.returncode == 0 or want not in result.stderr:
+            sys.exit(f"FAIL: values layout, {key}: the connectivity render did not fail with {want!r}\n{result.stderr}")
+        print(f"ok: values layout, {key}")
+
+    print("--> model-manager's values layout satisfies the absence guard, and the provider falls back to global.identity.type")
+    absent = sets("muster.muster.oauth.server.dex.clientId=", "muster.muster.oauth.server.existingSecret=", "global.domain=")
+    flags = [*base, *LOGIN, *absent, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "components.agentgateway.enabled=true")]
+    rels = releases(meta, flags)
+    values = copy.deepcopy(rels["agent-platform-connectivity"])
+    merge(values["model-manager"]["oauth"], {"authorizationServer": {"issuer": "https://mm.example.com", "upstream": {"client": {"id": CLIENT, "secretKeyRef": {"name": SECRET}}}}})
+    result = connectivity(conn, values, base)
+    if result.returncode != 0:
+        sys.exit(f"FAIL: values layout, absence: the new keys did not satisfy the guard\n{result.stderr}")
+    print("ok: values layout, absence")
+    values = copy.deepcopy(rels["agent-platform-connectivity"])
+    # Both charts default model-manager.oauth.provider to dex; null removes it.
+    values["model-manager"]["oauth"]["provider"] = None
+    values["global"]["identity"]["type"] = "google"
+    result = connectivity(conn, values, base)
+    if result.returncode != 0:
+        sys.exit(f"FAIL: values layout, global.identity.type google: the Dex absence guard fired\n{result.stderr}")
+    merge(values["model-manager"]["oauth"], {"authorizationServer": {"upstream": {"type": "dex"}}})
+    result = connectivity(conn, values, base)
+    if result.returncode == 0 or "model-manager.oauth.dex.clientID is empty" not in result.stderr:
+        sys.exit(f"FAIL: values layout, upstream.type dex over global.identity.type google: the Dex absence guard did not fire\n{result.stderr}")
+    print("ok: values layout, provider: oauth.authorizationServer.upstream.type, else global.identity.type")
+
     print("--> absent: what cannot be derived fails the connectivity render naming the key")
     for what, extra, fragments in (
         ("no Secret", sets("muster.muster.oauth.server.existingSecret="), ("none of model-manager.oauth.existingSecret", "set muster.muster.oauth.server.existingSecret")),
@@ -361,7 +450,7 @@ def main() -> None:
     print("--> no login named (muster's issuer unset): nothing filled, the guard stays silent")
     rels = releases(meta, [*base, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
                                         "kagent.controller.image.repository=giantswarm/kagent/controller")])
-    expect("model-manager oauth.dex", oauth(rels, "model-manager").get("dex"), {"allowPrivateURLs": False})
+    expect("model-manager oauth.dex", oauth(rels, "model-manager").get("dex") or {}, {})
     result = connectivity(conn, rels["agent-platform-connectivity"], base)
     if result.returncode != 0:
         sys.exit(f"FAIL: no login: the connectivity render failed\n{result.stderr}")

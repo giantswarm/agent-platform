@@ -4401,6 +4401,40 @@ Usage: include "agent-platform.scheduling.apply" (dict "values" $shaped)
 {{- end -}}
 
 {{/*
+The installation's login facts in the managers that call the Kubernetes API as
+the person (oauth.downstream): model-manager, agent-manager and
+cluster-manager. What a block leaves unset is filled from global.identity:
+oauth.provider from type, and muster.mcpServer.auth.requiredAudiences from
+kubernetes.audiences, the audiences muster requests at login so the forwarded
+ID token passes the API server (AuthenticationConfiguration
+jwt[].issuer.audiences). A value in the block wins, an empty list included.
+Runs on the $shaped copy before agent-platform.identity.apply, which reads the
+filled provider. Emits nothing.
+Usage: include "agent-platform.identity.defaults" (dict "values" $shaped)
+*/}}
+{{- define "agent-platform.identity.defaults" -}}
+{{- $v := .values -}}
+{{- $identity := dig "global" "identity" dict $v -}}
+{{- $type := dig "type" "" $identity -}}
+{{- $audiences := dig "kubernetes" "audiences" list $identity -}}
+{{- range $name := list "model-manager" "agent-manager" "cluster-manager" -}}
+{{- $block := index $v $name -}}
+{{- if kindIs "map" $block -}}
+{{- $oauth := index $block "oauth" -}}
+{{- if and $type (kindIs "map" $oauth) (not (hasKey $oauth "provider")) }}{{ $_ := set $oauth "provider" $type }}{{ end -}}
+{{- if $audiences -}}
+{{- $node := $block -}}
+{{- range $key := list "muster" "mcpServer" "auth" -}}
+{{- if not (kindIs "map" (index $node $key)) }}{{ $_ := set $node $key dict }}{{ end -}}
+{{- $node = index $node $key -}}
+{{- end -}}
+{{- if not (hasKey $node "requiredAudiences") }}{{ $_ := set $node "requiredAudiences" (deepCopy $audiences) }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The platform's one login in the managers' OAuth blocks
 (giantswarm/agent-platform#484). model-manager, agent-manager, vm-manager,
 cluster-manager, workspace-manager and skill-manager are OAuth resource servers

@@ -406,7 +406,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 3.5.8
+          tag: 3.5.10
       networkPolicy:
         egress:
           cidrs: []
@@ -557,7 +557,7 @@ spec:
         image:
           name: giantswarm/kubectl
           registry: gsoci.azurecr.io
-          version: v1.37.2
+          version: v1.37.3
       disabledExtensions:
       - page:gs/clusters
       - nav-item:gs/clusters
@@ -768,6 +768,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -1264,8 +1268,7 @@ spec:
       networkPolicy:
         enabled: false
       oauth:
-        dex:
-          allowPrivateURLs: false
+        dex: {}
         downstream:
           enabled: true
         enabled: true
@@ -1837,6 +1840,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -1979,6 +1986,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2015,8 +2026,7 @@ spec:
     networkPolicy:
       enabled: false
     oauth:
-      dex:
-        allowPrivateURLs: false
+      dex: {}
       downstream:
         enabled: true
       enabled: true
@@ -2097,6 +2107,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -2243,6 +2257,10 @@ spec:
         clientId: ""
         existingSecret: ""
         issuerUrl: ""
+        kubernetes:
+          audiences:
+          - dex-k8s-authenticator
+        type: dex
       imagePullSecrets: []
       observability:
         metrics:
@@ -5093,7 +5111,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.2"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.3"
           args:
             - "apply"
             - "--server-side"
@@ -5192,7 +5210,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.2"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.3"
           args:
             - "delete"
             - "jobs.batch"
@@ -5692,7 +5710,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.2"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.3"
           args:
             - "delete"
             - "fluxinstances.fluxcd.controlplane.io"
@@ -5788,7 +5806,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.2"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.3"
           args:
             - "delete"
             - "--namespace"

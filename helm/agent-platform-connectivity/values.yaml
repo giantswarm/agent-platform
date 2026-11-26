@@ -31,6 +31,22 @@ global:
     ca:
       secretName: ""
       key: ca.crt
+    # The kind of OpenID Provider: dex or google. Empty: dex. Charts that
+    # follow mcp-oauth's values layout (model-manager) use it where their own
+    # oauth.authorizationServer.upstream.type and oauth.provider are empty.
+    # The meta chart fills the managers' oauth.provider from it.
+    type: ""  # @schema enum: ["", dex, google]
+    kubernetes:
+      # The audiences the Kubernetes API server accepts on this provider's
+      # tokens (AuthenticationConfiguration jwt[].issuer.audiences, or the
+      # flag oidc-client-id): a forwarded ID token passes when its aud holds
+      # at least one. muster requests them from Dex as cross-client audiences
+      # at login. [dex-k8s-authenticator] on Giant Swarm clusters; with
+      # Google, the login client id, since Google adds no audiences.
+      # Charts that follow mcp-oauth's values layout (model-manager) use it
+      # where their own muster.mcpServer.auth.requiredAudiences is empty.
+      # The meta chart fills the managers' requiredAudiences from it.
+      audiences: []  # @schema item: string
   gatewayApi:
     # The public Gateway every route attaches to when neither the route's own
     # parentRefs/parentRef override nor the chart-owned edge
@@ -2478,8 +2494,6 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
   oauth:
     enabled: true
     provider: dex
-    dex:
-      allowPrivateURLs: false
     downstream:
       enabled: true
   muster:
@@ -2916,7 +2930,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 3.5.8
+      tag: 3.5.10
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
@@ -3593,7 +3607,7 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
       # The registry tags this image `v1.33.5`, `v1.37.0`, ...: the `v` is part
       # of the tag, Renovate bumps the digits after it.
       # registry: gsoci.azurecr.io/giantswarm/kubectl
-      version: "v1.37.2"
+      version: "v1.37.3"
 
 # === Kubernetes MCP server (mcp-kubernetes) ===
 # The mcp-kubernetes chart's own values are forwarded verbatim by the meta
