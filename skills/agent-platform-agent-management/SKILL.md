@@ -2,7 +2,7 @@
 name: agent-platform-agent-management
 description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.3.0"
+  version: "3.3.1"
 ---
 
 # Managing agents and their building blocks
@@ -159,10 +159,11 @@ never assume an argument. The agent tools drop an unknown key without an error: 
 - **Icon**: `iconUrl` only where the installation serves avatars; omit it otherwise.
 - **Confirm every choice you made for the person** — the technical name above all, and the display
   name, description and system prompt verbatim — and wait for a yes before writing. Write the plan in
-  your reply text first: owner (the organization), name, display name, description, harness, model,
-  toolset, connectors, skills, egress and system prompt. The person sees neither your tool calls' arguments nor `validate_agent`'s output,
-  and an `ask_user` question carries no plan, so never point at "the plan above" you have not written
-  out; when the person says they see none, write it out instead of asking again. When a tool cannot
+  your reply text and end your turn there: owner (the organization), name, display name, description,
+  harness, model, toolset, connectors, skills, egress and system prompt. The person's next message is
+  the answer; never confirm the plan with `ask_user`. The person sees neither your reasoning, your tool
+  calls' arguments nor `validate_agent`'s output, so never point at "the plan above" you have not
+  written out; when the person says they see none, write it out instead of asking again. When a tool cannot
   express what the person confirmed, stop and say so; never run a different write instead.
   Delete only on an explicit request that names the agent, one at a time.
 
