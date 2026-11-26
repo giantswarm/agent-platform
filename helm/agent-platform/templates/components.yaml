@@ -267,6 +267,7 @@ knowledge:
 {{- include "agent-platform.validateInlineSecrets" . -}}
 {{- include "agent-platform.validatePinnedLoginConnector" . -}}
 {{- include "agent-platform.validateToolsetPresets" . -}}
+{{- include "agent-platform.validateAgentChartLine" . -}}
 {{- $root := . -}}
 {{- $g := .Values.gitops -}}
 {{- /* Flux is the only render engine. Agents are Flux objects on every path

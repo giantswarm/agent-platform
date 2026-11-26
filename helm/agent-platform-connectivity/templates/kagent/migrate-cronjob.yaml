@@ -3,8 +3,13 @@ The cut-over of one installation's agents to the api.kagent.dev line
 (giantswarm/agent-platform#346 for the shape; bumblebee-plans#51 D11,
 expand–contract): `agent-manager migrate`, run once per pod template, in the
 kagent namespace, as the ServiceAccount of the migration's own name
-(migrate-rbac.yaml), never the agents' Flux identity. The 2.x range of
-agent-manager.agentChart.semver picks the 1.x -> 2.x
+(migrate-rbac.yaml), never the agents' Flux identity. The major of
+agent-manager.agentChart.semver picks the path. A 3.x range picks 2.x -> 3.x
+(agent chart 3.0, giantswarm/giantswarm#38902 slice 8): the command rewrites
+muster.requireApproval: true to default: Ask and spells out the 2.x
+modelConfig.name default, before it moves a namespace's OCIRepository to 3.x,
+and emits the same as a diff for a GitOps-owned release; both lines render
+the same Agent, so nothing is deleted. A 2.x range picks the 1.x -> 2.x
 path: the command validates every Generic-chart release against the chart
 2.x schema, rewrites the portal-created ones (sub-agent bindings `agent` ->
 `subAgent`, the 1.x Harness admission label -> agent.harness) and moves the

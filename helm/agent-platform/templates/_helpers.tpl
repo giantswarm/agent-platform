@@ -2172,6 +2172,78 @@ Usage: include "agent-platform.muster.sessionBindings" . | fromJson
 {{- define "agent-platform.muster.toolsetBindingFloor" -}}5.49.0{{- end -}}
 
 {{/*
+The first agent-manager whose migrate has the Generic chart 2.x -> 3.x hop
+(giantswarm/giantswarm#38902, slice 8): agent chart 3.0 removes
+muster.requireApproval, and that migrate rewrites it to default: Ask before
+it moves a namespace's chart source. The same release as
+agent-platform.agentManager.toolApprovalFloor; a placeholder until it exists.
+One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.agentManager.agentChartV3Floor" -}}3.6.0{{- end -}}
+
+{{/*
+The majors a range admits among 2 and 3, as a JSON list of strings: probed with each
+major's first, a middle and a late release version, which covers the forms
+the agent chart line takes (x-ranges, bounds, carets, tildes).
+Usage: include "agent-platform.agentChart.majors" "<range>" | fromJsonArray
+*/}}
+{{- define "agent-platform.agentChart.majors" -}}
+{{- $range := toString . -}}
+{{- $out := list -}}
+{{- range $m := list 2 3 -}}
+{{- $hit := false -}}
+{{- range $v := list (printf "%d.0.0" $m) (printf "%d.6.0" $m) (printf "%d.999.999" $m) -}}
+{{- if semverCompare $range $v -}}{{- $hit = true -}}{{- end -}}
+{{- end -}}
+{{- if $hit -}}{{- $out = append $out (toString $m) -}}{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The agent chart line (agent-manager.agentChart.semver) moves to 3.x only
+together with what makes that safe (slice 8): agent chart 3.0 removes
+muster.requireApproval, which agent-manager's migrate rewrites to
+`default: Ask` from agent-platform.agentManager.agentChartV3Floor, and muster
+enforces `default: Ask` from agent-platform.muster.agentApprovalFloor with
+agent-manager binding it (agent-manager.muster.toolApproval, derived on from
+those floors). The same range reaches the agent-platform-operator, which moves
+every organization's chart source at once, and the migrate run; the default
+agent's range (components.default-agent.versionRange) moves with it. A range
+spanning 2.x and 3.x is refused: migrate moves releases to one major. Emits
+nothing; fails naming the key and the fix.
+*/}}
+{{- define "agent-platform.validateAgentChartLine" -}}
+{{- $am := index .Values "agent-manager" | default dict -}}
+{{- $range := dig "agentChart" "semver" "2.x" $am | toString -}}
+{{- $majors := include "agent-platform.agentChart.majors" $range | fromJsonArray -}}
+{{- if gt (len $majors) 1 -}}
+{{- fail (printf "agent-manager.agentChart.semver %q admits agent chart 2.x and 3.x: agent-manager's migrate moves an installation's agents to exactly one major; use \">=3.0.0 <4.0.0\" (or a 2.x range)" $range) -}}
+{{- end -}}
+{{- $v3 := has "3" $majors -}}
+{{- if and $v3 (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) -}}
+{{- $amFloor := include "agent-platform.agentManager.agentChartV3Floor" . -}}
+{{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" $amFloor)) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q moves the agents to agent chart 3.x, but components.agent-manager.versionRange %q admits a release below %s: agent chart 3.0 removes muster.requireApproval, and only agent-manager %s's migrate rewrites it to default: Ask before it moves a namespace's chart source; move components.agent-manager.versionRange to %s or later in the same change" $range (dig "agent-manager" "versionRange" "" .Values.components) $amFloor $amFloor $amFloor) -}}
+{{- end -}}
+{{- $musterFloor := include "agent-platform.muster.agentApprovalFloor" . -}}
+{{- if not (and (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" $musterFloor))) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q moves the agents to agent chart 3.x, but muster is off or components.muster.versionRange %q admits a release below %s: chart 3.0 replaces muster.requireApproval with default: Ask, which only muster %s enforces; move components.muster.versionRange to %s or later in the same change" $range (dig "muster" "versionRange" "" .Values.components) $musterFloor $musterFloor $musterFloor) -}}
+{{- end -}}
+{{- $ownTa := dig "muster" "toolApproval" "enabled" nil $am -}}
+{{- if and (not (kindIs "invalid" $ownTa)) (not $ownTa) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q moves the agents to agent chart 3.x, but agent-manager.muster.toolApproval.enabled is false: an agent migrated from muster.requireApproval to default: Ask would start no Session (agent-manager refuses settings it does not bind); leave the key unset" $range) -}}
+{{- end -}}
+{{- end -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "default-agent") -}}
+{{- $da := dig "default-agent" "versionRange" "" .Values.components | toString -}}
+{{- if and $da (ne (has "3" (include "agent-platform.agentChart.majors" $da | fromJsonArray)) $v3) -}}
+{{- fail (printf "components.default-agent.versionRange %q and agent-manager.agentChart.semver %q select different agent chart majors: the default agent is a release of the same chart and moves with the line (\">=3.0.0 <4.0.0\" for both, or a 2.x range for both)" $da $range) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 While muster trusts the actor JWT, agent-manager is told so
 (muster.actorBearer) and binds every Session with the agent's toolset: the
 floors of components.agent-manager.versionRange and components.muster.versionRange

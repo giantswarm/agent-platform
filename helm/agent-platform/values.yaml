@@ -1230,7 +1230,8 @@ components:  # @schema additionalProperties: true
     chart: agent
     repository: oci://gsoci.azurecr.io/charts/giantswarm
     # The agent chart line, moved with agent-manager.agentChart.semver
-    # (make verify-default-agent). The floor is 2.6.0, whose empty
+    # (make verify-default-agent; another major fails the render,
+    # agent-platform.validateAgentChartLine). The floor is 2.6.0, whose empty
     # modelConfig.name renders no model (giantswarm/agent#130).
     versionRange: ">=2.6.0 <3.0.0"
     valuesFile: agents/default-agent/values.yaml
@@ -5357,7 +5358,17 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # the v1alpha2 Agent of kagent 0.10. A range, so patch and minor releases
     # of the line reach the agents on their own; the major is the API boundary
     # and moves only with this chart. The floor moves with components.kagent
-    # and components.default-agent.versionRange.
+    # and components.default-agent.versionRange. The same range reaches
+    # agent-manager's migrate run and the agent-platform-operator, which moves
+    # every organization's chart source at once. 3.x (chart 3.0 removes
+    # muster.requireApproval, giantswarm/giantswarm#38902) renders only with
+    # components.agent-manager.versionRange at
+    # agent-platform.agentManager.agentChartV3Floor (its migrate rewrites
+    # requireApproval to default: Ask before it moves a namespace's source),
+    # components.muster.versionRange at agent-platform.muster.agentApprovalFloor
+    # (muster enforces default: Ask), agent-manager's tool approval on and the
+    # default agent's range on 3.x: move all of them in one change
+    # (agent-platform.validateAgentChartLine, make verify-agent-chart-line).
     semver: ">=2.6.0 <3.0.0"
   # Deprecated: set skillManager.sources. Read only while agent-manager does
   # not pin through the skill-manager (components.skill-manager off, or
