@@ -22,7 +22,7 @@ Every agent lives in one namespace, and that namespace is its owner (agent-manag
   the portal shows "Owner: Platform", "Available to all organizations". The default agent (`default-agent`) is one.
 - **An organization**: a team or customer with its own members, models, connectors and egress
   policies. Its agents are for its members only. It is a Giant Swarm `Organization` with the Agent
-  Platform enabled (`spec.agentPlatform.enabled`); agent-platform-operator creates its namespace.
+  Platform enabled (`spec.capabilities.agentPlatform.enabled`); agent-platform-operator creates its namespace.
 
 Organizations are an installation's opt-in. Without them every agent is the platform's. An
 `Organization` without the Agent Platform is not listed; its `org-<name>` namespace holds its

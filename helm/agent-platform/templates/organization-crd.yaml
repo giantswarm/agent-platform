@@ -2,17 +2,18 @@
 The `Organization` CRD (organizations.security.giantswarm.io) on a cluster
 without KaaS (agentPlatformOrganizations.organizationCRD.enabled,
 giantswarm/giantswarm#39496). An organization of the Agent Platform is an
-`Organization` with spec.agentPlatform.enabled (giantswarm/giantswarm#39492);
-on a management cluster the KaaS stack installs this CRD, on a cluster
-without KaaS nothing does, and organization-operator and rbac-operator do not
-run there.
+`Organization` with spec.capabilities.agentPlatform.enabled
+(giantswarm/giantswarm#39492); on a management cluster the KaaS stack
+installs this CRD, on a cluster without KaaS nothing does, and
+organization-operator and rbac-operator do not run there.
 
 A value, not detection, as for the Flux CRDs of the bundled engine (the
 glossary's "Bundled Flux"): off by default, so this chart never takes over the
 CRD of a cluster whose KaaS stack installed it. files/crds/ holds
 organization-operator's CRD as generated
-(giantswarm/organization-operator@de1bb4efe3753169aba06e6d389a4286b664709b,
-config/crd/bases/security.giantswarm.io_organizations.yaml; spec.admins from
+(giantswarm/organization-operator@fe4507764d200afc5b02998e5d3c639aae78b0cf,
+config/crd/bases/security.giantswarm.io_organizations.yaml; spec.admins,
+spec.capabilities and the status of each capability from
 giantswarm/organization-operator#673).
 
 A template, not a crds/ subchart: nothing in this chart is an `Organization`,

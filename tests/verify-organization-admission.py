@@ -24,8 +24,9 @@ policy holds:
 - an Organization with the Agent Platform enabled has a name that makes
   agents-<name> a namespace name;
 - an Organization's Agent Platform, once enabled, is not switched off: no
-  write sets spec.agentPlatform.enabled to false or removes the block, a
-  cluster-admin's neither; an Organization without it is not held;
+  write sets spec.capabilities.agentPlatform.enabled to false or removes it,
+  spec.capabilities.agentPlatform or spec.capabilities, a cluster-admin's
+  neither; an Organization without it is not held;
 - an editor reads and never writes the agent chart's OCIRepository;
 - the operator's ServiceAccount creates only the namespace agents-<organization>
   with the labels, deletes only labelled ones, writes RoleBindings
@@ -62,8 +63,8 @@ policy holds:
 - the HelmRelease field lock, also for the organization's Flux ServiceAccount;
 - an Organization with the Agent Platform enabled is deleted only with
   prune: enabled, and one applied
-  from git only once its delete pull request merged (Orphaned, reason
-  DeleteMerged); any other Organization is not held;
+  from git only once its delete pull request merged (AgentPlatformOrphaned,
+  reason DeleteMerged); any other Organization is not held;
 - the EgressPolicy floor;
 - the operator's copies are the operator's;
 - the sandbox shape holds with a Kyverno PolicyException for agents-* in place.
@@ -354,28 +355,28 @@ def crb(name, role, user):
 
 
 def org(name, enabled=True, prune=None, finalizers=None):
-    """An Organization (cluster-scoped). enabled=None: no spec.agentPlatform,
-    a KaaS-only organization."""
+    """An Organization (cluster-scoped). enabled=None: no
+    spec.capabilities.agentPlatform, a KaaS-only organization."""
     meta = {"name": name}
     if prune:
         meta["annotations"] = {"kustomize.toolkit.fluxcd.io/prune": prune}
     if finalizers:
         meta["finalizers"] = finalizers
-    spec = {} if enabled is None else {"agentPlatform": {"enabled": enabled}}
+    spec = {} if enabled is None else {"capabilities": {"agentPlatform": {"enabled": enabled}}}
     return {"apiVersion": "security.giantswarm.io/v1alpha1", "kind": "Organization", "metadata": meta, "spec": spec}
 
 
 # The organizations the operator judges applied from git, by the status it
-# writes: name -> (Orphaned status, reason).
+# writes: name -> (AgentPlatformOrphaned status, reason).
 ORPHANED = {"in-git": ("False", "InInventory"), "lost": ("True", "MissingFromGit"), "merged": ("True", "DeleteMerged")}
 
 
 def set_orphaned(name, status, reason):
-    condition = {"type": "Orphaned", "status": status, "reason": reason, "message": "test",
+    condition = {"type": "AgentPlatformOrphaned", "status": status, "reason": reason, "message": "test",
                  "lastTransitionTime": "2026-01-01T00:00:00Z"}
     args = ["patch", "organization", name, "--subresource=status", "--type=merge",
             "-p", json.dumps({"status": {"conditions": [condition]}})]
-    must(kubectl(args), f"set Orphaned {status}/{reason} on {name}")
+    must(kubectl(args), f"set AgentPlatformOrphaned {status}/{reason} on {name}")
 
 
 def helmrelease(name, namespace, **spec_extra):
@@ -971,19 +972,21 @@ def prove_organizations():
     case("the operator removes no other finalizer from an Organization",
          patch("organization", "held", None, {"metadata": {"finalizers": [FINALIZER]}}, as_=OP), policy, only)
     case("the operator changes no Organization's spec",
-         patch("organization", "payments", None, {"spec": {"agentPlatform": {"harnesses": ["default"]}}}, as_=OP), policy, only)
+         patch("organization", "payments", None, {"spec": {"capabilities": {"agentPlatform": {"harnesses": ["default"]}}}}, as_=OP), policy, only)
     case("the operator changes no Organization's labels",
          patch("organization", "payments", None, {"metadata": {"labels": {"team": "x"}}}, as_=OP), policy, only)
     case("the operator changes no Organization's annotations",
          patch("organization", "payments", None, {"metadata": {"annotations": {"kustomize.toolkit.fluxcd.io/prune": "enabled"}}}, as_=OP), policy, only)
     case("the operator creates no Organization", create(org("minted"), as_=OP), policy, "creates and deletes no Organization")
     case("the operator deletes no Organization", delete("organization", "kaas", None, as_=OP), policy, "creates and deletes no Organization")
-    condition = {"type": "Ready", "status": "True", "reason": "Reconciled", "message": "test", "lastTransitionTime": "2026-01-01T00:00:00Z"}
+    condition = {"type": "AgentPlatformReady", "status": "True", "reason": "Reconciled", "message": "test", "lastTransitionTime": "2026-01-01T00:00:00Z"}
+    status = {"namespaces": [{"name": ORG, "capability": "agentPlatform"}],
+              "capabilities": {"agentPlatform": {"snapshotPrefix": f"s3://snapshots/{UID}"}}, "conditions": [condition]}
     case("the operator writes an Organization's status",
          kubectl(["patch", "organization", "payments", "--subresource=status", "--type=merge", "--dry-run=server",
-                  "-p", json.dumps({"status": {"agentPlatform": {"namespace": ORG}, "conditions": [condition]}})], None, OP))
+                  "-p", json.dumps({"status": status})], None, OP))
     case("a cluster-admin changes an Organization's spec (not held)",
-         patch("organization", "payments", None, {"spec": {"agentPlatform": {"harnesses": ["default"]}}}, as_=PERSON))
+         patch("organization", "payments", None, {"spec": {"capabilities": {"agentPlatform": {"harnesses": ["default"]}}}}, as_=PERSON))
 
 
 def prove_names():
@@ -995,7 +998,8 @@ def prove_names():
     case("an Organization with the Agent Platform whose agents-<name> passes 63 characters is refused", create(org(long), as_=PERSON), policy)
     case("an Organization with the Agent Platform whose agents-<name> is 63 characters is created", create(org("a" * 56), as_=PERSON))
     case("an Organization without the Agent Platform keeps a dotted name (not held)", create(org("acme.io", enabled=None), as_=PERSON))
-    case("an Organization of a dotted name gets no Agent Platform", patch("organization", "dotted.io", None, {"spec": {"agentPlatform": {"enabled": True}}}, as_=PERSON),
+    case("an Organization of a dotted name gets no Agent Platform",
+         patch("organization", "dotted.io", None, {"spec": {"capabilities": {"agentPlatform": {"enabled": True}}}}, as_=PERSON),
          policy, "refused: dotted.io")
     case("an Organization enabled with a dotted name before the policy still takes the prune annotation (only turning it on is held)",
          patch("organization", "enabled.io", None, {"metadata": {"annotations": {"kustomize.toolkit.fluxcd.io/prune": "enabled"}}}, as_=PERSON))
@@ -1006,14 +1010,17 @@ def prove_switch_off():
     is refused for every writer, a cluster-admin too."""
     policy = "agent-platform-organization-switch-off"
     off = "the Agent Platform cannot be switched off for an organization yet"
-    case("a cluster-admin does not set an enabled Organization's spec.agentPlatform.enabled to false",
-         patch("organization", "payments", None, {"spec": {"agentPlatform": {"enabled": False}}}, as_=PERSON), policy, off + ": keep spec.agentPlatform.enabled: true; refused: payments")
-    case("a cluster-admin does not remove an enabled Organization's spec.agentPlatform.enabled",
-         patch("organization", "payments", None, {"spec": {"agentPlatform": {"enabled": None}}}, as_=PERSON), policy, off)
-    case("a cluster-admin does not remove an enabled Organization's spec.agentPlatform",
-         patch("organization", "payments", None, {"spec": {"agentPlatform": None}}, as_=PERSON), policy, off)
-    case("an Organization without the Agent Platform takes spec.agentPlatform.enabled: false (not held)",
-         patch("organization", "kaas", None, {"spec": {"agentPlatform": {"enabled": False}}}, as_=PERSON))
+    case("a cluster-admin does not set an enabled Organization's spec.capabilities.agentPlatform.enabled to false",
+         patch("organization", "payments", None, {"spec": {"capabilities": {"agentPlatform": {"enabled": False}}}}, as_=PERSON), policy,
+         off + ": keep spec.capabilities.agentPlatform.enabled: true; refused: payments")
+    case("a cluster-admin does not remove an enabled Organization's spec.capabilities.agentPlatform.enabled",
+         patch("organization", "payments", None, {"spec": {"capabilities": {"agentPlatform": {"enabled": None}}}}, as_=PERSON), policy, off)
+    case("a cluster-admin does not remove an enabled Organization's spec.capabilities.agentPlatform",
+         patch("organization", "payments", None, {"spec": {"capabilities": {"agentPlatform": None}}}, as_=PERSON), policy, off)
+    case("a cluster-admin does not remove an enabled Organization's spec.capabilities",
+         patch("organization", "payments", None, {"spec": {"capabilities": None}}, as_=PERSON), policy, off)
+    case("an Organization without the Agent Platform takes spec.capabilities.agentPlatform.enabled: false (not held)",
+         patch("organization", "kaas", None, {"spec": {"capabilities": {"agentPlatform": {"enabled": False}}}}, as_=PERSON))
 
 
 def prove_labels():
@@ -1129,7 +1136,7 @@ def prove_delete_intent():
          policy, "with the Agent Platform enabled erases its Agent Platform: set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on payments first")
     case("an Organization with the Agent Platform and prune: disabled is not deleted", delete("organization", "kept", None, as_=PERSON), policy)
     case("an Organization with the Agent Platform and prune: enabled is deleted", delete("organization", "retired", None, as_=PERSON))
-    case("an Organization without spec.agentPlatform is deleted (not held)", delete("organization", "kaas", None, as_=PERSON))
+    case("an Organization without spec.capabilities.agentPlatform is deleted (not held)", delete("organization", "kaas", None, as_=PERSON))
     case("an Organization with the Agent Platform disabled is deleted (not held)", delete("organization", "off", None, as_=PERSON))
     case("an Organization with the Agent Platform off that still carries the operator's finalizer is deleted (not held: no hold)",
          delete("organization", "switched-off", None, as_=PERSON))

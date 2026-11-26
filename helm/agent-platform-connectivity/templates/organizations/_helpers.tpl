@@ -3,8 +3,8 @@
 Helpers of the Agent Platform organizations' role and admission policies
 (templates/organizations/, giantswarm/agent-platform#1267). An organization
 is an `Organization` (security.giantswarm.io/v1alpha1, cluster-scoped) with
-spec.agentPlatform.enabled (giantswarm/giantswarm#39492). The names are the
-agent-platform-operator's (giantswarm/agent-platform-operator,
+spec.capabilities.agentPlatform.enabled (giantswarm/giantswarm#39492). The
+names are the agent-platform-operator's (giantswarm/agent-platform-operator,
 internal/controller): the labels it puts on the organization namespace
 agents-<name>, the label of what it writes there, and its finalizer.
 */}}

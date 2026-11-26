@@ -88,102 +88,96 @@ spec:
                 - kind
                 - name
                 x-kubernetes-list-type: map
-              agentPlatform:
+              capabilities:
                 description: |-
-                  AgentPlatform is the organization's share of the installation's Agent
-                  Platform. organization-operator does not read it.
+                  Capabilities are the settings of the platform capabilities the
+                  organization gets, one field for each capability.
                 properties:
-                  enabled:
+                  agentPlatform:
                     description: |-
-                      Enabled gives the organization the Agent Platform and its namespace
-                      there.
-                    type: boolean
-                  harnesses:
-                    description: Harnesses are the names of the curated Harnesses
-                      the organization gets.
-                    items:
-                      type: string
-                    type: array
-                    x-kubernetes-list-type: set
-                  workers:
-                    default: {}
-                    description: Workers sizes the organization's WorkerPool.
+                      AgentPlatform is the organization's share of the installation's Agent
+                      Platform. organization-operator does not read it.
                     properties:
-                      replicas:
-                        default: 1
+                      enabled:
                         description: |-
-                          Replicas is the number of warm workers of the organization's WorkerPool
-                          while the organization uses them: while its namespace holds a
-                          ModelConfig and an Agent (a curated copy counts), or a ModelConfig and
-                          a session. The pool runs 0 while the namespace holds no ModelConfig,
-                          while it holds no Agent and no session, and while the organization is
-                          Orphaned. A deleted organization runs Replicas until its sessions are
-                          gone, so kagent can suspend its actors, and 0 after.
+                          Enabled gives the organization the Agent Platform and its namespace
+                          there.
+                        type: boolean
+                      harnesses:
+                        description: Harnesses are the names of the curated Harnesses
+                          the organization gets.
+                        items:
+                          type: string
+                        type: array
+                        x-kubernetes-list-type: set
+                      workers:
+                        default: {}
+                        description: Workers sizes the organization's WorkerPool.
+                        properties:
+                          replicas:
+                            default: 1
+                            description: |-
+                              Replicas is the number of warm workers of the organization's WorkerPool
+                              while the organization uses them: while its namespace holds a
+                              ModelConfig and an Agent (a curated copy counts), or a ModelConfig and
+                              a session. The pool runs 0 while the namespace holds no ModelConfig,
+                              while it holds no Agent and no session, and while the organization's
+                              AgentPlatformOrphaned condition is True. A deleted organization runs
+                              Replicas until its sessions are gone, so kagent can suspend its actors,
+                              and 0 after.
 
-                          Not set means 1; 0 set on purpose runs no worker.
-                        format: int32
-                        minimum: 0
-                        type: integer
+                              Not set means 1; 0 set on purpose runs no worker.
+                            format: int32
+                            minimum: 0
+                            type: integer
+                        type: object
                     type: object
                 type: object
             type: object
           status:
             description: |-
               OrganizationStatus defines the observed state of Organization. More than
-              one controller writes it: organization-operator writes Namespace, the Agent
-              Platform's operator writes AgentPlatform. Each writer patches its own
-              fields and keeps the others. A JSON merge patch replaces the whole
-              Conditions list, so a writer of Conditions uses server-side apply with a
-              field manager of its own, or a patch with an optimistic lock.
+              one controller writes it: organization-operator writes Namespace and its
+              kaas entry of Namespaces, the Agent Platform's operator writes its
+              agentPlatform entry of Namespaces, Capabilities.AgentPlatform and its
+              AgentPlatform conditions. Each writer writes its own fields and entries and
+              keeps the others. A JSON merge patch replaces a whole list, so a writer of
+              Namespaces or Conditions uses server-side apply with a field manager of its
+              own, or a patch with an optimistic lock.
             properties:
-              agentPlatform:
+              capabilities:
                 description: |-
-                  AgentPlatform is what the Agent Platform's operator observed for the
-                  organization. organization-operator does not write it.
+                  Capabilities are what the operator of each capability observed for the
+                  organization, one field for each capability.
                 properties:
-                  erasureStep:
+                  agentPlatform:
                     description: |-
-                      ErasureStep is the erasure step the operator is on once the
-                      organization's Agent Platform is erased: Workloads, Sessions, Snapshots,
-                      Namespace or OutsideObjects. Empty while it is not erased.
-                    enum:
-                    - Workloads
-                    - Sessions
-                    - Snapshots
-                    - Namespace
-                    - OutsideObjects
-                    type: string
-                  lastAppliedRevision:
-                    description: |-
-                      LastAppliedRevision is the last source revision the installation
-                      Kustomization applied the organization from (e.g. <branch>@sha1:<sha>
-                      for a GitRepository): that Kustomization's status.lastAppliedRevision
-                      while the organization is in its settled inventory. It is kept while the
-                      organization is Orphaned, so a removed file can be found in that
-                      revision. Empty when no such revision was recorded.
-                    type: string
-                  namespace:
-                    description: |-
-                      Namespace is the namespace the Agent Platform's operator created for
-                      the organization. Read it from here; do not derive it from the name.
-                    type: string
-                  snapshotPrefix:
-                    description: |-
-                      SnapshotPrefix is where the organization's worker snapshots live,
-                      s3://<bucket>/<uid>. Empty when the operator has no snapshot bucket.
-                    type: string
-                  snapshotsErasedAt:
-                    description: |-
-                      SnapshotsErasedAt is when the operator first emptied the snapshot
-                      prefix of the erased organization; it empties it once more after the
-                      snapshot erase delay.
-                    format: date-time
-                    type: string
+                      AgentPlatform is what the Agent Platform's operator observed for the
+                      organization. organization-operator does not write it.
+                    properties:
+                      lastAppliedRevision:
+                        description: |-
+                          LastAppliedRevision is the last source revision the installation
+                          Kustomization applied the organization from (e.g. <branch>@sha1:<sha>
+                          for a GitRepository): that Kustomization's status.lastAppliedRevision
+                          while the organization is in its settled inventory. It is kept while the
+                          organization's AgentPlatformOrphaned condition is True, so a removed file
+                          can be found in that revision. Empty when no such revision was recorded.
+                        type: string
+                      snapshotPrefix:
+                        description: |-
+                          SnapshotPrefix is where the organization's worker snapshots live,
+                          s3://<bucket>/<uid>. The erasure deletes the prefix recorded here. Empty
+                          when the operator has no snapshot bucket.
+                        type: string
+                    type: object
                 type: object
               conditions:
                 description: |-
                   Conditions are the conditions of every controller that reconciles the
-                  organization, one for each type.
+                  organization, one for each type. The type of a capability's condition
+                  starts with the capability's name in upper camel case, for example
+                  AgentPlatformReady.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -246,6 +240,35 @@ spec:
                 description: Namespace is the namespace containing the resources for
                   this organization.
                 type: string
+              namespaces:
+                description: |-
+                  Namespaces are the organization's namespaces, one for each capability
+                  that gives the organization a namespace. The operator of each
+                  capability writes its own entry: the kaas entry is Namespace. Read a
+                  capability's namespace from here; do not derive it from the name.
+                items:
+                  description: |-
+                    OrganizationNamespace is a namespace of the organization and the capability
+                    it belongs to.
+                  properties:
+                    capability:
+                      description: |-
+                        Capability is the capability that the namespace belongs to, for example
+                        kaas or agentPlatform.
+                      minLength: 1
+                      type: string
+                    name:
+                      description: Name is the namespace's name.
+                      minLength: 1
+                      type: string
+                  required:
+                  - capability
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - capability
+                x-kubernetes-list-type: map
             type: object
         type: object
     served: true

@@ -2,10 +2,11 @@
 agent-platform:organizations-admin (giantswarm/agent-platform#1267): manages
 organizations and their members. It creates, changes and deletes
 `Organization` objects (security.giantswarm.io, cluster-scoped; an
-organization has the Agent Platform while spec.agentPlatform.enabled is
-true), and writes RoleBindings that bind agent-platform:user or editor. The
-organization's admins are its spec.admins: agent-platform-operator alone
-binds agent-platform:admin, from that list (giantswarm/giantswarm#39501,
+organization has the Agent Platform while
+spec.capabilities.agentPlatform.enabled is true), and writes RoleBindings
+that bind agent-platform:user or editor. The organization's admins are its
+spec.admins: agent-platform-operator alone binds agent-platform:admin, from
+that list (giantswarm/giantswarm#39501,
 agent-platform-organization-admin-bindings in admission.yaml). Nothing else
 of an organization: it reads agents, sessions or credentials only after
 binding itself, which shows in the organization's members.

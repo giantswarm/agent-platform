@@ -3125,9 +3125,9 @@ musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemR
 
 # === Agent Platform organizations (giantswarm/giantswarm#38891) ===
 # An Organization (security.giantswarm.io/v1alpha1, cluster-scoped) whose
-# spec.agentPlatform.enabled is true owns an organization namespace,
-# agents-<name>, labelled agent-platform.giantswarm.io/organization and
-# /organization-uid (giantswarm/giantswarm#39492).
+# spec.capabilities.agentPlatform.enabled is true owns an organization
+# namespace, agents-<name>, labelled agent-platform.giantswarm.io/organization
+# and /organization-uid (giantswarm/giantswarm#39492).
 # Off, the default, nothing of it renders. On (with kagent and Agent Substrate
 # on), the meta chart installs agent-platform-operator
 # (components.agent-platform-operator, which follows this switch) into the
