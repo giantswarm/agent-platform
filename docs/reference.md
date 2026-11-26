@@ -455,7 +455,7 @@ Optional components for a cluster that has none of these. All are **off by defau
   - Backstage and mcp-kubernetes need `global.domain` and `global.identity` (`issuerUrl`, `clientId`, `existingSecret` with `dex-client-secret`, plus `backstage-session-secret` for Backstage).
   - `kserve-llmisvc-resources` needs cert-manager and is the platform's one KServe controller.
   - On a cluster without Cilium, set `mcp-kubernetes.ciliumNetworkPolicy.enabled: false`.
-  - With OAuth enabled, muster registers mcp-kubernetes at `mcp-kubernetes.mcpKubernetes.oauth.baseURL` plus `/mcp`, defaulting to `https://<fullnameOverride>.<global.domain>/mcp`. The endpoint and protected-resource metadata must share an origin. Muster needs network access and TLS trust for this public endpoint; OAuth-disabled registrations use the in-cluster Service.
+  - The bundled mcp-kubernetes registration uses its in-cluster Service URL. Its canonical OAuth resource can differ from that transport URL. The Muster warning release accepts valid cross-origin resource identifiers with a `DEPRECATED:` warning for operator-managed backends; operators must verify the backend's ownership and tunnel mapping. This is an RFC 9728 compatibility exception, not exact resource validation. Tenant and discovered subject-scoped token-binding checks remain enforced. See [Muster browser origins and discovery](https://github.com/giantswarm/muster/blob/main/docs/reference/configuration.md#browser-origins-and-mcp-discovery).
 - **Order.**
   - `agent-platform-connectivity` dependsOn `cloudnative-pg` (for the CNPG `Cluster`) and `muster` (for the `MCPServer` CRD).
   - `model-manager` dependsOn `kserve-llmisvc-resources`.

@@ -26,7 +26,7 @@ import sys
 
 import yaml
 
-CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "global.domain=ci.example.com", "--set", "components.mcp-kubernetes.enabled=true", "--set", "components.muster.enabled=true"]
+CONN_BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "components.mcp-kubernetes.enabled=true", "--set", "components.muster.enabled=true"]
 CLUSTER_LABEL = "muster.giantswarm.io/management-cluster"
 TIER_LABEL = "agent-platform.giantswarm.io/tool-group"
 DISPLAY_NAME = "ui.giantswarm.io/display-name"
@@ -62,18 +62,6 @@ def main() -> None:
     if len(default) != 1:
         fail(f"default: want one mcp-kubernetes MCPServer, got {len(default)}")
     single = default[0]
-    missing_base = render(conn, CONN_BASE + ["--set", "global.domain="], expect_fail=True)
-    if "mcp-kubernetes OAuth registration needs" not in missing_base:
-        fail("OAuth registration without a public base URL or domain must fail naming its inputs")
-    public = mcpservers(render(conn, CONN_BASE + ["--set", "global.domain=example.com"]))[0]
-    if public["spec"]["url"] != "https://mcp-kubernetes.example.com/mcp":
-        fail("OAuth registration must use the public protected-resource origin")
-    explicit = mcpservers(render(conn, CONN_BASE + ["--set", "global.domain=", "--set", "mcp-kubernetes.mcpKubernetes.oauth.baseURL=https://kubernetes.example.com:8443/"]))[0]
-    if explicit["spec"]["url"] != "https://kubernetes.example.com:8443/mcp":
-        fail("OAuth registration must preserve an explicit public base URL and port")
-    anonymous = mcpservers(render(conn, CONN_BASE + ["--set", "mcp-kubernetes.mcpKubernetes.oauth.enabled=false", "--set", "mcp-kubernetes.fullnameOverride=kubernetes", "--set", "mcp-kubernetes.service.port=9090"]))[0]
-    if anonymous["spec"]["url"] != "http://kubernetes.default.svc.cluster.local:9090/mcp" or "auth" in anonymous["spec"]:
-        fail("anonymous registration must use the configured in-cluster Service")
     if single["spec"].get("auth", {}).get("forwardToken") is not False:
         fail("OAuth registration must explicitly disable ID-token forwarding")
     if single["metadata"]["name"] != "mcp-kubernetes" or CLUSTER_LABEL in single["metadata"]["labels"] or "family" in single["spec"]:
