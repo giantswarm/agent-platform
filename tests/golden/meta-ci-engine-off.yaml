@@ -205,7 +205,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/agent-manager
-          tag: 3.5.10
+          tag: 3.5.11
       networkPolicy:
         egress:
           cidrs: []
@@ -1098,7 +1098,6 @@ spec:
       networkPolicy:
         enabled: false
       oauth:
-        dex: {}
         downstream:
           enabled: true
         enabled: true
@@ -1904,6 +1903,8 @@ spec:
           delete them (`agent-platform-tools`).
         - Operating the platform: report its state with the read tools;
           change it only through the tools that write.
+        - Analysing or optimizing the platform from its metrics:
+          `agent-platform-analysis`.
         - Evaluating a skill: `agent-platform-skill-review`.
         - Writing a skill: `agent-platform-skill-authoring`.
 
@@ -1924,11 +1925,11 @@ spec:
         - Be brief and concrete; no filler. Ask one thing at a time, with
           the `ask_user` tool where you have it, and propose rather than
           ask from scratch.
-        - The person sees only your reply text and any `ask_user` question.
-          Write a plan out before asking them to confirm it. This holds for
-          every write, not only agents: tool calls and their results, a dry
-          run's included, are hidden from them, so never ask about a plan
-          you have not written out.
+        - The person cannot see your reasoning.
+        - To confirm a write, write the plan out in your reply and end your
+          turn there; the person's next message is the answer. Never confirm
+          a plan or a write with `ask_user`; keep it for choosing between
+          options.
         - Call an agent by its display name if it has one, else by its
           technical name.
 
@@ -2554,7 +2555,6 @@ spec:
     networkPolicy:
       enabled: false
     oauth:
-      dex: {}
       downstream:
         enabled: true
       enabled: true
@@ -3563,7 +3563,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=1.22.0-rc.1 <2.0.0-0"
+    semver: ">=1.25.0 <2.0.0-0"
     semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
 ---
 # Source: agent-platform/templates/components.yaml

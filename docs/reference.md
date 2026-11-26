@@ -283,7 +283,7 @@ Both services register with muster through their own `MCPServer` CR, so their to
 - The service presents that token to the Kubernetes API.
 - The user's RBAC decides. The ServiceAccount holds no permissions.
 
-The OAuth issuer, client, secret and base URL come from the block, else from `global.identity` / `global.domain`. Anything still unset is filled from muster's OAuth server block (`muster.muster.oauth.server.dex.*`, `.existingSecret`). The render fails if anything is still missing. Further egress destinations go in `modelManager.networkPolicy.egress` / `agentManager.networkPolicy.egress`.
+The OAuth issuer, client, secret and base URL come from the block, else from `global.identity` / `global.domain`. Anything still unset is filled from muster's OAuth server block (`muster.muster.oauth.server.dex.*`, `.existingSecret`). The render fails if anything is still missing. model-manager uses mcp-oauth's values layout, so the meta chart fills `model-manager.oauth.authorizationServer.upstream.issuer`, `.upstream.client.id`, `.upstream.client.secretKeyRef` and `.issuer`. Its deprecated `oauth.dex.*`, `oauth.existingSecret` and `oauth.baseURL` still win when set. model-manager's egress also reaches the issuer and key set hosts of `model-manager.oauth.resourceServer.trustedIssuers`. Further egress destinations go in `modelManager.networkPolicy.egress` / `agentManager.networkPolicy.egress`.
 
 `make verify-managers` covers the wiring and the guards.
 
@@ -455,6 +455,7 @@ Optional components for a cluster that has none of these. All are **off by defau
   - Backstage and mcp-kubernetes need `global.domain` and `global.identity` (`issuerUrl`, `clientId`, `existingSecret` with `dex-client-secret`, plus `backstage-session-secret` for Backstage).
   - `kserve-llmisvc-resources` needs cert-manager and is the platform's one KServe controller.
   - On a cluster without Cilium, set `mcp-kubernetes.ciliumNetworkPolicy.enabled: false`.
+  - The bundled mcp-kubernetes registration uses its in-cluster Service URL. Its canonical OAuth resource can differ from that transport URL. The Muster warning release accepts valid cross-origin resource identifiers with a `DEPRECATED:` warning for operator-managed backends; operators must verify the backend's ownership and tunnel mapping. This is an RFC 9728 compatibility exception, not exact resource validation. Tenant and discovered subject-scoped token-binding checks remain enforced. See [Muster browser origins and discovery](https://github.com/giantswarm/muster/blob/main/docs/reference/configuration.md#browser-origins-and-mcp-discovery).
 - **Order.**
   - `agent-platform-connectivity` dependsOn `cloudnative-pg` (for the CNPG `Cluster`) and `muster` (for the `MCPServer` CRD).
   - `model-manager` dependsOn `kserve-llmisvc-resources`.

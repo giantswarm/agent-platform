@@ -278,6 +278,33 @@ agent-platform.idpHosts names from the provider alone) and when neither is set.
 {{- end -}}
 
 {{/*
+The hosts of model-manager.oauth.resourceServer.trustedIssuers that its egress
+must reach beyond the login identity provider: each entry's issuer and jwksURI
+host (lower case, no port), without the hosts agent-platform.idpHosts already
+names, sorted and unique. An entry is an issuer model-manager fetches a key set
+from, so a host missing here is a token it cannot validate. An address literal
+fails the render: the policy selects external hosts by name only.
+JSON list; empty without trusted issuers.
+*/}}
+{{- define "agent-platform.modelManager.trustedIssuerHosts" -}}
+{{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson -}}
+{{- $main := include "agent-platform.idpHosts" (dict "provider" (include "agent-platform.modelManager.oauthProvider" .) "issuerUrl" (include "agent-platform.modelManager.issuerUrl" .)) | fromJsonArray -}}
+{{- $hosts := list -}}
+{{- range $i, $entry := dig "oauth" "resourceServer" "trustedIssuers" list $chart -}}
+{{- range $key := list "issuer" "jwksURI" -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" (include "agent-platform.urlHost" (toString (dig $key "" $entry))) -}}
+{{- if $host -}}
+{{- if include "agent-platform.jwks.addrLiteral" $host -}}
+{{- fail (printf "model-manager.oauth.resourceServer.trustedIssuers[%d].%s names an address (%s): the network policy reaches a trusted issuer by name; use its DNS name" $i $key $host) -}}
+{{- end -}}
+{{- if not (has $host $main) }}{{ $hosts = append $hosts $host }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $hosts | uniq | sortAlpha | toJson -}}
+{{- end -}}
+
+{{/*
 Labels of every object the umbrella renders for the component.
 */}}
 {{- define "agent-platform.modelManager.labels" -}}

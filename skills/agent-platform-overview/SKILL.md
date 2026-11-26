@@ -104,6 +104,7 @@ function of its own (contract: the `agent-platform-tools` skill). Read each sche
 - **The models**: `x_agent-manager_list_model_configs`; serving: the `agent-platform-tools` skill.
 - **The skills and plugins**: `x_skill-manager_list_skills`; their sources: `x_skill-manager_list_skill_sources`; one skill's SKILL.md and files: `x_skill-manager_get_skill`, `x_skill-manager_get_skill_file`.
 - **Capabilities**: `x_agent-manager_get_info`.
+- **Trends and what to improve** (failing connectors, cost, latency): the `agent-platform-analysis` skill.
 - **Workflows** the installation offers for whole questions: `filter_tools {"pattern": "workflow_*"}`.
 - **Yourself**: `x_agent-manager_get_agent` with your **technical** name — the release name, not the
   runtime's `<name>_<namespace>` — and, when you belong to an organization, its name as
