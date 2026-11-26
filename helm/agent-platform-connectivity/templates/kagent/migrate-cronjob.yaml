@@ -5,7 +5,7 @@ expand–contract): `agent-manager migrate`, run once per pod template, in the
 kagent namespace, as the ServiceAccount of the migration's own name
 (migrate-rbac.yaml), never the agents' Flux identity. The major of
 agent-manager.agentChart.semver picks the path. A 3.x range picks 2.x -> 3.x
-(agent chart 3.0, giantswarm/giantswarm#38902 slice 8): the command rewrites
+(agent chart 3.0): the command rewrites
 muster.requireApproval: true to default: Ask and spells out the 2.x
 modelConfig.name default, before it moves a namespace's OCIRepository to 3.x,
 and emits the same as a diff for a GitOps-owned release; both lines render
@@ -165,7 +165,7 @@ spec:
       template:
         {{- $template | nindent 8 }}
 {{- with $m.preflightSemver }}
-{{- /* The preflight (M3I-1): the same run, dry, against preflightSemver,
+{{- /* The preflight: the same run, dry, against preflightSemver,
 never started by the hook: `kubectl create job --from=cronjob/<this>` before
 the agent chart line moves, as UPGRADE.md says. */ -}}
 {{- $pre := list }}

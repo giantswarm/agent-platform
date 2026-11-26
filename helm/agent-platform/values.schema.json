@@ -2165,12 +2165,29 @@
             "additionalProperties": true
         },
         "governance": {
-            "type": "string",
-            "description": "The platform's governance mode: trusted (the default) or governed. It changes no tool approval setting's meaning; it adds asking for agent callers. Governed asks a person before an agent runs any tool of a governed server (governedServers below) that is not on that server's safe list (new and renamed tools too), and before any of muster's own tools but its reads; the Dev Portal's connector wizard pre-selects the Recommended preset (read-only tools run, the rest ask). Trusted lets agents run what the connectors' own settings allow and pre-selects Allow all. In both modes muster's built-in floors ask a person before an agent adds or repoints a connector, changes approval settings, grants access, adds a model, egress origin, credential or backend, approves an action or a toolchain source, or changes muster's own configuration; the role floors hold on the governed servers of that role, so governedServers names them in both modes. The meta chart renders muster's governance configuration from it (muster.governance: the mode and governedServers), from the muster release that reads it (agent-platform.muster.governanceFloor); below it `governed` fails the render and trusted renders nothing. From that release the meta chart also renders muster.approval.installation (backstage.installationName, the name the approval page shows), muster-approval-binder's subject (agent-manager's ServiceAccount, muster.rbac.approvalBinder.subjects) and the pages muster may return the browser to after an approval in muster.oauth.mcpClient.postLoginRedirectAllowlist (the portal's /sessions with backstage.publicPort, klausGateway.obo.callbackBaseUrl + /auth/slack/return; an own list's entries stay). Approval itself needs muster's OAuth server with Dex sign-in, Valkey storage (the default) and muster.muster.oauth.mcpClient.publicUrl on the OAuth server's origin with mcpClient.enabled for the allowlist; the chart does not fail without them, muster refuses asking calls with the reason. Only admins switch it, through the Platform Manager with a second person's approval; never an agent. Anything else fails the render. Concept: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/",
-            "enum": [
-                "trusted",
-                "governed"
-            ]
+            "type": "object",
+            "description": "The platform's governance (mode and role floors). The mode, trusted (the default) or governed, changes no tool approval setting's meaning; it adds asking for agent callers. Governed asks a person before an agent runs any tool of a governed server (governedServers below) that is not on that server's safe list (new and renamed tools too), and before any of muster's own tools but its reads; the Dev Portal's connector wizard pre-selects the Recommended preset (read-only tools run, the rest ask). Trusted lets agents run what the connectors' own settings allow and pre-selects Allow all. In both modes muster's built-in floors ask a person before an agent adds or repoints a connector, changes approval settings, grants access, adds a model, egress origin, credential or backend, approves an action or a toolchain source, or changes muster's own configuration; the role floors hold on the governed servers of that role, so governedServers names them in both modes. The meta chart renders muster's governance configuration from it (muster.governance: the mode and governedServers), from the muster release that reads it (agent-platform.muster.governanceFloor); below it `governed` fails the render and trusted renders nothing. From that release the meta chart also renders muster.approval.installation (backstage.installationName, the name the approval page shows), muster-approval-binder's subject (agent-manager's ServiceAccount, muster.rbac.approvalBinder.subjects) and the pages muster may return the browser to after an approval in muster.oauth.mcpClient.postLoginRedirectAllowlist (the portal's /sessions with backstage.publicPort, klausGateway.obo.callbackBaseUrl + /auth/slack/return; an own list's entries stay). Approval itself needs muster's OAuth server with Dex sign-in, Valkey storage (the default) and muster.muster.oauth.mcpClient.publicUrl on the OAuth server's origin with mcpClient.enabled for the allowlist; the chart does not fail without them, muster refuses asking calls with the reason. The mode is set with this chart value (no agent tool changes it). The block mirrors muster's own governance configuration; a string here (the earlier scalar) fails the render. Further reading (optional): https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/",
+            "additionalProperties": false,
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "description": "trusted (the default) or governed; anything else fails the render.",
+                    "enum": [
+                        "trusted",
+                        "governed"
+                    ]
+                },
+                "roleFloors": {
+                    "type": "object",
+                    "description": "Floors per governance role (muster.governance.roleFloors): role -> the server's own tool names that ask agents in both modes on the governed servers of that role, added to muster's built-in floors (config can only add: a built-in floor is never removed). A role named here is a valid `role` of governedServers. For a server the installation registers itself, e.g.: governance: roleFloors: exampleManager: [approve_change, merge_change] governedServers: example-manager: role: exampleManager safe: [get_info, list_changes] Rendered from the muster release that reads the governance configuration (agent-platform.muster.governanceFloor), like governedServers.",
+                    "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
         },
         "governanceExempt": {
             "type": "object",
@@ -2189,7 +2206,7 @@
         },
         "governedServers": {
             "type": "object",
-            "description": "The servers muster governs (muster.governance.governedServers), per source the platform ships: `role` (which of muster's role floors hold on it: agentManager, platformManager, connectorManager, sessionManager, modelManager, clusterManager, vmManager, workspaceManager, toolchainManager, skillManager, infrastructure) and `safe`, the server's own tool names agents call unasked on governed (reads only; a floor never, muster refuses to start on one). Every other tool of a governed server asks agents on governed. A source renders one entry per MCPServer it ships while that renders (agent-platform.muster.governedKeys): a manager component's <component>.muster.mcpServer.name in its namespace; kagent the connectivity chart's kagent server; mcp-kubernetes the connectivity chart's and every agent-platform-mcps kubernetes entry; any other key is a muster server key itself (giantswarm-platform-manager). null drops a source (then list it in governanceExempt with the reason). make verify-tool-approval fails on a shipped MCPServer that is neither here nor in governanceExempt, and on a safe entry that names a floor or no tool of its server, or whose name starts with a write verb (create, delete, exec, set, approve, ...) unless a `# safe-write: <tool>: <reason>` comment above `safe:` says why it reads. Safe lists: tool-approval governed-safe-list-proposal (giantswarm/giantswarm#38902).",
+            "description": "The servers muster governs (muster.governance.governedServers), per source the platform ships: `role` (which of muster's role floors hold on it: agentManager, connectorManager, sessionManager, modelManager, clusterManager, vmManager, workspaceManager, toolchainManager, skillManager, infrastructure, or a role governance.roleFloors declares) and `safe`, the server's own tool names agents call unasked on governed (reads only; a floor never, muster refuses to start on one). Every other tool of a governed server asks agents on governed. A source renders one entry per MCPServer it ships while that renders (agent-platform.muster.governedKeys): a manager component's <component>.muster.mcpServer.name in its namespace; kagent the connectivity chart's kagent server; mcp-kubernetes the connectivity chart's and every agent-platform-mcps kubernetes entry; any other key is a muster server key itself (a server the installation registers, e.g. example-manager). null drops a source (then list it in governanceExempt with the reason). make verify-tool-approval fails on a shipped MCPServer that is neither here nor in governanceExempt, and on a safe entry that names a floor or no tool of its server, or whose name starts with a write verb (create, delete, exec, set, approve, ...) unless a `# safe-write: <tool>: <reason>` comment above `safe:` says why it reads.",
             "additionalProperties": true,
             "properties": {
                 "agent-manager": {
@@ -2208,21 +2225,6 @@
                     }
                 },
                 "cluster-manager": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "properties": {
-                        "role": {
-                            "type": "string"
-                        },
-                        "safe": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                },
-                "giantswarm-platform-manager": {
                     "type": "object",
                     "additionalProperties": false,
                     "properties": {
@@ -3594,7 +3596,7 @@
                     "properties": {
                         "editors": {
                             "type": "array",
-                            "description": "The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects.",
+                            "description": "The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects.",
                             "items": {
                                 "type": "object",
                                 "required": [

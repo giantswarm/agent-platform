@@ -417,8 +417,8 @@ components:  # @schema additionalProperties: true
     # token-family session ID still wins and the change is a no-op there.
     #
     # v5.1.0 (muster#1079) also FAILS the render on an explicitly emptied
-    # rbac.mcpServerEditor/workflowEditor.subjects. Both are bound to the
-    # Giant Swarm admin groups below, so the guard is satisfied.
+    # rbac.mcpServerEditor/workflowEditor.subjects. Both are bound to
+    # placeholder groups below, so the guard is satisfied.
     #
     # The muster values below define toolsetPresets that select by the
     # tool-group label (`label:` rules, muster#1168), and a muster before
@@ -2739,42 +2739,37 @@ muster:  # @schema skipProperties: true; additionalProperties: true
   crds:
     install: false
   # Who may register MCPServers and author Workflows through muster's
-  # writes-as-caller path. On a shared platform MC every registered server
-  # and authored workflow is visible to and routed through by other users,
-  # so the umbrella binds both editor Roles explicitly to the Giant Swarm
-  # admin groups (the same groups the config default layer feeds
-  # rbac-operator as oidc.giantswarm.write_all_group/_groups); the meta
-  # chart appends tenants.platformTeam to both. Installations wanting
-  # customer self-service widen subjects via their gitops values.
+  # writes-as-caller path. Every registered server and authored workflow is
+  # visible to and routed through by other users, so the chart binds both
+  # editor Roles explicitly. The defaults are placeholder groups
+  # (agent-platform:connector-admins, agent-platform:workflow-editors) that
+  # nobody belongs to unless the installation's identity provider puts them
+  # there: until an installation names its own groups, nobody but a cluster
+  # admin registers servers, authors workflows or changes tool approval. Set
+  # the subjects to the installation's admin groups, written as the API server
+  # sees them (with the OIDC groups prefix); the meta chart appends
+  # tenants.platformTeam to both. An empty list fails muster's render.
   #
-  # mcpServerEditor is the platform's connector-admin role (Governing tool
-  # calls, https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
-  # whoever holds muster's mcpserver-editor Role in muster's namespace edits
-  # every connector there, sets its tool approval (MCPServer spec.approval:
-  # Allow, Ask or Block per tool, and the rule new tools follow) and is the
-  # only one who may let an agent run a tool the connector asks for. Its
-  # subjects are the connector admins: by default the Giant Swarm admin
-  # groups plus tenants.platformTeam. The muster chart itself binds nobody by
-  # default (it bound system:authenticated before), so this list is what
-  # keeps connector admins on an upgrade; binding system:authenticated makes
-  # everyone a connector admin.
+  # mcpServerEditor is the platform's connector-admin role: whoever holds
+  # muster's mcpserver-editor Role in muster's namespace edits every connector
+  # there, sets its tool approval (MCPServer spec.approval: Allow, Ask or
+  # Block per tool, and the rule new tools follow) and is the only one who may
+  # let an agent run a tool the connector asks for. The muster chart itself
+  # binds nobody by default (it bound system:authenticated before), so this
+  # list is what keeps connector admins on an upgrade; binding
+  # system:authenticated makes everyone a connector admin. Further reading
+  # (optional): https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
   rbac:
     mcpServerEditor:
       subjects:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
-          name: giantswarm-ad:giantswarm-admins
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: giantswarm-github:giantswarm:giantswarm-admins
+          name: agent-platform:connector-admins
     workflowEditor:
       subjects:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
-          name: giantswarm-ad:giantswarm-admins
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: giantswarm-github:giantswarm:giantswarm-admins
+          name: agent-platform:workflow-editors
   # Muster's NetworkPolicy mirrors the umbrella's flavor split (`cilium` vs
   # `kubernetes`). `auto` (the default) is replaced by the resolved top-level
   # `networkPolicy.flavor` before the block is forwarded, so muster and the
@@ -4106,7 +4101,7 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # approval: its default, the Allow all preset written out for every tool
       # of the kagent line, is the connectivity chart's
       # (kagent.controllerRoute.mcp.approval there, which says why); set it here
-      # to tighten a tool (Ask or Block). Governing tool calls:
+      # to tighten a tool (Ask or Block). Further reading (optional):
       # https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
       approval:
         rule: Allow
@@ -5387,7 +5382,7 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     # and components.default-agent.versionRange. The same range reaches
     # agent-manager's migrate run and the agent-platform-operator, which moves
     # every organization's chart source at once. 3.x (chart 3.0 removes
-    # muster.requireApproval, giantswarm/giantswarm#38902) renders only with
+    # muster.requireApproval) renders only with
     # components.agent-manager.versionRange at
     # agent-platform.agentManager.agentChartV3Floor (its migrate rewrites
     # requireApproval to default: Ask before it moves a namespace's source),
@@ -5845,9 +5840,9 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # sessions.api.kagent.dev cluster-wide (the ClusterRole
 # agent-platform:workspace-manager-sessions): the manager lists every creator's
 # Sessions for the session directories' cleanup, which no tenant role grants.
-# === Governance mode (Governing tool calls, giantswarm/giantswarm#38902) ===
-# -- The platform's governance mode: trusted (the default) or governed. It
-# changes no tool approval setting's meaning; it adds asking for agent
+# === Governance mode (Governing tool calls) ===
+# -- The platform's governance (mode and role floors). The mode, trusted (the
+# default) or governed, changes no tool approval setting's meaning; it adds asking for agent
 # callers. Governed asks a person before an agent runs any tool of a governed
 # server (governedServers below) that is not on that server's safe list (new
 # and renamed tools too), and before any of muster's own tools but its reads;
@@ -5873,17 +5868,36 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # muster's OAuth server with Dex sign-in, Valkey storage (the default) and
 # muster.muster.oauth.mcpClient.publicUrl on the OAuth server's origin with
 # mcpClient.enabled for the allowlist; the chart does not fail without them,
-# muster refuses asking calls with the reason. Only admins switch it, through
-# the Platform Manager with a second person's approval; never an agent.
-# Anything else fails the render.
-# Concept: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
-governance: trusted  # @schema enum: [trusted, governed]
+# muster refuses asking calls with the reason. The mode is set with this chart
+# value (no agent tool changes it). The block mirrors muster's own governance
+# configuration; a string here (the earlier scalar) fails the render. Further
+# reading (optional): https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
+governance:  # @schema additionalProperties: false
+  # -- trusted (the default) or governed; anything else fails the render.
+  mode: trusted  # @schema enum: [trusted, governed]
+  # -- Floors per governance role (muster.governance.roleFloors): role -> the
+  # server's own tool names that ask agents in both modes on the governed
+  # servers of that role, added to muster's built-in floors (config can only
+  # add: a built-in floor is never removed). A role named here is a valid
+  # `role` of governedServers. For a server the installation registers
+  # itself, e.g.:
+  #   governance:
+  #     roleFloors:
+  #       exampleManager: [approve_change, merge_change]
+  #   governedServers:
+  #     example-manager:
+  #       role: exampleManager
+  #       safe: [get_info, list_changes]
+  # Rendered from the muster release that reads the governance configuration
+  # (agent-platform.muster.governanceFloor), like governedServers.
+  roleFloors: {}  # @schema additionalProperties: {type: array, items: {type: string}}
 
 # -- The servers muster governs (muster.governance.governedServers), per
 # source the platform ships: `role` (which of muster's role floors hold on
-# it: agentManager, platformManager, connectorManager, sessionManager,
-# modelManager, clusterManager, vmManager, workspaceManager,
-# toolchainManager, skillManager, infrastructure) and `safe`, the server's
+# it: agentManager, connectorManager, sessionManager, modelManager,
+# clusterManager, vmManager, workspaceManager, toolchainManager,
+# skillManager, infrastructure, or a role governance.roleFloors declares) and
+# `safe`, the server's
 # own tool names agents call unasked on governed (reads only; a floor never,
 # muster refuses to start on one). Every other tool of a governed server asks
 # agents on governed. A source renders one entry per MCPServer it ships
@@ -5891,14 +5905,14 @@ governance: trusted  # @schema enum: [trusted, governed]
 # component's <component>.muster.mcpServer.name in its namespace; kagent the
 # connectivity chart's kagent server; mcp-kubernetes the connectivity chart's
 # and every agent-platform-mcps kubernetes entry; any other key is a muster
-# server key itself (giantswarm-platform-manager). null drops a source (then
+# server key itself (a server the installation registers, e.g.
+# example-manager). null drops a source (then
 # list it in governanceExempt with the reason). make verify-tool-approval
 # fails on a shipped MCPServer that is neither here nor in governanceExempt,
 # and on a safe entry that names a floor or no tool of its server, or whose
 # name starts with a write verb (create, delete, exec, set, approve, ...)
 # unless a `# safe-write: <tool>: <reason>` comment above `safe:` says why
-# it reads. Safe
-# lists: tool-approval governed-safe-list-proposal (giantswarm/giantswarm#38902).
+# it reads.
 governedServers:  # @schema additionalProperties: true
   agent-manager:
     role: agentManager
@@ -5934,15 +5948,6 @@ governedServers:  # @schema additionalProperties: true
     # port_forward, context_use, the stop tools) and the deprecated
     # kubernetes_* aliases ask agents on governed.
     safe: [logs, list_port_forward_sessions, context_list, context_get_current, can_i, api_resources, cluster_health, capi_list_clusters, capi_get_cluster, capi_resolve_cluster, capi_cluster_health, get, list, describe]
-  giantswarm-platform-manager:
-    role: platformManager
-    # Its reads (giantswarm-platform-manager docs/governance.md). get_action,
-    # list_actions and list_installations bring Action records up to date
-    # with GitHub as the caller and may post the facts to the review thread
-    # or the standup channel; they decide nothing. The dry runs share their
-    # tools with the commits (enable, reconcile, disable_capability) and ask,
-    # as do verify_installation, watch_action, deny_action and the floors.
-    safe: [get_info, list_installations, list_actions, get_action, verify_capability]
 
 # -- MCPServer sources the platform ships that muster deliberately does not
 # govern, each with its reason (make verify-tool-approval wants every shipped
@@ -5968,8 +5973,7 @@ tenants:
         kind: Group
         name: system:authenticated
     # -- The platform's operators: bound to agent-platform:editor in the
-    # kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in
-    # muster.rbac.*.subjects.
+    # kagent namespace. RBAC subjects.
     editors:  # @schema item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
       - apiGroup: rbac.authorization.k8s.io
         kind: Group

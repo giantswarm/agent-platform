@@ -1803,8 +1803,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # The line the Dev Portal shows under the server's name (the MCPServer's
       # spec.description, at most 500 characters); empty renders none.
       description: "Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"
-      # The connector's tool approval (the MCPServer's spec.approval; Governing
-      # tool calls, https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
+      # The connector's tool approval (the MCPServer's spec.approval; further
+      # reading, optional: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
       # `rule` (Allow | Ask | Block; a Block rule hides and refuses every
       # tool without its own entry, new ones included) for a tool without its
       # own entry, and `tools`, the server's own tool names -> Allow | Ask |
@@ -3700,8 +3700,8 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
     # What the Dev Portal shows under the name (the MCPServer's
     # spec.description), at most 500 characters. Empty renders none.
     description: "Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"
-    # The connector's tool approval (the MCPServer's spec.approval; Governing
-    # tool calls, https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
+    # The connector's tool approval (the MCPServer's spec.approval; further
+    # reading, optional: https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/):
     # `rule` (Allow | Ask | Block; a Block rule hides and refuses every tool
     # without its own entry) for a tool without its own entry, new tools
     # included, and `tools`, the server's own tool names -> Allow | Ask | Block

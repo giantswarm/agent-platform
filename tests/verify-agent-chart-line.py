@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Assert that the agent chart line moves to 3.x only with what makes it safe
-(giantswarm/giantswarm#38902, slice 8).
+.
 
 Agent chart 3.0 removes muster.requireApproval; agent-manager's migrate
 rewrites it to `default: Ask` from agent-platform.agentManager.agentChartV3Floor,
@@ -46,7 +46,7 @@ BASE = [
     "--set", "global.identity.issuerUrl=https://dex.example.com",
     "--set", "global.identity.clientId=agent-platform",
     "--set", "global.identity.existingSecret=agent-platform-idp",
-    "--set", "global.gatewayApi.parentRefs[0].name=giantswarm-default",
+    "--set", "global.gatewayApi.parentRefs[0].name=example-gateway",
     "--set", "model-manager.ollama.endpoint=http://ollama.example.com:11434",
     "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
     "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
@@ -87,7 +87,7 @@ def refused(what: str, needle: str, *args: str) -> None:
 
 # The releases that do not carry what the 3.x line needs: a floor at or below
 # them would let a 3.x line through against a muster that ignores default: Ask
-# or an agent-manager whose migrate has no 2.x -> 3.x hop (M3-S8-01).
+# or an agent-manager whose migrate has no 2.x -> 3.x hop.
 LAST_WITHOUT = {"muster.agentApprovalFloor": (5, 67, 0), "agentManager.agentChartV3Floor": (3, 5, 8),
                 "agentManager.toolApprovalFloor": (3, 5, 8), "muster.governanceFloor": (5, 67, 0),
                 "muster.sessionBindingsPortFloor": (5, 67, 0)}
@@ -141,7 +141,7 @@ if "'>=2.6.0 <3.0.0'" not in out and '">=2.6.0 <3.0.0"' not in out:
     fail("the default render does not carry the 2.x line")
 
 # The preflight range reaches the connectivity release and is not the line:
-# no guard refuses it (M3I-1).
+# no guard refuses it.
 out = renders("preflight on the 2.x line", "--set", f"agentManager.migration.preflightSemver={V3}")
 if f"preflightSemver: '{V3}'" not in out:
     fail("agentManager.migration.preflightSemver does not reach the connectivity release")
@@ -178,7 +178,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
 META = META_ORIG
 
-# The migrate run reads organization namespaces on the 3.x path (M3-S8-06):
+# The migrate run reads organization namespaces on the 3.x path:
 # list on namespaces always, cluster-wide reads of releases, sources and Agents
 # with organizations on, no write anywhere outside its own namespaces.
 if CONN:
@@ -209,7 +209,7 @@ if CONN:
     pre = ("--set", f"agentManager.migration.preflightSemver={V3}")
     pre_orgs = migrate_cluster_rules(*pre, "--set", "agentPlatformOrganizations.enabled=true")
     if ns_rule not in pre_orgs or 'resources: ["helmreleases"]\n    verbs: ["get", "list"]' not in pre_orgs:
-        fail("a 3.x preflight range on the 2.x line grants the reads its dry run needs (M3I-1)")
+        fail("a 3.x preflight range on the 2.x line grants the reads its dry run needs")
     r = subprocess.run([*conn_base, *pre], capture_output=True, text=True)
     cron = [d for d in r.stdout.split("\n---\n") if "\nkind: CronJob\n" in "\n" + d and "-agent-manager-migrate-preflight\n" in d]
     if len(cron) != 1:
@@ -233,16 +233,18 @@ if CONN:
     if '"get", "list"]\n' in rules.split('resources: ["agents"]', 1)[-1][:40]:
         fail("the run lists Agents in organization namespaces, it gets none")
 
-# A bound that admits a pre-release of the next major (M3-S8-R-05), and range
+# A bound that admits a pre-release of the next major, and range
 # shapes that are no semver range.
 refused("<=3.0.0-rc.1 bound", "admits 3.0.0-0, a pre-release of the next agent chart major", "--set", "agent-manager.agentChart.semver=>=2.6.0 <=3.0.0-rc.1")
 refused("<3.0.0-rc.1 bound", "a pre-release of the next agent chart major", "--set", "agent-manager.agentChart.semver=>=2.6.0 <3.0.0-rc.1")
 refused("majors beyond 5", "admits agent chart majors 3, 6", "--set", "agent-manager.agentChart.semver=>=3.0.0 <4.0.0 || 6.x")
 refused("latest", "is not a semver range", "--set", "agent-manager.agentChart.semver=latest")
 refused("empty", "is not a semver range", "--set-string", "agent-manager.agentChart.semver=")
+renders("an exact 2.x pin", "--set-string", "agent-manager.agentChart.semver=2.6.1")
+refused("an exact 3.x pin", "keep the 2.x line" if unset else "admits a release below", "--set-string", "agent-manager.agentChart.semver=3.0.0")
 renders("prerelease-widened 2.x line", "--set", "agent-manager.agentChart.semver=>=2.6.0-0 <3.0.0-0")
 
-# An || range is held to its lowest alternative's floor (M3-S8-R-08).
+# An || range is held to its lowest alternative's floor.
 with tempfile.TemporaryDirectory() as tmp:
     META = with_floors(tmp)
     am = [a.replace("{floor}", TEST_FLOORS["agentManager.agentChartV3Floor"]) for a in AM]

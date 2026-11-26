@@ -1409,18 +1409,12 @@ spec:
           subjects:
           - apiGroup: rbac.authorization.k8s.io
             kind: Group
-            name: giantswarm-ad:giantswarm-admins
-          - apiGroup: rbac.authorization.k8s.io
-            kind: Group
-            name: giantswarm-github:giantswarm:giantswarm-admins
+            name: agent-platform:connector-admins
         workflowEditor:
           subjects:
           - apiGroup: rbac.authorization.k8s.io
             kind: Group
-            name: giantswarm-ad:giantswarm-admins
-          - apiGroup: rbac.authorization.k8s.io
-            kind: Group
-            name: giantswarm-github:giantswarm:giantswarm-admins
+            name: agent-platform:workflow-editors
       replicaCount: 2
     musterMcpServerViewers: null
     networkPolicy:
@@ -2200,18 +2194,12 @@ spec:
         subjects:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
-          name: giantswarm-ad:giantswarm-admins
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: giantswarm-github:giantswarm:giantswarm-admins
+          name: agent-platform:connector-admins
       workflowEditor:
         subjects:
         - apiGroup: rbac.authorization.k8s.io
           kind: Group
-          name: giantswarm-ad:giantswarm-admins
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: giantswarm-github:giantswarm:giantswarm-admins
+          name: agent-platform:workflow-editors
     replicaCount: 2
 ---
 # Source: agent-platform/templates/components.yaml

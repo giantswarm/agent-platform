@@ -19,8 +19,8 @@ a cluster-wide list on their kagent.dev resources, which proves a CRD empty
 before it goes. verify-flux-identity asserts these rights and no other
 cluster-scoped binding of the identity on the 2.x line.
 
-Only while agent-manager.agentChart.semver is a 3.x line (the 2.x -> 3.x path,
-giantswarm/giantswarm#38902 slice 8) the same ClusterRole also lets the run
+Only while agent-manager.agentChart.semver is a 3.x line (the 2.x -> 3.x path)
+the same ClusterRole also lets the run
 list namespaces (it finds the organization namespaces by label and fails when
 it may not) and, with agentPlatformOrganizations.enabled, list and get the
 HelmReleases and OCIRepositories and list the Agents it reads there, never
@@ -115,7 +115,7 @@ rules:
   - apiGroups: ["kagent.dev"]
     resources: {{ $legacyCRDs | toJson }}
     verbs: ["list"]
-  # Organization namespaces (giantswarm/giantswarm#38902, slice 8): on the
+  # Organization namespaces: on the
   # agent chart 2.x -> 3.x path the run lists the namespaces labelled as an
   # organization's and fails when it may not; it reads their releases, chart
   # sources and Agents, never writes them, and reports what needs changing

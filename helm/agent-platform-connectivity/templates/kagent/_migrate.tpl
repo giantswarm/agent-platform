@@ -147,7 +147,7 @@ migrate probes it.
 Truthy when a run of the migration takes the 2.x -> 3.x path and reads the
 organization namespaces (migrate-rbac.yaml): agent-manager.agentChart.semver
 (as the run takes it) is a 3.x line, or agentManager.migration.preflightSemver
-is, for the dry run before the line moves (M3I-1).
+is, for the dry run before the line moves.
 */}}
 {{- define "agent-platform.kagent.migration.v3Line" -}}
 {{- $am := include "agent-platform.agentManager.chartValues" . | fromJson -}}

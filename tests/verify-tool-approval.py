@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assert the platform side of Governing tool calls (giantswarm/giantswarm#38902, slice 7).
+"""Assert the platform side of Governing tool calls.
 
 - governance: the meta chart renders muster's governance configuration into the
   muster release (muster.governance: mode and governedServers {server, role,
@@ -30,9 +30,15 @@
 - governance floor: agent-platform.muster.governanceFloor is one X.Y.Z; its
   PLACEHOLDER-GOVERNANCE-FLOOR marker, while it is still there, appears once.
 - connector-admin: muster's mcpserver-editor Role (the platform's
-  connector-admin role) is bound to the configured groups: the Giant Swarm admin
-  groups by default (never empty, so muster's upgrade guard passes),
-  tenants.platformTeam appended, an installation's own list standing.
+  connector-admin role) is bound to the configured groups: a placeholder group
+  nobody belongs to by default (agent-platform:connector-admins; never empty,
+  so muster's upgrade guard passes, never everyone), tenants.platformTeam
+  appended, an installation's own list standing.
+- role floors: governance.roleFloors renders muster.governance.roleFloors (a
+  role an installation declares for its own server, usable in
+  governedServers); malformed values and a second definition in
+  muster.muster.governance.roleFloors fail; the default ships no server or
+  role outside the platform's own components.
 - muster-approval-binder: the muster release binds muster's Role
   muster-approval-binder (in muster's namespace, the muster chart's) to
   agent-manager's ServiceAccount and nothing else
@@ -191,7 +197,7 @@ FULL = [
     "--set", "global.identity.issuerUrl=https://dex.example.com",
     "--set", "global.identity.clientId=agent-platform",
     "--set", "global.identity.existingSecret=agent-platform-idp",
-    "--set", "global.gatewayApi.parentRefs[0].name=giantswarm-default",
+    "--set", "global.gatewayApi.parentRefs[0].name=example-gateway",
     "--set", "model-manager.ollama.endpoint=http://ollama.example.com:11434",
     "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
     "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
@@ -206,17 +212,35 @@ def check_governance() -> None:
     entries = governed_entries(trusted)
     if "        mode: trusted" not in trusted:
         fail(f"default governance, want mode trusted:\n{trusted}")
-    for key, role in (("giantswarm-platform-manager", "platformManager"), ("model-manager", "modelManager")):
-        if entries.get(key, {}).get("role") != role:
-            fail(f"default governance must govern {key} as {role}:\n{trusted}")
+    if entries.get("model-manager", {}).get("role") != "modelManager":
+        fail(f"default governance must govern model-manager as modelManager:\n{trusted}")
+    roles = {e.get("role") for e in entries.values()}
+    if not roles <= {"agentManager", "sessionManager", "modelManager", "clusterManager", "vmManager", "toolchainManager", "workspaceManager", "skillManager", "infrastructure"}:
+        fail(f"the default governs only the platform's own components: {sorted(roles)}")
+    if "roleFloors" in trusted:
+        fail(f"the default declares no role floors:\n{trusted}")
+    # An installation's own server and role.
+    own_role = governance(["--set", FLOOR_RANGE, "--set-json", 'governance.roleFloors={"exampleManager":["approve_change","merge_change"]}',
+                           "--set", "governedServers.example-manager.role=exampleManager", "--set", "governedServers.example-manager.safe[0]=get_info"])
+    if "roleFloors:\n          exampleManager:\n          - approve_change\n          - merge_change" not in own_role:
+        fail(f"governance.roleFloors must render as muster.governance.roleFloors:\n{own_role}")
+    if governed_entries(own_role).get("example-manager", {}).get("role") != "exampleManager":
+        fail(f"an installation's own server key governs with its declared role:\n{own_role}")
+    for args, want in ((["--set-json", 'governance.roleFloors={"Bad Role":["x"]}', "--skip-schema-validation"], 'role "Bad Role": want a camelCase name'),
+                       (["--set-json", 'governance.roleFloors={"exampleManager":"x"}', "--skip-schema-validation"], "governance.roleFloors.exampleManager: want a list"),
+                       (["--set-json", 'governance.roleFloors={"exampleManager":["a b"]}', "--skip-schema-validation"], "is not a tool name"),
+                       (["--set-json", 'governance.roleFloors={"exampleManager":["x"]}', "--set-json", 'muster.muster.governance.roleFloors={"exampleManager":["y"]}'], "are both set")):
+        err = render(META_DIR, META + ["--set", FLOOR_RANGE, *args], expect_fail=True)
+        if want not in err:
+            fail(f"{args}: want {want!r}, got:\n{err}")
     if "agent-manager" in entries or "vm-manager" in entries:
         fail(f"components that are off ship no server to govern:\n{trusted}")
-    governed = governed_entries(governance(["--set", FLOOR_RANGE, "--set", "governance=governed", "--set", "components.agent-manager.enabled=true", "--set", "agent-manager.muster.mcpServer.name=agents"]))
+    governed = governed_entries(governance(["--set", FLOOR_RANGE, "--set", "governance.mode=governed", "--set", "components.agent-manager.enabled=true", "--set", "agent-manager.muster.mcpServer.name=agents"]))
     am = governed.get("agents")
     if not am or am["role"] != "agentManager" or "list_agents" not in am["safe"] or "update_agent" in am["safe"]:
         fail(f"governed with a renamed agent-manager server: want agents as agentManager with its reads safe, got {governed}")
-    if "mode: governed" not in governance(["--set", FLOOR_RANGE, "--set", "governance=governed"]):
-        fail("governance=governed must render mode governed")
+    if "mode: governed" not in governance(["--set", FLOOR_RANGE, "--set", "governance.mode=governed"]):
+        fail("governance.mode=governed must render mode governed")
     apart = governed_entries(governance(["--set", FLOOR_RANGE, "--set", "components.muster.targetNamespace=muster", "--set", "components.vm-manager.enabled=true"]))
     if not any(k.endswith("/vm-manager") for k in apart):
         fail(f"a server outside muster's namespace is keyed namespace/name: {sorted(apart)}")
@@ -232,19 +256,25 @@ def check_governance() -> None:
         fail("a source set to null governs nothing")
     if governance([]):
         fail("below the muster floor the muster release must carry no governance block")
-    err = render(META_DIR, META + ["--set", "governance=governed"], expect_fail=True)
-    if "governance governed needs muster" not in err or "components.muster.versionRange" not in err:
+    err = render(META_DIR, META + ["--set", "governance.mode=governed"], expect_fail=True)
+    if "governance.mode governed needs muster" not in err or "components.muster.versionRange" not in err:
         fail(f"governed below the floor must fail naming governance and components.muster.versionRange:\n{err}")
-    err = render(META_DIR, META + ["--set", "governance=open"], expect_fail=True)
+    err = render(META_DIR, META + ["--set", "governance.mode=open"], expect_fail=True)
     if "governance" not in err:
         fail(f"an unknown mode must fail in the schema naming governance:\n{err}")
-    err = render(META_DIR, META + ["--set", "governance=open", "--skip-schema-validation"], expect_fail=True)
-    if 'governance "open": want trusted or governed' not in err:
+    err = render(META_DIR, META + ["--set", "governance.mode=open", "--skip-schema-validation"], expect_fail=True)
+    if 'governance.mode "open": want trusted or governed' not in err:
         fail(f"an unknown mode must fail in the template naming governance:\n{err}")
+    for args, want in ((["--set", "governance=governed"], "governance"),
+                       (["--set", "governance=governed", "--skip-schema-validation"], "governance is a map mirroring muster's governance configuration"),
+                       (["--set", "governance.policy=x", "--skip-schema-validation"], "governance.policy: unknown key")):
+        err = render(META_DIR, META + args, expect_fail=True)
+        if want not in err:
+            fail(f"{args}: want {want!r}, got:\n{err}")
     err = render(META_DIR, META + ["--set", FLOOR_RANGE, "--set", "muster.muster.governance.mode=governed"], expect_fail=True)
-    if "muster.muster.governance.mode (governed) differs from governance (trusted)" not in err:
+    if "muster.muster.governance.mode (governed) differs from governance.mode (trusted)" not in err:
         fail(f"an own mode that differs must fail naming both keys:\n{err}")
-    err = render(META_DIR, META + ["--set", FLOOR_RANGE, "--set", "muster.muster.governance.servers.platformManager[0]=pm"], expect_fail=True)
+    err = render(META_DIR, META + ["--set", FLOOR_RANGE, "--set", "muster.muster.governance.servers.agentManager[0]=am"], expect_fail=True)
     if "muster.muster.governance.servers is the earlier governance shape" not in err:
         fail(f"the earlier servers shape must fail:\n{err}")
     err = render(META_DIR, META + ["--set", FLOOR_RANGE, "--set", "governedServers.model-manager.safe_list[0]=x"], expect_fail=True)
@@ -262,7 +292,6 @@ def check_governance() -> None:
 # muster's floors (muster internal/api/governance.go roleFloors): never safe.
 FLOORS = {
     "agentManager": {"set_agent_approval", "set_organization_connector", "add_organization_member", "set_organization_model", "set_organization_egress_policy", "replace_organization_credential"},
-    "platformManager": {"approve_action", "merge_action"},
     "connectorManager": {"mcpserver_create", "mcpserver_connect", "mcpserver_set_approval"},
     "toolchainManager": {"approve_source"},
     "modelManager": {"add_backend"},
@@ -515,18 +544,17 @@ def check_approval_config() -> None:
 
 def check_connector_admin() -> None:
     editor = block(muster_release([]), "      mcpServerEditor:")
-    for group in ("giantswarm-ad:giantswarm-admins", "giantswarm-github:giantswarm:giantswarm-admins"):
-        if f"name: {group}" not in editor:
-            fail(f"connector admins by default must include {group}:\n{editor}")
+    if "name: agent-platform:connector-admins" not in editor or editor.count("name: ") != 1:
+        fail(f"connector admins by default are the placeholder group agent-platform:connector-admins alone:\n{editor}")
     if "system:authenticated" in editor:
         fail(f"connector admins must not default to everyone:\n{editor}")
     team = block(muster_release(["--set", "tenants.platformTeam[0].kind=Group", "--set", "tenants.platformTeam[0].name=customer:platform"]), "      mcpServerEditor:")
-    if "name: customer:platform" not in team or "giantswarm-ad:giantswarm-admins" not in team:
+    if "name: customer:platform" not in team or "agent-platform:connector-admins" not in team:
         fail(f"tenants.platformTeam must be appended to the connector admins:\n{team}")
     own = block(muster_release(["--set", "muster.rbac.mcpServerEditor.subjects[0].kind=Group", "--set", "muster.rbac.mcpServerEditor.subjects[0].name=ops"]), "      mcpServerEditor:")
-    if "name: ops" not in own or "giantswarm-ad:giantswarm-admins" in own:
+    if "name: ops" not in own or "agent-platform:connector-admins" in own:
         fail(f"an installation's own connector admins must stand:\n{own}")
-    print("ok: the connector-admin role (muster's mcpserver-editor) binds the Giant Swarm admin groups plus tenants.platformTeam, an own list standing")
+    print("ok: the connector-admin role (muster's mcpserver-editor) binds a placeholder group nobody is in by default plus tenants.platformTeam, an own list standing")
 
 
 def check_binder() -> None:
@@ -677,7 +705,7 @@ def check_approval() -> None:
 
 # Test values for the floors this file's checks need, set in a copy of the
 # chart while the chart keeps them unset until their releases exist
-# (giantswarm/giantswarm#38902 decision #89).
+#.
 TEST_FLOORS = {"muster.governanceFloor": "5.65.0", "muster.agentApprovalFloor": "5.66.0",
                "agentManager.toolApprovalFloor": "3.6.0", "muster.sessionBindingsPortFloor": "5.66.0"}
 
@@ -698,7 +726,7 @@ def with_test_floors(meta_dir: str, dst: str) -> str:
 
 def check_unset_floors_keep_everything_off() -> None:
     """On the chart as it is: a floor whose release does not exist gates its
-    wiring off whatever the component ranges say (M3-S8-01)."""
+    wiring off whatever the component ranges say."""
     high = ["--set", "components.muster.versionRange=>=5.99.0 <6.0.0-0", "--set", "components.agent-manager.versionRange=>=3.99.0 <4.0.0-0",
             "--set", "components.agent-manager.enabled=true"]
     text = open(os.path.join(META_DIR, "templates", "_helpers.tpl")).read()
@@ -710,10 +738,10 @@ def check_unset_floors_keep_everything_off() -> None:
     if "muster.governanceFloor" in unset:
         if block(muster, "      governance:"):
             fail("with the governance floor unset the muster release must carry no governance configuration")
-        err = render_meta_fail(high + ["--set", "governance=governed"])
+        err = render_meta_fail(high + ["--set", "governance.mode=governed"])
         if "no muster release this chart knows reads the governance configuration yet" not in err or ">= " in err or "muster  or" in err:
             fail(f"with the governance floor unset `governed` must fail naming why, with no empty floor:\n{err}")
-        for own in (["--set", "muster.muster.governance.mode=governed"], ["--set", "muster.muster.governance.servers.platformManager[0]=pm"]):
+        for own in (["--set", "muster.muster.governance.mode=governed"], ["--set", "muster.muster.governance.servers.agentManager[0]=am"]):
             err = render_meta_fail(high + own)
             if "muster.muster.governance is set" not in err:
                 fail(f"with the governance floor unset an own {own[1]} must fail (governed, governing nothing):\n{err}")

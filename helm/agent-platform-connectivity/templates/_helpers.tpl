@@ -2560,8 +2560,8 @@ string, so `with` gates a caller's comment). Include with nindent under
 {{- end -}}
 
 {{/*
-An MCPServer's spec.approval from a values block (Governing tool calls,
-giantswarm/giantswarm#38902), validated the way the CRD's CEL rules check it so
+An MCPServer's spec.approval from a values block (Governing tool calls),
+validated the way the CRD's CEL rules check it so
 a wrong value fails the render naming the key: `rule` Allow, Ask or Block (a
 Block rule hides and refuses every tool without its own entry), `tools` a
 map of at most 512 tool names to Allow, Ask or Block, nothing else. Renders the

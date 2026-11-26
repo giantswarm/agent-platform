@@ -366,11 +366,11 @@ required); below `1.3.0` the key is refused.
 
 Every tool behind muster is **Allow**, **Ask** (a person confirms the call first) or **Block**
 (hidden and refused); a connector's `rule` (Allow, Ask or Block) is what a tool without its own
-entry gets, new tools included, so a Block rule lets nobody add an unreviewed tool. The concept,
-who sets what and the prompts are on
+entry gets, new tools included, so a Block rule lets nobody add an unreviewed tool. muster's
+documentation describes the settings and the prompts; further reading (optional):
 [Governing tool calls](https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/). What this chart configures:
 
-- **`governance`** (`trusted`, the default, or `governed`) and **`governedServers`**: the meta
+- **`governance.mode`** (`trusted`, the default, or `governed`) and **`governedServers`**: the meta
   chart renders muster's governance configuration (`muster.governance`: `mode` and
   `governedServers`, one `{server, role, safe}` per MCPServer the platform ships while it renders)
   from the muster release that reads it (`agent-platform.muster.governanceFloor`). On governed,
@@ -382,14 +382,28 @@ who sets what and the prompts are on
   governed server of that role, so the servers are named on trusted as well. Sources: the manager
   components (their `muster.mcpServer.name` in their namespace), `kagent` (the connectivity chart's
   session tools), `mcp-kubernetes` (the connectivity chart's and every agent-platform-mcps
-  kubernetes entry) and `giantswarm-platform-manager`; a server outside muster's namespace is keyed
-  `namespace/name`. `null` drops a source; `governanceExempt` names the shipped sources that are
+  kubernetes entry), and any other key as a muster server key itself (a server the installation
+  registers); a server outside muster's namespace is keyed `namespace/name`. `null` drops a source; `governanceExempt` names the shipped sources that are
   deliberately not governed (prometheus, capi: reads only). An own
   `muster.muster.governance.governedServers` entry stands for its server; the earlier
   `muster.muster.governance.servers.<role>` shape fails the render, as does `governed` below the
-  muster floor (it would ask nothing). Persons get the connector settings only. Only admins switch
-  the mode, through the Platform Manager with a second person's approval. Anything but the two
-  values fails the render.
+  muster floor (it would ask nothing). Persons get the connector settings only. The mode is set
+  with this chart value; no agent tool changes it. `governance` mirrors muster's own governance
+  configuration (`{mode, roleFloors}`); a string there fails the render. Anything but the two values fails the render.
+- **`governance.roleFloors`** (default `{}`): role name to the server's own tool names that ask agents
+  in both modes on the governed servers of that role, rendered as `muster.governance.roleFloors` and
+  added to muster's built-in floors (config never removes one). A role declared here is a valid
+  `role` in `governedServers`, so an installation governs a server of its own:
+
+  ```yaml
+  governance:
+    roleFloors:
+      exampleManager: [approve_change, merge_change]
+  governedServers:
+    example-manager:
+      role: exampleManager
+      safe: [get_info, list_changes]
+  ```
 - **What approval needs, and what this chart renders for it.** Asking calls refuse with the reason
   unless muster's shared store is Valkey, muster runs its OAuth server (the browser sign-in through
   Dex) and has a public URL on that server's origin. The bundled Valkey and
@@ -417,12 +431,15 @@ who sets what and the prompts are on
   the same client retries, over any MCP session; another client of the same person asks anew.
   At most 3 pending approvals per client and 10 per person.
 - **The `connector-admin` role** is muster's `mcpserver-editor` Role in muster's namespace, bound to
-  `muster.rbac.mcpServerEditor.subjects` (the Giant Swarm admin groups) plus `tenants.platformTeam`.
-  Whoever holds it edits the namespace's connectors, sets their tool approval and may let an agent
-  skip a tool's `Ask`. The muster chart no longer binds `system:authenticated` and fails an upgrade
-  with an empty list while its old binding exists; this list is never empty by default, so the
-  upgrade passes and the editors become the admin groups (`system:authenticated` makes everyone one
-  again).
+  `muster.rbac.mcpServerEditor.subjects` plus `tenants.platformTeam`. Whoever holds it edits the
+  namespace's connectors, sets their tool approval and may let an agent skip a tool's `Ask`. The
+  default is a placeholder group nobody belongs to unless the identity provider says so
+  (`agent-platform:connector-admins`; `muster.rbac.workflowEditor.subjects` likewise
+  `agent-platform:workflow-editors`): until the installation names its admin groups (as the API
+  server sees them, with the OIDC groups prefix), only cluster admins edit connectors. The muster
+  chart no longer binds `system:authenticated` and fails an upgrade with an empty list while its
+  old binding exists; the placeholder keeps the list non-empty (`system:authenticated` makes
+  everyone a connector admin).
 - **`muster-approval-binder`**: muster takes an agent's tool settings in a Session binding only from
   a sender allowed to `bind` `toolapprovals` in muster's namespace. The muster chart ships that Role
   and binds it there, to `muster.rbac.approvalBinder.subjects`, which the meta chart sets to

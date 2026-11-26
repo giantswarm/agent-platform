@@ -533,7 +533,7 @@ takes the key (agent-platform.agentManager.toolchainsFloor). */ -}}
 {{- $_ := set $musterValues "toolchainsToolsPrefix" $prefix -}}
 {{- end -}}
 {{- end -}}
-{{- /* Tool approval per agent (giantswarm/giantswarm#38902, slice 3):
+{{- /* Tool approval per agent:
 agent-manager binds an agent's approval settings with every Session and
 refuses settings while it does not. On while muster takes them, from the
 floors agent-platform.muster.agentApprovalFloor and
@@ -1074,7 +1074,7 @@ installation keeps its own (agent-platform.chatgpt.personalLogin). */ -}}
 {{- $_ := set $derived "muster" $muster -}}
 {{- end -}}
 {{- /* The customer's platform team writes the servers and workflows of
-muster's namespace beside the Giant Swarm admin groups
+muster's namespace beside the configured editor groups
 (giantswarm/agent-platform#706): tenants.platformTeam is appended to both
 editor bindings' subjects, so an installation names its team without
 repeating the admin groups. */ -}}
@@ -2135,10 +2135,10 @@ each, no comment inside the define.
 {{- define "agent-platform.agentManager.toolsetBindingFloor" -}}2.9.0{{- end -}}
 
 {{/*
-The floors of tool approval per agent (slice 3): the first agent-manager
+The floors of tool approval per agent: the first agent-manager
 whose chart takes muster.toolApproval, and the first muster that takes an
 agent's approval settings with a Session binding. UNSET until those releases
-exist (giantswarm/giantswarm#38902 decision #89): an empty floor admits no
+exist: an empty floor admits no
 release, so what it gates stays off and the agent chart line cannot move to
 3.x; the platform release that pins those versions sets them. A guess would
 switch the wiring on against released versions without the feature (muster
@@ -2148,12 +2148,12 @@ inside the define.
 {{- define "agent-platform.agentManager.toolApprovalFloor" -}}{{- end -}}
 {{- define "agent-platform.muster.agentApprovalFloor" -}}{{- end -}}
 {{- /* The first muster serving the session bindings API on its own port
-(muster.credentialProvider.sessionBindings, decision #88); UNSET until it
-exists (#89). */ -}}
+(muster.credentialProvider.sessionBindings); UNSET until it
+exists. */ -}}
 {{- define "agent-platform.muster.sessionBindingsPortFloor" -}}{{- end -}}
 
 {{/*
-The session bindings API muster serves agent-manager alone (decision #88):
+The session bindings API muster serves agent-manager alone:
 from agent-platform.muster.sessionBindingsPortFloor, while muster runs its
 credential provider, on its own port and no longer on the aggregator port,
 its network policy admitting agent-manager's pods only. Emits JSON:
@@ -2180,10 +2180,10 @@ Usage: include "agent-platform.muster.sessionBindings" . | fromJson
 
 {{/*
 The first agent-manager whose migrate has the Generic chart 2.x -> 3.x hop
-(giantswarm/giantswarm#38902, slice 8): agent chart 3.0 removes
+: agent chart 3.0 removes
 muster.requireApproval, and that migrate rewrites it to default: Ask before
 it moves a namespace's chart source. The same release as
-agent-platform.agentManager.toolApprovalFloor; UNSET until it exists (#89),
+agent-platform.agentManager.toolApprovalFloor; UNSET until it exists,
 which keeps every 3.x line refused. One line, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.agentChartV3Floor" -}}{{- end -}}
@@ -2200,8 +2200,9 @@ Usage: include "agent-platform.agentChart.majors" "<range>" | fromJsonArray
 {{- define "agent-platform.agentChart.majors" -}}
 {{- $range := toString . -}}
 {{- $out := list -}}
+{{- $exact := regexFind "^\\s*=?v?[0-9]+\\.[0-9]+\\.[0-9]+\\s*$" $range | trim | trimPrefix "=" | trimPrefix "v" -}}
 {{- range $m := until 100 -}}
-{{- $hit := or (semverCompare $range (printf "%d.0.0" $m)) (semverCompare $range (printf "%d.999999.999999" $m)) -}}
+{{- $hit := or (and $exact (eq (toString (semver $exact).Major) (toString $m))) (semverCompare $range (printf "%d.0.0" $m)) (semverCompare $range (printf "%d.999999.999999" $m)) -}}
 {{- if and (not $hit) (lt $m 10) -}}
 {{- range $n := until 200 -}}
 {{- if and (not $hit) (or (semverCompare $range (printf "%d.%d.0" $m $n)) (semverCompare $range (printf "%d.%d.999999" $m $n))) -}}{{- $hit = true -}}{{- end -}}
@@ -2229,7 +2230,7 @@ read as the lower major. Takes a dict: range, major (the one major found).
 
 {{/*
 The agent chart line (agent-manager.agentChart.semver) moves to 3.x only
-together with what makes that safe (slice 8): agent chart 3.0 removes
+together with what makes that safe: agent chart 3.0 removes
 muster.requireApproval, which agent-manager's migrate rewrites to
 `default: Ask` from agent-platform.agentManager.agentChartV3Floor, and muster
 enforces `default: Ask` from agent-platform.muster.agentApprovalFloor with
@@ -2239,7 +2240,7 @@ every organization's chart source at once, and the migrate run; the default
 agent's range (components.default-agent.versionRange) moves with it. A range
 spanning majors, or admitting no release version, is refused, decided as
 migrate decides it (agent-platform.agentChart.majors); while the two floors
-are unset (#89) every 3.x line is refused. Checked whether or not agent-manager
+are unset every 3.x line is refused. Checked whether or not agent-manager
 is on: the range reaches the operator either way. Emits nothing; fails naming
 the key and the fix.
 */}}
@@ -4963,10 +4964,9 @@ comment inside the define.
 {{/*
 The first muster release that reads the governance configuration
 (muster.governance: the mode and the servers it names per role) and enforces
-tool approval (Governing tool calls, slice 2 of giantswarm/giantswarm#38902).
+tool approval (Governing tool calls).
 UNRELEASED: PLACEHOLDER-GOVERNANCE-FLOOR, UNSET until the release that carries
-it exists (muster's tool-approval branch, giantswarm/giantswarm#38902 decision
-#89: a guessed floor would render the configuration for a muster that ignores
+it exists (a guessed floor would render the configuration for a muster that ignores
 it, so a `governed` platform would not be governed); the
 same floor gates the approval block and the redirect allowlist entries below
 (agent-platform.muster.approval, agent-platform.muster.redirectAllowlist), and
@@ -4981,9 +4981,18 @@ or governed), validated: anything else fails the render naming the key.
 Usage: include "agent-platform.governance" $root
 */}}
 {{- define "agent-platform.governance" -}}
-{{- $mode := toString (.Values.governance | default "trusted") -}}
+{{- $g := .Values.governance | default dict -}}
+{{- if not (kindIs "map" $g) -}}
+{{- fail (printf "governance %q: governance is a map mirroring muster's governance configuration, {mode: trusted|governed, roleFloors: {role: [tools]}}: set governance.mode: %v" (toString $g) (toString $g)) -}}
+{{- end -}}
+{{- range $k, $_ := $g -}}
+{{- if not (has $k (list "mode" "roleFloors")) -}}
+{{- fail (printf "governance.%s: unknown key (want mode and roleFloors)" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- $mode := toString ($g.mode | default "trusted") -}}
 {{- if not (has $mode (list "trusted" "governed")) -}}
-{{- fail (printf "governance %q: want trusted or governed (Governing tool calls: trusted lets agents create and start agents freely, governed asks a person first)" $mode) -}}
+{{- fail (printf "governance.mode %q: want trusted or governed (Governing tool calls: trusted lets agents create and start agents freely, governed asks a person first)" $mode) -}}
 {{- end -}}
 {{- $mode -}}
 {{- end -}}
@@ -5030,8 +5039,7 @@ for it while they render.
     on, and every agent-platform-mcps.mcpServers entry of group kubernetes
     (its name, else <cluster>-mcp-kubernetes, in its namespace, else the
     component's);
-  - any other source is a server key itself (giantswarm-platform-manager, the
-    Platform Manager's registration, or an installation's own server).
+  - any other source is a server key itself (an installation's own server).
 Usage: include "agent-platform.muster.governedKeys" (dict "root" $ "source" $source) | fromJsonArray
 */}}
 {{- define "agent-platform.muster.governedKeys" -}}
@@ -5071,9 +5079,10 @@ Usage: include "agent-platform.muster.governedKeys" (dict "root" $ "source" $sou
 {{- end -}}
 
 {{/*
-muster's governance configuration (Governing tool calls,
-giantswarm/giantswarm#38902), rendered from the platform's governance mode:
-`mode` (governance) and `governedServers`, one entry {server, role, safe} per
+muster's governance configuration (Governing tool calls), rendered from the
+platform's governance mode: `mode` (governance), `roleFloors`
+(governance.roleFloors, when it names a role: role -> tool names muster adds to
+its built-in floors) and `governedServers`, one entry {server, role, safe} per
 MCPServer the platform ships for each source of the top-level governedServers
 (agent-platform.muster.governedKeys): its role names the floors muster asks
 agents for in both modes, its safe list the tools agents call unasked on
@@ -5097,7 +5106,7 @@ Usage: include "agent-platform.muster.governance" $root | fromJson
 {{- $own := dig "muster" "governance" dict (.Values.muster | default dict) | default dict -}}
 {{- with $own.mode -}}
 {{- if ne (toString .) $mode -}}
-{{- fail (printf "muster.muster.governance.mode (%v) differs from governance (%s): the platform's governance mode is the top-level governance value; leave muster.muster.governance.mode unset" . $mode) -}}
+{{- fail (printf "muster.muster.governance.mode (%v) differs from governance.mode (%s): the platform's governance mode is governance.mode; leave muster.muster.governance.mode unset" . $mode) -}}
 {{- end -}}
 {{- end -}}
 {{- if $own.servers -}}
@@ -5130,15 +5139,38 @@ Usage: include "agent-platform.muster.governance" $root | fromJson
 {{- end -}}
 {{- end -}}
 {{- $out = dict "mode" $mode "governedServers" $servers -}}
+{{- $floors := dig "roleFloors" dict (.Values.governance | default dict) | default dict -}}
+{{- if not (kindIs "map" $floors) -}}
+{{- fail "governance.roleFloors: want a map of role names to lists of tool names" -}}
+{{- end -}}
+{{- range $role, $tools := $floors -}}
+{{- if not (regexMatch "^[a-z][A-Za-z0-9]*$" $role) -}}
+{{- fail (printf "governance.roleFloors: role %q: want a camelCase name (e.g. exampleManager)" $role) -}}
+{{- end -}}
+{{- if not (kindIs "slice" $tools) -}}
+{{- fail (printf "governance.roleFloors.%s: want a list of the server's own tool names" $role) -}}
+{{- end -}}
+{{- range $tools -}}
+{{- if not (and (kindIs "string" .) (regexMatch "^[A-Za-z0-9_.-]+$" .)) -}}
+{{- fail (printf "governance.roleFloors.%s: %v is not a tool name" $role .) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $floors -}}
+{{- with $own.roleFloors -}}
+{{- fail "muster.muster.governance.roleFloors and governance.roleFloors are both set: name role floors in governance.roleFloors only" -}}
+{{- end -}}
+{{- $_ := set $out "roleFloors" $floors -}}
+{{- end -}}
 {{- else -}}
 {{- if dig "muster" "governance" nil (.Values.muster | default dict) -}}
-{{- fail "muster.muster.governance is set, but this chart renders muster's governance configuration only from the muster release that reads it (agent-platform.muster.governanceFloor), and none is pinned: a mode passed to muster directly would claim a governed platform that governs nothing. Remove muster.muster.governance; the platform's mode is the top-level governance value" -}}
+{{- fail "muster.muster.governance is set, but this chart renders muster's governance configuration only from the muster release that reads it (agent-platform.muster.governanceFloor), and none is pinned: a mode passed to muster directly would claim a governed platform that governs nothing. Remove muster.muster.governance; the platform's governance is the governance value (mode, roleFloors)" -}}
 {{- end -}}
 {{- if ne $mode "trusted" -}}
 {{- if not $floor -}}
-{{- fail (printf "governance %s: no muster release this chart knows reads the governance configuration yet (agent-platform.muster.governanceFloor is unset until one is released and pinned), so nothing would ask agents; keep governance trusted" $mode) -}}
+{{- fail (printf "governance.mode %s: no muster release this chart knows reads the governance configuration yet (agent-platform.muster.governanceFloor is unset until one is released and pinned), so nothing would ask agents; keep governance.mode trusted" $mode) -}}
 {{- end -}}
-{{- fail (printf "governance %s needs muster %s or later (the first release that reads the governance configuration), but components.muster.versionRange %q allows earlier releases: below it nothing would ask agents. Move components.muster.versionRange to >=%s, or keep governance trusted" $mode $floor (dig "muster" "versionRange" "" .Values.components) $floor) -}}
+{{- fail (printf "governance.mode %s needs muster %s or later (the first release that reads the governance configuration), but components.muster.versionRange %q allows earlier releases: below it nothing would ask agents. Move components.muster.versionRange to >=%s, or keep governance.mode trusted" $mode $floor (dig "muster" "versionRange" "" .Values.components) $floor) -}}
 {{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
