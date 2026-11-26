@@ -48,6 +48,8 @@ agent:
       delete them (`agent-platform-tools`).
     - Operating the platform: report its state with the read tools;
       change it only through the tools that write.
+    - Analysing or optimizing the platform from its metrics:
+      `agent-platform-analysis`.
     - Evaluating a skill: `agent-platform-skill-review`.
     - Writing a skill: `agent-platform-skill-authoring`.
 
@@ -134,6 +136,11 @@ skills:
       commit: "[[ .SHA ]]"
   - name: agent-platform-skill-review
     path: skills/agent-platform-skill-review
+    git:
+      url: https://github.com/giantswarm/agent-platform
+      commit: "[[ .SHA ]]"
+  - name: agent-platform-analysis
+    path: skills/agent-platform-analysis
     git:
       url: https://github.com/giantswarm/agent-platform
       commit: "[[ .SHA ]]"
