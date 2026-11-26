@@ -129,13 +129,26 @@ echo "{{ .job }} started; its outcome: kubectl -n {{ .namespace }} get job {{ .j
 {{- end -}}
 
 {{/*
-Truthy when a range (the argument) is a 3.x line, probed as agent-manager's
-migrate probes it.
+Truthy when a range (the argument) admits a 3.x release, probed as
+agent-manager's migrate probes it (agent-platform.agentChart.majors in the
+meta chart): every version the range names with its next patch and minor, so
+each alternative of a `||` range counts, and 3.0.0, a late 3.x and the first
+and a late patch of every minor below 200.
 */}}
 {{- define "agent-platform.kagent.migration.isV3" -}}
 {{- $range := toString . -}}
 {{- if and (regexMatch "[0-9]" $range) (not (regexMatch "(^|[\\s|,<>=~^])[A-Za-uwyzA-WYZ]" $range)) -}}
 {{- $hit := or (semverCompare $range "3.0.0") (semverCompare $range "3.999999.999999") -}}
+{{- range $lit := regexFindAll "[0-9]+(\\.[0-9]+)?(\\.[0-9]+)?" $range -1 -}}
+{{- $p := splitList "." $lit -}}
+{{- if eq (index $p 0) "3" -}}
+{{- $min := 0 -}}{{- if gt (len $p) 1 -}}{{- $min = atoi (index $p 1) -}}{{- end -}}
+{{- $pat := 0 -}}{{- if gt (len $p) 2 -}}{{- $pat = atoi (index $p 2) -}}{{- end -}}
+{{- range $v := list (printf "3.%d.%d" $min $pat) (printf "3.%d.%d" $min (add1 $pat)) (printf "3.%d.0" (add1 $min)) -}}
+{{- if and (not $hit) (semverCompare $range $v) -}}{{- $hit = true -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- range $n := until 200 -}}
 {{- if and (not $hit) (or (semverCompare $range (printf "3.%d.0" $n)) (semverCompare $range (printf "3.%d.999999" $n))) -}}{{- $hit = true -}}{{- end -}}
 {{- end -}}
@@ -152,4 +165,15 @@ is, for the dry run before the line moves.
 {{- define "agent-platform.kagent.migration.v3Line" -}}
 {{- $am := include "agent-platform.agentManager.chartValues" . | fromJson -}}
 {{- if or (include "agent-platform.kagent.migration.isV3" (dig "agentChart" "semver" "2.x" $am)) (include "agent-platform.kagent.migration.isV3" (dig "migration" "preflightSemver" "" (.Values.agentManager | default dict))) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Truthy when the run itself (not the preflight dry run) takes the 2.x -> 3.x
+path with organizations on: agent-manager.agentChart.semver is a 3.x line.
+Only then the run writes organization releases and its report there
+(migrate-rbac.yaml, organizations/migrate-scope.yaml).
+*/}}
+{{- define "agent-platform.kagent.migration.v3Writes" -}}
+{{- $am := include "agent-platform.agentManager.chartValues" . | fromJson -}}
+{{- if and (include "agent-platform.organizations.enabled" .) (include "agent-platform.kagent.migration" .) (include "agent-platform.kagent.migration.isV3" (dig "agentChart" "semver" "2.x" $am)) -}}true{{- end -}}
 {{- end -}}

@@ -234,12 +234,54 @@ if CONN:
     for want in ('resources: ["helmreleases"]\n    verbs: ["get", "list"]', 'resources: ["ocirepositories"]\n    verbs: ["get", "list"]', 'resources: ["agents"]\n    verbs: ["list"]', ns_rule):
         if want not in three_orgs:
             fail(f"3.x line with organizations: the migrate run's ClusterRole lacks {want!r}")
-    rules = three_orgs.split("cluster-wide list on their kagent.dev", 1)[-1].split('resources: ["namespaces"]', 1)[-1]
+    # D-GO-03: on the 3.x line itself (not a preflight) the run rewrites the
+    # organization releases agent-manager owns and writes its report there:
+    # update on HelmReleases, the report ConfigMap; nothing else, and the
+    # scope policy holds those writes to organization namespaces and the
+    # kagent namespace, spec.values only, the report's name only.
+    def org_rules(text: str) -> str:
+        return text.split("cluster-wide list on their kagent.dev", 1)[-1].split('resources: ["namespaces"]', 1)[-1]
+    writes = ('resources: ["helmreleases"]\n    verbs: ["update"]', 'resources: ["configmaps"]\n    verbs: ["create"]',
+              'resources: ["configmaps"]\n    resourceNames: ["agent-manager-migrate-report"]\n    verbs: ["get", "update"]')
+    for want in writes:
+        if want not in three_orgs:
+            fail(f"3.x line with organizations: the migrate run's ClusterRole lacks {want!r}")
+    rules = org_rules(three_orgs)
+    for w in writes:
+        rules = rules.replace(w, "")
     for verb in ("create", "update", "patch", "delete", "watch"):
         if f'"{verb}"' in rules:
-            fail(f"the migrate run's organization reads carry {verb}")
+            fail(f"the migrate run's organization rights carry {verb} beyond the release update and its report")
+    for what, text in (("a 3.x preflight on the 2.x line", pre_orgs), ("3.x line without organizations", three)):
+        for verb in ("create", "update", "patch", "delete", "watch"):
+            if f'"{verb}"' in org_rules(text):
+                fail(f"{what}: the migrate run's cluster-wide rights carry {verb}; only the 3.x line with organizations writes")
     if '"get", "list"]\n' in rules.split('resources: ["agents"]', 1)[-1][:40]:
         fail("the run lists Agents in organization namespaces, it gets none")
+
+    def scope_policy(*args: str) -> str:
+        r = subprocess.run([*conn_base, *args], capture_output=True, text=True)
+        found = [d for d in r.stdout.split("\n---\n") if "\nkind: ValidatingAdmissionPolicy\n" in "\n" + d and "name: agent-platform-organization-migrate-scope\n" in d]
+        return found[0] if found else ""
+    policy = scope_policy(*v3, "--set", "agentPlatformOrganizations.enabled=true")
+    if not policy:
+        fail("3.x line with organizations: no agent-platform-organization-migrate-scope policy holds the run's writes")
+    else:
+        for want in ("system:serviceaccount:", "-agent-manager-migrate'", "request.name == 'agent-manager-migrate-report'",
+                     "k == 'values'", "variables.organizationNamespace", 'resources: ["helmreleases"]', 'resources: ["configmaps"]'):
+            if want not in policy:
+                fail(f"the migrate scope policy lacks {want!r}:\n{policy}")
+    for what, args in (("2.x line", ("--set", "agentPlatformOrganizations.enabled=true")), ("preflight", (*pre, "--set", "agentPlatformOrganizations.enabled=true")), ("3.x without organizations", v3)):
+        if scope_policy(*args):
+            fail(f"{what}: the migrate scope policy renders without the writes it holds")
+
+    # D-GO-08: every alternative of a || range and every version a range
+    # names counts, here as in migrate and the agent-platform-operator.
+    refused("an alternative on another major", "admits agent chart majors 2, 3", "--set", "agent-manager.agentChart.semver=3.0.1 || 2.6.0")
+    for r in (">=2.6.1 <2.6.9", "= 2.6.1", "~2.250", "2.6.1 - 2.6.5"):
+        renders(f"{r} reads as 2.x", "--set", f"agent-manager.agentChart.semver={r}")
+    if not scope_policy("--set", "agent-manager.agentChart.semver=3.0.1 || 3.2.0", "--set", "agentPlatformOrganizations.enabled=true"):
+        fail("the connectivity chart reads 3.0.1 || 3.2.0 as a 3.x line")
 
 # A floor that needs the governance wiring, set while the governance floor is
 # unset (a release that sets its floors in two steps): the render fails naming

@@ -1,0 +1,73 @@
+{{- /*
+agent-platform-organization-migrate-scope: what agent-manager's migrate run
+(the ServiceAccount of agent-platform.kagent.migration.name in the kagent
+namespace) writes with the cluster-wide rights it holds during the 2.x -> 3.x
+cut-over (kagent/migrate-rbac.yaml, agent-platform.kagent.migration.v3Writes):
+RBAC cannot select namespaces by label, so this policy holds them to
+
+  * organization namespaces (labelled agent-platform.giantswarm.io/organization)
+    and the kagent namespace, where its Role writes anyway;
+  * in an organization namespace, a HelmRelease update that changes
+    spec.values only (migrate rewrites muster.requireApproval to
+    default: Ask and spells out modelConfig.name; it never changes the chart,
+    the identity a release runs as or anything else of it);
+  * a ConfigMap of the report's name, agent-manager-migrate-report.
+
+A bug or a leaked token of the run then cannot rewrite the platform's own
+HelmReleases or another namespace's ConfigMaps. Rendered with those rights
+only.
+*/ -}}
+{{- if include "agent-platform.kagent.migration.v3Writes" . }}
+{{- $label := include "agent-platform.organizations.label" . }}
+{{- $kagentNs := .Values.kagent.namespaceOverride | default .Release.Namespace }}
+{{- $user := printf "system:serviceaccount:%s:%s" $kagentNs (include "agent-platform.kagent.migration.name" .) }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-migrate-scope
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["helm.toolkit.fluxcd.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["helmreleases"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["configmaps"]
+  matchConditions:
+    - name: migrate
+      expression: {{ printf "request.userInfo.username == '%s'" $user | quote }}
+  variables:
+    - name: organizationNamespace
+      expression: {{ printf "has(namespaceObject.metadata.labels) && '%s' in namespaceObject.metadata.labels" $label | quote }}
+  validations:
+    - expression: {{ printf "request.namespace == '%s' || variables.organizationNamespace" $kagentNs | quote }}
+      reason: Forbidden
+      messageExpression: "'agent-manager migrate writes ' + request.resource.resource + ' only in organization namespaces and its own; refused in ' + request.namespace"
+    - expression: "request.resource.resource != 'configmaps' || request.name == 'agent-manager-migrate-report'"
+      reason: Forbidden
+      messageExpression: "'agent-manager migrate writes no ConfigMap but its report agent-manager-migrate-report; refused: ' + request.name"
+    - expression: >-
+        request.resource.resource != 'helmreleases' || !variables.organizationNamespace ||
+        (request.operation == 'UPDATE' &&
+         object.spec.all(k, k == 'values' || (k in oldObject.spec && oldObject.spec[k] == object.spec[k])) &&
+         oldObject.spec.all(k, k == 'values' || k in object.spec))
+      reason: Forbidden
+      messageExpression: "'agent-manager migrate changes only spec.values of a HelmRelease in an organization namespace; refused for ' + request.namespace + '/' + request.name"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-migrate-scope
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-migrate-scope
+  validationActions: [Deny]
+{{- end }}

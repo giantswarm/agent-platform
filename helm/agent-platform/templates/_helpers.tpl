@@ -2222,19 +2222,33 @@ nothing here would enforce it, so it fails too. Emits nothing.
 
 {{/*
 The release majors a range admits, as a JSON list of strings, decided as
-agent-manager's migrate decides its target major (TargetMajor): majors 0-99,
-each probed with its first and a very late version, majors 0-9 also with every
-minor 0-199 (first and late patch), so x-ranges, carets, tildes and bounds all
-count. A range that admits only pre-releases admits no major. Release versions
-only, as Flux's semver admits them without a pre-release comparator.
+agent-manager's migrate decides its target major (TargetMajor) and the
+agent-platform-operator the major of a chart source move: every version the
+range names, with its next patch and next minor (so an exact pin, a narrow
+bound, ~2.250 and each alternative of a `||` range count: `3.0.1 || 2.6.0`
+admits 2 and 3); and majors 0-99, each probed with its first and a very late
+version, majors 0-9 also with every minor 0-199 (first and late patch), so
+x-ranges, carets, tildes and bounds all count. A probe counts only when the
+range admits it. A range that admits only pre-releases admits no major.
+Release versions only, as Flux's semver admits them without a pre-release
+comparator.
 Usage: include "agent-platform.agentChart.majors" "<range>" | fromJsonArray
 */}}
 {{- define "agent-platform.agentChart.majors" -}}
 {{- $range := toString . -}}
+{{- $named := list -}}
+{{- range $lit := regexFindAll "[0-9]+(\\.[0-9]+)?(\\.[0-9]+)?" $range -1 -}}
+{{- $p := splitList "." $lit -}}
+{{- $maj := atoi (index $p 0) -}}
+{{- $min := 0 -}}{{- if gt (len $p) 1 -}}{{- $min = atoi (index $p 1) -}}{{- end -}}
+{{- $pat := 0 -}}{{- if gt (len $p) 2 -}}{{- $pat = atoi (index $p 2) -}}{{- end -}}
+{{- range $v := list (printf "%d.%d.%d" $maj $min $pat) (printf "%d.%d.%d" $maj $min (add1 $pat)) (printf "%d.%d.0" $maj (add1 $min)) -}}
+{{- if semverCompare $range $v -}}{{- $named = append $named (toString $maj) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $out := list -}}
-{{- $exact := regexFind "^\\s*=?v?[0-9]+\\.[0-9]+\\.[0-9]+\\s*$" $range | trim | trimPrefix "=" | trimPrefix "v" -}}
 {{- range $m := until 100 -}}
-{{- $hit := or (and $exact (eq (toString (semver $exact).Major) (toString $m))) (semverCompare $range (printf "%d.0.0" $m)) (semverCompare $range (printf "%d.999999.999999" $m)) -}}
+{{- $hit := or (has (toString $m) $named) (semverCompare $range (printf "%d.0.0" $m)) (semverCompare $range (printf "%d.999999.999999" $m)) -}}
 {{- if and (not $hit) (lt $m 10) -}}
 {{- range $n := until 200 -}}
 {{- if and (not $hit) (or (semverCompare $range (printf "%d.%d.0" $m $n)) (semverCompare $range (printf "%d.%d.999999" $m $n))) -}}{{- $hit = true -}}{{- end -}}
