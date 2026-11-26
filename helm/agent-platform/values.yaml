@@ -1114,7 +1114,10 @@ components:  # @schema additionalProperties: true
     # so no installation keeps a model-manager that writes kagent.dev
     # (giantswarm/model-manager#247).
     # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
-    versionRange: ">=1.22.0-rc.1 <2.0.0-0"
+    # 1.25.0 is the floor: its schema has oauth.authorizationServer and
+    # oauth.resourceServer, the keys agent-platform.identity.apply fills
+    # (giantswarm/model-manager#461).
+    versionRange: ">=1.25.0 <2.0.0-0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)

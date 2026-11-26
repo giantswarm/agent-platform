@@ -283,7 +283,7 @@ Both services register with muster through their own `MCPServer` CR, so their to
 - The service presents that token to the Kubernetes API.
 - The user's RBAC decides. The ServiceAccount holds no permissions.
 
-The OAuth issuer, client, secret and base URL come from the block, else from `global.identity` / `global.domain`. Anything still unset is filled from muster's OAuth server block (`muster.muster.oauth.server.dex.*`, `.existingSecret`). The render fails if anything is still missing. Further egress destinations go in `modelManager.networkPolicy.egress` / `agentManager.networkPolicy.egress`.
+The OAuth issuer, client, secret and base URL come from the block, else from `global.identity` / `global.domain`. Anything still unset is filled from muster's OAuth server block (`muster.muster.oauth.server.dex.*`, `.existingSecret`). The render fails if anything is still missing. model-manager uses mcp-oauth's values layout, so the meta chart fills `model-manager.oauth.authorizationServer.upstream.issuer`, `.upstream.client.id`, `.upstream.client.secretKeyRef` and `.issuer`. Its deprecated `oauth.dex.*`, `oauth.existingSecret` and `oauth.baseURL` still win when set. model-manager's egress also reaches the issuer and key set hosts of `model-manager.oauth.resourceServer.trustedIssuers`. Further egress destinations go in `modelManager.networkPolicy.egress` / `agentManager.networkPolicy.egress`.
 
 `make verify-managers` covers the wiring and the guards.
 
