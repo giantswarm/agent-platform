@@ -33,17 +33,19 @@ global:
     # (dex-client-secret, registration-token, oauth-encryption-key,
     # valkey-password; backstage-session-secret for the portal).
     existingSecret: ""
-    # The provider's kind: dex or google. Empty: dex. Charts that follow
-    # mcp-oauth's values layout (model-manager) use it where their own
+    # The kind of OpenID Provider: dex or google. Empty: dex. Charts that
+    # follow mcp-oauth's values layout (model-manager) use it where their own
     # oauth.authorizationServer.upstream.type and oauth.provider are empty;
     # model-manager.oauth.provider defaults to dex in both charts, so this
     # applies only where that value is null.
     type: ""  # @schema enum: ["", dex, google]
     kubernetes:
-      # Audiences the Kubernetes API server requires on a forwarded ID token
-      # (its AuthenticationConfiguration jwt.issuer.audiences), e.g.
-      # [dex-k8s-authenticator] on Giant Swarm clusters; empty for Google,
-      # whose client id is the API server's. muster requests them at login.
+      # The audiences the Kubernetes API server accepts on this provider's
+      # tokens (AuthenticationConfiguration jwt[].issuer.audiences, or the
+      # flag oidc-client-id): a forwarded ID token passes when its aud holds
+      # at least one. muster requests them from Dex as cross-client audiences
+      # at login. [dex-k8s-authenticator] on Giant Swarm clusters; with
+      # Google, the login client id, since Google adds no audiences.
       # Charts that follow mcp-oauth's values layout (model-manager) use it
       # where their own muster.mcpServer.auth.requiredAudiences is empty;
       # model-manager's defaults to [dex-k8s-authenticator] in both
