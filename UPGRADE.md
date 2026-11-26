@@ -40,18 +40,18 @@ muster decides Allow, Ask or Block for every tool call, and the chart renders mu
 
 - Move `components.muster.versionRange` to the muster release that carries tool approval with this chart. `governance.mode: governed` below it fails the render.
 - After muster's CRD upgrade, force a reconcile of the releases that render MCPServers (connectivity, agent-platform-mcps, the managers) if any of them was applied while the old CRD was served (its `spec.approval` was pruned): `flux reconcile helmrelease <name> -n <ns> --force`. Until the CRD knows `spec.approval`, muster refuses every server tool.
-- **Editor defaults changed.** `muster.rbac.mcpServerEditor.subjects` (the connector admins) and `muster.rbac.workflowEditor.subjects` default to placeholder groups nobody belongs to (`agent-platform:connector-admins`, `agent-platform:workflow-editors`); they were two Giant Swarm admin groups. Set both to your admin groups in the installation's values (as the API server sees them, with the OIDC groups prefix); `tenants.platformTeam` is still appended. Until then only cluster admins register servers, author workflows or change tool approval. Keep the lists non-empty: muster's chart no longer binds `system:authenticated` and fails the upgrade with an empty list while the old binding exists (`muster.rbac.mcpServerEditor.allowRemovingBinding: true` drops it).
+- **Editor defaults changed.** `muster.rbac.mcpServerEditor.subjects` (the connector admins) and `muster.rbac.workflowEditor.subjects` default to a ServiceAccount subject the chart never creates and no identity provider can issue a token for (`kube-system/agent-platform-unset-connector-admins`, `kube-system/agent-platform-unset-workflow-editors`); before, they named two fixed admin groups. Set both to your admin groups in the installation's values (as the API server sees them, with the OIDC groups prefix); `tenants.platformTeam` is still appended. Until then only cluster admins register servers, author workflows or change tool approval (fail closed). Keep the lists non-empty: muster's chart no longer binds `system:authenticated` and fails the upgrade with an empty list while the old binding exists (`muster.rbac.mcpServerEditor.allowRemovingBinding: true` drops it). `tenants.platform.editors` keeps its earlier default admin groups: replace them too.
 - **`governance` is a map** mirroring muster's governance configuration: `governance: {mode: trusted|governed, roleFloors: {}}`. Write `governance.mode: governed` where you wrote `governance: governed`; a string fails the render with that hint.
-- **No server outside the platform's components is governed by default.** The default `governedServers` entry for `giantswarm-platform-manager` is gone, and role floors beyond muster's built-in ones come from `governance.roleFloors`. An installation that registers a server of its own (for example `giantswarm-platform-manager`) names it with its role and safe list in `governedServers` and its floors in `governance.roleFloors`, in the installation's values:
+- **No server outside the platform's components is governed by default.** The earlier default `governedServers` entry for a vendor's own manager is gone, and role floors beyond muster's built-in ones come from `governance.roleFloors` (set below the muster governance floor, it fails the render instead of being dropped). An installation that registers a server of its own names it with its role and safe list in `governedServers` and its floors in `governance.roleFloors`, in the installation's values (a vendor documents its own server's entry):
 
   ```yaml
   governance:
     roleFloors:
-      platformManager: [approve_action, merge_action]
+      exampleManager: [approve_change, merge_change]
   governedServers:
-    giantswarm-platform-manager:
-      role: platformManager
-      safe: [get_info, list_installations, list_actions, get_action, verify_capability]
+    example-manager:
+      role: exampleManager
+      safe: [get_info, list_changes]
   ```
 - Replace an own `muster.muster.governance.servers.<role>` with `governedServers` entries (the render fails on the earlier shape).
 - An edge not on 443: set `backstage.publicPort`, and remove a hand-written portal entry from `muster.muster.oauth.mcpClient.postLoginRedirectAllowlist`. The allowlist reaches muster only with `muster.muster.oauth.mcpClient.enabled`.
