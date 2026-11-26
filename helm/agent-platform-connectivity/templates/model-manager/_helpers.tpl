@@ -260,7 +260,7 @@ else dex).
 */}}
 {{- define "agent-platform.modelManager.oauthProvider" -}}
 {{- $chart := include "agent-platform.modelManager.chartValues" . | fromJson -}}
-{{- dig "oauth" "authorizationServer" "upstream" "type" "" $chart | default (dig "oauth" "provider" "" $chart) | default (dig "identity" "type" "" (.Values.global | default dict)) | default "dex" -}}
+{{- dig "oauth" "authorizationServer" "upstream" "type" "" $chart | default (dig "oauth" "provider" "" $chart) | default .Values.global.identity.type | default "dex" -}}
 {{- end -}}
 
 {{/*

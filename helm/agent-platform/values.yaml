@@ -34,16 +34,20 @@ global:
     # valkey-password; backstage-session-secret for the portal).
     existingSecret: ""
     # The provider's kind: dex or google. Empty: dex. Charts that follow
-    # mcp-oauth's values layout use it as the default of their
-    # oauth.authorizationServer.upstream.type (model-manager).
+    # mcp-oauth's values layout (model-manager) use it where their own
+    # oauth.authorizationServer.upstream.type and oauth.provider are empty;
+    # model-manager.oauth.provider defaults to dex in both charts, so this
+    # applies only where that value is null.
     type: ""  # @schema enum: ["", dex, google]
     kubernetes:
       # Audiences the Kubernetes API server requires on a forwarded ID token
       # (its AuthenticationConfiguration jwt.issuer.audiences), e.g.
       # [dex-k8s-authenticator] on Giant Swarm clusters; empty for Google,
       # whose client id is the API server's. muster requests them at login.
-      # Charts that follow mcp-oauth's values layout use it as the default of
-      # their muster.mcpServer.auth.requiredAudiences (model-manager).
+      # Charts that follow mcp-oauth's values layout (model-manager) use it
+      # where their own muster.mcpServer.auth.requiredAudiences is empty;
+      # model-manager's defaults to [dex-k8s-authenticator] in both
+      # charts, so this applies only where that value is null.
       audiences: []  # @schema item: string
   gatewayApi:
     # The public Gateway every route attaches to when neither the route's own

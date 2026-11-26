@@ -141,13 +141,17 @@ login provider beside global.identity.
     {{- $oauth := dig "oauth" dict $chart }}
     {{- $dex := dig "dex" dict $oauth }}
     {{- $identity := .Values.global.identity }}
-    {{- /* model-manager's shared values layout first, then its deprecated keys. */}}
+    {{- /* model-manager's shared values layout first, then its deprecated keys;
+           a mismatch names the key that supplied the value. */}}
     {{- $upstream := dig "authorizationServer" "upstream" dict $oauth }}
     {{- $ownIssuer := dig "issuer" "" $upstream | default (dig "issuerURL" "" $dex) }}
     {{- $ownClient := dig "client" "id" "" $upstream | default (dig "clientID" "" $dex) }}
     {{- $ownSecret := dig "client" "secretKeyRef" "name" "" $upstream | default (dig "existingSecret" "" $oauth) }}
     {{- $ownBaseURL := dig "authorizationServer" "issuer" "" $oauth | default (dig "baseURL" "" $oauth) }}
-    {{- range $pair := list (list "authorizationServer.upstream.issuer" $ownIssuer "issuerUrl" $identity.issuerUrl) (list "authorizationServer.upstream.client.id" $ownClient "clientId" $identity.clientId) (list "authorizationServer.upstream.client.secretKeyRef.name" $ownSecret "existingSecret" $identity.existingSecret) }}
+    {{- $issuerKey := ternary "authorizationServer.upstream.issuer" "dex.issuerURL" (ne (dig "issuer" "" $upstream) "") }}
+    {{- $clientKey := ternary "authorizationServer.upstream.client.id" "dex.clientID" (ne (dig "client" "id" "" $upstream) "") }}
+    {{- $secretKey := ternary "authorizationServer.upstream.client.secretKeyRef.name" "existingSecret" (ne (dig "client" "secretKeyRef" "name" "" $upstream) "") }}
+    {{- range $pair := list (list $issuerKey $ownIssuer "issuerUrl" $identity.issuerUrl) (list $clientKey $ownClient "clientId" $identity.clientId) (list $secretKey $ownSecret "existingSecret" $identity.existingSecret) }}
       {{- $own := index $pair 1 }}{{- $global := index $pair 3 }}
       {{- if and $own $global (ne (toString $own) (toString $global)) }}
         {{- fail (printf "model-manager.oauth.%s (%s) differs from global.identity.%s (%s); the platform has one login provider" (index $pair 0) $own (index $pair 2) $global) }}

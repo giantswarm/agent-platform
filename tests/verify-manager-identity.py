@@ -16,6 +16,7 @@ Usage: verify-manager-identity.py <meta chart> <connectivity chart> [helm flags.
 The helm flags (the Makefile's VM: API versions, required inputs) go to both renders.
 """
 
+import copy
 import re
 import subprocess
 import sys
@@ -97,6 +98,20 @@ def oauth(rels: dict[str, dict], name: str) -> dict:
     if name not in rels:
         sys.exit(f"FAIL: no {name} HelmRelease in the render")
     return rels[name].get("oauth", {})
+
+
+def merge(dst: dict, src: dict) -> None:
+    for key, value in src.items():
+        if isinstance(value, dict) and isinstance(dst.get(key), dict):
+            merge(dst[key], value)
+        else:
+            dst[key] = copy.deepcopy(value)
+
+
+def layout_value(layout: dict) -> str:
+    while isinstance(layout, dict):
+        layout = next(iter(layout.values()))
+    return layout
 
 
 def expect(what: str, got, want) -> None:
@@ -324,6 +339,47 @@ def main() -> None:
     if result.returncode == 0 or f"muster.muster.oauth.server.dex.clientId ({CLIENT}) differs from global.identity.clientId (platform)" not in result.stderr:
         sys.exit(f"FAIL: one login: the differing client did not fail the render by that guard\n{result.stderr}")
     print("ok: one login")
+
+    print("--> model-manager's values layout: the connectivity guard reads oauth.authorizationServer before the deprecated keys and names the key that differs")
+    agreed = sets(f"global.identity.issuerUrl={ISSUER}", f"global.identity.clientId={CLIENT}", f"global.identity.existingSecret={SECRET}")
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *agreed])
+    for key, layout, global_key, value in (
+        ("authorizationServer.upstream.issuer", {"authorizationServer": {"upstream": {"issuer": "https://other.example.com"}}}, "issuerUrl", ISSUER),
+        ("authorizationServer.upstream.client.id", {"authorizationServer": {"upstream": {"client": {"id": "other"}}}}, "clientId", CLIENT),
+        ("authorizationServer.upstream.client.secretKeyRef.name", {"authorizationServer": {"upstream": {"client": {"secretKeyRef": {"name": "other"}}}}}, "existingSecret", SECRET),
+        ("dex.clientID", {"dex": {"clientID": "other"}}, "clientId", CLIENT),
+    ):
+        values = copy.deepcopy(rels["agent-platform-connectivity"])
+        merge(values["model-manager"]["oauth"], layout)
+        result = connectivity(conn, values, base)
+        got = layout_value(layout)
+        want = f"model-manager.oauth.{key} ({got}) differs from global.identity.{global_key} ({value})"
+        if result.returncode == 0 or want not in result.stderr:
+            sys.exit(f"FAIL: values layout, {key}: the connectivity render did not fail with {want!r}\n{result.stderr}")
+        print(f"ok: values layout, {key}")
+
+    print("--> model-manager's values layout satisfies the absence guard, and the provider falls back to global.identity.type")
+    absent = sets("muster.muster.oauth.server.dex.clientId=", "muster.muster.oauth.server.existingSecret=", "global.domain=")
+    flags = [*base, *LOGIN, *absent, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "components.agentgateway.enabled=true")]
+    rels = releases(meta, flags)
+    values = copy.deepcopy(rels["agent-platform-connectivity"])
+    merge(values["model-manager"]["oauth"], {"authorizationServer": {"issuer": "https://mm.example.com", "upstream": {"client": {"id": CLIENT, "secretKeyRef": {"name": SECRET}}}}})
+    result = connectivity(conn, values, base)
+    if result.returncode != 0:
+        sys.exit(f"FAIL: values layout, absence: the new keys did not satisfy the guard\n{result.stderr}")
+    print("ok: values layout, absence")
+    values = copy.deepcopy(rels["agent-platform-connectivity"])
+    # Both charts default model-manager.oauth.provider to dex; null removes it.
+    values["model-manager"]["oauth"]["provider"] = None
+    values["global"]["identity"]["type"] = "google"
+    result = connectivity(conn, values, base)
+    if result.returncode != 0:
+        sys.exit(f"FAIL: values layout, global.identity.type google: the Dex absence guard fired\n{result.stderr}")
+    merge(values["model-manager"]["oauth"], {"authorizationServer": {"upstream": {"type": "dex"}}})
+    result = connectivity(conn, values, base)
+    if result.returncode == 0 or "model-manager.oauth.dex.clientID is empty" not in result.stderr:
+        sys.exit(f"FAIL: values layout, upstream.type dex over global.identity.type google: the Dex absence guard did not fire\n{result.stderr}")
+    print("ok: values layout, provider: oauth.authorizationServer.upstream.type, else global.identity.type")
 
     print("--> absent: what cannot be derived fails the connectivity render naming the key")
     for what, extra, fragments in (
