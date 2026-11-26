@@ -139,8 +139,9 @@ https://docs.giantswarm.io/tutorials/agent-platform/connecting-custom-mcp-server
 Further reading (optional): https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/. Every tool has one setting, decided by Muster on every call, whoever calls (an
 agent, the portal, Slack, Claude Code):
 
-- **Allow** runs. **Ask**: a person confirms the exact call on Muster's approval page first; the
-  call then runs once. **Block**: hidden, absent from `filter_tools`, refused as not found.
+- **Allow** runs. **Ask**: a person confirms the exact call first (in portal chat, where the request
+  is shown with Approve / Decline, or on Muster's approval page); the call then runs once. An agent
+  cannot decide its own request: Muster takes decisions only from the person. **Block**: hidden, absent from `filter_tools`, refused as not found.
 - A connector carries `spec.approval`: a `rule` (`Allow`, `Ask` or `Block`) that every tool without
   its own entry follows — **new tools follow the rule**, so a `Block` rule hides every tool nobody
   has reviewed yet — and per-tool entries by the server's own tool name (no `x_<server>_` prefix).

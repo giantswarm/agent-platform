@@ -27,10 +27,12 @@
   <obo.callbackBaseUrl>/auth/slack/return with its port while klaus-gateway is
   on and names it; invalid ports and URLs fail; own entries stay, first, once
   each; none below the floor.
-- sign-in handoff: muster.approval.handoffClients is the portal's own client
+- trusted clients: muster.approval.trustedClients is the portal's own client
   (backstage.oidcClientId, when it differs from the platform's shared client)
   while the portal is on, backstage.signInHandoff is on and muster is at least
-  agent-platform.muster.handoffFloor; an own list stands; a list naming the
+  agent-platform.muster.trustedClientsFloor; from
+  agent-platform.muster.handoffFloor below it the list renders as
+  handoffClients; an own list under either name stands; a list naming the
   shared client fails; the backstage release mounts portal-dex-client-secret
   and the connectivity app-config signs in with that client, requesting the
   platform client's audience.
@@ -737,7 +739,7 @@ def check_approval() -> None:
 #.
 TEST_FLOORS = {"muster.governanceFloor": "5.65.0", "muster.agentApprovalFloor": "5.66.0",
                "agentManager.toolApprovalFloor": "3.6.0", "muster.sessionBindingsPortFloor": "5.66.0",
-               "muster.handoffFloor": "5.68.0"}
+               "muster.handoffFloor": "5.68.0", "muster.trustedClientsFloor": "5.69.0"}
 
 
 def with_test_floors(meta_dir: str, dst: str) -> str:
@@ -773,7 +775,7 @@ def check_floor_dependencies() -> None:
     """The floors that need the governance wiring fail the render while the
     governance floor is unset, whichever of them is set; governed mode and role
     floors fail with muster off."""
-    dependent = ["agentManager.toolApprovalFloor", "muster.agentApprovalFloor", "muster.sessionBindingsPortFloor", "agentManager.agentChartV3Floor", "muster.handoffFloor"]
+    dependent = ["agentManager.toolApprovalFloor", "muster.agentApprovalFloor", "muster.sessionBindingsPortFloor", "agentManager.agentChartV3Floor", "muster.handoffFloor", "muster.trustedClientsFloor"]
     values = {**TEST_FLOORS, "agentManager.agentChartV3Floor": "3.6.0"}
     with tempfile.TemporaryDirectory(prefix="verify-floor-deps-") as tmp:
         for i, name in enumerate(dependent):
@@ -830,10 +832,11 @@ def check_unset_floors_keep_everything_off() -> None:
         fail("with muster's agent approval floor unset agent-manager must bind no settings")
     if "muster.sessionBindingsPortFloor" in unset and block(muster, "        sessionBindings:"):
         fail("with the session bindings floor unset muster must keep its earlier bindings wiring")
-    if "muster.handoffFloor" in unset:
+    if "muster.handoffFloor" in unset and "muster.trustedClientsFloor" in unset:
         portal = render_meta(high + PORTAL_CLIENT + ["--set", "backstage.oidcClientId=platform-portal"])
-        if "handoffClients" in (doc(portal, "HelmRelease", "muster") or ""):
-            fail("with the handoff floor unset muster must list no sign-in handoff client")
+        release = doc(portal, "HelmRelease", "muster") or ""
+        if "handoffClients" in release or "trustedClients" in release:
+            fail("with the handoff and trusted-clients floors unset muster must list no trusted client")
     print(f"ok: unset floors ({', '.join(unset)}) keep what they gate off for any muster and agent-manager range; `governed` fails")
 
 
@@ -938,21 +941,29 @@ PORTAL_CLIENT = [
 
 
 def check_handoff_clients() -> None:
-    """muster.approval.handoffClients lists the portal's own client
+    """muster.approval.trustedClients lists the portal's own client
     (backstage.oidcClientId) while it differs from the platform's shared
     client, the portal is on, backstage.signInHandoff is on and muster is at
-    least agent-platform.muster.handoffFloor; an own list stands; a list
-    naming the shared client fails the render."""
-    handoff = f"components.muster.versionRange=>={TEST_FLOORS['muster.handoffFloor']} <6.0.0-0"
-    header = "        handoffClients:"
+    least agent-platform.muster.trustedClientsFloor; from
+    agent-platform.muster.handoffFloor below it the list renders as
+    handoffClients (that muster reads no trustedClients); an own list under
+    either name stands; a list naming the shared client fails the render."""
+    trusted = f"components.muster.versionRange=>={TEST_FLOORS['muster.trustedClientsFloor']} <6.0.0-0"
+    handoff = f"components.muster.versionRange=>={TEST_FLOORS['muster.handoffFloor']} <{TEST_FLOORS['muster.trustedClientsFloor']}"
 
-    def clients(args: list[str], floor: str = handoff) -> list[str]:
-        got = block(muster_release(["--set", floor, *PORTAL_CLIENT, *args]), header)
+    def clients(args: list[str], floor: str = trusted, key: str = "trustedClients") -> list[str]:
+        release = muster_release(["--set", floor, *PORTAL_CLIENT, *args])
+        other = "handoffClients" if key == "trustedClients" else "trustedClients"
+        if block(release, f"        {other}:"):
+            fail(f"muster's approval must not carry {other} when {key} is expected")
+        got = block(release, f"        {key}:")
         return [l.strip() for l in got.split("\n")[1:] if l.strip()]
 
     dedicated = ["--set", "backstage.oidcClientId=platform-portal"]
     if clients(dedicated) != ["- platform-portal"]:
-        fail(f"a dedicated portal client must be muster's one handoff client, got {clients(dedicated)}")
+        fail(f"a dedicated portal client must be muster's one trusted client, got {clients(dedicated)}")
+    if clients(dedicated, handoff, "handoffClients") != ["- platform-portal"]:
+        fail("below the trusted-clients floor, from the handoff floor, the list must render as handoffClients")
     for args, why in (
         ([], "the portal on the shared client"),
         (["--set", "backstage.oidcClientId=platform"], "backstage.oidcClientId equal to the shared client"),
@@ -960,21 +971,25 @@ def check_handoff_clients() -> None:
         (dedicated + ["--set", "components.backstage.enabled=false"], "the portal off"),
     ):
         if clients(args):
-            fail(f"{why}: no handoff client expected, got {clients(args)}")
-    if clients(dedicated, FLOOR_RANGE):
-        fail("below the handoff floor muster must list no handoff client")
-    own = clients(dedicated + ["--set", "muster.muster.approval.handoffClients[0]=other-portal"])
+            fail(f"{why}: no trusted client expected, got {clients(args)}")
+    if clients(dedicated, FLOOR_RANGE) or clients(dedicated, FLOOR_RANGE, "handoffClients"):
+        fail("below the handoff floor muster must list no trusted client")
+    own = clients(dedicated + ["--set", "muster.muster.approval.trustedClients[0]=other-portal"])
     if own != ["- other-portal"]:
-        fail(f"an own handoffClients list must stand, got {own}")
-    if clients(dedicated + ["--set-json", "muster.muster.approval.handoffClients=[]"]):
-        fail("an own empty handoffClients list must stand (no tickets)")
-    err = render(META_DIR, META + ["--set", handoff, *PORTAL_CLIENT, "--set", "muster.muster.approval.handoffClients[0]=platform"], expect_fail=True)
-    if 'handoffClients lists "platform", the platform\'s shared OAuth client' not in err:
-        fail(f"a handoff list naming the shared client must fail the render:\n{err}")
-    rel = doc(render_meta(["--set", handoff, *PORTAL_CLIENT, *dedicated]), "HelmRelease", "backstage") or ""
+        fail(f"an own trustedClients list must stand, got {own}")
+    own = clients(dedicated + ["--set", "muster.muster.approval.handoffClients[0]=other-portal"], key="handoffClients")
+    if own != ["- other-portal"]:
+        fail(f"an own handoffClients list (the earlier name) must stand, got {own}")
+    if clients(dedicated + ["--set-json", "muster.muster.approval.trustedClients=[]"]):
+        fail("an own empty trustedClients list must stand (no trusted client)")
+    for key in ("trustedClients", "handoffClients"):
+        err = render(META_DIR, META + ["--set", trusted, *PORTAL_CLIENT, "--set", f"muster.muster.approval.{key}[0]=platform"], expect_fail=True)
+        if f'{key} lists "platform", the platform\'s shared OAuth client' not in err:
+            fail(f"a {key} list naming the shared client must fail the render:\n{err}")
+    rel = doc(render_meta(["--set", trusted, *PORTAL_CLIENT, *dedicated]), "HelmRelease", "backstage") or ""
     if "key: portal-dex-client-secret" not in rel or "optional: true" not in rel:
         fail("the backstage release must mount the portal's own client secret (portal-dex-client-secret, optional)")
-    print("ok: muster.approval.handoffClients is the portal's dedicated client from the handoff floor (none on the shared client, with signInHandoff false, the portal off or below the floor), an own list stands, the shared client fails")
+    print("ok: muster.approval.trustedClients is the portal's dedicated client from the trusted-clients floor (handoffClients from the handoff floor below it; none on the shared client, with signInHandoff false, the portal off or below the floors), an own list under either name stands, the shared client fails")
 
 
 def check_portal_client_app_config() -> None:

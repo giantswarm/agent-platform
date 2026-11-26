@@ -5869,7 +5869,7 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # that reads it (agent-platform.muster.governanceFloor); below it `governed`
 # fails the render and trusted renders nothing. From that release the meta
 # chart also renders muster.approval.installation (backstage.installationName,
-# the name the approval page shows; and handoffClients, the portal's own
+# the name the approval page shows; and trustedClients, the portal's own
 # client, with backstage.oidcClientId and backstage.signInHandoff), muster-approval-binder's subject
 # (agent-manager's ServiceAccount, muster.rbac.approvalBinder.subjects) and
 # the pages muster may return the browser to after an approval in
@@ -6957,16 +6957,16 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   # sessions by the token's client too, so a person's connector sign-ins of
   # the shared client are not the portal's (subject-scoped ones are).
   oidcClientId: ""
-  # Sign-in handoff: with a dedicated oidcClientId, muster gives the portal's
-  # backend a one-time ticket (muster.approval.handoffClients) when a person
-  # clicks Open on an approval or connector sign-in prompt in chat, and the
-  # page opens signed in instead of asking the person to sign in to muster
-  # again. The trade-off: whoever holds a portal token of a person (only the
-  # portal backend, by design) can open that person's approval page without
-  # a browser sign-in; deciding still takes the click on muster's page, with
-  # its anti-forgery and origin checks. false keeps muster's own sign-in on
-  # every page. Without a dedicated client nothing is listed: the shared
-  # client is held by muster, agents and CLIs as well.
+  # muster trusts the portal with a person's approvals: with a dedicated
+  # oidcClientId the chart lists it in muster.approval.trustedClients, so the
+  # portal shows a tool approval in chat and decides it on the person's click
+  # (Approve / Decline, with the person's token), and opens muster's connector
+  # sign-in signed in through a one-time ticket. The trade-off: whoever holds a
+  # portal token of a person (only the portal backend, by design) can approve
+  # that person's pending requests without muster's browser sign-in; the
+  # portal decides only on the person's click. false keeps every decision and
+  # sign-in on muster's own pages. Without a dedicated client nothing is
+  # listed: the shared client is held by muster, agents and CLIs as well.
   signInHandoff: true
   # Extra query parameters on the login provider's authorize request. Dex needs
   # none; Google needs access_type: offline and prompt: consent for a refresh
