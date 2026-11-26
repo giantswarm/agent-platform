@@ -121,7 +121,8 @@ spec:
 # selectors below resolve), the Kubernetes API (ModelConfig wiring,
 # InferenceServices, download Jobs — as the caller), the identity provider
 # (model-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
-# Dex issuer by name, or the three Google hosts for the google provider), for
+# Dex issuer by name, or the three Google hosts for the google provider) and
+# the hosts of model-manager.oauth.resourceServer.trustedIssuers, for
 # every ollama, lemonade and lmstudio backend its host model server's endpoint, for the
 # kserve backend the Hugging Face Hub and the model registry, with commit mode
 # (model-manager.github) GitHub's API, and the names and blocks of
@@ -149,6 +150,36 @@ spec:
         - kube-apiserver
     {{- if $oauthOn }}
     {{- include "agent-platform.idpEgress.cilium" (dict "ctx" $ "provider" (include "agent-platform.modelManager.oauthProvider" .) "issuerUrl" (include "agent-platform.modelManager.issuerUrl" .)) | trim | nindent 4 }}
+    {{- $trusted := include "agent-platform.modelManager.trustedIssuerHosts" . | fromJsonArray }}
+    {{- $external := list }}
+    {{- range $trusted }}
+    {{- if include "agent-platform.jwks.inCluster" . }}
+    # A trusted issuer served in the cluster
+    # (model-manager.oauth.resourceServer.trustedIssuers): its Service's namespace.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ index (splitList "." .) 1 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- else }}
+    {{- $external = append $external . }}
+    {{- end }}
+    {{- end }}
+    {{- with $external }}
+    # The other issuers model-manager validates tokens of
+    # (model-manager.oauth.resourceServer.trustedIssuers): discovery and the key
+    # set, by name.
+    - toFQDNs:
+        {{- range . }}
+        - matchName: {{ . }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
     {{- end }}
     {{- if $kserveOn }}
     {{- with $hf.fqdns }}

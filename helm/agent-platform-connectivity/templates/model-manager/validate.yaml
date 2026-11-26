@@ -160,16 +160,16 @@ login provider beside global.identity.
     {{- $server := dig "muster" "oauth" "server" dict (.Values.muster | default dict) }}
     {{- if and (dig "enabled" true $server) (dig "dex" "issuerUrl" "" $server) }}
       {{- if not (include "agent-platform.modelManager.issuerUrl" .) }}
-        {{- fail "model-manager.oauth.dex.issuerURL is empty and global.identity.issuerUrl is not set: model-manager validates tokens of the platform's login — the meta chart fills it from muster.muster.oauth.server.dex.issuerUrl; set global.identity.issuerUrl or model-manager.oauth.dex.issuerURL when rendering this chart alone" }}
+        {{- fail "model-manager.oauth.authorizationServer.upstream.issuer is empty and global.identity.issuerUrl is not set: model-manager validates tokens of the platform's login — the meta chart fills it from muster.muster.oauth.server.dex.issuerUrl; set global.identity.issuerUrl or model-manager.oauth.authorizationServer.upstream.issuer when rendering this chart alone" }}
       {{- end }}
       {{- if and (not $ownClient) (not $identity.clientId) }}
-        {{- fail "model-manager.oauth.dex.clientID is empty and global.identity.clientId is not set: model-manager validates tokens for the platform's login client — set muster.muster.oauth.server.dex.clientId, which the meta chart fills model-manager.oauth.dex.clientID from (or set global.identity.clientId)" }}
+        {{- fail "model-manager.oauth.authorizationServer.upstream.client.id is empty and global.identity.clientId is not set: model-manager validates tokens for the platform's login client — set muster.muster.oauth.server.dex.clientId, which the meta chart fills model-manager.oauth.authorizationServer.upstream.client.id from (or set global.identity.clientId)" }}
       {{- end }}
       {{- if and (not $ownSecret) (not (dig "clientSecret" "" $dex)) (not $identity.existingSecret) }}
-        {{- fail "none of model-manager.oauth.existingSecret, model-manager.oauth.dex.clientSecret or global.identity.existingSecret is set: model-manager needs the login client's secret — set muster.muster.oauth.server.existingSecret (a Secret with key dex-client-secret), which the meta chart fills model-manager.oauth.existingSecret from (or set global.identity.existingSecret)" }}
+        {{- fail "none of model-manager.oauth.authorizationServer.upstream.client.secretKeyRef.name, its deprecated model-manager.oauth.existingSecret or model-manager.oauth.dex.clientSecret, or global.identity.existingSecret is set: model-manager needs the login client's secret — set muster.muster.oauth.server.existingSecret (a Secret with key dex-client-secret), which the meta chart fills model-manager.oauth.authorizationServer.upstream.client.secretKeyRef from (or set global.identity.existingSecret)" }}
       {{- end }}
       {{- if and (not $ownBaseURL) (not .Values.global.domain) }}
-        {{- fail "model-manager.oauth.baseURL is empty and global.domain is not set: the resource server needs its public base URL — the meta chart derives https://agentgateway.<global.domain>/model-manager; set global.domain, or model-manager.oauth.baseURL" }}
+        {{- fail "model-manager.oauth.authorizationServer.issuer is empty and global.domain is not set: the resource server needs its public base URL — the meta chart derives https://agentgateway.<global.domain>/model-manager; set global.domain, or model-manager.oauth.authorizationServer.issuer" }}
       {{- end }}
     {{- end }}
   {{- end }}

@@ -4,8 +4,11 @@
 The meta chart fills what a manager's oauth block and global.identity leave
 unset from muster.muster.oauth.server (agent-platform.identity.apply):
 oauth.dex.issuerURL, oauth.dex.clientID with oauth.trustedAudiences, and
-oauth.existingSecret for model-manager, agent-manager, vm-manager,
-cluster-manager and skill-manager; oauth.baseURL for the two routed managers.
+oauth.existingSecret for agent-manager, vm-manager, cluster-manager and
+skill-manager, oauth.baseURL for agent-manager's route; model-manager, on
+mcp-oauth's values layout, gets oauth.authorizationServer.upstream.issuer,
+upstream.client.id, upstream.client.secretKeyRef and authorizationServer.issuer
+instead, and no trustedAudiences (its chart derives them from the client).
 The connectivity release receives the same filled blocks (not skill-manager's,
 which only its own release reads), so each case renders the meta chart, then
 the connectivity chart with the values its HelmRelease carries — where the
@@ -21,6 +24,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 
 import yaml
 
@@ -100,6 +104,30 @@ def oauth(rels: dict[str, dict], name: str) -> dict:
     if name not in rels:
         sys.exit(f"FAIL: no {name} HelmRelease in the render")
     return rels[name].get("oauth", {})
+
+
+# Managers on mcp-oauth's values layout: the meta chart fills
+# oauth.authorizationServer, not the deprecated keys.
+LAYOUT = ("model-manager",)
+
+
+def filled(o: dict, name: str) -> dict:
+    """The login inputs a manager's oauth block carries, read from the layout the meta chart fills for it."""
+    if name in LAYOUT:
+        authz = o.get("authorizationServer", {})
+        upstream = authz.get("upstream", {})
+        client = upstream.get("client", {})
+        ref = client.get("secretKeyRef", {})
+        return {"issuer": upstream.get("issuer"), "client": client.get("id"), "secret": ref.get("name"),
+                "secretKey": ref.get("key"), "audiences": o.get("trustedAudiences"), "base": authz.get("issuer")}
+    dex = o.get("dex", {})
+    return {"issuer": dex.get("issuerURL"), "client": dex.get("clientID"), "secret": o.get("existingSecret"),
+            "secretKey": None, "audiences": o.get("trustedAudiences"), "base": o.get("baseURL")}
+
+
+def login_audiences(name: str, client: str):
+    """The trustedAudiences the meta chart fills with a client: none on the values layout."""
+    return None if name in LAYOUT else [client]
 
 
 def required_audiences(rels: dict[str, dict], name: str):
@@ -223,14 +251,16 @@ def main() -> None:
     print("--> derived: muster's login fills every manager; the routed ones get the route's base URL")
     rels = releases(meta, [*base, *ALL_ON, *LOGIN])
     for name in MANAGERS:
-        o = oauth(rels, name)
-        dex = o.get("dex", {})
-        expect(f"{name} oauth.dex.issuerURL", dex.get("issuerURL"), ISSUER)
-        expect(f"{name} oauth.dex.clientID", dex.get("clientID"), CLIENT)
-        expect(f"{name} oauth.existingSecret", o.get("existingSecret"), SECRET)
-        expect(f"{name} oauth.trustedAudiences", o.get("trustedAudiences"), [CLIENT])
+        f = filled(oauth(rels, name), name)
+        expect(f"{name} issuer", f["issuer"], ISSUER)
+        expect(f"{name} client", f["client"], CLIENT)
+        expect(f"{name} client secret", f["secret"], SECRET)
+        expect(f"{name} oauth.trustedAudiences", f["audiences"], login_audiences(name, CLIENT))
         want = f"https://agentgateway.ci.example.com{ROUTED[name]}" if name in ROUTED else None
-        expect(f"{name} oauth.baseURL", o.get("baseURL"), want)
+        expect(f"{name} base URL", f["base"], want)
+    expect("model-manager client secret key", filled(oauth(rels, "model-manager"), "model-manager")["secretKey"], "dex-client-secret")
+    for key in ("dex", "existingSecret", "baseURL", "trustedAudiences"):
+        expect(f"model-manager deprecated oauth.{key} left unset", key in oauth(rels, "model-manager"), False)
     cvals = rels["agent-platform-connectivity"]
     for name in MANAGERS:
         if name not in NOT_IN_CONNECTIVITY:
@@ -277,6 +307,30 @@ def main() -> None:
             sys.exit(f"FAIL: idp egress: a Cilium policy gives {name}'s pods the cluster entity; it has {rules}")
     print("ok: idp egress")
 
+    print("--> trusted issuers: model-manager's egress reaches each issuer and key set host of oauth.resourceServer.trustedIssuers by name, an in-cluster one through its namespace, the login host once; an address fails the render")
+    values = copy.deepcopy(rels["agent-platform-connectivity"])
+    merge(values["model-manager"]["oauth"], {"resourceServer": {"trustedIssuers": [
+        {"issuer": "https://Other.Example.com/", "jwksURI": "https://keys.example.net/jwks", "audiences": ["a"]},
+        {"issuer": "http://dex.idp.svc.cluster.local:5556/dex", "jwksURI": "http://dex.idp.svc.cluster.local:5556/dex/keys", "audiences": ["a"]},
+        {"issuer": ISSUER, "jwksURI": f"{ISSUER}/keys", "audiences": ["a"]},
+    ]}})
+    result = connectivity(conn, values, base)
+    if result.returncode != 0:
+        sys.exit(f"FAIL: trusted issuers: the connectivity render failed\n{result.stderr}")
+    egress = next(d for d in yaml.safe_load_all(result.stdout) if d and d.get("kind") == "CiliumNetworkPolicy"
+                  and d["metadata"]["name"] == "agent-platform-connectivity-model-manager-egress")["spec"]["egress"]
+    names = [m["matchName"] for r in egress for m in r.get("toFQDNs", []) if "matchName" in m]
+    expect("trusted issuers: external hosts by name", sorted(n for n in names if n in ("other.example.com", "keys.example.net")), ["keys.example.net", "other.example.com"])
+    expect("trusted issuers: the login host once", names.count(urllib.parse.urlparse(ISSUER).hostname), 1)
+    expect("trusted issuers: no FQDN rule for an in-cluster Service", [n for n in names if n.endswith(".svc.cluster.local")], [])
+    if not any(m.get("matchLabels") == {"io.kubernetes.pod.namespace": "idp"} for r in egress for m in r.get("toEndpoints", [])):
+        sys.exit(f"FAIL: trusted issuers: no rule reaches the in-cluster issuer's namespace idp; egress is {egress}")
+    values["model-manager"]["oauth"]["resourceServer"]["trustedIssuers"].append({"issuer": "https://203.0.113.7/", "jwksURI": "https://203.0.113.7/keys", "audiences": ["a"]})
+    result = connectivity(conn, values, base)
+    if result.returncode == 0 or "model-manager.oauth.resourceServer.trustedIssuers[3].issuer names an address (203.0.113.7)" not in result.stderr:
+        sys.exit(f"FAIL: trusted issuers: an address literal did not fail the render naming the entry\n{result.stderr}")
+    print("ok: trusted issuers")
+
     print("--> skill-manager off: no policy selects its pods")
     rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets("components.skill-manager.enabled=false")])
     result = connectivity(conn, rels["agent-platform-connectivity"], base)
@@ -312,23 +366,48 @@ def main() -> None:
     print("--> agent-manager's route hostname override is its base URL's host; model-manager, which has no route, keeps agentgateway.<domain>")
     rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets("agentManager.route.hostname=agents.ci.example.com")])
     expect("agent-manager oauth.baseURL", oauth(rels, "agent-manager").get("baseURL"), "https://agents.ci.example.com/agent-manager")
-    expect("model-manager oauth.baseURL", oauth(rels, "model-manager").get("baseURL"), "https://agentgateway.ci.example.com/model-manager")
+    expect("model-manager base URL", filled(oauth(rels, "model-manager"), "model-manager")["base"], "https://agentgateway.ci.example.com/model-manager")
     print("ok: route hostname")
 
     print("--> explicit wins: a manager's own client, Secret, audiences and base URL stand")
     rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets(
+        "agent-manager.oauth.dex.clientID=own-client",
+        "agent-manager.oauth.existingSecret=own-secret",
+        "agent-manager.oauth.trustedAudiences[0]=own-audience",
+        "agent-manager.oauth.baseURL=https://am.example.com",
+    )])
+    o = oauth(rels, "agent-manager")
+    expect("agent-manager oauth.dex.clientID", o["dex"].get("clientID"), "own-client")
+    expect("agent-manager oauth.existingSecret", o.get("existingSecret"), "own-secret")
+    expect("agent-manager oauth.trustedAudiences", o.get("trustedAudiences"), ["own-audience"])
+    expect("agent-manager oauth.baseURL", o.get("baseURL"), "https://am.example.com")
+    expect("agent-manager oauth.dex.issuerURL (still derived)", o["dex"].get("issuerURL"), ISSUER)
+    print("ok: explicit wins")
+
+    print("--> explicit wins on the values layout: model-manager's own keys stand, in either layout, and the rest is still filled")
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets(
+        "model-manager.oauth.authorizationServer.upstream.client.id=own-client",
+        "model-manager.oauth.authorizationServer.upstream.client.secretKeyRef.name=own-secret",
+        "model-manager.oauth.authorizationServer.upstream.client.secretKeyRef.key=client-secret",
+        "model-manager.oauth.authorizationServer.issuer=https://mm.example.com",
+    )])
+    f = filled(oauth(rels, "model-manager"), "model-manager")
+    expect("model-manager upstream.client.id", f["client"], "own-client")
+    expect("model-manager upstream.client.secretKeyRef", (f["secret"], f["secretKey"]), ("own-secret", "client-secret"))
+    expect("model-manager authorizationServer.issuer", f["base"], "https://mm.example.com")
+    expect("model-manager upstream.issuer (still derived)", f["issuer"], ISSUER)
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets(
         "model-manager.oauth.dex.clientID=own-client",
         "model-manager.oauth.existingSecret=own-secret",
-        "model-manager.oauth.trustedAudiences[0]=own-audience",
         "model-manager.oauth.baseURL=https://mm.example.com",
     )])
     o = oauth(rels, "model-manager")
-    expect("model-manager oauth.dex.clientID", o["dex"].get("clientID"), "own-client")
-    expect("model-manager oauth.existingSecret", o.get("existingSecret"), "own-secret")
-    expect("model-manager oauth.trustedAudiences", o.get("trustedAudiences"), ["own-audience"])
-    expect("model-manager oauth.baseURL", o.get("baseURL"), "https://mm.example.com")
-    expect("model-manager oauth.dex.issuerURL (still derived)", o["dex"].get("issuerURL"), ISSUER)
-    print("ok: explicit wins")
+    f = filled(o, "model-manager")
+    expect("model-manager deprecated oauth.dex.clientID stands", o["dex"].get("clientID"), "own-client")
+    expect("model-manager upstream.client with deprecated keys set", (f["client"], f["secret"]), (None, None))
+    expect("model-manager authorizationServer.issuer with deprecated baseURL set", f["base"], None)
+    expect("model-manager upstream.issuer (still derived)", f["issuer"], ISSUER)
+    print("ok: explicit wins on the values layout")
 
     print("--> global.identity wins: set, nothing is filled (the charts read it themselves)")
     rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets(
@@ -337,11 +416,9 @@ def main() -> None:
         f"global.identity.existingSecret={SECRET}",
     )])
     for name in MANAGERS:
-        o = oauth(rels, name)
-        for key in ("issuerURL", "clientID"):
-            expect(f"{name} oauth.dex.{key} with global.identity set", o.get("dex", {}).get(key), None)
-        expect(f"{name} oauth.existingSecret with global.identity set", o.get("existingSecret"), None)
-        expect(f"{name} oauth.trustedAudiences with global.identity set", o.get("trustedAudiences"), None)
+        f = filled(oauth(rels, name), name)
+        for key in ("issuer", "client", "secret", "audiences"):
+            expect(f"{name} {key} with global.identity set", f[key], None)
     print("ok: global.identity wins")
 
     print("--> global.identity without a client (enigma's shape): each key is filled on its own, the client from muster's login")
@@ -350,11 +427,11 @@ def main() -> None:
         f"global.identity.existingSecret={SECRET}",
     )])
     for name in MANAGERS:
-        o = oauth(rels, name)
-        expect(f"{name} oauth.dex.clientID without global.identity.clientId", o.get("dex", {}).get("clientID"), CLIENT)
-        expect(f"{name} oauth.trustedAudiences without global.identity.clientId", o.get("trustedAudiences"), [CLIENT])
-        expect(f"{name} oauth.dex.issuerURL with global.identity.issuerUrl set", o.get("dex", {}).get("issuerURL"), None)
-        expect(f"{name} oauth.existingSecret with global.identity.existingSecret set", o.get("existingSecret"), None)
+        f = filled(oauth(rels, name), name)
+        expect(f"{name} client without global.identity.clientId", f["client"], CLIENT)
+        expect(f"{name} oauth.trustedAudiences without global.identity.clientId", f["audiences"], login_audiences(name, CLIENT))
+        expect(f"{name} issuer with global.identity.issuerUrl set", f["issuer"], None)
+        expect(f"{name} client secret with global.identity.existingSecret set", f["secret"], None)
     print("ok: global.identity without a client")
 
     print("--> one login: a global.identity.clientId that differs from muster's fails the connectivity render")
@@ -401,15 +478,15 @@ def main() -> None:
         sys.exit(f"FAIL: values layout, global.identity.type google: the Dex absence guard fired\n{result.stderr}")
     merge(values["model-manager"]["oauth"], {"authorizationServer": {"upstream": {"type": "dex"}}})
     result = connectivity(conn, values, base)
-    if result.returncode == 0 or "model-manager.oauth.dex.clientID is empty" not in result.stderr:
+    if result.returncode == 0 or "model-manager.oauth.authorizationServer.upstream.client.id is empty" not in result.stderr:
         sys.exit(f"FAIL: values layout, upstream.type dex over global.identity.type google: the Dex absence guard did not fire\n{result.stderr}")
     print("ok: values layout, provider: oauth.authorizationServer.upstream.type, else global.identity.type")
 
     print("--> absent: what cannot be derived fails the connectivity render naming the key")
     for what, extra, fragments in (
-        ("no Secret", sets("muster.muster.oauth.server.existingSecret="), ("none of model-manager.oauth.existingSecret", "set muster.muster.oauth.server.existingSecret")),
-        ("no client", sets("muster.muster.oauth.server.dex.clientId="), ("model-manager.oauth.dex.clientID is empty", "set muster.muster.oauth.server.dex.clientId")),
-        ("no base URL (no domain)", sets("global.domain="), ("model-manager.oauth.baseURL is empty", "set global.domain")),
+        ("no Secret", sets("muster.muster.oauth.server.existingSecret="), ("none of model-manager.oauth.authorizationServer.upstream.client.secretKeyRef.name", "set muster.muster.oauth.server.existingSecret")),
+        ("no client", sets("muster.muster.oauth.server.dex.clientId="), ("model-manager.oauth.authorizationServer.upstream.client.id is empty", "set muster.muster.oauth.server.dex.clientId")),
+        ("no base URL (no domain)", sets("global.domain="), ("model-manager.oauth.authorizationServer.issuer is empty", "set global.domain")),
     ):
         flags = [*base, *LOGIN, *sets("components.kagent.enabled=true", "kagent.database.postgres.urlFile=/etc/kagent-db/uri", "global.domain=ci.example.com", "components.agentgateway.enabled=true"), *extra]
         rels = releases(meta, flags)
