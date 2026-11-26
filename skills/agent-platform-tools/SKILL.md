@@ -2,7 +2,7 @@
 name: agent-platform-tools
 description: Use when a question is about tools on the Agent Platform — Muster's meta-tools and call_tool, finding or running a tool, what a toolset or preset resolves to, why a tool is missing or refused, connectors and signing in to one, workflows, or model-manager.
 metadata:
-  version: "3.3.1"
+  version: "3.3.2"
 ---
 
 # Tools on the Agent Platform
@@ -218,4 +218,9 @@ clients. Procedure and version prerequisites:
   without a setting: `oauth.sso.allowPrivateIPs` and muster's `dex.allowPrivateIPJWKS` (alias
   `dex.allowPrivateIPOIDC`) are deprecated; do not set them to repair discovery. Operator checks and migration:
   [OAuth issuer connectivity](https://github.com/giantswarm/agent-platform/blob/main/docs/authentication.md#oauth-issuer-connectivity).
+- A discovery error about a backend's advertised `resource` naming another origin is an invalid
+  metadata document. Have its owner correct the advertisement; do not bypass the check by pinning
+  an authorization-server issuer. Browser Origin warnings concern the operator's allowed origins,
+  not the person's credentials. Configuration and migration:
+  [Muster browser origins and discovery](https://github.com/giantswarm/muster/blob/main/docs/reference/configuration.md#browser-origins-and-mcp-discovery).
 - Everything else: https://docs.giantswarm.io/tutorials/agent-platform/troubleshooting/.
