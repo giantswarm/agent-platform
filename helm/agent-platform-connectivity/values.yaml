@@ -2979,6 +2979,15 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     # namespaces; with organizations, read their releases, sources and Agents);
     # empty (the default) renders neither.
     preflightSemver: ""
+    # true while the 2.x -> 3.x cut-over of the organizations runs: only then,
+    # and only with agent-manager.agentChart.semver on a 3.x line and
+    # agentPlatformOrganizations.enabled, the migration's identity may update
+    # the organizations' HelmReleases (spec.values only) and write its report
+    # there, held by the ValidatingAdmissionPolicy
+    # agent-platform-organization-migrate-scope. Set it in the change that
+    # moves the line; unset it once no organization is Ready=False with reason
+    # ChartSourceHeld (UPGRADE.md).
+    cutover: false
     # Namespaces the GitOps-owned agents' HelmReleases and OCIRepositories live
     # in (a HelmRelease with targetNamespace: kagent applied from elsewhere —
     # the fleet's flux-giantswarm): the Job reads them there (get, list; a Role

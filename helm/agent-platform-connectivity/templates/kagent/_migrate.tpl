@@ -168,12 +168,13 @@ is, for the dry run before the line moves.
 {{- end -}}
 
 {{/*
-Truthy when the run itself (not the preflight dry run) takes the 2.x -> 3.x
-path with organizations on: agent-manager.agentChart.semver is a 3.x line.
-Only then the run writes organization releases and its report there
-(migrate-rbac.yaml, organizations/migrate-scope.yaml).
+Truthy while the organizations' cut-over runs: agentManager.migration.cutover
+set, agent-manager.agentChart.semver a 3.x line (not the preflight dry run)
+and organizations on. Only then the run writes organization releases and its
+report there (migrate-rbac.yaml, organizations/migrate-scope.yaml); unset
+afterwards, the identity keeps its reads on the 3.x line and no write there.
 */}}
 {{- define "agent-platform.kagent.migration.v3Writes" -}}
 {{- $am := include "agent-platform.agentManager.chartValues" . | fromJson -}}
-{{- if and (include "agent-platform.organizations.enabled" .) (include "agent-platform.kagent.migration" .) (include "agent-platform.kagent.migration.isV3" (dig "agentChart" "semver" "2.x" $am)) -}}true{{- end -}}
+{{- if and (dig "migration" "cutover" false (.Values.agentManager | default dict)) (include "agent-platform.organizations.enabled" .) (include "agent-platform.kagent.migration" .) (include "agent-platform.kagent.migration.isV3" (dig "agentChart" "semver" "2.x" $am)) -}}true{{- end -}}
 {{- end -}}

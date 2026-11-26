@@ -25,8 +25,10 @@ list namespaces (it finds the organization namespaces by label and fails when
 it may not) and, with agentPlatformOrganizations.enabled, list and get the
 HelmReleases and OCIRepositories and list the Agents it reads there
 (agent-platform.kagent.migration.v3Line; a 3.x preflight range on the 2.x
-line too, for its dry run). Only while the line itself is 3.x
-(agent-platform.kagent.migration.v3Writes) the run also updates the
+line too, for its dry run). Only while the line itself is 3.x and
+agentManager.migration.cutover is set (agent-platform.kagent.migration.v3Writes;
+UPGRADE.md says to unset it once every organization moved) the run also
+updates the
 organization releases agent-manager owns (their values to 3.x) and writes its
 report ConfigMap agent-manager-migrate-report there, which the
 agent-platform-operator reads before it moves the organization's chart source

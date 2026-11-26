@@ -5569,6 +5569,9 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     # preflightSemver (unset): forwarded when set, the connectivity chart's
     # values.yaml documents it (UPGRADE.md, the dry run before the agent chart
     # line moves to 3.x).
+    # cutover (unset): forwarded when set; true only while the organizations'
+    # 2.x -> 3.x cut-over runs (the connectivity chart's values.yaml,
+    # UPGRADE.md).
     gitopsNamespaces: []
 
 # === Skill repositories ===

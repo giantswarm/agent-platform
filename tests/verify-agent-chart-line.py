@@ -211,6 +211,8 @@ if CONN:
     two_orgs = migrate_cluster_rules("--set", "agentPlatformOrganizations.enabled=true")
     three = migrate_cluster_rules(*v3)
     three_orgs = migrate_cluster_rules(*v3, "--set", "agentPlatformOrganizations.enabled=true")
+    cutover = ("--set", "agentManager.migration.cutover=true")
+    three_cut = migrate_cluster_rules(*v3, *cutover, "--set", "agentPlatformOrganizations.enabled=true")
     for what, text in (("2.x line", two), ("2.x line with organizations", two_orgs)):
         if ns_rule in text or "helm.toolkit.fluxcd.io" in text:
             fail(f"{what}: the migrate run reads no organization namespace, so its identity gets no namespace list and no cluster-wide release read")
@@ -234,7 +236,8 @@ if CONN:
     for want in ('resources: ["helmreleases"]\n    verbs: ["get", "list"]', 'resources: ["ocirepositories"]\n    verbs: ["get", "list"]', 'resources: ["agents"]\n    verbs: ["list"]', ns_rule):
         if want not in three_orgs:
             fail(f"3.x line with organizations: the migrate run's ClusterRole lacks {want!r}")
-    # D-GO-03: on the 3.x line itself (not a preflight) the run rewrites the
+    # D-GO-03, D-GO-27: on the 3.x line itself (not a preflight) and only
+    # while agentManager.migration.cutover is set, the run rewrites the
     # organization releases agent-manager owns and writes its report there:
     # update on HelmReleases, the report ConfigMap; nothing else, and the
     # scope policy holds those writes to organization namespaces and the
@@ -244,15 +247,17 @@ if CONN:
     writes = ('resources: ["helmreleases"]\n    verbs: ["update"]', 'resources: ["configmaps"]\n    verbs: ["create"]',
               'resources: ["configmaps"]\n    resourceNames: ["agent-manager-migrate-report"]\n    verbs: ["get", "update"]')
     for want in writes:
-        if want not in three_orgs:
-            fail(f"3.x line with organizations: the migrate run's ClusterRole lacks {want!r}")
-    rules = org_rules(three_orgs)
+        if want not in three_cut:
+            fail(f"3.x line with organizations during the cut-over: the migrate run's ClusterRole lacks {want!r}")
+    rules = org_rules(three_cut)
     for w in writes:
         rules = rules.replace(w, "")
     for verb in ("create", "update", "patch", "delete", "watch"):
         if f'"{verb}"' in rules:
             fail(f"the migrate run's organization rights carry {verb} beyond the release update and its report")
-    for what, text in (("a 3.x preflight on the 2.x line", pre_orgs), ("3.x line without organizations", three)):
+    pre_cut = migrate_cluster_rules(*pre, *cutover, "--set", "agentPlatformOrganizations.enabled=true")
+    for what, text in (("a 3.x preflight on the 2.x line", pre_orgs), ("a 3.x preflight with cutover set", pre_cut),
+                       ("3.x line without organizations", three), ("3.x line with organizations, cutover unset", three_orgs)):
         for verb in ("create", "update", "patch", "delete", "watch"):
             if f'"{verb}"' in org_rules(text):
                 fail(f"{what}: the migrate run's cluster-wide rights carry {verb}; only the 3.x line with organizations writes")
@@ -263,15 +268,17 @@ if CONN:
         r = subprocess.run([*conn_base, *args], capture_output=True, text=True)
         found = [d for d in r.stdout.split("\n---\n") if "\nkind: ValidatingAdmissionPolicy\n" in "\n" + d and "name: agent-platform-organization-migrate-scope\n" in d]
         return found[0] if found else ""
-    policy = scope_policy(*v3, "--set", "agentPlatformOrganizations.enabled=true")
+    policy = scope_policy(*v3, *cutover, "--set", "agentPlatformOrganizations.enabled=true")
     if not policy:
         fail("3.x line with organizations: no agent-platform-organization-migrate-scope policy holds the run's writes")
     else:
         for want in ("system:serviceaccount:", "-agent-manager-migrate'", "request.name == 'agent-manager-migrate-report'",
-                     "k == 'values'", "variables.organizationNamespace", 'resources: ["helmreleases"]', 'resources: ["configmaps"]'):
+                     "k == 'values'", "variables.organizationNamespace", 'resources: ["helmreleases"]', 'resources: ["configmaps"]',
+                     "variables.sameMetadata", "ownerReferences", "finalizers"):
             if want not in policy:
                 fail(f"the migrate scope policy lacks {want!r}:\n{policy}")
-    for what, args in (("2.x line", ("--set", "agentPlatformOrganizations.enabled=true")), ("preflight", (*pre, "--set", "agentPlatformOrganizations.enabled=true")), ("3.x without organizations", v3)):
+    for what, args in (("2.x line", (*cutover, "--set", "agentPlatformOrganizations.enabled=true")), ("preflight", (*pre, *cutover, "--set", "agentPlatformOrganizations.enabled=true")),
+                       ("3.x without organizations", (*v3, *cutover)), ("3.x, cutover unset", (*v3, "--set", "agentPlatformOrganizations.enabled=true"))):
         if scope_policy(*args):
             fail(f"{what}: the migrate scope policy renders without the writes it holds")
 
@@ -280,8 +287,14 @@ if CONN:
     refused("an alternative on another major", "admits agent chart majors 2, 3", "--set", "agent-manager.agentChart.semver=3.0.1 || 2.6.0")
     for r in (">=2.6.1 <2.6.9", "= 2.6.1", "~2.250", "2.6.1 - 2.6.5"):
         renders(f"{r} reads as 2.x", "--set", f"agent-manager.agentChart.semver={r}")
-    if not scope_policy("--set", "agent-manager.agentChart.semver=3.0.1 || 3.2.0", "--set", "agentPlatformOrganizations.enabled=true"):
-        fail("the connectivity chart reads 3.0.1 || 3.2.0 as a 3.x line")
+    # The connectivity chart's own probe (isV3): an exact pin and an
+    # alternative only the named-version probes see (D-GO-08, D-GO-31).
+    for r in ("3.0.1", "=3.0.1", "2.6.0 || 3.0.1", "3.0.1 || 3.2.0"):
+        if ns_rule not in migrate_cluster_rules("--set", f"agent-manager.agentChart.semver={r}"):
+            fail(f"the connectivity chart does not read {r} as a 3.x line")
+    for r in ("2.6.1", ">=2.6.1 <2.6.9", "~2.250"):
+        if ns_rule in migrate_cluster_rules("--set", f"agent-manager.agentChart.semver={r}"):
+            fail(f"the connectivity chart reads {r} as a 3.x line")
 
 # A floor that needs the governance wiring, set while the governance floor is
 # unset (a release that sets its floors in two steps): the render fails naming

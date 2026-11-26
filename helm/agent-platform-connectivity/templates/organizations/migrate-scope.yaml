@@ -10,12 +10,16 @@ RBAC cannot select namespaces by label, so this policy holds them to
   * in an organization namespace, a HelmRelease update that changes
     spec.values only (migrate rewrites muster.requireApproval to
     default: Ask and spells out modelConfig.name; it never changes the chart,
-    the identity a release runs as or anything else of it);
+    the identity a release runs as or anything else of it), its labels,
+    annotations, ownerReferences and finalizers as they were (no owner the
+    garbage collector would delete it for, no GitOps label that changes who
+    owns it, no Flux reconcile request);
   * a ConfigMap of the report's name, agent-manager-migrate-report.
 
 A bug or a leaked token of the run then cannot rewrite the platform's own
 HelmReleases or another namespace's ConfigMaps. Rendered with those rights
-only.
+only: while agentManager.migration.cutover is set
+(agent-platform.kagent.migration.v3Writes).
 */ -}}
 {{- if include "agent-platform.kagent.migration.v3Writes" . }}
 {{- $label := include "agent-platform.organizations.label" . }}
@@ -44,6 +48,13 @@ spec:
     - name: migrate
       expression: {{ printf "request.userInfo.username == '%s'" $user | quote }}
   variables:
+    - name: sameMetadata
+      expression: >-
+        request.operation != 'UPDATE' ||
+        (object.metadata.?labels.orValue({}) == oldObject.metadata.?labels.orValue({}) &&
+         object.metadata.?annotations.orValue({}) == oldObject.metadata.?annotations.orValue({}) &&
+         object.metadata.?ownerReferences.orValue([]) == oldObject.metadata.?ownerReferences.orValue([]) &&
+         object.metadata.?finalizers.orValue([]) == oldObject.metadata.?finalizers.orValue([]))
     - name: organizationNamespace
       expression: {{ printf "has(namespaceObject.metadata.labels) && '%s' in namespaceObject.metadata.labels" $label | quote }}
   validations:
@@ -57,9 +68,10 @@ spec:
         request.resource.resource != 'helmreleases' || !variables.organizationNamespace ||
         (request.operation == 'UPDATE' &&
          object.spec.all(k, k == 'values' || (k in oldObject.spec && oldObject.spec[k] == object.spec[k])) &&
-         oldObject.spec.all(k, k == 'values' || k in object.spec))
+         oldObject.spec.all(k, k == 'values' || k in object.spec) &&
+         variables.sameMetadata)
       reason: Forbidden
-      messageExpression: "'agent-manager migrate changes only spec.values of a HelmRelease in an organization namespace; refused for ' + request.namespace + '/' + request.name"
+      messageExpression: "'agent-manager migrate changes only spec.values of a HelmRelease in an organization namespace, never its spec otherwise, labels, annotations, ownerReferences or finalizers; refused for ' + request.namespace + '/' + request.name"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

@@ -861,14 +861,16 @@ HELMRELEASE_CRD = {
 
 
 def prove_migrate_scope(chart):
-    """agent-platform-organization-migrate-scope (D-GO-03): on the 3.x line
-    the migrate run may update HelmReleases and write its report cluster-wide;
-    the policy holds it to organization namespaces and the kagent namespace,
-    to spec.values of an organization's HelmRelease, and to the report's
-    name."""
+    """agent-platform-organization-migrate-scope (D-GO-03, D-GO-27): during
+    the cut-over on the 3.x line the migrate run may update HelmReleases and
+    write its report cluster-wide; the policy holds it to organization
+    namespaces and the kagent namespace, to spec.values of an organization's
+    HelmRelease (its labels, annotations, ownerReferences and finalizers as
+    they were), and to the report's name."""
     r = connectivity(chart, "kubernetes", "--set", "components.agent-manager.enabled=true",
                      "--set", "global.identity.issuerUrl=https://dex.ci.example.com", "--set", "global.identity.clientId=platform",
-                     "--set", "global.identity.existingSecret=platform-oauth", "--set", "agent-manager.agentChart.semver=>=3.0.0 <4.0.0")
+                     "--set", "global.identity.existingSecret=platform-oauth", "--set", "agent-manager.agentChart.semver=>=3.0.0 <4.0.0",
+                     "--set", "agentManager.migration.cutover=true")
     if r.returncode != 0:
         fail(f"connectivity render on the 3.x line:\n{r.stderr[-800:]}")
     docs_ = [d for d in yaml.safe_load_all(r.stdout) if d and d.get("metadata", {}).get("name") == "agent-platform-organization-migrate-scope"]
@@ -892,11 +894,25 @@ def prove_migrate_scope(chart):
 
     def replace(obj):
         return kubectl(["replace", "-f", "-", "--dry-run=server"], yaml.safe_dump(obj), user)
+
+    def with_meta(**meta):
+        obj = hr(ORG_NS, {"default": "Ask"})
+        obj["metadata"].update(meta)
+        return obj
+    owner = [{"apiVersion": "v1", "kind": "ConfigMap", "name": "gone", "uid": "00000000-0000-0000-0000-000000000000"}]
+    for what, meta in (("a label", {"labels": {"kustomize.toolkit.fluxcd.io/name": "flux"}}),
+                       ("an annotation", {"annotations": {"reconcile.fluxcd.io/forceAt": "now"}}),
+                       ("an owner", {"ownerReferences": owner}),
+                       ("a finalizer", {"finalizers": ["example.com/hold"]})):
+        case(f"migrate adds {what} to an organization release", replace(with_meta(**meta)), "agent-platform-organization-migrate-scope")
     case("migrate rewrites an organization release's values", replace(hr(ORG_NS, {"default": "Ask"})))
     case("migrate changes more than an organization release's values", replace(hr(ORG_NS, {"default": "Ask"}, "20m")), "agent-platform-organization-migrate-scope")
     case(f"migrate rewrites a release in {PLAIN_NS}", replace(hr(PLAIN_NS, {"default": "Ask"})), "agent-platform-organization-migrate-scope")
     report = lambda ns, name="agent-manager-migrate-report": {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": name, "namespace": ns}}
     case("migrate writes its report in an organization namespace", create(report(ORG_NS), as_=user))
+    marked = report(ORG_NS) | {"metadata": {"name": "agent-manager-migrate-report", "namespace": ORG_NS,
+                                            "annotations": {"agent-platform.giantswarm.io/agent-chart-ready-major": "3"}}}
+    case("migrate marks its report in an organization namespace", create(marked, as_=user))
     case("migrate writes its report in the kagent namespace", create(report("kagent"), as_=user))
     case("migrate writes its report in kube-system", create(report("kube-system"), as_=user), "agent-platform-organization-migrate-scope")
     case("migrate writes another ConfigMap in an organization namespace", create(report(ORG_NS, "settings"), as_=user), "agent-platform-organization-migrate-scope")
