@@ -161,9 +161,8 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   name, description and system prompt verbatim — and wait for a yes before writing. Write the plan in
   your reply text and end your turn there: owner (the organization), name, display name, description,
   harness, model, toolset, connectors, skills, egress and system prompt. The person's next message is
-  the answer; never confirm the plan with `ask_user`. The person sees neither your reasoning, your tool
-  calls' arguments nor `validate_agent`'s output, so never point at "the plan above" you have not
-  written out; when the person says they see none, write it out instead of asking again. When a tool cannot
+  the answer; never confirm the plan with `ask_user`. The person cannot see your reasoning, so never
+  point at "the plan above" you have not written out; when the person says they see none, write it out instead of asking again. When a tool cannot
   express what the person confirmed, stop and say so; never run a different write instead.
   Delete only on an explicit request that names the agent, one at a time.
 
