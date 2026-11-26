@@ -5012,8 +5012,6 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
   oauth:
     enabled: true
     provider: dex
-    dex:
-      allowPrivateURLs: false
     downstream:
       enabled: true
   muster:
