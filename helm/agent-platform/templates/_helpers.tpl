@@ -499,6 +499,13 @@ schema refuses the key. An installation's own rbac.namespaces stays. */ -}}
 {{- fail (printf "agent-manager.muster.url (%s) differs from the platform's muster MCP URL (%s): agent-manager composes every agent's RemoteMCPServer against the muster this chart installs — the URL follows muster.fullnameOverride and muster.service.port; leave agent-manager.muster.url unset" $ownUrl $url) -}}
 {{- end -}}
 {{- $musterValues := dict "url" $url -}}
+{{- /* agent-manager calls muster's session bindings API on its own port
+(agent-platform.muster.sessionBindings); an own bindingsUrl stands. */ -}}
+{{- with (include "agent-platform.muster.sessionBindings" .root | fromJson).url -}}
+{{- if not (dig "muster" "bindingsUrl" "" (index $.root.Values "agent-manager" | default dict)) -}}
+{{- $_ := set $musterValues "bindingsUrl" . -}}
+{{- end -}}
+{{- end -}}
 {{- /* muster trusts a bound Session's actor JWT: every Session start_session
 binds carries the agent's toolset, and agent-manager reports it as bound to
 each session at its start (agent-manager 2.9.0, giantswarm/agent-manager#228). */ -}}
@@ -626,6 +633,13 @@ renders (networkPolicy.mcpBackends). */ -}}
 {{- end -}}
 {{- with $mcpBackends -}}
 {{- $_ := set $derived "networkPolicy" (dict "mcpBackends" .) -}}
+{{- end -}}
+{{- /* agent-manager's egress to muster's session bindings port
+(agent-platform.muster.sessionBindings). */ -}}
+{{- with (include "agent-platform.muster.sessionBindings" .root | fromJson).sessionBindings -}}
+{{- $np := get $derived "networkPolicy" | default dict -}}
+{{- $_ := set $np "musterSessionBindingsPort" (int (dig "port" 8091 .)) -}}
+{{- $_ := set $derived "networkPolicy" $np -}}
 {{- end -}}
 {{- /* agent-manager's migrate run pins through the skill-manager too: its
 URL, its namespace and the service token's Secret, which the connectivity
@@ -1035,6 +1049,9 @@ workspaces on and no releasable instance agent-platform.validateWorkspaceAuth
 has failed the render. */ -}}
 {{- $provider := include "agent-platform.muster.credentialProvider" .root | fromJson -}}
 {{- if or $provider.releasable (dig "actorBearer" "enabled" false $provider) -}}
+{{- with (include "agent-platform.muster.sessionBindings" .root | fromJson).sessionBindings -}}
+{{- $_ := set $provider "sessionBindings" . -}}
+{{- end -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $muster "credentialProvider" $provider -}}
 {{- $_ := set $derived "muster" $muster -}}
@@ -2124,6 +2141,34 @@ releases exist. One line each, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.toolApprovalFloor" -}}3.6.0{{- end -}}
 {{- define "agent-platform.muster.agentApprovalFloor" -}}5.66.0{{- end -}}
+{{- /* The first muster serving the session bindings API on its own port
+(muster.credentialProvider.sessionBindings, decision #88). */ -}}
+{{- define "agent-platform.muster.sessionBindingsPortFloor" -}}5.66.0{{- end -}}
+
+{{/*
+The session bindings API muster serves agent-manager alone (decision #88):
+from agent-platform.muster.sessionBindingsPortFloor, while muster runs its
+credential provider, on its own port and no longer on the aggregator port,
+its network policy admitting agent-manager's pods only. Emits JSON:
+{sessionBindings, url} -- muster's credentialProvider.sessionBindings and
+agent-manager's muster.bindingsUrl -- or {} below the floor or without the
+provider. An own muster.muster.credentialProvider.sessionBindings key stands.
+Usage: include "agent-platform.muster.sessionBindings" . | fromJson
+*/}}
+{{- define "agent-platform.muster.sessionBindings" -}}
+{{- $out := dict -}}
+{{- $provider := include "agent-platform.muster.credentialProvider" . | fromJson -}}
+{{- if and $provider.enabled (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.sessionBindingsPortFloor" .))) -}}
+{{- $own := dig "muster" "credentialProvider" "sessionBindings" dict (.Values.muster | default dict) | default dict -}}
+{{- $amNs := dig "agent-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $amName := dig "nameOverride" "agent-manager" (index .Values "agent-manager" | default dict) -}}
+{{- $sb := dict "onMainPort" false "allowedFrom" (list (dict "namespace" $amNs "podLabels" (dict "app.kubernetes.io/name" $amName))) -}}
+{{- range $k, $v := $own -}}{{- $_ := set $sb $k $v -}}{{- end -}}
+{{- $port := dig "port" 8091 $sb -}}
+{{- $out = dict "sessionBindings" $sb "url" (printf "http://%s.%s.svc.cluster.local:%v/session-bindings" (include "agent-platform.musterFullname" .) (include "agent-platform.muster.namespace" .) $port) -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
 {{- define "agent-platform.muster.toolsetBindingFloor" -}}5.49.0{{- end -}}
 
 {{/*

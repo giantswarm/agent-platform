@@ -577,6 +577,44 @@ def check_agent_manager_tool_approval() -> None:
     print("ok: agent-manager's muster.toolApproval.enabled is on from its floor and muster's, off below muster's, absent below its own, an own value stands")
 
 
+def check_session_bindings() -> None:
+    base = [
+        "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+        "--set", "components.kagent.enabled=true",
+        "--set", "components.agent-manager.enabled=true",
+        "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
+        "--set", "kagent.database.postgres.urlFile=/etc/kagent-db/uri",
+        "--set", "muster.muster.oauth.server.baseUrl=https://muster.ci.example.com",
+    ]
+    floor = ["--set", "components.muster.versionRange=>=5.66.0 <6.0.0-0"]
+
+    def releases(args: list[str]) -> tuple[str, str]:
+        out = render_meta([*base, *args])
+        muster, am = doc(out, "HelmRelease", "muster"), doc(out, "HelmRelease", "agent-manager")
+        if muster is None or am is None:
+            fail(f"no muster or agent-manager HelmRelease with {args}")
+        return block(muster, "        sessionBindings:"), am
+
+    conn = doc(render_meta([*base, *floor]), "HelmRelease", "agent-platform-connectivity") or ""
+    if "musterSessionBindingsPort: 8091" not in conn:
+        fail("from the floor the connectivity release must open agent-manager's egress to the session bindings port (networkPolicy.musterSessionBindingsPort)")
+    sb, am = releases(floor)
+    if "onMainPort: false" not in sb or "namespace:" not in sb or "app.kubernetes.io/name: agent-manager" not in sb:
+        fail(f"from muster's session bindings floor muster must serve the API on its own port, off the aggregator port, admitting agent-manager's pods alone:\n{sb}")
+    if not re.search(r"bindingsUrl: http://muster\.[^.]+\.svc\.cluster\.local:8091/session-bindings", am):
+        fail(f"from the floor agent-manager must call the session bindings port:\n{am}")
+    sb, am = releases([])
+    if sb or "bindingsUrl:" in am:
+        fail(f"below the floor neither the port nor the URL are derived:\n{sb}")
+    sb, _ = releases([*floor, "--set", "muster.muster.credentialProvider.sessionBindings.onMainPort=true"])
+    if "onMainPort: true" not in sb:
+        fail(f"an own sessionBindings.onMainPort must stand:\n{sb}")
+    _, am = releases([*floor, "--set", "agent-manager.muster.bindingsUrl=https://bindings.example.com/session-bindings"])
+    if "bindingsUrl: https://bindings.example.com/session-bindings" not in am or ":8091/session-bindings" in am:
+        fail(f"an own agent-manager.muster.bindingsUrl must stand:\n{am}")
+    print("ok: from muster's session bindings floor muster serves the session bindings API on its own port, off the aggregator port, its network policy admitting agent-manager's pods alone, and agent-manager's bindingsUrl names that port; none below the floor; own values stand")
+
+
 def approval_of(out: str, name: str) -> str:
     cr = doc(out, "MCPServer", name)
     if cr is None:
@@ -638,4 +676,5 @@ if __name__ == "__main__":
     check_connector_admin()
     check_binder()
     check_agent_manager_tool_approval()
+    check_session_bindings()
     check_approval()
