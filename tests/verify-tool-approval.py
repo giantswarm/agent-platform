@@ -242,6 +242,9 @@ def check_governance() -> None:
     if "muster.muster.governance.servers is the earlier governance shape" not in err:
         fail(f"the earlier servers shape must fail:\n{err}")
     err = render(META_DIR, META + ["--set", FLOOR_RANGE, "--set", "governedServers.model-manager.safe_list[0]=x"], expect_fail=True)
+    if "governedServers" not in err or "safe_list" not in err:
+        fail(f"an unknown key of a source must fail in the schema naming it:\n{err}")
+    err = render(META_DIR, META + ["--set", FLOOR_RANGE, "--set", "governedServers.model-manager.safe_list[0]=x", "--skip-schema-validation"], expect_fail=True)
     if "governedServers.model-manager.safe_list: unknown key" not in err:
         fail(f"an unknown key of a source must fail naming it:\n{err}")
     connectivity = doc(render_meta([]), "HelmRelease", "agent-platform-connectivity")
