@@ -2225,6 +2225,12 @@ read as the lower major. Takes a dict: range, major (the one major found).
 {{- $v := printf "%d.0.0-%s" $next $pre -}}
 {{- if and (not $found) (semverCompare $.range $v) -}}{{- $found = $v -}}{{- end -}}
 {{- end -}}
+{{- /* Helm 3.17 bundles a semver library that never matches a pre-release against a range whose lower bound names none, so the probes above see nothing there; read the upper bounds as written too: `<=` or `<` naming a pre-release of the next major other than `<N.0.0-0` admits N.0.0-0. */ -}}
+{{- if not $found -}}
+{{- range $b := regexFindAll (printf "<=?\\s*v?%d\\.0\\.0-[0-9A-Za-z.-]+" (int $next)) $.range -1 -}}
+{{- if or (hasPrefix "<=" $b) (not (regexMatch "-0$" $b)) -}}{{- $found = printf "%d.0.0-0" (int $next) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $found -}}
 {{- end -}}
 
