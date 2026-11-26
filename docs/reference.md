@@ -685,9 +685,12 @@ The chart ships two presets, `infrastructure` and `agent-platform`, under `muste
 - `method: plugin` (default) uses the Barman Cloud plugin, which you install next to the operator. It gives continuous WAL archiving and a daily `ScheduledBackup` to `postgres.backup.objectStore`.
 - `method: volumeSnapshot` takes CSI snapshots and keeps no WAL archive.
 - `postgres.backup.crossplane.*` provisions the object store on AWS or Azure.
+- AWS stores retain their bucket, public access block and TLS-only bucket policy on uninstall. Helm keeps their managed resources, and Crossplane management policies exclude `Delete`. This applies to PostgreSQL backups and Substrate snapshots. Bucket lifecycle configurations and IAM roles follow the release lifecycle.
 - To restore, bootstrap a second Cluster named `<clusterName>-restore` from the same store. The network policies, the AWS role and the ImageVolume PolicyException expect that name.
 
-`make verify-postgres` asserts this.
+`make verify-postgres` checks backup wiring; `make verify-s3-retention` checks AWS retention and the remediation guards.
+
+For a public access block stuck deleting because an SCP denies `s3:PutBucketPublicAccessBlock`, run `hack/orphan-s3-public-access-block.sh --context <context> --bucket <bucket>`. It checks the retained bucket and the block's last observed protection settings, then performs a server-side dry run. Add `--apply` to orphan the AWS block and wait for Crossplane to release its finalizer. The script leaves the bucket and its data in place. It requires `kubectl` and `jq`; verify the AWS block directly with authenticated AWS access after it finishes.
 
 ### Agent sandbox
 
