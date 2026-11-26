@@ -873,6 +873,45 @@ def check_default_agent_release_readable() -> None:
     print("ok: agent-manager may get the default agent's release (muster.toolApproval.platformReleases: <Flux namespace>/default-agent) from its tool approval floor, none without the default agent or below the floor")
 
 
+def check_default_agent_on_remote_target() -> None:
+    """With a remote target (gitops.target.kubeConfig) agent-manager runs on
+    the target and cannot read the default agent's release on this cluster:
+    it gets the release's approval values instead
+    (muster.toolApproval.platformAgents), the Agent, the release its Flux
+    labels name (<Flux namespace>/<target.name>-default-agent) and the
+    release's own tools/toolset/default, and no platformReleases."""
+    am = "components.agent-manager.versionRange=>=3.6.0 <4.0.0-0"
+    musters = "components.muster.versionRange=>=5.66.0 <6.0.0-0"
+    target = ["--set", "gitops.target.kubeConfig.secretRef.name=wc1-kubeconfig", "--set", "gitops.target.name=wc1",
+              "--set", "gitops.namespace=flux-giantswarm"]
+
+    def releases(args: list[str]) -> tuple[str, str, str]:
+        out = render_meta([*DEFAULT_AGENT_ON, "--set", am, "--set", musters, *target, *args])
+        hr = doc(out, "HelmRelease", "wc1-agent-manager")
+        if hr is None:
+            fail(f"no wc1-agent-manager HelmRelease with {args}")
+        da = doc(out, "HelmRelease", "wc1-default-agent") or ""
+        return block(hr, "        platformAgents:"), block(hr, "        platformReleases:"), da
+
+    agents, plain, da = releases([])
+    if plain:
+        fail(f"with a remote target agent-manager cannot read the release: no platformReleases, got\n{plain}")
+    lines = [line.strip().lstrip("- ").strip() for line in agents.split("\n")[1:] if line.strip()]
+    for want in ["name: default-agent", "namespace: kagent", "release:", "name: wc1-default-agent", "namespace: flux-giantswarm",
+                 "values:", "toolset:", "preset:full"]:
+        if want not in lines:
+            fail(f"platformAgents must carry the default agent kagent/default-agent, its release flux-giantswarm/wc1-default-agent and its toolset; missing {want!r}:\n{agents}")
+    for key in ["tools:", "default:", "requireApproval:"]:
+        if (key in lines) != (("\n    " + key) in da or ("\n      " + key) in da):
+            fail(f"platformAgents' {key} must match the default agent's release values:\n{agents}\n{da}")
+    if "toolset:\n    - preset:full" not in da:
+        fail(f"the default agent's release carries toolset [preset:full]:\n{da}")
+    agents, plain, _ = releases(["--set", "components.default-agent.enabled=false"])
+    if agents or plain:
+        fail("no default agent, no platform agent")
+    print("ok: with a remote target agent-manager gets the default agent's approval values (muster.toolApproval.platformAgents: kagent/default-agent, release <Flux namespace>/<target>-default-agent, the release's toolset) instead of platformReleases; none without the default agent")
+
+
 def render_meta_fail(args: list[str]) -> str:
     return render(META_DIR, META + args, expect_fail=True)
 
@@ -894,5 +933,6 @@ if __name__ == "__main__":
     check_binder()
     check_agent_manager_tool_approval()
     check_default_agent_release_readable()
+    check_default_agent_on_remote_target()
     check_session_bindings()
     check_approval()

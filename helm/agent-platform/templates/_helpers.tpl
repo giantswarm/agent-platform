@@ -549,11 +549,21 @@ its chart has no such key); an own value stands. */ -}}
 renders in its own Flux namespace, not in the kagent namespace agent-manager
 manages: agent-manager reads it by the Agent's Flux labels and gets get on
 it by name (muster.toolApproval.platformReleases), so every person who may
-start a session with the default agent can. Not with a remote target: the
-release is on this cluster, agent-manager on the target. */ -}}
-{{- if and (include "agent-platform.componentEnabled" (dict "root" .root "name" "default-agent")) (not (include "agent-platform.targetSecretName" .root)) -}}
+start a session with the default agent can. With a remote target the release
+is on this cluster and agent-manager on the target, where it cannot read it:
+agent-manager gets the release's approval values instead
+(muster.toolApproval.platformAgents, agent-platform.defaultAgent.approval),
+rendered here from the values the release is rendered with, so only whoever
+may change the release may change them; agent-manager checks them against
+the Agent's Flux labels and the agent chart's X-Muster-Tool-Approval header. */ -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "default-agent") -}}
 {{- $ta := get $musterValues "toolApproval" | default dict -}}
-{{- $_ := set $ta "platformReleases" (list (dict "namespace" (dig "namespace" "" (.root.Values.gitops | default dict) | default .root.Release.Namespace) "name" (include "agent-platform.childName" (dict "root" .root "name" "default-agent")))) -}}
+{{- $release := dict "namespace" (dig "namespace" "" (.root.Values.gitops | default dict) | default .root.Release.Namespace) "name" (include "agent-platform.childName" (dict "root" .root "name" "default-agent")) -}}
+{{- if include "agent-platform.targetSecretName" .root -}}
+{{- $_ := set $ta "platformAgents" (list (include "agent-platform.defaultAgent.approval" (dict "root" .root "release" $release) | fromJson)) -}}
+{{- else -}}
+{{- $_ := set $ta "platformReleases" (list $release) -}}
+{{- end -}}
 {{- $_ := set $musterValues "toolApproval" $ta -}}
 {{- end -}}
 {{- end -}}
@@ -5801,6 +5811,36 @@ Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 {{- $model := dig "modelConfig" "" $da | toString -}}
 {{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:full") "labels" $labels "modelConfig" (dict "name" $model) -}}
 {{- $_ := set $out "agent" $agent -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The default agent as agent-manager's muster.toolApproval.platformAgents entry,
+for a remote target (gitops.target.kubeConfig), where agent-manager runs on
+the target and cannot read the release on this cluster: the Agent (kagent
+namespace, values agent.name else the release name default-agent), the
+release its Flux labels name (.release: {namespace, name}) and the approval
+values of the release's spec.values — tools, toolset, default and
+muster.requireApproval / muster.enabled — taken from the values the release
+is rendered with (components.default-agent.valuesFile under
+agent-platform.defaultAgent.derived, as components.yaml merges them).
+Usage: include "agent-platform.defaultAgent.approval" (dict "root" $ "release" $release) | fromJson
+*/}}
+{{- define "agent-platform.defaultAgent.approval" -}}
+{{- $c := index .root.Values.components "default-agent" -}}
+{{- $vals := include "agent-platform.componentValuesFile" (dict "root" .root "path" $c.valuesFile) | fromJson -}}
+{{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.defaultAgent.derived" .root | fromJson) -}}
+{{- $approval := dict -}}
+{{- range $key := list "tools" "toolset" "default" -}}
+{{- if hasKey $vals $key -}}{{- $_ := set $approval $key (get $vals $key) -}}{{- end -}}
+{{- end -}}
+{{- $muster := dict -}}
+{{- range $key := list "requireApproval" "enabled" -}}
+{{- if hasKey ($vals.muster | default dict) $key -}}{{- $_ := set $muster $key (get $vals.muster $key) -}}{{- end -}}
+{{- end -}}
+{{- with $muster -}}{{- $_ := set $approval "muster" . -}}{{- end -}}
+{{- $out := dict "namespace" (include "agent-platform.kagent.namespace" .root) "name" (dig "agent" "name" "default-agent" $vals) "release" .release -}}
+{{- with $approval -}}{{- $_ := set $out "values" . -}}{{- end -}}
 {{- $out | toJson -}}
 {{- end -}}
 
