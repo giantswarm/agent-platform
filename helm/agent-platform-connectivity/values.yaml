@@ -2965,6 +2965,16 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
+    # A second, never-started CronJob <migration>-preflight that runs
+    # `migrate --dry-run` against this range instead of the line's, e.g.
+    # ">=3.0.0 <4.0.0" before the agent chart line moves to 3.x: the mandatory
+    # check of UPGRADE.md, run as the migration's identity with
+    # `kubectl create job --from=cronjob/<migration>-preflight`, reading its
+    # report from the run's log (a dry run writes nothing). A 3.x range here
+    # also grants the identity the read-only access the 3.x path needs (list
+    # namespaces; with organizations, read their releases, sources and Agents);
+    # empty (the default) renders neither.
+    preflightSemver: ""
     # Namespaces the GitOps-owned agents' HelmReleases and OCIRepositories live
     # in (a HelmRelease with targetNamespace: kagent applied from elsewhere —
     # the fleet's flux-giantswarm): the Job reads them there (get, list; a Role

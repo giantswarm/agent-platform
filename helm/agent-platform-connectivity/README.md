@@ -1811,6 +1811,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
 | agentManager.migration.image.tag | string | `"3.5.6"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
+| agentManager.migration.preflightSemver | string | `""` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
 | cluster-manager.installation.name | string | `""` |  |

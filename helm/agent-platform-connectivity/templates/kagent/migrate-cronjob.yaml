@@ -164,6 +164,40 @@ spec:
       ttlSecondsAfterFinished: 86400
       template:
         {{- $template | nindent 8 }}
+{{- with $m.preflightSemver }}
+{{- /* The preflight (M3I-1): the same run, dry, against preflightSemver,
+never started by the hook: `kubectl create job --from=cronjob/<this>` before
+the agent chart line moves, as UPGRADE.md says. */ -}}
+{{- $pre := list }}
+{{- range $env }}
+{{- if eq .name "AGENT_CHART_SEMVER" }}{{- $pre = append $pre (dict "name" "AGENT_CHART_SEMVER" "value" (toString $.Values.agentManager.migration.preflightSemver)) }}{{- else if ne .name "AGENT_CHART_SEMVER_FILTER" }}{{- $pre = append $pre . }}{{- end }}
+{{- end }}
+{{- $preTemplate := include "agent-platform.kagent.migration.podTemplate" (dict "root" $ "serviceAccountName" $sa "image" $image "args" (list "migrate" "--dry-run") "env" $pre) }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "agent-platform.kagent.migration.name" $ }}-preflight
+  namespace: {{ $kagentNs }}
+  labels:
+    {{- include "agent-platform.kagent.migration.labels" $ | nindent 4 }}
+  annotations:
+    agent-platform.giantswarm.io/about: {{ printf "agent-manager migrate --dry-run against %s (agentManager.migration.preflightSemver): run it with kubectl create job --from=cronjob/<this> and read the report in its log; it writes nothing (UPGRADE.md)" (toString .) | quote }}
+spec:
+  suspend: true
+  schedule: "0 0 31 2 *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "agent-platform.kagent.migration.labels" $ | nindent 8 }}
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      ttlSecondsAfterFinished: 86400
+      template:
+        {{- $preTemplate | nindent 8 }}
+{{- end }}
 ---
 {{ include "agent-platform.hooks.job" (dict
       "root" .

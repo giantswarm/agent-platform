@@ -140,6 +140,12 @@ if V3 in out:
 if "'>=2.6.0 <3.0.0'" not in out and '">=2.6.0 <3.0.0"' not in out:
     fail("the default render does not carry the 2.x line")
 
+# The preflight range reaches the connectivity release and is not the line:
+# no guard refuses it (M3I-1).
+out = renders("preflight on the 2.x line", "--set", f"agentManager.migration.preflightSemver={V3}")
+if f"preflightSemver: '{V3}'" not in out:
+    fail("agentManager.migration.preflightSemver does not reach the connectivity release")
+
 # Ranges the guard must read as migrate does, on the chart as it is.
 for r in ["~3.2", "3.1.x", ">=3.1.0 <3.6.0", "3.x", V3]:
     if unset:
@@ -200,6 +206,21 @@ if CONN:
     for what, text in (("2.x line", two), ("2.x line with organizations", two_orgs)):
         if ns_rule in text or "helm.toolkit.fluxcd.io" in text:
             fail(f"{what}: the migrate run reads no organization namespace, so its identity gets no namespace list and no cluster-wide release read")
+    pre = ("--set", f"agentManager.migration.preflightSemver={V3}")
+    pre_orgs = migrate_cluster_rules(*pre, "--set", "agentPlatformOrganizations.enabled=true")
+    if ns_rule not in pre_orgs or 'resources: ["helmreleases"]\n    verbs: ["get", "list"]' not in pre_orgs:
+        fail("a 3.x preflight range on the 2.x line grants the reads its dry run needs (M3I-1)")
+    r = subprocess.run([*conn_base, *pre], capture_output=True, text=True)
+    cron = [d for d in r.stdout.split("\n---\n") if "\nkind: CronJob\n" in "\n" + d and "-agent-manager-migrate-preflight\n" in d]
+    if len(cron) != 1:
+        fail("a preflight range renders one CronJob <migration>-preflight")
+    else:
+        body = cron[0]
+        if "suspend: true" not in body or "- --dry-run" not in body or f"value: '{V3}'" not in body or "AGENT_CHART_SEMVER_FILTER" in body:
+            fail(f"the preflight CronJob is suspended, runs migrate --dry-run against the preflight range, without the line's filter:\n{body}")
+    r = subprocess.run([*conn_base], capture_output=True, text=True)
+    if "-agent-manager-migrate-preflight" in r.stdout:
+        fail("without a preflight range no preflight CronJob renders")
     if ns_rule not in three or "helm.toolkit.fluxcd.io" in three:
         fail("3.x line without organizations: the run lists namespaces (and finds none) and reads no release cluster-wide")
     for want in ('resources: ["helmreleases"]\n    verbs: ["get", "list"]', 'resources: ["ocirepositories"]\n    verbs: ["get", "list"]', 'resources: ["agents"]\n    verbs: ["list"]', ns_rule):

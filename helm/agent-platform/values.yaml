@@ -5566,6 +5566,9 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
       repository: giantswarm/agent-manager
       tag: 3.5.6
     dryRun: false
+    # preflightSemver (unset): forwarded when set, the connectivity chart's
+    # values.yaml documents it (UPGRADE.md, the dry run before the agent chart
+    # line moves to 3.x).
     gitopsNamespaces: []
 
 # === Skill repositories ===

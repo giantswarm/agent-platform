@@ -129,13 +129,11 @@ echo "{{ .job }} started; its outcome: kubectl -n {{ .namespace }} get job {{ .j
 {{- end -}}
 
 {{/*
-Truthy when agent-manager.agentChart.semver (as the migrate run takes it) is a
-3.x line: the run then takes the 2.x -> 3.x path and reads the organization
-namespaces (migrate-rbac.yaml). Probes 3.x as agent-manager's migrate does.
+Truthy when a range (the argument) is a 3.x line, probed as agent-manager's
+migrate probes it.
 */}}
-{{- define "agent-platform.kagent.migration.v3Line" -}}
-{{- $am := include "agent-platform.agentManager.chartValues" . | fromJson -}}
-{{- $range := dig "agentChart" "semver" "2.x" $am | toString -}}
+{{- define "agent-platform.kagent.migration.isV3" -}}
+{{- $range := toString . -}}
 {{- if and (regexMatch "[0-9]" $range) (not (regexMatch "(^|[\\s|,<>=~^])[A-Za-uwyzA-WYZ]" $range)) -}}
 {{- $hit := or (semverCompare $range "3.0.0") (semverCompare $range "3.999999.999999") -}}
 {{- range $n := until 200 -}}
@@ -143,4 +141,15 @@ namespaces (migrate-rbac.yaml). Probes 3.x as agent-manager's migrate does.
 {{- end -}}
 {{- if $hit -}}true{{- end -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Truthy when a run of the migration takes the 2.x -> 3.x path and reads the
+organization namespaces (migrate-rbac.yaml): agent-manager.agentChart.semver
+(as the run takes it) is a 3.x line, or agentManager.migration.preflightSemver
+is, for the dry run before the line moves (M3I-1).
+*/}}
+{{- define "agent-platform.kagent.migration.v3Line" -}}
+{{- $am := include "agent-platform.agentManager.chartValues" . | fromJson -}}
+{{- if or (include "agent-platform.kagent.migration.isV3" (dig "agentChart" "semver" "2.x" $am)) (include "agent-platform.kagent.migration.isV3" (dig "migration" "preflightSemver" "" (.Values.agentManager | default dict))) -}}true{{- end -}}
 {{- end -}}
