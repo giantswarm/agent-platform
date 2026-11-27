@@ -2133,6 +2133,7 @@ spec:
             clientId: ""
             issuerUrl: ""
           enabled: true
+          encryptionKey: true
           existingSecret: ""
           storage:
             type: valkey

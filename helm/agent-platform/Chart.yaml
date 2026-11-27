@@ -21,6 +21,7 @@ sources:
 appVersion: "0.1.0"
 version: 1.1.35
 annotations:
+  agent-platform.giantswarm.io/unreleased: '{"credential-api":{"versionRange":">=0.2.0 <0.3.0-0","waitsFor":"0.2.0"}}'
   io.giantswarm.application.audience: all
   io.giantswarm.application.managed: "true"
   io.giantswarm.application.team: bumblebee
