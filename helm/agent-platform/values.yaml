@@ -2780,7 +2780,7 @@ muster:  # @schema skipProperties: true; additionalProperties: true
   # mcpServerEditor is the connector-admin role: its holders edit connectors,
   # set their tool approval and alone may let an agent skip an Ask. Binding
   # system:authenticated makes everyone a connector admin. See
-  # https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
+  # https://github.com/giantswarm/agent-platform/blob/main/docs/tool-approval.md
   rbac:
     mcpServerEditor:
       subjects:
@@ -5862,7 +5862,7 @@ clusterManager:  # @schema skipProperties: true; additionalProperties: true
 # muster.muster.oauth.mcpClient.publicUrl (with mcpClient.enabled for the
 # redirect allowlist); without them muster refuses asking calls with the reason.
 # No agent tool changes the mode. A string here (the earlier scalar) fails the
-# render. See https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/
+# render. See https://github.com/giantswarm/agent-platform/blob/main/docs/tool-approval.md
 governance:  # @schema additionalProperties: false
   # -- trusted (the default) or governed; anything else fails the render.
   mode: trusted  # @schema enum: [trusted, governed]

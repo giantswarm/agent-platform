@@ -136,7 +136,7 @@ https://docs.giantswarm.io/tutorials/agent-platform/connecting-custom-mcp-server
 
 ## Tool approval: Allow, Ask, Block
 
-Further reading (optional): https://docs.giantswarm.io/overview/agent-platform/governing-tool-calls/.
+Further reading (optional): https://github.com/giantswarm/agent-platform/blob/main/docs/tool-approval.md.
 Muster decides every call by its tool's setting, whoever calls (an agent, the portal, Slack, Claude Code):
 
 - **Allow** runs. **Ask**: a person confirms the exact call first (inline in portal chat, or on Muster's
