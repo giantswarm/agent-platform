@@ -2,7 +2,7 @@
 
 How a request authenticates against the Agent Platform. Every person signs in at one OIDC provider (Dex, `global.identity`); muster is the OAuth resource server and authorization server for MCP clients; agentgateway verifies tokens at the edge only on the routes listed in [4](#4-edge-jwt-validation-and-jwks). Install and registration steps are in [install.md](install.md); every value is in [reference.md](reference.md).
 
-Multiple muster replicas require the shared OAuth encryption key to seal URL-elicitation continuation state. The platform enables `muster.muster.oauth.server.encryptionKey` by default for multiple replicas, using the existing `oauth-encryption-key` Secret input. An explicit setting remains the installation's choice and is checked by muster's chart. The single-replica lab example disables OAuth and needs no shared key. The muster version floor is unchanged.
+Multiple muster replicas require the shared OAuth encryption key to seal URL-elicitation continuation state. The platform enables `muster.muster.oauth.server.encryptionKey` by default, using the existing `oauth-encryption-key` Secret input. An explicit setting remains the installation's choice and is checked by muster's chart. The single-replica lab example disables OAuth and needs no shared key.
 
 ## 1. The request path
 
