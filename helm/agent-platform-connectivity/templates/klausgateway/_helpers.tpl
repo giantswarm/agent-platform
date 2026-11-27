@@ -88,3 +88,110 @@ team-review endpoint's TokenReview, the refusal notices' reads).
 {{- define "agent-platform.klausGateway.storeEgress" -}}
 {{- if or (include "agent-platform.klausGateway.valkeyEgress" .) (include "agent-platform.klausGateway.apiServerEgress" .) -}}true{{- end -}}
 {{- end -}}
+
+{{/*
+Truthy (emits "true") while the A2A server's agentgateway entry renders:
+klaus-gateway on and klausGateway.agentgatewayRoute.a2aServer.enabled.
+*/}}
+{{- define "agent-platform.klausGateway.a2aServerOn" -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) (dig "agentgatewayRoute" "a2aServer" "enabled" false (.Values.klausGateway | default dict)) -}}true{{- end -}}
+{{- end -}}
+
+{{/*
+The A2A server's entry, resolved and checked, as JSON: the
+klausGateway.agentgatewayRoute.a2aServer block with hostname and
+exchange.tokenUrl defaulted. Fails the render on a block agentgateway could not
+serve: a request it would refuse, or exchange at no connector, fails closed at
+runtime with no other trace than a 401.
+Usage: include "agent-platform.klausGateway.a2aServer" . | fromJson
+*/}}
+{{- define "agent-platform.klausGateway.a2aServer" -}}
+{{- $route := .Values.klausGateway.agentgatewayRoute | default dict -}}
+{{- $a2a := deepCopy ($route.a2aServer | default dict) -}}
+{{- $path := "klausGateway.agentgatewayRoute.a2aServer" -}}
+{{- if not (include "agent-platform.ingress.agentgateway" .) -}}
+{{- fail (printf "%s.enabled is true but muster is off: the A2A server's token check and exchange run on the agentgateway data plane, which this release renders only in front of muster" $path) -}}
+{{- end -}}
+{{- $_ := set $a2a "hostname" ($a2a.hostname | default $route.hostname | default "") -}}
+{{- if not $a2a.hostname -}}
+{{- fail (printf "%s.enabled is true but neither %s.hostname nor klausGateway.agentgatewayRoute.hostname is set: the A2A server needs a public hostname" $path $path) -}}
+{{- end -}}
+{{- if not $a2a.issuers -}}
+{{- fail (printf "%s.enabled is true but %s.issuers is empty: agentgateway would accept no A2A client token" $path $path) -}}
+{{- end -}}
+{{- $names := dict -}}
+{{- $issuers := dict -}}
+{{- range $i, $issuer := $a2a.issuers -}}
+{{- range $k := list "name" "issuer" "audience" "connectorId" -}}
+{{- if not (index $issuer $k) -}}
+{{- fail (printf "%s.issuers[%d].%s is empty: every issuer needs name, issuer, audience, allowedClients, connectorId and jwks" $path $i $k) -}}
+{{- end -}}
+{{- end -}}
+{{- if not $issuer.allowedClients -}}
+{{- fail (printf "%s.issuers[%d].allowedClients is empty: agentgateway checks the client that requested the token (azp) against it, and an empty list would refuse every token" $path $i) -}}
+{{- end -}}
+{{- if has $a2a.exchange.clientId $issuer.allowedClients -}}
+{{- fail (printf "%s.issuers[%d].allowedClients names the exchange client %s: its tokens are the platform tokens agentgateway issues, never an A2A client's" $path $i $a2a.exchange.clientId) -}}
+{{- end -}}
+{{- if hasKey $names $issuer.name -}}
+{{- fail (printf "%s.issuers[%d].name %q is not unique" $path $i $issuer.name) -}}
+{{- end -}}
+{{- if hasKey $issuers $issuer.issuer -}}
+{{- fail (printf "%s.issuers[%d].issuer %q is not unique" $path $i $issuer.issuer) -}}
+{{- end -}}
+{{- $_ := set $names $issuer.name true -}}
+{{- $_ := set $issuers $issuer.issuer true -}}
+{{- $_ := include "agent-platform.jwks.validate" (dict "ctx" $ "path" (printf "%s.issuers[%d]" $path $i) "jwks" $issuer.jwks) -}}
+{{- end -}}
+{{- $exchange := $a2a.exchange | default dict -}}
+{{- if not $exchange.clientId -}}
+{{- fail (printf "%s.exchange.clientId is empty: the exchange authenticates at Dex as this client" $path) -}}
+{{- end -}}
+{{- if not $exchange.secretName -}}
+{{- fail (printf "%s.exchange.secretName is empty: name the Secret in this release's namespace that holds the secret of the Dex client %s" $path $exchange.clientId) -}}
+{{- end -}}
+{{- if not $exchange.audiences -}}
+{{- fail (printf "%s.exchange.audiences is empty: the first is the audience klaus-gateway checks on the exchanged token" $path) -}}
+{{- end -}}
+{{- if not (has (toString $exchange.subjectTokenType) (list "IdToken" "AccessToken")) -}}
+{{- fail (printf "%s.exchange.subjectTokenType is %q: IdToken or AccessToken" $path (toString $exchange.subjectTokenType)) -}}
+{{- end -}}
+{{- if not $exchange.tokenUrl -}}
+{{- $_ := set $exchange "tokenUrl" (printf "%s/token" (include "agent-platform.issuerUrl" (dict "ctx" . "for" (printf "%s.exchange.tokenUrl" $path)) | trimSuffix "/")) -}}
+{{- end -}}
+{{- if not (hasPrefix "https://" $exchange.tokenUrl) -}}
+{{- fail (printf "%s.exchange.tokenUrl is %q: the exchange sends the client secret and the client's token, so it must be https" $path $exchange.tokenUrl) -}}
+{{- end -}}
+{{- $_ := set $a2a "exchange" $exchange -}}
+{{- $a2a | toJson -}}
+{{- end -}}
+
+{{/*
+The CEL rule agentgateway requires of an A2A client's verified token: one
+clause per issuer, its iss and the client that requested it among the issuer's
+allowedClients. The requesting client is azp, else client_id (RFC 9068), else
+the only aud, which a JWT may carry as a string or a one-item list.
+Usage: include "agent-platform.klausGateway.a2aClientRule" $issuers
+*/}}
+{{- define "agent-platform.klausGateway.a2aClientRule" -}}
+{{- $client := "(has(jwt.azp) ? jwt.azp : (has(jwt.client_id) ? jwt.client_id : (type(jwt.aud) == string ? jwt.aud : (size(jwt.aud) == 1 ? jwt.aud[0] : \"\"))))" -}}
+{{- $clauses := list -}}
+{{- range . -}}
+{{- $clauses = append $clauses (printf "(jwt.iss == %s && %s in %s)" (toJson .issuer) $client (toJson .allowedClients)) -}}
+{{- end -}}
+{{- join " || " $clauses -}}
+{{- end -}}
+
+{{/*
+The CEL expression of the exchange's connector_id: the Dex connector of the
+verified token's issuer. Every iss reaching it matched a provider of the same
+policy, so the final empty string is never sent.
+Usage: include "agent-platform.klausGateway.a2aConnectorExpr" $issuers
+*/}}
+{{- define "agent-platform.klausGateway.a2aConnectorExpr" -}}
+{{- $expr := "\"\"" -}}
+{{- range reverse . -}}
+{{- $expr = printf "jwt.iss == %s ? %s : (%s)" (toJson .issuer) (toJson .connectorId) $expr -}}
+{{- end -}}
+{{- $expr -}}
+{{- end -}}

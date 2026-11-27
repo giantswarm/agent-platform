@@ -1688,6 +1688,11 @@ the form a Cilium toFQDNs matchName is matched in.
 {{- if (include "agent-platform.modelServing.modelsGateway.enabled" .) -}}
 {{- $sources = append $sources (include "agent-platform.modelServing.modelsGateway.jwks" . | fromJson) -}}
 {{- end -}}
+{{- if include "agent-platform.klausGateway.a2aServerOn" . -}}
+{{- range (dig "agentgatewayRoute" "a2aServer" "issuers" list .Values.klausGateway) -}}
+{{- $sources = append $sources (.jwks | default dict) -}}
+{{- end -}}
+{{- end -}}
 {{- range $sources -}}
 {{- $host := include "agent-platform.jwks.normalizeHost" (.host | default "") -}}
 {{- $port := .port | default 443 | int -}}

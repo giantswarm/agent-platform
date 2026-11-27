@@ -869,6 +869,9 @@ the block otherwise: a klaus-gateway before 4.11.0 refuses it. */ -}}
 {{- $_ := set $refusals "enabled" true -}}
 {{- $_ := set $derived "refusals" $refusals -}}
 {{- end -}}
+{{- with (include "agent-platform.klausGateway.a2aServerValues" .root) -}}
+{{- $_ := set $derived "a2aServer" (. | fromJson) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "valkey" -}}
 {{- $auth := dig "valkey" "auth" dict (.root.Values.valkey | default dict) -}}
@@ -4949,6 +4952,72 @@ klausGateway.workspaces.toolsPrefix while workspaces are on
 (agent-platform.componentDerivedValues). One line, no comment inside the define.
 */}}
 {{- define "agent-platform.klausGateway.workspacesFloor" -}}4.3.0{{- end -}}
+
+{{/*
+The first release of the klaus-gateway line whose chart takes
+a2aServer.token, the platform token agentgateway's exchange sends (the A2A
+server behind klausGateway.agentgatewayRoute.a2aServer). Its 4.20.0 release
+candidates before that took a2aServer.exchange instead and refuse the block.
+One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.klausGateway.a2aServerFloor" -}}4.20.0{{- end -}}
+
+{{/*
+klaus-gateway's a2aServer values, as JSON, while
+klausGateway.agentgatewayRoute.a2aServer is on: the card's issuers from that
+block's issuers, the platform token agentgateway's exchange issues (the
+installation's issuer, the first exchange audience, the exchange client) and
+the public URL. An own klausGateway.a2aServer value that differs fails the
+render: the connectivity chart routes and checks from the same block. jwksUrl,
+allowPrivateIpJwksHosts and the other keys of klausGateway.a2aServer stay the
+operator's. Empty while the block is off.
+*/}}
+{{- define "agent-platform.klausGateway.a2aServerValues" -}}
+{{- $kg := .Values.klausGateway | default dict -}}
+{{- $route := $kg.agentgatewayRoute | default dict -}}
+{{- $a2a := $route.a2aServer | default dict -}}
+{{- if and $a2a.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) -}}
+{{- $kgFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "klaus-gateway" "versionRange" "" .Values.components) | default "0.0.0") "" -}}
+{{- if lt ((semver $kgFloor).Compare (semver (include "agent-platform.klausGateway.a2aServerFloor" .))) 0 -}}
+{{- fail (printf "klausGateway.agentgatewayRoute.a2aServer.enabled is true but the floor of components.klaus-gateway.versionRange (%s) is below %s, the first klaus-gateway that takes the platform token agentgateway's exchange sends: raise the range's floor to %s" $kgFloor (include "agent-platform.klausGateway.a2aServerFloor" .) (include "agent-platform.klausGateway.a2aServerFloor" .)) -}}
+{{- end -}}
+{{- $issuer := required "klausGateway.agentgatewayRoute.a2aServer.enabled needs global.identity.issuerUrl: agentgateway's exchange issues the platform token there" (dig "identity" "issuerUrl" "" (.Values.global | default dict)) | trimSuffix "/" -}}
+{{- $hostname := $a2a.hostname | default $route.hostname | default "" -}}
+{{- if not $hostname -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.enabled is true but neither its hostname nor klausGateway.agentgatewayRoute.hostname is set: the A2A server needs a public hostname" -}}
+{{- end -}}
+{{- $exchange := $a2a.exchange | default dict -}}
+{{- $cards := list -}}
+{{- range ($a2a.issuers | default list) -}}
+{{- $card := dict "name" .name "issuer" .issuer "audience" .audience -}}
+{{- range $k, $v := (.card | default dict) -}}
+{{- if $v -}}{{- $_ := set $card $k $v -}}{{- end -}}
+{{- end -}}
+{{- $cards = append $cards $card -}}
+{{- end -}}
+{{- $want := dict
+  "enabled" true
+  "publicUrl" (printf "https://%s" $hostname)
+  "issuers" $cards
+  "token" (dict "issuer" $issuer "audience" (first ($exchange.audiences | default (list ""))) "allowedClients" (list ($exchange.clientId | default ""))) -}}
+{{- $own := $kg.a2aServer | default dict -}}
+{{- range $k := list "enabled" "publicUrl" "issuers" -}}
+{{- if and (hasKey $own $k) (index $own $k) (ne (toJson (index $own $k)) (toJson (index $want $k))) -}}
+{{- fail (printf "klausGateway.a2aServer.%s differs from what klausGateway.agentgatewayRoute.a2aServer gives the gateway: leave klausGateway.a2aServer.%s unset" $k $k) -}}
+{{- end -}}
+{{- end -}}
+{{- $ownToken := $own.token | default dict -}}
+{{- range $k, $v := $want.token -}}
+{{- if and (index $ownToken $k) (ne (toJson (index $ownToken $k)) (toJson $v)) -}}
+{{- fail (printf "klausGateway.a2aServer.token.%s differs from what klausGateway.agentgatewayRoute.a2aServer gives the gateway: leave klausGateway.a2aServer.token.%s unset" $k $k) -}}
+{{- end -}}
+{{- end -}}
+{{- $token := deepCopy $want.token -}}
+{{- $_ := set $token "jwksUrl" ($ownToken.jwksUrl | default (printf "%s/keys" $issuer)) -}}
+{{- $_ := set $want "token" $token -}}
+{{- $want | toJson -}}
+{{- end -}}
+{{- end -}}
 
 {{/*
 The first release of the agent-manager line (giantswarm/agent-manager) whose

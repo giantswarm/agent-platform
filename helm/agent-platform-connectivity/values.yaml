@@ -2359,6 +2359,61 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     # Hostname on which the agentgateway Gateway will match these paths.
     # Example: agentgateway.<cluster>.<base-domain>
     hostname: ""
+    # The A2A server's entry for outside A2A clients (an application's
+    # backend): agentgateway checks the client's token against one of
+    # `issuers`, exchanges it at the installation's Dex (RFC 8693) and sends
+    # klaus-gateway the Dex token. Renders, on `hostname`:
+    #   /.well-known/agent-card.json  the public Agent Card, no token needed
+    #   /a2a                          A2A JSON-RPC, token checked and exchanged
+    # Independent of `enabled` above and of slack.enabled. The meta chart
+    # derives the klaus-gateway release's a2aServer block from this one
+    # (klaus-gateway >= 4.20.0, agent-platform.klausGateway.a2aServerFloor).
+    # docs/klaus-gateway-a2a.md has the Dex setup it needs.
+    a2aServer:
+      enabled: false
+      # Public hostname of the A2A server. Empty means agentgatewayRoute.hostname.
+      hostname: ""
+      # The identity providers A2A clients get their token from: the
+      # installation's Dex (applications with a Dex client) and outside
+      # issuers Dex trusts through a connector. Each entry:
+      #   name: the issuer's security scheme in the Agent Card (unique).
+      #   issuer: the token's iss, exactly (unique).
+      #   audience: the client a token must be issued for, exactly.
+      #   allowedClients: the only clients whose tokens are accepted: the
+      #     token's azp, else its client_id, else its only aud.
+      #   connectorId: the Dex connector that verifies this issuer's tokens in
+      #     the exchange (connector_id).
+      #   jwks: {host, port, path, tls: {enabled, caSecretName}}, the same
+      #     shape and rules as kagent.controllerRoute.jwtAuthentication.jwks.
+      #   card: the Agent Card's scheme for the issuer, passed to
+      #     klaus-gateway: {tokenUrl, metadataUrl, openIdConnectUrl}.
+      issuers: []
+      exchange:
+        # Dex's token endpoint (https). Empty means
+        # <global.identity.issuerUrl>/token.
+        tokenUrl: ""
+        # The Dex client agentgateway exchanges as. It is the only client
+        # klaus-gateway accepts platform tokens from.
+        clientId: klaus-gateway-exchange
+        # Secret in this release's namespace holding the client's secret.
+        secretName: ""
+        secretKey: clientSecret
+        # The clients the exchanged token is issued for, each requested as
+        # Dex's audience:server:client_id:<aud> scope. The first is the
+        # audience klaus-gateway checks.
+        audiences:
+          - klaus-gateway
+          - agent-platform
+          - kubernetes
+        scopes:
+          - openid
+          - email
+          - profile
+          - groups
+        # The type of every issuer's tokens as the exchange names them
+        # (IdToken or AccessToken). agentgateway takes one per policy, so all
+        # issuers must send the same type.
+        subjectTokenType: IdToken
 
 agentgateway:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: agentgateway-controller

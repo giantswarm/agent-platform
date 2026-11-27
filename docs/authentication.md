@@ -97,6 +97,40 @@ POST https://models.<domain>/<namespace>/<model>/v1/chat/completions
 Authorization: Bearer <id_token>
 ```
 
+## 7. klaus-gateway's A2A server
+
+Outside A2A clients, such as an application's backend, reach agents through klaus-gateway's A2A server. Its entry is `klausGateway.agentgatewayRoute.a2aServer`, off by default, on its own hostname (`hostname`, else `klausGateway.agentgatewayRoute.hostname`). agentgateway checks the client's token and exchanges it at the installation's Dex. klaus-gateway receives only the Dex token, checks it again, and starts each Session through agent-manager as the caller ([klaus-gateway's `docs/a2a-server.md`](https://github.com/giantswarm/klaus-gateway/blob/main/docs/a2a-server.md)).
+
+| Path | Route | Policy |
+|---|---|---|
+| `/.well-known/agent-card.json` | `klausgateway-a2a-card` | None: a client reads the card before it has a token |
+| `/a2a` | `klausgateway-a2a` | `AgentgatewayPolicy` `klausgateway-a2a` |
+
+Both routes go to the `AgentgatewayBackend` `klausgateway-a2a`, an A2A backend. agentgateway reports the JSON-RPC method in its A2A metrics and rewrites the card's interface URLs to the public address.
+
+The `klausgateway-a2a` policy does the following:
+
+- **Token check.** JWT validation is `Strict`, with one provider per entry of `issuers`. Each provider has the issuer's exact `audience` and its own JWKS backend (`klausgateway-a2a-jwks-<index>`). A token of any other issuer gets `401`.
+- **Client check.** One `Require` rule checks that the client that requested the token is in that issuer's `allowedClients`. The client is the token's `azp`, else its `client_id`, else its only `aud`. Dex does not check the subject token's audience in an exchange (dexidp/dex#4397), so this check and the audience check above are the only ones.
+- **Exchange.** An RFC 8693 token exchange at `exchange.tokenUrl` (default `<global.identity.issuerUrl>/token`), as the Dex client `exchange.clientId`, with `ClientSecretBasic` and the Secret `exchange.secretName`.
+  - `connector_id` is the `connectorId` of the token's issuer.
+  - Every audience in `exchange.audiences` is requested as Dex's `audience:server:client_id:<aud>` scope.
+  - The requested token type is an ID token.
+  - The exchanged token replaces the client's token, so klaus-gateway never sees the client's token.
+- **No exchange cache.** The agent runtime keeps the exchanged token for a whole turn, so klaus-gateway refuses one with less than `a2aServer.minTokenLifetime` (25 minutes) left. agentgateway's cache serves an entry until 15 seconds before it expires and cannot require a minimum lifetime, so every request is exchanged.
+- **One token type.** agentgateway sends one `subject_token_type` per policy (`exchange.subjectTokenType`), so every issuer must send the same token type.
+
+The meta chart derives the klaus-gateway release's `a2aServer` block from the same entry: `publicUrl`, the issuers' card schemes, and the platform token's issuer, JWKS URL, audience (the first of `exchange.audiences`) and client (`exchange.clientId`). An own `klausGateway.a2aServer` value that differs fails the render. This needs klaus-gateway 4.20.0 or later in `components.klaus-gateway.versionRange`.
+
+With network policies on, the data plane gets egress to klaus-gateway on 8080. The agentgateway controller gets egress to every external JWKS host the issuers name.
+
+Dex needs the setup that klaus-gateway's `docs/a2a-server.md` lists under "Identity provider configuration":
+
+- the exchange client, listed in `trustedPeers` of every client in `exchange.audiences`
+- one connector per issuer, limited to the token exchange grant
+- `allowedConnectors` on every other client
+- `expiry.idTokens` longer than `a2aServer.minTokenLifetime`
+
 ## OAuth issuer connectivity
 
 The agent-manager, vm-manager, cluster-manager, skill-manager and workspace-manager defaults set `oauth.dex.allowPrivateURLs: false`. The model-manager block does not set `oauth.dex.allowPrivateURLs`, and the mcp-kubernetes block does not set `mcpKubernetes.oauth.allowPrivateURLs`: neither value has an effect. Their Dex discovery client can reach an operator-configured issuer that resolves to a private address without this opt-in and follows `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`. An issuer discovery failure calls for checking DNS, egress, proxy settings and certificate trust, rather than asking the person to sign in again. Keep HTTPS, certificate verification and the exact configured issuer identity intact; configure the installation's internal CA through `global.identity.ca.secretName` when needed.

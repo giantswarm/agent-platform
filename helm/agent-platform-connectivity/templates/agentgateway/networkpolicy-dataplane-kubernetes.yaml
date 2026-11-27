@@ -94,6 +94,19 @@ spec:
         - port: 8090
           protocol: TCP
     {{- end }}
+    {{- if include "agent-platform.klausGateway.a2aServerOn" . }}
+    # klaus-gateway's A2A server (klausGateway.agentgatewayRoute.a2aServer).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.klausGateway.namespaceOverride | default .Release.Namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
     {{- $kubernetes := index .Values "mcp-kubernetes" | default dict }}
     {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "mcp-kubernetes")) (dig "gatewayAPI" "enabled" (dig "mcpKubernetes" "oauth" "enabled" false $kubernetes) $kubernetes) }}
     - to:

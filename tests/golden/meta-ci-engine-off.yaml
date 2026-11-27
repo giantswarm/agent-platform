@@ -936,6 +936,25 @@ spec:
         fallbackIconUrlTemplate: ""
         url: grpc://agentgateway.agent-platform.svc.cluster.local:8080
       agentgatewayRoute:
+        a2aServer:
+          enabled: false
+          exchange:
+            audiences:
+            - klaus-gateway
+            - agent-platform
+            - kubernetes
+            clientId: klaus-gateway-exchange
+            scopes:
+            - openid
+            - email
+            - profile
+            - groups
+            secretKey: clientSecret
+            secretName: ""
+            subjectTokenType: IdToken
+            tokenUrl: ""
+          hostname: ""
+          issuers: []
         enabled: false
         hostname: ""
       image:

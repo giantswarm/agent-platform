@@ -1,0 +1,39 @@
+# klaus-gateway's A2A server behind agentgateway (klausGateway.agentgatewayRoute.a2aServer):
+# the klaus-gateway release's a2aServer block is derived from the entry the
+# connectivity chart routes. verify-klausgateway-a2a asserts it.
+components:
+  klaus-gateway:
+    enabled: true
+    versionRange: ">=4.20.0-0 <5.0.0"
+global:
+  identity:
+    issuerUrl: https://dex.ci.example.com
+klausGateway:
+  agentgatewayRoute:
+    hostname: agentgateway.ci.example.com
+    a2aServer:
+      enabled: true
+      hostname: a2a.ci.example.com
+      issuers:
+        - name: dex
+          issuer: https://dex.ci.example.com
+          audience: klaus-gateway-app
+          allowedClients: [example-app]
+          connectorId: self
+          jwks:
+            host: dex.giantswarm.svc.cluster.local
+            port: 5556
+            path: /keys
+          card:
+            tokenUrl: https://dex.ci.example.com/token
+        - name: example-idp
+          issuer: https://login.example.org
+          audience: platform-backend
+          allowedClients: [example-backend]
+          connectorId: example-idp
+          jwks:
+            host: login.example.org
+            port: 443
+            path: /.well-known/jwks.json
+      exchange:
+        secretName: klaus-gateway-exchange
