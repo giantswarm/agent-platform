@@ -1147,6 +1147,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | global.identity.existingSecret | string | `""` |  |
 | global.identity.ca.secretName | string | `""` |  |
 | global.identity.ca.key | string | `"ca.crt"` |  |
+| global.identity.type | string | `""` |  |
+| global.identity.kubernetes.audiences | list | `[]` |  |
 | global.gatewayApi.parentRefs | list | `[]` |  |
 | global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |
@@ -1731,7 +1733,6 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | model-manager.mcp.enabled | bool | `true` |  |
 | model-manager.oauth.enabled | bool | `true` |  |
 | model-manager.oauth.provider | string | `"dex"` |  |
-| model-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | model-manager.oauth.downstream.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
@@ -1810,7 +1811,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"3.5.6"` |  |
+| agentManager.migration.image.tag | string | `"3.5.11"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
 | agentManager.migration.preflightSemver | string | `""` |  |
 | agentManager.migration.cutover | bool | `false` |  |
@@ -1965,7 +1966,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |
-| backstage.configReload.image.version | string | `"v1.37.2"` |  |
+| backstage.configReload.image.version | string | `"v1.37.3"` |  |
 | mcp-kubernetes.fullnameOverride | string | `"mcp-kubernetes"` |  |
 | mcp-kubernetes.mcpKubernetes.oauth.enabled | bool | `true` |  |
 | mcp-kubernetes.kubernetesAudience | string | `"dex-k8s-authenticator"` |  |

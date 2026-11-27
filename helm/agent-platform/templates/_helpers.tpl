@@ -4730,6 +4730,40 @@ Usage: include "agent-platform.scheduling.apply" (dict "values" $shaped)
 {{- end -}}
 
 {{/*
+The installation's login facts in the managers that call the Kubernetes API as
+the person (oauth.downstream): model-manager, agent-manager and
+cluster-manager. What a block leaves unset is filled from global.identity:
+oauth.provider from type, and muster.mcpServer.auth.requiredAudiences from
+kubernetes.audiences, the audiences muster requests at login so the forwarded
+ID token passes the API server (AuthenticationConfiguration
+jwt[].issuer.audiences). A value in the block wins, an empty list included.
+Runs on the $shaped copy before agent-platform.identity.apply, which reads the
+filled provider. Emits nothing.
+Usage: include "agent-platform.identity.defaults" (dict "values" $shaped)
+*/}}
+{{- define "agent-platform.identity.defaults" -}}
+{{- $v := .values -}}
+{{- $identity := dig "global" "identity" dict $v -}}
+{{- $type := dig "type" "" $identity -}}
+{{- $audiences := dig "kubernetes" "audiences" list $identity -}}
+{{- range $name := list "model-manager" "agent-manager" "cluster-manager" -}}
+{{- $block := index $v $name -}}
+{{- if kindIs "map" $block -}}
+{{- $oauth := index $block "oauth" -}}
+{{- if and $type (kindIs "map" $oauth) (not (hasKey $oauth "provider")) }}{{ $_ := set $oauth "provider" $type }}{{ end -}}
+{{- if $audiences -}}
+{{- $node := $block -}}
+{{- range $key := list "muster" "mcpServer" "auth" -}}
+{{- if not (kindIs "map" (index $node $key)) }}{{ $_ := set $node $key dict }}{{ end -}}
+{{- $node = index $node $key -}}
+{{- end -}}
+{{- if not (hasKey $node "requiredAudiences") }}{{ $_ := set $node "requiredAudiences" (deepCopy $audiences) }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The platform's one login in the managers' OAuth blocks
 (giantswarm/agent-platform#484). model-manager, agent-manager, vm-manager,
 cluster-manager, workspace-manager and skill-manager are OAuth resource servers
@@ -4749,13 +4783,11 @@ fails the render when either disagrees with muster's; skill-manager's own
 values are guarded here, agent-platform.identity.validate). Only for the dex
 provider, while muster's OAuth server is on (with it off, model-manager's oauth
 is off: componentDerivedValues).
-oauth.baseURL of model-manager and agent-manager is
-https://<host><pathPrefix>: for
-agent-manager the hostname and prefix of its route (agentManager.route.hostname,
-else agentgateway.<global.domain>), for model-manager, which has no route,
-agentgateway.<global.domain> and /model-manager, the resource URL it has always
-announced; without a host it stays unset and the connectivity chart's guard
-names the key.
+oauth.baseURL of agent-manager is https://<host><pathPrefix>, the hostname
+and prefix of its route (agentManager.route.hostname, else
+agentgateway.<global.domain>); without a host it stays unset and the
+connectivity chart's guard names the key. model-manager is on mcp-oauth's
+values layout: agent-platform.identity.applyLayout fills its keys instead.
 Runs on the $shaped copy in components.yaml after scheduling.apply, so each
 manager release and the connectivity release — its guards, the managers'
 identity-provider egress — read the same filled block. Emits nothing.
@@ -4767,10 +4799,13 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- $identity := dig "identity" dict $global -}}
 {{- $domain := dig "domain" "" $global -}}
 {{- $login := include "agent-platform.identity.musterLogin" $v | fromJson -}}
-{{- range $name, $wiring := dict "model-manager" "modelManager" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" "workspace-manager" "" "skill-manager" "" -}}
+{{- range $name, $wiring := dict "model-manager" "" "agent-manager" "agentManager" "vm-manager" "" "cluster-manager" "" "workspace-manager" "" "skill-manager" "" -}}
 {{- $block := index $v $name -}}
 {{- if and (kindIs "map" $block) (kindIs "map" (index $block "oauth")) (dig "oauth" "enabled" false $block) -}}
 {{- $oauth := index $block "oauth" -}}
+{{- if eq $name "model-manager" -}}
+{{- include "agent-platform.identity.applyLayout" (dict "oauth" $oauth "identity" $identity "login" $login "domain" $domain) -}}
+{{- else -}}
 {{- if and $login (eq (toString (dig "provider" "dex" $oauth)) "dex") -}}
 {{- if not (kindIs "map" (index $oauth "dex")) }}{{ $_ := set $oauth "dex" dict }}{{ end -}}
 {{- $dex := index $oauth "dex" -}}
@@ -4783,13 +4818,52 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- end -}}
 {{- if and $wiring (not $oauth.baseURL) -}}
 {{- $route := dig $wiring "route" dict $v -}}
-{{- if eq $wiring "modelManager" }}{{ $route = dict "pathPrefix" "/model-manager" }}{{ end -}}
 {{- $host := $route.hostname -}}
 {{- if and (not $host) $domain }}{{ $host = printf "agentgateway.%s" $domain }}{{ end -}}
 {{- if and $host $route.pathPrefix }}{{ $_ := set $oauth "baseURL" (printf "https://%s%s" $host $route.pathPrefix) }}{{ end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+agent-platform.identity.apply for a manager on mcp-oauth's values layout
+(model-manager from 1.25.0-rc.1): the same defaults, written to
+oauth.authorizationServer instead of the deprecated keys —
+upstream.issuer from muster's issuer, upstream.client.id from its client,
+upstream.client.secretKeyRef from its existingSecret (key dex-client-secret),
+and issuer https://agentgateway.<global.domain>/model-manager. A key is filled
+only when the new key, its deprecated key and global.identity all leave it
+unset, so an installation's own value in either layout stands. The client's
+audiences need no fill: the chart derives the trusted issuer's audiences from
+upstream.client.id. Only for the dex provider (upstream.type, else the
+deprecated provider, else global.identity.type, else dex). Emits nothing.
+Usage: include "agent-platform.identity.applyLayout" (dict "oauth" $oauth "identity" $identity "login" $login "domain" $domain)
+*/}}
+{{- define "agent-platform.identity.applyLayout" -}}
+{{- $oauth := .oauth -}}
+{{- $identity := .identity -}}
+{{- $login := .login -}}
+{{- if not (kindIs "map" (index $oauth "authorizationServer")) }}{{ $_ := set $oauth "authorizationServer" dict }}{{ end -}}
+{{- $as := index $oauth "authorizationServer" -}}
+{{- $dex := dig "dex" dict $oauth -}}
+{{- $provider := dig "upstream" "type" "" $as | default (dig "provider" "" $oauth) | default (dig "type" "" $identity) | default "dex" -}}
+{{- if and $login (eq (toString $provider) "dex") -}}
+{{- if not (kindIs "map" (index $as "upstream")) }}{{ $_ := set $as "upstream" dict }}{{ end -}}
+{{- $up := index $as "upstream" -}}
+{{- if not (kindIs "map" (index $up "client")) }}{{ $_ := set $up "client" dict }}{{ end -}}
+{{- $client := index $up "client" -}}
+{{- if and $login.issuerURL (not $up.issuer) (not $dex.issuerURL) (not $identity.issuerUrl) }}{{ $_ := set $up "issuer" $login.issuerURL }}{{ end -}}
+{{- if and $login.clientID (not $client.id) (not $dex.clientID) (not $identity.clientId) }}{{ $_ := set $client "id" $login.clientID }}{{ end -}}
+{{- if and $login.existingSecret (not (dig "secretKeyRef" "name" "" $client)) (not $oauth.existingSecret) (not $dex.clientSecret) (not $identity.existingSecret) -}}
+{{- $_ := set $client "secretKeyRef" (dict "name" $login.existingSecret "key" "dex-client-secret") -}}
+{{- end -}}
+{{- if not $client }}{{ $_ := unset $up "client" }}{{ end -}}
+{{- if not $up }}{{ $_ := unset $as "upstream" }}{{ end -}}
+{{- end -}}
+{{- if and .domain (not $as.issuer) (not $oauth.baseURL) }}{{ $_ := set $as "issuer" (printf "https://agentgateway.%s/model-manager" .domain) }}{{ end -}}
+{{- if not $as }}{{ $_ := unset $oauth "authorizationServer" }}{{ end -}}
 {{- end -}}
 
 {{/*

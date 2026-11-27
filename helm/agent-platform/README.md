@@ -470,6 +470,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | global.identity.issuerUrl | string | `""` |  |
 | global.identity.clientId | string | `""` |  |
 | global.identity.existingSecret | string | `""` |  |
+| global.identity.type | string | `"dex"` |  |
+| global.identity.kubernetes.audiences[0] | string | `"dex-k8s-authenticator"` |  |
 | global.gatewayApi.parentRefs | list | `[]` |  |
 | global.observability.metrics.serviceMonitor.enabled | string | `"auto"` | `auto` (default) renders the monitor objects when monitoring.coreos.com/v1 is served on the cluster, detected once by the meta chart (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
 | global.observability.metrics.serviceMonitor.interval | string | `""` |  |
@@ -490,7 +492,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | gitops.target.kubeConfig.secretRef.key | string | `""` |  |
 | gitops.hooks.image.registry | string | `"gsoci.azurecr.io"` |  |
 | gitops.hooks.image.repository | string | `"giantswarm/kubectl"` |  |
-| gitops.hooks.image.tag | string | `"v1.37.2"` |  |
+| gitops.hooks.image.tag | string | `"v1.37.3"` |  |
 | gitops.hooks.helmImage.registry | string | `"gsoci.azurecr.io"` |  |
 | gitops.hooks.helmImage.repository | string | `"giantswarm/alpine-k8s"` |  |
 | gitops.hooks.helmImage.tag | string | `"1.37.2"` |  |
@@ -612,7 +614,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-sandbox.dependsOn[0] | string | `"agent-platform-connectivity"` |  |
 | components.model-manager.chart | string | `"model-manager"` |  |
 | components.model-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.model-manager.versionRange | string | `">=1.22.0-rc.1 <2.0.0-0"` |  |
+| components.model-manager.versionRange | string | `">=1.25.0 <2.0.0-0"` |  |
 | components.model-manager.valuesFrom | string | `"model-manager"` |  |
 | components.model-manager.enabled | bool | `true` |  |
 | components.model-manager.dependsOn[0] | string | `"muster"` |  |
@@ -620,7 +622,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `">=3.5.0-rc.1 <4.0.0-0"` |  |
+| components.agent-manager.versionRange | string | `">=3.5.8 <4.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.omitEmptyKeys[0] | string | `"harness.egress"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
@@ -1005,7 +1007,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | valkey.valkey.podAnnotations."karpenter.sh/do-not-disrupt" | string | `"true"` |  |
 | valkey.valkey.image.registry | string | `"gsoci.azurecr.io"` |  |
 | valkey.valkey.image.repository | string | `"giantswarm/valkey"` |  |
-| valkey.valkey.image.tag | string | `"9.2.0"` |  |
+| valkey.valkey.image.tag | string | `"9.2.1"` |  |
 | valkey.valkey.auth.enabled | bool | `true` |  |
 | valkey.valkey.auth.usersExistingSecret | string | `""` |  |
 | valkey.valkey.auth.aclUsers.default.permissions | string | `"~* &* +@all"` |  |
@@ -1446,12 +1448,9 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | model-manager.kagent.disableWiring | bool | `false` |  |
 | model-manager.mcp.enabled | bool | `true` |  |
 | model-manager.oauth.enabled | bool | `true` |  |
-| model-manager.oauth.provider | string | `"dex"` |  |
-| model-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | model-manager.oauth.downstream.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.enabled | bool | `true` |  |
 | model-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
-| model-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | model-manager.networkPolicy.enabled | bool | `false` |  |
 | model-manager.serviceMonitor.enabled | string | `"auto"` |  |
 | model-manager.serviceMonitor.interval | string | `"60s"` |  |
@@ -1506,12 +1505,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agent-manager.skills.repositories | list | `[]` |  |
 | agent-manager.mcp.enabled | bool | `true` |  |
 | agent-manager.oauth.enabled | bool | `true` |  |
-| agent-manager.oauth.provider | string | `"dex"` |  |
 | agent-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | agent-manager.oauth.downstream.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.enabled | bool | `true` |  |
 | agent-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
-| agent-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | agent-manager.networkPolicy.enabled | bool | `false` |  |
 | agent-manager.serviceMonitor.enabled | string | `"auto"` |  |
 | agent-manager.serviceMonitor.interval | string | `"60s"` |  |
@@ -1542,7 +1539,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentManager.migration.enabled | bool | `true` |  |
 | agentManager.migration.image.registry | string | `"gsoci.azurecr.io"` |  |
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
-| agentManager.migration.image.tag | string | `"3.5.6"` |  |
+| agentManager.migration.image.tag | string | `"3.5.11"` |  |
 | agentManager.migration.dryRun | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | skills.platformSource.enabled | bool | `true` |  |
@@ -1567,12 +1564,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | cluster-manager.installation.name | string | `""` |  |
 | cluster-manager.mcp.enabled | bool | `true` |  |
 | cluster-manager.oauth.enabled | bool | `true` |  |
-| cluster-manager.oauth.provider | string | `"dex"` |  |
 | cluster-manager.oauth.dex.allowPrivateURLs | bool | `false` |  |
 | cluster-manager.oauth.downstream.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.enabled | bool | `true` |  |
 | cluster-manager.muster.mcpServer.auth.forwardToken | bool | `true` |  |
-| cluster-manager.muster.mcpServer.auth.requiredAudiences[0] | string | `"dex-k8s-authenticator"` |  |
 | cluster-manager.serviceMonitor.enabled | string | `"auto"` |  |
 | cluster-manager.serviceMonitor.interval | string | `"60s"` |  |
 | cluster-manager.serviceMonitor.labels."observability.giantswarm.io/tenant" | string | `"giantswarm"` |  |
@@ -1745,7 +1740,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | backstage.configReload.enabled | bool | `true` |  |
 | backstage.configReload.image.registry | string | `"gsoci.azurecr.io"` |  |
 | backstage.configReload.image.name | string | `"giantswarm/kubectl"` |  |
-| backstage.configReload.image.version | string | `"v1.37.2"` |  |
+| backstage.configReload.image.version | string | `"v1.37.3"` |  |
 | backstage.ingress.enabled | bool | `false` |  |
 | backstage.resources.verticalPodAutoscaler.enabled | bool | `false` |  |
 | backstage.backstage.args[0] | string | `"--config"` |  |

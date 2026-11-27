@@ -33,6 +33,22 @@ global:
     # (dex-client-secret, registration-token, oauth-encryption-key,
     # valkey-password; backstage-session-secret for the portal).
     existingSecret: ""
+    # The kind of OpenID Provider: dex or google. The meta chart fills
+    # oauth.provider of model-manager, agent-manager and cluster-manager with
+    # it where their blocks leave it unset.
+    type: dex  # @schema enum: ["", dex, google]
+    kubernetes:
+      # The audiences the Kubernetes API server accepts on this provider's
+      # tokens (AuthenticationConfiguration jwt[].issuer.audiences, or the
+      # flag oidc-client-id): a forwarded ID token passes when its aud holds
+      # at least one. muster requests them from Dex as cross-client audiences
+      # at login. [dex-k8s-authenticator] on Giant Swarm clusters; with
+      # Google, the login client id, since Google adds no audiences.
+      # The meta chart fills muster.mcpServer.auth.requiredAudiences of
+      # model-manager, agent-manager and cluster-manager, which call the API
+      # server as the person (oauth.downstream), with it where their blocks
+      # leave it unset; an empty list there requests none.
+      audiences: [dex-k8s-authenticator]  # @schema item: string
   gatewayApi:
     # The public Gateway every route attaches to when neither the route's own
     # parentRefs/parentRef override nor the chart-owned edge
@@ -193,7 +209,7 @@ gitops:
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/kubectl
-      tag: v1.37.2
+      tag: v1.37.3
     helmImage:
       registry: gsoci.azurecr.io
       repository: giantswarm/alpine-k8s
@@ -1098,7 +1114,10 @@ components:  # @schema additionalProperties: true
     # so no installation keeps a model-manager that writes kagent.dev
     # (giantswarm/model-manager#247).
     # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
-    versionRange: ">=1.22.0-rc.1 <2.0.0-0"
+    # 1.25.0 is the floor: its schema has oauth.authorizationServer and
+    # oauth.resourceServer, the keys agent-platform.identity.apply fills
+    # (giantswarm/model-manager#461).
+    versionRange: ">=1.25.0 <2.0.0-0"
     valuesFrom: model-manager
     enabled: true
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app)
@@ -1181,8 +1200,17 @@ components:  # @schema additionalProperties: true
     # 3.1.0 serves Vertex service-account JSON keys and installation models
     # through the same credentials.uiURL, without tenancy too, and takes
     # tenants.commit.platformModelsPath (giantswarm/agent-manager#409).
-    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
-    versionRange: ">=3.5.0-rc.1 <4.0.0-0"
+    # 3.5.0 is the first release on mcp-oauth v1.15, which permits private
+    # issuer JWKS without a blanket allowance, so this chart sets no
+    # oauth.sso.allowPrivateIPs for it.
+    # The floor is a stable release, 3.5.8, the newest one when the floor
+    # left release candidates (giantswarm/agent-platform#1497): an
+    # installation with gitops.prereleases off follows agent-manager's stable
+    # releases only, and gitops.prereleases admits its release candidates.
+    # The ceiling stays below 4.0.0: agent-manager 4.x serves the tools of
+    # the Organization kind, which only the chart release of
+    # giantswarm/agent-platform#1489 admits.
+    versionRange: ">=3.5.8 <4.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -3036,7 +3064,7 @@ valkey:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/valkey
-      tag: "9.2.0"
+      tag: "9.2.1"
     auth:
       enabled: true
       # Name of a pre-created Secret holding the default user's password under
@@ -5039,11 +5067,10 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
     disableWiring: false
   mcp:
     enabled: true
+  # oauth.provider and muster.mcpServer.auth.requiredAudiences come from
+  # global.identity (agent-platform.identity.defaults) unless set here.
   oauth:
     enabled: true
-    provider: dex
-    dex:
-      allowPrivateURLs: false
     downstream:
       enabled: true
   muster:
@@ -5051,8 +5078,6 @@ model-manager:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       auth:
         forwardToken: true
-        requiredAudiences:
-          - dex-k8s-authenticator
   networkPolicy:
     enabled: false
   # `auto` (the default) follows the resolved
@@ -5387,9 +5412,10 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
     repositories: []
   mcp:
     enabled: true
+  # oauth.provider and muster.mcpServer.auth.requiredAudiences come from
+  # global.identity (agent-platform.identity.defaults) unless set here.
   oauth:
     enabled: true
-    provider: dex
     dex:
       allowPrivateURLs: false
     downstream:
@@ -5399,8 +5425,6 @@ agent-manager:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       auth:
         forwardToken: true
-        requiredAudiences:
-          - dex-k8s-authenticator
   networkPolicy:
     enabled: false
   # `auto` (the default) follows the resolved
@@ -5545,7 +5569,7 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     image:
       registry: gsoci.azurecr.io
       repository: giantswarm/agent-manager
-      tag: 3.5.6
+      tag: 3.5.11
     dryRun: false
     # preflightSemver and cutover (unset): forwarded when set; documented in
     # the connectivity chart's values.yaml and UPGRADE.md.
@@ -5673,9 +5697,10 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
     name: ""
   mcp:
     enabled: true
+  # oauth.provider and muster.mcpServer.auth.requiredAudiences come from
+  # global.identity (agent-platform.identity.defaults) unless set here.
   oauth:
     enabled: true
-    provider: dex
     dex:
       allowPrivateURLs: false
     downstream:
@@ -5685,8 +5710,6 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
       enabled: true
       auth:
         forwardToken: true
-        requiredAudiences:
-          - dex-k8s-authenticator
   # `auto` (the default) follows the resolved
   # global.observability.metrics.serviceMonitor.enabled, like every other
   # monitor of this platform; `true` / `false` force it. The chart's metrics
@@ -6947,7 +6970,7 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
       registry: gsoci.azurecr.io
       name: giantswarm/kubectl
       # registry: gsoci.azurecr.io/giantswarm/kubectl
-      version: "v1.37.2"
+      version: "v1.37.3"
   # --- The backstage chart's own values (forwarded verbatim) ---
   ingress:
     enabled: false

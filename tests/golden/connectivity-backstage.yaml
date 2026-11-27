@@ -11513,7 +11513,8 @@ spec:
 # selectors below resolve), the Kubernetes API (ModelConfig wiring,
 # InferenceServices, download Jobs — as the caller), the identity provider
 # (model-manager.oauth: the discovery, JWKS, userinfo and token endpoints — the
-# Dex issuer by name, or the three Google hosts for the google provider), for
+# Dex issuer by name, or the three Google hosts for the google provider) and
+# the hosts of model-manager.oauth.resourceServer.trustedIssuers, for
 # every ollama, lemonade and lmstudio backend its host model server's endpoint, for the
 # kserve backend the Hugging Face Hub and the model registry, with commit mode
 # (model-manager.github) GitHub's API, and the names and blocks of
@@ -11918,7 +11919,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kubectl
-          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.2"
+          image: "gsoci.azurecr.io/giantswarm/kubectl:v1.37.3"
           command: ["kubectl"]
           args:
             - set

@@ -141,7 +141,17 @@ login provider beside global.identity.
     {{- $oauth := dig "oauth" dict $chart }}
     {{- $dex := dig "dex" dict $oauth }}
     {{- $identity := .Values.global.identity }}
-    {{- range $pair := list (list "dex.issuerURL" (dig "issuerURL" "" $dex) "issuerUrl" $identity.issuerUrl) (list "dex.clientID" (dig "clientID" "" $dex) "clientId" $identity.clientId) (list "existingSecret" (dig "existingSecret" "" $oauth) "existingSecret" $identity.existingSecret) }}
+    {{- /* model-manager's shared values layout first, then its deprecated keys;
+           a mismatch names the key that supplied the value. */}}
+    {{- $upstream := dig "authorizationServer" "upstream" dict $oauth }}
+    {{- $ownIssuer := dig "issuer" "" $upstream | default (dig "issuerURL" "" $dex) }}
+    {{- $ownClient := dig "client" "id" "" $upstream | default (dig "clientID" "" $dex) }}
+    {{- $ownSecret := dig "client" "secretKeyRef" "name" "" $upstream | default (dig "existingSecret" "" $oauth) }}
+    {{- $ownBaseURL := dig "authorizationServer" "issuer" "" $oauth | default (dig "baseURL" "" $oauth) }}
+    {{- $issuerKey := ternary "authorizationServer.upstream.issuer" "dex.issuerURL" (ne (dig "issuer" "" $upstream) "") }}
+    {{- $clientKey := ternary "authorizationServer.upstream.client.id" "dex.clientID" (ne (dig "client" "id" "" $upstream) "") }}
+    {{- $secretKey := ternary "authorizationServer.upstream.client.secretKeyRef.name" "existingSecret" (ne (dig "client" "secretKeyRef" "name" "" $upstream) "") }}
+    {{- range $pair := list (list $issuerKey $ownIssuer "issuerUrl" $identity.issuerUrl) (list $clientKey $ownClient "clientId" $identity.clientId) (list $secretKey $ownSecret "existingSecret" $identity.existingSecret) }}
       {{- $own := index $pair 1 }}{{- $global := index $pair 3 }}
       {{- if and $own $global (ne (toString $own) (toString $global)) }}
         {{- fail (printf "model-manager.oauth.%s (%s) differs from global.identity.%s (%s); the platform has one login provider" (index $pair 0) $own (index $pair 2) $global) }}
@@ -150,16 +160,16 @@ login provider beside global.identity.
     {{- $server := dig "muster" "oauth" "server" dict (.Values.muster | default dict) }}
     {{- if and (dig "enabled" true $server) (dig "dex" "issuerUrl" "" $server) }}
       {{- if not (include "agent-platform.modelManager.issuerUrl" .) }}
-        {{- fail "model-manager.oauth.dex.issuerURL is empty and global.identity.issuerUrl is not set: model-manager validates tokens of the platform's login — the meta chart fills it from muster.muster.oauth.server.dex.issuerUrl; set global.identity.issuerUrl or model-manager.oauth.dex.issuerURL when rendering this chart alone" }}
+        {{- fail "model-manager.oauth.authorizationServer.upstream.issuer is empty and global.identity.issuerUrl is not set: model-manager validates tokens of the platform's login — the meta chart fills it from muster.muster.oauth.server.dex.issuerUrl; set global.identity.issuerUrl or model-manager.oauth.authorizationServer.upstream.issuer when rendering this chart alone" }}
       {{- end }}
-      {{- if and (not (dig "clientID" "" $dex)) (not $identity.clientId) }}
-        {{- fail "model-manager.oauth.dex.clientID is empty and global.identity.clientId is not set: model-manager validates tokens for the platform's login client — set muster.muster.oauth.server.dex.clientId, which the meta chart fills model-manager.oauth.dex.clientID from (or set global.identity.clientId)" }}
+      {{- if and (not $ownClient) (not $identity.clientId) }}
+        {{- fail "model-manager.oauth.authorizationServer.upstream.client.id is empty and global.identity.clientId is not set: model-manager validates tokens for the platform's login client — set muster.muster.oauth.server.dex.clientId, which the meta chart fills model-manager.oauth.authorizationServer.upstream.client.id from (or set global.identity.clientId)" }}
       {{- end }}
-      {{- if and (not (dig "existingSecret" "" $oauth)) (not (dig "clientSecret" "" $dex)) (not $identity.existingSecret) }}
-        {{- fail "none of model-manager.oauth.existingSecret, model-manager.oauth.dex.clientSecret or global.identity.existingSecret is set: model-manager needs the login client's secret — set muster.muster.oauth.server.existingSecret (a Secret with key dex-client-secret), which the meta chart fills model-manager.oauth.existingSecret from (or set global.identity.existingSecret)" }}
+      {{- if and (not $ownSecret) (not (dig "clientSecret" "" $dex)) (not $identity.existingSecret) }}
+        {{- fail "none of model-manager.oauth.authorizationServer.upstream.client.secretKeyRef.name, its deprecated model-manager.oauth.existingSecret or model-manager.oauth.dex.clientSecret, or global.identity.existingSecret is set: model-manager needs the login client's secret — set muster.muster.oauth.server.existingSecret (a Secret with key dex-client-secret), which the meta chart fills model-manager.oauth.authorizationServer.upstream.client.secretKeyRef from (or set global.identity.existingSecret)" }}
       {{- end }}
-      {{- if and (not (dig "baseURL" "" $oauth)) (not .Values.global.domain) }}
-        {{- fail "model-manager.oauth.baseURL is empty and global.domain is not set: the resource server needs its public base URL — the meta chart derives https://agentgateway.<global.domain>/model-manager; set global.domain, or model-manager.oauth.baseURL" }}
+      {{- if and (not $ownBaseURL) (not .Values.global.domain) }}
+        {{- fail "model-manager.oauth.authorizationServer.issuer is empty and global.domain is not set: the resource server needs its public base URL — the meta chart derives https://agentgateway.<global.domain>/model-manager; set global.domain, or model-manager.oauth.authorizationServer.issuer" }}
       {{- end }}
     {{- end }}
   {{- end }}

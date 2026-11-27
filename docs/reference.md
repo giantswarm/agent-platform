@@ -283,7 +283,7 @@ Both services register with muster through their own `MCPServer` CR, so their to
 - The service presents that token to the Kubernetes API.
 - The user's RBAC decides. The ServiceAccount holds no permissions.
 
-The OAuth issuer, client, secret and base URL come from the block, else from `global.identity` / `global.domain`. Anything still unset is filled from muster's OAuth server block (`muster.muster.oauth.server.dex.*`, `.existingSecret`). The render fails if anything is still missing. Further egress destinations go in `modelManager.networkPolicy.egress` / `agentManager.networkPolicy.egress`.
+The OAuth issuer, client, secret and base URL come from the block, else from `global.identity` / `global.domain`. Anything still unset is filled from muster's OAuth server block (`muster.muster.oauth.server.dex.*`, `.existingSecret`). The render fails if anything is still missing. model-manager uses mcp-oauth's values layout, so the meta chart fills `model-manager.oauth.authorizationServer.upstream.issuer`, `.upstream.client.id`, `.upstream.client.secretKeyRef` and `.issuer`. Its deprecated `oauth.dex.*`, `oauth.existingSecret` and `oauth.baseURL` still win when set. model-manager's egress also reaches the issuer and key set hosts of `model-manager.oauth.resourceServer.trustedIssuers`. Further egress destinations go in `modelManager.networkPolicy.egress` / `agentManager.networkPolicy.egress`.
 
 `make verify-managers` covers the wiring and the guards.
 
@@ -455,6 +455,7 @@ Optional components for a cluster that has none of these. All are **off by defau
   - Backstage and mcp-kubernetes need `global.domain` and `global.identity` (`issuerUrl`, `clientId`, `existingSecret` with `dex-client-secret`, plus `backstage-session-secret` for Backstage).
   - `kserve-llmisvc-resources` needs cert-manager and is the platform's one KServe controller.
   - On a cluster without Cilium, set `mcp-kubernetes.ciliumNetworkPolicy.enabled: false`.
+  - The bundled mcp-kubernetes registration uses its in-cluster Service URL. Its canonical OAuth resource can differ from that transport URL. The Muster warning release accepts valid cross-origin resource identifiers with a `DEPRECATED:` warning for operator-managed backends; operators must verify the backend's ownership and tunnel mapping. This is an RFC 9728 compatibility exception, not exact resource validation. Tenant and discovered subject-scoped token-binding checks remain enforced. See [Muster browser origins and discovery](https://github.com/giantswarm/muster/blob/main/docs/reference/configuration.md#browser-origins-and-mcp-discovery).
 - **Order.**
   - `agent-platform-connectivity` dependsOn `cloudnative-pg` (for the CNPG `Cluster`) and `muster` (for the `MCPServer` CRD).
   - `model-manager` dependsOn `kserve-llmisvc-resources`.
@@ -685,9 +686,12 @@ The chart ships two presets, `infrastructure` and `agent-platform`, under `muste
 - `method: plugin` (default) uses the Barman Cloud plugin, which you install next to the operator. It gives continuous WAL archiving and a daily `ScheduledBackup` to `postgres.backup.objectStore`.
 - `method: volumeSnapshot` takes CSI snapshots and keeps no WAL archive.
 - `postgres.backup.crossplane.*` provisions the object store on AWS or Azure.
+- AWS stores retain their bucket, public access block and TLS-only bucket policy on uninstall. Helm keeps their managed resources, and Crossplane management policies exclude `Delete`. This applies to PostgreSQL backups and Substrate snapshots. Bucket lifecycle configurations and IAM roles follow the release lifecycle.
 - To restore, bootstrap a second Cluster named `<clusterName>-restore` from the same store. The network policies, the AWS role and the ImageVolume PolicyException expect that name.
 
-`make verify-postgres` asserts this.
+`make verify-postgres` checks backup wiring; `make verify-s3-retention` checks AWS retention and the remediation guards.
+
+For a public access block stuck deleting because an SCP denies `s3:PutBucketPublicAccessBlock`, run `hack/orphan-s3-public-access-block.sh --context <context> --bucket <bucket>`. It checks the retained bucket and the block's last observed protection settings, then performs a server-side dry run. Add `--apply` to orphan the AWS block and wait for Crossplane to release its finalizer. The script leaves the bucket and its data in place. It requires `kubectl` and `jq`; verify the AWS block directly with authenticated AWS access after it finishes.
 
 ### Agent sandbox
 

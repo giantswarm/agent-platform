@@ -215,6 +215,12 @@ Use the linked operator procedure; old binaries must not write to migrated stora
 Muster keeps the upstream identity-provider credentials and forwards or exchanges them according
 to the backend's configuration. Never send a muster access token directly to a backend.
 
+The bundled Kubernetes server is registered through its in-cluster Service URL.
+Its canonical OAuth resource may differ from that transport URL. Muster's warning release
+accepts valid cross-origin identifiers for operator-managed backends with a `DEPRECATED:`
+warning. Verify ownership and the transport mapping; exact RFC 9728 resource matching
+is not enforced on that discovery path. Resource identifiers are unchanged.
+
 Client configuration management is opt-in through
 `muster.oauth.server.enableClientManagementEndpoint`. Store the registration access token in a
 secret manager and use the returned `registration_client_uri`, not a constructed management URL.
@@ -266,4 +272,13 @@ clients. Procedure and version prerequisites:
   without a setting: `oauth.sso.allowPrivateIPs` and muster's `dex.allowPrivateIPJWKS` (alias
   `dex.allowPrivateIPOIDC`) are deprecated; do not set them to repair discovery. Operator checks and migration:
   [OAuth issuer connectivity](https://github.com/giantswarm/agent-platform/blob/main/docs/authentication.md#oauth-issuer-connectivity).
+- A `DEPRECATED:` warning about a backend's advertised `resource` naming another origin can
+  indicate an operator-managed private tunnel whose URL differs from the canonical resource.
+  Have the operator verify ownership and the tunnel mapping; do not change resource identifiers
+  or pin an authorization-server issuer to hide the warning. Cross-origin acceptance is a
+  documented RFC 9728 compatibility exception, not proof of safe token reuse. Tenant resource
+  checks, discovered subject-scoped grant binding and TLS verification remain enforced.
+  Browser Origin warnings concern the operator's allowed origins, not the person's credentials.
+  Configuration and migration:
+  [Muster browser origins and discovery](https://github.com/giantswarm/muster/blob/main/docs/reference/configuration.md#browser-origins-and-mcp-discovery).
 - Everything else: https://docs.giantswarm.io/tutorials/agent-platform/troubleshooting/.

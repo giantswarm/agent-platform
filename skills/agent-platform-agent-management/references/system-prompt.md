@@ -28,7 +28,8 @@ Your knowledge lives in your skills: load <skill> for <topic>, <skill> for <topi
 skill the first time its topic comes up instead of guessing.
 
 <Tool rules: what you may read, what you may change, what needs an explicit request; how you
-confirm choices you made for the person; that you act with the person's identity and say so.>
+confirm choices you made for the person (the plan in the reply text, ending the turn, never an
+`ask_user` question); that you act with the person's identity and say so.>
 
 <The Muster meta-tool paragraph.>
 ```

@@ -69,6 +69,15 @@ muster decides Allow, Ask or Block for every tool call; the chart renders its go
 - The connectivity release no longer renders `agent-platform:muster-approval-binder`; the muster release binds `muster-approval-binder` in muster's namespace instead.
 - Clients (portal, klaus-gateway, kagent) retry an approved call as the same client of the same person; another client asks anew.
 
+## \<current\> → \<next\> (agent-manager follows stable releases by default)
+
+`components.agent-manager.versionRange` selects `>=3.5.8 <4.0.0` (giantswarm/agent-platform#1497). The range starts at a stable release, so an installation with `gitops.prereleases: false` follows agent-manager's stable releases only and no longer takes its release candidates. The ceiling stays below 4.0.0.
+
+### Operator action
+
+- To keep agent-manager's release candidates, set an explicit `components.agent-manager.versionRange` whose floor is a release candidate. `gitops.prereleases: true` admits them too, but it admits the release candidates of every component and of this chart itself as well.
+- An installation that pins the BOM: move `agent-manager` to `3.5.8`.
+
 ## \<current\> → \<next\> (forge CLI configuration from the Harness only)
 
 The kagent and kagent-crds ranges select the 1.33 line. Its runtimes no longer generate git, gh or glab configuration in a workspace turn: no credential helper, no placeholder `GH_TOKEN` or `GITLAB_TOKEN` and no `GLAB_CONFIG_DIR`. The chart declares those inert values in `Harness.spec.env` with `workspaces.enabled`, and the Go ADK passes declared values to its shell tools while it still withholds every undeclared runtime variable. Session grants and gateway bindings keep deciding access; the values grant nothing.
