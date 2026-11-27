@@ -1698,7 +1698,7 @@ spec:
         image:
           registry: gsoci.azurecr.io
           repository: giantswarm/valkey
-          tag: 9.2.0
+          tag: 9.2.1
         metrics:
           exporter:
             securityContext:
@@ -2322,7 +2322,7 @@ spec:
           mv "$stage/appendonlydir" /data/appendonlydir
           rm -rf "$stage"
           echo "converted dump.rdb ($keys keys) into /data/appendonlydir"
-        image: gsoci.azurecr.io/giantswarm/valkey:9.2.0
+        image: gsoci.azurecr.io/giantswarm/valkey:9.2.1
         name: append-only-conversion
         resources:
           limits:
@@ -2348,7 +2348,7 @@ spec:
       image:
         registry: gsoci.azurecr.io
         repository: giantswarm/valkey
-        tag: 9.2.0
+        tag: 9.2.1
       metrics:
         exporter:
           securityContext:
