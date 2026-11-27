@@ -1281,6 +1281,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.substrate.egressGateway.privateCIDRs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
 | networkPolicy.musterInClusterMcpPorts[1] | int | `8443` |  |
+| networkPolicy.musterSessionBindingsPort | int | `0` |  |
+| networkPolicy.musterSessionBindingsNamespace | string | `""` |  |
 | networkPolicy.mcpBackends | object | `{}` |  |
 | networkPolicy.mcpBackendScrapers[0].namespace | string | `"kube-system"` |  |
 | networkPolicy.mcpBackendScrapers[0].matchLabels."app.kubernetes.io/instance" | string | `"alloy-metrics"` |  |
@@ -1533,6 +1535,25 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controllerRoute.mcp.timeout | int | `300` |  |
 | kagent.controllerRoute.mcp.displayName | string | `"Kagent"` |  |
 | kagent.controllerRoute.mcp.description | string | `"Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"` |  |
+| kagent.controllerRoute.mcp.approval.rule | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_sessions | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.invoke_session | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.create_session_checkpoint | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_session_checkpoints | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.fork_session | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_sandbox_templates | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.create_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_sandboxes | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.get_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.suspend_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.resume_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.delete_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.start_sandbox_process | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.get_sandbox_process | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.kill_sandbox_process | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.read_sandbox_outputs | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.read_sandbox_file | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.write_sandbox_file | string | `"Allow"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
@@ -1792,6 +1813,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | agentManager.migration.image.repository | string | `"giantswarm/agent-manager"` |  |
 | agentManager.migration.image.tag | string | `"3.5.11"` |  |
 | agentManager.migration.dryRun | bool | `false` | dry-run: the report and the diffs, nothing written — a rehearsal of one installation's cut-over before the real run. |
+| agentManager.migration.preflightSemver | string | `""` |  |
+| agentManager.migration.cutover | bool | `false` |  |
 | agentManager.migration.gitopsNamespaces | list | `[]` |  |
 | cluster-manager.fullnameOverride | string | `"cluster-manager"` |  |
 | cluster-manager.installation.name | string | `""` |  |
@@ -1922,6 +1945,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | backstage.installationName | string | `"agent-platform"` |  |
 | backstage.extraScopes[0] | string | `"federated:id"` |  |
 | backstage.extraScopes[1] | string | `"audience:server:client_id:dex-k8s-authenticator"` |  |
+| backstage.oidcClientId | string | `""` |  |
 | backstage.startUrlSearchParams | object | `{}` |  |
 | backstage.enabledExtensions | list | `[]` |  |
 | backstage.disabledExtensions[0] | string | `"page:gs/clusters"` |  |
@@ -1950,6 +1974,31 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | mcp-kubernetes.mcpServer.managementCluster | string | `""` |  |
 | mcp-kubernetes.mcpServer.displayName | string | `"Kubernetes"` |  |
 | mcp-kubernetes.mcpServer.description | string | `"Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"` |  |
+| mcp-kubernetes.mcpServer.approval.rule | string | `"Ask"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.get | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.list | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.describe | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.logs | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.api_resources | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.cluster_health | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.can_i | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.context_list | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.context_get_current | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.list_port_forward_sessions | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.capi_list_clusters | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.capi_get_cluster | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.capi_resolve_cluster | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.capi_cluster_health | string | `"Allow"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.context_use | string | `"Ask"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.create | string | `"Ask"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.apply | string | `"Ask"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.delete | string | `"Ask"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.patch | string | `"Ask"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.scale | string | `"Ask"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.exec | string | `"Ask"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.port_forward | string | `"Ask"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.stop_port_forward_session | string | `"Ask"` |  |
+| mcp-kubernetes.mcpServer.approval.tools.stop_all_port_forward_sessions | string | `"Ask"` |  |
 | cloudnative-pg | object | `{}` |  |
 | kagent-crds | object | `{}` |  |
 | substrate.createNamespace | bool | `false` |  |

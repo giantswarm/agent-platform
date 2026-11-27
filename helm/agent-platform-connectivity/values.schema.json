@@ -1731,6 +1731,12 @@
                         "type": "integer"
                     }
                 },
+                "musterSessionBindingsNamespace": {
+                    "type": "string"
+                },
+                "musterSessionBindingsPort": {
+                    "type": "integer"
+                },
                 "substrate": {
                     "type": "object",
                     "additionalProperties": false,

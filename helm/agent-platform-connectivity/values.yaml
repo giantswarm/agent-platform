@@ -826,6 +826,14 @@ networkPolicy:
   musterInClusterMcpPorts:
     - 8080
     - 8443
+  # Port of muster's session bindings API (agent-manager only); set by the meta
+  # chart from muster's floor. 0 opens no egress for it: agent-manager binds on
+  # muster's aggregator port.
+  musterSessionBindingsPort: 0
+  # Namespace muster runs in, for that egress rule; set by the meta chart from
+  # muster's namespace (components.muster.targetNamespace). Empty selects the
+  # release's own namespace.
+  musterSessionBindingsNamespace: ""
   # In-cluster MCP backends an installation registers with muster (its own
   # MCPServer entries, e.g. through agent-platform-mcps). A ClusterIP Service
   # without a policy admits every pod on the cluster, and a direct call skips
@@ -1813,6 +1821,38 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # The line the Dev Portal shows under the server's name (the MCPServer's
       # spec.description, at most 500 characters); empty renders none.
       description: "Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"
+      # The connector's tool approval (spec.approval; see
+      # https://github.com/giantswarm/agent-platform/blob/main/docs/tool-approval.md):
+      # `rule` (Allow | Ask | Block) for a tool without its own entry, new ones
+      # included, and `tools`, the server's own tool names -> Allow | Ask | Block
+      # (at most 512). Written out for every tool as the Allow all preset: these
+      # session tools run as the person who ran the turn and carry no MCP
+      # annotations. On a governed platform muster also asks agents before every
+      # tool not on the meta chart's governedServers.kagent safe list, whatever
+      # these say. null renders none (the connector runs every tool, not
+      # reviewed). Without spec.approval in muster's CRD, muster refuses the
+      # server's tools until the CRD is upgraded.
+      approval:
+        rule: Allow
+        tools:
+          list_sessions: Allow
+          invoke_session: Allow
+          create_session_checkpoint: Allow
+          list_session_checkpoints: Allow
+          fork_session: Allow
+          list_sandbox_templates: Allow
+          create_sandbox: Allow
+          list_sandboxes: Allow
+          get_sandbox: Allow
+          suspend_sandbox: Allow
+          resume_sandbox: Allow
+          delete_sandbox: Allow
+          start_sandbox_process: Allow
+          get_sandbox_process: Allow
+          kill_sandbox_process: Allow
+          read_sandbox_outputs: Allow
+          read_sandbox_file: Allow
+          write_sandbox_file: Allow
     # The first of the controller's two authentication layers, on by default
     # (docs/authentication.md, "The kagent controller route"). Renders an
     # AgentgatewayPolicy on the GRPCRoute (plus a static AgentgatewayBackend for
@@ -2934,6 +2974,19 @@ agentManager:  # @schema skipProperties: true; additionalProperties: true
     # --dry-run: the report and the diffs, nothing written — a rehearsal of
     # one installation's cut-over before the real run.
     dryRun: false
+    # A never-started CronJob <migration>-preflight that runs `migrate --dry-run`
+    # against this range instead of the line's, e.g. ">=3.0.0 <4.0.0" before the
+    # agent chart line moves to 3.x (the mandatory check of UPGRADE.md; a dry
+    # run writes nothing). A 3.x range also grants the migration's identity the
+    # read-only access the 3.x path needs. Empty renders neither.
+    preflightSemver: ""
+    # true only while the organizations' 2.x -> 3.x cut-over runs, with
+    # agent-manager.agentChart.semver on 3.x and agentPlatformOrganizations
+    # enabled: the migration's identity may then update the organizations'
+    # HelmReleases (spec.values only) and write its report there, held by the
+    # ValidatingAdmissionPolicy agent-platform-organization-migrate-scope.
+    # Unset it once no organization is Ready=False with reason ChartSourceHeld.
+    cutover: false
     # Namespaces the GitOps-owned agents' HelmReleases and OCIRepositories live
     # in (a HelmRelease with targetNamespace: kagent applied from elsewhere —
     # the fleet's flux-giantswarm): the Job reads them there (get, list; a Role
@@ -3537,6 +3590,14 @@ backstage:  # @schema skipProperties: true; additionalProperties: true
   extraScopes:
     - federated:id
     - audience:server:client_id:dex-k8s-authenticator
+  # The portal's own OAuth client. Empty (default) signs in with
+  # global.identity.clientId and AGENT_PLATFORM_OIDC_CLIENT_SECRET. Set, the
+  # login provider takes this id and AGENT_PLATFORM_PORTAL_OIDC_CLIENT_SECRET
+  # (the meta chart mounts the key portal-dex-client-secret), and
+  # audience:server:client_id:<global.identity.clientId> is added to
+  # extraScopes (unless they are empty). The meta chart's values.yaml lists
+  # what the identity provider needs.
+  oidcClientId: ""
   # Extra query parameters on the login provider's authorize request (the
   # oidc authenticator's startUrlSearchParams). Dex needs none. Google models
   # offline access as authorize parameters, not as the offline_access scope
@@ -3659,6 +3720,45 @@ mcp-kubernetes:  # @schema skipProperties: true; additionalProperties: true
     # What the Dev Portal shows under the name (the MCPServer's
     # spec.description), at most 500 characters. Empty renders none.
     description: "Resources, events and pod logs of this installation's cluster, and the health of its workload clusters"
+    # The connector's tool approval (spec.approval; see
+    # https://github.com/giantswarm/agent-platform/blob/main/docs/tool-approval.md):
+    # `rule` (Allow | Ask | Block) for a tool without its own entry, new ones
+    # included, and `tools`, the server's own tool names -> Allow | Ask | Block
+    # (at most 512). Written out as the Recommended preset, equal to
+    # agent-platform-mcps' kubernetes family (make verify-tool-approval compares
+    # them): read-only tools run, every other one asks, new tools ask until
+    # listed. The deprecated kubernetes_* aliases follow the rule. On a governed
+    # platform muster also asks agents before every tool not on the meta chart's
+    # governedServers.mcp-kubernetes safe list. null renders none (not
+    # reviewed). Without spec.approval in muster's CRD, muster refuses the
+    # server's tools until the CRD is upgraded.
+    approval:
+      rule: Ask
+      tools:
+        get: Allow
+        list: Allow
+        describe: Allow
+        logs: Allow
+        api_resources: Allow
+        cluster_health: Allow
+        can_i: Allow
+        context_list: Allow
+        context_get_current: Allow
+        list_port_forward_sessions: Allow
+        capi_list_clusters: Allow
+        capi_get_cluster: Allow
+        capi_resolve_cluster: Allow
+        capi_cluster_health: Allow
+        context_use: Ask
+        create: Ask
+        apply: Ask
+        delete: Ask
+        patch: Ask
+        scale: Ask
+        exec: Ask
+        port_forward: Ask
+        stop_port_forward_session: Ask
+        stop_all_port_forward_sessions: Ask
 
 cloudnative-pg: {}  # @schema skipProperties: true; additionalProperties: true
 # The kagent-crds component's values (kagent main ships its CRDs as their own

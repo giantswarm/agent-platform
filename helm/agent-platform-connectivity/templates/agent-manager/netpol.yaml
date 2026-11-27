@@ -182,6 +182,18 @@ spec:
             - port: {{ $musterPort | quote }}
               protocol: TCP
     {{- end }}
+    {{- with .Values.networkPolicy.musterSessionBindingsPort }}
+    # muster's session bindings API on its own port (start_session's binds,
+    # grant drops), which muster admits from agent-manager alone.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: muster
+            io.kubernetes.pod.namespace: {{ $.Values.networkPolicy.musterSessionBindingsNamespace | default $.Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: {{ . | quote }}
+              protocol: TCP
+    {{- end }}
     {{- if $oauthOn }}
     {{- include "agent-platform.idpEgress.cilium" (dict "ctx" $ "provider" (include "agent-platform.agentManager.oauthProvider" .) "issuerUrl" (include "agent-platform.agentManager.issuerUrl" .)) | trim | nindent 4 }}
     {{- end }}
@@ -400,6 +412,20 @@ spec:
               app.kubernetes.io/name: muster
       ports:
         - port: {{ $musterPort | int }}
+          protocol: TCP
+    {{- end }}
+    {{- with .Values.networkPolicy.musterSessionBindingsPort }}
+    # muster's session bindings API on its own port (start_session's binds,
+    # grant drops), which muster admits from agent-manager alone.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.networkPolicy.musterSessionBindingsNamespace | default $.Release.Namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: muster
+      ports:
+        - port: {{ . | int }}
           protocol: TCP
     {{- end }}
     {{- include "agent-platform.agentManager.chartSourcesEgress.kubernetes" . | nindent 4 }}

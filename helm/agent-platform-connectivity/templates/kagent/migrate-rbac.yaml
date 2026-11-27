@@ -17,7 +17,27 @@ ClusterRoleBinding to this ServiceAccount, holds exactly that: get and delete
 on customresourcedefinitions confined by resourceNames to those nine CRDs, and
 a cluster-wide list on their kagent.dev resources, which proves a CRD empty
 before it goes. verify-flux-identity asserts these rights and no other
-cluster-scoped binding of the identity.
+cluster-scoped binding of the identity on the 2.x line.
+
+Only while agent-manager.agentChart.semver is a 3.x line (the 2.x -> 3.x path)
+the same ClusterRole also lets the run
+list namespaces (it finds the organization namespaces by label and fails when
+it may not) and, with agentPlatformOrganizations.enabled, list and get the
+HelmReleases and OCIRepositories and list the Agents it reads there
+(agent-platform.kagent.migration.v3Line; a 3.x preflight range on the 2.x
+line too, for its dry run). Only while the line itself is 3.x and
+agentManager.migration.cutover is set (agent-platform.kagent.migration.v3Writes;
+UPGRADE.md says to unset it once every organization moved) the run also
+updates the
+organization releases agent-manager owns (their values to 3.x) and writes its
+report ConfigMap agent-manager-migrate-report there, which the
+agent-platform-operator reads before it moves the organization's chart source
+to 3.x; it never writes an organization's OCIRepository. The operator mirrors
+no binding of this identity into organization namespaces, so these rights are
+cluster-wide; they exist only for the cut-over run, and
+agent-platform-organization-migrate-scope (organizations/migrate-scope.yaml)
+holds the writes to organization namespaces (and the kagent namespace), to
+spec.values of a HelmRelease and to the report's name.
 
 Per namespace in agentManager.migration.gitopsNamespaces (the fleet:
 flux-giantswarm, where the GitOps-owned agents' HelmReleases and
@@ -106,6 +126,41 @@ rules:
   - apiGroups: ["kagent.dev"]
     resources: {{ $legacyCRDs | toJson }}
     verbs: ["list"]
+  # Organization namespaces: on the
+  # agent chart 2.x -> 3.x path the run lists the namespaces labelled as an
+  # organization's and fails when it may not; it reads their releases, chart
+  # sources and Agents, rewrites the releases agent-manager owns and marks
+  # each namespace in its report once every release there is on 3.x values;
+  # the agent-platform-operator moves an organization's source only then.
+  {{- if include "agent-platform.kagent.migration.v3Line" . }}
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["list"]
+  {{- if include "agent-platform.organizations.enabled" . }}
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["get", "list"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources: ["ocirepositories"]
+    verbs: ["get", "list"]
+  - apiGroups: ["api.kagent.dev"]
+    resources: ["agents"]
+    verbs: ["list"]
+  {{- end }}
+  {{- if include "agent-platform.kagent.migration.v3Writes" . }}
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources: ["helmreleases"]
+    verbs: ["update"]
+  # RBAC cannot name the object of a create.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["agent-manager-migrate-report"]
+    verbs: ["get", "update"]
+  {{- end }}
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

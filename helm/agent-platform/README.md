@@ -376,6 +376,60 @@ Karpenter relaxes a preferred term and launches the node. An installation's own
 `podAffinity` stands instead of the derived one (keep the atelet term in it, never
 required); below `1.3.0` the key is refused.
 
+## Tool approval and the governance mode
+
+Every tool behind muster is **Allow**, **Ask** (a person confirms the call first) or **Block**
+(hidden and refused). A connector's `rule` applies to tools without their own entry, new ones
+included. Concepts and prompts: [Governing tool calls](https://github.com/giantswarm/agent-platform/blob/main/docs/tool-approval.md).
+
+| Value | What it does |
+|-------|--------------|
+| `governance.mode` | `trusted` (default) or `governed`; anything else fails the render. `governed` asks a person before an agent runs any tool of a governed server that is not on its safe list (new tools too) and any muster tool but its reads; it fails the render below `agent-platform.muster.governanceFloor`. |
+| `governedServers` | Per source `{role, safe}`: `safe` is the read tools agents call unasked. Sources: the manager components, `kagent`, `mcp-kubernetes`, or any other key as a muster server key (`namespace/name` outside muster's namespace). `null` drops a source; `governanceExempt` lists shipped sources left ungoverned. The earlier `muster.muster.governance.servers.<role>` shape fails the render. |
+| `governance.roleFloors` | Role to tool names that ask agents in both modes, added to muster's built-in floors. A role declared here is valid in `governedServers`. |
+
+Persons get the connectors' settings only; no agent tool changes the mode. `governance` is a map
+(`{mode, roleFloors}`); a string fails the render. Registering a server of your own:
+
+```yaml
+governance:
+  roleFloors:
+    exampleManager: [approve_change, merge_change]
+governedServers:
+  example-manager:
+    role: exampleManager
+    safe: [get_info, list_changes]
+```
+
+- **Prerequisites.** Asking calls are refused (reported as `approval.unavailable`) unless muster
+  runs on Valkey (default), has its OAuth server with Dex sign-in (`oauth.server.baseUrl`,
+  `dex.issuerUrl`, `dex.clientId`, `existingSecret`) and a public URL on that server's origin
+  (`muster.muster.oauth.mcpClient.enabled` with `publicUrl`). The chart does not fail a render
+  without them.
+- **Rendered for muster.** `approval.installation` (`backstage.installationName`) and
+  `oauth.mcpClient.postLoginRedirectAllowlist`: the portal's `/sessions` (`backstage.publicPort`
+  when not 443) and `<klausGateway.obo.callbackBaseUrl>/auth/slack/return`; an own list's entries
+  stay. Without an entry the person answers in the portal or Slack by hand.
+- **Retry as the same client.** An approval binds to the person and the calling client, not the MCP
+  session; another client of the person asks anew. At most 3 pending per client, 10 per person.
+- **`connector-admin`** is muster's `mcpserver-editor` Role, bound to
+  `muster.rbac.mcpServerEditor.subjects` plus `tenants.platformTeam`. Its holders edit connectors,
+  set tool approval and may let an agent skip an `Ask`. The default subject is a ServiceAccount
+  nobody can authenticate as (fail closed; `workflowEditor` likewise): set your admin groups,
+  with the OIDC groups prefix. Binding `system:authenticated` makes everyone an admin.
+- **`muster-approval-binder`** lets agent-manager's ServiceAccount (and only it) bind an agent's
+  tool settings to a Session (`muster.rbac.approvalBinder.subjects`; an own list stands; name an
+  agent-manager ServiceAccount the chart does not create).
+- **Shipped connectors carry `spec.approval`.** `mcp-kubernetes.mcpServer.approval` is
+  *Recommended* (read-only Allow, rest Ask), `kagent.controllerRoute.mcp.approval` and the managers'
+  `<component>.muster.mcpServer.approval` are *Allow all*, agent-platform-mcps families
+  `muster.families.<group>.approval` *Recommended*. Tighten a tool or the rule there; `null`
+  renders none (the connector runs everything, shown as *not reviewed*).
+
+Operator steps: [UPGRADE.md](../../UPGRADE.md). `make verify-tool-approval` asserts the governance configuration, its coverage (every shipped
+MCPServer governed or exempt, no floor safe), the allowlist, the admins, the binder and the
+connectors' settings.
+
 ## Voluntary disruption
 
 The platform's core runs as single replicas — the agentgateway data plane, muster, the kagent controller, klaus-gateway, agent-manager — and each carries long-lived streams (MCP sessions, A2A and portal SSE turns, the LLM listener). A voluntary eviction (Karpenter consolidation, a node drain) cuts them mid-turn (giantswarm/agent-platform#431). Two guards, both on by default:
@@ -650,16 +704,19 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.backstage.versionRange | string | `">=2.68.0 <4.0.0"` |  |
 | components.backstage.valuesFrom | string | `"backstage"` |  |
 | components.backstage.omitKeys[0] | string | `"hostname"` |  |
-| components.backstage.omitKeys[1] | string | `"parentRefs"` |  |
-| components.backstage.omitKeys[2] | string | `"installationName"` |  |
-| components.backstage.omitKeys[3] | string | `"extraScopes"` |  |
-| components.backstage.omitKeys[4] | string | `"startUrlSearchParams"` |  |
-| components.backstage.omitKeys[5] | string | `"enabledExtensions"` |  |
-| components.backstage.omitKeys[6] | string | `"disabledExtensions"` |  |
-| components.backstage.omitKeys[7] | string | `"skillsRepositories"` |  |
-| components.backstage.omitKeys[8] | string | `"skillPullRequests"` |  |
-| components.backstage.omitKeys[9] | string | `"metaAgents"` |  |
-| components.backstage.omitKeys[10] | string | `"configReload"` |  |
+| components.backstage.omitKeys[1] | string | `"publicPort"` |  |
+| components.backstage.omitKeys[2] | string | `"parentRefs"` |  |
+| components.backstage.omitKeys[3] | string | `"installationName"` |  |
+| components.backstage.omitKeys[4] | string | `"extraScopes"` |  |
+| components.backstage.omitKeys[5] | string | `"startUrlSearchParams"` |  |
+| components.backstage.omitKeys[6] | string | `"enabledExtensions"` |  |
+| components.backstage.omitKeys[7] | string | `"disabledExtensions"` |  |
+| components.backstage.omitKeys[8] | string | `"skillsRepositories"` |  |
+| components.backstage.omitKeys[9] | string | `"skillPullRequests"` |  |
+| components.backstage.omitKeys[10] | string | `"metaAgents"` |  |
+| components.backstage.omitKeys[11] | string | `"configReload"` |  |
+| components.backstage.omitKeys[12] | string | `"oidcClientId"` |  |
+| components.backstage.omitKeys[13] | string | `"signInHandoff"` |  |
 | components.backstage.enabled | bool | `false` |  |
 | components.backstage.dependsOn[0] | string | `"cloudnative-pg"` |  |
 | components.backstage.dependsOn[1] | string | `"agent-platform-connectivity"` |  |
@@ -729,16 +786,19 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.forwardAllValues | bool | `true` |  |
 | components.agent-platform-connectivity.disableWaitForJobs | bool | `true` |  |
 | components.agent-platform-connectivity.omitKeys[0] | string | `"flux-engine"` |  |
-| components.agent-platform-connectivity.omitKeys[1] | string | `"scheduling"` |  |
-| components.agent-platform-connectivity.omitKeys[2] | string | `"gpu-operator"` |  |
-| components.agent-platform-connectivity.omitKeys[3] | string | `"toolchain-manager"` |  |
-| components.agent-platform-connectivity.omitKeys[4] | string | `"kserve-runtime-configs"` |  |
-| components.agent-platform-connectivity.omitKeys[5] | string | `"skills"` |  |
-| components.agent-platform-connectivity.omitKeys[6] | string | `"skillManager"` |  |
-| components.agent-platform-connectivity.omitKeys[7] | string | `"skill-manager"` |  |
-| components.agent-platform-connectivity.omitKeys[8] | string | `"defaultAgent"` |  |
-| components.agent-platform-connectivity.omitKeys[9] | string | `"agent-platform-operator"` |  |
-| components.agent-platform-connectivity.omitKeys[10] | string | `"agentPlatformOrganizations.operator"` |  |
+| components.agent-platform-connectivity.omitKeys[1] | string | `"governance"` |  |
+| components.agent-platform-connectivity.omitKeys[2] | string | `"governedServers"` |  |
+| components.agent-platform-connectivity.omitKeys[3] | string | `"governanceExempt"` |  |
+| components.agent-platform-connectivity.omitKeys[4] | string | `"scheduling"` |  |
+| components.agent-platform-connectivity.omitKeys[5] | string | `"gpu-operator"` |  |
+| components.agent-platform-connectivity.omitKeys[6] | string | `"toolchain-manager"` |  |
+| components.agent-platform-connectivity.omitKeys[7] | string | `"kserve-runtime-configs"` |  |
+| components.agent-platform-connectivity.omitKeys[8] | string | `"skills"` |  |
+| components.agent-platform-connectivity.omitKeys[9] | string | `"skillManager"` |  |
+| components.agent-platform-connectivity.omitKeys[10] | string | `"skill-manager"` |  |
+| components.agent-platform-connectivity.omitKeys[11] | string | `"defaultAgent"` |  |
+| components.agent-platform-connectivity.omitKeys[12] | string | `"agent-platform-operator"` |  |
+| components.agent-platform-connectivity.omitKeys[13] | string | `"agentPlatformOrganizations.operator"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -854,6 +914,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | networkPolicy.substrate.egressGateway.privateCIDRs | list | `[]` |  |
 | networkPolicy.musterInClusterMcpPorts[0] | int | `8080` |  |
 | networkPolicy.musterInClusterMcpPorts[1] | int | `8443` |  |
+| networkPolicy.musterSessionBindingsPort | int | `0` |  |
+| networkPolicy.musterSessionBindingsNamespace | string | `""` |  |
 | networkPolicy.mcpBackends | object | `{}` |  |
 | networkPolicy.mcpBackendScrapers[0].namespace | string | `"kube-system"` |  |
 | networkPolicy.mcpBackendScrapers[0].matchLabels."app.kubernetes.io/instance" | string | `"alloy-metrics"` |  |
@@ -887,18 +949,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.image.registry | string | `"gsoci.azurecr.io"` |  |
 | muster.fullnameOverride | string | `"muster"` |  |
 | muster.crds.install | bool | `false` |  |
-| muster.rbac.mcpServerEditor.subjects[0].apiGroup | string | `"rbac.authorization.k8s.io"` |  |
-| muster.rbac.mcpServerEditor.subjects[0].kind | string | `"Group"` |  |
-| muster.rbac.mcpServerEditor.subjects[0].name | string | `"giantswarm-ad:giantswarm-admins"` |  |
-| muster.rbac.mcpServerEditor.subjects[1].apiGroup | string | `"rbac.authorization.k8s.io"` |  |
-| muster.rbac.mcpServerEditor.subjects[1].kind | string | `"Group"` |  |
-| muster.rbac.mcpServerEditor.subjects[1].name | string | `"giantswarm-github:giantswarm:giantswarm-admins"` |  |
-| muster.rbac.workflowEditor.subjects[0].apiGroup | string | `"rbac.authorization.k8s.io"` |  |
-| muster.rbac.workflowEditor.subjects[0].kind | string | `"Group"` |  |
-| muster.rbac.workflowEditor.subjects[0].name | string | `"giantswarm-ad:giantswarm-admins"` |  |
-| muster.rbac.workflowEditor.subjects[1].apiGroup | string | `"rbac.authorization.k8s.io"` |  |
-| muster.rbac.workflowEditor.subjects[1].kind | string | `"Group"` |  |
-| muster.rbac.workflowEditor.subjects[1].name | string | `"giantswarm-github:giantswarm:giantswarm-admins"` |  |
+| muster.rbac.mcpServerEditor.subjects[0].kind | string | `"ServiceAccount"` |  |
+| muster.rbac.mcpServerEditor.subjects[0].name | string | `"agent-platform-unset-connector-admins"` |  |
+| muster.rbac.mcpServerEditor.subjects[0].namespace | string | `"kube-system"` |  |
+| muster.rbac.workflowEditor.subjects[0].kind | string | `"ServiceAccount"` |  |
+| muster.rbac.workflowEditor.subjects[0].name | string | `"agent-platform-unset-workflow-editors"` |  |
+| muster.rbac.workflowEditor.subjects[0].namespace | string | `"kube-system"` |  |
 | muster.networkPolicy.enabled | bool | `true` |  |
 | muster.networkPolicy.flavor | string | `"auto"` |  |
 | muster.networkPolicy.cilium.allowClusterIngress | bool | `true` |  |
@@ -1160,6 +1216,25 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controllerRoute.mcp.timeout | int | `300` |  |
 | kagent.controllerRoute.mcp.displayName | string | `"Kagent"` |  |
 | kagent.controllerRoute.mcp.description | string | `"Your agent sessions on this installation, as the signed-in person: list them, send one a message, and checkpoint or fork them"` |  |
+| kagent.controllerRoute.mcp.approval.rule | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_sessions | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.invoke_session | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.create_session_checkpoint | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_session_checkpoints | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.fork_session | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_sandbox_templates | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.create_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.list_sandboxes | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.get_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.suspend_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.resume_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.delete_sandbox | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.start_sandbox_process | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.get_sandbox_process | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.kill_sandbox_process | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.read_sandbox_outputs | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.read_sandbox_file | string | `"Allow"` |  |
+| kagent.controllerRoute.mcp.approval.tools.write_sandbox_file | string | `"Allow"` |  |
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
@@ -1508,8 +1583,13 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | clusterManager.networkPolicy.workloadClusters.ports[1] | int | `6443` |  |
 | clusterManager.networkPolicy.egress.fqdns | list | `[]` |  |
 | clusterManager.networkPolicy.egress.cidrs | list | `[]` |  |
+| governance | object | `{"mode":"trusted","roleFloors":{}}` | The platform's governance (mode and role floors). `trusted` (default) lets agents run what the connectors' settings allow; `governed` also asks a person before an agent runs any tool of a governed server (governedServers) that is not on its safe list, and any muster tool but its reads. In both modes muster's built-in floors ask before an agent adds or repoints a connector, changes approval settings, grants access, adds a model, egress origin, credential or backend, approves an action or toolchain source, or changes muster's configuration. Rendered as muster.governance from agent-platform.muster.governanceFloor; below it `governed` fails the render. Approval needs muster's OAuth server with Dex sign-in, Valkey storage and muster.muster.oauth.mcpClient.publicUrl (with mcpClient.enabled for the redirect allowlist); without them muster refuses asking calls with the reason. No agent tool changes the mode. A string here (the earlier scalar) fails the render. See https://github.com/giantswarm/agent-platform/blob/main/docs/tool-approval.md |
+| governance.mode | string | `"trusted"` | trusted (the default) or governed; anything else fails the render. |
+| governance.roleFloors | object | `{}` | Floors per governance role (muster.governance.roleFloors): role -> tool names that ask agents in both modes on the governed servers of that role, added to muster's built-in floors. A role named here is valid in governedServers. Example for a server the installation registers:   governance:     roleFloors:       exampleManager: [approve_change, merge_change]   governedServers:     example-manager:       role: exampleManager       safe: [get_info, list_changes] |
+| governedServers | object | `{"agent-manager":{"role":"agentManager","safe":["get_info","list_agents","get_agent","get_agent_status","validate_agent","list_model_configs","list_egress_policies","list_skills","list_sessions","get_session","get_session_turn","toolchain_users","list_organizations","get_organization","list_organization_members","list_organization_connectors"]},"cluster-manager":{"role":"clusterManager","safe":["get_info","list_clusters","list_releases","list_node_pools"]},"kagent":{"role":"sessionManager","safe":["list_sessions","list_session_checkpoints","list_sandbox_templates","list_sandboxes","get_sandbox","get_sandbox_process","read_sandbox_outputs","read_sandbox_file"]},"mcp-kubernetes":{"role":"infrastructure","safe":["logs","list_port_forward_sessions","context_list","context_get_current","can_i","api_resources","cluster_health","capi_list_clusters","capi_get_cluster","capi_resolve_cluster","capi_cluster_health","get","list","describe"]},"model-manager":{"role":"modelManager","safe":["get_info","get_backend","list_backends","list_models","get_model","list_loaded_models","list_presets","search_models","check_fit","list_nodes","list_jobs","get_job"]},"skill-manager":{"role":"skillManager","safe":["list_skill_sources","list_skills","resolve_skills","get_skill","get_skill_file"]},"toolchain-manager":{"role":"toolchainManager","safe":["list_sources","list_toolchains","describe_toolchain","toolchain_build_status","search_packages"]},"vm-manager":{"role":"vmManager","safe":["get_info","get_host","list_images","get_image","list_networks","get_network","list_vms","get_vm","get_vm_metrics","get_vm_attestation"]},"workspace-manager":{"role":"workspaceManager","safe":["list_providers","list_owners","list_workspaces","get_workspace","list_repositories","preview_workspace"]}}` | The servers muster governs (muster.governance.governedServers), per source: `role` (agentManager, connectorManager, sessionManager, modelManager, clusterManager, vmManager, workspaceManager, toolchainManager, skillManager, infrastructure, or a role governance.roleFloors declares) and `safe`, the server's own read tools that agents call unasked on governed (never a floor). Every other tool asks agents on governed. A source renders one entry per MCPServer it ships: a manager component's <component>.muster.mcpServer.name; kagent; mcp-kubernetes (the connectivity chart's and every agent-platform-mcps kubernetes entry); any other key is a muster server key itself. null drops a source (list it in governanceExempt). make verify-tool-approval fails on a shipped MCPServer in neither place, and on a safe entry that names a floor, no tool of its server, or starts with a write verb unless a `# safe-write: <tool>: <reason>` comment above `safe:` says why. |
+| governanceExempt | object | `{"capi":"agent-platform-mcps' capi family (mcp-kubernetes' CAPI tools): every tool reads","prometheus":"agent-platform-mcps' prometheus family (mcp-prometheus): every tool reads"}` | Shipped MCPServer sources muster deliberately does not govern, each with its reason. Read by the meta chart's tests only. |
 | tenants.platform.users | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"system:authenticated"}]` | Every signed-in person: bound to agent-platform:platform-user in the kagent namespace, and, while musterMcpServerViewers is unset, to `list` (with get and watch) on muster's MCPServers in muster's namespace (the servers for everyone). RBAC subjects. The default, system:authenticated, gives this to every user. It also gives it to every ServiceAccount, so every pod in the cluster can read the platform tenant's Agents, RemoteMCPServer URLs and muster's MCPServer specs. To give it to people only, replace the default with an OIDC group that every user belongs to, written as the API server sees it (with the installation's OIDC groups prefix). |
-| tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The Giant Swarm admin groups, as in muster.rbac.*.subjects. |
+| tenants.platform.editors | list | `[{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-ad:giantswarm-admins"},{"apiGroup":"rbac.authorization.k8s.io","kind":"Group","name":"giantswarm-github:giantswarm:giantswarm-admins"}]` | The platform's operators: bound to agent-platform:editor in the kagent namespace. RBAC subjects. The default names two admin groups kept from before tool approval: replace them with the installation's own. |
 | tenants.platform.kagentRelease.name | string | `""` | The name of kagent's HelmRelease in the kagent namespace. Empty, the default, admits none. |
 | tenants.platform.kagentRelease.writers | list | `[]` | The identities that write it: RBAC-style subjects of kind User, Group or ServiceAccount (with its namespace), as the API server sees them (a kubeconfig's user or group, a Flux ServiceAccount). |
 | tenants.platformTeam | list | `[]` | The customer's platform team, per installation: RBAC subjects bound to agent-platform:editor in the kagent namespace beside `platform.editors`, and added to muster's mcpserver-editor and workflow-editor subjects beside muster.rbac.*.subjects (the meta chart appends them to the muster release's values). Empty by default. A group is written as the API server sees it (with the OIDC groups prefix of the installation). |
@@ -1639,6 +1719,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | backstage.installationName | string | `"agent-platform"` |  |
 | backstage.extraScopes[0] | string | `"federated:id"` |  |
 | backstage.extraScopes[1] | string | `"audience:server:client_id:dex-k8s-authenticator"` |  |
+| backstage.oidcClientId | string | `""` |  |
+| backstage.signInHandoff | bool | `true` |  |
 | backstage.startUrlSearchParams | object | `{}` |  |
 | backstage.enabledExtensions | list | `[]` |  |
 | backstage.disabledExtensions[0] | string | `"page:gs/clusters"` |  |
@@ -1673,8 +1755,12 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | backstage.backstage.extraEnvVars[1].name | string | `"AGENT_PLATFORM_OIDC_CLIENT_SECRET"` |  |
 | backstage.backstage.extraEnvVars[1].valueFrom.secretKeyRef.name | string | `"{{ .Values.global.identity.existingSecret }}"` |  |
 | backstage.backstage.extraEnvVars[1].valueFrom.secretKeyRef.key | string | `"dex-client-secret"` |  |
-| backstage.backstage.extraEnvVars[2].name | string | `"NODE_EXTRA_CA_CERTS"` |  |
-| backstage.backstage.extraEnvVars[2].value | string | `"{{ with (dig \"identity\" \"ca\" \"secretName\" \"\" .Values.global) }}/etc/agent-platform/idp-ca/{{ dig \"identity\" \"ca\" \"key\" \"ca.crt\" $.Values.global }}{{ end }}"` |  |
+| backstage.backstage.extraEnvVars[2].name | string | `"AGENT_PLATFORM_PORTAL_OIDC_CLIENT_SECRET"` |  |
+| backstage.backstage.extraEnvVars[2].valueFrom.secretKeyRef.name | string | `"{{ .Values.global.identity.existingSecret }}"` |  |
+| backstage.backstage.extraEnvVars[2].valueFrom.secretKeyRef.key | string | `"portal-dex-client-secret"` |  |
+| backstage.backstage.extraEnvVars[2].valueFrom.secretKeyRef.optional | bool | `true` |  |
+| backstage.backstage.extraEnvVars[3].name | string | `"NODE_EXTRA_CA_CERTS"` |  |
+| backstage.backstage.extraEnvVars[3].value | string | `"{{ with (dig \"identity\" \"ca\" \"secretName\" \"\" .Values.global) }}/etc/agent-platform/idp-ca/{{ dig \"identity\" \"ca\" \"key\" \"ca.crt\" $.Values.global }}{{ end }}"` |  |
 | backstage.backstage.extraVolumes[0].name | string | `"idp-ca"` |  |
 | backstage.backstage.extraVolumes[0].secret.secretName | string | `"{{ dig \"identity\" \"ca\" \"secretName\" \"\" .Values.global | default \"agent-platform-idp-ca\" }}"` |  |
 | backstage.backstage.extraVolumes[0].secret.optional | bool | `true` |  |

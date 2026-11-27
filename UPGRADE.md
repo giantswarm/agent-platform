@@ -15,6 +15,60 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (agent chart 3.0: `muster.requireApproval` becomes `default: Ask`)
+
+Agent chart 3.0 removes `muster.requireApproval` and the default of `modelConfig.name`. `default: Ask` replaces `requireApproval: true`: muster asks a person before every tool call the agent makes through it, from every client. `agent-manager.agentChart.semver` moves the agents of the whole installation: agent-manager composes new agents on it, its migrate run (the connectivity release's start hook) rewrites the existing releases, and the agent-platform-operator moves each organization's chart source once migrate marks that organization ready.
+
+The render allows the 3.x line only together with `make verify-agent-chart-line`'s conditions: agent-manager at `agent-platform.agentManager.agentChartV3Floor`, muster at `agent-platform.muster.agentApprovalFloor`, agent-manager's tool approval on, and the default agent's range on the same major. **Both floors are unset in this chart** until the releases carrying tool approval exist, so every 3.x range is refused for now; the platform release that pins those versions sets them. The other tool approval floors (`agentManager.toolApprovalFloor`, `muster.governanceFloor`, `muster.sessionBindingsPortFloor`) behave the same: unset, what they gate stays off and `governance: governed` fails. A range admitting two majors or only pre-releases fails.
+
+What migrate does:
+
+| Case | Result |
+|------|--------|
+| Release owned by agent-manager | Rewritten: `requireApproval: true` becomes `default: Ask`, the key is dropped, an unset `modelConfig.name` becomes `default-model-config` |
+| Release with `spec.valuesFrom` | `failed`: move the settings into `spec.values` |
+| Pinned, git-owned or platform release | `pending` with a diff to apply |
+| Organization namespace | Same rules; GitOps-owned releases get a diff. Annotates the namespace `agent-platform.giantswarm.io/agent-chart-ready-major: "3"` once every release is on 3.x values |
+
+Any `failed` or `pending` release keeps the namespace in the expand phase. The operator moves an organization's source only on that annotation; until then the organization is `Ready=False` (`ChartSourceHeld`) and its releases stay on 2.x, still asking. A release created on the 2.x source after the run is not covered: the operator holds the source and names it until migrate runs again.
+
+### Operator action
+
+- **Before the upgrade (mandatory), with the line still on 2.x:** set `agentManager.migration.preflightSemver: ">=3.0.0 <4.0.0"`, run `kubectl -n <kagent namespace> create job --from=cronjob/<release>-agent-manager-migrate-preflight preflight-1` and read `kubectl -n <kagent namespace> logs job/preflight-1` (a dry run writes nothing). Fix every release it lists that the run will not write (`failed`, and `diff` ones you own in git), organization namespaces included, then unset `preflightSemver`. Also list releases with `valuesFrom` or without the 3.x settings: `kubectl get helmreleases -A -o json | jq -r '.items[] | select(.spec.values.muster.requireApproval != null or .spec.values.modelConfig.name == null or (.spec.valuesFrom // [] | length > 0)) | "\(.metadata.namespace)/\(.metadata.name)"'`.
+- **The repair is always `muster.requireApproval: true` to `default: Ask`**, never just deleting the key (that turns asks off); drop `false` and `null`; set `modelConfig.name` where unset. In git, apply it together with moving that release's chart source to 3.x.
+- Once the floors are set, move `agent-manager.agentChart.semver` and `components.default-agent.versionRange` to `>=3.0.0 <4.0.0` together with `components.agent-manager.versionRange` and `components.muster.versionRange` at or above the floors. With organizations on, set `agentManager.migration.cutover: true` in the same change (a boolean; without it the organizations' sources stay held).
+- Tool approval's prerequisites must hold (muster's OAuth server with Dex sign-in, Valkey; see the next entry): without them muster refuses every call that asks, so a migrated agent cannot call its tools. It never runs them unasked.
+- Running Sessions: with agent-manager at `agentManager.toolApprovalFloor`, it binds `default: Ask` for a Session of an agent still on `requireApproval: true` already on 2.x. That agent needs the prerequisites from then on and is asked twice (kagent and muster) until migrated. Sessions from an older agent-manager carry no settings and muster applies the agent's `X-Muster-Tool-Approval: default=Ask`.
+- Read the report: `kubectl -n <kagent namespace> get configmap agent-manager-migrate-report -o jsonpath='{.data.report\.yaml}'`. A release with `requireApproval: true` beside tool approval settings is `failed`: set its settings by hand. The run needs list on namespaces and, in organization namespaces, read access and update on HelmReleases and its report ConfigMap (granted only on the 3.x line with `cutover`, scoped by the ValidatingAdmissionPolicy `agent-platform-organization-migrate-scope`); without them it fails before writing.
+- **Per organization:** `kubectl get agentplatformorganizations -A -o json | jq -r '.items[] | select(any(.status.conditions[]?; .reason == "ChartSourceHeld")) | "\(.metadata.namespace)/\(.metadata.name)"'` lists those still on 2.x; the report in the organization's namespace names the releases that hold it. Apply each diff in the organization's repository, then run migrate again: `kubectl -n <kagent namespace> create job --from=cronjob/<release>-agent-manager-migrate migrate-2` (also after a failed write, and when the condition names releases created after the run). Once none is held, unset `cutover`.
+
+## \<current\> → \<next\> (tool approval and the governance mode)
+
+muster decides Allow, Ask or Block for every tool call; the chart renders its governance configuration, the approval page's installation name, the redirect allowlist and the approval binder ([chart README](helm/agent-platform/README.md#tool-approval-and-the-governance-mode)). None of it reaches a muster below `agent-platform.muster.governanceFloor`.
+
+### Operator action
+
+- Move `components.muster.versionRange` to the muster release carrying tool approval. `governance.mode: governed` below it fails the render.
+- After muster's CRD upgrade, force a reconcile of the releases that render MCPServers (connectivity, agent-platform-mcps, the managers) if any was applied while the old CRD was served (its `spec.approval` was pruned): `flux reconcile helmrelease <name> -n <ns> --force`. Until then muster refuses every server tool. Check with `kubectl get mcpservers -A -o custom-columns=NAME:.metadata.name,RULE:.spec.approval.rule`.
+- **Editor defaults changed.** `muster.rbac.mcpServerEditor.subjects` (connector admins) and `muster.rbac.workflowEditor.subjects` default to a ServiceAccount nobody can authenticate as (`kube-system/agent-platform-unset-connector-admins`, `...-workflow-editors`); before, they named two fixed admin groups. Set both to your admin groups (with the OIDC groups prefix); `tenants.platformTeam` is still appended. Until then only cluster admins register servers, author workflows or change tool approval. Keep the lists non-empty: muster's chart fails the upgrade with an empty list while its old `system:authenticated` binding exists (`muster.rbac.mcpServerEditor.allowRemovingBinding: true` drops it). `tenants.platform.editors` keeps its earlier default groups: replace them too.
+- **`governance` is a map.** Write `governance.mode: governed` where you wrote `governance: governed`; a string fails the render.
+- **No server outside the platform's components is governed by default.** Own servers go in `governedServers` with `governance.roleFloors` (set below the muster governance floor, the render fails):
+
+  ```yaml
+  governance:
+    roleFloors:
+      exampleManager: [approve_change, merge_change]
+  governedServers:
+    example-manager:
+      role: exampleManager
+      safe: [get_info, list_changes]
+  ```
+- Replace an own `muster.muster.governance.servers.<role>` with `governedServers` entries (the earlier shape fails the render).
+- An edge not on 443: set `backstage.publicPort` and remove a hand-written portal entry from `muster.muster.oauth.mcpClient.postLoginRedirectAllowlist`. The allowlist reaches muster only with `muster.muster.oauth.mcpClient.enabled`.
+- An agent-manager ServiceAccount the chart does not create (`agent-manager.serviceAccount.create: false`) needs `agent-manager.serviceAccount.name`.
+- The connectivity release no longer renders `agent-platform:muster-approval-binder`; the muster release binds `muster-approval-binder` in muster's namespace instead.
+- Clients (portal, klaus-gateway, kagent) retry an approved call as the same client of the same person; another client asks anew.
+
 ## \<current\> → \<next\> (agent-manager follows stable releases by default)
 
 `components.agent-manager.versionRange` selects `>=3.5.8 <4.0.0` (giantswarm/agent-platform#1497). The range starts at a stable release, so an installation with `gitops.prereleases: false` follows agent-manager's stable releases only and no longer takes its release candidates. The ceiling stays below 4.0.0.

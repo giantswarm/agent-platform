@@ -214,12 +214,12 @@ def main() -> None:
             fail(f"{release}: agentChart.semver {on_semver!r} does not admit {rc}")
         if not on_flt or any(re.search(on_flt, t) for t in TAGS_REFUSED) or not all(re.search(on_flt, t) for t in TAGS_ADMITTED):
             fail(f"{release}: agentChart.semverFilter {on_flt!r} is not the release tag filter")
-    own = agent_charts(helm(chart, [*ON, "--set", "agent-manager.agentChart.semver=1.x", "--set", "agent-manager.agentChart.semverFilter=^1[.]x$"]))
-    if set(own.values()) != {("1.x", "^1[.]x$")}:
+    own = agent_charts(helm(chart, [*ON, "--set", "agent-manager.agentChart.semver=2.x", "--set", "agent-manager.agentChart.semverFilter=^2[.]x$"]))
+    if set(own.values()) != {("2.x", "^2[.]x$")}:
         fail(f"an agentChart with its own semverFilter: {own}, want it as written")
-    pinned = agent_charts(helm(chart, [*ON, "--set-string", "agent-manager.agentChart.semver=1.5.0"]))
-    if set(pinned.values()) != {("1.5.0", "")}:
-        fail(f"an agentChart pinned to 1.5.0: {pinned}, want the pin as written and no filter")
+    pinned = agent_charts(helm(chart, [*ON, "--set-string", "agent-manager.agentChart.semver=2.6.1"]))
+    if set(pinned.values()) != {("2.6.1", "")}:
+        fail(f"an agentChart pinned to 2.6.1: {pinned}, want the pin as written and no filter")
     # An exact pin and an exclusion stay as written: `-0` would turn 1.2.3
     # into a version that does not exist and stop != from excluding. A range
     # of those only admits no pre-release, so it gets no filter. A range that

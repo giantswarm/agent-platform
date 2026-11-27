@@ -2,6 +2,8 @@
 
 A **toolset** is the selector list an agent declares to say which of the gateway's tools it is composed with: the agent chart's `toolset` value (rendered as the `X-Muster-Toolset` header on the agent's muster tool entry), agent-manager's `toolset` argument, or the `toolset` argument of muster's `filter_tools`. muster evaluates it on every request as one more filter on the caller's own catalogue — it never widens access; the invoking human's identity and the backends' own authorization remain the boundary. The grammar, the built-in presets and the error texts are muster's: [docs/reference/toolsets.md](https://github.com/giantswarm/muster/blob/main/docs/reference/toolsets.md).
 
+A toolset only selects tools; whether a selected tool runs, asks a person or is hidden is its connector's tool approval (`Allow`, `Ask`, `Block`; the agent-platform chart README, "Tool approval and the governance mode"; [Tool approval](tool-approval.md)). Once agent-manager ships per-agent tool lists (`tools` in `create_agent`), the toolset becomes that list: the same selectors, each optionally `Allow`, `Ask` or `Block`, plus a `default`.
+
 A **preset** is a named selection an agent refers to as `preset:<name>`. Presets are muster configuration — `toolsetPresets` in muster's `config.yaml`, which the muster chart renders from its `muster.toolsetPresets` value. This meta-package forwards its `muster:` block to the muster release, so the presets an installation ships live under **`muster.muster.toolsetPresets`** in these values (the first `muster` is the component block, the second is the muster chart's own `muster:` key).
 
 ## The presets muster builds in

@@ -342,6 +342,12 @@ spec:
             secretKeyRef:
               key: dex-client-secret
               name: '{{ .Values.global.identity.existingSecret }}'
+        - name: AGENT_PLATFORM_PORTAL_OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: portal-dex-client-secret
+              name: '{{ .Values.global.identity.existingSecret }}'
+              optional: true
         - name: NODE_EXTRA_CA_CERTS
           value: '{{ with (dig "identity" "ca" "secretName" "" .Values.global) }}/etc/agent-platform/idp-ca/{{
             dig "identity" "ca" "key" "ca.crt" $.Values.global }}{{ end }}'
@@ -388,10 +394,12 @@ spec:
           endpoint: http://otlp-gateway.kube-system.svc:4317
           headers: X-Scope-OrgID=giantswarm
           protocol: grpc
+      oidcClientId: ""
       parentRefs: []
       resources:
         verticalPodAutoscaler:
           enabled: false
+      signInHandoff: true
       skillsRepositories:
       - https://github.com/giantswarm/agent-skills
       startUrlSearchParams: {}
@@ -724,6 +732,27 @@ spec:
               enabled: false
           mode: Strict
         mcp:
+          approval:
+            rule: Allow
+            tools:
+              create_sandbox: Allow
+              create_session_checkpoint: Allow
+              delete_sandbox: Allow
+              fork_session: Allow
+              get_sandbox: Allow
+              get_sandbox_process: Allow
+              invoke_session: Allow
+              kill_sandbox_process: Allow
+              list_sandbox_templates: Allow
+              list_sandboxes: Allow
+              list_session_checkpoints: Allow
+              list_sessions: Allow
+              read_sandbox_file: Allow
+              read_sandbox_outputs: Allow
+              resume_sandbox: Allow
+              start_sandbox_process: Allow
+              suspend_sandbox: Allow
+              write_sandbox_file: Allow
           description: 'Your agent sessions on this installation, as the signed-in person:
             list them, send one a message, and checkpoint or fork them'
           displayName: Kagent
@@ -1218,20 +1247,14 @@ spec:
       rbac:
         mcpServerEditor:
           subjects:
-          - apiGroup: rbac.authorization.k8s.io
-            kind: Group
-            name: giantswarm-ad:giantswarm-admins
-          - apiGroup: rbac.authorization.k8s.io
-            kind: Group
-            name: giantswarm-github:giantswarm:giantswarm-admins
+          - kind: ServiceAccount
+            name: agent-platform-unset-connector-admins
+            namespace: kube-system
         workflowEditor:
           subjects:
-          - apiGroup: rbac.authorization.k8s.io
-            kind: Group
-            name: giantswarm-ad:giantswarm-admins
-          - apiGroup: rbac.authorization.k8s.io
-            kind: Group
-            name: giantswarm-github:giantswarm:giantswarm-admins
+          - kind: ServiceAccount
+            name: agent-platform-unset-workflow-editors
+            namespace: kube-system
       replicaCount: 2
     musterMcpServerViewers: null
     networkPolicy:
@@ -1270,6 +1293,8 @@ spec:
       musterInClusterMcpPorts:
       - 8080
       - 8443
+      musterSessionBindingsNamespace: ""
+      musterSessionBindingsPort: 0
       substrate:
         credentialProvider:
           egressFQDNs: []
@@ -2725,20 +2750,14 @@ spec:
     rbac:
       mcpServerEditor:
         subjects:
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: giantswarm-ad:giantswarm-admins
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: giantswarm-github:giantswarm:giantswarm-admins
+        - kind: ServiceAccount
+          name: agent-platform-unset-connector-admins
+          namespace: kube-system
       workflowEditor:
         subjects:
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: giantswarm-ad:giantswarm-admins
-        - apiGroup: rbac.authorization.k8s.io
-          kind: Group
-          name: giantswarm-github:giantswarm:giantswarm-admins
+        - kind: ServiceAccount
+          name: agent-platform-unset-workflow-editors
+          namespace: kube-system
     replicaCount: 2
 ---
 # Source: agent-platform/templates/components.yaml

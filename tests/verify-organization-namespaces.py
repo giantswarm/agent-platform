@@ -849,6 +849,76 @@ def prove_operator_scope():
     case("the operator deletes an organization's Agent", kubectl(["delete", "agent", "probe", "-n", ORG_NS, "--dry-run=server", "--wait=false"], None, op))
 
 
+HELMRELEASE_CRD = {
+    "apiVersion": "apiextensions.k8s.io/v1", "kind": "CustomResourceDefinition",
+    "metadata": {"name": "helmreleases.helm.toolkit.fluxcd.io"},
+    "spec": {"group": "helm.toolkit.fluxcd.io", "scope": "Namespaced",
+             "names": {"plural": "helmreleases", "singular": "helmrelease", "kind": "HelmRelease", "listKind": "HelmReleaseList"},
+             "versions": [{"name": "v2", "served": True, "storage": True,
+                           "schema": {"openAPIV3Schema": {"type": "object", "properties": {
+                               "spec": {"type": "object", "x-kubernetes-preserve-unknown-fields": True}}}}}]},
+}
+
+
+def prove_migrate_scope(chart):
+    """agent-platform-organization-migrate-scope (D-GO-03, D-GO-27): during
+    the cut-over on the 3.x line the migrate run may update HelmReleases and
+    write its report cluster-wide; the policy holds it to organization
+    namespaces and the kagent namespace, to spec.values of an organization's
+    HelmRelease (its labels, annotations, ownerReferences and finalizers as
+    they were), and to the report's name."""
+    r = connectivity(chart, "kubernetes", "--set", "components.agent-manager.enabled=true",
+                     "--set", "global.identity.issuerUrl=https://dex.ci.example.com", "--set", "global.identity.clientId=platform",
+                     "--set", "global.identity.existingSecret=platform-oauth", "--set", "agent-manager.agentChart.semver=>=3.0.0 <4.0.0",
+                     "--set", "agentManager.migration.cutover=true")
+    if r.returncode != 0:
+        fail(f"connectivity render on the 3.x line:\n{r.stderr[-800:]}")
+    docs_ = [d for d in yaml.safe_load_all(r.stdout) if d and d.get("metadata", {}).get("name") == "agent-platform-organization-migrate-scope"]
+    if len(docs_) != 2:
+        fail(f"the 3.x line renders the migrate scope policy and its binding, got {len(docs_)} objects")
+        return
+    policy = next(d for d in docs_ if d["kind"] == "ValidatingAdmissionPolicy")
+    user = re.search(r"username == '([^']+)'", policy["spec"]["matchConditions"][0]["expression"]).group(1)
+    must(kubectl(["apply", "--server-side", "-f", "-"], yaml.safe_dump(HELMRELEASE_CRD)), "install the HelmRelease CRD")
+    must(kubectl(["wait", "--for=condition=Established", "crd/helmreleases.helm.toolkit.fluxcd.io", "--timeout=60s"]), "wait for the HelmRelease CRD")
+    for d in docs_:
+        must(kubectl(["apply", "--server-side", "-f", "-"], yaml.safe_dump(d)), f"apply {d['kind']} {d['metadata']['name']}")
+    API.settle(docs_)
+
+    def hr(ns, values, interval="10m"):
+        return {"apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease", "metadata": {"name": "triage", "namespace": ns},
+                "spec": {"interval": interval, "serviceAccountName": "kagent-flux", "chartRef": {"kind": "OCIRepository", "name": "agent"}, "values": values}}
+    old = {"muster": {"requireApproval": True}}
+    for ns in (ORG_NS, PLAIN_NS):
+        must(create(hr(ns, old), dry=False), f"create a HelmRelease in {ns}")
+
+    def replace(obj):
+        return kubectl(["replace", "-f", "-", "--dry-run=server"], yaml.safe_dump(obj), user)
+
+    def with_meta(**meta):
+        obj = hr(ORG_NS, {"default": "Ask"})
+        obj["metadata"].update(meta)
+        return obj
+    owner = [{"apiVersion": "v1", "kind": "ConfigMap", "name": "gone", "uid": "00000000-0000-0000-0000-000000000000"}]
+    for what, meta in (("a label", {"labels": {"kustomize.toolkit.fluxcd.io/name": "flux"}}),
+                       ("an annotation", {"annotations": {"reconcile.fluxcd.io/forceAt": "now"}}),
+                       ("an owner", {"ownerReferences": owner}),
+                       ("a finalizer", {"finalizers": ["example.com/hold"]})):
+        case(f"migrate adds {what} to an organization release", replace(with_meta(**meta)), "agent-platform-organization-migrate-scope")
+    case("migrate rewrites an organization release's values", replace(hr(ORG_NS, {"default": "Ask"})))
+    case("migrate changes more than an organization release's values", replace(hr(ORG_NS, {"default": "Ask"}, "20m")), "agent-platform-organization-migrate-scope")
+    case(f"migrate rewrites a release in {PLAIN_NS}", replace(hr(PLAIN_NS, {"default": "Ask"})), "agent-platform-organization-migrate-scope")
+    report = lambda ns, name="agent-manager-migrate-report": {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": name, "namespace": ns}}
+    case("migrate writes its report in an organization namespace", create(report(ORG_NS), as_=user))
+    marked = report(ORG_NS) | {"metadata": {"name": "agent-manager-migrate-report", "namespace": ORG_NS,
+                                            "annotations": {"agent-platform.giantswarm.io/agent-chart-ready-major": "3"}}}
+    case("migrate marks its report in an organization namespace", create(marked, as_=user))
+    case("migrate writes its report in the kagent namespace", create(report("kagent"), as_=user))
+    case("migrate writes its report in kube-system", create(report("kube-system"), as_=user), "agent-platform-organization-migrate-scope")
+    case("migrate writes another ConfigMap in an organization namespace", create(report(ORG_NS, "settings"), as_=user), "agent-platform-organization-migrate-scope")
+    case("a person's ConfigMap is not the migrate policy's business", create(report(ORG_NS, "settings"), as_=PERSON))
+
+
 def prove_worker_access():
     """CONNECT and the ephemeralcontainers subresource are admitted before the
     API server looks for the pod's node, so a Pending pod is enough."""
@@ -964,6 +1034,7 @@ def main():
         prove_label(meta_chart, k8s)
         prove_netpol(k8s)
         prove_operator_scope()
+        prove_migrate_scope(chart)
         prove_worker_access()
         prove_render_check(chart)
         prove_model_manager(chart)

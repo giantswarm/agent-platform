@@ -1,8 +1,8 @@
 ---
 name: agent-platform-agent-management
-description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
+description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset (its tool list and Allow/Ask/Block settings) or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.3.1"
+  version: "3.4.0"
 ---
 
 # Managing agents and their building blocks
@@ -94,7 +94,10 @@ never assume an argument. The agent tools drop an unknown key without an error: 
    status about every 30 s for up to about five minutes; still `progressing`, tell the person its summary and call it
    again at the start of your next turn.
 3. `x_agent-manager_update_agent` for follow-ups: only the fields passed change; `skills`, `plugins`,
-   `egress` and `toolset` replace their whole list. `refreshSkills: true` re-pins every git skill and
+   `egress` and `toolset` replace their whole list. Where `x_agent-manager_update_agent_access`
+   exists, `update_agent` takes only name, description, prompt, model, tags, icon, labels and
+   annotations; the tool list, skills, plugins, egress, connectors, Harness and toolchains go to
+   `update_agent_access`, and settings to `set_agent_approval`. `refreshSkills: true` re-pins every git skill and
    plugin to the head of its ref, as you: it fails when you cannot read one of the agent's
    repositories.
 
@@ -123,12 +126,42 @@ never assume an argument. The agent tools drop an unknown key without an error: 
 - **Toolset**: the smallest that does the job; `preset:none` for chat only; the broadest preset only
   on an explicit request. An own-account (OAuth) connector without `grantScope: subject` needs a
   sign-in in each of the agent's conversations (`agent-platform-tools`); say so before choosing it.
+- **Tool approval** (further reading, optional: https://github.com/giantswarm/agent-platform/blob/main/docs/tool-approval.md):
+  today a toolset only selects tools; their Allow/Ask/Block settings are the connectors'
+  (`agent-platform-tools`). On a **governed** platform every agent-manager tool that is not a read
+  asks the person when an agent calls it; on a trusted one (the default) they run, except the floors
+  that ask in both modes (`set_organization_connector`, `add_organization_member`,
+  `set_organization_model`, `set_organization_egress_policy`, `replace_organization_credential`).
+  Check the `filter_tools` `approval` of the tool before you promise an outcome.
+  **Only once agent-manager ships per-agent tool lists** (`create_agent`'s schema has `tools`;
+  `update_agent_access` and `set_agent_approval` exist; `describe_tool` them first): the toolset
+  becomes the agent's **tool list**, the same selectors each optionally `Allow`, `Ask` or `Block`,
+  plus a `default`; at most 32 entries, an unlisted tool invisible.
+  - An agent's settings only tighten its connectors' (the strictest wins). `Allow` over a
+    connector's `Ask` is an **exception** only a connector admin of that connector grants, through
+    `set_agent_approval` (it asks the person whenever an agent calls it); a save drops the
+    exceptions the saver may not grant, so say so before saving. `create_agent` and
+    `update_agent_access` refuse such an `Allow` and any `default: Allow`.
+  - `set_agent_approval` takes `settings` (`{"<entry>": "Allow"|"Ask"|"Block"|""}` for entries
+    already in `tools`) and `default`. `get_agent`/`list_agents` return the list as `toolSettings`
+    (`tools` stays the kagent MCP bindings), plus `defaultApproval`, `grants` (`grantedBy`) and
+    `approvalSettings` (false: this installation refuses settings). `list_approval_grants` lists a
+    namespace's grants; `filter_tools` with `agentTools` shows how a list resolves before you save.
+  - `sessionsUpdated: false` or `warnings` on a save mean running sessions still carry a dropped
+    exception until agent-manager tells muster again: say so. A governed platform's asks cannot be
+    lifted per agent; to make an agent ask before every call, set `default: Ask`.
+  - Agent chart 3.0 removes `muster.requireApproval`: agent-manager's migrate rewrites `true` to
+    `default: Ask` in the releases it owns and reports the others (GitOps, `valuesFrom`); check its
+    report. An organization stays on chart 2.x (`Ready=False`, `ChartSourceHeld`) until every
+    release there is on 3.x values and migrate ran again. The fix is replacing the key with
+    `default: Ask`, never deleting it; never write the key.
 - **An organization's connectors**: a kagent `RemoteMCPServer` in the organization namespace
   (`x_agent-manager_set_organization_connector`), not a Muster server, so no `toolset` selector
   reaches it. From agent-manager 3.3.0 (`connectors` in `x_agent-manager_create_agent`'s schema;
   without it the agent takes none), pass the names of the connectors that
   `x_agent-manager_list_organization_connectors` gives as `connectors` to `create_agent`,
-  `validate_agent` or `update_agent`: each name alone, once. On update the list replaces the
+  `validate_agent` or `update_agent_access` (`update_agent` before agent-manager split its update
+  tools): each name alone, once. On update the list replaces the
   agent's connectors, `[]` removes them, and an absent argument keeps them; `get_agent` and
   `list_agents` return them. The agent calls the connector itself with the connector's credential;
   its host needs no `EgressPolicy`. Choose only a usable one (`agent-platform-tools`). Refused: a
@@ -136,7 +169,7 @@ never assume an argument. The agent tools drop an unknown key without an error: 
   workload cluster, and an agent's binding to Muster: the `RemoteMCPServer` that one HelmRelease
   renders with an agent of its name, which the list marks `musterBindingOf` from agent-manager
   3.3.4 (how to tell it without the field: `agent-platform-tools`). From agent-manager 3.3.4,
-  `update_agent` and `validate_agent` refuse `connectors`, `[]` too, on an agent whose HelmRelease
+  the update tool and `validate_agent` refuse `connectors`, `[]` too, on an agent whose HelmRelease
   has `spec.valuesFrom` (the message names it): tell the person that this agent's connectors are
   set where its `valuesFrom` values are managed, not through the tool.
 - **Toolchains and workspace**: `defaultToolchains` and `defaultWorkspace`, the smallest set the job

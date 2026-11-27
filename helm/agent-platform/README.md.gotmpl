@@ -362,6 +362,60 @@ Karpenter relaxes a preferred term and launches the node. An installation's own
 `podAffinity` stands instead of the derived one (keep the atelet term in it, never
 required); below `1.3.0` the key is refused.
 
+## Tool approval and the governance mode
+
+Every tool behind muster is **Allow**, **Ask** (a person confirms the call first) or **Block**
+(hidden and refused). A connector's `rule` applies to tools without their own entry, new ones
+included. Concepts and prompts: [Governing tool calls](https://github.com/giantswarm/agent-platform/blob/main/docs/tool-approval.md).
+
+| Value | What it does |
+|-------|--------------|
+| `governance.mode` | `trusted` (default) or `governed`; anything else fails the render. `governed` asks a person before an agent runs any tool of a governed server that is not on its safe list (new tools too) and any muster tool but its reads; it fails the render below `agent-platform.muster.governanceFloor`. |
+| `governedServers` | Per source `{role, safe}`: `safe` is the read tools agents call unasked. Sources: the manager components, `kagent`, `mcp-kubernetes`, or any other key as a muster server key (`namespace/name` outside muster's namespace). `null` drops a source; `governanceExempt` lists shipped sources left ungoverned. The earlier `muster.muster.governance.servers.<role>` shape fails the render. |
+| `governance.roleFloors` | Role to tool names that ask agents in both modes, added to muster's built-in floors. A role declared here is valid in `governedServers`. |
+
+Persons get the connectors' settings only; no agent tool changes the mode. `governance` is a map
+(`{mode, roleFloors}`); a string fails the render. Registering a server of your own:
+
+```yaml
+governance:
+  roleFloors:
+    exampleManager: [approve_change, merge_change]
+governedServers:
+  example-manager:
+    role: exampleManager
+    safe: [get_info, list_changes]
+```
+
+- **Prerequisites.** Asking calls are refused (reported as `approval.unavailable`) unless muster
+  runs on Valkey (default), has its OAuth server with Dex sign-in (`oauth.server.baseUrl`,
+  `dex.issuerUrl`, `dex.clientId`, `existingSecret`) and a public URL on that server's origin
+  (`muster.muster.oauth.mcpClient.enabled` with `publicUrl`). The chart does not fail a render
+  without them.
+- **Rendered for muster.** `approval.installation` (`backstage.installationName`) and
+  `oauth.mcpClient.postLoginRedirectAllowlist`: the portal's `/sessions` (`backstage.publicPort`
+  when not 443) and `<klausGateway.obo.callbackBaseUrl>/auth/slack/return`; an own list's entries
+  stay. Without an entry the person answers in the portal or Slack by hand.
+- **Retry as the same client.** An approval binds to the person and the calling client, not the MCP
+  session; another client of the person asks anew. At most 3 pending per client, 10 per person.
+- **`connector-admin`** is muster's `mcpserver-editor` Role, bound to
+  `muster.rbac.mcpServerEditor.subjects` plus `tenants.platformTeam`. Its holders edit connectors,
+  set tool approval and may let an agent skip an `Ask`. The default subject is a ServiceAccount
+  nobody can authenticate as (fail closed; `workflowEditor` likewise): set your admin groups,
+  with the OIDC groups prefix. Binding `system:authenticated` makes everyone an admin.
+- **`muster-approval-binder`** lets agent-manager's ServiceAccount (and only it) bind an agent's
+  tool settings to a Session (`muster.rbac.approvalBinder.subjects`; an own list stands; name an
+  agent-manager ServiceAccount the chart does not create).
+- **Shipped connectors carry `spec.approval`.** `mcp-kubernetes.mcpServer.approval` is
+  *Recommended* (read-only Allow, rest Ask), `kagent.controllerRoute.mcp.approval` and the managers'
+  `<component>.muster.mcpServer.approval` are *Allow all*, agent-platform-mcps families
+  `muster.families.<group>.approval` *Recommended*. Tighten a tool or the rule there; `null`
+  renders none (the connector runs everything, shown as *not reviewed*).
+
+Operator steps: [UPGRADE.md](../../UPGRADE.md). `make verify-tool-approval` asserts the governance configuration, its coverage (every shipped
+MCPServer governed or exempt, no floor safe), the allowlist, the admins, the binder and the
+connectors' settings.
+
 ## Voluntary disruption
 
 The platform's core runs as single replicas — the agentgateway data plane, muster, the kagent controller, klaus-gateway, agent-manager — and each carries long-lived streams (MCP sessions, A2A and portal SSE turns, the LLM listener). A voluntary eviction (Karpenter consolidation, a node drain) cuts them mid-turn (giantswarm/agent-platform#431). Two guards, both on by default:

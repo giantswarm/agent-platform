@@ -499,6 +499,13 @@ schema refuses the key. An installation's own rbac.namespaces stays. */ -}}
 {{- fail (printf "agent-manager.muster.url (%s) differs from the platform's muster MCP URL (%s): agent-manager composes every agent's RemoteMCPServer against the muster this chart installs — the URL follows muster.fullnameOverride and muster.service.port; leave agent-manager.muster.url unset" $ownUrl $url) -}}
 {{- end -}}
 {{- $musterValues := dict "url" $url -}}
+{{- /* agent-manager calls muster's session bindings API on its own port
+(agent-platform.muster.sessionBindings); an own bindingsUrl stands. */ -}}
+{{- with (include "agent-platform.muster.sessionBindings" .root | fromJson).url -}}
+{{- if not (dig "muster" "bindingsUrl" "" (index $.root.Values "agent-manager" | default dict)) -}}
+{{- $_ := set $musterValues "bindingsUrl" . -}}
+{{- end -}}
+{{- end -}}
 {{- /* muster trusts a bound Session's actor JWT: every Session start_session
 binds carries the agent's toolset, and agent-manager reports it as bound to
 each session at its start (agent-manager 2.9.0, giantswarm/agent-manager#228). */ -}}
@@ -524,6 +531,43 @@ takes the key (agent-platform.agentManager.toolchainsFloor). */ -}}
 {{- fail (printf "agent-manager.muster.toolchainsToolsPrefix (%s) differs from the prefix muster gives the toolchain-manager's tools (%s, x_ and toolchain-manager.muster.mcpServer.name): start_session calls list_toolchains by that name — leave agent-manager.muster.toolchainsToolsPrefix unset" $ownPrefix $prefix) -}}
 {{- end -}}
 {{- $_ := set $musterValues "toolchainsToolsPrefix" $prefix -}}
+{{- end -}}
+{{- end -}}
+{{- /* Tool approval per agent:
+agent-manager binds an agent's approval settings with every Session and
+refuses settings while it does not. On while muster takes them, from the
+floors agent-platform.muster.agentApprovalFloor and
+agent-platform.agentManager.toolApprovalFloor (below the agent-manager floor
+its chart has no such key); an own value stands. */ -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "agent-manager" "version" (include "agent-platform.agentManager.toolApprovalFloor" .root)) -}}
+{{- $ownTa := dig "muster" "toolApproval" "enabled" nil (index .root.Values "agent-manager" | default dict) -}}
+{{- if kindIs "invalid" $ownTa -}}
+{{- $musterTakes := and (include "agent-platform.componentEnabled" (dict "root" .root "name" "muster")) (include "agent-platform.componentFloorAtLeast" (dict "root" .root "name" "muster" "version" (include "agent-platform.muster.agentApprovalFloor" .root))) -}}
+{{- $_ := set $musterValues "toolApproval" (dict "enabled" (ternary true false (not (empty $musterTakes)))) -}}
+{{- end -}}
+{{- /* The default agent's settings live in its release, which this chart
+renders in its own Flux namespace, not in the kagent namespace agent-manager
+manages: agent-manager reads it by the Agent's Flux labels and gets get on
+it by name (muster.toolApproval.platformReleases, with the Agent it renders:
+an agent-manager that reads the release only for the listed agent, and refuses
+it when the Agent's labels name another release), so every person who may
+start a session with the default agent can. With a remote target the release
+is on this cluster and agent-manager on the target, where it cannot read it:
+agent-manager gets the release's approval values instead
+(muster.toolApproval.platformAgents, agent-platform.defaultAgent.approval),
+rendered here from the values the release is rendered with, so only whoever
+may change the release may change them; agent-manager checks them against
+the Agent's Flux labels and the agent chart's X-Muster-Tool-Approval header. */ -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "default-agent") -}}
+{{- $ta := get $musterValues "toolApproval" | default dict -}}
+{{- $release := dict "namespace" (dig "namespace" "" (.root.Values.gitops | default dict) | default .root.Release.Namespace) "name" (include "agent-platform.childName" (dict "root" .root "name" "default-agent")) -}}
+{{- $agent := include "agent-platform.defaultAgent.approval" (dict "root" .root "release" $release) | fromJson -}}
+{{- if include "agent-platform.targetSecretName" .root -}}
+{{- $_ := set $ta "platformAgents" (list $agent) -}}
+{{- else -}}
+{{- $_ := set $ta "platformReleases" (list (dict "namespace" $release.namespace "name" $release.name "agent" (dict "namespace" $agent.namespace "name" $agent.name))) -}}
+{{- end -}}
+{{- $_ := set $musterValues "toolApproval" $ta -}}
 {{- end -}}
 {{- end -}}
 {{- $_ := set $derived "muster" $musterValues -}}
@@ -614,6 +658,14 @@ renders (networkPolicy.mcpBackends). */ -}}
 {{- with $mcpBackends -}}
 {{- $_ := set $derived "networkPolicy" (dict "mcpBackends" .) -}}
 {{- end -}}
+{{- /* agent-manager's egress to muster's session bindings port
+(agent-platform.muster.sessionBindings). */ -}}
+{{- with (include "agent-platform.muster.sessionBindings" .root | fromJson).sessionBindings -}}
+{{- $np := get $derived "networkPolicy" | default dict -}}
+{{- $_ := set $np "musterSessionBindingsPort" (int (dig "port" 8091 .)) -}}
+{{- $_ := set $np "musterSessionBindingsNamespace" (include "agent-platform.muster.namespace" $.root) -}}
+{{- $_ := set $derived "networkPolicy" $np -}}
+{{- end -}}
 {{- /* agent-manager's migrate run pins through the skill-manager too: its
 URL, its namespace and the service token's Secret, which the connectivity
 release generates (agent-platform.skillManager.serviceToken). */ -}}
@@ -642,6 +694,19 @@ them from here (agent-platform.organizations.operator). Off, nothing: the
 connectivity release's values stay those of a chart without the operator. */ -}}
 {{- if include "agent-platform.organizations.on" .root -}}
 {{- $_ := set $derived "agentPlatformOrganizations" (dict "operator" (include "agent-platform.organizations.operator" .root | fromJson)) -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .name "backstage" -}}
+{{- /* The portal backend's own workload token for muster (audience muster),
+projected where its muster backend reads it, while the platform binds the
+portal's ServiceAccount to muster-approval-decider
+(agent-platform.backstage.musterWorkloadToken). Appended to the block's own
+extraVolumes and extraVolumeMounts, which derived values would replace. */ -}}
+{{- with (include "agent-platform.backstage.musterWorkloadToken" .root | fromJson) -}}
+{{- $own := dig "backstage" dict ($.root.Values.backstage | default dict) | default dict -}}
+{{- $volumes := append (dig "extraVolumes" list $own | default list) .volume -}}
+{{- $mounts := append (dig "extraVolumeMounts" list $own | default list) .mount -}}
+{{- $_ := set $derived "backstage" (dict "extraVolumes" $volumes "extraVolumeMounts" $mounts) -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "toolchain-manager" -}}
@@ -1022,6 +1087,9 @@ workspaces on and no releasable instance agent-platform.validateWorkspaceAuth
 has failed the render. */ -}}
 {{- $provider := include "agent-platform.muster.credentialProvider" .root | fromJson -}}
 {{- if or $provider.releasable (dig "actorBearer" "enabled" false $provider) -}}
+{{- with (include "agent-platform.muster.sessionBindings" .root | fromJson).sessionBindings -}}
+{{- $_ := set $provider "sessionBindings" . -}}
+{{- end -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $muster "credentialProvider" $provider -}}
 {{- $_ := set $derived "muster" $muster -}}
@@ -1044,7 +1112,7 @@ installation keeps its own (agent-platform.chatgpt.personalLogin). */ -}}
 {{- $_ := set $derived "muster" $muster -}}
 {{- end -}}
 {{- /* The customer's platform team writes the servers and workflows of
-muster's namespace beside the Giant Swarm admin groups
+muster's namespace beside the configured editor groups
 (giantswarm/agent-platform#706): tenants.platformTeam is appended to both
 editor bindings' subjects, so an installation names its team without
 repeating the admin groups. */ -}}
@@ -1061,6 +1129,39 @@ repeating the admin groups. */ -}}
 {{- with (include "agent-platform.muster.presetIcons" .root | fromJson) -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $derived "muster" (mergeOverwrite $muster (dict "toolsetPresets" .)) -}}
+{{- end -}}
+{{- /* muster's governance configuration from the platform's governance mode
+(agent-platform.muster.governance), from the muster floor that reads it. */ -}}
+{{- with (include "agent-platform.muster.governance" .root | fromJson) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $muster "governance" . -}}
+{{- $_ := set $derived "muster" $muster -}}
+{{- end -}}
+{{- /* muster's approval configuration and the pages it may return the
+browser to after an approval, from the same muster floor. */ -}}
+{{- with (include "agent-platform.muster.approval" .root | fromJson) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $muster "approval" . -}}
+{{- $_ := set $derived "muster" $muster -}}
+{{- end -}}
+{{- /* agent-manager's ServiceAccount, the one sender of approval settings,
+bound to muster-approval-binder by the muster chart in muster's namespace. */ -}}
+{{- with (include "agent-platform.muster.approvalBinderSubjects" .root | fromJsonArray) -}}
+{{- $rbac := get $derived "rbac" | default dict -}}
+{{- $_ := set $rbac "approvalBinder" (dict "subjects" .) -}}
+{{- $_ := set $derived "rbac" $rbac -}}
+{{- end -}}
+{{- /* The portal's ServiceAccount, the one workload muster takes a person's
+approval decision and handoff request from (beside the person's token),
+bound to muster-approval-decider by the muster chart in muster's namespace. */ -}}
+{{- with (include "agent-platform.muster.approvalDeciderSubjects" .root | fromJsonArray) -}}
+{{- $rbac := get $derived "rbac" | default dict -}}
+{{- $_ := set $rbac "approvalDecider" (dict "subjects" .) -}}
+{{- $_ := set $derived "rbac" $rbac -}}
+{{- end -}}
+{{- with (include "agent-platform.muster.redirectAllowlist" .root | fromJsonArray) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $derived "muster" (mergeOverwrite $muster (dict "oauth" (dict "mcpClient" (dict "postLoginRedirectAllowlist" .)))) -}}
 {{- end -}}
 {{- end -}}
 {{- if and (eq .name "model-manager") (not (include "agent-platform.componentEnabled" (dict "root" .root "name" "kagent"))) -}}
@@ -1647,12 +1748,13 @@ Usage: include "agent-platform.agentManager.installationModelsFloor" $root
 {{/*
 Whether the floor of components.<name>.versionRange is at least version, a
 release candidate of it included: "true", else empty (a range without a floor
-too).
+too, and an empty version: a floor whose release does not exist yet admits
+nothing, so what it gates stays off).
 Usage: include "agent-platform.componentFloorAtLeast" (dict "root" $root "name" "<component>" "version" "X.Y.Z")
 */}}
 {{- define "agent-platform.componentFloorAtLeast" -}}
 {{- $floor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig .name "versionRange" "" .root.Values.components)) "" -}}
-{{- if and $floor (ge ((semver $floor).Compare (semver .version)) 0) -}}true{{- end -}}
+{{- if and $floor .version (ge ((semver $floor).Compare (semver .version)) 0) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -2077,7 +2179,225 @@ earlier muster refuses such a binding, so a Session would not start. One line
 each, no comment inside the define.
 */}}
 {{- define "agent-platform.agentManager.toolsetBindingFloor" -}}2.9.0{{- end -}}
+
+{{/*
+The floors of tool approval per agent: the first agent-manager
+whose chart takes muster.toolApproval, and the first muster that takes an
+agent's approval settings with a Session binding. UNSET until those releases
+exist: an empty floor admits no
+release, so what it gates stays off and the agent chart line cannot move to
+3.x; the platform release that pins those versions sets them. A guess would
+switch the wiring on against released versions without the feature (muster
+5.66.x and 5.67.0-rc.1 have no agent approval). One line each, no comment
+inside the define.
+*/}}
+{{- define "agent-platform.agentManager.toolApprovalFloor" -}}{{- end -}}
+{{- define "agent-platform.muster.agentApprovalFloor" -}}{{- end -}}
+{{- /* The first muster serving the session bindings API on its own port
+(muster.credentialProvider.sessionBindings); UNSET until it
+exists. */ -}}
+{{- define "agent-platform.muster.sessionBindingsPortFloor" -}}{{- end -}}
+{{- /* The first muster reading approval.trustedClients (handoffClients
+renamed; the trusted client also decides approvals inline, POST
+/approvals/{id}/decision) and reviewing the trusted client's own workload
+token (verb decide, muster-approval-decider; giantswarm/muster#1912); UNSET
+until it exists. Below it the chart lists no trusted client under either
+name: a muster that issues handoff tickets without the workload review and
+the sign-in confirmation must not be trusted with them. */ -}}
+{{- define "agent-platform.muster.trustedClientsFloor" -}}{{- end -}}
+
+{{/*
+The session bindings API muster serves agent-manager alone:
+from agent-platform.muster.sessionBindingsPortFloor, while muster runs its
+credential provider, on its own port and no longer on the aggregator port,
+its network policy admitting agent-manager's pods only. Emits JSON:
+{sessionBindings, url} -- muster's credentialProvider.sessionBindings and
+agent-manager's muster.bindingsUrl -- or {} below the floor or without the
+provider. An own muster.muster.credentialProvider.sessionBindings key stands.
+Usage: include "agent-platform.muster.sessionBindings" . | fromJson
+*/}}
+{{- define "agent-platform.muster.sessionBindings" -}}
+{{- $out := dict -}}
+{{- $provider := include "agent-platform.muster.credentialProvider" . | fromJson -}}
+{{- if and $provider.enabled (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.sessionBindingsPortFloor" .))) -}}
+{{- $own := dig "muster" "credentialProvider" "sessionBindings" dict (.Values.muster | default dict) | default dict -}}
+{{- $amNs := dig "agent-manager" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $amName := dig "nameOverride" "agent-manager" (index .Values "agent-manager" | default dict) -}}
+{{- $sb := dict "onMainPort" false "allowedFrom" (list (dict "namespace" $amNs "podLabels" (dict "app.kubernetes.io/name" $amName))) -}}
+{{- range $k, $v := $own -}}{{- $_ := set $sb $k $v -}}{{- end -}}
+{{- $port := dig "port" 8091 $sb -}}
+{{- $out = dict "sessionBindings" $sb "url" (printf "http://%s.%s.svc.cluster.local:%v/session-bindings" (include "agent-platform.musterFullname" .) (include "agent-platform.muster.namespace" .) $port) -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
 {{- define "agent-platform.muster.toolsetBindingFloor" -}}5.49.0{{- end -}}
+
+{{/*
+The first agent-manager whose migrate has the Generic chart 2.x -> 3.x hop
+: agent chart 3.0 removes
+muster.requireApproval, and that migrate rewrites it to default: Ask before
+it moves a namespace's chart source. The same release as
+agent-platform.agentManager.toolApprovalFloor; UNSET until it exists,
+which keeps every 3.x line refused. One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.agentManager.agentChartV3Floor" -}}{{- end -}}
+
+{{/*
+The release floors depend on one another: the governance floor
+(agent-platform.muster.governanceFloor) gates the binder, the approval block
+and the redirect allowlist that muster's approval enforcement needs, and the
+floors of tool approval per agent, of the session bindings port and of the
+agent chart 3.x line each make agent-manager bind settings muster refuses
+without them. A floor set while the governance floor is unset (a release that
+sets them in two steps) renders agent-manager against a muster wired for none
+of it: no Session starts. Fails naming the floor that is set and the one that
+is missing. Governance itself (governance.mode governed, governance.roleFloors)
+needs muster as a component of this release: with muster off (an external one)
+nothing here would enforce it, so it fails too. Emits nothing.
+*/}}
+{{- define "agent-platform.validateReleaseFloors" -}}
+{{- if not (include "agent-platform.muster.governanceFloor" .) -}}
+{{- range $name := list "agentManager.toolApprovalFloor" "muster.agentApprovalFloor" "muster.sessionBindingsPortFloor" "agentManager.agentChartV3Floor" "muster.trustedClientsFloor" -}}
+{{- if include (printf "agent-platform.%s" $name) $ -}}
+{{- fail (printf "agent-platform.%s is set while agent-platform.muster.governanceFloor is unset: the muster approval binder, approval block and redirect allowlist render only from the governance floor, so agent-manager would bind settings that muster refuses from it and no Session would start; set agent-platform.muster.governanceFloor in the same release" $name) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if not (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) -}}
+{{- if ne (include "agent-platform.governance" .) "trusted" -}}
+{{- fail (printf "governance.mode %s needs muster as a component of this release (components.muster.enabled): with muster off nothing here enforces governance, so the platform would claim a governed state it does not have; enable components.muster, or keep governance.mode trusted" (include "agent-platform.governance" .)) -}}
+{{- end -}}
+{{- if dig "roleFloors" nil (.Values.governance | default dict) -}}
+{{- fail "governance.roleFloors is set while muster is off (components.muster.enabled): the role floors are rendered into muster's governance configuration, so they would be dropped and the servers of those roles would not ask; enable components.muster, or remove governance.roleFloors" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+The release majors a range admits, as a JSON list of strings, decided as
+agent-manager's migrate decides its target major (TargetMajor) and the
+agent-platform-operator the major of a chart source move: every version the
+range names, with its next patch and next minor (so an exact pin, a narrow
+bound, ~2.250 and each alternative of a `||` range count: `3.0.1 || 2.6.0`
+admits 2 and 3); and majors 0-99, each probed with its first and a very late
+version, majors 0-9 also with every minor 0-199 (first and late patch), so
+x-ranges, carets, tildes and bounds all count. A probe counts only when the
+range admits it. A range that admits only pre-releases admits no major.
+Release versions only, as Flux's semver admits them without a pre-release
+comparator.
+Usage: include "agent-platform.agentChart.majors" "<range>" | fromJsonArray
+*/}}
+{{- define "agent-platform.agentChart.majors" -}}
+{{- $range := toString . -}}
+{{- $named := list -}}
+{{- range $lit := regexFindAll "[0-9]+(\\.[0-9]+)?(\\.[0-9]+)?" $range -1 -}}
+{{- $p := splitList "." $lit -}}
+{{- $maj := atoi (index $p 0) -}}
+{{- $min := 0 -}}{{- if gt (len $p) 1 -}}{{- $min = atoi (index $p 1) -}}{{- end -}}
+{{- $pat := 0 -}}{{- if gt (len $p) 2 -}}{{- $pat = atoi (index $p 2) -}}{{- end -}}
+{{- range $v := list (printf "%d.%d.%d" $maj $min $pat) (printf "%d.%d.%d" $maj $min (add1 $pat)) (printf "%d.%d.0" $maj (add1 $min)) -}}
+{{- if semverCompare $range $v -}}{{- $named = append $named (toString $maj) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out := list -}}
+{{- range $m := until 100 -}}
+{{- $hit := or (has (toString $m) $named) (semverCompare $range (printf "%d.0.0" $m)) (semverCompare $range (printf "%d.999999.999999" $m)) -}}
+{{- if and (not $hit) (lt $m 10) -}}
+{{- range $n := until 200 -}}
+{{- if and (not $hit) (or (semverCompare $range (printf "%d.%d.0" $m $n)) (semverCompare $range (printf "%d.%d.999999" $m $n))) -}}{{- $hit = true -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $hit -}}{{- $out = append $out (toString $m) -}}{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The first pre-release of the next major a range admits (e.g. 3.0.0-rc.1 under
+">=2.6.0 <=3.0.0-rc.1"), or empty: Flux would serve that chart under a range
+read as the lower major. Takes a dict: range, major (the one major found).
+*/}}
+{{- define "agent-platform.agentChart.nextMajorPreRelease" -}}
+{{- $next := add1 (atoi .major) -}}
+{{- $found := "" -}}
+{{- range $pre := list "0" "alpha.0" "rc.1" "rc.999" -}}
+{{- $v := printf "%d.0.0-%s" $next $pre -}}
+{{- if and (not $found) (semverCompare $.range $v) -}}{{- $found = $v -}}{{- end -}}
+{{- end -}}
+{{- /* Helm 3.17 bundles a semver library that never matches a pre-release against a range whose lower bound names none, so the probes above see nothing there; read the upper bounds as written too: `<=` or `<` naming a pre-release of the next major other than `<N.0.0-0` admits N.0.0-0. */ -}}
+{{- if not $found -}}
+{{- range $b := regexFindAll (printf "<=?\\s*v?%d\\.0\\.0-[0-9A-Za-z.-]+" (int $next)) $.range -1 -}}
+{{- if or (hasPrefix "<=" $b) (not (regexMatch "-0$" $b)) -}}{{- $found = printf "%d.0.0-0" (int $next) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $found -}}
+{{- end -}}
+
+{{/*
+The agent chart line (agent-manager.agentChart.semver) moves to 3.x only
+together with what makes that safe: agent chart 3.0 removes
+muster.requireApproval, which agent-manager's migrate rewrites to
+`default: Ask` from agent-platform.agentManager.agentChartV3Floor, and muster
+enforces `default: Ask` from agent-platform.muster.agentApprovalFloor with
+agent-manager binding it (agent-manager.muster.toolApproval, derived on from
+those floors). The same range reaches the agent-platform-operator, which moves
+every organization's chart source at once, and the migrate run; the default
+agent's range (components.default-agent.versionRange) moves with it. A range
+spanning majors, or admitting no release version, is refused, decided as
+migrate decides it (agent-platform.agentChart.majors); while the two floors
+are unset every 3.x line is refused. Checked whether or not agent-manager
+is on: the range reaches the operator either way. Emits nothing; fails naming
+the key and the fix.
+*/}}
+{{- define "agent-platform.validateAgentChartLine" -}}
+{{- $am := index .Values "agent-manager" | default dict -}}
+{{- $range := dig "agentChart" "semver" "2.x" $am | toString -}}
+{{- if not (and (regexMatch "^[\\s0-9A-Za-z.<>=!~^*|,+-]+$" $range) (regexMatch "[0-9]" $range) (not (regexMatch "(^|[\\s|,<>=~^])[A-Za-uwyzA-WYZ]" $range))) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q is not a semver range: name the line as a range of one major (\">=2.6.0 <3.0.0\")" $range) -}}
+{{- end -}}
+{{- $majors := include "agent-platform.agentChart.majors" $range | fromJsonArray -}}
+{{- if not $majors -}}
+{{- fail (printf "agent-manager.agentChart.semver %q admits no release version of the agent chart: name the line as a range of one major (\">=2.6.0 <3.0.0\"; \">=3.0.0 <4.0.0\" once it may move), never a pre-release alone" $range) -}}
+{{- end -}}
+{{- if gt (len $majors) 1 -}}
+{{- $shown := join ", " $majors -}}
+{{- if gt (len $majors) 5 -}}{{- $shown = printf "%s, …" (join ", " (slice $majors 0 5)) -}}{{- end -}}
+{{- fail (printf "agent-manager.agentChart.semver %q admits agent chart majors %s: agent-manager's migrate moves an installation's agents to exactly one major; bound the range below the next major (\">=3.0.0 <4.0.0\", or a 2.x range)" $range $shown) -}}
+{{- end -}}
+{{- $major := first $majors -}}
+{{- with include "agent-platform.agentChart.nextMajorPreRelease" (dict "range" $range "major" $major) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q admits %s, a pre-release of the next agent chart major: Flux would serve it under a range read as %s.x; bound it below %d.0.0-0" $range . $major (add1 (atoi $major))) -}}
+{{- end -}}
+{{- if not (has $major (list "2" "3")) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q selects agent chart %s.x: this chart renders agents of the 2.x and 3.x lines only" $range $major) -}}
+{{- end -}}
+{{- if eq $major "3" -}}
+{{- $amFloor := include "agent-platform.agentManager.agentChartV3Floor" . -}}
+{{- $musterFloor := include "agent-platform.muster.agentApprovalFloor" . -}}
+{{- if not (and $amFloor $musterFloor) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q moves the agents to agent chart 3.x, which removes muster.requireApproval: this chart does not know yet which releases make that safe — the agent-manager whose migrate rewrites requireApproval to default: Ask (agent-platform.agentManager.agentChartV3Floor) and the muster that enforces default: Ask (agent-platform.muster.agentApprovalFloor) are unset; keep the 2.x line until a platform release sets them" $range) -}}
+{{- end -}}
+{{- if not (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "agent-manager" "version" $amFloor)) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q moves the agents to agent chart 3.x, but components.agent-manager.versionRange %q admits a release below %s: agent chart 3.0 removes muster.requireApproval, and only agent-manager %s's migrate rewrites it to default: Ask before it moves a namespace's chart source; move components.agent-manager.versionRange to %s or later in the same change" $range (dig "agent-manager" "versionRange" "" .Values.components) $amFloor $amFloor $amFloor) -}}
+{{- end -}}
+{{- if not (and (include "agent-platform.componentEnabled" (dict "root" . "name" "muster")) (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" $musterFloor))) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q moves the agents to agent chart 3.x, but muster is off or components.muster.versionRange %q admits a release below %s: chart 3.0 replaces muster.requireApproval with default: Ask, which only muster %s enforces; move components.muster.versionRange to %s or later in the same change" $range (dig "muster" "versionRange" "" .Values.components) $musterFloor $musterFloor $musterFloor) -}}
+{{- end -}}
+{{- $ownTa := dig "muster" "toolApproval" "enabled" nil $am -}}
+{{- if and (not (kindIs "invalid" $ownTa)) (not $ownTa) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q moves the agents to agent chart 3.x, but agent-manager.muster.toolApproval.enabled is false: an agent migrated from muster.requireApproval to default: Ask would start no Session (agent-manager refuses settings it does not bind); leave the key unset" $range) -}}
+{{- end -}}
+{{- end -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "default-agent") -}}
+{{- $da := dig "default-agent" "versionRange" "" .Values.components | toString -}}
+{{- if $da -}}
+{{- $daMajors := include "agent-platform.agentChart.majors" $da | fromJsonArray -}}
+{{- if ne (toJson $daMajors) (toJson $majors) -}}
+{{- fail (printf "components.default-agent.versionRange %q and agent-manager.agentChart.semver %q select different agent chart majors (%s and %s): the default agent is a release of the same chart and moves with the line (\">=3.0.0 <4.0.0\" for both, or a 2.x range for both)" $da $range (join ", " $daMajors) $major) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 
 {{/*
 While muster trusts the actor JWT, agent-manager is told so
@@ -2629,8 +2949,11 @@ source-controller uses).
 Usage: include "agent-platform.semverRangeFloor" "<range>"
 */}}
 {{- define "agent-platform.semverRangeFloor" -}}
+{{- $lowest := "" -}}
+{{- $open := false -}}
+{{- range $alt := splitList "||" (toString .) -}}
 {{- $floor := "" -}}
-{{- range splitList " " (. | replace "," " " | trim) -}}
+{{- range splitList " " ($alt | replace "," " " | trim) -}}
 {{- $term := trim . -}}
 {{- if and (not $floor) $term (not (hasPrefix "<" $term)) -}}
 {{- $v := $term | trimPrefix ">=" | trimPrefix ">" | trimPrefix "^" | trimPrefix "~" | trimPrefix "=" | trimPrefix "v" -}}
@@ -2639,7 +2962,13 @@ Usage: include "agent-platform.semverRangeFloor" "<range>"
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- $floor -}}
+{{- if not $floor -}}
+{{- $open = true -}}
+{{- else if or (not $lowest) (lt ((semver $floor).Compare (semver $lowest)) 0) -}}
+{{- $lowest = $floor -}}
+{{- end -}}
+{{- end -}}
+{{- if not $open -}}{{- $lowest -}}{{- end -}}
 {{- end -}}
 
 {{/*
@@ -4812,6 +5141,407 @@ comment inside the define.
 {{- define "agent-platform.muster.presetIconsFloor" -}}5.61.0{{- end -}}
 
 {{/*
+The first muster release that reads the governance configuration
+(muster.governance: the mode and the servers it names per role) and enforces
+tool approval (Governing tool calls).
+UNRELEASED: PLACEHOLDER-GOVERNANCE-FLOOR, UNSET until the release that carries
+it exists (a guessed floor would render the configuration for a muster that ignores
+it, so a `governed` platform would not be governed); the
+same floor gates the approval block and the redirect allowlist entries below
+(agent-platform.muster.approval, agent-platform.muster.redirectAllowlist), and
+tests/verify-tool-approval.py takes it from here. Below it the meta chart
+forwards none of them. One line, no comment inside the define.
+*/}}
+{{- define "agent-platform.muster.governanceFloor" -}}{{- end -}}
+
+{{/*
+The platform's governance mode (top-level `governance`: trusted, the default,
+or governed), validated: anything else fails the render naming the key.
+Usage: include "agent-platform.governance" $root
+*/}}
+{{- define "agent-platform.governance" -}}
+{{- $g := .Values.governance | default dict -}}
+{{- if not (kindIs "map" $g) -}}
+{{- fail (printf "governance %q: governance is a map mirroring muster's governance configuration, {mode: trusted|governed, roleFloors: {role: [tools]}}: set governance.mode: %v" (toString $g) (toString $g)) -}}
+{{- end -}}
+{{- range $k, $_ := $g -}}
+{{- if not (has $k (list "mode" "roleFloors")) -}}
+{{- fail (printf "governance.%s: unknown key (want mode and roleFloors)" $k) -}}
+{{- end -}}
+{{- end -}}
+{{- $mode := toString ($g.mode | default "trusted") -}}
+{{- if not (has $mode (list "trusted" "governed")) -}}
+{{- fail (printf "governance.mode %q: want trusted or governed (Governing tool calls: trusted lets agents create and start agents freely, governed asks a person first)" $mode) -}}
+{{- end -}}
+{{- $mode -}}
+{{- end -}}
+
+{{/*
+The namespace a component's release installs its workloads (and its muster
+MCPServer) into, as components.yaml places it: the kagent namespace with
+components.<name>.inKagentNamespace, else components.<name>.targetNamespace,
+else the platform's (agent-platform.targetNamespace).
+Usage: include "agent-platform.componentNamespace" (dict "root" $ "name" "model-manager")
+*/}}
+{{- define "agent-platform.componentNamespace" -}}
+{{- $c := index (.root.Values.components | default dict) .name | default dict -}}
+{{- if $c.inKagentNamespace -}}
+{{- include "agent-platform.kagent.namespace" .root -}}
+{{- else -}}
+{{- $c.targetNamespace | default (include "agent-platform.targetNamespace" .root) -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+muster's key for an MCPServer (muster's api.MCPServerKey): the name for a
+server in muster's own namespace (muster.muster.namespace, else the muster
+release's), namespace/name for one outside it.
+Usage: include "agent-platform.muster.serverKey" (dict "root" $ "namespace" $ns "name" $name)
+*/}}
+{{- define "agent-platform.muster.serverKey" -}}
+{{- $musterNs := dig "muster" "namespace" "" (.root.Values.muster | default dict) | default (include "agent-platform.muster.namespace" .root) -}}
+{{- if or (not .namespace) (eq .namespace $musterNs) -}}{{- .name -}}{{- else -}}{{- printf "%s/%s" .namespace .name -}}{{- end -}}
+{{- end -}}
+
+{{/*
+The muster server keys of a governedServers source (top-level
+governedServers.<source>), as a JSON list: the MCPServers the platform ships
+for it while they render.
+  - the manager components (agent-manager, model-manager, vm-manager,
+    cluster-manager, workspace-manager, toolchain-manager, skill-manager):
+    <component>.muster.mcpServer.name (default the component's name) in the
+    component's namespace, while the component is on;
+  - kagent: the connectivity chart's MCPServer kagent (kagent's session and
+    sandbox tools), while the kagent component is on;
+  - mcp-kubernetes: the connectivity chart's [<managementCluster>-]mcp-kubernetes
+    while the mcp-kubernetes component and mcp-kubernetes.mcpServer.enabled are
+    on, and every agent-platform-mcps.mcpServers entry of group kubernetes
+    (its name, else <cluster>-mcp-kubernetes, in its namespace, else the
+    component's);
+  - any other source is a server key itself (an installation's own server).
+Usage: include "agent-platform.muster.governedKeys" (dict "root" $ "source" $source) | fromJsonArray
+*/}}
+{{- define "agent-platform.muster.governedKeys" -}}
+{{- $root := .root -}}
+{{- $keys := list -}}
+{{- $managers := list "agent-manager" "model-manager" "vm-manager" "cluster-manager" "workspace-manager" "toolchain-manager" "skill-manager" -}}
+{{- $connNs := dig "agent-platform-connectivity" "targetNamespace" "" ($root.Values.components | default dict) | default (include "agent-platform.targetNamespace" $root) -}}
+{{- if has .source $managers -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" .source)) (dig "muster" "mcpServer" "enabled" true (index $root.Values .source | default dict)) -}}
+{{- $name := dig "muster" "mcpServer" "name" .source (index $root.Values .source | default dict) -}}
+{{- $keys = append $keys (include "agent-platform.muster.serverKey" (dict "root" $root "namespace" (include "agent-platform.componentNamespace" (dict "root" $root "name" .source)) "name" $name)) -}}
+{{- end -}}
+{{- else if eq .source "kagent" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" $root "name" "kagent") -}}
+{{- $keys = append $keys (include "agent-platform.muster.serverKey" (dict "root" $root "namespace" $connNs "name" "kagent")) -}}
+{{- end -}}
+{{- else if eq .source "mcp-kubernetes" -}}
+{{- $mcpk := index $root.Values "mcp-kubernetes" | default dict -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $root "name" "mcp-kubernetes")) (dig "mcpServer" "enabled" true $mcpk) -}}
+{{- $cluster := dig "mcpServer" "managementCluster" "" $mcpk -}}
+{{- $keys = append $keys (include "agent-platform.muster.serverKey" (dict "root" $root "namespace" $connNs "name" (printf "%smcp-kubernetes" (ternary (printf "%s-" $cluster) "" (ne $cluster ""))))) -}}
+{{- end -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" $root "name" "agent-platform-mcps") -}}
+{{- $mcpsNs := include "agent-platform.componentNamespace" (dict "root" $root "name" "agent-platform-mcps") -}}
+{{- range (dig "mcpServers" list (index $root.Values "agent-platform-mcps" | default dict)) -}}
+{{- if eq (toString .group) "kubernetes" -}}
+{{- $name := .name | default (printf "%s-mcp-%s" .cluster .group) -}}
+{{- $key := include "agent-platform.muster.serverKey" (dict "root" $root "namespace" (.namespace | default $mcpsNs) "name" $name) -}}
+{{- if not (has $key $keys) -}}{{- $keys = append $keys $key -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- else -}}
+{{- $keys = append $keys .source -}}
+{{- end -}}
+{{- $keys | toJson -}}
+{{- end -}}
+
+{{/*
+muster's governance configuration (Governing tool calls), rendered from the
+platform's governance mode: `mode` (governance), `roleFloors`
+(governance.roleFloors, when it names a role: role -> tool names muster adds to
+its built-in floors) and `governedServers`, one entry {server, role, safe} per
+MCPServer the platform ships for each source of the top-level governedServers
+(agent-platform.muster.governedKeys): its role names the floors muster asks
+agents for in both modes, its safe list the tools agents call unasked on
+governed (every other tool of a governed server asks agents there, new and
+renamed ones too). A source set to null governs nothing (the coverage test,
+tests/verify-tool-approval.py, then wants it in governanceExempt). An own
+muster.muster.governance.governedServers entry stands for its server key,
+first; an own mode that differs from `governance` fails (single source), and
+so does an own muster.muster.governance.servers (the earlier shape, which
+muster refuses beside governedServers). Only from the muster floor
+agent-platform.muster.governanceFloor; {} below it, where `governed` fails the
+render rather than silently asking nothing.
+Usage: include "agent-platform.muster.governance" $root | fromJson
+*/}}
+{{- define "agent-platform.muster.governance" -}}
+{{- $root := . -}}
+{{- $mode := include "agent-platform.governance" . -}}
+{{- $out := dict -}}
+{{- $floor := include "agent-platform.muster.governanceFloor" . -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" $floor) -}}
+{{- $own := dig "muster" "governance" dict (.Values.muster | default dict) | default dict -}}
+{{- with $own.mode -}}
+{{- if ne (toString .) $mode -}}
+{{- fail (printf "muster.muster.governance.mode (%v) differs from governance.mode (%s): the platform's governance mode is governance.mode; leave muster.muster.governance.mode unset" . $mode) -}}
+{{- end -}}
+{{- end -}}
+{{- if $own.servers -}}
+{{- fail "muster.muster.governance.servers is the earlier governance shape, which muster does not read beside governedServers: name a server's role and safe list in the top-level governedServers (or muster.muster.governance.governedServers entries {server, role, safe})" -}}
+{{- end -}}
+{{- $servers := list -}}
+{{- $seen := list -}}
+{{- range ($own.governedServers | default list) -}}
+{{- $servers = append $servers . -}}
+{{- $seen = append $seen (toString .server) -}}
+{{- end -}}
+{{- range $source, $entry := (.Values.governedServers | default dict) -}}
+{{- if $entry -}}
+{{- if not (kindIs "map" $entry) -}}
+{{- fail (printf "governedServers.%s: want {role, safe} or null, got %v" $source $entry) -}}
+{{- end -}}
+{{- range $k, $_ := $entry -}}
+{{- if not (has $k (list "role" "safe")) -}}
+{{- fail (printf "governedServers.%s.%s: unknown key (want role and safe)" $source $k) -}}
+{{- end -}}
+{{- end -}}
+{{- range (include "agent-platform.muster.governedKeys" (dict "root" $root "source" $source) | fromJsonArray) -}}
+{{- if not (has . $seen) -}}
+{{- $server := dict "server" . "safe" ($entry.safe | default list) -}}
+{{- with $entry.role -}}{{- $_ := set $server "role" . -}}{{- end -}}
+{{- $servers = append $servers $server -}}
+{{- $seen = append $seen . -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out = dict "mode" $mode "governedServers" $servers -}}
+{{- $floors := dig "roleFloors" dict (.Values.governance | default dict) | default dict -}}
+{{- if not (kindIs "map" $floors) -}}
+{{- fail "governance.roleFloors: want a map of role names to lists of tool names" -}}
+{{- end -}}
+{{- range $role, $tools := $floors -}}
+{{- if not (regexMatch "^[a-z][A-Za-z0-9]*$" $role) -}}
+{{- fail (printf "governance.roleFloors: role %q: want a camelCase name (e.g. exampleManager)" $role) -}}
+{{- end -}}
+{{- if not (kindIs "slice" $tools) -}}
+{{- fail (printf "governance.roleFloors.%s: want a list of the server's own tool names" $role) -}}
+{{- end -}}
+{{- range $tools -}}
+{{- if not (and (kindIs "string" .) (regexMatch "^[A-Za-z0-9_.-]+$" .)) -}}
+{{- fail (printf "governance.roleFloors.%s: %v is not a tool name" $role .) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $floors -}}
+{{- with $own.roleFloors -}}
+{{- fail "muster.muster.governance.roleFloors and governance.roleFloors are both set: name role floors in governance.roleFloors only" -}}
+{{- end -}}
+{{- $_ := set $out "roleFloors" $floors -}}
+{{- end -}}
+{{- else -}}
+{{- if dig "roleFloors" nil (.Values.governance | default dict) -}}
+{{- fail (printf "governance.roleFloors is set, but this chart renders muster's governance configuration only from the muster release that reads it (agent-platform.muster.governanceFloor%s), so the floors would be dropped and the servers of those roles would not ask: remove governance.roleFloors until then" (ternary ", unset in this chart" (printf " %s, above components.muster.versionRange" $floor) (not $floor))) -}}
+{{- end -}}
+{{- if dig "muster" "governance" nil (.Values.muster | default dict) -}}
+{{- fail "muster.muster.governance is set, but this chart renders muster's governance configuration only from the muster release that reads it (agent-platform.muster.governanceFloor), and none is pinned: a mode passed to muster directly would claim a governed platform that governs nothing. Remove muster.muster.governance; the platform's governance is the governance value (mode, roleFloors)" -}}
+{{- end -}}
+{{- if ne $mode "trusted" -}}
+{{- if not $floor -}}
+{{- fail (printf "governance.mode %s: no muster release this chart knows reads the governance configuration yet (agent-platform.muster.governanceFloor is unset until one is released and pinned), so nothing would ask agents; keep governance.mode trusted" $mode) -}}
+{{- end -}}
+{{- fail (printf "governance.mode %s needs muster %s or later (the first release that reads the governance configuration), but components.muster.versionRange %q allows earlier releases: below it nothing would ask agents. Move components.muster.versionRange to >=%s, or keep governance.mode trusted" $mode $floor (dig "muster" "versionRange" "" .Values.components) $floor) -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+muster's approval-binder subjects (muster.rbac.approvalBinder.subjects): the
+muster chart ships the Role muster-approval-binder and binds it, in muster's
+namespace where muster's sender review asks, to these subjects. The platform
+binds agent-manager's ServiceAccount and nothing else, while agent-manager is
+on: agent-manager.serviceAccount.name, else agent-manager.fullnameOverride,
+in agent-manager's namespace. A ServiceAccount the chart does not create
+needs its name (the namespace's `default` would let every pod using it send
+approval settings). An own muster.rbac.approvalBinder.subjects stands. Only
+from the muster floor agent-platform.muster.governanceFloor; [] below it.
+Usage: include "agent-platform.muster.approvalBinderSubjects" $root | fromJsonArray
+*/}}
+{{- define "agent-platform.muster.approvalBinderSubjects" -}}
+{{- $out := list -}}
+{{- if and (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.governanceFloor" .))) (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) (not (dig "rbac" "approvalBinder" "subjects" list (.Values.muster | default dict))) -}}
+{{- $am := index .Values "agent-manager" | default dict -}}
+{{- $name := dig "serviceAccount" "name" "" $am -}}
+{{- if not (dig "serviceAccount" "create" true $am) -}}
+{{- if not $name -}}
+{{- fail "agent-manager.serviceAccount.create is false without agent-manager.serviceAccount.name: muster-approval-binder would bind the namespace's default ServiceAccount, so every pod using it could send approval settings; name agent-manager's ServiceAccount" -}}
+{{- end -}}
+{{- else -}}
+{{- $name = $name | default (required "agent-manager.fullnameOverride must be set" (dig "fullnameOverride" "" $am)) -}}
+{{- end -}}
+{{- $out = list (dict "kind" "ServiceAccount" "name" $name "namespace" (include "agent-platform.componentNamespace" (dict "root" . "name" "agent-manager"))) -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+muster's approval-decider subjects (muster.rbac.approvalDecider.subjects): the
+muster chart ships the Role muster-approval-decider (verb decide on
+toolapprovals) and binds it, in muster's namespace where muster's workload
+review asks, to these subjects. muster takes a trusted client's decision or
+handoff request only with that client's own workload token beside the
+person's (IA-01 of the inline approval security review). The platform binds
+the portal's ServiceAccount (backstage.name, default backstage, in the
+portal's namespace) and nothing else, while the portal is on and muster's
+approval trusts a client (agent-platform.muster.approval renders
+trustedClients) from agent-platform.muster.trustedClientsFloor, the first
+muster that reviews the workload. An own muster.rbac.approvalDecider.subjects
+stands. [] otherwise.
+Usage: include "agent-platform.muster.approvalDeciderSubjects" $root | fromJsonArray
+*/}}
+{{- define "agent-platform.muster.approvalDeciderSubjects" -}}
+{{- $out := list -}}
+{{- if and (include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.trustedClientsFloor" .))) (include "agent-platform.componentEnabled" (dict "root" . "name" "backstage")) (not (dig "rbac" "approvalDecider" "subjects" list (.Values.muster | default dict))) -}}
+{{- with (include "agent-platform.muster.approval" . | fromJson).trustedClients -}}
+{{- $name := dig "name" "backstage" ($.Values.backstage | default dict) | default "backstage" -}}
+{{- $out = list (dict "kind" "ServiceAccount" "name" $name "namespace" (include "agent-platform.componentNamespace" (dict "root" $ "name" "backstage"))) -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The portal backend's projected ServiceAccount token for muster (audience
+muster, an hour, rotated by the kubelet), at the path its muster backend
+reads by default (/var/run/secrets/muster.giantswarm.io/serviceaccount/token),
+while the platform binds the portal's ServiceAccount to muster-approval-decider
+(agent-platform.muster.approvalDeciderSubjects). Emits JSON {volume, mount},
+or {} otherwise.
+Usage: include "agent-platform.backstage.musterWorkloadToken" $root | fromJson
+*/}}
+{{- define "agent-platform.backstage.musterWorkloadToken" -}}
+{{- if include "agent-platform.muster.approvalDeciderSubjects" . | fromJsonArray -}}
+{{- dict "volume" (dict "name" "muster-workload-token" "projected" (dict "sources" (list (dict "serviceAccountToken" (dict "audience" "muster" "expirationSeconds" 3600 "path" "token"))))) "mount" (dict "name" "muster-workload-token" "mountPath" "/var/run/secrets/muster.giantswarm.io/serviceaccount" "readOnly" true) | toJson -}}
+{{- else -}}
+{{- dict | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+muster's approval configuration (muster.approval, rendered as `approval` into
+config.yaml): installation, the name the approval page shows, from
+backstage.installationName (the name the portal shows for this platform,
+default agent-platform) unless muster.muster.approval.installation names its
+own; any other own key (ttl) is kept. trustedClients, the OAuth clients muster
+trusts with a person's approvals (the portal decides them inline in chat with
+the person's token, and opens muster's connector sign-in signed in through a
+one-time handoff ticket): the portal's own client
+(agent-platform.backstage.oidcClient) while the portal is on with a dedicated
+client, backstage.signInHandoff is on and muster is at least
+agent-platform.muster.trustedClientsFloor, and none below it (an earlier
+muster issues handoff tickets without the workload review and the sign-in
+confirmation). An own list under either name (handoffClients, the earlier
+one) stands, but every entry must be the portal's dedicated
+client: one naming the platform's shared client (global.identity.clientId,
+else muster's login client) fails the render (every holder of such a token,
+muster, an agent's delegation, a CLI, could then approve without the page's
+own sign-in), and so does any other id (dex-k8s-authenticator, the kagent
+UI's or klaus-gateway's client, a CLI's: people hold tokens of those too). Only from the muster floor
+agent-platform.muster.governanceFloor; {} below it.
+Usage: include "agent-platform.muster.approval" $root | fromJson
+*/}}
+{{- define "agent-platform.muster.approval" -}}
+{{- $out := dict -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.governanceFloor" .)) -}}
+{{- $own := dig "muster" "approval" dict (.Values.muster | default dict) | default dict -}}
+{{- $out = mergeOverwrite (dict "installation" (include "agent-platform.portalInstallationName" .)) $own -}}
+{{- $portal := include "agent-platform.backstage.oidcClient" . | fromJson -}}
+{{- if and (not (hasKey $own "handoffClients")) (not (hasKey $own "trustedClients")) $portal.dedicated (dig "signInHandoff" true (.Values.backstage | default dict)) (include "agent-platform.componentEnabled" (dict "root" . "name" "backstage")) -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.trustedClientsFloor" .)) -}}
+{{- $_ := set $out "trustedClients" (list $portal.clientId) -}}
+{{- end -}}
+{{- end -}}
+{{- range $key := list "trustedClients" "handoffClients" -}}
+{{- range $client := (get $out $key | default list) -}}
+{{- if and $portal.platformClientId (eq (toString $client) $portal.platformClientId) -}}
+{{- fail (printf "muster.muster.approval.%s lists %q, the platform's shared OAuth client: every holder of a token of that client (muster itself, agents acting for a person, CLIs) could approve a person's requests without muster's sign-in; list only the portal's own client (backstage.oidcClientId)" $key $portal.platformClientId) -}}
+{{- end -}}
+{{- if not (and $portal.dedicated (eq (toString $client) $portal.clientId)) -}}
+{{- fail (printf "muster.muster.approval.%s lists %q, which is not the portal's own OAuth client (backstage.oidcClientId, set and other than the platform's shared client): muster trusts a listed client with a person's approvals, and people sign in to other clients (dex-k8s-authenticator, the kagent UI, klaus-gateway, CLIs) with tokens of their own; list only the portal's dedicated client" $key (toString $client)) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The OAuth client the portal signs people in with: backstage.oidcClientId, else
+the platform's shared client (global.identity.clientId). dedicated is true when
+the portal's client is set and differs from the platform's client (global
+.identity.clientId, else muster's login client); only a dedicated client may
+be trusted for sign-in handoff (agent-platform.muster.approval). Emits JSON
+{clientId, platformClientId, dedicated}.
+Usage: include "agent-platform.backstage.oidcClient" $root | fromJson
+*/}}
+{{- define "agent-platform.backstage.oidcClient" -}}
+{{- $login := include "agent-platform.identity.musterLogin" .Values | fromJson -}}
+{{- $platform := toString (dig "identity" "clientId" "" (.Values.global | default dict) | default ($login.clientID | default "")) -}}
+{{- $own := toString (dig "oidcClientId" "" (.Values.backstage | default dict) | default "") -}}
+{{- dict "clientId" ($own | default $platform) "platformClientId" $platform "dedicated" (and (ne $own "") (ne $own $platform)) | toJson -}}
+{{- end -}}
+
+{{/*
+The pages muster may send the browser back to after an approval
+(muster.oauth.mcpClient.postLoginRedirectAllowlist; muster compares scheme and
+host with its port exactly, and an entry admits its path and everything below
+it at a segment boundary): the portal's Sessions pages,
+https://<portal host>[:<backstage.publicPort>]/sessions, while the portal is on
+and has a host (backstage.hostname, else backstage.<global.domain>; the port
+only when backstage.publicPort is set and not 443, as on a lab edge on 8443),
+and klaus-gateway's return, <klausGateway.obo.callbackBaseUrl>/auth/slack/return
+(scheme, host and port as written; an http(s) URL with a host, else the
+render fails naming the key), while klaus-gateway is on and names its
+callbackBaseUrl. An own list's entries stay, first, each entry once. Only
+from the muster floor agent-platform.muster.governanceFloor; [] below it.
+muster renders the list only while muster.muster.oauth.mcpClient.enabled is
+on (NOTES.txt says so when the list is not empty and it is off).
+Usage: include "agent-platform.muster.redirectAllowlist" $root | fromJsonArray
+*/}}
+{{- define "agent-platform.muster.redirectAllowlist" -}}
+{{- $out := list -}}
+{{- if include "agent-platform.componentFloorAtLeast" (dict "root" . "name" "muster" "version" (include "agent-platform.muster.governanceFloor" .)) -}}
+{{- $out = dig "muster" "oauth" "mcpClient" "postLoginRedirectAllowlist" list (.Values.muster | default dict) | default list -}}
+{{- $derived := list -}}
+{{- $backstage := .Values.backstage | default dict -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "backstage") -}}
+{{- $host := dig "hostname" "" $backstage -}}
+{{- if and (not $host) .Values.global.domain -}}{{- $host = printf "backstage.%s" .Values.global.domain -}}{{- end -}}
+{{- $port := toString (dig "publicPort" "" $backstage | default "") -}}
+{{- if and $port (or (not (regexMatch "^[1-9][0-9]{0,4}$" $port)) (gt (atoi $port) 65535)) -}}
+{{- fail (printf "backstage.publicPort %q: want the port the portal's public URL carries (1-65535), or empty for 443" $port) -}}
+{{- end -}}
+{{- if $host -}}{{- $derived = append $derived (printf "https://%s%s/sessions" $host (ternary (printf ":%s" $port) "" (and (ne $port "") (ne $port "443")))) -}}{{- end -}}
+{{- end -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway") -}}
+{{- $base := dig "obo" "callbackBaseUrl" "" (.Values.klausGateway | default dict) | trimSuffix "/" -}}
+{{- if $base -}}
+{{- $u := urlParse $base -}}
+{{- if or (not (has $u.scheme (list "http" "https"))) (not $u.host) $u.userinfo $u.query $u.fragment -}}
+{{- fail (printf "klausGateway.obo.callbackBaseUrl %q: want an http(s) URL with a host (and port, if not the scheme's default), no user, query or fragment, e.g. https://gw.example.com" $base) -}}
+{{- end -}}
+{{- $derived = append $derived (printf "%s/auth/slack/return" $base) -}}
+{{- end -}}
+{{- end -}}
+{{- range $derived -}}{{- if not (has . $out) -}}{{- $out = append $out . -}}{{- end -}}{{- end -}}
+{{- end -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
 Icons of the shipped presets (infrastructure, agent-platform), for each one
 muster.muster.toolsetPresets still defines and leaves without an icon, while
 the floor of components.muster.versionRange is at least
@@ -5276,6 +6006,36 @@ Usage: include "agent-platform.defaultAgent.derived" $ | fromJson
 {{- $model := dig "modelConfig" "" $da | toString -}}
 {{- $out := dict "muster" (dict "url" (include "agent-platform.musterMcpUrl" .)) "toolset" (list "preset:full") "labels" $labels "modelConfig" (dict "name" $model) -}}
 {{- $_ := set $out "agent" $agent -}}
+{{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+The default agent as agent-manager's muster.toolApproval.platformAgents entry,
+for a remote target (gitops.target.kubeConfig), where agent-manager runs on
+the target and cannot read the release on this cluster: the Agent (kagent
+namespace, values agent.name else the release name default-agent), the
+release its Flux labels name (.release: {namespace, name}) and the approval
+values of the release's spec.values — tools, toolset, default and
+muster.requireApproval / muster.enabled — taken from the values the release
+is rendered with (components.default-agent.valuesFile under
+agent-platform.defaultAgent.derived, as components.yaml merges them).
+Usage: include "agent-platform.defaultAgent.approval" (dict "root" $ "release" $release) | fromJson
+*/}}
+{{- define "agent-platform.defaultAgent.approval" -}}
+{{- $c := index .root.Values.components "default-agent" -}}
+{{- $vals := include "agent-platform.componentValuesFile" (dict "root" .root "path" $c.valuesFile) | fromJson -}}
+{{- $vals = mergeOverwrite (deepCopy $vals) (include "agent-platform.defaultAgent.derived" .root | fromJson) -}}
+{{- $approval := dict -}}
+{{- range $key := list "tools" "toolset" "default" -}}
+{{- if hasKey $vals $key -}}{{- $_ := set $approval $key (get $vals $key) -}}{{- end -}}
+{{- end -}}
+{{- $muster := dict -}}
+{{- range $key := list "requireApproval" "enabled" -}}
+{{- if hasKey ($vals.muster | default dict) $key -}}{{- $_ := set $muster $key (get $vals.muster $key) -}}{{- end -}}
+{{- end -}}
+{{- with $muster -}}{{- $_ := set $approval "muster" . -}}{{- end -}}
+{{- $out := dict "namespace" (include "agent-platform.kagent.namespace" .root) "name" (dig "agent" "name" "default-agent" $vals) "release" .release -}}
+{{- with $approval -}}{{- $_ := set $out "values" . -}}{{- end -}}
 {{- $out | toJson -}}
 {{- end -}}
 

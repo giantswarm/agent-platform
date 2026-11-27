@@ -44,6 +44,23 @@ muster aggregates many MCP servers behind `/mcp`. Each server entry in `agent-pl
 
 muster signs no tokens of its own: every downstream server validates against Dex. A kagent agent acts as the person who started its Session: agent-manager binds the Session's Actor to that person at muster, and the egress gateway puts the Actor's JWT on every call to muster, which serves it as the bound person. The runtime never holds or forwards the person's token: the Harness sets no `KAGENT_PROPAGATE_TOKEN`, so no MCP server receives it, and muster refuses a Session nobody bound. model-manager, agent-manager, cluster-manager and mcp-kubernetes receive the person's token with the audience `dex-k8s-authenticator` and act on the cluster with that person's RBAC (install.md, [The identity provider](install.md#the-identity-provider)).
 
+### The portal's own client and sign-in handoff
+
+By default the portal signs in with the platform's shared client (`global.identity.clientId`). `backstage.oidcClientId` gives it a client of its own at the same issuer:
+
+- The identity provider registers it with the portal's redirect URI only (`https://<portal>/api/auth/oidc-agent-platform/handler/frame`); its secret goes into `global.identity.existingSecret` under `portal-dex-client-secret`.
+- The portal also requests the platform client's audience (`audience:server:client_id:<global.identity.clientId>`, added to `backstage.extraScopes`), so every component that trusts the platform client accepts its tokens unchanged; `azp` names the portal's client. On Dex, the platform client and `dex-k8s-authenticator` list the portal's client under `trustedPeers`.
+- muster keys a forwarded token's session by its client too: a person's connector sign-ins through the shared client are not the portal's, except subject-scoped ones (`spec.auth.grantScope: subject`).
+
+With a dedicated client and `backstage.signInHandoff` on (default), the chart lists that client, and only it, in muster's `approval.trustedClients` (from `agent-platform.muster.trustedClientsFloor`; below it none). The portal then shows a tool approval inline and posts the decision to muster (`POST /approvals/{id}/decision`) with the person's token and the digest of what was shown, and *Open* on a connector sign-in prompt gets a one-time ticket from `POST /handoff-tickets`. A person's portal token is not held by the portal backend alone (the browser, `forwardToken` servers and runtimes hold it too), so muster takes it on these two endpoints only together with the backend's own workload identity: its projected ServiceAccount token (audience `muster`, in `X-Muster-Approval-Client`, checked by `TokenReview` and a `LocalSubjectAccessReview` for `decide` on `toolapprovals.muster.giantswarm.io`). The chart binds muster's Role `muster-approval-decider` to the portal's ServiceAccount (`muster.rbac.approvalDecider.subjects`; an own list stands) and projects the token at `/var/run/secrets/muster.giantswarm.io/serviceaccount/token`. Either token alone decides nothing and mints no ticket.
+
+- Trade-off: the portal backend can approve a person's pending requests without muster's browser sign-in, on the person's click only.
+- muster refuses tokens naming an acting party, an agent's credential, another client, another workload or another person. A ticketed connector sign-in still asks the browser on muster's page first.
+- Only the portal's dedicated client may be listed: the render fails when `muster.muster.approval.trustedClients` or `handoffClients` names any other id (the shared client, `dex-k8s-authenticator`, the kagent UI's, klaus-gateway's or a CLI's).
+- `backstage.signInHandoff: false` keeps every decision and sign-in on muster's own pages.
+
+`agentlab portal dev` has no projected token: agentlab mints a lab-only one for the lab portal's ServiceAccount (audience `muster`) on every start and points `muster.workloadTokenFile` at it. Never copy an installation's portal token to a laptop.
+
 ## 4. Edge JWT validation and JWKS
 
 agentgateway verifies the JWT itself (`Strict`, against `global.identity.issuerUrl`) on three routes: the kagent controller route ([5](#5-the-kagent-controller-route)), the agent-manager route (`agentManager.route` with its `jwtAuthentication.enabled`, both off by default) and the models Gateway ([6](#6-the-models-gateway)). Each takes its key set from its own `jwtAuthentication.jwks` (`host`, `port`, `path`, `tls`). The agentgateway controller fetches it and pushes the keys to the data plane. A failed fetch refuses every caller with `401 token uses the unknown key`.
