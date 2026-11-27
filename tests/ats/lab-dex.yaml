@@ -66,10 +66,12 @@ stringData:
   # Bearer for muster's RFC 7591 dynamic client registration endpoint
   # (POST /oauth/register); the smoke's OAuth client presents it.
   registration-token: lab-only-registration-token
-  # muster's token encryption at rest (muster.oauth.server.encryptionKey, which
-  # the meta chart turns on when muster runs more than one replica). muster
-  # needs exactly 32 bytes, base64 or hex: this is base64 of the 32-byte string
-  # "lab-only-oauth-encryption-key-32", nothing secret.
+  # muster's key for token encryption at rest and for sealing requestState
+  # (muster.oauth.server.encryptionKey: on by default in the muster chart since
+  # giantswarm/muster#1929, so the smoke reads it with one replica too). muster's
+  # aggregator does not start unless it decodes to exactly 32 bytes (base64 or
+  # hex): this is base64 of the 32-byte string "lab-only-oauth-encryption-key-32",
+  # nothing secret.
   oauth-encryption-key: bGFiLW9ubHktb2F1dGgtZW5jcnlwdGlvbi1rZXktMzI=
   # Read by muster's Valkey session storage when it is on (the smoke uses
   # in-memory storage; the key exists because the chart's contract names it).
