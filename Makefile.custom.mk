@@ -1763,6 +1763,25 @@ verify-klausgateway-a2a: ## Assert klaus-gateway's A2A server entry (klausGatewa
 	@echo "--> meta: the klaus-gateway release's a2aServer"
 	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) >$(VERIFY_TMP)/kga-meta.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --meta $(VERIFY_TMP)/kga-meta.out
+	@echo "--> meta: session-start registration dependencies"
+	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set agent-manager.muster.mcpServer.name=session-manager >$(VERIFY_TMP)/kga-meta-starter.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-starter.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --meta-starter $(VERIFY_TMP)/kga-meta-starter.out x_session-manager_
+	@for setting in 'components.agent-manager.enabled=false' 'agent-manager.muster.mcpServer.enabled=false' 'agent-manager.mcp.enabled=false' 'components.agent-manager.enabled=false,klausGateway.a2a.agentManagerToolsPrefix='; do \
+		if $(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set "$$setting" >$(VERIFY_TMP)/kga-meta-no-starter.out 2>&1; then echo "FAIL: A2A entry rendered without session-start tools"; exit 1; fi; \
+		grep -q 'needs components.agent-manager.enabled' $(VERIFY_TMP)/kga-meta-no-starter.out || { cat $(VERIFY_TMP)/kga-meta-no-starter.out; exit 1; }; \
+	done
+	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set components.agent-manager.enabled=false --set klausGateway.a2a.agentManagerToolsPrefix=x_external_ >$(VERIFY_TMP)/kga-meta-own-starter.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-own-starter.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --meta-starter $(VERIFY_TMP)/kga-meta-own-starter.out x_external_
+	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set agent-manager.muster.mcpServer.enabled=false --set klausGateway.a2a.agentManagerToolsPrefix=x_external_ >$(VERIFY_TMP)/kga-meta-own-starter.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-own-starter.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --meta-starter $(VERIFY_TMP)/kga-meta-own-starter.out x_external_
+	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set components.agent-manager.enabled=false --set klausGateway.obo.musterUrl=https://muster.remote.example >$(VERIFY_TMP)/kga-meta-remote-starter.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-remote-starter.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --meta-starter $(VERIFY_TMP)/kga-meta-remote-starter.out '' https://muster.remote.example
+	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set components.agent-manager.enabled=false --set klausGateway.obo.musterUrl=https://muster.remote.example --set klausGateway.a2a.agentManagerToolsPrefix=x_remote_ >$(VERIFY_TMP)/kga-meta-remote-starter.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-remote-starter.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --meta-starter $(VERIFY_TMP)/kga-meta-remote-starter.out x_remote_ https://muster.remote.example
+	@if $(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set components.muster.enabled=false --set components.agent-manager.enabled=false --set klausGateway.a2a.agentManagerToolsPrefix=x_external_ >$(VERIFY_TMP)/kga-meta-no-muster.out 2>&1; then echo "FAIL: a session-start prefix replaced the missing muster endpoint"; exit 1; fi
+	@grep -q 'needs components.muster.enabled' $(VERIFY_TMP)/kga-meta-no-muster.out || { cat $(VERIFY_TMP)/kga-meta-no-muster.out; exit 1; }
+	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set klausGateway.agentgatewayRoute.a2aServer.enabled=false --set klausGateway.a2a.enabled=true --set components.agent-manager.enabled=false >$(VERIFY_TMP)/kga-meta-legacy-client.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-legacy-client.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --meta-off $(VERIFY_TMP)/kga-meta-legacy-client.out
 	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set global.identity.ca.secretName=dex-ca --set global.identity.ca.key=issuer.pem >$(VERIFY_TMP)/kga-meta-private.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-private.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --meta-private-ca $(VERIFY_TMP)/kga-meta-private.out
 	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set global.identity.ca.secretName=dex-ca --set global.identity.ca.key=issuer.pem --set klausGateway.a2aServer.caSecretKey=gateway.pem >$(VERIFY_TMP)/kga-meta-own-key.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-own-key.out; exit 1; }

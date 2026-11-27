@@ -105,7 +105,7 @@ def connectivity(docs):
             "openid", "email", "profile", "groups",
             "audience:server:client_id:klaus-gateway",
             "audience:server:client_id:agent-platform",
-            "audience:server:client_id:kubernetes",
+            "audience:server:client_id:dex-k8s-authenticator",
         ],
         "additionalParams": {
             "connector_id": 'jwt.iss == "https://dex.ci.example.com" ? "self" : (jwt.iss == "https://login.example.org" ? "example-idp" : (""))',
@@ -187,6 +187,7 @@ def gateway_values(docs):
 
 def meta(docs, private_ca=False, trailing_slash=False, ca_key="issuer.pem"):
     meta_namespace(docs)
+    meta_starter(docs, "x_agent-manager_")
     values = gateway_values(docs)
     got = values.get("a2aServer")
     if values.get("a2a", {}).get("enabled") is not True:
@@ -223,7 +224,22 @@ def meta_off(docs):
     got = gateway_values(docs).get("a2aServer")
     if got:
         fail(f"the A2A entry is off but a2aServer {got!r} is forwarded")
+    if gateway_values(docs).get("a2a", {}).get("agentManagerToolsPrefix"):
+        fail("an entry that is off must not derive the session starter's tool prefix")
     print("ok: no a2aServer forwarded while the entry is off")
+
+
+def meta_starter(docs, prefix, muster_url=None):
+    values = gateway_values(docs)
+    if values.get("a2a", {}).get("agentManagerToolsPrefix", "") != prefix:
+        fail(f"the A2A session starter does not use tool prefix {prefix!r}")
+    if muster_url is None:
+        muster = find(docs, "HelmRelease", "muster")
+        namespace = muster["spec"].get("targetNamespace") or muster["metadata"]["namespace"]
+        muster_url = f"http://muster.{namespace}.svc.cluster.local:8090"
+    if values.get("obo", {}).get("musterUrl") != muster_url:
+        fail(f"the A2A session starter does not use muster {muster_url!r}")
+    print("ok: A2A session-start tools use the configured MCP registration and muster")
 
 
 def meta_namespace(docs, own_target=None):
@@ -245,6 +261,9 @@ def meta_namespace(docs, own_target=None):
 
 def main():
     mode, path = sys.argv[1], sys.argv[2]
+    if mode == "--meta-starter":
+        meta_starter(load(path), sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None)
+        return
     if mode == "--meta-own-ca-key":
         meta(load(path), private_ca=True, ca_key="gateway.pem")
         return

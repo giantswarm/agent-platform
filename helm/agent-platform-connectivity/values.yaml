@@ -2423,7 +2423,7 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
         audiences:
           - klaus-gateway
           - agent-platform
-          - kubernetes
+          - dex-k8s-authenticator
         scopes:
           - openid
           - email

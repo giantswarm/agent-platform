@@ -2,6 +2,8 @@
 # the klaus-gateway release's a2aServer block is derived from the entry the
 # connectivity chart routes. verify-klausgateway-a2a asserts it.
 components:
+  agent-manager:
+    enabled: true
   kagent:
     enabled: true
   klaus-gateway:

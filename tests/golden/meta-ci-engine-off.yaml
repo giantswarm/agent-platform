@@ -945,7 +945,7 @@ spec:
             audiences:
             - klaus-gateway
             - agent-platform
-            - kubernetes
+            - dex-k8s-authenticator
             clientId: klaus-gateway-exchange
             endpoint:
               host: ""
@@ -2746,6 +2746,8 @@ spec:
           icon: data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM5OTNDMUQiLz48ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSIxMCIgeT0iOSIgd2lkdGg9IjEyIiBoZWlnaHQ9IjYiIHJ4PSIxLjUiLz48cmVjdCB4PSIxMCIgeT0iMTciIHdpZHRoPSIxMiIgaGVpZ2h0PSI2IiByeD0iMS41Ii8+PHBhdGggZD0iTTEzIDEyaC4wMU0xMyAyMGguMDEiLz48L2c+PC9zdmc+
           include:
           - label: agent-platform.giantswarm.io/tool-group=infrastructure
+      writesAsCaller:
+        kubernetesAudience: dex-k8s-authenticator
     networkPolicy:
       cilium:
         allowClusterIngress: true

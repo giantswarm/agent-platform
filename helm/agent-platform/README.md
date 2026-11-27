@@ -1349,7 +1349,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.agentgatewayRoute.a2aServer.exchange.secretKey | string | `"clientSecret"` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[0] | string | `"klaus-gateway"` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[1] | string | `"agent-platform"` |  |
-| klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[2] | string | `"kubernetes"` |  |
+| klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[2] | string | `"dex-k8s-authenticator"` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.scopes[0] | string | `"openid"` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.scopes[1] | string | `"email"` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.scopes[2] | string | `"profile"` |  |

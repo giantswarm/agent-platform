@@ -231,6 +231,14 @@ def main(chart):
             "klausGateway.agentgatewayRoute.a2aServer.enabled=false",
         ])
     print("ok: the A2A server requires an explicit API server CIDR only while enabled")
+    for setting in (
+        "exchange.audiences[2]=dex-k8s-authenticator",
+        "exchange.audiences={klaus-gateway,,dex-k8s-authenticator}",
+        "exchange.audiences={klaus-gateway,bad audience,dex-k8s-authenticator}",
+    ):
+        render(chart, "cilium", ["klausGateway.agentgatewayRoute.a2aServer." + setting],
+               error="exchange.audiences")
+    print("ok: Dex cross-client audiences reject sparse, empty and invalid scope tokens")
 
 
 if __name__ == "__main__":

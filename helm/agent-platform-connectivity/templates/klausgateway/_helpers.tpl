@@ -332,8 +332,13 @@ Usage: include "agent-platform.klausGateway.a2aServer" . | fromJson
 {{- if not $exchange.secretName -}}
 {{- fail (printf "%s.exchange.secretName is empty: name the Secret in this release's namespace that holds the secret of the Dex client %s" $path $exchange.clientId) -}}
 {{- end -}}
-{{- if not $exchange.audiences -}}
-{{- fail (printf "%s.exchange.audiences is empty: the first is the audience klaus-gateway checks on the exchanged token" $path) -}}
+{{- if not (and (kindIs "slice" $exchange.audiences) $exchange.audiences) -}}
+{{- fail (printf "%s.exchange.audiences must be a nonempty list of audience strings" $path) -}}
+{{- end -}}
+{{- range $index, $audience := $exchange.audiences -}}
+{{- if or (not (kindIs "string" $audience)) (not (regexMatch `^[\x21\x23-\x5b\x5d-\x7e]+$` (toString $audience))) -}}
+{{- fail (printf "%s.exchange.audiences[%d] must be a nonempty string using OAuth scope-token characters to form a Dex cross-client scope" $path $index) -}}
+{{- end -}}
 {{- end -}}
 {{- if not (has (toString $exchange.subjectTokenType) (list "IdToken" "AccessToken")) -}}
 {{- fail (printf "%s.exchange.subjectTokenType is %q: IdToken or AccessToken" $path (toString $exchange.subjectTokenType)) -}}

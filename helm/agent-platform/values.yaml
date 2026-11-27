@@ -48,6 +48,8 @@ global:
       # model-manager, agent-manager and cluster-manager, which call the API
       # server as the person (oauth.downstream), with it where their blocks
       # leave it unset; an empty list there requests none.
+      # The first audience also fills muster's writesAsCaller.kubernetesAudience
+      # when its native setting is empty.
       audiences: [dex-k8s-authenticator]  # @schema item: string
   gatewayApi:
     # The public Gateway every route attaches to when neither the route's own
@@ -4880,7 +4882,7 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
         audiences:
           - klaus-gateway
           - agent-platform
-          - kubernetes
+          - dex-k8s-authenticator
         scopes:
           - openid
           - email

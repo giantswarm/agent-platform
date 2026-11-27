@@ -14,6 +14,8 @@ The kagent and kagent-crds ranges select `>=1.34.0-rc.4 <1.35.0-0`, including re
 - A pinned BOM moves `kagent` and `kagent-crds` together to `1.34.0-rc.4` or later on that minor line.
 - An explicitly pinned native controller needs `1.34.0-rc.3` or later for audience verification. Earlier native pins fail the render; the extensions controller retains its existing audience support.
 - Enabling `klausGateway.agentgatewayRoute.a2aServer` requires a klaus-gateway range starting at `4.20.0-rc.6` or later and the Dex setup in [authentication.md](docs/authentication.md). Its existing stable default range remains available with the entry off.
+- For the platform's muster, enable agent-manager's managed MCP registration or explicitly name an existing registration with `klausGateway.a2a.agentManagerToolsPrefix`. The derived prefix follows the managed MCPServer name.
+- The default API audience requested by the A2A exchange is `dex-k8s-authenticator`. For another API audience, align `global.identity.kubernetes.audiences`, any explicit `muster.muster.writesAsCaller.kubernetesAudience`, and `klausGateway.agentgatewayRoute.a2aServer.exchange.audiences` with the registered Dex clients.
 
 ## \<current\> → \<next\> (shared muster request-state encryption)
 

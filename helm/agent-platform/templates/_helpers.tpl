@@ -875,8 +875,21 @@ the block otherwise: a klaus-gateway before 4.11.0 refuses it. */ -}}
 {{- with (include "agent-platform.klausGateway.a2aServerValues" .root) -}}
 {{- $_ := set $derived "a2aServer" (. | fromJson) -}}
 {{- $_ := set $derived "a2a" (mergeOverwrite (get $derived "a2a" | default dict) (dict "enabled" true)) -}}
-{{- if not (dig "obo" "musterUrl" "" $kg) -}}
-{{- $_ := set $derived "obo" (dict "musterUrl" (include "agent-platform.musterMcpUrl" $.root | trimSuffix "/mcp")) -}}
+{{- $nativeMuster := include "agent-platform.musterMcpUrl" $.root | trimSuffix "/mcp" -}}
+{{- $ownMuster := dig "obo" "musterUrl" "" $kg -}}
+{{- if not ($ownMuster | default $nativeMuster) -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.enabled needs components.muster.enabled or an explicit klausGateway.obo.musterUrl: every session starts through muster" -}}
+{{- end -}}
+{{- if not $ownMuster -}}
+{{- $_ := set $derived "obo" (dict "musterUrl" $nativeMuster) -}}
+{{- end -}}
+{{- if and (or (not $ownMuster) (eq $ownMuster $nativeMuster)) (not (dig "a2a" "agentManagerToolsPrefix" "" $kg)) -}}
+{{- $manager := index $.root.Values "agent-manager" | default dict -}}
+{{- if not (and (include "agent-platform.componentEnabled" (dict "root" $.root "name" "agent-manager")) (dig "mcp" "enabled" true $manager) (dig "muster" "mcpServer" "enabled" false $manager)) -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.enabled needs components.agent-manager.enabled with agent-manager.mcp.enabled and agent-manager.muster.mcpServer.enabled: enable its session-start tools, or set klausGateway.a2a.agentManagerToolsPrefix for an operator-owned MCP registration" -}}
+{{- end -}}
+{{- $name := required "agent-manager.muster.mcpServer.name must be nonempty for the A2A session-start tools" (dig "muster" "mcpServer" "name" "agent-manager" $manager) -}}
+{{- $_ := set $derived "a2a" (mergeOverwrite (get $derived "a2a" | default dict) (dict "agentManagerToolsPrefix" (printf "x_%s_" $name))) -}}
 {{- end -}}
 {{- end -}}
 {{- if and (or (dig "a2a" "enabled" false $kg) (dig "a2a" "enabled" false $derived)) (not (dig "a2a" "url" "" $kg)) -}}
@@ -1039,6 +1052,9 @@ sources' registries (agent-platform.kagent.sessionToolImages). */ -}}
 {{- $multiple := or (gt (int (.root.Values.muster.replicaCount | default 1)) 1) (and (dig "autoscaling" "enabled" false (.root.Values.muster | default dict)) (gt (int (dig "autoscaling" "maxReplicas" 1 (.root.Values.muster | default dict))) 1)) -}}
 {{- if and $multiple (not (hasKey $server "encryptionKey")) -}}
 {{- $_ := set $derived "muster" (dict "oauth" (dict "server" (dict "encryptionKey" true))) -}}
+{{- end -}}
+{{- if and (not (dig "muster" "writesAsCaller" "kubernetesAudience" "" (.root.Values.muster | default dict))) (dig "identity" "kubernetes" "audiences" list (.root.Values.global | default dict)) -}}
+{{- $_ := set $derived "muster" (mergeOverwrite (get $derived "muster" | default dict) (dict "writesAsCaller" (dict "kubernetesAudience" (include "agent-platform.muster.kubernetesAudience" .root)))) -}}
 {{- end -}}
 {{- /* The resource muster's OAuth server names in its protected resource
 metadata and binds tokens to: its MCP endpoint, oauth.server.baseUrl + /mcp,
@@ -1390,6 +1406,9 @@ Usage: include "agent-platform.kagent.authentication" . | fromJson
 {{- fail "kagent.controller.auth.audiences is required: set the trusted client IDs explicitly, or configure global.identity.clientId for the same issuer" -}}
 {{- end -}}
 {{- $entry := dig "agentgatewayRoute" "a2aServer" dict (.Values.klausGateway | default dict) -}}
+{{- if and $entry.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) -}}
+{{- include "agent-platform.klausGateway.validateA2AAudiences" $entry.exchange.audiences -}}
+{{- end -}}
 {{- $ownTarget := dig "a2a" "url" "" (.Values.klausGateway | default dict) -}}
 {{- $nativeTarget := include "agent-platform.kagentControllerTarget" . -}}
 {{- if and $entry.enabled (or (not $ownTarget) (eq $ownTarget $nativeTarget)) (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) -}}
@@ -3829,6 +3848,19 @@ the muster release's own, so .Values.muster.service is normally unset here.
 {{- dig "service" "port" 8090 (.Values.muster | default dict) -}}
 {{- end -}}
 
+{{/* The audience muster requires for caller visibility and Kubernetes writes. */}}
+{{- define "agent-platform.muster.kubernetesAudience" -}}
+{{- $own := dig "muster" "writesAsCaller" "kubernetesAudience" "" (.Values.muster | default dict) -}}
+{{- $audiences := dig "identity" "kubernetes" "audiences" list (.Values.global | default dict) -}}
+{{- if $own -}}
+{{- $own -}}
+{{- else if $audiences -}}
+{{- first $audiences -}}
+{{- else -}}
+dex-k8s-authenticator
+{{- end -}}
+{{- end -}}
+
 {{/*
 The namespace muster lands in: the kagent component's namespace with
 components.muster.inKagentNamespace, else components.muster.targetNamespace,
@@ -5040,6 +5072,17 @@ prerelease because earlier release candidates omit parts of this behavior.
 */}}
 {{- define "agent-platform.klausGateway.a2aServerFloor" -}}4.20.0-rc.6{{- end -}}
 
+{{- define "agent-platform.klausGateway.validateA2AAudiences" -}}
+{{- if not (and (kindIs "slice" .) .) -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences must be a nonempty list of audience strings" -}}
+{{- end -}}
+{{- range $index, $audience := . -}}
+{{- if or (not (kindIs "string" $audience)) (not (regexMatch `^[\x21\x23-\x5b\x5d-\x7e]+$` (toString $audience))) -}}
+{{- fail (printf "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[%d] must be a nonempty string using OAuth scope-token characters to form a Dex cross-client scope" $index) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{/*
 klaus-gateway's a2aServer values, as JSON, while
 klausGateway.agentgatewayRoute.a2aServer is on: the card's issuers from that
@@ -5070,6 +5113,28 @@ by hand. */ -}}
 {{- fail "klausGateway.agentgatewayRoute.a2aServer.enabled is true but neither its hostname nor klausGateway.agentgatewayRoute.hostname is set: the A2A server needs a public hostname" -}}
 {{- end -}}
 {{- $exchange := $a2a.exchange | default dict -}}
+{{- include "agent-platform.klausGateway.validateA2AAudiences" $exchange.audiences -}}
+{{- $ownMuster := dig "obo" "musterUrl" "" $kg -}}
+{{- $nativeMuster := include "agent-platform.musterMcpUrl" . | trimSuffix "/mcp" -}}
+{{- if or (not $ownMuster) (eq $ownMuster $nativeMuster) -}}
+{{- $visibility := or (include "agent-platform.organizations.on" .) (kindIs "map" (dig "muster" "mcpServerNamespaceSelector" nil (.Values.muster | default dict))) -}}
+{{- $musterAudience := include "agent-platform.muster.kubernetesAudience" . -}}
+{{- if and $visibility (not (has $musterAudience ($exchange.audiences | default list))) -}}
+{{- fail (printf "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences must include %q, required by muster.muster.writesAsCaller.kubernetesAudience for caller visibility and session-start calls" $musterAudience) -}}
+{{- end -}}
+{{- $apiAudiences := dig "identity" "kubernetes" "audiences" list (.Values.global | default dict) -}}
+{{- $managerOAuth := dig "oauth" dict (index .Values "agent-manager" | default dict) -}}
+{{- $managerDownstream := and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) ($managerOAuth.enabled | default false) (dig "downstream" "enabled" false $managerOAuth) -}}
+{{- if and $apiAudiences (or $visibility $managerDownstream) -}}
+{{- $accepted := false -}}
+{{- range $audience := $apiAudiences -}}
+{{- if has $audience ($exchange.audiences | default list) -}}{{- $accepted = true -}}{{- end -}}
+{{- end -}}
+{{- if not $accepted -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences must include an audience from global.identity.kubernetes.audiences: muster starts the session with the person's Kubernetes identity" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- $cards := list -}}
 {{- range ($a2a.issuers | default list) -}}
 {{- $card := dict "name" .name "issuer" .issuer "audience" .audience -}}
