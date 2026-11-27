@@ -2,7 +2,7 @@
 name: agent-platform-agent-management
 description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.3.1"
+  version: "3.3.2"
 ---
 
 # Managing agents and their building blocks
@@ -97,6 +97,10 @@ never assume an argument. The agent tools drop an unknown key without an error: 
    `egress` and `toolset` replace their whole list. `refreshSkills: true` re-pins every git skill and
    plugin to the head of its ref, as you: it fails when you cannot read one of the agent's
    repositories.
+
+`start_session` can relay a URL interaction required by a workspace or toolchain read.
+Follow `agent-platform-tools`' consent and retry rules. Do not report a session as
+started while its tool call awaits input, or retry with changed arguments.
 
 ## The rules the tools do not tell you
 
