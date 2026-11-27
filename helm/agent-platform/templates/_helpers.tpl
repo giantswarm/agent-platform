@@ -421,6 +421,28 @@ Usage: include "agent-platform.componentDerivedValues" (dict "root" $root "name"
 */}}
 {{- define "agent-platform.componentDerivedValues" -}}
 {{- $derived := dict -}}
+{{- if eq .name "credential-api" -}}
+{{- $configuration := .root.Values | toJson | fromJson -}}
+{{- $values := index $configuration "credential-api" | default dict -}}
+{{- $domain := dig "global" "domain" "" $configuration -}}
+{{- if and (not $values.credentialOrigin) $domain }}{{ $_ := set $derived "credentialOrigin" (printf "https://credentials.%s" $domain) }}{{ end -}}
+{{- $login := include "agent-platform.identity.musterLogin" $configuration | fromJson -}}
+{{- $issuer := dig "global" "identity" "issuerUrl" "" $configuration | default $login.issuerURL -}}
+{{- $oauth := dict -}}
+{{- if not (dig "oauth" "issuer" "" $values) }}{{ $_ := set $oauth "issuer" $issuer }}{{ end -}}
+{{- $audiences := dig "global" "identity" "kubernetes" "audiences" list $configuration -}}
+{{- if and $audiences (not (dig "oauth" "kubernetesAudience" "" $values)) }}{{ $_ := set $oauth "kubernetesAudience" (first $audiences) }}{{ end -}}
+{{- $_ := set $derived "oauth" $oauth -}}
+{{- $_ := set $derived "tenancy" (dig "agentPlatformOrganizations" "enabled" false $configuration) -}}
+{{- $_ := set $derived "platformNamespace" (include "agent-platform.kagent.namespace" .root) -}}
+{{- if not (dig "gatewayAPI" "parentRefs" list $values) -}}
+{{- $parents := dig "global" "gatewayApi" "parentRefs" list $configuration -}}
+{{- if dig "gatewayApi" "gateway" "create" false $configuration -}}
+{{- $parents = list (dict "name" .root.Values.gateway.name "namespace" .root.Release.Namespace "group" "gateway.networking.k8s.io" "kind" "Gateway" "sectionName" "https") -}}
+{{- end -}}
+{{- $_ := set $derived "gatewayAPI" (dict "parentRefs" $parents) -}}
+{{- end -}}
+{{- end -}}
 {{- if eq .name "mcp-kubernetes" -}}
 {{- $oauth := dig "mcpKubernetes" "oauth" dict (index .root.Values "mcp-kubernetes" | default dict) -}}
 {{- if $oauth.enabled -}}
@@ -583,6 +605,9 @@ agent-manager sets it, from the same release. */ -}}
 {{- $derived = include "agent-platform.defaultAgent.derived" .root | fromJson -}}
 {{- end -}}
 {{- if eq .name "agent-platform-connectivity" -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "credential-api") -}}
+{{- $_ := set $derived "credentialApi" (dict "namespace" (dig "credential-api" "targetNamespace" "agent-platform-credential-api" .root.Values.components)) -}}
+{{- end -}}
 {{- /* Helm coalescing removes a defaulted key overridden with null. Forward
 PostgreSQL's explicit unlimited sentinel so connectivity's own 4GB default
 cannot silently reinstate a cap on the second render. */ -}}
@@ -871,6 +896,12 @@ the block otherwise: a klaus-gateway before 4.11.0 refuses it. */ -}}
 {{- if not (has $reader $clients) -}}{{- $clients = append $clients $reader -}}{{- end -}}
 {{- $_ := set $derived "ciliumNetworkPolicy" (dict "ingress" (dict "clients" $clients)) -}}
 {{- end -}}
+{{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "credential-api") -}}
+{{- $clients := dig "ciliumNetworkPolicy" "ingress" "clients" (dig "ciliumNetworkPolicy" "ingress" "clients" list (.root.Values.valkey | default dict)) $derived | deepCopy -}}
+{{- $client := dict "namespace" (dig "credential-api" "targetNamespace" "agent-platform-credential-api" .root.Values.components) "matchLabels" (dict "app.kubernetes.io/name" "credential-api") -}}
+{{- if not (has $client $clients) }}{{ $clients = append $clients $client }}{{ end -}}
+{{- $_ := set $derived "ciliumNetworkPolicy" (dict "ingress" (dict "clients" $clients)) -}}
+{{- end -}}
 {{- end -}}
 {{- if and (eq .name "kagent") (include "agent-platform.substrateStore.mode" .root) -}}
 {{- $_ := set $derived "harness" (dict "snapshotLocation" (include "agent-platform.kagent.snapshotLocation" .root)) -}}
@@ -990,12 +1021,16 @@ sources' registries (agent-platform.kagent.sessionToolImages). */ -}}
 {{- end -}}
 {{- end -}}
 {{- if eq .name "muster" -}}
+{{- $server := dig "muster" "oauth" "server" dict (.root.Values.muster | default dict) -}}
+{{- $multiple := or (gt (int (.root.Values.muster.replicaCount | default 1)) 1) (and (dig "autoscaling" "enabled" false (.root.Values.muster | default dict)) (gt (int (dig "autoscaling" "maxReplicas" 1 (.root.Values.muster | default dict))) 1)) -}}
+{{- if and $multiple (not (hasKey $server "encryptionKey")) -}}
+{{- $_ := set $derived "muster" (dict "oauth" (dict "server" (dict "encryptionKey" true))) -}}
+{{- end -}}
 {{- /* The resource muster's OAuth server names in its protected resource
 metadata and binds tokens to: its MCP endpoint, oauth.server.baseUrl + /mcp,
 unless the installation names its own. Left empty, mcp-oauth falls back to the
 issuer, which is not the URL clients call, and RFC 9728 §3.3 has clients
 discard that metadata. */ -}}
-{{- $server := dig "muster" "oauth" "server" dict (.root.Values.muster | default dict) -}}
 {{- if and $server.baseUrl (not $server.resourceIdentifier) -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $derived "muster" (mergeOverwrite $muster (dict "oauth" (dict "server" (dict "resourceIdentifier" (printf "%s/mcp" (trimSuffix "/" $server.baseUrl)))))) -}}

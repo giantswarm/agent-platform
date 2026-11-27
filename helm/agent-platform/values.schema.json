@@ -612,6 +612,48 @@
                         }
                     }
                 },
+                "credential-api": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "chart": {
+                            "type": "string"
+                        },
+                        "dependsOn": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "gatedRoster": {
+                            "type": "boolean"
+                        },
+                        "gatedValues": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "injectGlobal": {
+                            "type": "boolean"
+                        },
+                        "repository": {
+                            "type": "string"
+                        },
+                        "targetNamespace": {
+                            "type": "string"
+                        },
+                        "valuesFrom": {
+                            "type": "string"
+                        },
+                        "versionRange": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "default-agent": {
                     "type": "object",
                     "additionalProperties": true,
@@ -1403,6 +1445,19 @@
                             "type": "string"
                         }
                     }
+                }
+            }
+        },
+        "credential-api": {
+            "type": "object",
+            "additionalProperties": true
+        },
+        "credentialApi": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "namespace": {
+                    "type": "string"
                 }
             }
         },

@@ -34,6 +34,7 @@ NOT_IN_CONNECTIVITY = ("skill-manager",)
 DEX_OPT_IN_UNSET = ("model-manager",)
 # Components with an oauth block that this script does not render, and where they are covered.
 EXEMPT = {"workspace-manager": "needs the workspaces fixture; verify-workspace-manager and verify-idp-egress cover it"}
+OWN_CLIENTS = {"credential-api": "its own PKCE browser client; verify-credential-api checks issuer and audience derivation"}
 # The managers that call the Kubernetes API as the person (oauth.downstream).
 DOWNSTREAM = ("model-manager", "agent-manager", "cluster-manager")
 ROUTED = {"model-manager": "/model-manager", "agent-manager": "/agent-manager"}
@@ -178,13 +179,13 @@ def roster_covered(meta: str) -> None:
         if isinstance(values.get(c.get("valuesFrom") or ""), dict)
         and isinstance(values[c["valuesFrom"]].get("oauth"), dict)
     }
-    missing = sorted(with_oauth - listed)
+    missing = sorted(with_oauth - listed - set(OWN_CLIENTS))
     if missing:
         sys.exit(f"FAIL: roster: {missing} forward an oauth block but are not in agent-platform.identity.apply's list")
     if not set(MANAGERS) <= with_oauth:
         sys.exit(f"FAIL: roster: {sorted(set(MANAGERS) - with_oauth)} have no oauth block in values.yaml")
     # Every one of them is rendered below (its client and its identity-provider egress), or exempt with a reason.
-    unchecked = sorted(with_oauth - set(MANAGERS) - set(EXEMPT))
+    unchecked = sorted(with_oauth - set(MANAGERS) - set(EXEMPT) - set(OWN_CLIENTS))
     if unchecked:
         sys.exit(f"FAIL: roster: {unchecked} forward an oauth block but are not in MANAGERS: add them, so their login and identity-provider egress are checked")
 

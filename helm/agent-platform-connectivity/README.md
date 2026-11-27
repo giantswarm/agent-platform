@@ -1139,6 +1139,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| credentialApi.namespace | string | `"agent-platform-credential-api"` |  |
 | global.registry | string | `"gsoci.azurecr.io"` |  |
 | global.imagePullSecrets | list | `[]` |  |
 | global.domain | string | `""` |  |

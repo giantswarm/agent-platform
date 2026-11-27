@@ -136,6 +136,8 @@ GOLDEN_RETIRED := python3 -c 'import sys; d=open(sys.argv[1]).read().split("\n--
 # verify-model-catalog asserts both charts' gateway tags agree.
 KYVERNO_GOLDEN := $(VM) --set components.kagent.enabled=true --set networkPolicy.enabled=false --set networkPolicy.flavor=kubernetes --set kagent.fluxServiceAccountName= --set muster.muster.oauth.server.enabled=false --set kagent.serviceMonitor.enabled=false --set kagent.namespaceOverride=default --set valkey.podDisruptionBudget.enabled=false --set kagent.substrateWorkerPool.podDisruptionBudget.enabled=false --set components.model-manager.enabled=false --set kagent.controller.vpa.maxAllowed.memory=1280Mi --set kagent.substrateWorkerPool.priorityClass.enabled=false --set llmRouting.modelConfigPolicy.enabled=false --set agentgateway.proxy.image.tag=golden
 # GOLDEN_REF's chart reads the same component toggle, so both sides render alike.
+# Multiple muster replicas use the shared key for sealed continuation state.
+KYVERNO_GOLDEN += --set muster.muster.oauth.server.encryptionKey=true
 KYVERNO_GOLDEN_REF := $(KYVERNO_GOLDEN)
 # GOLDEN_REF defaults to the merge-base of HEAD and GOLDEN_BASE: a branch is held
 # to the render it forked from, so a later GOLDEN_BASE commit that changes an
@@ -4711,6 +4713,10 @@ VERIFY_SHARD_TOTAL ?= 1
 .PHONY: verify-runner
 verify-runner: ## Assert verify-all's shard coverage, private scratch directories and failure propagation.
 	@python3 tests/verify-runner.py
+
+.PHONY: verify-credential-api
+verify-credential-api:
+	@CHART_DIR="$(CHART_DIR)" HELM="$(HELM)" bash tests/verify-credential-api.sh
 
 .PHONY: verify-all
 verify-all: ## Run every verify-* target, or one VERIFY_SHARD_INDEX of VERIFY_SHARD_TOTAL isolated CI shards, with wall-clock timings.
