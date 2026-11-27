@@ -450,15 +450,6 @@
                 }
             }
         },
-        "credentialApi": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-                "namespace": {
-                    "type": "string"
-                }
-            }
-        },
         "dashboards": {
             "type": "object",
             "additionalProperties": false,
