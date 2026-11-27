@@ -107,18 +107,6 @@ spec:
         - port: 8080
           protocol: TCP
     {{- end }}
-    {{- if dig "credential-api" "enabled" false .Values.components }}
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.credentialApi.namespace }}
-          podSelector:
-            matchLabels:
-              app.kubernetes.io/name: credential-api
-      ports:
-        - port: 8080
-          protocol: TCP
-    {{- end }}
     # xDS to the agentgateway controller (its own release; match the
     # controller-only `agentgateway: agentgateway` label, not the release name).
     - to:
