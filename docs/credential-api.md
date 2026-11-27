@@ -2,7 +2,7 @@
 
 The optional `components.credential-api` component handles person-bound browser submission and apply-mode Secret writes. It has no MCP endpoint or credential-read API. It runs in `agent-platform-credential-api`, separate from manager workloads. Managers authenticate with TokenRequest tokens issued for `credential-api` and may open operations only under their configured kind prefixes.
 
-The component is disabled by default. Its intended implementation release is 0.2.0, which is not published; provisioning's initial 0.1.0 scaffold is not this service. Keep the integration draft until repository provisioning, the shared `mcp-toolkit/k8s` named-subject authorization release and the credential-api release have completed. The existing `UNRELEASED` annotation blocks an enabled development installation and the release pipeline until that version is available. The existing muster version floor remains unchanged.
+The component is disabled by default. Its intended implementation release is 0.2.0, which is not published; provisioning's initial 0.1.0 scaffold is not this service. Keep the component disabled until credential-api 0.2.0 is published and verified. The service uses `client-go` directly for named-subject authorization and published `mcp-toolkit/k8s` functions for person-scoped clients; it requires no shared authorization helper release. The existing `UNRELEASED` annotation blocks an enabled development installation and the release pipeline until the service version is available. The existing muster version floor remains unchanged.
 
 ```yaml
 components:
