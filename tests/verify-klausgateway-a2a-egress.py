@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -126,8 +128,68 @@ def check(chart, flavor, name, settings, targets):
     print(f"ok: {name} ({flavor})")
 
 
+def check_component_wiring(chart, flavor, settings):
+    meta = chart.parent / "agent-platform"
+    command = [os.environ.get("HELM", "helm"), "template", "t", str(meta),
+               "--namespace", "agent-platform", "-f", str(meta / "ci/ci-values.yaml"),
+               "-f", str(meta / "ci/test-klausgateway-a2a-values.yaml"),
+               "--set", "ingress.parentRefs[0].name=x", "--set", "global.domain=ci.example.com",
+               "--set", "global.identity.existingSecret=ci-platform-idp",
+               "--set", "gateway.jwksEgress.enabled=true", "--set", f"networkPolicy.flavor={flavor}",
+               "--set", "networkPolicy.kubernetes.apiServerCIDR=10.96.0.1/32",
+               "--set", "klausGateway.obo.enabled=false", "--set", "klausGateway.slack.enabled=false"]
+    for setting in settings:
+        command.extend(["--set", setting])
+    documents = [document for document in yaml.safe_load_all(subprocess.check_output(command, text=True)) if document]
+    releases = {document["metadata"]["name"]: document for document in documents if document.get("kind") == "HelmRelease"}
+    gateway = releases["klaus-gateway"]["spec"]["values"]
+    connectivity = releases["agent-platform-connectivity"]
+    namespace = connectivity["spec"].get("targetNamespace") or connectivity["metadata"]["namespace"]
+    with tempfile.TemporaryDirectory(prefix="a2a-component-wiring-") as temporary:
+        values = Path(temporary) / "values.yaml"
+        values.write_text(yaml.safe_dump(connectivity["spec"]["values"]))
+        values.chmod(0o600)
+        rendered = subprocess.check_output([os.environ.get("HELM", "helm"), "template", "agent-platform-connectivity",
+                                            str(chart), "--namespace", namespace, "-f", str(values)], text=True)
+    policies = [document for document in yaml.safe_load_all(rendered) if document and
+                document["metadata"]["name"].endswith("-klausgateway-a2a-server-egress")]
+    if len(policies) != 1:
+        fail(f"{flavor}: no unique gateway egress policy from the meta chart's actual connectivity values")
+    endpoint = urlsplit(gateway["obo"]["musterUrl"])
+    muster_namespace = endpoint.hostname.split(".")[1]
+    if not reaches(policies[0], flavor, namespace=muster_namespace, port=endpoint.port):
+        fail(f"{flavor}: projected connectivity policy does not reach the gateway's actual muster URL {endpoint.geturl()}")
+    muster_release = releases["muster"]
+    muster_values = muster_release["spec"]["values"]
+    native_namespace = muster_release["spec"].get("targetNamespace") or muster_release["metadata"]["namespace"]
+    native_name = muster_values["fullnameOverride"]
+    native_port = muster_values.get("service", {}).get("port", 8090)
+    native_url = f"http://{native_name}.{native_namespace}.svc.cluster.local:{native_port}"
+    pod_port = muster_values.get("muster", {}).get("aggregator", {}).get("port", 8090)
+    if endpoint.geturl() == native_url:
+        if not reaches(policies[0], flavor, namespace=native_namespace, port=pod_port):
+            fail(f"{flavor}: native muster Service port {native_port} maps to pod port {pod_port} without egress")
+    elif pod_port != endpoint.port and reaches(policies[0], flavor, namespace=muster_namespace, port=pod_port):
+        fail(f"{flavor}: a remote muster inherited the local instance's pod port")
+    projected = connectivity["spec"]["values"]["klausGateway"]
+    if projected["obo"]["musterUrl"] != gateway["obo"]["musterUrl"] or projected["a2aServer"] != gateway["a2aServer"]:
+        fail(f"{flavor}: connectivity does not receive the gateway's resolved A2A configuration")
+    print(f"ok: actual component wiring reaches {endpoint.geturl()} ({flavor})")
+
+
 def main(chart):
     for flavor in ("cilium", "kubernetes"):
+        check_component_wiring(chart, flavor, [])
+        check_component_wiring(chart, flavor, ["components.muster.targetNamespace=identity-tools"])
+        check_component_wiring(chart, flavor, ["components.muster.targetNamespace=identity-tools",
+                                             "muster.fullnameOverride=identity-broker", "muster.service.port=8191",
+                                             "muster.muster.aggregator.port=8191"])
+        check_component_wiring(chart, flavor, ["components.muster.targetNamespace=identity-tools",
+                                             "muster.fullnameOverride=identity-broker", "muster.service.port=8191"])
+        check_component_wiring(chart, flavor, ["components.agent-platform-connectivity.targetNamespace=network-system",
+                                             "muster.service.port=8191"])
+        check_component_wiring(chart, flavor, ["components.muster.targetNamespace=identity-tools",
+                                             "klausGateway.obo.musterUrl=http://muster.foreign.svc.cluster.local:8191"])
         check(chart, flavor, "relocated gateway with custom agentgateway listener", [
             "components.klaus-gateway.targetNamespace=gateway-system",
             "gateway.listeners[0].port=9090",

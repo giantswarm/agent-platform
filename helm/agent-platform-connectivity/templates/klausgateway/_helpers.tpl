@@ -131,7 +131,15 @@ use FQDN or CIDR rules. URLs without a port use their HTTP scheme's default.
 {{- end -}}
 {{- end -}}
 {{- $muster := dig "obo" "musterUrl" "" $gateway | default (dig "muster" "oauth" "server" "baseUrl" "" (.Values.muster | default dict)) -}}
-{{- $targets := include "agent-platform.klausGateway.urlEgressTargets" (list $jwks $muster) | fromJsonArray -}}
+{{- $urls := list $jwks $muster -}}
+{{- $nativeMuster := include "agent-platform.musterMcpUrl" . | trimSuffix "/mcp" -}}
+{{- if and $nativeMuster (eq $muster $nativeMuster) -}}
+{{- /* The Service's named http target uses the aggregator's pod port. */ -}}
+{{- $musterHost := (urlParse $muster).hostname -}}
+{{- $podPort := dig "muster" "aggregator" "port" 8090 (.Values.muster | default dict) -}}
+{{- $urls = append $urls (printf "http://%s:%v" $musterHost $podPort) -}}
+{{- end -}}
+{{- $targets := include "agent-platform.klausGateway.urlEgressTargets" $urls | fromJsonArray -}}
 {{- $targets = concat $targets (include "agent-platform.klausGateway.a2aProxyTargets" (dict "ctx" . "role" "gateway") | fromJsonArray) -}}
 {{- $targets | uniq | toJson -}}
 {{- end -}}

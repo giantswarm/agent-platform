@@ -608,6 +608,12 @@ agent-manager sets it, from the same release. */ -}}
 {{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "credential-api") -}}
 {{- $_ := set $derived "credentialApi" (dict "namespace" (dig "credential-api" "targetNamespace" "agent-platform-credential-api" .root.Values.components)) -}}
 {{- end -}}
+{{- if and (dig "agentgatewayRoute" "a2aServer" "enabled" false (.root.Values.klausGateway | default dict)) (include "agent-platform.componentEnabled" (dict "root" .root "name" "klaus-gateway")) -}}
+{{- $gateway := include "agent-platform.componentDerivedValues" (dict "root" .root "name" "klaus-gateway") | fromJson -}}
+{{- if $gateway.a2aServer -}}
+{{- $_ := set $derived "klausGateway" (pick $gateway "a2aServer" "a2a" "obo") -}}
+{{- end -}}
+{{- end -}}
 {{- with (include "agent-platform.kagent.authentication" .root | fromJson).auth -}}
 {{- $_ := set $derived "kagent" (dict "controller" (dict "auth" (dict "audiences" .audiences))) -}}
 {{- end -}}
