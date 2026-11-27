@@ -15,6 +15,18 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (agent-platform-operator 0.5 and agent-manager 4 for the Organization kind)
+
+`components.agent-platform-operator.versionRange` selects `>=0.4.0 <0.6.0` and `components.agent-manager.versionRange` selects `>=3.5.8 <5.0.0`. agent-platform-operator 0.5 reconciles the `Organization` kind (giantswarm/agent-platform-operator#69) and ships no CRD. agent-manager 4 serves the organization tools by the organization's name (giantswarm/agent-manager#475). This chart's organization policies and skills are written for these two releases.
+
+While 0.5.0 and 4.0.0 are release candidates, an installation with `gitops.prereleases: true` takes their release candidates, and an installation with `gitops.prereleases: false` stays on 0.4.x and 3.5.x. When 0.5.0 and 4.0.0 are released, an installation without `gitops.prereleases` takes them, and a later chart release raises both floors to them.
+
+### Operator action
+
+- agent-manager 4 refuses `{parent}` in `agent-manager.credentials.uiURL`. Remove `{parent}` from the template before agent-manager 4 runs, or agent-manager's release fails to render.
+- With `agentPlatformOrganizations.enabled`, run agent-platform-operator 0.5.x and agent-manager 4.x with this chart. On `gitops.prereleases: false`, wait for 0.5.0 and 4.0.0 before this chart release.
+- An installation that pins the BOM and has `agentPlatformOrganizations.enabled`: pin `agent-platform-operator` to a 0.5.x release and `agent-manager` to a 4.x release. The BOM's own pins stay at the floors, 0.4.0 and 3.5.8, until the floors move.
+
 ## \<current\> → \<next\> (agent-manager follows stable releases by default)
 
 `components.agent-manager.versionRange` selects `>=3.5.8 <4.0.0` (giantswarm/agent-platform#1497). The range starts at a stable release, so an installation with `gitops.prereleases: false` follows agent-manager's stable releases only and no longer takes its release candidates. The ceiling stays below 4.0.0.

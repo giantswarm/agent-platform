@@ -1207,10 +1207,17 @@ components:  # @schema additionalProperties: true
     # left release candidates (giantswarm/agent-platform#1497): an
     # installation with gitops.prereleases off follows agent-manager's stable
     # releases only, and gitops.prereleases admits its release candidates.
-    # The ceiling stays below 4.0.0: agent-manager 4.x serves the tools of
-    # the Organization kind, which only the chart release of
-    # giantswarm/agent-platform#1489 admits.
-    versionRange: ">=3.5.8 <4.0.0"
+    # 4.0.0 serves the organization tools by name on the Organization kind
+    # (giantswarm/agent-manager#475), which this chart's policies and skills
+    # are written for; the ceiling is the next major. The floor stays at
+    # 3.5.8 only while 4.0.0 is a release candidate: a release-candidate
+    # floor admits every later release candidate on an installation with
+    # gitops.prereleases off, and a floor of the unpublished 4.0.0 fails
+    # make verify-release-floors. So gitops.prereleases takes 4.0.0-rc.1 and
+    # later, and an installation without it stays on 3.5.x until 4.0.0 is
+    # released. When 4.0.0 is released, the floor becomes 4.0.0 (make
+    # golden-update moves the BOM pin with it).
+    versionRange: ">=3.5.8 <5.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -1455,9 +1462,9 @@ components:  # @schema additionalProperties: true
     # (agent-platform-operator, its chart's name), and another targetNamespace
     # fails the render.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # A 0.4.x release rolls in without a change here, its CRD with it
-    # (CreateReplace); one that needs wiring of this chart is a minor
-    # release, 0.5.0, outside the range. 0.1.0 carries the CRD, the curated
+    # A 0.5.x release rolls in without a change here; one that needs wiring
+    # of this chart is a minor release, 0.6.0, outside the range. 0.1.0
+    # carries the CRD, the curated
     # copies, organization cleanup, the ate-api CA projected from ClusterTrustBundles
     # (agent-platform-operator#2, #3, #7, #21) and the serviceAccountBindings
     # the meta chart derives: the credential providers' Secret readers bound
@@ -1487,12 +1494,29 @@ components:  # @schema additionalProperties: true
     # (kagent.controller.image.repository, the default); with the line's own
     # controller an organization with a ModelConfig and no Agent keeps its
     # workers and is Ready=False.
-    versionRange: ">=0.4.0 <0.5.0"
+    # 0.5.0 reconciles the Organization kind (security.giantswarm.io) with
+    # spec.capabilities.agentPlatform and one namespace agents-<name>
+    # (giantswarm/agent-platform-operator#69), which this chart's policies
+    # are written for; a 0.4.x operator reconciles AgentPlatformOrganizations,
+    # whose namespaces and Kustomizations these policies refuse. The floor
+    # stays at 0.4.0 only while 0.5.0 is a release candidate: a
+    # release-candidate floor admits every later release candidate on an
+    # installation with gitops.prereleases off, and a floor of the unpublished
+    # 0.5.0 fails make verify-release-floors. So gitops.prereleases takes
+    # 0.5.0-rc.1 and later, and an installation without it stays on 0.4.x
+    # until 0.5.0 is released. When 0.5.0 is released, the floor becomes
+    # 0.5.0 (make golden-update moves the BOM pin with it), and crds and
+    # ownedCrds below go.
+    versionRange: ">=0.4.0 <0.6.0"
     valuesFrom: agent-platform-operator
-    # App-owned CRD: the chart ships agentplatformorganizations in its crds/
-    # dir. CreateReplace makes Flux upgrade it with the app on every release
-    # (Helm never upgrades crds/-dir CRDs on its own). It owns its version, so
-    # no CRD dependsOn.
+    # App-owned CRD of the 0.4.x line: its chart ships
+    # agentplatformorganizations in its crds/ dir. CreateReplace makes Flux
+    # upgrade it with the app on every release (Helm never upgrades crds/-dir
+    # CRDs on its own). It owns its version, so no CRD dependsOn. A 0.5.x
+    # chart ships no crds/ dir (the Organization CRD is organization-operator's,
+    # or agentPlatformOrganizations.organizationCRD's): CreateReplace has
+    # nothing to apply for it, and ownedCrds only checks the owner of the CRD
+    # that a 0.4.x release left behind.
     crds: CreateReplace
     ownedCrds:
       - agentplatformorganizations.agent-platform.giantswarm.io
