@@ -206,7 +206,7 @@ spec:
       action: Require
       policy:
         matchExpressions:
-          - {{ include "agent-platform.klausGateway.a2aClientRule" $a2a.issuers | quote }}
+          - {{ printf "!has(jwt.cnf) && !has(jwt.act) && (%s)" (include "agent-platform.klausGateway.a2aClientRule" $a2a.issuers) | quote }}
   backend:
     auth:
       oauthTokenExchange:

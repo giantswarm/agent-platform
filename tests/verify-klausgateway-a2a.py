@@ -90,8 +90,10 @@ def connectivity(docs):
         fail(f"providers {providers!r}, want {want_providers!r}")
     authz = spec["traffic"]["authorization"]
     want_rule = (
+        '!has(jwt.cnf) && !has(jwt.act) && ('
         f'(jwt.iss == "https://dex.ci.example.com" && {CLIENT} in ["example-app"]) || '
         f'(jwt.iss == "https://login.example.org" && {CLIENT} in ["example-backend","example-batch"])'
+        ')'
     )
     if authz["action"] != "Require" or authz["policy"]["matchExpressions"] != [want_rule]:
         fail(f"authorization {authz!r}, want Require {want_rule!r}")
