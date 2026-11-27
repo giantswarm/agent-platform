@@ -39,8 +39,10 @@ EXAMPLES = {
     # A workload cluster of the fleet: Kyverno (the Substrate PolicyExceptions)
     # and Cilium (the network policies of the Substrate hops), layered over the
     # installation's Dex as the example says.
-    "runtime-slice.yaml": ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2",
-                           "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+    "runtime-slice.yaml": ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2"],
+}
+META_FLAGS = {
+    "runtime-slice.yaml": ["--set", "global.identity.issuerUrl=https://dex.ci.example.com",
                            "--set", "kagent.controller.auth.audiences[0]=agent-platform"],
 }
 # Examples with a check of their own: the BOM (verify-components-charts) and the
@@ -71,7 +73,8 @@ def main(meta: str) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         for example, api_versions in EXAMPLES.items():
             print(f"--> examples/{example}")
-            rendered = cc.docs(cc.render_meta(meta, ["-n", "agent-platform", "-f", str(examples / example), *api_versions]))
+            rendered = cc.docs(cc.render_meta(meta, ["-n", "agent-platform", "-f", str(examples / example),
+                                                    *api_versions, *META_FLAGS.get(example, [])]))
             # A component's HelmRelease and OCIRepository are named after its key.
             on = sorted(n for kind, n in rendered if kind == "HelmRelease" and n in components)
             if not on:
