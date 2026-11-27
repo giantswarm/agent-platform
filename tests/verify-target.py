@@ -61,7 +61,8 @@ ENGINE_OFF = ["--set", "components.flux.enabled=false"]
 # The installation's Dex, a platform input every slice is layered over: the
 # runtime slice's kagent controller (the kagent-extensions binary) identifies
 # people by its tokens.
-PLATFORM = ["--set", "global.identity.issuerUrl=https://dex.ci.example.com"]
+PLATFORM = ["--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+            "--set", "kagent.controller.auth.audiences[0]=agent-platform"]
 FLUX_KINDS = {"OCIRepository", "HelmRelease"}
 # The hook identity and its policy (hooks/*.yaml), the only objects an engine-off
 # render may carry besides Flux documents (the serving teardown's, with the slice on).

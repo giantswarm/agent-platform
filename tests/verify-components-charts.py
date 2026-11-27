@@ -258,8 +258,6 @@ ALL_ON_INPUTS = [
     # The OAuth clients each resource server needs. An installation supplies
     # these; they are not in the meta chart's values, and without them the
     # charts refuse to render at all.
-    "--set", "muster.muster.oauth.server.dex.clientSecret=x",
-    "--set", "muster.muster.oauth.server.registrationToken=x",
     "--set", "muster.muster.oauth.server.existingSecret=agent-platform-idp",
     "--set", "muster.muster.oauth.server.encryptionKey=true",
     # valkey's ACL users need their passwords from somewhere (its own guard).

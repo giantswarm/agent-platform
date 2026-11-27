@@ -9,7 +9,7 @@ Each case pins one property:
   giantswarm/kagent/controller-extensions and the kagent release's
   controller.env sets the binary's KAGENT_EXTENSIONS_*
   variables from the controller's own settings: the issuer and key set of
-  controller.auth with no audience (a token of any of its clients),
+  controller.auth with its trusted audiences,
   the user ID claim, the groups claim and the prefixes, the namespace selector
   and the included namespaces, the machine audience, workspace-manager's
   ServiceAccount as the machine caller while workspaces are on (following
@@ -21,12 +21,12 @@ Each case pins one property:
   (in the connectivity release's namespace) is a machine caller too
   (giantswarm/giantswarm#38988);
 - with the line's own controller (giantswarm/kagent/controller) no variable of
-  the binary is set and none of its guards applies;
+  the binary is set, and its audience-validation version guard applies;
 - every variable the chart sets names a flag of the binary;
 - the render fails naming the key in the noop authorization mode, in the
   insecure authentication mode, without an issuer and with a kagent range
-  below agent-platform.kagent.extensionsFloor, each of which the line's own
-  controller renders;
+  below agent-platform.kagent.extensionsFloor; the line's own controller keeps
+  its own mode, issuer and version requirements;
 - the kagent chart of the floor release (until it is published, the newest
   release before it, which renders the controller the same way), rendered
   with the release's values, runs controller-extensions at the chart's own
@@ -104,7 +104,7 @@ def main() -> None:
     c = controller([*ON, *WORKSPACES])
     expect(c["image"]["repository"], REPOSITORY, "on by default: the controller runs the binary the kagent line publishes")
     want = {
-        "KAGENT_EXTENSIONS_OIDC_ISSUERS": [{"issuer": "https://dex.ci.example.com", "jwksURL": ka.DEX_KEYS}],
+        "KAGENT_EXTENSIONS_OIDC_ISSUERS": [{"issuer": "https://dex.ci.example.com", "jwksURL": ka.DEX_KEYS, "audiences": ["platform"]}],
         "KAGENT_EXTENSIONS_OIDC_USERNAME_CLAIM": "email",
         "KAGENT_EXTENSIONS_OIDC_GROUPS_CLAIM": "groups",
         "KAGENT_EXTENSIONS_OIDC_USERNAME_PREFIX": "",
@@ -121,6 +121,14 @@ def main() -> None:
     expect(got, want, "the binary's settings are the controller's own")
     expect(set(env(c)) - FLAGS, set(), "every variable names a flag of the binary")
     ok("on: the controller runs the binary with the controller's settings")
+
+    issuer = json.loads(env(controller(["--set", f"{ka.AUTH}.audiences={{portal,kagent-cli}}"]))["KAGENT_EXTENSIONS_OIDC_ISSUERS"])[0]
+    expect(issuer["audiences"], ["portal", "kagent-cli"], "the extensions binary receives the native controller's explicit trust set")
+    own_issuers = '[{"issuer":"https://own.example.com","audiences":["own-client"]}]'
+    overridden = controller(["--set-json", "kagent.controller.env=" + json.dumps([
+        {"name": "KAGENT_EXTENSIONS_OIDC_ISSUERS", "value": own_issuers}])])
+    expect(env(overridden)["KAGENT_EXTENSIONS_OIDC_ISSUERS"], own_issuers,
+           "an explicit extensions issuer environment entry remains authoritative")
 
     got = env(controller([*ON, *WORKSPACES, "--set", "workspace-manager.serviceAccount.name=wm",
                           "--set", "components.workspace-manager.targetNamespace=workspaces"]))
@@ -171,10 +179,14 @@ def main() -> None:
     ]
     for what, flags, needle in refused:
         must_fail([*ON, *flags], needle, f"the binary with {what}")
+        if needle == "components.kagent.versionRange":
+            must_fail([*OWN, *flags], "ignores controller.auth.audiences",
+                      "the native controller below its audience-validation floor")
+            continue
         c = controller([*OWN, *flags])
         expect((c["image"]["repository"], env(c)), ("giantswarm/kagent/controller", {}),
                f"the line's own controller with {what} renders without the binary's settings")
-    ok("the line's own controller renders without the binary's settings or guards")
+    ok("the native controller has its own version guard and receives no extension settings")
 
     hr = kagent_release([*ON, *WORKSPACES])
     tags = cc.registry_tags(ka.KAGENT_CHART)

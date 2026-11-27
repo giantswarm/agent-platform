@@ -608,6 +608,15 @@ agent-manager sets it, from the same release. */ -}}
 {{- if include "agent-platform.componentEnabled" (dict "root" .root "name" "credential-api") -}}
 {{- $_ := set $derived "credentialApi" (dict "namespace" (dig "credential-api" "targetNamespace" "agent-platform-credential-api" .root.Values.components)) -}}
 {{- end -}}
+{{- if and (dig "agentgatewayRoute" "a2aServer" "enabled" false (.root.Values.klausGateway | default dict)) (include "agent-platform.componentEnabled" (dict "root" .root "name" "klaus-gateway")) -}}
+{{- $gateway := include "agent-platform.componentDerivedValues" (dict "root" .root "name" "klaus-gateway") | fromJson -}}
+{{- if $gateway.a2aServer -}}
+{{- $_ := set $derived "klausGateway" (pick $gateway "a2aServer" "a2a" "obo") -}}
+{{- end -}}
+{{- end -}}
+{{- with (include "agent-platform.kagent.authentication" .root | fromJson).auth -}}
+{{- $_ := set $derived "kagent" (dict "controller" (dict "auth" (dict "audiences" .audiences))) -}}
+{{- end -}}
 {{- /* Helm coalescing removes a defaulted key overridden with null. Forward
 PostgreSQL's explicit unlimited sentinel so connectivity's own 4GB default
 cannot silently reinstate a cap on the second render. */ -}}
@@ -869,6 +878,30 @@ the block otherwise: a klaus-gateway before 4.11.0 refuses it. */ -}}
 {{- $_ := set $refusals "enabled" true -}}
 {{- $_ := set $derived "refusals" $refusals -}}
 {{- end -}}
+{{- with (include "agent-platform.klausGateway.a2aServerValues" .root) -}}
+{{- $_ := set $derived "a2aServer" (. | fromJson) -}}
+{{- $_ := set $derived "a2a" (mergeOverwrite (get $derived "a2a" | default dict) (dict "enabled" true)) -}}
+{{- $nativeMuster := include "agent-platform.musterMcpUrl" $.root | trimSuffix "/mcp" -}}
+{{- $ownMuster := dig "obo" "musterUrl" "" $kg -}}
+{{- if not ($ownMuster | default $nativeMuster) -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.enabled needs components.muster.enabled or an explicit klausGateway.obo.musterUrl: every session starts through muster" -}}
+{{- end -}}
+{{- if not $ownMuster -}}
+{{- $_ := set $derived "obo" (dict "musterUrl" $nativeMuster) -}}
+{{- end -}}
+{{- if and (or (not $ownMuster) (eq $ownMuster $nativeMuster)) (not (dig "a2a" "agentManagerToolsPrefix" "" $kg)) -}}
+{{- $manager := index $.root.Values "agent-manager" | default dict -}}
+{{- if not (and (include "agent-platform.componentEnabled" (dict "root" $.root "name" "agent-manager")) (dig "mcp" "enabled" true $manager) (dig "muster" "mcpServer" "enabled" false $manager)) -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.enabled needs components.agent-manager.enabled with agent-manager.mcp.enabled and agent-manager.muster.mcpServer.enabled: enable its session-start tools, or set klausGateway.a2a.agentManagerToolsPrefix for an operator-owned MCP registration" -}}
+{{- end -}}
+{{- $name := required "agent-manager.muster.mcpServer.name must be nonempty for the A2A session-start tools" (dig "muster" "mcpServer" "name" "agent-manager" $manager) -}}
+{{- $_ := set $derived "a2a" (mergeOverwrite (get $derived "a2a" | default dict) (dict "agentManagerToolsPrefix" (printf "x_%s_" $name))) -}}
+{{- end -}}
+{{- end -}}
+{{- if and (or (dig "a2a" "enabled" false $kg) (dig "a2a" "enabled" false $derived)) (not (dig "a2a" "url" "" $kg)) -}}
+{{- $target := required "klausGateway.a2a requires kagent.controllerRoute.enabled with kagent and agentgateway enabled, or an explicit klausGateway.a2a.url" (include "agent-platform.kagentControllerTarget" .root) -}}
+{{- $_ := set $derived "a2a" (mergeOverwrite (get $derived "a2a" | default dict) (dict "url" $target)) -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .name "valkey" -}}
 {{- $auth := dig "valkey" "auth" dict (.root.Values.valkey | default dict) -}}
@@ -1026,11 +1059,20 @@ sources' registries (agent-platform.kagent.sessionToolImages). */ -}}
 {{- if and $multiple (not (hasKey $server "encryptionKey")) -}}
 {{- $_ := set $derived "muster" (dict "oauth" (dict "server" (dict "encryptionKey" true))) -}}
 {{- end -}}
+{{- if and (not (dig "muster" "writesAsCaller" "kubernetesAudience" "" (.root.Values.muster | default dict))) (dig "identity" "kubernetes" "audiences" list (.root.Values.global | default dict)) -}}
+{{- $_ := set $derived "muster" (mergeOverwrite (get $derived "muster" | default dict) (dict "writesAsCaller" (dict "kubernetesAudience" (include "agent-platform.muster.kubernetesAudience" .root)))) -}}
+{{- end -}}
 {{- /* The resource muster's OAuth server names in its protected resource
 metadata and binds tokens to: its MCP endpoint, oauth.server.baseUrl + /mcp,
 unless the installation names its own. Left empty, mcp-oauth falls back to the
 issuer, which is not the URL clients call, and RFC 9728 §3.3 has clients
 discard that metadata. */ -}}
+{{- $identitySecret := dig "identity" "existingSecret" "" (.root.Values.global | default dict) -}}
+{{- $inlineLogin := and ($server.enabled | default false) (or (dig "dex" "clientSecret" "" $server) (dig "google" "clientSecret" "" $server) $server.initialAccessToken $server.registrationToken) -}}
+{{- if and $server.encryptionKey $identitySecret (not $server.existingSecret) (not $server.encryptionKeyValue) (not $inlineLogin) -}}
+{{- $muster := get $derived "muster" | default dict -}}
+{{- $_ := set $derived "muster" (mergeOverwrite $muster (dict "oauth" (dict "server" (dict "existingSecret" $identitySecret)))) -}}
+{{- end -}}
 {{- if and $server.baseUrl (not $server.resourceIdentifier) -}}
 {{- $muster := get $derived "muster" | default dict -}}
 {{- $_ := set $derived "muster" (mergeOverwrite $muster (dict "oauth" (dict "server" (dict "resourceIdentifier" (printf "%s/mcp" (trimSuffix "/" $server.baseUrl)))))) -}}
@@ -1315,7 +1357,9 @@ release receives in the trusted-proxy authentication mode
   with TLS (jwks.tls.enabled, or port 443), else http://<host>:<port><path>;
 - auth.jwksAllowHTTP: true beside a derived plain-http jwksURL (the in-cluster
   Dex serves no TLS).
-The controller then checks the signature, iss and exp of a person's token
+- auth.audiences: an explicit controller list, else the route's list, else
+  the same issuer's platform login client while the UI is disabled.
+The controller then checks the signature, iss, exp and audience of a person's token
 against the issuer's keys before it reads a claim. Each key the block sets
 stands, and the derived jwksAllowHTTP accompanies only the derived jwksURL.
 Emits {} without an issuer or a JWKS host, in another mode and with kagent off.
@@ -1347,6 +1391,51 @@ Usage: include "agent-platform.kagent.authentication" . | fromJson
 {{- end -}}
 {{- if and $issuer ($own.jwksURL | default $url) -}}
 {{- $a := dict -}}
+{{- $audiences := $own.audiences | default $jwt.audiences | default list -}}
+{{- if and (kindIs "slice" $own.audiences) (not $own.audiences) -}}
+{{- fail "kagent.controller.auth.audiences must name at least one trusted person's token audience" -}}
+{{- end -}}
+{{- if not $audiences -}}
+{{- if dig "oauth2-proxy" "enabled" false $kagent -}}
+{{- fail "kagent.oauth2-proxy is enabled: set kagent.controller.auth.audiences explicitly or kagent.controllerRoute.jwtAuthentication.audiences to include the UI and other trusted clients" -}}
+{{- end -}}
+{{- $identity := .Values.global.identity | default dict -}}
+{{- $login := include "agent-platform.identity.musterLogin" .Values | fromJson -}}
+{{- if and $identity.clientId (eq $issuer (toString ($identity.issuerUrl | default ""))) -}}
+{{- $audiences = append $audiences $identity.clientId -}}
+{{- else if and $login.clientID (eq $issuer (toString ($login.issuerURL | default ""))) -}}
+{{- $audiences = append $audiences $login.clientID -}}
+{{- end -}}
+{{- end -}}
+{{- $audiences = compact $audiences | uniq -}}
+{{- if not $audiences -}}
+{{- fail "kagent.controller.auth.audiences is required: set the trusted client IDs explicitly, or configure global.identity.clientId for the same issuer" -}}
+{{- end -}}
+{{- $entry := dig "agentgatewayRoute" "a2aServer" dict (.Values.klausGateway | default dict) -}}
+{{- if and $entry.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) -}}
+{{- include "agent-platform.klausGateway.validateA2AAudiences" $entry.exchange.audiences -}}
+{{- end -}}
+{{- $ownTarget := dig "a2a" "url" "" (.Values.klausGateway | default dict) -}}
+{{- $nativeTarget := include "agent-platform.kagentControllerTarget" . -}}
+{{- if and $entry.enabled (or (not $ownTarget) (eq $ownTarget $nativeTarget)) (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) -}}
+{{- $accepted := false -}}
+{{- range $audience := $entry.exchange.audiences -}}
+{{- if has $audience $audiences -}}{{- $accepted = true -}}{{- end -}}
+{{- end -}}
+{{- if not $accepted -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences must include an audience trusted by kagent.controller.auth.audiences: configure the exchanged token for the controller's trusted clients" -}}
+{{- end -}}
+{{- if and (dig "controllerRoute" "enabled" false $kagent) $jwt.enabled $jwt.audiences -}}
+{{- $accepted = false -}}
+{{- range $audience := $entry.exchange.audiences -}}
+{{- if has $audience $jwt.audiences -}}{{- $accepted = true -}}{{- end -}}
+{{- end -}}
+{{- if not $accepted -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences must include an audience trusted by kagent.controllerRoute.jwtAuthentication.audiences: the token must pass both the route and controller checks" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $a "audiences" $audiences -}}
 {{- if not $own.issuer -}}{{- $_ := set $a "issuer" $issuer -}}{{- end -}}
 {{- if not $own.jwksURL -}}
 {{- $ca := dig "tls" "caSecretName" "" $jwks -}}
@@ -1377,12 +1466,20 @@ define.
 {{- define "agent-platform.kagent.authenticationFloor" -}}1.24.1{{- end -}}
 
 {{/*
+Minimum kagent release whose native controller validates auth.audiences.
+The extensions controller validates audiences through its issuer configuration.
+*/}}
+{{- define "agent-platform.kagent.nativeAudienceFloor" -}}1.34.0-rc.3{{- end -}}
+
+{{/*
 The guards of the kagent controller's verification of people's tokens, run
 while the kagent component renders (agent-platform.componentDerivedValues):
 - with an issuer on the release (own or agent-platform.kagent.authentication)
   in the trusted-proxy mode, the floor of components.kagent.versionRange is at
   least agent-platform.kagent.authenticationFloor; a release candidate of it
   passes.
+- the native controller requires agent-platform.kagent.nativeAudienceFloor,
+  including its prerelease, to validate controller.auth.audiences.
 Emits nothing; fails naming the key and the fix.
 */}}
 {{- define "agent-platform.validateKagentAuthentication" -}}
@@ -1396,6 +1493,13 @@ Emits nothing; fails naming the key and the fix.
 {{- $have := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" $range | default "0.0.0") "" -}}
 {{- if lt ((semver $have).Compare (semver $floor)) 0 -}}
 {{- fail (printf "components.kagent.versionRange %q admits a kagent release below %s, the first whose controller verifies people's tokens against the issuer's keys: in the trusted-proxy mode this chart sets kagent.controller.auth.issuer and jwksURL on the kagent release, which an earlier chart ignores; move the floor to %s or later" $range $floor $floor) -}}
+{{- end -}}
+{{- if ne (dig "controller" "image" "repository" "" .Values.kagent) "giantswarm/kagent/controller-extensions" -}}
+{{- $audienceFloor := include "agent-platform.kagent.nativeAudienceFloor" . -}}
+{{- $have := include "agent-platform.semverRangeFloor" $range | default "0.0.0" -}}
+{{- if lt ((semver $have).Compare (semver $audienceFloor)) 0 -}}
+{{- fail (printf "components.kagent.versionRange %q admits a native controller below %s, which ignores controller.auth.audiences: move the floor to %s or later" $range $audienceFloor $audienceFloor) -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -2919,7 +3023,7 @@ with SubjectAccessReviews (giantswarm/kagent-extensions). Its settings are the
 controller's own, as the release receives them (an own value, else the derived
 one), set as its KAGENT_EXTENSIONS_* variables:
 - the people's issuer: controller.auth.issuer and jwksURL
-  (agent-platform.kagent.authentication), a token of any of its clients, as
+  (agent-platform.kagent.authentication), with its trusted client audiences, as
   the controller route's JWT policy accepts;
 - the user ID claim controller.auth.userIdClaim (sub when empty), and
   controller.authorization's groupsClaim, usernamePrefix and groupsPrefix;
@@ -2977,7 +3081,7 @@ Agent has a session (its worker replica rule, agent-platform-operator#50). */ -}
 {{- $callers = append $callers (printf "%s/%s" $op.namespace $op.name) -}}
 {{- end -}}
 {{- $settings := list
-  (dict "name" "KAGENT_EXTENSIONS_OIDC_ISSUERS" "value" (list (dict "issuer" $auth.issuer "jwksURL" $auth.jwksURL) | toJson))
+  (dict "name" "KAGENT_EXTENSIONS_OIDC_ISSUERS" "value" (list (dict "issuer" $auth.issuer "jwksURL" $auth.jwksURL "audiences" $auth.audiences) | toJson))
   (dict "name" "KAGENT_EXTENSIONS_OIDC_USERNAME_CLAIM" "value" (toString ($auth.userIdClaim | default "sub")))
   (dict "name" "KAGENT_EXTENSIONS_OIDC_GROUPS_CLAIM" "value" (toString (dig "groupsClaim" "" $authz)))
   (dict "name" "KAGENT_EXTENSIONS_OIDC_USERNAME_PREFIX" "value" (toString (dig "usernamePrefix" "" $authz)))
@@ -3750,6 +3854,19 @@ the muster release's own, so .Values.muster.service is normally unset here.
 {{- dig "service" "port" 8090 (.Values.muster | default dict) -}}
 {{- end -}}
 
+{{/* The audience muster requires for caller visibility and Kubernetes writes. */}}
+{{- define "agent-platform.muster.kubernetesAudience" -}}
+{{- $own := dig "muster" "writesAsCaller" "kubernetesAudience" "" (.Values.muster | default dict) -}}
+{{- $audiences := dig "identity" "kubernetes" "audiences" list (.Values.global | default dict) -}}
+{{- if $own -}}
+{{- $own -}}
+{{- else if $audiences -}}
+{{- first $audiences -}}
+{{- else -}}
+dex-k8s-authenticator
+{{- end -}}
+{{- end -}}
+
 {{/*
 The namespace muster lands in: the kagent component's namespace with
 components.muster.inKagentNamespace, else components.muster.targetNamespace,
@@ -3791,15 +3908,19 @@ data plane, the one agent-manager's session tools call as the caller:
 grpc://<gateway.name>.<target namespace>.svc.cluster.local:<gateway.listeners[0].port>
 while the kagent and agentgateway components are on and kagent.controllerRoute
 is enabled (the GRPCRoute that carries SessionService and lf.a2a.v1.A2AService),
-"" otherwise. The data plane lands with the connectivity release, in the
-platform's target namespace.
+"" otherwise. The data plane lands with the connectivity release.
 Usage: include "agent-platform.kagentControllerTarget" .
 */}}
 {{- define "agent-platform.kagentControllerTarget" -}}
 {{- $kagentOn := include "agent-platform.componentEnabled" (dict "root" . "name" "kagent") -}}
 {{- $gatewayOn := include "agent-platform.componentEnabled" (dict "root" . "name" "agentgateway") -}}
 {{- if and $kagentOn $gatewayOn (dig "controllerRoute" "enabled" false (.Values.kagent | default dict)) -}}
-{{- printf "grpc://%s.%s.svc.cluster.local:%v" .Values.gateway.name (include "agent-platform.targetNamespace" .) (index .Values.gateway.listeners 0).port -}}
+{{- $component := index .Values.components "agent-platform-connectivity" | default dict -}}
+{{- $namespace := $component.targetNamespace | default (include "agent-platform.targetNamespace" .) -}}
+{{- if $component.inKagentNamespace -}}
+{{- $namespace = include "agent-platform.kagent.namespace" . -}}
+{{- end -}}
+{{- printf "grpc://%s.%s.svc.cluster.local:%v" .Values.gateway.name $namespace (index .Values.gateway.listeners 0).port -}}
 {{- end -}}
 {{- end -}}
 
@@ -4951,6 +5072,114 @@ klausGateway.workspaces.toolsPrefix while workspaces are on
 {{- define "agent-platform.klausGateway.workspacesFloor" -}}4.3.0{{- end -}}
 
 {{/*
+The minimum klaus-gateway release with exchanged Dex ID-token verification,
+A2A extension request forwarding and per-agent cards. Compare the full
+prerelease because earlier release candidates omit parts of this behavior.
+*/}}
+{{- define "agent-platform.klausGateway.a2aServerFloor" -}}4.20.0-rc.6{{- end -}}
+
+{{- define "agent-platform.klausGateway.validateA2AAudiences" -}}
+{{- if not (and (kindIs "slice" .) .) -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences must be a nonempty list of audience strings" -}}
+{{- end -}}
+{{- range $index, $audience := . -}}
+{{- if or (not (kindIs "string" $audience)) (not (regexMatch `^[\x21\x23-\x5b\x5d-\x7e]+$` (toString $audience))) -}}
+{{- fail (printf "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[%d] must be a nonempty string using OAuth scope-token characters to form a Dex cross-client scope" $index) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+klaus-gateway's a2aServer values, as JSON, while
+klausGateway.agentgatewayRoute.a2aServer is on: the card's issuers from that
+block's issuers, the platform token agentgateway's exchange issues (the
+installation's issuer, the first exchange audience, the exchange client) and
+the public URL. An own klausGateway.a2aServer value that differs fails the
+render: the connectivity chart routes and checks from the same block. jwksUrl,
+allowPrivateIpJwksHosts and the other keys of klausGateway.a2aServer stay the
+operator's. Empty while the block is off.
+*/}}
+{{- define "agent-platform.klausGateway.a2aServerValues" -}}
+{{- $kg := .Values.klausGateway | default dict -}}
+{{- $route := $kg.agentgatewayRoute | default dict -}}
+{{- $a2a := $route.a2aServer | default dict -}}
+{{- if and $a2a.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) -}}
+{{- $kgFloor := include "agent-platform.semverRangeFloor" (dig "klaus-gateway" "versionRange" "" .Values.components) | default "0.0.0" -}}
+{{- /* A branch build (X.Y.Z-r<branch-hash>t<time>h<sha>) carries the last
+release's version, so its floor says nothing about which values its chart
+takes: nothing is derived for it, and the operator sets klausGateway.a2aServer
+by hand. */ -}}
+{{- if not (regexMatch "^r[0-9a-f]+t[0-9]{14}h[0-9a-f]{7,40}$" (toString (semver $kgFloor).Prerelease)) -}}
+{{- if lt ((semver $kgFloor).Compare (semver (include "agent-platform.klausGateway.a2aServerFloor" .))) 0 -}}
+{{- fail (printf "klausGateway.agentgatewayRoute.a2aServer.enabled is true but the floor of components.klaus-gateway.versionRange (%s) is below %s, required for exchanged Dex ID-token verification and per-agent cards: raise the range's floor to %s" $kgFloor (include "agent-platform.klausGateway.a2aServerFloor" .) (include "agent-platform.klausGateway.a2aServerFloor" .)) -}}
+{{- end -}}
+{{- $issuer := required "klausGateway.agentgatewayRoute.a2aServer.enabled needs global.identity.issuerUrl: agentgateway's exchange issues the platform token there" (dig "identity" "issuerUrl" "" (.Values.global | default dict)) -}}
+{{- $hostname := $a2a.hostname | default $route.hostname | default "" -}}
+{{- if not $hostname -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.enabled is true but neither its hostname nor klausGateway.agentgatewayRoute.hostname is set: the A2A server needs a public hostname" -}}
+{{- end -}}
+{{- $exchange := $a2a.exchange | default dict -}}
+{{- include "agent-platform.klausGateway.validateA2AAudiences" $exchange.audiences -}}
+{{- $ownMuster := dig "obo" "musterUrl" "" $kg -}}
+{{- $nativeMuster := include "agent-platform.musterMcpUrl" . | trimSuffix "/mcp" -}}
+{{- if or (not $ownMuster) (eq $ownMuster $nativeMuster) -}}
+{{- $visibility := or (include "agent-platform.organizations.on" .) (kindIs "map" (dig "muster" "mcpServerNamespaceSelector" nil (.Values.muster | default dict))) -}}
+{{- $musterAudience := include "agent-platform.muster.kubernetesAudience" . -}}
+{{- if and $visibility (not (has $musterAudience ($exchange.audiences | default list))) -}}
+{{- fail (printf "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences must include %q, required by muster.muster.writesAsCaller.kubernetesAudience for caller visibility and session-start calls" $musterAudience) -}}
+{{- end -}}
+{{- $apiAudiences := dig "identity" "kubernetes" "audiences" list (.Values.global | default dict) -}}
+{{- $managerOAuth := dig "oauth" dict (index .Values "agent-manager" | default dict) -}}
+{{- $managerDownstream := and (include "agent-platform.componentEnabled" (dict "root" . "name" "agent-manager")) ($managerOAuth.enabled | default false) (dig "downstream" "enabled" false $managerOAuth) -}}
+{{- if and $apiAudiences (or $visibility $managerDownstream) -}}
+{{- $accepted := false -}}
+{{- range $audience := $apiAudiences -}}
+{{- if has $audience ($exchange.audiences | default list) -}}{{- $accepted = true -}}{{- end -}}
+{{- end -}}
+{{- if not $accepted -}}
+{{- fail "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences must include an audience from global.identity.kubernetes.audiences: muster starts the session with the person's Kubernetes identity" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $cards := list -}}
+{{- range ($a2a.issuers | default list) -}}
+{{- $card := dict "name" .name "issuer" .issuer "audience" .audience -}}
+{{- range $k, $v := (.card | default dict) -}}
+{{- if $v -}}{{- $_ := set $card $k $v -}}{{- end -}}
+{{- end -}}
+{{- $cards = append $cards $card -}}
+{{- end -}}
+{{- $want := dict
+  "enabled" true
+  "publicUrl" (printf "https://%s" $hostname)
+  "issuers" $cards
+  "token" (dict "issuer" $issuer "audience" (first ($exchange.audiences | default (list ""))) "allowedClients" (list ($exchange.clientId | default ""))) -}}
+{{- $own := $kg.a2aServer | default dict -}}
+{{- range $k := list "enabled" "publicUrl" "issuers" -}}
+{{- if and (hasKey $own $k) (index $own $k) (ne (toJson (index $own $k)) (toJson (index $want $k))) -}}
+{{- fail (printf "klausGateway.a2aServer.%s differs from what klausGateway.agentgatewayRoute.a2aServer gives the gateway: leave klausGateway.a2aServer.%s unset" $k $k) -}}
+{{- end -}}
+{{- end -}}
+{{- $ownToken := $own.token | default dict -}}
+{{- range $k, $v := $want.token -}}
+{{- if and (index $ownToken $k) (ne (toJson (index $ownToken $k)) (toJson $v)) -}}
+{{- fail (printf "klausGateway.a2aServer.token.%s differs from what klausGateway.agentgatewayRoute.a2aServer gives the gateway: leave klausGateway.a2aServer.token.%s unset" $k $k) -}}
+{{- end -}}
+{{- end -}}
+{{- $token := deepCopy $want.token -}}
+{{- $_ := set $token "jwksUrl" ($ownToken.jwksUrl | default (printf "%s/keys" (trimSuffix "/" $issuer))) -}}
+{{- $_ := set $want "token" $token -}}
+{{- $identityCA := dig "identity" "ca" dict (.Values.global | default dict) -}}
+{{- if and $identityCA.secretName (not $own.caSecret) (not $own.caFile) -}}
+{{- $_ := set $want "caSecret" $identityCA.secretName -}}
+{{- $_ := set $want "caSecretKey" ($own.caSecretKey | default ($identityCA.key | default "ca.crt")) -}}
+{{- end -}}
+{{- $want | toJson -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 The first release of the agent-manager line (giantswarm/agent-manager) whose
 chart takes muster.toolchainsToolsPrefix (start_session starts a toolchain
 only at a version the toolchain-manager's list_toolchains lists); an earlier
@@ -5442,7 +5671,12 @@ klaus-gateway's release namespace and the name of its ServiceAccount and pods
 (klausGateway.fullnameOverride, else klaus-gateway).
 */}}
 {{- define "agent-platform.klausGateway.namespace" -}}
-{{- dig "klaus-gateway" "targetNamespace" "" .Values.components | default (include "agent-platform.targetNamespace" .) -}}
+{{- $component := index .Values.components "klaus-gateway" | default dict -}}
+{{- if $component.inKagentNamespace -}}
+{{- include "agent-platform.kagent.namespace" . -}}
+{{- else -}}
+{{- $component.targetNamespace | default (include "agent-platform.targetNamespace" .) -}}
+{{- end -}}
 {{- end -}}
 {{- define "agent-platform.klausGateway.name" -}}
 {{- dig "fullnameOverride" "" (.Values.klausGateway | default dict) | default "klaus-gateway" -}}

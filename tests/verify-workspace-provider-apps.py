@@ -13,8 +13,8 @@ sign-in side by side (giantswarm/giantswarm#38672, agent-platform.workspaceManag
   git user oauth2; the component charts at the BOM's pins take the forwarded values (the
   workspace-manager's MCPServer receives both Apps' grants, muster's configuration keeps
   both Apps and releases them);
-- a single instance with sign-in (tests/fixtures/workspaces-values.yaml) renders as
-  before: no providerApps anywhere, the registration pinned to the github instance;
+- a single instance with sign-in keeps its App and names it on the registration;
+- the independent ChatGPT App remains available when its prerequisites hold;
 - derivation: without an own issuer the github App's is <url>/apps/<app.id> on the
   instance's url (a GitHub Enterprise Server's endpoints too, and no iss, which only
   github.com is known to name); an own scopes value stands;
@@ -66,6 +66,7 @@ GITHUB_APP = """\
         name: github
         tokenEndpoint: https://github.com/login/oauth/access_token
 """
+CHATGPT_APP = "      - flow: chatgptDeviceCode\n        name: chatgpt\n"
 GITLAB_APP = """\
       - authorizationEndpoint: https://gitlab.example.com:8443/oauth/authorize
         clientCredentialsSecretRef:
@@ -160,8 +161,8 @@ def main(meta: str) -> int:
     both = helm(meta, [*BOTH, *SUBSTRATE, *IDENTITY])
     muster = muster_block(both)
     apps = block(muster, "providerApps", 6)
-    if apps != "      providerApps:\n" + GITHUB_APP + GITLAB_APP:
-        fail(f"the muster release's providerApps are not the github and gitlab Apps:\n{apps}")
+    if apps != "      providerApps:\n" + GITHUB_APP + GITLAB_APP + CHATGPT_APP:
+        fail(f"muster does not keep the workspace Apps beside the independent ChatGPT App:\n{apps}")
     provider = block(muster, "credentialProvider", 6)
     must_have(provider, ("        releasable:\n          github: https://github.com/apps/ci-agents\n          gitlab: https://gitlab.example.com:8443\n",
                          "        gitUsers:\n          gitlab: oauth2\n"), "muster's credentialProvider")
@@ -205,11 +206,13 @@ def main(meta: str) -> int:
 
     # --- own values -------------------------------------------------------------------------
     pinned = helm(meta, [*BOTH, "--set", f"{AUTH}.provider=github"])
-    if "providerApps" in pinned:
-        fail("an own auth.provider derives provider Apps")
+    if "providerApps" in auth_block(pinned):
+        fail("an own auth.provider derives workspace provider Apps")
+    if block(muster_block(pinned), "providerApps", 6) != "      providerApps:\n" + CHATGPT_APP:
+        fail("an own workspace provider pin changed the independent ChatGPT App")
     must_have(auth_block(pinned), ("          provider: github\n",), "the registration with an own pin")
     named = helm(meta, [*BOTH, "--set", f"{AUTH}.providerApps={{gitlab}}"])
-    if block(muster_block(named), "providerApps", 6) != "      providerApps:\n" + GITLAB_APP:
+    if block(muster_block(named), "providerApps", 6) != "      providerApps:\n" + GITLAB_APP + CHATGPT_APP:
         fail(f"an own auth.providerApps [gitlab] keeps other Apps:\n{muster_block(named)}")
     must_have(auth_block(named), ("          providerApps:\n          - gitlab\n",), "the registration naming its own Apps")
     if re.search(r"^          provider:", auth_block(named), re.M):

@@ -1,0 +1,73 @@
+# Exercises klaus-gateway's A2A server entry (klausGateway.agentgatewayRoute.a2aServer):
+# two issuers, the installation's Dex in the cluster and an outside issuer on
+# 443, each with its own audience, clients and Dex connector; network policy on
+# so the data plane's egress to klaus-gateway and the controller's JWKS egress
+# render. verify-klausgateway-a2a asserts the objects.
+components:
+  agentgateway:
+    enabled: true
+  klaus-gateway:
+    enabled: true
+
+global:
+  identity:
+    issuerUrl: https://dex.ci.example.com
+
+ingress:
+  mode: agentgateway-muster
+  parentRefs:
+    - name: giantswarm-default
+      namespace: envoy-gateway-system
+      group: gateway.networking.k8s.io
+      kind: Gateway
+  hostnames:
+    - muster.ci.example.com
+
+networkPolicy:
+  enabled: true
+  kubernetes:
+    apiServerCIDR: 10.96.0.1/32
+
+gateway:
+  jwksEgress:
+    enabled: true
+    namespace: giantswarm
+    port: 5556
+
+muster:
+  muster:
+    oauth:
+      server:
+        enabled: false
+        storage:
+          type: memory
+
+klausGateway:
+  agentgatewayRoute:
+    hostname: agentgateway.ci.example.com
+    a2aServer:
+      enabled: true
+      hostname: a2a.ci.example.com
+      issuers:
+        - name: dex
+          issuer: https://dex.ci.example.com
+          audience: klaus-gateway-app
+          allowedClients: [example-app]
+          connectorId: self
+          jwks:
+            host: dex.giantswarm.svc.cluster.local
+            port: 5556
+            path: /keys
+          card:
+            tokenUrl: https://dex.ci.example.com/token
+        - name: example-idp
+          issuer: https://login.example.org
+          audience: platform-backend
+          allowedClients: [example-backend, example-batch]
+          connectorId: example-idp
+          jwks:
+            host: login.example.org
+            port: 443
+            path: /.well-known/jwks.json
+      exchange:
+        secretName: klaus-gateway-exchange

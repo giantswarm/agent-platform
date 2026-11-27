@@ -301,14 +301,24 @@ the fleet (engine off, exempt namespace) keeps the key empty and renders none. *
 {{- /* The air-gapped mirror (gitops.mirror.registry): every source below moves
 onto it — see "The mirror" in _helpers.tpl. */ -}}
 {{- $mirror := include "agent-platform.mirror.registry" $root -}}
-{{- /* The component roster, stripped to enablement, for a chart that renders
-another component's wiring. It carries the same key path this chart reads
-(components.<name>.enabled), so the two can never spell the answer differently.
-The source coordinates (chart/repository/versionRange/...) are meta-package
-plumbing and are dropped. */ -}}
+{{- /* The roster carries effective component enablement and the workload
+namespaces needed by cross-component policies. Repository coordinates stay
+with the component releases. */ -}}
 {{- $roster := dict -}}
 {{- range $key, $c := .Values.components -}}
 {{- $_ := set $roster $key (dict "enabled" (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" $key)) "true")) -}}
+{{- if has $key (list "klaus-gateway" "muster") -}}
+{{- $namespaceHelper := ternary "agent-platform.klausGateway.namespace" "agent-platform.muster.namespace" (eq $key "klaus-gateway") -}}
+{{- $componentNamespace := include $namespaceHelper $root -}}
+{{- $connectivity := index $root.Values.components "agent-platform-connectivity" | default dict -}}
+{{- $connectivityNamespace := $connectivity.targetNamespace | default $targetNs -}}
+{{- if $connectivity.inKagentNamespace -}}
+{{- $connectivityNamespace = include "agent-platform.kagent.namespace" $root -}}
+{{- end -}}
+{{- if ne $componentNamespace $connectivityNamespace -}}
+{{- $_ := set (index $roster $key) "targetNamespace" $componentNamespace -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- /* The values every release is inlined from: one deep copy of the tree with
 every cluster-shape knob (kyvernoPolicies.enabled, networkPolicy.flavor,

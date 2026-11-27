@@ -31,11 +31,12 @@ Each case pins one property:
   (global.identity.issuerUrl, else kagent.controllerRoute.jwtAuthentication
   .issuer), jwksURL (the controller route's key set, http to the in-cluster
   Dex, https to an issuer on 443) and jwksAllowHTTP true beside a plain-http
-  jwksURL; each own key stands, an own jwksURL carries no derived
+  jwksURL; audiences are the explicit controller or route trust set, else the
+  same issuer's login client when the UI is off; each own key stands, an own jwksURL carries no derived
   jwksAllowHTTP; nothing in the insecure mode or without an issuer; a kagent
   range whose floor is below agent-platform.kagent.authenticationFloor fails
-  naming it (a release candidate of it passes), and so does a derived https
-  key set behind a private CA;
+  naming it; the native controller also needs nativeAudienceFloor, compared
+  including its prerelease, and a derived https key set behind a private CA fails;
 - the connectivity release's controller egress (cilium) opens the in-cluster
   Dex's namespace on the JWKS port, an external issuer's port other than 443
   to the world, and nothing in the insecure mode;
@@ -53,6 +54,7 @@ Needs PyYAML. HELM selects the binary.
 """
 
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -80,6 +82,7 @@ BASE = [
     "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
     "--set", "global.identity.clientId=platform",
     "--set", "global.identity.existingSecret=platform-oauth",
+    "--set", "kagent.controller.auth.audiences=null",
 ]
 WORKSPACES = ["-f", "tests/fixtures/workspaces-values.yaml", "-f", "tests/fixtures/workspaces-agents-values.yaml"]
 AUTHZ = "kagent.controller.authorization"
@@ -100,7 +103,7 @@ AUTH = "kagent.controller.auth"
 OWN = ["--set", "kagent.controller.image.repository=giantswarm/kagent/controller"]
 DEX_KEYS = "http://dex.giantswarm.svc.cluster.local:5556/keys"
 AUTHENTICATION = {"mode": "trusted-proxy", "userIdClaim": "email", "issuer": "https://dex.ci.example.com",
-                  "jwksURL": DEX_KEYS, "jwksAllowHTTP": True}
+                  "jwksURL": DEX_KEYS, "jwksAllowHTTP": True, "audiences": ["platform"]}
 DEX_EGRESS = {"toEndpoints": [{"matchLabels": {"io.kubernetes.pod.namespace": "giantswarm"}}],
               "toPorts": [{"ports": [{"port": "5556", "protocol": "TCP"}]}]}
 CILIUM = ["--set", "networkPolicy.enabled=true", "--set", "networkPolicy.flavor=cilium"]
@@ -183,32 +186,89 @@ def authentication_floor() -> str:
 def check_authentication() -> None:
     expect(controller([]).get("auth"), AUTHENTICATION,
            "trusted-proxy: the controller verifies people's tokens against global.identity.issuerUrl and the in-cluster Dex's key set")
-    expect(controller(["--set", "kagent.controllerRoute.jwtAuthentication.issuer=https://route.example.com"])["auth"]["issuer"],
+    expect(controller(["--set", "kagent.controllerRoute.jwtAuthentication.issuer=https://route.example.com",
+                       "--set", "kagent.controllerRoute.jwtAuthentication.audiences={route-client}"])["auth"]["issuer"],
            "https://route.example.com", "the issuer follows kagent.controllerRoute.jwtAuthentication.issuer")
     public = ["--set", "kagent.controllerRoute.jwtAuthentication.jwks.host=dex.ci.example.com",
               "--set", "kagent.controllerRoute.jwtAuthentication.jwks.port=443"]
     got = controller(public)["auth"]
     expect((got.get("jwksURL"), "jwksAllowHTTP" in got), ("https://dex.ci.example.com/keys", False),
            "an issuer on 443: an https key set and no jwksAllowHTTP")
-    expect(controller(["--set", f"{AUTH}.issuer=https://own.example.com"])["auth"],
-           {**AUTHENTICATION, "issuer": "https://own.example.com"}, "an own issuer stands, the key set is derived")
+    expect(controller(["--set", f"{AUTH}.issuer=https://own.example.com", "--set", f"{AUTH}.audiences={{own-client}}"])["auth"],
+           {**AUTHENTICATION, "issuer": "https://own.example.com", "audiences": ["own-client"]}, "an own issuer and audiences stand, the key set is derived")
     got = controller(["--set", f"{AUTH}.jwksURL=https://keys.example.com/jwks"])["auth"]
     expect((got.get("issuer"), got.get("jwksURL"), "jwksAllowHTTP" in got),
            ("https://dex.ci.example.com", "https://keys.example.com/jwks", False),
            "an own jwksURL stands and carries no derived jwksAllowHTTP")
     expect(controller(["--set", f"{AUTH}.jwksAllowHTTP=false"])["auth"].get("jwksAllowHTTP"), False, "an own jwksAllowHTTP stands")
-    expect(controller([*OWN, "--set", f"{AUTH}.mode=insecure"])["auth"], {"mode": "insecure", "userIdClaim": "email"},
+    expect(controller([*OWN, "--set", f"{AUTH}.mode=insecure"])["auth"], {"mode": "insecure", "userIdClaim": "email", "audiences": None},
            "the insecure mode: nothing derived")
-    expect(controller([*OWN, "--set", "global.identity.issuerUrl="])["auth"], {"mode": "trusted-proxy", "userIdClaim": "email"},
+    expect(controller([*OWN, "--set", "global.identity.issuerUrl="])["auth"], {"mode": "trusted-proxy", "userIdClaim": "email", "audiences": None},
            "without an issuer: nothing derived")
     floor = authentication_floor()
     must_fail([*OWN, "--set", "components.kagent.versionRange=>=1.0.0 <1.1.0"], f"admits a kagent release below {floor}",
               "a kagent floor below the first release that verifies people's tokens")
-    controller([*OWN, "--set", f"components.kagent.versionRange=>={floor}-rc.1 <1.25.0-0"])
-    ok(f"a release candidate of {floor} passes the floor guard")
+    for version in ("1.33.0", "1.34.0-rc.1", "1.34.0-rc.2"):
+        must_fail([*OWN, "--set", f"components.kagent.versionRange=>={version} <1.35.0-0"],
+                  "ignores controller.auth.audiences", f"native controller {version} without audience validation")
+    for version in ("1.34.0-rc.3", "1.34.0"):
+        expect(controller([*OWN, "--set", f"components.kagent.versionRange=>={version} <1.35.0-0"])["auth"]["audiences"],
+               ["platform"], f"native controller {version} supports the configured audiences")
+    expect(controller(["--set", "components.kagent.versionRange=>=1.33.0 <1.34.0-0"])["auth"]["audiences"],
+           ["platform"], "the extensions controller retains its existing audience support on older releases")
     must_fail(["--set", "kagent.controllerRoute.jwtAuthentication.jwks.tls.enabled=true",
                "--set", "kagent.controllerRoute.jwtAuthentication.jwks.tls.caSecretName=dex-ca"],
               "the controller trusts the system roots only", "a derived https key set behind a private CA")
+
+    expect(controller(["--set", "kagent.controllerRoute.jwtAuthentication.audiences={route-client}"])["auth"]["audiences"],
+           ["route-client"], "the explicit route trust set precedes inferred login clients")
+    expect(controller(["--set", f"{AUTH}.audiences={{own-client}}",
+                       "--set", "kagent.controllerRoute.jwtAuthentication.audiences={route-client}"])["auth"]["audiences"],
+           ["own-client"], "an explicit controller audience set stands")
+    must_fail(["--set", f"{AUTH}.audiences={{}}"], "kagent.controller.auth.audiences", "an explicitly empty controller trust set")
+    must_fail(["--set", "global.identity.clientId="], "kagent.controller.auth.audiences", "no inferable token audience")
+    must_fail(["--set", f"{AUTH}.issuer=https://other.example.com"], "kagent.controller.auth.audiences",
+              "a different issuer requires its own trusted clients")
+    ui = ["--set", "kagent.oauth2-proxy.enabled=true"]
+    must_fail(ui, "set kagent.controller.auth.audiences explicitly", "a UI client held only in a Secret")
+    known_ui = [*ui, "--set", "kagent.oauth2-proxy.config.clientID=ui"]
+    literal_ui = [*known_ui, "--set", "kagent.oauth2-proxy.extraArgs.oidc-issuer-url=https://dex.ci.example.com"]
+    must_fail(literal_ui, "set kagent.controller.auth.audiences explicitly", "a UI with literal issuer and client still needs explicit trust")
+    must_fail([*known_ui, "--set", "kagent.oauth2-proxy.extraArgs.oidc-issuer-url=https://other.example.com"],
+              "set kagent.controller.auth.audiences explicitly", "a foreign UI issuer cannot widen the controller issuer's trust set")
+    expect(controller([*ui, "--set", f"{AUTH}.audiences={{ui,platform}}"])["auth"]["audiences"],
+           ["ui", "platform"], "an explicit trust set supports a secret-only UI client")
+    expect(controller([*literal_ui, "--set", "kagent.controllerRoute.jwtAuthentication.audiences={ui,platform}"])["auth"]["audiences"],
+           ["ui", "platform"], "the explicit route trust set supports an enabled UI")
+    docs = connectivity(["--set", "kagent.controllerRoute.enabled=true", "--set", "gateway.jwksEgress.enabled=true"])
+    for name in ("kagent-controller-jwt", "kagent-a2a-jwt", "kagent-mcp-jwt"):
+        policy = find(docs, "AgentgatewayPolicy", name)
+        expect(policy["spec"]["traffic"]["jwtAuthentication"]["providers"][0]["audiences"],
+               ["platform"], f"{name}: the edge checks the controller's inferred trust set")
+    a2a = ["-f", f"{CHART}/ci/test-klausgateway-a2a-values.yaml"]
+    must_fail([*a2a, "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[2]=dex-k8s-authenticator"],
+              "exchange.audiences[0] must be a nonempty string", "a sparse audience override cannot create a null primary audience")
+    must_fail([*a2a, "--set-json", 'klausGateway.agentgatewayRoute.a2aServer.exchange.audiences=["agent-platform",""]'],
+              "exchange.audiences[1] must be a nonempty string", "an empty exchange audience cannot become a Dex scope")
+    for invalid in ("bad audience", 'bad"audience', "bad\\audience", "non-ascii-é", 123):
+        must_fail([*a2a, "--set-json", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences=" + json.dumps(["agent-platform", invalid])],
+                  "OAuth scope-token characters", "an exchange audience must fit its generated Dex cross-client scope")
+    must_fail(a2a, "exchange.audiences must include", "an exchanged token outside the controller's trust set")
+    expect(controller([*a2a, "--set", "klausGateway.a2a.url=grpcs://remote.private.example:8443"])["auth"]["audiences"],
+           ["platform"], "an explicit remote A2A upstream retains its own authentication contract")
+    expect(controller([*a2a, "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences={klaus-gateway,platform,dex-k8s-authenticator}"])["auth"]["audiences"],
+           ["platform"], "a trusted exchanged audience needs no broader controller trust set")
+    separate = [*a2a, "--set", f"{AUTH}.audiences={{controller-client}}",
+                "--set", "kagent.controllerRoute.jwtAuthentication.audiences={route-client}",
+                "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences={klaus-gateway,controller-client,dex-k8s-authenticator}"]
+    must_fail(separate, "trusted by kagent.controllerRoute.jwtAuthentication.audiences",
+              "an exchanged token accepted by the controller but refused by the route")
+    expect(controller([*separate, "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[3]=route-client"])["auth"]["audiences"],
+           ["controller-client"], "separate route and controller trust sets accept a token naming both")
+    proxy_environment = [{"name": "HTTPS_PROXY", "value": "http://proxy.proxy-system.svc:3128"},
+                         {"name": "NO_PROXY", "value": ".svc,.cluster.local"}]
+    proxied = controller(["--set-json", "kagent.controller.env=" + json.dumps(proxy_environment)])
+    expect(proxied["env"][:2], proxy_environment, "the audience derivation preserves explicit proxy environment")
 
     egress = controller_egress([])
     expect(DEX_EGRESS in egress, True, "cilium: the controller's egress opens the in-cluster Dex on the JWKS port")
@@ -227,6 +287,53 @@ def kagent_floor() -> str:
     return m.group(1)
 
 
+def check_muster_kubernetes_audience() -> None:
+    key = "muster.muster.writesAsCaller.kubernetesAudience"
+    def audience(settings):
+        return release_values(settings, "muster")["muster"].get("writesAsCaller", {}).get("kubernetesAudience")
+
+    expect(audience([]), "dex-k8s-authenticator", "muster uses the declared default Kubernetes audience")
+    custom = ["--set", "global.identity.kubernetes.audiences={customer-api,other-api}"]
+    expect(audience(custom), "customer-api", "muster derives the primary declared API audience")
+    expect(audience([*custom, "--set", f"{key}=own-api"]), "own-api", "muster preserves an explicit native audience")
+    a2a = ["-f", f"{CHART}/ci/test-klausgateway-a2a-values.yaml",
+           "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences={klaus-gateway,platform,dex-k8s-authenticator}"]
+    visibility = ["--set-json", "muster.muster.mcpServerNamespaceSelector={}"]
+    must_fail([*a2a, "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[2]=kubernetes"],
+              "from global.identity.kubernetes.audiences", "a generic Kubernetes audience is not the installation's registered client")
+    must_fail([*a2a, *visibility, "--set-json", "global.identity.kubernetes.audiences=[]",
+               "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[2]=kubernetes"],
+              'must include "dex-k8s-authenticator"', "an empty API trust list keeps muster's native audience default")
+    native_muster = release_values(a2a, "klaus-gateway")["obo"]["musterUrl"]
+    must_fail([*a2a, *visibility, "--set", f"klausGateway.obo.musterUrl={native_muster}",
+               "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[2]=kubernetes"],
+              'must include "dex-k8s-authenticator"', "an explicit native muster URL keeps its audience guard")
+    must_fail([*a2a, *custom], "from global.identity.kubernetes.audiences", "downstream agent-manager requires an actual API audience")
+    expect(audience([*a2a, *custom, "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[2]=customer-api"]),
+           "customer-api", "an exchange for the custom API audience passes")
+    must_fail([*a2a, *visibility, "--set", f"{key}=own-api"], 'must include "own-api"', "an explicit muster visibility audience must reach the exchange")
+    expect(audience([*a2a, *visibility, "--set", f"{key}=own-api", "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[3]=own-api"]),
+           "own-api", "the exchange can satisfy separate muster and API audience requirements")
+    must_fail([*a2a, *visibility, *custom, "--set", f"{key}=dex-k8s-authenticator"],
+              "from global.identity.kubernetes.audiences", "muster's precheck alone does not prove API audience compatibility")
+    expect(audience([*a2a, *visibility, "--set", "global.identity.kubernetes.audiences={kubernetes}",
+                     "--set", f"{key}=kubernetes", "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[2]=kubernetes"]),
+           "kubernetes", "an explicitly configured Kubernetes client ID remains supported")
+    remote = [*a2a, *visibility, "--set", "klausGateway.a2a.url=grpcs://remote.private.example:8443",
+              "--set", "components.kagent.enabled=false",
+              "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[2]=other-api"]
+    must_fail(remote, 'must include "dex-k8s-authenticator"', "a remote A2A target still starts sessions through native muster")
+    expect(audience([*remote, "--set", "klausGateway.obo.musterUrl=https://muster.remote.example"]),
+           "dex-k8s-authenticator", "an explicit remote muster retains its own exchange contract")
+    no_api = [*a2a, "--set", "agent-manager.oauth.downstream.enabled=false",
+              "--set-json", "muster.muster.mcpServerNamespaceSelector=null",
+              "--set", f"{key}=own-api", "--set", "klausGateway.agentgatewayRoute.a2aServer.exchange.audiences[2]=other-api"]
+    expect(audience(no_api), "own-api", "no caller visibility and no downstream API profile imposes no Kubernetes audience")
+    must_fail([*no_api, *visibility], 'must include "own-api"', "an empty visibility selector activates caller audience checks")
+    expect(audience([*a2a, "--set", f"{key}=own-api"]), "own-api",
+           "muster's native write audience is not required for a session start without caller visibility")
+
+
 def kagent_chart_render(values: dict, version: str) -> list:
     with tempfile.TemporaryDirectory() as tmp:
         with open(f"{tmp}/values.yaml", "w", encoding="utf-8") as f:
@@ -239,6 +346,7 @@ def kagent_chart_render(values: dict, version: str) -> list:
 
 
 def main() -> None:
+    check_muster_kubernetes_audience()
     c = controller([])
     expect(c.get("authorization"), DEFAULT, "default: the kubernetes mode with the installation's OIDC mapping and the tenants' namespaces")
     expect(c.get("networkPolicy"), {"enabled": True, "from": [GATEWAY, EGRESS]},
@@ -329,8 +437,10 @@ def main() -> None:
     if floor != pinned:
         print(f"NOTE: the KAGENT_AUTH_* check waits for kagent {pinned} (UNRELEASED); {floor} does not carry the keys")
         return
-    expect({k: v for k, v in cm["data"].items() if k in ("KAGENT_AUTH_ISSUER", "KAGENT_AUTH_JWKS_URL", "KAGENT_AUTH_JWKS_ALLOW_HTTP")},
-           {"KAGENT_AUTH_ISSUER": "https://dex.ci.example.com", "KAGENT_AUTH_JWKS_URL": DEX_KEYS, "KAGENT_AUTH_JWKS_ALLOW_HTTP": "true"},
+    authentication = {"KAGENT_AUTH_ISSUER": "https://dex.ci.example.com", "KAGENT_AUTH_JWKS_URL": DEX_KEYS, "KAGENT_AUTH_JWKS_ALLOW_HTTP": "true"}
+    if tuple(map(int, pinned.split("-")[0].split("."))) >= (1, 34, 0):
+        authentication["KAGENT_AUTH_AUDIENCES"] = "platform"
+    expect({k: v for k, v in cm["data"].items() if k in authentication}, authentication,
            f"the kagent chart {floor} configures the verification of people's tokens from the forwarded block")
 
 

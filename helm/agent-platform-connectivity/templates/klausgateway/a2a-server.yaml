@@ -1,0 +1,245 @@
+{{- /*
+The A2A server's entry for outside A2A clients (docs/authentication.md):
+agentgateway checks the client's token against its issuer, exchanges it at
+Dex (RFC 8693) and sends klaus-gateway the Dex token. The Agent Card route
+carries no policy: a client reads it before it has a token.
+*/ -}}
+{{- if include "agent-platform.klausGateway.a2aServerOn" . }}
+{{- $a2a := include "agent-platform.klausGateway.a2aServer" . | fromJson }}
+{{- $exchange := $a2a.exchange }}
+{{- $ns := include "agent-platform.klausGateway.namespace" . }}
+{{- $fullname := include "agent-platform.klausGateway.fullname" . }}
+{{- $routes := list (dict "name" "klausgateway-a2a-card" "type" "Exact" "path" "/.well-known/agent-card.json") (dict "name" "klausgateway-a2a" "type" "PathPrefix" "path" "/a2a") }}
+# JSON-RPC calls use the A2A backend for protocol metrics and method tracing.
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: klausgateway-a2a
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  a2a:
+    host: {{ printf "%s.%s.svc.cluster.local" $fullname $ns }}
+    port: 8080
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: klausgateway-a2a-cards
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  static:
+    host: {{ printf "%s.%s.svc.cluster.local" $fullname $ns }}
+    port: 8080
+{{- range $routes }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ $.Values.gateway.name }}
+      namespace: {{ $.Release.Namespace }}
+      group: gateway.networking.k8s.io
+      kind: Gateway
+  hostnames:
+    - {{ $a2a.hostname | quote }}
+  rules:
+    {{- if eq .name "klausgateway-a2a" }}
+    - matches:
+        - path:
+            type: {{ .type }}
+            value: {{ .path }}
+          method: GET
+      backendRefs:
+        - name: klausgateway-a2a-cards
+          kind: AgentgatewayBackend
+          group: agentgateway.dev
+    {{- end }}
+    - matches:
+        - path:
+            type: {{ .type }}
+            value: {{ .path }}
+      backendRefs:
+        - name: {{ ternary "klausgateway-a2a-cards" "klausgateway-a2a" (eq .name "klausgateway-a2a-card") }}
+          kind: AgentgatewayBackend
+          group: agentgateway.dev
+{{- if not (include "agent-platform.edgeIsDataPlane" $) }}
+---
+# Layer-1 route: the public hostname to the agentgateway data plane.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: agentgateway-{{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+spec:
+  parentRefs:
+    {{- include "agent-platform.parentRefs" (dict "ctx" $ "override" $.Values.ingress.parentRefs "key" "ingress.parentRefs") | nindent 4 }}
+  hostnames:
+    - {{ $a2a.hostname | quote }}
+  rules:
+    - matches:
+        - path:
+            type: {{ .type }}
+            value: {{ .path }}
+      backendRefs:
+        - name: {{ $.Values.gateway.name }}
+          port: 8080
+{{- end }}
+{{- end }}
+{{- range $i, $issuer := $a2a.issuers }}
+{{- $jwks := merge (deepCopy $issuer.jwks) (dict "tls" (dict "enabled" false "caSecretName" "")) }}
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: klausgateway-a2a-jwks-{{ $i }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "labels.common" $ | nindent 4 }}
+spec:
+  {{- if or (include "agent-platform.jwks.tlsEnabled" $jwks) $jwks.tunnel }}
+  policies:
+    {{- with $jwks.tunnel }}
+    tunnel:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- if include "agent-platform.jwks.tlsEnabled" $jwks }}
+    tls:
+      {{- $ca := include "agent-platform.jwks.caSecretName" (dict "ctx" $ "jwks" $jwks) }}
+      {{- if $ca }}
+      caCertificateRefs:
+        - kind: Secret
+          name: {{ $ca }}
+          {{- $key := include "agent-platform.klausGateway.a2aCASecretKey" (dict "ctx" $ "jwks" $jwks) }}
+          {{- if ne $key "ca.crt" }}
+          key: {{ $key | quote }}
+          {{- end }}
+      {{- else }}
+      {}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  static:
+    host: {{ $jwks.host }}
+    port: {{ $jwks.port }}
+{{- end }}
+---
+# Dex's token endpoint the exchange calls, over TLS verified against the
+# endpoint's CA (a private Dex CA included), else the system trust.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: klausgateway-a2a-dex-token
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policies:
+    {{- with $exchange.endpoint.tunnel }}
+    tunnel:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    tls:
+      {{- if $exchange.endpoint.caSecretName }}
+      caCertificateRefs:
+        - kind: Secret
+          name: {{ $exchange.endpoint.caSecretName }}
+          {{- $key := include "agent-platform.klausGateway.a2aCASecretKey" (dict "ctx" . "jwks" $exchange.endpoint) }}
+          {{- if ne $key "ca.crt" }}
+          key: {{ $key | quote }}
+          {{- end }}
+      {{- else }}
+      {}
+      {{- end }}
+  static:
+    host: {{ $exchange.endpoint.host }}
+    port: {{ $exchange.endpoint.port }}
+---
+# The token check and the exchange. The client's token must come from one of
+# the issuers, for that issuer's audience, requested by one of its
+# allowedClients; agentgateway then exchanges it at Dex through the issuer's
+# connector and sends klaus-gateway the Dex token in its place, never the
+# client's.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: klausgateway-a2a
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: klausgateway-a2a
+  traffic:
+    jwtAuthentication:
+      mode: Strict
+      # The exchange reads the client's token from the Authorization header,
+      # which JWT authentication removes otherwise; the exchange replaces it.
+      preserveToken: true
+      providers:
+        {{- range $i, $issuer := $a2a.issuers }}
+        - issuer: {{ $issuer.issuer | quote }}
+          audiences:
+            - {{ $issuer.audience | quote }}
+          jwks:
+            remote:
+              backendRef:
+                group: agentgateway.dev
+                kind: AgentgatewayBackend
+                name: klausgateway-a2a-jwks-{{ $i }}
+              jwksPath: {{ $issuer.jwks.path | quote }}
+        {{- end }}
+    authorization:
+      action: Require
+      policy:
+        matchExpressions:
+          - {{ printf "!has(jwt.cnf) && !has(jwt.act) && (%s)" (include "agent-platform.klausGateway.a2aClientRule" $a2a.issuers) | quote }}
+  backend:
+    auth:
+      oauthTokenExchange:
+        backendRef:
+          group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: klausgateway-a2a-dex-token
+        path: {{ $exchange.endpoint.path | quote }}
+        subjectToken:
+          tokenType: {{ $exchange.subjectTokenType }}
+        requestedTokenType: IdToken
+        # Dex takes audiences as cross-client scopes, not as the audience
+        # parameter.
+        scopes:
+          {{- range $exchange.scopes }}
+          - {{ . | quote }}
+          {{- end }}
+          {{- range $exchange.audiences }}
+          - {{ printf "audience:server:client_id:%s" . | quote }}
+          {{- end }}
+        additionalParams:
+          connector_id: {{ include "agent-platform.klausGateway.a2aConnectorExpr" $a2a.issuers | quote }}
+        clientAuth:
+          clientId: {{ $exchange.clientId | quote }}
+          method: ClientSecretBasic
+          secretRef:
+            name: {{ $exchange.secretName }}
+            key: {{ $exchange.secretKey | default "clientSecret" }}
+        # No cache. The agent runtime keeps the exchanged token for a whole
+        # turn, so klaus-gateway refuses one with less than its
+        # minTokenLifetime (25m) left; agentgateway's cache serves an entry
+        # until 15s before it expires and has no minimum-lifetime setting.
+        cache:
+          inMemory:
+            maxEntries: 0
+{{- end }}

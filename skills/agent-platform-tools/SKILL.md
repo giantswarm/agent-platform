@@ -213,6 +213,9 @@ clients. Procedure and version prerequisites:
   names selectors that select nothing (a server not signed in to, a renamed tool, an empty preset).
 - An error **naming the toolset** on `call_tool` is composition — the tool is outside the toolset.
   Change the agent (`agent-platform-agent-management`), not the call.
+- An undispatched `call_tool` error with `structuredContent.status: unauthenticated`
+  means muster refused the caller's token. Show its reason and obtain a valid token.
+  Backend sign-ins use `auth_required` or URL elicitation instead.
 - `auth_required` naming a provider App (structured `apps`, each with its `authUrl`) answers a call
   that needs the person's grant of that GitHub App: a commit (`mode: commit` on agent-manager,
   cluster-manager or model-manager), or pinning or reading a private skill. Where the manager

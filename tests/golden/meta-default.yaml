@@ -884,6 +884,7 @@ spec:
             lf.a2a.v1.A2AService: []
         hostname: ""
         jwtAuthentication:
+          audiences: []
           enabled: true
           issuer: ""
           jwks:
@@ -1104,8 +1105,35 @@ spec:
         defaultAgent: ""
         enabled: false
         fallbackIconUrlTemplate: ""
-        url: grpc://agentgateway.agent-platform.svc.cluster.local:8080
+        url: ""
       agentgatewayRoute:
+        a2aServer:
+          enabled: false
+          exchange:
+            audiences:
+            - klaus-gateway
+            - agent-platform
+            - dex-k8s-authenticator
+            clientId: klaus-gateway-exchange
+            endpoint:
+              host: ""
+              path: ""
+              port: 443
+              tls:
+                caSecretKey: ""
+                caSecretName: ""
+                enabled: true
+              tunnel: {}
+            scopes:
+            - openid
+            - email
+            - profile
+            - groups
+            secretKey: clientSecret
+            secretName: ""
+            subjectTokenType: IdToken
+          hostname: ""
+          issuers: []
         enabled: false
         hostname: ""
       image:
@@ -1335,6 +1363,7 @@ spec:
               clientId: ""
               issuerUrl: ""
             enabled: true
+            encryptionKey: true
             existingSecret: ""
             storage:
               type: valkey
@@ -2176,6 +2205,8 @@ spec:
           icon: data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGNpcmNsZSBjeD0iMTYiIGN5PSIxNiIgcj0iMTYiIGZpbGw9IiM5OTNDMUQiLz48ZyBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cmVjdCB4PSIxMCIgeT0iOSIgd2lkdGg9IjEyIiBoZWlnaHQ9IjYiIHJ4PSIxLjUiLz48cmVjdCB4PSIxMCIgeT0iMTciIHdpZHRoPSIxMiIgaGVpZ2h0PSI2IiByeD0iMS41Ii8+PHBhdGggZD0iTTEzIDEyaC4wMU0xMyAyMGguMDEiLz48L2c+PC9zdmc+
           include:
           - label: agent-platform.giantswarm.io/tool-group=infrastructure
+      writesAsCaller:
+        kubernetesAudience: dex-k8s-authenticator
     networkPolicy:
       cilium:
         allowClusterIngress: true
@@ -2588,7 +2619,7 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=5.64.0-rc.2 <6.0.0-0"
+    semver: ">=5.67.0-rc.18 <6.0.0-0"
     semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
 ---
 # Source: agent-platform/templates/components.yaml

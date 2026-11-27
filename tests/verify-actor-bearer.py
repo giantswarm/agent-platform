@@ -29,6 +29,7 @@ AUDIENCE = "https://muster.ci.example.com"
 ISSUER = "https://idp.ate-system.svc"
 BASE = [
     "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+    "--set", "kagent.controller.auth.audiences[0]=agent-platform",
     "--set", "components.kagent.enabled=true",
     "--set", "components.agent-manager.enabled=true",
     "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",

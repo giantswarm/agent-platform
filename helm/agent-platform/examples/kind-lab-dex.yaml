@@ -82,3 +82,4 @@ muster:
     oauth:
       server:
         enabled: false
+        encryptionKey: false

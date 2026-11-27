@@ -1,5 +1,6 @@
 {{- if and (include "agent-platform.agentgateway.controller" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
 {{- $external := include "agent-platform.jwks.externalTargets" . | fromJsonArray }}
+{{- $proxyTargets := include "agent-platform.klausGateway.a2aProxyTargets" (dict "ctx" . "role" "controller") | fromJsonArray }}
 {{- $extra := (.Values.gateway.jwksEgress).external | default dict }}
 {{- $extraCidrs := $extra.cidrs | default list }}
 {{- $extraFqdns := $extra.fqdns | default list }}
@@ -7,7 +8,7 @@
 {{- /* A toFQDNs selector matches nothing without the DNS proxy clause, so the
 policy renders the proxy variant of the DNS rule as soon as one name is
 selected, and the plain variant otherwise. */}}
-{{- $needsDnsProxy := or (gt (len $external) 0) (gt (len $extraFqdns) 0) }}
+{{- $needsDnsProxy := or (gt (len $external) 0) (gt (len $extraFqdns) 0) (gt (len $proxyTargets) 0) }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -92,6 +93,9 @@ spec:
     {{- /* gateway.jwksEgress.external.fqdns: an issuer the routes do not name,
     selected by name. Cilium FQDN selectors verbatim (matchName, matchPattern).
     */}}
+    {{- if $proxyTargets }}
+    {{- include "agent-platform.klausGateway.egress.cilium" (dict "ctx" . "targets" $proxyTargets) | nindent 4 }}
+    {{- end }}
     {{- if $extraFqdns }}
     - toFQDNs:
         {{- toYaml $extraFqdns | nindent 8 }}
