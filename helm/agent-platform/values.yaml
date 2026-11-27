@@ -492,7 +492,12 @@ components:  # @schema additionalProperties: true
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
     # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
-    versionRange: ">=5.64.0-rc.2 <6.0.0-0"
+    # Floor 5.67.0-rc.19: the chart turns muster.oauth.server.encryptionKey on
+    # by default and, without a Secret that holds the key, generates one shared
+    # key for every replica (giantswarm/muster#1929). 5.67.0-rc.15 to rc.18
+    # refuse more than one replica without encryptionKey (giantswarm/muster#1919),
+    # and an older chart keeps the tokens unencrypted; muster.replicaCount is 2.
+    versionRange: ">=5.67.0-rc.19 <6.0.0-0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
