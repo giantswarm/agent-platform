@@ -199,6 +199,11 @@ clients. Procedure and version prerequisites:
 
 ## When a tool is missing or refused
 
+- After a Valkey-backed installation enables muster encryption, old sign-ins and actor bindings
+  can be unreadable. Once the rollout finishes, sign in again and start a new Session so
+  agent-manager binds its actor. Unreadable bindings grant no credentials and can be replaced
+  without waiting for their TTL. Operator guidance:
+  [Encryption upgrades](https://github.com/giantswarm/muster/blob/main/docs/operations/installation.md#more-than-one-replica).
 - `filter_tools` with a `pattern` names, under `servers_requiring_auth`, each connector whose tools
   a sign-in would unlock, with its `auth_tool`: call `core_auth_login` with that `server` from this
   conversation and give the person the sign-in link it returns. An entry with an `error` and no
