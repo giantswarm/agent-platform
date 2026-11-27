@@ -24,8 +24,8 @@ While 0.5.0 and 4.0.0 are release candidates, an installation with `gitops.prere
 ### Operator action
 
 - agent-manager 4 refuses `{parent}` in `agent-manager.credentials.uiURL`. Remove `{parent}` from the template before agent-manager 4 runs, or agent-manager's release fails to render.
-- With `agentPlatformOrganizations.enabled`, run agent-platform-operator 0.5.x and agent-manager 4.x with this chart. On `gitops.prereleases: false`, wait for 0.5.0 and 4.0.0 before this chart release.
-- An installation that pins the BOM and has `agentPlatformOrganizations.enabled`: pin `agent-platform-operator` to a 0.5.x release and `agent-manager` to a 4.x release. The BOM's own pins stay at the floors, 0.4.0 and 3.5.8, until the floors move.
+- With `agentPlatformOrganizations.enabled`, run agent-platform-operator 0.5.x, agent-manager 4.x and klaus-gateway 4.18.10 or later with this chart: agent-manager 4 starts an organization's Session only by the organization's name, which klaus-gateway sends from 4.18.10 (giantswarm/klaus-gateway#616). The Dev Portal's organization pages need the portal release of giantswarm/backstage#3651. On `gitops.prereleases: false`, wait for 0.5.0 and 4.0.0 before this chart release.
+- An installation that pins the BOM and has `agentPlatformOrganizations.enabled`: pin `agent-platform-operator` to a 0.5.x release, `agent-manager` to a 4.x release and `klaus-gateway` to 4.18.10 or later. The BOM's own pins stay at the floors (0.4.0, 3.5.8 and 4.11.0) until the floors move (giantswarm/agent-platform#1510).
 
 ## \<current\> → \<next\> (agent-manager follows stable releases by default)
 
