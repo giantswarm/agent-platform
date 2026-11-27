@@ -492,7 +492,12 @@ components:  # @schema additionalProperties: true
     # The upper bound stays at the next major so minor releases still roll
     # forward on their own.
     # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
-    versionRange: ">=5.64.0-rc.2 <6.0.0-0"
+    # Floor 5.67.0-rc.19: the chart turns muster.oauth.server.encryptionKey on
+    # by default and, without a Secret that holds the key, generates one shared
+    # key for every replica (giantswarm/muster#1929). 5.67.0-rc.15 to rc.18
+    # refuse more than one replica without encryptionKey (giantswarm/muster#1919),
+    # and an older chart keeps the tokens unencrypted; muster.replicaCount is 2.
+    versionRange: ">=5.67.0-rc.19 <6.0.0-0"
     valuesFrom: muster
     # App-owned CRDs: muster ships its MCPServer/Workflow CRDs in its own chart
     # crds/ dir and owns their version. CreateReplace makes Flux upgrade them
@@ -1129,17 +1134,6 @@ components:  # @schema additionalProperties: true
     # installs first (the reference is dropped while that component is off,
     # as every other one).
     dependsOn: [muster, kagent, kserve-llmisvc-resources]
-  credential-api:  # @schema additionalProperties: true
-    chart: credential-api
-    repository: oci://gsoci.azurecr.io/charts/giantswarm
-    versionRange: ">=0.2.0 <0.3.0-0"
-    valuesFrom: credential-api
-    enabled: false
-    injectGlobal: false
-    targetNamespace: agent-platform-credential-api
-    gatedValues: [credentialApi]
-    gatedRoster: true
-    dependsOn: [valkey]
   agent-manager:  # @schema additionalProperties: true
     chart: agent-manager
     # The agent write surface of the Agent Control Plane
@@ -1878,7 +1872,6 @@ components:  # @schema additionalProperties: true
       # The flux-engine subchart's values are the engine's, not wiring: never
       # forwarded (Helm coalesces the subchart's defaults into this block).
       - flux-engine
-      - credential-api
       # Read by the meta chart alone (merged into the four components' own
       # scheduling knobs before their releases render, agent-platform.scheduling.apply);
       # the connectivity chart never sees it.
@@ -5028,26 +5021,6 @@ agentSandbox:  # @schema skipProperties: true; additionalProperties: true
 # token to the API: the user's RBAC governs and the ServiceAccount holds no
 # permissions (the chart renders no RBAC). The chart's own NetworkPolicy stays
 # off; the connectivity chart renders the policies (modelManager below).
-credential-api:  # @schema skipProperties: true; additionalProperties: true
-  installation: ""
-  credentialOrigin: ""
-  portalOrigin: ""
-  audience: credential-api
-  existingSecret: credential-api
-  managers: {}
-  operationCapacity: 256
-  cleanupInterval: 1m
-  oauth:
-    issuer: ""
-    clientId: credential-api
-    kubernetesAudience: ""
-  gatewayAPI:
-    enabled: true
-    parentRefs: []
-
-credentialApi:
-  namespace: ""
-
 model-manager:  # @schema skipProperties: true; additionalProperties: true
   fullnameOverride: model-manager
   # OTLP trace export: `auto` takes global.observability.traces.otlp (endpoint,

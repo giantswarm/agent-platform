@@ -87,8 +87,6 @@ To share with one team instead, create it in that team's organization.
 
 ## Who manages models and egress policies
 
-The optional credential-api component provides person-bound browser submission on `credentials.<installation domain>`, with direct portal-origin routes to the same service. Managers pass metadata and exact destinations only. Its own OAuth session must match the operation's issuer and subject; another person or another identity cannot save, including an admin using someone else's link. On “Ask an admin”, the admin starts setup with their own sign-in. Check the installation, initiating actor, every consumer and destination before entering a value. Never send credentials through a tool or chat. See [credential-api configuration](../../docs/credential-api.md) for the unpublished dependency gates. Existing consumers keep their current flow until their migration slices; model-manager owns model credentials in that migration.
-
 - **Platform models**: cluster admins use the same model and credential tools without
   `organization`, or the installation's configuration in git. The
   credential operation declares `scope: platform`; it is not an organization.
