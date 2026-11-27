@@ -102,6 +102,10 @@ never assume an argument. The agent tools drop an unknown key without an error: 
    plugin to the head of its ref, as you: it fails when you cannot read one of the agent's
    repositories.
 
+`start_session` can relay a URL interaction required by a workspace or toolchain read.
+Follow `agent-platform-tools`' consent and retry rules. Do not report a session as
+started while its tool call awaits input, or retry with changed arguments.
+
 ## The rules the tools do not tell you
 
 - Workspace CLI configuration belongs to the Harness's literal environment.

@@ -78,6 +78,16 @@ with its description, `toolset_unmatched` the selectors that selected nothing, `
 `toolset_bound`) what bounds you. It never widens your own toolset. Defining presets:
 https://docs.giantswarm.io/tutorials/agent-platform/toolset-presets/.
 
+## URL interactions and retries
+
+Muster and its downstream managers can ask for a URL interaction, including sign-in,
+consent or credential setup. Preserve the producer's message and show the URL for the
+person's consent; never open or accept it automatically. Acceptance agrees to navigation
+and does not prove the browser flow completed. Let the MCP client carry sealed
+`requestState` and `inputResponses` on the same call, without changing its arguments.
+These are protocol fields, never tool arguments. Decline or cancel stops that attempt.
+An invalid-state or sealing error is a failure, not permission to retry without state.
+
 ## Connectors (MCP servers)
 
 "Connector" names two things. A **Muster connector** is a Muster `MCPServer`, and an agent reaches
