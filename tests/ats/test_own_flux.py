@@ -225,8 +225,13 @@ def wait_for_components_settled(kube: Kube, timeout: float) -> None:
 
 def platform_values() -> Dict[str, Any]:
     """The smoke's base values (engine on there) with the engine off: what the
-    README's own-Flux HelmRelease inlines."""
-    return load_values(SCENARIO.own_flux_values, ["components.flux.enabled=false"])
+    README's own-Flux HelmRelease inlines, with muster at one replica."""
+    # One muster replica, as in the smoke (values-round-trips.yaml): since
+    # giantswarm/muster#1919 the muster chart refuses more than one replica
+    # without muster.oauth.server.encryptionKey, the meta chart's default is
+    # two replicas and these values set no key. Drop the setting when the
+    # chart's default renders without one.
+    return load_values(SCENARIO.own_flux_values, ["components.flux.enabled=false", "muster.replicaCount=1"])
 
 
 def meta_helmrelease(version: str, engine: bool) -> List[Dict[str, Any]]:
