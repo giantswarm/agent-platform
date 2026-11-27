@@ -54,24 +54,55 @@ identity provider.
 {{- end -}}
 
 {{/*
-The identity provider the component validates tokens with
-(cluster-manager.oauth.provider): dex (the default) or google.
+The identity provider the component validates tokens with: dex or google, as
+the chart resolves it (cluster-manager.oauth.authorizationServer.upstream.type,
+else the deprecated cluster-manager.oauth.provider, else global.identity.type,
+else dex).
 */}}
 {{- define "agent-platform.clusterManager.oauthProvider" -}}
 {{- $chart := include "agent-platform.clusterManager.chartValues" . | fromJson -}}
-{{- dig "oauth" "provider" "dex" $chart -}}
+{{- dig "oauth" "authorizationServer" "upstream" "type" "" $chart | default (dig "oauth" "provider" "" $chart) | default .Values.global.identity.type | default "dex" -}}
 {{- end -}}
 
 {{/*
 The issuer URL the component validates tokens against: the dex provider's
-cluster-manager.oauth.dex.issuerURL, else global.identity.issuerUrl (the chart's
-own fallback). Empty for the google provider and when neither is set.
+cluster-manager.oauth.authorizationServer.upstream.issuer, else the deprecated
+cluster-manager.oauth.dex.issuerURL, else global.identity.issuerUrl (the
+chart's own fallbacks). Empty for the google provider (whose public endpoints
+agent-platform.idpHosts names from the provider alone) and when neither is set.
 */}}
 {{- define "agent-platform.clusterManager.issuerUrl" -}}
 {{- $chart := include "agent-platform.clusterManager.chartValues" . | fromJson -}}
 {{- if eq (include "agent-platform.clusterManager.oauthProvider" .) "dex" -}}
-{{- dig "oauth" "dex" "issuerURL" "" $chart | default .Values.global.identity.issuerUrl -}}
+{{- dig "oauth" "authorizationServer" "upstream" "issuer" "" $chart | default (dig "oauth" "dex" "issuerURL" "" $chart) | default .Values.global.identity.issuerUrl -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+The hosts of cluster-manager.oauth.resourceServer.trustedIssuers that its
+egress must reach beyond the login identity provider: each entry's issuer and
+jwksURI host (lower case, no port), without the hosts agent-platform.idpHosts
+already names, sorted and unique. An entry is an issuer cluster-manager fetches
+a key set from, so a host missing here is a token it cannot validate. An
+address literal fails the render: the policy selects external hosts by name
+only. JSON list; empty without trusted issuers.
+*/}}
+{{- define "agent-platform.clusterManager.trustedIssuerHosts" -}}
+{{- $chart := include "agent-platform.clusterManager.chartValues" . | fromJson -}}
+{{- $main := include "agent-platform.idpHosts" (dict "provider" (include "agent-platform.clusterManager.oauthProvider" .) "issuerUrl" (include "agent-platform.clusterManager.issuerUrl" .)) | fromJsonArray -}}
+{{- $hosts := list -}}
+{{- range $i, $entry := dig "oauth" "resourceServer" "trustedIssuers" list $chart -}}
+{{- range $key := list "issuer" "jwksURI" -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" (include "agent-platform.urlHost" (toString (dig $key "" $entry))) -}}
+{{- if $host -}}
+{{- if include "agent-platform.jwks.addrLiteral" $host -}}
+{{- fail (printf "cluster-manager.oauth.resourceServer.trustedIssuers[%d].%s names an address (%s): the network policy reaches a trusted issuer by name; use its DNS name" $i $key $host) -}}
+{{- end -}}
+{{- if not (has $host $main) }}{{ $hosts = append $hosts $host }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $hosts | uniq | sortAlpha | toJson -}}
 {{- end -}}
 
 {{/*

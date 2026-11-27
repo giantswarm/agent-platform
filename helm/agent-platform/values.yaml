@@ -1342,8 +1342,9 @@ components:  # @schema additionalProperties: true
     # each new cluster-manager line rolls in without a release of this chart. A
     # cluster-manager release that renames one of them must not ship until this
     # chart follows (UNCAPPED in tests/verify-range-ceilings.py).
-    # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
-    versionRange: ">=0.39.0-rc.1"
+    # 0.40.0-rc.1 is the floor: its schema has oauth.authorizationServer and
+    # oauth.resourceServer, the keys agent-platform.identity.apply fills.
+    versionRange: ">=0.40.0-rc.1"
     valuesFrom: cluster-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster app);
@@ -5653,8 +5654,6 @@ cluster-manager:  # @schema skipProperties: true; additionalProperties: true
   # global.identity (agent-platform.identity.defaults) unless set here.
   oauth:
     enabled: true
-    dex:
-      allowPrivateURLs: false
     downstream:
       enabled: true
   muster:

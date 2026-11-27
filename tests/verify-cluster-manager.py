@@ -153,7 +153,7 @@ def main(meta: str, connectivity: str) -> int:
         f"    fullnameOverride: {NAME}\n",
         "    installation:\n      name: \"\"\n",
         "    modelManager:\n      namespace: default\n",
-        "    oauth:\n      dex:\n        allowPrivateURLs: false\n      downstream:\n        enabled: true\n      enabled: true\n      provider: dex\n",
+        "    oauth:\n      downstream:\n        enabled: true\n      enabled: true\n",
         "    muster:\n      mcpServer:\n        auth:\n          forwardToken: true\n          requiredAudiences:\n          - dex-k8s-authenticator\n        enabled: true\n",
         "\n    global:\n",
     ), "the HelmRelease")
@@ -359,8 +359,8 @@ def main(meta: str, connectivity: str) -> int:
     # --- the guards -------------------------------------------------------------------------
     for what, flags, fragment in (
         ("muster off with the MCPServer on", ["--set", "components.muster.enabled=false"], f"{NAME}.muster.mcpServer.enabled is true but components.muster.enabled is false"),
-        ("a missing issuer", ["--set", "global.identity.issuerUrl="], f"{NAME}.oauth.dex.issuerURL is empty and global.identity.issuerUrl is not set"),
-        ("a missing domain", ["--set", "global.domain="], f"{NAME}.oauth.baseURL is empty and global.domain is not set"),
+        ("a missing issuer", ["--set", "global.identity.issuerUrl="], f"{NAME}.oauth.authorizationServer.upstream.issuer (or its deprecated {NAME}.oauth.dex.issuerURL) is empty and global.identity.issuerUrl is not set"),
+        ("a missing domain", ["--set", "global.domain="], f"{NAME}.oauth.authorizationServer.issuer (or its deprecated {NAME}.oauth.baseURL) is empty and global.domain is not set"),
         ("a bad CIDR", ["--set", f"{WIRING}.networkPolicy.workloadClusters.cidrs[0]=not-a-cidr"], "is not an IPv4 CIDR"),
         ("no workload ports", ["--set", f"{WIRING}.networkPolicy.workloadClusters.ports=null"], f"{WIRING}.networkPolicy.workloadClusters.ports is empty"),
         ("Flux required without the API", ["--set", f"{WIRING}.flux.requireApi=true"], "helm.toolkit.fluxcd.io/v2 API (HelmRelease) is not on the cluster"),

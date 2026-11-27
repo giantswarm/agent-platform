@@ -4,11 +4,13 @@
 The meta chart fills what a manager's oauth block and global.identity leave
 unset from muster.muster.oauth.server (agent-platform.identity.apply):
 oauth.dex.issuerURL, oauth.dex.clientID with oauth.trustedAudiences, and
-oauth.existingSecret for agent-manager, vm-manager, cluster-manager and
-skill-manager, oauth.baseURL for agent-manager's route; model-manager, on
-mcp-oauth's values layout, gets oauth.authorizationServer.upstream.issuer,
-upstream.client.id, upstream.client.secretKeyRef and authorizationServer.issuer
-instead, and no trustedAudiences (its chart derives them from the client).
+oauth.existingSecret for agent-manager, vm-manager and skill-manager,
+oauth.baseURL for agent-manager's route; model-manager and cluster-manager, on
+mcp-oauth's values layout, get oauth.authorizationServer.upstream.issuer,
+upstream.client.id and upstream.client.secretKeyRef instead, and no
+trustedAudiences (their charts derive them from the client); model-manager also
+gets authorizationServer.issuer, while cluster-manager's chart derives its own
+from global.domain.
 The connectivity release receives the same filled blocks (not skill-manager's,
 which only its own release reads), so each case renders the meta chart, then
 the connectivity chart with the values its HelmRelease carries — where the
@@ -31,7 +33,7 @@ import yaml
 MANAGERS = ("model-manager", "agent-manager", "vm-manager", "cluster-manager", "skill-manager")
 # Blocks the connectivity release does not receive (components.agent-platform-connectivity.omitKeys).
 NOT_IN_CONNECTIVITY = ("skill-manager",)
-DEX_OPT_IN_UNSET = ("model-manager",)
+DEX_OPT_IN_UNSET = ("model-manager", "cluster-manager")
 # Components with an oauth block that this script does not render, and where they are covered.
 EXEMPT = {"workspace-manager": "needs the workspaces fixture; verify-workspace-manager and verify-idp-egress cover it"}
 # The managers that call the Kubernetes API as the person (oauth.downstream).
@@ -108,7 +110,7 @@ def oauth(rels: dict[str, dict], name: str) -> dict:
 
 # Managers on mcp-oauth's values layout: the meta chart fills
 # oauth.authorizationServer, not the deprecated keys.
-LAYOUT = ("model-manager",)
+LAYOUT = ("model-manager", "cluster-manager")
 
 
 def filled(o: dict, name: str) -> dict:
@@ -203,7 +205,7 @@ def idp_rules(docs: list[dict], name: str) -> list[dict]:
 
 
 def expect_no_dex_opt_in(label: str, name: str, manager_oauth: dict) -> None:
-    """model-manager's chart defaults the no-op opt-in to false, so its block leaves the key out; the others set it to false."""
+    """model-manager's and cluster-manager's charts default the no-op opt-in to false, so their blocks leave the key out; the others set it to false."""
     if name in DEX_OPT_IN_UNSET:
         expect(f"{label} obsolete Dex opt-in unset", "allowPrivateURLs" in manager_oauth.get("dex", {}), False)
     else:
@@ -258,9 +260,10 @@ def main() -> None:
         expect(f"{name} oauth.trustedAudiences", f["audiences"], login_audiences(name, CLIENT))
         want = f"https://agentgateway.ci.example.com{ROUTED[name]}" if name in ROUTED else None
         expect(f"{name} base URL", f["base"], want)
-    expect("model-manager client secret key", filled(oauth(rels, "model-manager"), "model-manager")["secretKey"], "dex-client-secret")
-    for key in ("dex", "existingSecret", "baseURL", "trustedAudiences"):
-        expect(f"model-manager deprecated oauth.{key} left unset", key in oauth(rels, "model-manager"), False)
+    for name in LAYOUT:
+        expect(f"{name} client secret key", filled(oauth(rels, name), name)["secretKey"], "dex-client-secret")
+        for key in ("dex", "existingSecret", "baseURL", "trustedAudiences", "provider"):
+            expect(f"{name} deprecated oauth.{key} left unset", key in oauth(rels, name), False)
     cvals = rels["agent-platform-connectivity"]
     for name in MANAGERS:
         if name not in NOT_IN_CONNECTIVITY:
@@ -278,9 +281,10 @@ def main() -> None:
         sys.exit("FAIL: derived: model-manager's egress does not reach the derived issuer")
     print("ok: derived")
 
-    print("--> global.identity: the managers that call the Kubernetes API as the person take its provider and audiences where their blocks leave them unset")
+    print("--> global.identity: the managers that call the Kubernetes API as the person take its audiences, and agent-manager its provider, where their blocks leave them unset; the values layout charts read global.identity.type themselves")
     for name in DOWNSTREAM:
-        expect(f"{name} oauth.provider from global.identity.type", oauth(rels, name).get("provider"), "dex")
+        want = None if name in LAYOUT else "dex"
+        expect(f"{name} oauth.provider from global.identity.type", oauth(rels, name).get("provider"), want)
         expect(f"{name} requiredAudiences from global.identity.kubernetes.audiences", required_audiences(rels, name), ["dex-k8s-authenticator"])
     expect("skill-manager requiredAudiences (its own)", required_audiences(rels, "skill-manager"), ["dex-k8s-authenticator"])
     rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets(
@@ -307,28 +311,29 @@ def main() -> None:
             sys.exit(f"FAIL: idp egress: a Cilium policy gives {name}'s pods the cluster entity; it has {rules}")
     print("ok: idp egress")
 
-    print("--> trusted issuers: model-manager's egress reaches each issuer and key set host of oauth.resourceServer.trustedIssuers by name, an in-cluster one through its namespace, the login host once; an address fails the render")
-    values = copy.deepcopy(rels["agent-platform-connectivity"])
-    merge(values["model-manager"]["oauth"], {"resourceServer": {"trustedIssuers": [
-        {"issuer": "https://Other.Example.com/", "jwksURI": "https://keys.example.net/jwks", "audiences": ["a"]},
-        {"issuer": "http://dex.idp.svc.cluster.local:5556/dex", "jwksURI": "http://dex.idp.svc.cluster.local:5556/dex/keys", "audiences": ["a"]},
-        {"issuer": ISSUER, "jwksURI": f"{ISSUER}/keys", "audiences": ["a"]},
-    ]}})
-    result = connectivity(conn, values, base)
-    if result.returncode != 0:
-        sys.exit(f"FAIL: trusted issuers: the connectivity render failed\n{result.stderr}")
-    egress = next(d for d in yaml.safe_load_all(result.stdout) if d and d.get("kind") == "CiliumNetworkPolicy"
-                  and d["metadata"]["name"] == "agent-platform-connectivity-model-manager-egress")["spec"]["egress"]
-    names = [m["matchName"] for r in egress for m in r.get("toFQDNs", []) if "matchName" in m]
-    expect("trusted issuers: external hosts by name", sorted(n for n in names if n in ("other.example.com", "keys.example.net")), ["keys.example.net", "other.example.com"])
-    expect("trusted issuers: the login host once", names.count(urllib.parse.urlparse(ISSUER).hostname), 1)
-    expect("trusted issuers: no FQDN rule for an in-cluster Service", [n for n in names if n.endswith(".svc.cluster.local")], [])
-    if not any(m.get("matchLabels") == {"io.kubernetes.pod.namespace": "idp"} for r in egress for m in r.get("toEndpoints", [])):
-        sys.exit(f"FAIL: trusted issuers: no rule reaches the in-cluster issuer's namespace idp; egress is {egress}")
-    values["model-manager"]["oauth"]["resourceServer"]["trustedIssuers"].append({"issuer": "https://203.0.113.7/", "jwksURI": "https://203.0.113.7/keys", "audiences": ["a"]})
-    result = connectivity(conn, values, base)
-    if result.returncode == 0 or "model-manager.oauth.resourceServer.trustedIssuers[3].issuer names an address (203.0.113.7)" not in result.stderr:
-        sys.exit(f"FAIL: trusted issuers: an address literal did not fail the render naming the entry\n{result.stderr}")
+    for layout in LAYOUT:
+        print(f"--> trusted issuers: {layout}'s egress reaches each issuer and key set host of oauth.resourceServer.trustedIssuers by name, an in-cluster one through its namespace, the login host once; an address fails the render")
+        values = copy.deepcopy(rels["agent-platform-connectivity"])
+        merge(values[layout]["oauth"], {"resourceServer": {"trustedIssuers": [
+            {"issuer": "https://Other.Example.com/", "jwksURI": "https://keys.example.net/jwks", "audiences": ["a"]},
+            {"issuer": "http://dex.idp.svc.cluster.local:5556/dex", "jwksURI": "http://dex.idp.svc.cluster.local:5556/dex/keys", "audiences": ["a"]},
+            {"issuer": ISSUER, "jwksURI": f"{ISSUER}/keys", "audiences": ["a"]},
+        ]}})
+        result = connectivity(conn, values, base)
+        if result.returncode != 0:
+            sys.exit(f"FAIL: trusted issuers: {layout}: the connectivity render failed\n{result.stderr}")
+        egress = next(d for d in yaml.safe_load_all(result.stdout) if d and d.get("kind") == "CiliumNetworkPolicy"
+                      and d["metadata"]["name"] == f"agent-platform-connectivity-{layout}-egress")["spec"]["egress"]
+        names = [m["matchName"] for r in egress for m in r.get("toFQDNs", []) if "matchName" in m]
+        expect(f"trusted issuers: {layout}: external hosts by name", sorted(n for n in names if n in ("other.example.com", "keys.example.net")), ["keys.example.net", "other.example.com"])
+        expect(f"trusted issuers: {layout}: the login host once", names.count(urllib.parse.urlparse(ISSUER).hostname), 1)
+        expect(f"trusted issuers: {layout}: no FQDN rule for an in-cluster Service", [n for n in names if n.endswith(".svc.cluster.local")], [])
+        if not any(m.get("matchLabels") == {"io.kubernetes.pod.namespace": "idp"} for r in egress for m in r.get("toEndpoints", [])):
+            sys.exit(f"FAIL: trusted issuers: {layout}: no rule reaches the in-cluster issuer's namespace idp; egress is {egress}")
+        values[layout]["oauth"]["resourceServer"]["trustedIssuers"].append({"issuer": "https://203.0.113.7/", "jwksURI": "https://203.0.113.7/keys", "audiences": ["a"]})
+        result = connectivity(conn, values, base)
+        if result.returncode == 0 or f"{layout}.oauth.resourceServer.trustedIssuers[3].issuer names an address (203.0.113.7)" not in result.stderr:
+            sys.exit(f"FAIL: trusted issuers: {layout}: an address literal did not fail the render naming the entry\n{result.stderr}")
     print("ok: trusted issuers")
 
     print("--> skill-manager off: no policy selects its pods")
@@ -407,6 +412,15 @@ def main() -> None:
     expect("model-manager upstream.client with deprecated keys set", (f["client"], f["secret"]), (None, None))
     expect("model-manager authorizationServer.issuer with deprecated baseURL set", f["base"], None)
     expect("model-manager upstream.issuer (still derived)", f["issuer"], ISSUER)
+    rels = releases(meta, [*base, *ALL_ON, *LOGIN, *sets(
+        "cluster-manager.oauth.authorizationServer.upstream.client.id=own-client",
+        "cluster-manager.oauth.authorizationServer.issuer=https://cm.example.com",
+    )])
+    f = filled(oauth(rels, "cluster-manager"), "cluster-manager")
+    expect("cluster-manager upstream.client.id", f["client"], "own-client")
+    expect("cluster-manager authorizationServer.issuer", f["base"], "https://cm.example.com")
+    expect("cluster-manager upstream.client.secretKeyRef (still derived)", (f["secret"], f["secretKey"]), (SECRET, "dex-client-secret"))
+    expect("cluster-manager upstream.issuer (still derived)", f["issuer"], ISSUER)
     print("ok: explicit wins on the values layout")
 
     print("--> global.identity wins: set, nothing is filled (the charts read it themselves)")
@@ -470,8 +484,7 @@ def main() -> None:
         sys.exit(f"FAIL: values layout, absence: the new keys did not satisfy the guard\n{result.stderr}")
     print("ok: values layout, absence")
     values = copy.deepcopy(rels["agent-platform-connectivity"])
-    # Both charts default model-manager.oauth.provider to dex; null removes it.
-    values["model-manager"]["oauth"]["provider"] = None
+    expect("connectivity model-manager oauth.provider unset", "provider" in values["model-manager"]["oauth"], False)
     values["global"]["identity"]["type"] = "google"
     result = connectivity(conn, values, base)
     if result.returncode != 0:

@@ -33,18 +33,22 @@ its CRD, or pool releases nothing reconciles.
          the child release, out of sight. Fail here, naming both keys. */ -}}
   {{- if (include "agent-platform.clusterManager.oauthEnabled" .) }}
     {{- $oauth := dig "oauth" dict $chart }}
-    {{- if and (not (dig "baseURL" "" $oauth)) (not .Values.global.domain) }}
-      {{- fail "cluster-manager.oauth.enabled is true but cluster-manager.oauth.baseURL is empty and global.domain is not set: the resource server needs its public base URL" }}
+    {{- $dex := dig "dex" dict $oauth }}
+    {{- /* cluster-manager's shared values layout first, then its deprecated
+           keys. */}}
+    {{- $upstream := dig "authorizationServer" "upstream" dict $oauth }}
+    {{- if and (not (dig "authorizationServer" "issuer" "" $oauth)) (not (dig "baseURL" "" $oauth)) (not .Values.global.domain) }}
+      {{- fail "cluster-manager.oauth.enabled is true but cluster-manager.oauth.authorizationServer.issuer (or its deprecated cluster-manager.oauth.baseURL) is empty and global.domain is not set: the resource server needs its public base URL — the chart derives https://<fullname>.<global.domain>" }}
     {{- end }}
-    {{- if eq (dig "provider" "dex" $oauth) "dex" }}
+    {{- if eq (include "agent-platform.clusterManager.oauthProvider" .) "dex" }}
       {{- if not (include "agent-platform.clusterManager.issuerUrl" .) }}
-        {{- fail "cluster-manager.oauth.enabled is true but cluster-manager.oauth.dex.issuerURL is empty and global.identity.issuerUrl is not set: the resource server needs the login issuer" }}
+        {{- fail "cluster-manager.oauth.enabled is true but cluster-manager.oauth.authorizationServer.upstream.issuer (or its deprecated cluster-manager.oauth.dex.issuerURL) is empty and global.identity.issuerUrl is not set: the resource server needs the login issuer — the meta chart fills it from muster.muster.oauth.server.dex.issuerUrl" }}
       {{- end }}
-      {{- if and (not (dig "dex" "clientID" "" $oauth)) (not .Values.global.identity.clientId) }}
-        {{- fail "cluster-manager.oauth.enabled is true but cluster-manager.oauth.dex.clientID is empty and global.identity.clientId is not set: the resource server needs the platform OAuth client" }}
+      {{- if and (not (dig "client" "id" "" $upstream)) (not (dig "clientID" "" $dex)) (not .Values.global.identity.clientId) }}
+        {{- fail "cluster-manager.oauth.enabled is true but cluster-manager.oauth.authorizationServer.upstream.client.id (or its deprecated cluster-manager.oauth.dex.clientID) is empty and global.identity.clientId is not set: the resource server needs the platform OAuth client — set muster.muster.oauth.server.dex.clientId, which the meta chart fills it from" }}
       {{- end }}
-      {{- if and (not (dig "existingSecret" "" $oauth)) (not (dig "dex" "clientSecret" "" $oauth)) (not .Values.global.identity.existingSecret) }}
-        {{- fail "cluster-manager.oauth.enabled is true but none of cluster-manager.oauth.existingSecret, cluster-manager.oauth.dex.clientSecret or global.identity.existingSecret is set: the resource server needs the platform client's secret (key dex-client-secret)" }}
+      {{- if and (not (dig "client" "secretKeyRef" "name" "" $upstream)) (not (dig "existingSecret" "" $oauth)) (not (dig "clientSecret" "" $dex)) (not .Values.global.identity.existingSecret) }}
+        {{- fail "cluster-manager.oauth.enabled is true but none of cluster-manager.oauth.authorizationServer.upstream.client.secretKeyRef.name, its deprecated cluster-manager.oauth.existingSecret or cluster-manager.oauth.dex.clientSecret, or global.identity.existingSecret is set: the resource server needs the platform client's secret — set muster.muster.oauth.server.existingSecret (a Secret with key dex-client-secret), which the meta chart fills it from" }}
       {{- end }}
     {{- end }}
   {{- end }}

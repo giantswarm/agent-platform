@@ -147,8 +147,10 @@ KAGENT = ["kagent-crds", "kagent"]
 # component -> the release its RANGE waits for. While nothing the range admits
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
-UNRELEASED: dict[str, str] = {
-}
+# cluster-manager waits for the release on mcp-oauth's values layout
+# (oauth.authorizationServer, oauth.resourceServer); through 0.39.x the schema
+# closes the oauth block.
+UNRELEASED: dict[str, str] = {"cluster-manager": "0.40.0-rc.1"}
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
 # value the meta chart forwards. The entry goes with the release.
