@@ -1212,10 +1212,17 @@ components:  # @schema additionalProperties: true
     # left release candidates (giantswarm/agent-platform#1497): an
     # installation with gitops.prereleases off follows agent-manager's stable
     # releases only, and gitops.prereleases admits its release candidates.
-    # The ceiling stays below 4.0.0: agent-manager 4.x serves the tools of
-    # the Organization kind, which only the chart release of
-    # giantswarm/agent-platform#1489 admits.
-    versionRange: ">=3.5.8 <4.0.0"
+    # 4.0.0 serves the organization tools by name on the Organization kind
+    # (giantswarm/agent-manager#475), which this chart's policies and skills
+    # are written for; the ceiling is the next major. The floor stays at
+    # 3.5.8 only while 4.0.0 is a release candidate: a release-candidate
+    # floor admits every later release candidate on an installation with
+    # gitops.prereleases off, and a floor of the unpublished 4.0.0 fails
+    # make verify-release-floors. So gitops.prereleases takes 4.0.0-rc.1 and
+    # later, and an installation without it stays on 3.5.x until 4.0.0 is
+    # released. When 4.0.0 is released, the floor becomes 4.0.0 (make
+    # golden-update moves the BOM pin with it).
+    versionRange: ">=3.5.8 <5.0.0"
     valuesFrom: agent-manager
     # harness.egress travels only when set: the key is new in agent-manager
     # 1.11.0, and an older chart's closed harness block refuses it; unset, the
@@ -1450,8 +1457,8 @@ components:  # @schema additionalProperties: true
     chart: agent-platform-operator
     # The Agent Platform organizations' operator
     # (giantswarm/agent-platform-operator, giantswarm/giantswarm#38891): it
-    # reconciles each AgentPlatformOrganization (agent-platform.giantswarm.io)
-    # into its organization namespace, with the curated copies, and cleans up a
+    # reconciles each Organization (security.giantswarm.io) with the Agent
+    # Platform enabled into its organization namespace, with the curated copies, and cleans up a
     # deleted organization behind a finalizer. No `enabled` here: the
     # component follows the one switch agentPlatformOrganizations.enabled
     # (below), and an explicit value that disagrees with it fails the render
@@ -1460,9 +1467,9 @@ components:  # @schema additionalProperties: true
     # (agent-platform-operator, its chart's name), and another targetNamespace
     # fails the render.
     repository: oci://gsoci.azurecr.io/charts/giantswarm
-    # A 0.4.x release rolls in without a change here, its CRD with it
-    # (CreateReplace); one that needs wiring of this chart is a minor
-    # release, 0.5.0, outside the range. 0.1.0 carries the CRD, the curated
+    # A 0.5.x release rolls in without a change here; one that needs wiring
+    # of this chart is a minor release, 0.6.0, outside the range. 0.1.0
+    # carries the CRD, the curated
     # copies, organization cleanup, the ate-api CA projected from ClusterTrustBundles
     # (agent-platform-operator#2, #3, #7, #21) and the serviceAccountBindings
     # the meta chart derives: the credential providers' Secret readers bound
@@ -1492,12 +1499,29 @@ components:  # @schema additionalProperties: true
     # (kagent.controller.image.repository, the default); with the line's own
     # controller an organization with a ModelConfig and no Agent keeps its
     # workers and is Ready=False.
-    versionRange: ">=0.4.0 <0.5.0"
+    # 0.5.0 reconciles the Organization kind (security.giantswarm.io) with
+    # spec.capabilities.agentPlatform and one namespace agents-<name>
+    # (giantswarm/agent-platform-operator#69), which this chart's policies
+    # are written for; a 0.4.x operator reconciles AgentPlatformOrganizations,
+    # whose namespaces and Kustomizations these policies refuse. The floor
+    # stays at 0.4.0 only while 0.5.0 is a release candidate: a
+    # release-candidate floor admits every later release candidate on an
+    # installation with gitops.prereleases off, and a floor of the unpublished
+    # 0.5.0 fails make verify-release-floors. So gitops.prereleases takes
+    # 0.5.0-rc.1 and later, and an installation without it stays on 0.4.x
+    # until 0.5.0 is released. When 0.5.0 is released, the floor becomes
+    # 0.5.0 (make golden-update moves the BOM pin with it), and crds and
+    # ownedCrds below go.
+    versionRange: ">=0.4.0 <0.6.0"
     valuesFrom: agent-platform-operator
-    # App-owned CRD: the chart ships agentplatformorganizations in its crds/
-    # dir. CreateReplace makes Flux upgrade it with the app on every release
-    # (Helm never upgrades crds/-dir CRDs on its own). It owns its version, so
-    # no CRD dependsOn.
+    # App-owned CRD of the 0.4.x line: its chart ships
+    # agentplatformorganizations in its crds/ dir. CreateReplace makes Flux
+    # upgrade it with the app on every release (Helm never upgrades crds/-dir
+    # CRDs on its own). It owns its version, so no CRD dependsOn. A 0.5.x
+    # chart ships no crds/ dir (the Organization CRD is organization-operator's,
+    # or agentPlatformOrganizations.organizationCRD's): CreateReplace has
+    # nothing to apply for it, and ownedCrds only checks the owner of the CRD
+    # that a 0.4.x release left behind.
     crds: CreateReplace
     ownedCrds:
       - agentplatformorganizations.agent-platform.giantswarm.io
@@ -1879,6 +1903,9 @@ components:  # @schema additionalProperties: true
       # The operator's names reach the connectivity release derived
       # (agent-platform.organizations.operator), never as declared here.
       - agentPlatformOrganizations.operator
+      # The Organization CRD switch is this chart's own
+      # (templates/organization-crd.yaml).
+      - agentPlatformOrganizations.organizationCRD
     # Renders the consumer-side CRs: AgentgatewayParameters (agentgateway.dev CRD,
     # owned by the agentgateway app), the kagent RemoteMCPServer/ModelConfig CRs
     # (kagent.dev CRD, owned by the kagent app) and, with the mcp-kubernetes
@@ -5873,10 +5900,10 @@ tenants:
 musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemRequired: [kind, name]; itemProperties: {"apiGroup": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "namespace": {"type": "string"}}
 
 # === Agent Platform organizations (giantswarm/giantswarm#38891) ===
-# An AgentPlatformOrganization (agent-platform.giantswarm.io/v1alpha1, the
-# agent-platform-operator's) in a parent namespace owns an organization
-# namespace, agents-<name>-<random>, labelled
-# agent-platform.giantswarm.io/organization, /parent and /organization-uid.
+# An Organization (security.giantswarm.io/v1alpha1, cluster-scoped) whose
+# spec.capabilities.agentPlatform.enabled is true owns an organization
+# namespace, agents-<name>, labelled agent-platform.giantswarm.io/organization
+# and /organization-uid (giantswarm/giantswarm#39492).
 # Off, the default, nothing of it renders. On (with kagent and Agent Substrate
 # on), the meta chart installs agent-platform-operator
 # (components.agent-platform-operator, which follows this switch) into the
@@ -5959,9 +5986,9 @@ agentPlatformOrganizations:
     name: ""
   # -- The start of every organization's path in the installation's source
   # (the fixed part of agent-platform-operator's commitMode.path, which must
-  # be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies
-  # exactly this prefix, its parent and its name, from the labels the
-  # operator writes on it. ./<segments>/ with no empty, . or .. segment; the
+  # be <fluxPathPrefix>{name}): an operator Kustomization applies exactly
+  # this prefix and its organization's name, from the label the operator
+  # writes on it. ./<segments>/ with no empty, . or .. segment; the
   # render fails otherwise.
   fluxPathPrefix: ./agent-platform/organizations/
   # -- The installation's SOPS key Secret in fluxNamespace
@@ -5975,6 +6002,19 @@ agentPlatformOrganizations:
   # covers one, beside the cluster-internal and host-local names it never
   # names. The render fails while both are empty.
   apiHostnames: []  # @schema item: string
+  # The Organization CRD (organizations.security.giantswarm.io), for a
+  # cluster without KaaS (giantswarm/giantswarm#39496). Read by this chart
+  # alone (components.agent-platform-connectivity.omitKeys).
+  organizationCRD:
+    # -- Install the `Organization` CRD (security.giantswarm.io), which the
+    # organizations are, from this chart (templates/organization-crd.yaml).
+    # Off by default: on a management cluster the KaaS stack installs it.
+    # Turn it on only on a cluster without KaaS: where the CRD exists
+    # under another owner, the release fails. A value, not detection. The
+    # CRD stays when the value turns off or the release goes
+    # (helm.sh/resource-policy: keep): its removal would delete every
+    # Organization.
+    enabled: false
   # -- agent-platform-operator's names, which this chart derives onto the
   # connectivity release while the organizations are on
   # (agent-platform.organizations.operator, giantswarm/agent-platform#1278).

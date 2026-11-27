@@ -52,7 +52,7 @@ def load(path: str) -> dict:
 
 
 def held_back(meta_values: str) -> set[str]:
-    """Top-level blocks the connectivity entry's omitKeys holds back."""
+    """The keys the connectivity entry's omitKeys holds back: top-level blocks, or dotted nested paths."""
     text = open(meta_values, encoding="utf-8").read()
     start = text.index("  agent-platform-connectivity:")
     omit = re.search(r"^    omitKeys:\n((?:      .*\n)+)", text[start:], re.M)
@@ -156,6 +156,8 @@ def main() -> int:
     rejected, visited = [], []
     for top, sub in forwarded.items():
         walk(sub, conn_props[top], top, rejected, visited)
+    # A dotted omitKeys entry holds back that nested key (agent-platform.omitPath).
+    rejected = [r for r in rejected if not any(r == h or r.startswith(h + ".") for h in held)]
     if rejected:
         sys.exit(
             "FAIL: meta-chart keys the connectivity schema does not declare — forwardAllValues hands them to the "

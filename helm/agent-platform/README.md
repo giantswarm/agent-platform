@@ -568,7 +568,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.model-manager.dependsOn[2] | string | `"kserve-llmisvc-resources"` |  |
 | components.agent-manager.chart | string | `"agent-manager"` |  |
 | components.agent-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-manager.versionRange | string | `">=3.5.8 <4.0.0"` |  |
+| components.agent-manager.versionRange | string | `">=3.5.8 <5.0.0"` |  |
 | components.agent-manager.valuesFrom | string | `"agent-manager"` |  |
 | components.agent-manager.omitEmptyKeys[0] | string | `"harness.egress"` |  |
 | components.agent-manager.enabled | bool | `false` |  |
@@ -639,7 +639,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.toolchain-manager.gatedRoster | bool | `true` |  |
 | components.agent-platform-operator.chart | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.agent-platform-operator.versionRange | string | `">=0.4.0 <0.5.0"` |  |
+| components.agent-platform-operator.versionRange | string | `">=0.4.0 <0.6.0"` |  |
 | components.agent-platform-operator.valuesFrom | string | `"agent-platform-operator"` |  |
 | components.agent-platform-operator.crds | string | `"CreateReplace"` |  |
 | components.agent-platform-operator.ownedCrds[0] | string | `"agentplatformorganizations.agent-platform.giantswarm.io"` |  |
@@ -739,6 +739,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-connectivity.omitKeys[8] | string | `"defaultAgent"` |  |
 | components.agent-platform-connectivity.omitKeys[9] | string | `"agent-platform-operator"` |  |
 | components.agent-platform-connectivity.omitKeys[10] | string | `"agentPlatformOrganizations.operator"` |  |
+| components.agent-platform-connectivity.omitKeys[11] | string | `"agentPlatformOrganizations.organizationCRD"` |  |
 | components.agent-platform-connectivity.dependsOn[0] | string | `"muster"` |  |
 | components.agent-platform-connectivity.dependsOn[1] | string | `"agentgateway"` |  |
 | components.agent-platform-connectivity.dependsOn[2] | string | `"substrate-crds"` |  |
@@ -1517,9 +1518,10 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | agentPlatformOrganizations.enabled | bool | `false` | Install agent-platform-operator and render the organizations' role, admission policies and access. Needs kagent (components.kagent.enabled), Agent Substrate, kagent.fluxServiceAccountName, llmRouting.enabled with a model whose provider the listener serves (Anthropic, Mistral or OpenAI) and llmRouting.modelConfigPolicy.enabled on an API server that serves admissionregistration.k8s.io/v1 MutatingAdmissionPolicy, and global.domain or apiHostnames: the render fails without them. The rollout gate: off by default for now (see above). |
 | agentPlatformOrganizations.fluxNamespace | string | `""` | The namespace of the installation's Flux source, where the operator keeps an organization's Kustomization and Flux ServiceAccount (commit mode), both named after the organization namespace, the Kustomization running as that ServiceAccount into that namespace, and the operator's erasure.fluxNamespace (derived); set, the ClusterRole agent-platform:organization-flux renders for the ServiceAccount. Empty: the operator writes no Kustomization and no ServiceAccount outside the organization namespaces. |
 | agentPlatformOrganizations.fluxSource | object | `{"kind":"GitRepository","name":""}` | The installation's Flux source in fluxNamespace, which an organization's Kustomization applies from (agent-platform-operator's commitMode.sourceRef). The admission policy holds the operator's Kustomizations to this source. The name is required with fluxNamespace: the render fails without it. |
-| agentPlatformOrganizations.fluxPathPrefix | string | `"./agent-platform/organizations/"` | The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies exactly this prefix, its parent and its name, from the labels the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise. |
+| agentPlatformOrganizations.fluxPathPrefix | string | `"./agent-platform/organizations/"` | The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{name}): an operator Kustomization applies exactly this prefix and its organization's name, from the label the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise. |
 | agentPlatformOrganizations.fluxDecryptionSecret | string | `"sops-keys"` | The installation's SOPS key Secret in fluxNamespace (agent-platform-operator's commitMode.decryptionSecret): the only Secret an organization's Kustomization may decrypt with. Empty: none may set spec.decryption. |
 | agentPlatformOrganizations.apiHostnames | list | `[]` | The installation's Kubernetes API hostnames beside api.<global.domain>, which is derived while global.domain is set: an EgressPolicy in an organization namespace may not name them, nor a wildcard origin that covers one, beside the cluster-internal and host-local names it never names. The render fails while both are empty. |
+| agentPlatformOrganizations.organizationCRD.enabled | bool | `false` | Install the `Organization` CRD (security.giantswarm.io), which the organizations are, from this chart (templates/organization-crd.yaml). Off by default: on a management cluster the KaaS stack installs it. Turn it on only on a cluster without KaaS: where the CRD exists under another owner, the release fails. A value, not detection. The CRD stays when the value turns off or the release goes (helm.sh/resource-policy: keep): its removal would delete every Organization. |
 | agentPlatformOrganizations.operator | object | `{"awsRoleName":"","podLabels":{},"serviceAccountName":"","snapshotSecret":""}` | agent-platform-operator's names, which this chart derives onto the connectivity release while the organizations are on (agent-platform.organizations.operator, giantswarm/agent-platform#1278). Declared for the connectivity chart's schema only: never forwarded as set here (components.agent-platform-connectivity.omitKeys), and an own value fails the render. Leave it unset. |
 | agentPlatformOrganizations.operator.serviceAccountName | string | `""` | Derived: the operator's ServiceAccount (its chart's name). |
 | agentPlatformOrganizations.operator.podLabels | object | `{}` | Derived: its pods' selector labels. |

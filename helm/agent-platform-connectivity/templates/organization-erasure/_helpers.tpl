@@ -24,7 +24,7 @@ snapshots.credentials.existingSecret.
 {{- end -}}
 
 {{/*
-The first segment of an organization's snapshot keys: its AgentPlatformOrganization's
+The first segment of an organization's snapshot keys: its Organization's
 UID (36 characters, 8-4-4-4-12), as an IAM wildcard. `?` is one character, so
 the pattern matches a UID and no shorter or longer segment: the platform
 Harness's own prefix (kagent.harness.snapshotStore.prefix) never matches.

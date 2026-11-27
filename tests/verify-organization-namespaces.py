@@ -19,6 +19,11 @@ The meta chart's render:
   Substrate's credential provider reading
   the organization namespaces by the new label;
 - tenants.organizations is refused by the schema (the tenants mode is gone);
+- agentPlatformOrganizations.organizationCRD.enabled (a cluster without KaaS,
+  giantswarm/giantswarm#39496): off by default no Organization CRD; on, the
+  CRD organizations.security.giantswarm.io, kept by Helm when the value turns
+  off or the release goes, and nothing else of the render moves (the switch
+  reaches no component release);
 - the render fails with an
   explicit components.agent-platform-operator.enabled or targetNamespace that
   disagrees, with an own derived operator value or kagent namespaceSelector
@@ -76,7 +81,7 @@ HELM = os.environ.get("HELM", "helm")
 NEW = "agent-platform.giantswarm.io/organization"
 OLD = "giantswarm.io/organization"
 RELEASE_NS = "agent-platform"
-ORG_NS = "agents-payments-x7k2q"
+ORG_NS = "agents-payments"
 TENANT_NS = "org-acme"
 PLAIN_NS = "team-a"
 POOL = "kagent-default"
@@ -155,6 +160,16 @@ def check_meta(chart):
     expect(authz.get("namespaceSelector") == NEW, f"off, kagent lists a person's agents over {NEW}")
     conn = release(off, "agent-platform-connectivity")["values"]
     expect("agent-platform-operator" not in conn["components"], "off, the connectivity roster carries no agent-platform-operator entry")
+
+    crd = "organizations.security.giantswarm.io"
+    expect(find(off, "CustomResourceDefinition", crd) is None, f"off by default, no {crd} CRD renders")
+    with_crd = docs(meta(chart, "--set", "agentPlatformOrganizations.organizationCRD.enabled=true"))
+    organization = find(with_crd, "CustomResourceDefinition", crd)
+    expect(organization is not None and organization["spec"]["scope"] == "Cluster"
+           and organization["metadata"].get("annotations", {}).get("helm.sh/resource-policy") == "keep",
+           f"agentPlatformOrganizations.organizationCRD.enabled renders the cluster-scoped {crd} CRD with helm.sh/resource-policy: keep")
+    expect([d for d in with_crd if d is not organization] == off,
+           "agentPlatformOrganizations.organizationCRD.enabled changes nothing else of the render (no component release gets the switch)")
 
     on = docs(meta(chart, *ON))
     operator_peer = {"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": RELEASE_NS}}, "podSelector": {"matchLabels": {"app.kubernetes.io/name": "agent-platform-operator"}}}
@@ -288,7 +303,7 @@ def check_meta(chart):
     expect(am.get("tenants") == {"enabled": True, "commit": manager_commit},
            "organization GitOps configuration reaches the manager beside the derived organization switch")
     expect(v["commitMode"] == {"sourceRef": {"kind": "GitRepository", "name": "giantswarm-config"},
-                               "path": "./agent-platform/organizations/{parent}/{name}", "decryptionSecret": "sops-keys"},
+                               "path": "./agent-platform/organizations/{name}", "decryptionSecret": "sops-keys"},
            f"with fluxNamespace, the operator's commit mode follows fluxSource, fluxPathPrefix and fluxDecryptionSecret ({v.get('commitMode')})")
     own_cm = release(docs(meta(chart, *ON, "--set", "agent-platform-operator.commitMode.interval=5m",
                                "--set", "agent-platform-operator.commitMode.installationKustomization.name=agent-platform",
@@ -297,7 +312,7 @@ def check_meta(chart):
                                "--set", "agentPlatformOrganizations.fluxDecryptionSecret=")), "agent-platform-operator")["values"]["commitMode"]
     expect(own_cm.get("interval") == "5m" and own_cm.get("installationKustomization", {}).get("name") == "agent-platform"
            and own_cm["sourceRef"] == {"kind": "OCIRepository", "name": "giantswarm-config"}
-           and own_cm["path"] == "./orgs/{parent}/{name}" and own_cm["decryptionSecret"] == "",
+           and own_cm["path"] == "./orgs/{name}" and own_cm["decryptionSecret"] == "",
            f"an own commitMode.interval and installationKustomization travel beside the derived source, path and key ({own_cm})")
     no_flux = release(docs(meta(chart, *SWITCH)), "agent-platform-operator")["values"]
     expect("commitMode" not in no_flux or not no_flux["commitMode"].get("sourceRef", {}).get("name"),

@@ -8,7 +8,11 @@ binds the platform tenant only (platform-tenant.yaml), its signed-in people
 to agent-platform:platform-user, the user's role without the platform's
 EgressPolicies and RoleBindings. The names are fixed:
 the bindings an installation declares refer to them, and the admin role's
-`bind` names them.
+`bind` names the user and editor roles. The admin role is not in it: RBAC
+still lets an admin bind it, as it holds its rules, so in an organization
+namespace the policy agent-platform-organization-admin-bindings keeps that
+binding for agent-platform-operator, which derives it from the
+Organization's spec.admins (giantswarm/giantswarm#39501).
 
 The kagent line serves api.kagent.dev: an agent is an Agent that carries its
 AgentTemplate inline or by templateRef, and a conversation is a Session of an
@@ -79,11 +83,11 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # The admin binds members to the three roles and nothing else: the API
+  # The admin binds members to user and editor and nothing else: the API
   # server refuses a RoleBinding to any other role whose rights the admin does
   # not hold.
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
     verbs: ["bind"]
-    resourceNames: ["agent-platform:user", "agent-platform:editor", "agent-platform:admin"]
+    resourceNames: ["agent-platform:user", "agent-platform:editor"]
 {{- end }}

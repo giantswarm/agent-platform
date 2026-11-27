@@ -211,7 +211,7 @@
                 },
                 "fluxPathPrefix": {
                     "type": "string",
-                    "description": "The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{parent}/{name}): an operator Kustomization applies exactly this prefix, its parent and its name, from the labels the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise."
+                    "description": "The start of every organization's path in the installation's source (the fixed part of agent-platform-operator's commitMode.path, which must be <fluxPathPrefix>{name}): an operator Kustomization applies exactly this prefix and its organization's name, from the label the operator writes on it. ./<segments>/ with no empty, . or .. segment; the render fails otherwise."
                 },
                 "fluxSource": {
                     "type": "object",
@@ -249,6 +249,16 @@
                         "snapshotSecret": {
                             "type": "string",
                             "description": "Derived, with substrate.rustfs.enabled: the Secret of RustFS's keys."
+                        }
+                    }
+                },
+                "organizationCRD": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean",
+                            "description": "Install the `Organization` CRD (security.giantswarm.io), which the organizations are, from this chart (templates/organization-crd.yaml). Off by default: on a management cluster the KaaS stack installs it. Turn it on only on a cluster without KaaS: where the CRD exists under another owner, the release fails. A value, not detection. The CRD stays when the value turns off or the release goes (helm.sh/resource-policy: keep): its removal would delete every Organization."
                         }
                     }
                 }

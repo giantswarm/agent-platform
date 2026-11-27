@@ -6266,7 +6266,7 @@ operator block's own. Without fluxNamespace there is no commit mode. */ -}}
 {{- end -}}
 {{- $_ := set $derived "commitMode" (dict
       "sourceRef" (dict "kind" ($source.kind | default "GitRepository") "name" $source.name)
-      "path" (printf "%s{parent}/{name}" ($orgs.fluxPathPrefix | default ""))
+      "path" (printf "%s{name}" ($orgs.fluxPathPrefix | default ""))
       "decryptionSecret" ($orgs.fluxDecryptionSecret | default "")) -}}
 {{- else if dig "commitMode" "sourceRef" "name" "" $own -}}
 {{- fail "agent-platform-operator.commitMode.sourceRef.name is set but agentPlatformOrganizations.fluxNamespace is not: commit mode needs the installation's Flux namespace, where the operator keeps the organizations' Kustomizations; set agentPlatformOrganizations.fluxNamespace and fluxSource, and leave agent-platform-operator.commitMode.sourceRef unset" -}}

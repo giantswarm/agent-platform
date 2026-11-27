@@ -47,7 +47,9 @@ specialist does better and costs less on the tasks it is built for.
 ## Find an existing agent
 
 Fetch the live list, never from memory: `x_agent-manager_list_agents` through `call_tool` (read its
-schema with `describe_tool` first). Judge each agent by:
+schema with `describe_tool` first), once without `organization` for the Platform's agents and once
+with `organization` for each of the person's organizations (`x_agent-manager_list_organizations`),
+or only the one the person names. Judge each agent by:
 
 - **Description** and display name (`ui.giantswarm.io/display-name`): what it is for.
 - **Skills and toolset**: what it can reach. A toolset narrower than the task rules it out.

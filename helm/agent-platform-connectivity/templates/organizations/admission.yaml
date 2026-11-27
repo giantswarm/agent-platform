@@ -2,8 +2,10 @@
 The admission policies of the Agent Platform organizations
 (giantswarm/agent-platform#1267, epic giantswarm/giantswarm#38891). An
 organization namespace is one labelled agent-platform.giantswarm.io/organization
-(selected by the label, never listed); agent-platform-operator creates it from
-an AgentPlatformOrganization. RBAC grants by resource and namespace, not by a
+(selected by the label, never listed); agent-platform-operator creates it,
+named agents-<name>, for an `Organization` (security.giantswarm.io,
+cluster-scoped) whose spec.capabilities.agentPlatform.enabled is true
+(giantswarm/giantswarm#39492). RBAC grants by resource and namespace, not by a
 namespace's labels, so these ValidatingAdmissionPolicies narrow what RBAC
 grants. Each holds for cluster-admin too, unless it names the requesters it
 holds. Admission runs every policy and webhook on a request: Kyverno and these
@@ -11,9 +13,20 @@ policies each refuse on their own, and a Kyverno PolicyException lifts none of
 these.
 
   * agent-platform-organization-operator-namespaces: the operator's
-    ServiceAccount creates only a namespace named agents-<organization>-*
-    that carries the three organization labels, and updates or deletes only a
+    ServiceAccount creates only the namespace named agents-<organization>
+    that carries the two organization labels, and updates or deletes only a
     namespace that carries them.
+  * agent-platform-organization-namespace-names: only the operator's
+    ServiceAccount creates a namespace named agents-*, a cluster-admin held
+    too. An organization's namespace name is fixed, so a namespace made
+    before its organization would stop the operator from creating it.
+  * agent-platform-organization-operator-organizations: on an `Organization`
+    the operator's ServiceAccount adds and removes its own finalizer
+    (agent-platform.organizations.finalizer) and nothing else: it creates
+    and deletes none and changes no spec, label, annotation, owner reference
+    or other finalizer. Its status is the status subresource, which this
+    policy does not match. A finalizer is a write of the whole object
+    (patch or update), which RBAC cannot narrow to it.
   * agent-platform-organization-operator-objects: the operator's ServiceAccount
     writes RoleBindings only in organization namespaces, ServiceAccounts only
     there or in agentPlatformOrganizations.fluxNamespace, and Kustomizations
@@ -25,8 +38,8 @@ these.
     spec.targetNamespace (the organization namespace). The operator names
     both after the organization namespace; a policy cannot read another
     namespace's labels, so the pin is that name. It applies its own path,
-    fluxPathPrefix + <parent>/<organization> from the labels the operator
-    writes on it, from the installation's source (fluxSource,
+    fluxPathPrefix + <organization> from the label the operator writes on
+    it, from the installation's source (fluxSource,
     its name required with fluxNamespace) and decrypts with its key
     (fluxDecryptionSecret) only, and sets no kubeConfig, postBuild
     substituteFrom, patches or components: kustomize-controller acts on those
@@ -36,39 +49,28 @@ these.
     own Secret reader, by a RoleBinding named after that ClusterRole; a Secret
     reader it binds to its provider only.
   * agent-platform-organization-labels: only the operator's ServiceAccount
-    sets, changes or removes the three organization labels of a namespace, on
+    sets, changes or removes the two organization labels of a namespace, on
     CREATE and UPDATE. kagent's authorization, Substrate's credential grants
     and these policies select on them.
   * agent-platform-organizations-admin-rolebindings: a requester who may
-    create AgentPlatformOrganizations in a namespace that is no organization
-    namespace (agent-platform:organizations-admin's own right) and may not
-    create Roles there (as a cluster-admin or the namespace's built-in admin
-    may) writes no RoleBinding there.
-  * agent-platform-organization-admin-mirrors: in an organization namespace
-    only the operator binds agent-platform:organizations-admin, as its
-    mirrors of the parent namespace's admins (giantswarm/agent-platform#1363):
-    an organizations-admin bound there holds every rule of the role, so RBAC
-    lets it bind the role without `bind`, and the subject could write
-    AgentPlatformOrganizations there. A create, and an update that changes
-    the subjects, is refused for everyone else, a cluster-admin too: an
-    admin of the organization is made in the parent namespace, and the
-    operator mirrors it. A delete passes; the operator's labelled mirrors
-    are agent-platform-organization-copies'.
-  * agent-platform-organization-no-nesting: no AgentPlatformOrganization is
-    created in an organization namespace, by anyone, the operator and a
-    cluster-admin included (giantswarm/agent-platform#1423): organizations
-    are created in a parent namespace. The operator would reconcile one
-    there into a nested organization, with its own namespace, workers and
-    admin mirrors. An update or a delete of one that exists passes, so it
-    can be removed.
-  * agent-platform-organization-admins-binding: the RoleBinding
-    organization-admins of an organization namespace binds agent-platform:admin
-    to at least one subject; it is not deleted or emptied while the namespace
-    is not terminating. A policy cannot count the other admin bindings, so
-    this one name is held; a lockout is a cluster-admin's to fix. Applied
-    from git (labelled kustomize.toolkit.fluxcd.io/name), it carries
-    kustomize.toolkit.fluxcd.io/prune: disabled: Flux never prunes it, and the
-    namespace's deletion removes it.
+    create Organizations (agent-platform:organizations-admin's own right, by
+    a ClusterRoleBinding or a RoleBinding of that namespace) and may not
+    create Roles in a namespace that is no organization namespace (as a
+    cluster-admin or the namespace's built-in admin may) writes no
+    RoleBinding there.
+  * agent-platform-organization-names: an Organization whose write turns
+    the Agent Platform on (a create, or an update from off) has a name that
+    makes agents-<name> a namespace name: a DNS label of at most 63
+    characters, so no dot. The CRD does not hold it,
+    and the operator could create no namespace for it.
+  * agent-platform-organization-admin-bindings: in an organization namespace
+    only the operator's ServiceAccount creates, changes or deletes a
+    RoleBinding to the ClusterRole agent-platform:admin, a cluster-admin held
+    too; the namespace and garbage collectors delete one. The organization's
+    admins are its spec.admins, which the operator binds by the RoleBinding
+    organization-admins (giantswarm/giantswarm#39501). RBAC lets a holder of
+    a role bind it without `bind`, so an admin could otherwise make another
+    admin.
   * agent-platform-organization-rolebinding-subjects: a RoleBinding in an
     organization namespace binds no system:* group or user and no
     ServiceAccount of another namespace, whoever writes it; only the operator
@@ -78,12 +80,12 @@ these.
   * agent-platform-organization-flux-writes: what an organization's Flux
     ServiceAccount (agents-* in fluxNamespace, not the operator) writes in an
     organization namespace: a RoleBinding binds the ClusterRole
-    agent-platform:user, editor or admin (RBAC lets an identity bind any role
+    agent-platform:user or editor (RBAC lets an identity bind any role
     whose rules it holds without `bind`, agent-platform:organization-flux
     itself among them, which reads every Secret of the namespace); it changes
     or deletes only a RoleBinding its own Kustomization applied (labelled
-    kustomize.toolkit.fluxcd.io/name with its name), never organization-admins
-    or another binding people wrote; and a Secret is no ServiceAccount token.
+    kustomize.toolkit.fluxcd.io/name with its name), never a binding people
+    or the operator wrote; and a Secret is no ServiceAccount token.
   * agent-platform-organization-git-secrets: a Secret in an organization
     namespace that an organization's Kustomization applied (labelled
     kustomize.toolkit.fluxcd.io/name and namespace fluxNamespace) is changed
@@ -104,15 +106,23 @@ these.
     an editor's release could read the namespace's Secrets through valuesFrom
     or run as another identity. An update that leaves the spec as it is passes
     (a finalizer, a reconcile request).
-  * agent-platform-organization-delete-intent: an AgentPlatformOrganization is
+  * agent-platform-organization-switch-off: an update of an `Organization`
+    whose Agent Platform was enabled keeps
+    spec.capabilities.agentPlatform.enabled true, for every writer: nothing
+    defines yet what a switch-off does (decision D10 of
+    giantswarm/giantswarm#39492), so a write that sets it to false, removes
+    it or removes spec.capabilities.agentPlatform (or spec.capabilities) is
+    refused.
+  * agent-platform-organization-delete-intent: an `Organization` with the
+    Agent Platform enabled (spec.capabilities.agentPlatform.enabled) is
     deleted only when it carries kustomize.toolkit.fluxcd.io/prune: enabled,
-    Flux's own marker of an intended prune, or while its namespace terminates
-    (the parent going erases its organizations). One the operator judges
-    applied from git (it has an Orphaned condition) is deleted only once its
-    delete pull request merged (Orphaned True, reason DeleteMerged): while its
-    file is in git, or gone without a delete, the annotation alone would erase
-    it, and Flux would apply an empty one again. Only the operator writes its
-    status.
+    Flux's own marker of an intended prune; any other `Organization` is not
+    held. One the operator judges applied from git (it has an
+    AgentPlatformOrphaned condition) is deleted only once its delete pull
+    request merged (AgentPlatformOrphaned True, reason DeleteMerged): while
+    its file is in git, or gone without a delete, the
+    annotation alone would erase it, and Flux would apply an empty one
+    again.
   * agent-platform-organization-egress-floor: an EgressPolicy in an
     organization namespace names no cluster-internal or host-local host
     (*.svc, *.cluster.local, kubernetes.default, localhost, *.localhost,
@@ -156,10 +166,10 @@ controllers) is the same pair of policies as a tenant's
 {{- end }}
 {{- $fluxPathPrefix := $values.fluxPathPrefix | default "" }}
 {{- if and $fluxNs (not (regexMatch "^\\./([^/.][^/]*/)+$" $fluxPathPrefix)) }}
-{{- fail (printf "agentPlatformOrganizations.fluxPathPrefix %q must be a path of the source that starts with ./ and ends with /, with no empty, . or .. segment: an organization's path is the prefix, its parent and its name" $fluxPathPrefix) }}
+{{- fail (printf "agentPlatformOrganizations.fluxPathPrefix %q must be a path of the source that starts with ./ and ends with /, with no empty, . or .. segment: an organization's path is the prefix and its name" $fluxPathPrefix) }}
 {{- end }}
 {{- $orgLabel := include "agent-platform.organizations.label" . }}
-{{- $parentLabel := "agent-platform.giantswarm.io/parent" }}
+{{- $finalizer := include "agent-platform.organizations.finalizer" . }}
 {{- $segment := "[a-z0-9]([-a-z0-9]*[a-z0-9])?" }}
 {{- $fluxKey := $values.fluxDecryptionSecret | default "" }}
 {{- $helmSA := required "agentPlatformOrganizations.enabled needs kagent.fluxServiceAccountName: an organization's HelmReleases run as it" (include "agent-platform.kagent.fluxServiceAccountName" .) }}
@@ -197,9 +207,9 @@ spec:
       messageExpression: {{ printf "'the agent-platform-operator writes only organization namespaces, labelled %s; refused: ' + request.operation + ' ' + request.name" (join ", " $labels) | quote }}
     - expression: >-
         request.operation != 'CREATE' || (has(object.metadata.labels) && {{ squote $label }} in object.metadata.labels &&
-        object.metadata.name.startsWith('agents-' + object.metadata.labels[{{ squote $label }}] + '-'))
+        object.metadata.name == 'agents-' + object.metadata.labels[{{ squote $label }}])
       reason: Forbidden
-      messageExpression: {{ printf "'the agent-platform-operator creates only a namespace named agents-<organization>-* (the %s label); refused: ' + object.metadata.name" $label | quote }}
+      messageExpression: {{ printf "'the agent-platform-operator creates only the namespace named agents-<organization> (the %s label); refused: ' + object.metadata.name" $label | quote }}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -209,6 +219,97 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   policyName: agent-platform-organization-operator-namespaces
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-namespace-names
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["namespaces"]
+  matchConditions:
+    # Every requester but the operator, a cluster-admin too: an
+    # organization's namespace is agents-<name>, a fixed name, and one made
+    # before the operator's would hold it.
+    - name: not-operator
+      expression: {{ printf "request.userInfo.username != '%s'" $operator | quote }}
+    - name: agents-name
+      expression: "object.metadata.name.startsWith('agents-')"
+  validations:
+    - expression: "false"
+      reason: Forbidden
+      messageExpression: {{ printf "'only the agent-platform-operator (%s) creates a namespace named agents-*, an organization namespace; refused for ' + request.userInfo.username + ': ' + object.metadata.name" $operator | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-namespace-names
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-namespace-names
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-operator-organizations
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  # The object itself, not its status subresource, which the operator writes.
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["security.giantswarm.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["organizations"]
+  matchConditions:
+    - name: operator
+      expression: {{ printf "request.userInfo.username == '%s'" $operator | quote }}
+  variables:
+    - name: finalizersBefore
+      expression: "request.operation == 'UPDATE' && has(oldObject.metadata.finalizers) ? oldObject.metadata.finalizers : []"
+    - name: finalizersAfter
+      expression: "request.operation == 'UPDATE' && has(object.metadata.finalizers) ? object.metadata.finalizers : []"
+    # The finalizers the write adds or removes.
+    - name: finalizersChanged
+      expression: >-
+        variables.finalizersAfter.filter(f, !(f in variables.finalizersBefore)) +
+        variables.finalizersBefore.filter(f, !(f in variables.finalizersAfter))
+    # The fields the operator leaves as they are.
+    - name: kept
+      expression: >-
+        request.operation == 'UPDATE' &&
+        (has(object.metadata.labels) ? object.metadata.labels : {}) == (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}) &&
+        (has(object.metadata.annotations) ? object.metadata.annotations : {}) == (has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}) &&
+        (has(object.metadata.ownerReferences) ? object.metadata.ownerReferences : []) == (has(oldObject.metadata.ownerReferences) ? oldObject.metadata.ownerReferences : []) &&
+        (has(object.spec) ? dyn(object.spec) : dyn({})) == (has(oldObject.spec) ? dyn(oldObject.spec) : dyn({}))
+  validations:
+    - expression: "request.operation == 'UPDATE'"
+      reason: Forbidden
+      messageExpression: {{ printf "'the agent-platform-operator creates and deletes no Organization; refused: ' + request.operation + ' ' + request.name" | quote }}
+    - expression: {{ printf "variables.kept && variables.finalizersChanged.all(f, f == '%s')" $finalizer | quote }}
+      reason: Forbidden
+      messageExpression: {{ printf "'the agent-platform-operator adds or removes its finalizer %s on an Organization and changes nothing else of it; refused: ' + request.operation + ' ' + request.name" $finalizer | quote }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-operator-organizations
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-operator-organizations
   validationActions: [Deny]
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -299,13 +400,13 @@ spec:
     # Flux impersonates spec.serviceAccountName; without one, or with a Flux
     # controller's own, kustomize-controller applies with a controller's
     # identity. The organization's Flux ServiceAccount and namespace carry
-    # the Kustomization's name, agents-<organization>-*: a Flux controller's
+    # the Kustomization's name, agents-<organization>: a Flux controller's
     # name is never one.
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
         object.metadata.name.startsWith('agents-')
       reason: Forbidden
-      messageExpression: "'a Kustomization of the agent-platform-operator is an organization Kustomization, named agents-<organization>-*; refused: ' + request.namespace + '/' + object.metadata.name"
+      messageExpression: "'a Kustomization of the agent-platform-operator is an organization Kustomization, named agents-<organization>; refused: ' + request.namespace + '/' + object.metadata.name"
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
         (has(object.spec) && has(object.spec.serviceAccountName) && object.spec.serviceAccountName == object.metadata.name)
@@ -351,20 +452,19 @@ spec:
       messageExpression: >-
         {{ printf "'a Kustomization of the agent-platform-operator applies from the installation source %s %s/%s; refused: '" $fluxSourceKind $fluxNs $fluxSourceName }} +
         request.namespace + '/' + object.metadata.name
-    # Its own organization's path only: the prefix, then the parent and the
-    # name the operator labels it with (two DNS labels, so no `.`, `..` or
-    # empty segment). One organization's Kustomization never applies the
-    # organizations' root, a whole parent, another organization's path or the
-    # installation's.
+    # Its own organization's path only: the prefix, then the name the
+    # operator labels it with (a DNS label, so no `.`, `..` or empty
+    # segment). One organization's Kustomization never applies the
+    # organizations' root, another organization's path or the installation's.
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
         (has(object.spec) && has(object.spec.path) &&
-        object.spec.path.matches({{ printf "r'^%s%s/%s$'" (regexQuoteMeta $fluxPathPrefix) $segment $segment }}) &&
-        has(object.metadata.labels) && {{ squote $parentLabel }} in object.metadata.labels && {{ squote $orgLabel }} in object.metadata.labels &&
-        object.spec.path == {{ squote $fluxPathPrefix }} + object.metadata.labels[{{ squote $parentLabel }}] + '/' + object.metadata.labels[{{ squote $orgLabel }}])
+        object.spec.path.matches({{ printf "r'^%s%s$'" (regexQuoteMeta $fluxPathPrefix) $segment }}) &&
+        has(object.metadata.labels) && {{ squote $orgLabel }} in object.metadata.labels &&
+        object.spec.path == {{ squote $fluxPathPrefix }} + object.metadata.labels[{{ squote $orgLabel }}])
       reason: Forbidden
       messageExpression: >-
-        {{ printf "'a Kustomization of the agent-platform-operator applies its organization path, %s<%s>/<%s>; refused: '" $fluxPathPrefix $parentLabel $orgLabel }} +
+        {{ printf "'a Kustomization of the agent-platform-operator applies its organization path, %s<%s>; refused: '" $fluxPathPrefix $orgLabel }} +
         request.namespace + '/' + object.metadata.name + ' with ' + (has(object.spec) && has(object.spec.path) ? object.spec.path : 'none')
     - expression: >-
         request.resource.resource != 'kustomizations' || request.operation == 'DELETE' ||
@@ -446,13 +546,14 @@ spec:
         operations: ["CREATE", "UPDATE", "DELETE"]
         resources: ["rolebindings"]
   matchConditions:
-    # agent-platform:organizations-admin's own right, in this namespace, by a
-    # ClusterRoleBinding or a RoleBinding here; a requester who may create
-    # Roles here (a cluster-admin, the built-in admin of this namespace) is
-    # not held.
+    # agent-platform:organizations-admin's own right, asked in this namespace:
+    # a ClusterRoleBinding grants it, and a RoleBinding here holds its rule
+    # too (it grants no Organization, which is cluster-scoped, but the
+    # RoleBinding writes). A requester who may create Roles here (a
+    # cluster-admin, the built-in admin of this namespace) is not held.
     - name: organizations-admin
       expression: >-
-        authorizer.group('agent-platform.giantswarm.io').resource('agentplatformorganizations').namespace(request.namespace).check('create').allowed() &&
+        authorizer.group('security.giantswarm.io').resource('organizations').namespace(request.namespace).check('create').allowed() &&
         !authorizer.group('rbac.authorization.k8s.io').resource('roles').namespace(request.namespace).check('create').allowed()
   validations:
     - expression: "false"
@@ -472,97 +573,7 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: agent-platform-organization-admin-mirrors
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-spec:
-  failurePolicy: Fail
-  matchConstraints:
-    namespaceSelector:
-      {{- include "agent-platform.organizations.namespaces" . | nindent 6 }}
-    resourceRules:
-      - apiGroups: ["rbac.authorization.k8s.io"]
-        apiVersions: ["v1"]
-        operations: ["CREATE", "UPDATE"]
-        resources: ["rolebindings"]
-  matchConditions:
-    # A binding to agent-platform:organizations-admin. RBAC lets a requester
-    # bind a role whose rules it holds in the namespace without `bind`, and
-    # an organizations-admin bound here holds every rule of that role.
-    - name: organizations-admin
-      expression: "object.roleRef.kind == 'ClusterRole' && object.roleRef.name == 'agent-platform:organizations-admin'"
-    # Every requester but the operator, a cluster-admin too: no authorizer
-    # check tells a cluster-admin apart without a way around it (a Role, or
-    # escalate alone, would pass one). An admin of an organization namespace
-    # is made in its parent namespace, where the operator mirrors it.
-    - name: not-operator
-      expression: {{ printf "request.userInfo.username != '%s'" $operator | quote }}
-    # The operator's mirrors (labelled, before or after the write) are
-    # agent-platform-organization-copies'.
-    - name: not-operator-object
-      expression: >-
-        [dyn(object), dyn(oldObject)].all(o, o == null || !(has(o.metadata.labels) && {{ squote $objectLabel }} in o.metadata.labels))
-  validations:
-    # An update that leaves the subjects as they are, the same list in the
-    # same order, passes (a label, an annotation, a finalizer): it grants
-    # nobody anything, and the roleRef of a RoleBinding never changes.
-    - expression: >-
-        request.operation == 'UPDATE' &&
-        (has(object.subjects) ? object.subjects : []) == (has(oldObject.subjects) ? oldObject.subjects : [])
-      reason: Forbidden
-      messageExpression: {{ printf "'only the agent-platform-operator (%s) binds agent-platform:organizations-admin in an organization namespace, as its mirrors of the parent namespace admins: bind the person to agent-platform:organizations-admin in the parent namespace, and the operator mirrors it; refused for ' + request.userInfo.username + ': ' + request.operation + ' ' + request.namespace + '/' + object.metadata.name" $operator | quote }}
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  name: agent-platform-organization-admin-mirrors
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-spec:
-  policyName: agent-platform-organization-admin-mirrors
-  validationActions: [Deny]
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  name: agent-platform-organization-no-nesting
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-spec:
-  failurePolicy: Fail
-  # Every requester, the operator and a cluster-admin included: an
-  # organization's parent is a parent namespace, never an organization
-  # namespace. Only CREATE: an update or a delete of a nested organization
-  # made before this policy passes, so its erasure runs.
-  matchConstraints:
-    namespaceSelector:
-      {{- include "agent-platform.organizations.namespaces" . | nindent 6 }}
-    resourceRules:
-      - apiGroups: ["agent-platform.giantswarm.io"]
-        apiVersions: ["*"]
-        operations: ["CREATE"]
-        resources: ["agentplatformorganizations"]
-  validations:
-    - expression: "false"
-      reason: Forbidden
-      messageExpression: >-
-        'an AgentPlatformOrganization is created in a parent namespace, never in an organization namespace; refused for ' +
-        request.userInfo.username + ': ' + request.namespace + '/' + request.name
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  name: agent-platform-organization-no-nesting
-  labels:
-    {{- include "labels.common" . | nindent 4 }}
-spec:
-  policyName: agent-platform-organization-no-nesting
-  validationActions: [Deny]
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  name: agent-platform-organization-admins-binding
+  name: agent-platform-organization-admin-bindings
   labels:
     {{- include "labels.common" . | nindent 4 }}
 spec:
@@ -576,43 +587,41 @@ spec:
         operations: ["CREATE", "UPDATE", "DELETE"]
         resources: ["rolebindings"]
   matchConditions:
-    - name: organization-admins
-      expression: "has(request.name) ? request.name == 'organization-admins' : request.operation == 'DELETE'"
+    # A RoleBinding to agent-platform:admin, before or after the write (a
+    # DELETE carries no object).
+    - name: binds-admin
+      expression: >-
+        [dyn(object), dyn(oldObject)].exists(o, o != null &&
+        o.roleRef.kind == 'ClusterRole' && o.roleRef.name == 'agent-platform:admin')
+    - name: not-operator
+      expression: {{ printf "request.userInfo.username != '%s'" $operator | quote }}
+  variables:
+    # The binding written; a DeleteCollection's request carries no name.
+    - name: binding
+      expression: "request.operation == 'DELETE' ? oldObject : object"
   validations:
+    # Everyone else is refused. The namespace controller empties a
+    # terminating namespace and the garbage collector acts on owners: each
+    # deletes, and the garbage collector removes the finalizer of a
+    # foreground or orphan deletion by an update that keeps what the binding
+    # grants.
     - expression: >-
-        has(namespaceObject.metadata.deletionTimestamp) ||
-        (request.operation != 'DELETE' && has(object.subjects) && size(object.subjects) > 0)
+        request.userInfo.username in {{ $collectors }} && (request.operation == 'DELETE' ||
+        (object.roleRef == oldObject.roleRef &&
+        (has(object.subjects) ? object.subjects : []) == (has(oldObject.subjects) ? oldObject.subjects : [])))
       reason: Forbidden
       messageExpression: >-
-        'the RoleBinding organization-admins of an organization namespace keeps at least one subject until its namespace is deleted; refused: ' +
-        request.operation + (request.operation == 'DELETE' ? '' : ' without subjects') + ' in ' + request.namespace
-    - expression: "request.operation == 'DELETE' || (object.roleRef.kind == 'ClusterRole' && object.roleRef.name == 'agent-platform:admin')"
-      reason: Forbidden
-      messageExpression: "'the RoleBinding organization-admins of an organization namespace binds the ClusterRole agent-platform:admin, not ' + object.roleRef.kind + ' ' + object.roleRef.name"
-    # Applied from git (commit mode: the first admins are a file of the
-    # organization's path), it carries Flux's prune: disabled, on create and
-    # on every update. Flux then never prunes it, which the first rule would
-    # refuse while the namespace lives: the organization's Kustomization,
-    # which the erasure deletes first and waits for, would keep its finalizer
-    # for good. The namespace's deletion removes the binding.
-    - expression: >-
-        request.operation == 'DELETE' ||
-        !(has(object.metadata.labels) && 'kustomize.toolkit.fluxcd.io/name' in object.metadata.labels) ||
-        (has(object.metadata.annotations) && 'kustomize.toolkit.fluxcd.io/prune' in object.metadata.annotations &&
-        object.metadata.annotations['kustomize.toolkit.fluxcd.io/prune'] == 'disabled')
-      reason: Forbidden
-      messageExpression: >-
-        'the RoleBinding organization-admins applied from git carries kustomize.toolkit.fluxcd.io/prune: disabled, so the erasure of its organization never waits on its prune; refused: ' +
-        request.operation + ' in ' + request.namespace
+        {{ printf "'only the agent-platform-operator (%s) writes a RoleBinding to agent-platform:admin in an organization namespace, from the organization admins (the Organization spec.admins); refused for '" $operator }} +
+        request.userInfo.username + ': ' + request.operation + ' ' + request.namespace + '/' + variables.binding.metadata.name
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: agent-platform-organization-admins-binding
+  name: agent-platform-organization-admin-bindings
   labels:
     {{- include "labels.common" . | nindent 4 }}
 spec:
-  policyName: agent-platform-organization-admins-binding
+  policyName: agent-platform-organization-admin-bindings
   validationActions: [Deny]
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -692,8 +701,8 @@ spec:
     # A binding that exists is changed or deleted only when this
     # ServiceAccount's own Kustomization (of its name, in fluxNamespace)
     # applied it, as kustomize-controller labels what it applies: a file in
-    # git never takes over organization-admins or another binding people
-    # wrote, and prune never deletes one.
+    # git never takes over a binding people or the operator wrote, and prune
+    # never deletes one.
     - expression: >-
         request.resource.resource != 'rolebindings' || request.operation == 'CREATE' ||
         (has(oldObject.metadata.labels) &&
@@ -708,10 +717,10 @@ spec:
     - expression: >-
         request.resource.resource != 'rolebindings' || request.operation == 'DELETE' ||
         (object.roleRef.kind == 'ClusterRole' &&
-        object.roleRef.name in ['agent-platform:user', 'agent-platform:editor', 'agent-platform:admin'])
+        object.roleRef.name in ['agent-platform:user', 'agent-platform:editor'])
       reason: Forbidden
       messageExpression: >-
-        'a RoleBinding from an organization path in git binds agent-platform:user, editor or admin; refused: ' +
+        'a RoleBinding from an organization path in git binds agent-platform:user or editor; refused: ' +
         request.namespace + '/' + object.metadata.name + ' to ' + object.roleRef.kind + ' ' + object.roleRef.name
     # A ServiceAccount token Secret would hand out a token, without expiry, of
     # any ServiceAccount of the namespace (the Helm ServiceAccount, the
@@ -847,27 +856,33 @@ spec:
   failurePolicy: Fail
   matchConstraints:
     resourceRules:
-      - apiGroups: ["agent-platform.giantswarm.io"]
+      - apiGroups: ["security.giantswarm.io"]
         apiVersions: ["*"]
         operations: ["DELETE"]
-        resources: ["agentplatformorganizations"]
+        resources: ["organizations"]
+  matchConditions:
+    # An Organization with the Agent Platform enabled: its deletion erases
+    # the organization's Agent Platform. Any other Organization is not held
+    # (the switch does not go off: agent-platform-organization-switch-off).
+    - name: agent-platform
+      expression: >-
+        has(oldObject.spec) && has(oldObject.spec.capabilities) && has(oldObject.spec.capabilities.agentPlatform) &&
+        has(oldObject.spec.capabilities.agentPlatform.enabled) && oldObject.spec.capabilities.agentPlatform.enabled
   validations:
     - expression: >-
-        has(namespaceObject.metadata.deletionTimestamp) ||
-        (has(oldObject.metadata.annotations) && 'kustomize.toolkit.fluxcd.io/prune' in oldObject.metadata.annotations &&
-        oldObject.metadata.annotations['kustomize.toolkit.fluxcd.io/prune'] == 'enabled')
+        has(oldObject.metadata.annotations) && 'kustomize.toolkit.fluxcd.io/prune' in oldObject.metadata.annotations &&
+        oldObject.metadata.annotations['kustomize.toolkit.fluxcd.io/prune'] == 'enabled'
       reason: Forbidden
       messageExpression: >-
-        'deleting an AgentPlatformOrganization erases its organization: set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on ' +
-        request.namespace + '/' + request.name + ' first'
+        'deleting an Organization with the Agent Platform enabled erases its Agent Platform: set the annotation kustomize.toolkit.fluxcd.io/prune: enabled on ' +
+        oldObject.metadata.name + ' first'
     - expression: >-
-        has(namespaceObject.metadata.deletionTimestamp) ||
-        !(has(oldObject.status) && has(oldObject.status.conditions) && oldObject.status.conditions.exists(c, c.type == 'Orphaned')) ||
-        oldObject.status.conditions.exists(c, c.type == 'Orphaned' && c.status == 'True' && c.reason == 'DeleteMerged')
+        !(has(oldObject.status) && has(oldObject.status.conditions) && oldObject.status.conditions.exists(c, c.type == 'AgentPlatformOrphaned')) ||
+        oldObject.status.conditions.exists(c, c.type == 'AgentPlatformOrphaned' && c.status == 'True' && c.reason == 'DeleteMerged')
       reason: Forbidden
       messageExpression: >-
-        'an AgentPlatformOrganization applied from git is erased only once its delete pull request merged (Orphaned, reason DeleteMerged):
-        delete it with agent-manager in mode commit, then erase it; refused: ' + request.namespace + '/' + request.name
+        'an Organization applied from git is erased only once its delete pull request merged (AgentPlatformOrphaned, reason DeleteMerged):
+        delete it with agent-manager in mode commit, then erase it; refused: ' + oldObject.metadata.name
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -877,6 +892,91 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   policyName: agent-platform-organization-delete-intent
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-names
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["security.giantswarm.io"]
+        apiVersions: ["*"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["organizations"]
+  matchConditions:
+    - name: agent-platform-enabled
+      expression: >-
+        has(object.spec) && has(object.spec.capabilities) && has(object.spec.capabilities.agentPlatform) &&
+        has(object.spec.capabilities.agentPlatform.enabled) && object.spec.capabilities.agentPlatform.enabled
+    # Only the write that turns it on: a name is immutable, and one enabled
+    # before this policy must still take the prune annotation and the
+    # removal of the operator's finalizer.
+    - name: turned-on
+      expression: >-
+        request.operation == 'CREATE' ||
+        !(has(oldObject.spec) && has(oldObject.spec.capabilities) && has(oldObject.spec.capabilities.agentPlatform) &&
+        has(oldObject.spec.capabilities.agentPlatform.enabled) && oldObject.spec.capabilities.agentPlatform.enabled)
+  validations:
+    - expression: "('agents-' + object.metadata.name).matches('^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$')"
+      reason: Invalid
+      messageExpression: >-
+        'an Organization with the Agent Platform enabled has a name that makes agents-<name> a namespace name (a DNS label of at most 63 characters, no dot); refused: ' +
+        object.metadata.name
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-names
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-names
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: agent-platform-organization-switch-off
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["security.giantswarm.io"]
+        apiVersions: ["*"]
+        operations: ["UPDATE"]
+        resources: ["organizations"]
+  matchConditions:
+    # An Organization whose Agent Platform was on before the write.
+    - name: was-enabled
+      expression: >-
+        has(oldObject.spec) && has(oldObject.spec.capabilities) && has(oldObject.spec.capabilities.agentPlatform) &&
+        has(oldObject.spec.capabilities.agentPlatform.enabled) && oldObject.spec.capabilities.agentPlatform.enabled
+  validations:
+    # Nothing defines yet what a switch-off does (decision D10 of the plan,
+    # giantswarm/giantswarm#39492): the switch stays on, for every writer.
+    - expression: >-
+        has(object.spec) && has(object.spec.capabilities) && has(object.spec.capabilities.agentPlatform) &&
+        has(object.spec.capabilities.agentPlatform.enabled) && object.spec.capabilities.agentPlatform.enabled
+      reason: Forbidden
+      messageExpression: >-
+        'the Agent Platform cannot be switched off for an organization yet: keep spec.capabilities.agentPlatform.enabled: true; refused: ' +
+        object.metadata.name
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: agent-platform-organization-switch-off
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policyName: agent-platform-organization-switch-off
   validationActions: [Deny]
 ---
 apiVersion: admissionregistration.k8s.io/v1

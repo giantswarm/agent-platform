@@ -2,7 +2,7 @@
 name: agent-platform-agent-management
 description: Use when asked to create, change, inspect, troubleshoot, re-pin or delete an agent on the Agent Platform, to choose its model, skills, toolset or egress, or to read or evaluate one of its sessions.
 metadata:
-  version: "3.3.2"
+  version: "3.4.0"
 ---
 
 # Managing agents and their building blocks
@@ -76,14 +76,18 @@ them with `filter_tools` (`pattern`) and read each schema with `describe_tool` b
 never assume an argument. The agent tools drop an unknown key without an error: the prompt is
 `systemMessage`, a skill is `{name, path, git: {url, ref}}`, never a bare name. The order:
 
-1. `x_agent-manager_get_info` and the owner (`x_agent-manager_list_organizations`: each
-   organization's `namespace`), then the choices from live lists: `x_agent-manager_list_model_configs`
-   for that `namespace` and for `kagent` (without `namespace` it lists `kagent` only),
+1. `x_agent-manager_get_info` and the owner: an organization by its name
+   (`x_agent-manager_list_organizations`), or the Platform. Every agent tool takes it the same way:
+   `organization: <name>` for an organization's agent, no `organization` for the Platform's, and
+   `organization` with `cluster` for an agent on that organization's workload cluster; never an
+   organization's namespace (refusals: `agent-platform-organizations`). Then the choices from live
+   lists: `x_agent-manager_list_model_configs` with that `organization` and without it (the
+   Platform's),
    `x_skill-manager_list_skills` before any prompt is drafted (per source: ref, the commit it resolves
    to, path, readOnly, each skill's description, and each plugin with its `format`: `agent-plugins`
    needs a `skills` selection from its listed skills, `claude-code` loads whole — judge a skill from
    that listing, or read it with `x_skill-manager_get_skill`; `load_skill` knows only your own skills),
-   `x_agent-manager_list_egress_policies`, presets from `filter_tools {"include_presets": true}`. A
+   `x_agent-manager_list_egress_policies` for the owner, presets from `filter_tools {"include_presets": true}`. A
    skill whose name or description matches the agent's purpose settles what the purpose means:
    propose pinning it.
 2. `x_agent-manager_validate_agent` → the plan written out and confirmed (below) →
@@ -117,8 +121,8 @@ started while its tool call awaits input, or retry with changed arguments.
   what the portal and Slack show.
 - **Model**: the cheapest config from the live list that can do the job, never invented — an agent
   on a missing or not-accepted config never boots. No suitable model: a hosted API model with a key is
-  `x_agent-manager_set_organization_model` (organization admin, or cluster admin
-  for the installation namespace; the key goes into the credential form it
+  `x_agent-manager_set_organization_model` (organization admin with `organization`, or cluster
+  admin without it for the installation's models; the key goes into the credential form it
   links). Native Vertex models also take nonsecret `projectID` and `location`;
   upload their JSON only in that credential form. Direct Vertex calls are
   unmetered by the LLM gateway. A local or Hugging Face model is model-manager (`agent-platform-tools`); a
@@ -155,8 +159,8 @@ started while its tool call awaits input, or retry with changed arguments.
   `x_agent-manager_list_egress_policies` (each destination with a credential) give its Secret as
   `credentialSecret` and `credentialKey`: names only, never a value. Pass them as `secret` and `key`
   to `x_agent-manager_replace_organization_credential`, or as `credentialSecret` and `credentialKey`
-  to `x_agent-manager_set_organization_model` and `x_agent-manager_set_organization_egress_policy`;
-  never ask the person for them. A change of a model's provider, or of a Vertex model's project,
+  to `x_agent-manager_set_organization_model` and `x_agent-manager_set_organization_egress_policy`,
+  with the same `organization` as the list; never ask the person for them. A change of a model's provider, or of a Vertex model's project,
   needs a new `credentialSecret` that does not exist yet.
 - **System prompt**: role, voice and rules; knowledge goes into skills. Every agent with tools carries
   the meta-tool paragraph from `references/system-prompt.md`.
@@ -191,7 +195,8 @@ to the owning release.
 
 Why an agent went in circles, guessed arguments or gave up is in its session; the fix is a change to
 its prompt, skills or toolset. agent-manager reads sessions as the person:
-`x_agent-manager_list_sessions` (your own; `allCreators` where you are authorized), then
+`x_agent-manager_list_sessions` (the agent's `organization`, none for a Platform agent; your own
+sessions, every person's with `allCreators` where you are authorized), then
 `x_agent-manager_get_session` and `x_agent-manager_get_session_turn` — read their schemas first.
 
 - **In your own context**: `get_session` in the default `summary` to find the turns that matter, then
