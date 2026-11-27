@@ -104,6 +104,29 @@ spec:
     port: {{ $jwks.port }}
 {{- end }}
 ---
+# Dex's token endpoint the exchange calls, over TLS verified against the
+# endpoint's CA (a private Dex CA included), else the system trust.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: klausgateway-a2a-dex-token
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  policies:
+    tls:
+      {{- if $exchange.endpoint.caSecretName }}
+      caCertificateRefs:
+        - kind: Secret
+          name: {{ $exchange.endpoint.caSecretName }}
+      {{- else }}
+      {}
+      {{- end }}
+  static:
+    host: {{ $exchange.endpoint.host }}
+    port: {{ $exchange.endpoint.port }}
+---
 # The token check and the exchange. The client's token must come from one of
 # the issuers, for that issuer's audience, requested by one of its
 # allowedClients; agentgateway then exchanges it at Dex through the issuer's
@@ -148,7 +171,11 @@ spec:
   backend:
     auth:
       oauthTokenExchange:
-        url: {{ $exchange.tokenUrl | quote }}
+        backendRef:
+          group: agentgateway.dev
+          kind: AgentgatewayBackend
+          name: klausgateway-a2a-dex-token
+        path: {{ $exchange.endpoint.path | quote }}
         subjectToken:
           tokenType: {{ $exchange.subjectTokenType }}
         requestedTokenType: IdToken

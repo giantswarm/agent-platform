@@ -4954,13 +4954,15 @@ klausGateway.workspaces.toolsPrefix while workspaces are on
 {{- define "agent-platform.klausGateway.workspacesFloor" -}}4.3.0{{- end -}}
 
 {{/*
-The first release of the klaus-gateway line whose chart takes
-a2aServer.token, the platform token agentgateway's exchange sends (the A2A
-server behind klausGateway.agentgatewayRoute.a2aServer). Its 4.20.0 release
-candidates before that took a2aServer.exchange instead and refuse the block.
+PLACEHOLDER (giantswarm/klaus-gateway#628, unreleased): the first release of
+the klaus-gateway line whose chart takes a2aServer.token, the platform token
+agentgateway's exchange sends (the A2A server behind
+klausGateway.agentgatewayRoute.a2aServer), expected as 4.20.0-rc.3. Compared
+with its prerelease: 4.20.0-rc.1 and rc.2 took a2aServer.exchange instead and
+refuse the block. Move it to the release that carries #628 when it is cut.
 One line, no comment inside the define.
 */}}
-{{- define "agent-platform.klausGateway.a2aServerFloor" -}}4.20.0{{- end -}}
+{{- define "agent-platform.klausGateway.a2aServerFloor" -}}4.20.0-rc.3{{- end -}}
 
 {{/*
 klaus-gateway's a2aServer values, as JSON, while
@@ -4977,7 +4979,12 @@ operator's. Empty while the block is off.
 {{- $route := $kg.agentgatewayRoute | default dict -}}
 {{- $a2a := $route.a2aServer | default dict -}}
 {{- if and $a2a.enabled (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) -}}
-{{- $kgFloor := regexReplaceAll "-.*$" (include "agent-platform.semverRangeFloor" (dig "klaus-gateway" "versionRange" "" .Values.components) | default "0.0.0") "" -}}
+{{- $kgFloor := include "agent-platform.semverRangeFloor" (dig "klaus-gateway" "versionRange" "" .Values.components) | default "0.0.0" -}}
+{{- /* A branch build (X.Y.Z-r<branch-hash>t<time>h<sha>) carries the last
+release's version, so its floor says nothing about which values its chart
+takes: nothing is derived for it, and the operator sets klausGateway.a2aServer
+by hand. */ -}}
+{{- if not (regexMatch "^r[0-9a-f]+t[0-9]{14}h[0-9a-f]{7,40}$" (toString (semver $kgFloor).Prerelease)) -}}
 {{- if lt ((semver $kgFloor).Compare (semver (include "agent-platform.klausGateway.a2aServerFloor" .))) 0 -}}
 {{- fail (printf "klausGateway.agentgatewayRoute.a2aServer.enabled is true but the floor of components.klaus-gateway.versionRange (%s) is below %s, the first klaus-gateway that takes the platform token agentgateway's exchange sends: raise the range's floor to %s" $kgFloor (include "agent-platform.klausGateway.a2aServerFloor" .) (include "agent-platform.klausGateway.a2aServerFloor" .)) -}}
 {{- end -}}
@@ -5016,6 +5023,7 @@ operator's. Empty while the block is off.
 {{- $_ := set $token "jwksUrl" ($ownToken.jwksUrl | default (printf "%s/keys" $issuer)) -}}
 {{- $_ := set $want "token" $token -}}
 {{- $want | toJson -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 

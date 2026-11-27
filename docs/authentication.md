@@ -112,7 +112,10 @@ The `klausgateway-a2a` policy does the following:
 
 - **Token check.** JWT validation is `Strict`, with one provider per entry of `issuers`. Each provider has the issuer's exact `audience` and its own JWKS backend (`klausgateway-a2a-jwks-<index>`). A token of any other issuer gets `401`.
 - **Client check.** One `Require` rule checks that the client that requested the token is in that issuer's `allowedClients`. The client is the token's `azp`, else its `client_id`, else its only `aud`. Dex does not check the subject token's audience in an exchange (dexidp/dex#4397), so this check and the audience check above are the only ones.
-- **Exchange.** An RFC 8693 token exchange at `exchange.tokenUrl` (default `<global.identity.issuerUrl>/token`), as the Dex client `exchange.clientId`, with `ClientSecretBasic` and the Secret `exchange.secretName`.
+- **Exchange.** An RFC 8693 token exchange at Dex's token endpoint, as the Dex client `exchange.clientId`, with `ClientSecretBasic` and the Secret `exchange.secretName`.
+  - The endpoint is the `AgentgatewayBackend` `klausgateway-a2a-dex-token`, from `exchange.endpoint` (`host`, `port`, `path`, `tls`, the same shape as an issuer's `jwks`). It is always TLS, verified against `exchange.endpoint.tls.caSecretName`, else `global.identity.ca.secretName`, else the system trust, so a Dex with a private CA works.
+  - With `exchange.endpoint.host` empty, the endpoint is `<global.identity.issuerUrl>/token` on the issuer's host and port.
+  - An in-cluster host (`<service>.<namespace>.svc.cluster.local`) also opens the data plane's egress to that namespace and port.
   - `connector_id` is the `connectorId` of the token's issuer.
   - Every audience in `exchange.audiences` is requested as Dex's `audience:server:client_id:<aud>` scope.
   - The requested token type is an ID token.
@@ -120,7 +123,7 @@ The `klausgateway-a2a` policy does the following:
 - **No exchange cache.** The agent runtime keeps the exchanged token for a whole turn, so klaus-gateway refuses one with less than `a2aServer.minTokenLifetime` (25 minutes) left. agentgateway's cache serves an entry until 15 seconds before it expires and cannot require a minimum lifetime, so every request is exchanged.
 - **One token type.** agentgateway sends one `subject_token_type` per policy (`exchange.subjectTokenType`), so every issuer must send the same token type.
 
-The meta chart derives the klaus-gateway release's `a2aServer` block from the same entry: `publicUrl`, the issuers' card schemes, and the platform token's issuer, JWKS URL, audience (the first of `exchange.audiences`) and client (`exchange.clientId`). An own `klausGateway.a2aServer` value that differs fails the render. This needs klaus-gateway 4.20.0 or later in `components.klaus-gateway.versionRange`.
+The meta chart derives the klaus-gateway release's `a2aServer` block from the same entry: `publicUrl`, the issuers' card schemes, and the platform token's issuer, JWKS URL, audience (the first of `exchange.audiences`) and client (`exchange.clientId`). An own `klausGateway.a2aServer` value that differs fails the render. This needs the floor of `components.klaus-gateway.versionRange` at 4.20.0-rc.3 or later, compared with its prerelease (4.20.0-rc.1 and rc.2 refuse the block). A branch build of klaus-gateway (`X.Y.Z-r<hash>t<time>h<sha>`) carries the last release's version, so for it nothing is derived and the render does not fail: set `klausGateway.a2aServer` by hand.
 
 With network policies on, the data plane gets egress to klaus-gateway on 8080. The agentgateway controller gets egress to every external JWKS host the issuers name.
 

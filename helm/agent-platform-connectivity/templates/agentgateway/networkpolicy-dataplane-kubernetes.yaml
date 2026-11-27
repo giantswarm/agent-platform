@@ -106,6 +106,17 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
+    {{- $endpoint := (include "agent-platform.klausGateway.a2aServer" . | fromJson).exchange.endpoint }}
+    {{- if $endpoint.inCluster }}
+    # The exchange's in-cluster Dex token endpoint.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ index (splitList "." (include "agent-platform.jwks.normalizeHost" $endpoint.host)) 1 }}
+      ports:
+        - port: {{ $endpoint.port }}
+          protocol: TCP
+    {{- end }}
     {{- end }}
     {{- $kubernetes := index .Values "mcp-kubernetes" | default dict }}
     {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "mcp-kubernetes")) (dig "gatewayAPI" "enabled" (dig "mcpKubernetes" "oauth" "enabled" false $kubernetes) $kubernetes) }}

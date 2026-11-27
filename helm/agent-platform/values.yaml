@@ -4816,7 +4816,8 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     #   /a2a                          A2A JSON-RPC, token checked and exchanged
     # Independent of `enabled` above and of slack.enabled. The meta chart
     # derives the klaus-gateway release's a2aServer block from this one
-    # (klaus-gateway >= 4.20.0, agent-platform.klausGateway.a2aServerFloor).
+    # (klaus-gateway >= 4.20.0-rc.3, agent-platform.klausGateway.a2aServerFloor;
+    # a branch build derives nothing: set klausGateway.a2aServer by hand).
     # docs/klaus-gateway-a2a.md has the Dex setup it needs.
     a2aServer:
       enabled: false
@@ -4838,9 +4839,20 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
       #     klaus-gateway: {tokenUrl, metadataUrl, openIdConnectUrl}.
       issuers: []
       exchange:
-        # Dex's token endpoint (https). Empty means
-        # <global.identity.issuerUrl>/token.
-        tokenUrl: ""
+        # Dex's token endpoint, the jwks shape: {host, port, path, tls:
+        # {enabled, caSecretName}}. TLS is required: the exchange sends the
+        # client secret and the client's token. An empty host means
+        # global.identity.issuerUrl's host and port, its path + /token, TLS
+        # verified against global.identity.ca.secretName, else the system
+        # trust. An in-cluster host (<service>.<namespace>.svc.cluster.local)
+        # also opens the data plane's egress to that namespace and port.
+        endpoint:
+          host: ""
+          port: 443
+          path: ""
+          tls:
+            enabled: true
+            caSecretName: ""
         # The Dex client agentgateway exchanges as. It is the only client
         # klaus-gateway accepts platform tokens from.
         clientId: klaus-gateway-exchange

@@ -1114,6 +1114,13 @@ spec:
             - agent-platform
             - kubernetes
             clientId: klaus-gateway-exchange
+            endpoint:
+              host: ""
+              path: ""
+              port: 443
+              tls:
+                caSecretName: ""
+                enabled: true
             scopes:
             - openid
             - email
@@ -1122,7 +1129,6 @@ spec:
             secretKey: clientSecret
             secretName: ""
             subjectTokenType: IdToken
-            tokenUrl: ""
           hostname: ""
           issuers: []
         enabled: false

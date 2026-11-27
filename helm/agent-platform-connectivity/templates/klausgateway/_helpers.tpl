@@ -100,7 +100,8 @@ klaus-gateway on and klausGateway.agentgatewayRoute.a2aServer.enabled.
 {{/*
 The A2A server's entry, resolved and checked, as JSON: the
 klausGateway.agentgatewayRoute.a2aServer block with hostname and
-exchange.tokenUrl defaulted. Fails the render on a block agentgateway could not
+exchange.endpoint defaulted, and the endpoint's CA Secret and whether it is
+in-cluster resolved. Fails the render on a block agentgateway could not
 serve: a request it would refuse, or exchange at no connector, fails closed at
 runtime with no other trace than a 401.
 Usage: include "agent-platform.klausGateway.a2aServer" . | fromJson
@@ -156,12 +157,36 @@ Usage: include "agent-platform.klausGateway.a2aServer" . | fromJson
 {{- if not (has (toString $exchange.subjectTokenType) (list "IdToken" "AccessToken")) -}}
 {{- fail (printf "%s.exchange.subjectTokenType is %q: IdToken or AccessToken" $path (toString $exchange.subjectTokenType)) -}}
 {{- end -}}
-{{- if not $exchange.tokenUrl -}}
-{{- $_ := set $exchange "tokenUrl" (printf "%s/token" (include "agent-platform.issuerUrl" (dict "ctx" . "for" (printf "%s.exchange.tokenUrl" $path)) | trimSuffix "/")) -}}
+{{- $endpoint := deepCopy ($exchange.endpoint | default dict) -}}
+{{- $tls := deepCopy ($endpoint.tls | default dict) -}}
+{{- if not $endpoint.host -}}
+{{- $issuerUrl := include "agent-platform.issuerUrl" (dict "ctx" . "for" (printf "%s.exchange.endpoint.host" $path)) | trimSuffix "/" -}}
+{{- $u := urlParse $issuerUrl -}}
+{{- if ne $u.scheme "https" -}}
+{{- fail (printf "%s.exchange.endpoint.host is empty and the issuer %q is not https: the exchange sends the client secret and the client's token, so set %s.exchange.endpoint to Dex's TLS token endpoint" $path $issuerUrl $path) -}}
 {{- end -}}
-{{- if not (hasPrefix "https://" $exchange.tokenUrl) -}}
-{{- fail (printf "%s.exchange.tokenUrl is %q: the exchange sends the client secret and the client's token, so it must be https" $path $exchange.tokenUrl) -}}
+{{- $hostPort := splitList ":" $u.host -}}
+{{- $_ := set $endpoint "host" (first $hostPort) -}}
+{{- $_ := set $endpoint "port" (ternary (last $hostPort | int) 443 (eq (len $hostPort) 2)) -}}
+{{- $_ := set $endpoint "path" (printf "%s/token" (trimSuffix "/" $u.path)) -}}
+{{- $_ := set $tls "enabled" true -}}
 {{- end -}}
+{{- $_ := set $endpoint "tls" $tls -}}
+{{- if not $endpoint.port -}}
+{{- fail (printf "%s.exchange.endpoint.port is empty: the port Dex serves its token endpoint on over TLS" $path) -}}
+{{- end -}}
+{{- if or (include "agent-platform.jwks.hostCarriesPort" $endpoint.host) (include "agent-platform.jwks.addrLiteral" $endpoint.host) (include "agent-platform.jwks.malformedName" $endpoint.host) -}}
+{{- fail (printf "%s.exchange.endpoint.host is %q: Dex's hostname alone, with no scheme, port, path or address literal" $path $endpoint.host) -}}
+{{- end -}}
+{{- if not (hasPrefix "/" (toString $endpoint.path)) -}}
+{{- fail (printf "%s.exchange.endpoint.path is %q: the token endpoint's path, starting with /" $path (toString $endpoint.path)) -}}
+{{- end -}}
+{{- if not (include "agent-platform.jwks.tlsEnabled" $endpoint) -}}
+{{- fail (printf "%s.exchange.endpoint is not TLS (port %v, tls.enabled false): the exchange sends the client secret and the client's token, so set %s.exchange.endpoint.tls.enabled: true" $path $endpoint.port $path) -}}
+{{- end -}}
+{{- $_ := set $endpoint "caSecretName" (include "agent-platform.jwks.caSecretName" (dict "ctx" . "jwks" $endpoint)) -}}
+{{- $_ := set $endpoint "inCluster" (include "agent-platform.jwks.inCluster" $endpoint.host) -}}
+{{- $_ := set $exchange "endpoint" $endpoint -}}
 {{- $_ := set $a2a "exchange" $exchange -}}
 {{- $a2a | toJson -}}
 {{- end -}}

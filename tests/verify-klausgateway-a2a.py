@@ -6,6 +6,8 @@ Modes, each reading a rendered manifest (stdout of `helm template`, PyYAML):
                   the A2A backend, the card route without a policy, the /a2a
                   route with the token check and the exchange, the JWKS
                   backends, the data plane's egress to klaus-gateway.
+  --connectivity-in-cluster  the same with an in-cluster Dex token endpoint and
+                  its CA: the TLS backend with the CA, the data plane's egress.
   --off           the connectivity chart without the entry: none of it.
   --meta          the meta chart with ci/test-klausgateway-a2a-values.yaml: the
                   klaus-gateway release's derived a2aServer block.
@@ -84,7 +86,8 @@ def connectivity(docs):
         fail(f"authorization {authz!r}, want Require {want_rule!r}")
     exchange = spec["backend"]["auth"]["oauthTokenExchange"]
     want_exchange = {
-        "url": "https://dex.ci.example.com/token",
+        "backendRef": {"group": "agentgateway.dev", "kind": "AgentgatewayBackend", "name": "klausgateway-a2a-dex-token"},
+        "path": "/token",
         "subjectToken": {"tokenType": "IdToken"},
         "requestedTokenType": "IdToken",
         "scopes": [
@@ -111,6 +114,9 @@ def connectivity(docs):
         fail(f"klausgateway-a2a-jwks-0 {jwks0 and jwks0['spec']!r}")
     if not jwks1 or jwks1["spec"].get("policies") != {"tls": {}} or jwks1["spec"]["static"] != {"host": "login.example.org", "port": 443}:
         fail(f"klausgateway-a2a-jwks-1 must originate TLS on 443 with the system trust, got {jwks1 and jwks1['spec']!r}")
+    token = find(docs, "AgentgatewayBackend", "klausgateway-a2a-dex-token")
+    if not token or token["spec"] != {"policies": {"tls": {}}, "static": {"host": "dex.ci.example.com", "port": 443}}:
+        fail(f"klausgateway-a2a-dex-token must originate TLS to the issuer's host on 443, got {token and token['spec']!r}")
     egress = None
     for d in docs:
         if d["metadata"]["name"].endswith("-dataplane") and d.get("kind") in ("NetworkPolicy", "CiliumNetworkPolicy"):
@@ -118,6 +124,27 @@ def connectivity(docs):
     if egress is None or "klaus-gateway" not in yaml.safe_dump(egress):
         fail("the data plane's network policy opens no egress to klaus-gateway")
     print("ok: A2A backend, public card route, /a2a token check and exchange, JWKS backends, data plane egress")
+
+
+def connectivity_in_cluster(docs):
+    policy = find(docs, "AgentgatewayPolicy", "klausgateway-a2a")
+    exchange = policy["spec"]["backend"]["auth"]["oauthTokenExchange"]
+    if exchange.get("path") != "/token" or "url" in exchange:
+        fail(f"the exchange must call the backend at /token, got {exchange!r}")
+    token = find(docs, "AgentgatewayBackend", "klausgateway-a2a-dex-token")
+    want = {
+        "policies": {"tls": {"caCertificateRefs": [{"kind": "Secret", "name": "dex-ca"}]}},
+        "static": {"host": "dex.giantswarm.svc.cluster.local", "port": 5556},
+    }
+    if not token or token["spec"] != want:
+        fail(f"klausgateway-a2a-dex-token {token and token['spec']!r}, want {want!r}")
+    egress = None
+    for d in docs:
+        if d["metadata"]["name"].endswith("-dataplane") and d.get("kind") in ("NetworkPolicy", "CiliumNetworkPolicy"):
+            egress = yaml.safe_dump(d["spec"].get("egress", []))
+    if egress is None or "giantswarm" not in egress or "5556" not in egress:
+        fail("the data plane's network policy opens no egress to the in-cluster Dex token endpoint")
+    print("ok: an in-cluster Dex token endpoint with a private CA: TLS backend with the CA, data plane egress")
 
 
 def off(docs):
@@ -164,7 +191,7 @@ def meta_off(docs):
 
 def main():
     mode, path = sys.argv[1], sys.argv[2]
-    {"--connectivity": connectivity, "--off": off, "--meta": meta, "--meta-off": meta_off}[mode](load(path))
+    {"--connectivity": connectivity, "--connectivity-in-cluster": connectivity_in_cluster, "--off": off, "--meta": meta, "--meta-off": meta_off}[mode](load(path))
 
 
 if __name__ == "__main__":

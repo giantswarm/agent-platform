@@ -1676,7 +1676,11 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | klausGateway.agentgatewayRoute.a2aServer.enabled | bool | `false` |  |
 | klausGateway.agentgatewayRoute.a2aServer.hostname | string | `""` |  |
 | klausGateway.agentgatewayRoute.a2aServer.issuers | list | `[]` |  |
-| klausGateway.agentgatewayRoute.a2aServer.exchange.tokenUrl | string | `""` |  |
+| klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.host | string | `""` |  |
+| klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.port | int | `443` |  |
+| klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.path | string | `""` |  |
+| klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.enabled | bool | `true` |  |
+| klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.caSecretName | string | `""` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.clientId | string | `"klaus-gateway-exchange"` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.secretName | string | `""` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.secretKey | string | `"clientSecret"` |  |

@@ -1729,18 +1729,24 @@ verify-klausgateway-valkey: ## Assert the gateway's Valkey routing-store default
 
 KG_A2A_CONN := $(VM) --namespace agent-platform -f $(CONNECTIVITY_DIR)/ci/test-klausgateway-a2a-values.yaml
 KG_A2A_META := $(VM) -f $(CHART_DIR)/ci/test-klausgateway-a2a-values.yaml
-verify-klausgateway-a2a: ## Assert klaus-gateway's A2A server entry (klausGateway.agentgatewayRoute.a2aServer, giantswarm/giantswarm#39388): an A2A backend to klaus-gateway:8080; the Agent Card route on the A2A hostname without any policy; the /a2a route's AgentgatewayPolicy — Strict JWT keeping the token, one provider per issuer with its audience and JWKS backend, one Require rule matching each iss to its allowedClients by azp, else client_id, else the only aud, and the RFC 8693 exchange at Dex (IdToken in and out, the audiences as Dex cross-client scopes, connector_id chosen by iss, ClientSecretBasic from the Secret, cache off); the data plane's egress to klaus-gateway in both network policy flavours; nothing while off; the guards (no issuers, an issuer without allowedClients, the exchange client among them, no secretName) fail naming the key. The meta chart derives the klaus-gateway release's a2aServer (card issuers, publicUrl, the platform token's issuer, JWKS, audience and client) from the same block, forwards nothing while it is off, fails below klaus-gateway 4.20.0 and on an own a2aServer.publicUrl that differs.
+KG_A2A_IN_CLUSTER := --set klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.host=dex.giantswarm.svc.cluster.local --set klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.port=5556 --set klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.path=/token --set klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.caSecretName=dex-ca
+verify-klausgateway-a2a: ## Assert klaus-gateway's A2A server entry (klausGateway.agentgatewayRoute.a2aServer, giantswarm/giantswarm#39388): an A2A backend to klaus-gateway:8080; the Agent Card route on the A2A hostname without any policy; the /a2a route's AgentgatewayPolicy — Strict JWT keeping the token, one provider per issuer with its audience and JWKS backend, one Require rule matching each iss to its allowedClients by azp, else client_id, else the only aud, and the RFC 8693 exchange at Dex through the TLS backend klausgateway-a2a-dex-token (the issuer's host on 443 with the system trust by default; an in-cluster endpoint with its CA Secret and the data plane's egress to it) (IdToken in and out, the audiences as Dex cross-client scopes, connector_id chosen by iss, ClientSecretBasic from the Secret, cache off); the data plane's egress to klaus-gateway in both network policy flavours; nothing while off; the guards (no issuers, an issuer without allowedClients, the exchange client among them, no secretName, a token endpoint without TLS) fail naming the key. The meta chart derives the klaus-gateway release's a2aServer (card issuers, publicUrl, the platform token's issuer, JWKS, audience and client) from the same block, forwards nothing while it is off, fails below klaus-gateway 4.20.0-rc.3 compared with its prerelease (4.11.0 and 4.20.0-rc.2 fail), derives nothing for a branch build (X.Y.Z-r<hash>t<time>h<sha>) and on an own a2aServer.publicUrl that differs.
 	@echo "====> $@"
 	@echo "--> connectivity: the entry's objects"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) >$(VERIFY_TMP)/kga-conn.out 2>&1 || { cat $(VERIFY_TMP)/kga-conn.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --connectivity $(VERIFY_TMP)/kga-conn.out
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) --set networkPolicy.flavor=cilium >$(VERIFY_TMP)/kga-conn-cilium.out 2>&1 || { cat $(VERIFY_TMP)/kga-conn-cilium.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --connectivity $(VERIFY_TMP)/kga-conn-cilium.out
+	@echo "--> connectivity: an in-cluster Dex token endpoint with a private CA"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) $(KG_A2A_IN_CLUSTER) >$(VERIFY_TMP)/kga-incl.out 2>&1 || { cat $(VERIFY_TMP)/kga-incl.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --connectivity-in-cluster $(VERIFY_TMP)/kga-incl.out
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) $(KG_A2A_IN_CLUSTER) --set networkPolicy.flavor=cilium >$(VERIFY_TMP)/kga-incl-cilium.out 2>&1 || { cat $(VERIFY_TMP)/kga-incl-cilium.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --connectivity-in-cluster $(VERIFY_TMP)/kga-incl-cilium.out
 	@echo "--> connectivity: nothing while off"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) --set klausGateway.agentgatewayRoute.a2aServer.enabled=false >$(VERIFY_TMP)/kga-off.out 2>&1 || { cat $(VERIFY_TMP)/kga-off.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --off $(VERIFY_TMP)/kga-off.out
 	@echo "--> connectivity: the guards"
-	@for case in "issuers=null|issuers is empty" "issuers[0].allowedClients=null|issuers\[0\].allowedClients is empty" "issuers[0].allowedClients[0]=klaus-gateway-exchange|names the exchange client" "exchange.secretName=|exchange.secretName is empty"; do \
+	@for case in "issuers=null|issuers is empty" "issuers[0].allowedClients=null|issuers\[0\].allowedClients is empty" "issuers[0].allowedClients[0]=klaus-gateway-exchange|names the exchange client" "exchange.secretName=|exchange.secretName is empty" "exchange.endpoint.tls.enabled=false,klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.host=dex.giantswarm.svc.cluster.local,klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.port=5556,klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.path=/token|exchange.endpoint is not TLS"; do \
 		set="$${case%%|*}"; want="$${case#*|}"; \
 		if $(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) --set "klausGateway.agentgatewayRoute.a2aServer.$$set" >$(VERIFY_TMP)/kga-guard.out 2>&1; then echo "FAIL: $$set rendered"; exit 1; fi; \
 		grep -q "$$want" $(VERIFY_TMP)/kga-guard.out || { echo "FAIL: $$set failed without naming it"; cat $(VERIFY_TMP)/kga-guard.out; exit 1; }; \
@@ -1751,9 +1757,14 @@ verify-klausgateway-a2a: ## Assert klaus-gateway's A2A server entry (klausGatewa
 	@python3 tests/verify-klausgateway-a2a.py --meta $(VERIFY_TMP)/kga-meta.out
 	@$(HELM) template t $(CHART_DIR) $(VM) --set components.klaus-gateway.enabled=true >$(VERIFY_TMP)/kga-meta-off.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-off.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --meta-off $(VERIFY_TMP)/kga-meta-off.out
-	@if $(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set 'components.klaus-gateway.versionRange=>=4.11.0 <5.0.0' >$(VERIFY_TMP)/kga-floor.out 2>&1; then echo "FAIL: a klaus-gateway range below 4.20.0 rendered"; exit 1; fi
-	@grep -q "raise the range's floor to 4.20.0" $(VERIFY_TMP)/kga-floor.out || { cat $(VERIFY_TMP)/kga-floor.out; exit 1; }
-	@echo "ok: a klaus-gateway range below 4.20.0 fails naming the floor"
+	@for range in ">=4.11.0 <5.0.0" ">=4.20.0-rc.2 <5.0.0"; do \
+		if $(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set "components.klaus-gateway.versionRange=$$range" >$(VERIFY_TMP)/kga-floor.out 2>&1; then echo "FAIL: klaus-gateway $$range rendered"; exit 1; fi; \
+		grep -q "raise the range's floor to 4.20.0-rc.3" $(VERIFY_TMP)/kga-floor.out || { cat $(VERIFY_TMP)/kga-floor.out; exit 1; }; \
+		echo "ok: klaus-gateway $$range fails naming the floor 4.20.0-rc.3"; \
+	done
+	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set 'components.klaus-gateway.versionRange=>=4.19.1-r80b459c9t20261127101704ha83c9c8 <5.0.0' >$(VERIFY_TMP)/kga-dev.out 2>&1 || { cat $(VERIFY_TMP)/kga-dev.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --meta-off $(VERIFY_TMP)/kga-dev.out
+	@echo "ok: a klaus-gateway branch build renders and derives nothing"
 	@if $(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set klausGateway.a2aServer.publicUrl=https://other.example.com >$(VERIFY_TMP)/kga-own.out 2>&1; then echo "FAIL: an own a2aServer.publicUrl that differs rendered"; exit 1; fi
 	@grep -q "leave klausGateway.a2aServer.publicUrl unset" $(VERIFY_TMP)/kga-own.out || { cat $(VERIFY_TMP)/kga-own.out; exit 1; }
 	@echo "ok: an own a2aServer.publicUrl that differs fails"
