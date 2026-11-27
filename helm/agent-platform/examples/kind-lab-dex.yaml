@@ -75,6 +75,7 @@ components:
     enabled: false
 
 muster:
+  replicaCount: 1
   networkPolicy:
     enabled: false
   muster:

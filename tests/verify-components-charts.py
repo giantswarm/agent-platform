@@ -148,6 +148,7 @@ KAGENT = ["kagent-crds", "kagent"]
 # is published, the forwarded block is rendered against the newest chart the
 # line has (see fallback()); the entry goes when the release exists.
 UNRELEASED: dict[str, str] = {
+    "credential-api": "0.2.0",
 }
 # component -> a published branch build that already carries the schema of the
 # release UNRELEASED waits for, when the newest release's schema would refuse a
@@ -246,6 +247,7 @@ QUICKSTART = [
 # for renders with a much smaller component set: viaMuster is tied to the
 # agent-platform-mcps component, which only the full set turns on.
 ALL_ON_INPUTS = [
+    "--set", "credential-api.installation=ci",
     # Every route the connectivity chart renders needs a public Gateway to
     # hang off (the chart's own guard); set once for all of them, the name is
     # immaterial to a render.
@@ -258,6 +260,8 @@ ALL_ON_INPUTS = [
     # charts refuse to render at all.
     "--set", "muster.muster.oauth.server.dex.clientSecret=x",
     "--set", "muster.muster.oauth.server.registrationToken=x",
+    "--set", "muster.muster.oauth.server.existingSecret=agent-platform-idp",
+    "--set", "muster.muster.oauth.server.encryptionKey=true",
     # valkey's ACL users need their passwords from somewhere (its own guard).
     "--set", "valkey.valkey.auth.usersExistingSecret=x",
     "--set", "mcp-kubernetes.mcpKubernetes.oauth.dex.clientSecret=x",

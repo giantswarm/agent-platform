@@ -1,3 +1,6 @@
+credentialApi:
+  namespace: agent-platform-credential-api
+
 global:
   registry: gsoci.azurecr.io
   imagePullSecrets: []

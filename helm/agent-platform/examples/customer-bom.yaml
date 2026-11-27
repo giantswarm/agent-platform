@@ -50,6 +50,7 @@ components:
   agent-sandbox:                 { versionRange: "0.2.31" }
   dicebear:                      { versionRange: "0.3.10" }
   model-manager:                 { versionRange: "1.25.0" }
+  credential-api:                { versionRange: "0.2.0" }
   agent-manager:                 { versionRange: "3.5.8" }
   # The default agent (components.default-agent): the agent chart.
   default-agent:       { versionRange: "2.6.0" }
