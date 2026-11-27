@@ -1,0 +1,3 @@
+# The lab-only muster oauth-encryption-key in tests/ats/lab-dex.yaml: a public,
+# readable lab value (base64 of "lab-only-oauth-encryption-key-32"), not a secret.
+cc76dc7d807b10e7499f91e1d04a9afcd86401a3:tests/ats/lab-dex.yaml:generic-api-key:73
