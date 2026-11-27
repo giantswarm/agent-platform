@@ -9,6 +9,10 @@
 global:
   identity:
     issuerUrl: https://dex.ci.example.com
+kagent:
+  controller:
+    auth:
+      audiences: [agent-platform]
 workspaces:
   enabled: true
   storage:

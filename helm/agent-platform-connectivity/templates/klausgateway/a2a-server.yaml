@@ -1,5 +1,5 @@
 {{- /*
-The A2A server's entry for outside A2A clients (docs/klaus-gateway-a2a.md):
+The A2A server's entry for outside A2A clients (docs/authentication.md):
 agentgateway checks the client's token against its issuer, exchanges it at
 Dex (RFC 8693) and sends klaus-gateway the Dex token. The Agent Card route
 carries no policy: a client reads it before it has a token.
@@ -7,12 +7,10 @@ carries no policy: a client reads it before it has a token.
 {{- if include "agent-platform.klausGateway.a2aServerOn" . }}
 {{- $a2a := include "agent-platform.klausGateway.a2aServer" . | fromJson }}
 {{- $exchange := $a2a.exchange }}
-{{- $ns := .Values.klausGateway.namespaceOverride | default .Release.Namespace }}
+{{- $ns := include "agent-platform.klausGateway.namespace" . }}
 {{- $fullname := include "agent-platform.klausGateway.fullname" . }}
 {{- $routes := list (dict "name" "klausgateway-a2a-card" "type" "Exact" "path" "/.well-known/agent-card.json") (dict "name" "klausgateway-a2a" "type" "PathPrefix" "path" "/a2a") }}
-# An A2A backend, not a static one: agentgateway parses the JSON-RPC method
-# for its A2A metrics and rewrites the Agent Card's interface URLs to the
-# public address.
+# JSON-RPC calls use the A2A backend for protocol metrics and method tracing.
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -23,6 +21,18 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   a2a:
+    host: {{ printf "%s.%s.svc.cluster.local" $fullname $ns }}
+    port: 8080
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: klausgateway-a2a-cards
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  static:
     host: {{ printf "%s.%s.svc.cluster.local" $fullname $ns }}
     port: 8080
 {{- range $routes }}
@@ -43,12 +53,23 @@ spec:
   hostnames:
     - {{ $a2a.hostname | quote }}
   rules:
+    {{- if eq .name "klausgateway-a2a" }}
+    - matches:
+        - path:
+            type: {{ .type }}
+            value: {{ .path }}
+          method: GET
+      backendRefs:
+        - name: klausgateway-a2a-cards
+          kind: AgentgatewayBackend
+          group: agentgateway.dev
+    {{- end }}
     - matches:
         - path:
             type: {{ .type }}
             value: {{ .path }}
       backendRefs:
-        - name: klausgateway-a2a
+        - name: {{ ternary "klausgateway-a2a-cards" "klausgateway-a2a" (eq .name "klausgateway-a2a-card") }}
           kind: AgentgatewayBackend
           group: agentgateway.dev
 {{- if not (include "agent-platform.edgeIsDataPlane" $) }}
@@ -87,17 +108,27 @@ metadata:
   labels:
     {{- include "labels.common" $ | nindent 4 }}
 spec:
-  {{- if include "agent-platform.jwks.tlsEnabled" $jwks }}
+  {{- if or (include "agent-platform.jwks.tlsEnabled" $jwks) $jwks.tunnel }}
   policies:
+    {{- with $jwks.tunnel }}
+    tunnel:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- if include "agent-platform.jwks.tlsEnabled" $jwks }}
     tls:
       {{- $ca := include "agent-platform.jwks.caSecretName" (dict "ctx" $ "jwks" $jwks) }}
       {{- if $ca }}
       caCertificateRefs:
         - kind: Secret
           name: {{ $ca }}
+          {{- $key := include "agent-platform.klausGateway.a2aCASecretKey" (dict "ctx" $ "jwks" $jwks) }}
+          {{- if ne $key "ca.crt" }}
+          key: {{ $key | quote }}
+          {{- end }}
       {{- else }}
       {}
       {{- end }}
+    {{- end }}
   {{- end }}
   static:
     host: {{ $jwks.host }}
@@ -115,11 +146,19 @@ metadata:
     {{- include "labels.common" . | nindent 4 }}
 spec:
   policies:
+    {{- with $exchange.endpoint.tunnel }}
+    tunnel:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
     tls:
       {{- if $exchange.endpoint.caSecretName }}
       caCertificateRefs:
         - kind: Secret
           name: {{ $exchange.endpoint.caSecretName }}
+          {{- $key := include "agent-platform.klausGateway.a2aCASecretKey" (dict "ctx" . "jwks" $exchange.endpoint) }}
+          {{- if ne $key "ca.crt" }}
+          key: {{ $key | quote }}
+          {{- end }}
       {{- else }}
       {}
       {{- end }}

@@ -68,6 +68,7 @@ ON = [
     # The portal's egress policy names the login issuer, its route a Gateway,
     # its public URL the domain.
     "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+    "--set", "kagent.controller.auth.audiences[0]=agent-platform",
     "--set", "global.gatewayApi.parentRefs[0].name=gw", "--set", "global.gatewayApi.parentRefs[0].namespace=gw-system",
     "--set", "global.domain=example.com",
 ]

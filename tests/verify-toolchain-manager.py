@@ -306,6 +306,7 @@ def main(meta: str, connectivity: str) -> int:
               (REPOS + "  - registry.acme.example/toolchains\n",), "the kagent release values with additionalSources")
     must_lack(values(documents(helm(meta, [*IDENTITY, *KAGENT]))[("HelmRelease", "kagent")]), ("sessionToolImageRepositories",), "the kagent release values with the component off")
     must_lack(values(documents(helm(meta, [*ON, *IDENTITY, *KAGENT, "--set", "components.kagent.versionRange=>=1.25.0 <1.26.0", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller",
+                                           "--set", "kagent.controller.auth.mode=insecure",
                                            "--set", "components.kagent-crds.versionRange=>=1.25.0 <1.26.0"]))[("HelmRelease", "kagent")]),
               ("sessionToolImageRepositories",), "the kagent release values below the 1.26.0 floor")
     must_have(values(documents(helm(meta, [*ON, *IDENTITY, *KAGENT, "--set", "kagent.controller.sessionToolImageRepositories[0]=registry.own.example/tools"]))[("HelmRelease", "kagent")]),

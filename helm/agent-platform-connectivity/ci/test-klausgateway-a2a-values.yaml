@@ -25,6 +25,8 @@ ingress:
 
 networkPolicy:
   enabled: true
+  kubernetes:
+    apiServerCIDR: 10.96.0.1/32
 
 gateway:
   jwksEgress:

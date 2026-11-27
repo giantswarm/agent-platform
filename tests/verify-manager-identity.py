@@ -61,6 +61,7 @@ def sets(*pairs: str) -> list[str]:
 # Without an issuer the line's own controller runs, not the kagent-extensions binary.
 LOGIN = sets(
     "kagent.controller.image.repository=giantswarm/kagent/controller",
+    "kagent.controller.auth.audiences[0]=agent-platform",
     f"muster.muster.oauth.server.dex.issuerUrl={ISSUER}",
     f"muster.muster.oauth.server.dex.clientId={CLIENT}",
     f"muster.muster.oauth.server.existingSecret={SECRET}",

@@ -1,5 +1,6 @@
 {{- if and (include "agent-platform.agentgateway.controller" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes") }}
 {{- $externalPorts := include "agent-platform.jwks.externalPorts" . | fromJsonArray }}
+{{- $proxyTargets := include "agent-platform.klausGateway.a2aProxyTargets" (dict "ctx" . "role" "controller") | fromJsonArray }}
 {{- $extra := (.Values.gateway.jwksEgress).external | default dict }}
 {{- $extraCidrs := $extra.cidrs | default list }}
 {{- $extraPort := $extra.port | default 443 | int }}
@@ -86,6 +87,9 @@ spec:
     or one this flavour's IPv4 wide rule cannot reach. Its sibling
     external.fqdns is a name selector and this flavour has none, so an issuer
     reached by name belongs in the blocks here. */}}
+    {{- if $proxyTargets }}
+    {{- include "agent-platform.klausGateway.egress.kubernetes" (dict "ctx" . "targets" $proxyTargets) | nindent 4 }}
+    {{- end }}
     {{- if $extraCidrs }}
     - to:
         {{- range $extraCidrs }}

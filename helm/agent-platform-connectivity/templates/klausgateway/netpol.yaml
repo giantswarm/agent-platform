@@ -1,14 +1,14 @@
-{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) .Values.klausGateway.a2a.enabled .Values.networkPolicy.enabled }}
-{{- $agentgatewayPort := "8080" }}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) (or .Values.klausGateway.a2a.enabled (include "agent-platform.klausGateway.a2aServerEgressOn" .)) .Values.networkPolicy.enabled }}
+{{- $agentgatewayPort := (index .Values.gateway.listeners 0).port }}
+{{- $namespace := include "agent-platform.klausGateway.namespace" . }}
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
 # Allow klausgateway to reach the agentgateway data-plane for A2A egress.
-# Traffic flows: klausgateway → agentgateway:8080 → kagent-controller:8083.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
   name: {{ include "name" . }}-klausgateway-a2a-egress
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $namespace }}
   labels:
     {{- include "labels.common" . | nindent 4 }}
 spec:
@@ -20,6 +20,9 @@ spec:
     - toEndpoints:
         - matchLabels:
             gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+            {{- if ne $namespace .Release.Namespace }}
+            io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+            {{- end }}
       toPorts:
         - ports:
             - port: {{ $agentgatewayPort | quote }}
@@ -30,7 +33,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "name" . }}-klausgateway-a2a-egress
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ $namespace }}
   labels:
     {{- include "labels.common" . | nindent 4 }}
 spec:
@@ -43,6 +46,11 @@ spec:
         - podSelector:
             matchLabels:
               gateway.networking.k8s.io/gateway-name: {{ .Values.gateway.name }}
+          {{- if ne $namespace .Release.Namespace }}
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          {{- end }}
       ports:
         - port: {{ $agentgatewayPort | int }}
           protocol: TCP
@@ -110,6 +118,74 @@ spec:
           protocol: TCP
 {{- end }}
 {{- end }}
+{{- if and (include "agent-platform.klausGateway.a2aServerEgressOn" .) .Values.networkPolicy.enabled }}
+{{- $targets := include "agent-platform.klausGateway.a2aServerEgressTargets" . | fromJsonArray }}
+{{- $peers := include "agent-platform.idpEgress.inClusterPeers" (dict "ctx" . "issuerUrl" "") | fromJsonArray }}
+{{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "name" . }}-klausgateway-a2a-server-egress
+  namespace: {{ include "agent-platform.klausGateway.namespace" . }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
+  egress:
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- include "agent-platform.klausGateway.egress.cilium" (dict "ctx" . "targets" $targets) | nindent 4 }}
+    {{- range $peers }}
+    - toEndpoints:
+        - matchLabels:
+            {{- with .matchLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            io.kubernetes.pod.namespace: {{ .namespace | quote }}
+      toPorts:
+        - ports:
+            {{- range .ports }}
+            - port: {{ . | toString | quote }}
+              protocol: TCP
+            {{- end }}
+    {{- end }}
+{{- else if eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "name" . }}-klausgateway-a2a-server-egress
+  namespace: {{ include "agent-platform.klausGateway.namespace" . }}
+  labels:
+    {{- include "labels.common" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . | quote }}
+  policyTypes: [Egress]
+  egress:
+    {{- include "agent-platform.klausGateway.egress.kubernetes" (dict "ctx" . "targets" $targets) | nindent 4 }}
+    {{- range $peers }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .namespace | quote }}
+          {{- with .matchLabels }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        {{- range .ports }}
+        - port: {{ . | int }}
+          protocol: TCP
+        {{- end }}
+    {{- end }}
+    {{- include "agent-platform.dnsEgress.kubernetes" . | nindent 4 }}
+{{- end }}
+{{- end }}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" $ "name" "klaus-gateway")) (include "agent-platform.klausGateway.storeEgress" .) .Values.networkPolicy.enabled }}
 {{- if eq (include "agent-platform.networkPolicyFlavor" .) "cilium" }}
 ---
@@ -138,7 +214,7 @@ apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
   name: {{ include "name" . }}-klausgateway-store-egress
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "agent-platform.klausGateway.namespace" . }}
   labels:
     {{- include "labels.common" . | nindent 4 }}
 spec:
@@ -166,7 +242,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: {{ include "name" . }}-klausgateway-store-egress
-  namespace: {{ .Release.Namespace }}
+  namespace: {{ include "agent-platform.klausGateway.namespace" . }}
   labels:
     {{- include "labels.common" . | nindent 4 }}
 spec:
@@ -180,6 +256,11 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "agent-platform.valkey.podSelector" . | nindent 14 }}
+          {{- if ne (include "agent-platform.klausGateway.namespace" .) .Release.Namespace }}
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace }}
+          {{- end }}
       ports:
         - port: {{ include "agent-platform.klausGateway.valkeyPort" . | int }}
           protocol: TCP

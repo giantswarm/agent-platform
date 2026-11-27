@@ -102,8 +102,10 @@ ALLOW_HTTP_CHART = "1.11.5-rc.1"
 # controller's verification of people's tokens.
 BELOW_AUTH_FLOOR = ["--set", "kagent.controller.auth.mode=insecure", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"]
 MUSTER_BASE_URL = ["--set", "muster.muster.oauth.server.baseUrl=https://muster.ci.example.com"]
-ACTOR_JWT_PROVIDERS = ("        actorJWTProviders:\n          muster:\n            audience: https://muster.ci.example.com\n"
-                       f"            hostname: muster.{NAMESPACE}.svc.cluster.local\n")
+MUSTER_ACTOR_JWT_PROVIDER = (
+    "          muster:\n            audience: https://muster.ci.example.com\n"
+    f"            hostname: muster.{NAMESPACE}.svc.cluster.local\n"
+)
 ENV = {"jwksURL": "KAGENT_SESSION_ADMISSION_JWT_JWKS_URL", "issuer": "KAGENT_SESSION_ADMISSION_JWT_ISSUER",
        "audience": "KAGENT_SESSION_ADMISSION_JWT_AUDIENCE"}
 
@@ -284,21 +286,22 @@ def main(meta: str) -> int:
     ok("agent-manager's muster.actorBearer follows muster's actor bearer: true with it on, absent with it off, an own value that differs fails the render")
     ok("with workspaces and Substrate on muster accepts Substrate's actor JWT (actorBearer, issuer https://idp.<substrate namespace>.svc "
        "or substrate.ateApi.actorJWTIssuer); an own enabled: false or audience stands")
-    def actor_jwt_of(flags: list) -> str:
-        return block(block(block(kagent_release([*base, *flags], meta), "controller", 4), "session", 6), "actorJWTProviders", 8)
-    if actor_jwt_of(MUSTER_BASE_URL) != ACTOR_JWT_PROVIDERS:
+    def muster_actor_jwt_of(flags: list) -> str:
+        providers = block(block(block(kagent_release([*base, *flags], meta), "controller", 4), "session", 6), "actorJWTProviders", 8)
+        return block(providers, "muster", 10)
+    if muster_actor_jwt_of(MUSTER_BASE_URL) != MUSTER_ACTOR_JWT_PROVIDER:
         fail(f"with muster trusting the actor JWT the kagent release's controller.session.actorJWTProviders is not muster's "
-             f"in-cluster host and its oauth.server.baseUrl:\n{actor_jwt_of(MUSTER_BASE_URL)}")
-    if "            audience: https://muster.example\n" not in actor_jwt_of([*MUSTER_BASE_URL, "--set", "muster.muster.credentialProvider.actorBearer.audience=https://muster.example"]):
+             f"in-cluster host and its oauth.server.baseUrl:\n{muster_actor_jwt_of(MUSTER_BASE_URL)}")
+    if "            audience: https://muster.example\n" not in muster_actor_jwt_of([*MUSTER_BASE_URL, "--set", "muster.muster.credentialProvider.actorBearer.audience=https://muster.example"]):
         fail("kagent's muster actor-JWT provider does not take muster's own actorBearer.audience")
-    if "            hostname: muster.example.internal\n" not in actor_jwt_of([*MUSTER_BASE_URL, "--set", "kagent.controller.session.actorJWTProviders.muster.hostname=muster.example.internal"]):
+    if "            hostname: muster.example.internal\n" not in muster_actor_jwt_of([*MUSTER_BASE_URL, "--set", "kagent.controller.session.actorJWTProviders.muster.hostname=muster.example.internal"]):
         fail("an own kagent.controller.session.actorJWTProviders.muster.hostname does not stand")
-    if "            hostname: muster-gw.agent-platform.svc.cluster.local\n" not in actor_jwt_of([*MUSTER_BASE_URL, "--set", "muster.fullnameOverride=muster-gw"]):
+    if "            hostname: muster-gw.agent-platform.svc.cluster.local\n" not in muster_actor_jwt_of([*MUSTER_BASE_URL, "--set", "muster.fullnameOverride=muster-gw"]):
         fail("kagent's muster actor-JWT provider does not follow muster.fullnameOverride, the host every agent's RemoteMCPServer targets")
     for flags, what in (([*MUSTER_BASE_URL, "--set", "muster.muster.credentialProvider.actorBearer.enabled=false"], "with muster's actorBearer off"),
                         ([], "without an audience (no oauth.server.baseUrl): kagent's controller refuses an entry without one")):
-        if actor_jwt_of(flags):
-            fail(f"the kagent release names an actor-JWT provider {what}:\n{actor_jwt_of(flags)}")
+        if muster_actor_jwt_of(flags):
+            fail(f"the kagent release names an actor-JWT provider {what}:\n{muster_actor_jwt_of(flags)}")
     ok("with muster trusting the actor JWT the kagent release names muster as its actor-JWT provider: the host of the agents' "
        "in-cluster MCP URL (following muster.fullnameOverride) and muster's audience (actorBearer.audience, else oauth.server.baseUrl); "
        "an own key stands; nothing with the actor bearer off or without an audience")
@@ -353,9 +356,9 @@ def main(meta: str) -> int:
                         ([*NO_OWN, "--set", "workspaceManager.grantKey.create=false"], "with grantKey.create false")):
         if admission(kagent_release([*base, *flags], meta)) is not None:
             fail(f"the kagent release carries a Session admission {what}: the manager signs no grant then")
-        if releasable[-1] in flags and actor_jwt_of([*flags, *MUSTER_BASE_URL]) != ACTOR_JWT_PROVIDERS:
+        if releasable[-1] in flags and muster_actor_jwt_of([*flags, *MUSTER_BASE_URL]) != MUSTER_ACTOR_JWT_PROVIDER:
             fail(f"{what} the kagent release does not name muster as its actor-JWT provider while muster trusts the actor JWT: "
-                 f"a Session start_session binds without a workspace would reach muster as nobody:\n{actor_jwt_of([*flags, *MUSTER_BASE_URL])}")
+                 f"a Session start_session binds without a workspace would reach muster as nobody:\n{muster_actor_jwt_of([*flags, *MUSTER_BASE_URL])}")
     must_fail(meta, [*ON, *IDENTITY, "--set", "components.kagent.enabled=false"], "workspaces need the agents", "workspaces on with kagent off")
     ok("no Session admission without a grant key (no providers, oauth off, grantKey.create false), while muster's actor-JWT "
        "provider stays; workspaces with kagent off fail the render")
@@ -431,9 +434,11 @@ def main(meta: str) -> int:
        f"of the controller ConfigMap from the forwarded block")
     render = kagent_chart_render(kagent_release([*base, *MUSTER_BASE_URL], meta), floor)
     cm = [d for d in render.split("\n---\n") if re.search(r"^kind: ConfigMap$", d, re.M) and "KAGENT_CONTROLLER_NAME:" in d]
-    want = json.dumps({"muster": {"audience": "https://muster.ci.example.com", "hostname": f"muster.{NAMESPACE}.svc.cluster.local"}}, separators=(",", ":"))
-    if not cm or f"KAGENT_SESSION_ACTOR_JWT_PROVIDERS: {json.dumps(want)}" not in cm[0]:
-        fail(f"the kagent chart {floor} does not render KAGENT_SESSION_ACTOR_JWT_PROVIDERS {want} from the forwarded "
+    want = {"audience": "https://muster.ci.example.com", "hostname": f"muster.{NAMESPACE}.svc.cluster.local"}
+    provider_setting = re.search(r"^  KAGENT_SESSION_ACTOR_JWT_PROVIDERS: (.+)$", cm[0], re.M) if cm else None
+    providers = json.loads(json.loads(provider_setting.group(1))) if provider_setting else {}
+    if providers.get("muster") != want:
+        fail(f"the kagent chart {floor} does not render the muster KAGENT_SESSION_ACTOR_JWT_PROVIDERS entry {want} from the forwarded "
              f"kagent.controller.session.actorJWTProviders: the range admits no release that compiles muster's actor JWT:\n{cm[0] if cm else render}")
     ok(f"the kagent chart {floor} renders KAGENT_SESSION_ACTOR_JWT_PROVIDERS with muster's host and audience from the forwarded block")
     render = kagent_chart_render(hr, ALLOW_HTTP_CHART)

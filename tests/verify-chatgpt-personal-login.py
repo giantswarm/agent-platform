@@ -146,7 +146,8 @@ def main(chart: str) -> int:
         # The workspace on the deprecated pin, whose sign-in needs no OAuth client role.
         (["--set", "muster.muster.oauth.mcpClient.enabled=false", "--set", "workspace-manager.muster.mcpServer.auth.provider=github"], "muster's OAuth client off"),
         (["--set", "workspaces.enabled=false"], "the credential provider off"),
-        (["--set", "components.kagent-crds.versionRange=>=1.23.0 <1.25.0", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller"], "the kagent-crds floor"),
+        (["--set", "components.kagent-crds.versionRange=>=1.23.0 <1.25.0", "--set", "kagent.controller.image.repository=giantswarm/kagent/controller",
+          "--set", "kagent.controller.auth.mode=insecure"], "the kagent-crds floor"),
         (["--set", "components.muster.versionRange=>=5.50.0 <6.0.0"], "the muster floor"),
     ):
         off = meta(chart, [*ON, *flags])

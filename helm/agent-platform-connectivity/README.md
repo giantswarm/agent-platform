@@ -1537,6 +1537,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
+| kagent.controllerRoute.jwtAuthentication.audiences | list | `[]` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.host | string | `"dex.giantswarm.svc.cluster.local"` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.port | int | `5556` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.path | string | `"/keys"` |  |
@@ -1681,6 +1682,8 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.path | string | `""` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.enabled | bool | `true` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.caSecretName | string | `""` |  |
+| klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.caSecretKey | string | `""` |  |
+| klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tunnel | object | `{}` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.clientId | string | `"klaus-gateway-exchange"` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.secretName | string | `""` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.secretKey | string | `"clientSecret"` |  |

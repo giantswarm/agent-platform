@@ -2,12 +2,18 @@
 # the klaus-gateway release's a2aServer block is derived from the entry the
 # connectivity chart routes. verify-klausgateway-a2a asserts it.
 components:
+  kagent:
+    enabled: true
   klaus-gateway:
     enabled: true
-    versionRange: ">=4.20.0-rc.3 <5.0.0"
+    versionRange: ">=4.20.0-rc.6 <5.0.0"
 global:
   identity:
     issuerUrl: https://dex.ci.example.com
+    clientId: agent-platform
+kagent:
+  controllerRoute:
+    enabled: true
 klausGateway:
   agentgatewayRoute:
     hostname: agentgateway.ci.example.com

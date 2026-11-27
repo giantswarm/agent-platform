@@ -40,7 +40,8 @@ EXAMPLES = {
     # and Cilium (the network policies of the Substrate hops), layered over the
     # installation's Dex as the example says.
     "runtime-slice.yaml": ["--api-versions", "kyverno.io/v1", "--api-versions", "cilium.io/v2",
-                           "--set", "global.identity.issuerUrl=https://dex.ci.example.com"],
+                           "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+                           "--set", "kagent.controller.auth.audiences[0]=agent-platform"],
 }
 # Examples with a check of their own: the BOM (verify-components-charts) and the
 # serving slice (verify-serving-slice).

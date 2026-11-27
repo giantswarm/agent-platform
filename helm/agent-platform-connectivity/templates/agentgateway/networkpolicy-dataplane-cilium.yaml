@@ -1,4 +1,5 @@
 {{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "cilium") }}
+{{- $exchangeTargets := include "agent-platform.klausGateway.a2aExchangeTargets" . | fromJsonArray }}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -53,7 +54,11 @@ spec:
     {{- end }}
   egress:
     - toEntities: ["kube-apiserver"]
+    {{- if $exchangeTargets }}
+    {{- include "agent-platform.dnsEgressWithProxy" . | nindent 4 }}
+    {{- else }}
     {{- include "agent-platform.dnsEgress" . | nindent 4 }}
+    {{- end }}
     - toEntities: ["world"]
       toPorts:
         - ports:
@@ -83,22 +88,12 @@ spec:
     - toEndpoints:
         - matchLabels:
             app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . }}
-            io.kubernetes.pod.namespace: {{ .Values.klausGateway.namespaceOverride | default .Release.Namespace }}
+            io.kubernetes.pod.namespace: {{ include "agent-platform.klausGateway.namespace" . }}
       toPorts:
         - ports:
             - port: "8080"
               protocol: TCP
-    {{- $endpoint := (include "agent-platform.klausGateway.a2aServer" . | fromJson).exchange.endpoint }}
-    {{- if $endpoint.inCluster }}
-    # The exchange's in-cluster Dex token endpoint.
-    - toEndpoints:
-        - matchLabels:
-            io.kubernetes.pod.namespace: {{ index (splitList "." (include "agent-platform.jwks.normalizeHost" $endpoint.host)) 1 }}
-      toPorts:
-        - ports:
-            - port: {{ $endpoint.port | quote }}
-              protocol: TCP
-    {{- end }}
+    {{- include "agent-platform.klausGateway.egress.cilium" (dict "ctx" . "targets" $exchangeTargets) | nindent 4 }}
     {{- end }}
     {{- $kubernetes := index .Values "mcp-kubernetes" | default dict }}
     {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "mcp-kubernetes")) (dig "gatewayAPI" "enabled" (dig "mcpKubernetes" "oauth" "enabled" false $kubernetes) $kubernetes) }}

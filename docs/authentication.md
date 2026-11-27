@@ -23,7 +23,7 @@ With the chart-owned edge (`gatewayApi.gateway.create: true`) the agentgateway d
 
 muster validates every token itself. agentgateway on the MCP path passes the bearer through unverified.
 
-`muster.muster.oauth.server.trustedAudiences` is a compatibility exception to the [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization#token-handling), which requires a token issued for the MCP server itself. muster accepts a signed ID token of the configured identity provider as a bearer when its audience is a listed client, on `/mcp` and on its person-only endpoints such as `/session-bindings`; a token naming an acting party (`act`) or bound to a DPoP key (`cnf`) is not accepted this way. muster's own access tokens from its login flow are the conforming path. List only the client IDs whose ID tokens reach muster as bearers: the portal's client and the clients whose tokens agentgateway and agent-manager forward. Removing the exception is tracked in [giantswarm/mcp-oauth#678](https://github.com/giantswarm/mcp-oauth/issues/678). The ATS smoke test checks that a listed audience is accepted and that an unlisted audience, an invalid signature and an unknown access token are refused.
+`muster.muster.oauth.server.trustedAudiences` is a compatibility exception to the [MCP authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization#token-handling), which requires a token issued for the MCP server itself. muster accepts a signed ID token of the configured identity provider as a bearer when its audience is a listed client, on `/mcp` and on its person-only endpoints such as `/session-bindings`; a token naming an acting party (`act`) or bound to a DPoP key (`cnf`) is not accepted this way. muster's own access tokens from its login flow are the conforming path. List only the client IDs whose ID tokens reach muster as bearers: the portal's client and the clients whose tokens agentgateway and agent-manager forward. Removing the exception is tracked in [giantswarm/mcp-oauth#690](https://github.com/giantswarm/mcp-oauth/issues/690). The ATS smoke test checks that a listed audience is accepted and that an unlisted audience, an invalid signature and an unknown access token are refused.
 
 ## 2. OAuth discovery
 
@@ -54,24 +54,26 @@ An in-cluster issuer (for example Dex on `:5556` in another namespace) needs `ga
 
 ## 5. The kagent controller route
 
-`kagent.controllerRoute.enabled` (off by default; rendered with `components.kagent` on) exposes the kagent controller's API: the kagent API v2 gRPC services and A2A v1, native gRPC or gRPC-Web, and A2A over HTTP under `/agents/` (JSON-RPC at `/agents/<namespace>/<name>`, the agent card at `/agents/<namespace>/<name>/.well-known/agent-card.json`). The agent cards advertise `https://<controller route hostname>`, which the chart sets as `kagent.controller.a2aGatewayUrl` unless you set your own. The controller does not verify the token it is given, so it is reachable only through two authentication boundaries:
+`kagent.controllerRoute.enabled` (off by default; rendered with `components.kagent` on) exposes the kagent controller's API: the kagent API v2 gRPC services and A2A v1, native gRPC or gRPC-Web, and A2A over HTTP under `/agents/` (JSON-RPC at `/agents/<namespace>/<name>`, the agent card at `/agents/<namespace>/<name>/.well-known/agent-card.json`). The agent cards advertise `https://<controller route hostname>`, which the chart sets as `kagent.controller.a2aGatewayUrl` unless you set your own. External requests reach it through two authentication boundaries:
 
 - **agentgateway** (`GRPCRoute kagent-controller`, `kagent-controller-public`, `HTTPRoute kagent-a2a`, `kagent-a2a-public`), with `AgentgatewayPolicy kagent-controller-jwt` and `kagent-a2a-jwt`. JWT validation is on by default (`kagent.controllerRoute.jwtAuthentication`). A token is required and must carry the identity claim, `kagent.controller.auth.userIdClaim` (`email`). The policy **sets** `x-user-id` from the verified claim, which replaces any value the client sent, **removes** `x-agent-name` and `x-user-groups`, and passes the bearer through.
 - **the kagent UI** (`kagent.uiRoute` behind `kagent.oauth2-proxy`). Its route removes `x-user-id`, `x-agent-name` and `x-user-groups`, and the bearer comes from the oauth2-proxy session.
 
-The controller (`kagent.controller.auth.mode: trusted-proxy`) takes the caller from the bearer's `email` claim. It never verifies a signature, so its API port (`:8083`) admits only the kagent UI, the agentgateway data plane, Substrate's egress gateway and, with workspaces on, workspace-manager.
+In `kagent.controller.auth.mode: trusted-proxy`, the controller verifies a person's bearer signature, exact issuer, expiry and trusted audience before taking the caller from its `email` claim. The native controller receives `controller.auth.issuer`, `jwksURL` and `audiences`; the extensions controller receives the equivalent issuer configuration through `KAGENT_EXTENSIONS_OIDC_ISSUERS`. Its API port (`:8083`) admits only the kagent UI, the agentgateway data plane, Substrate's egress gateway and, with workspaces on, workspace-manager.
 
 With `kagent.controller.authorization.mode: kubernetes` (the default from kagent 1.19), the controller then asks the API server, with a SubjectAccessReview for that user and the token's `groups`, whether the caller may see and run an agent. A person needs `agent-platform:user`, `agent-platform:editor` or `agent-platform:admin` in the agent's namespace; in the kagent namespace, `tenants.platform.users` grants `agent-platform:user`. `mode: noop` lets every signed-in caller see and run every agent. See [UPGRADE.md](../UPGRADE.md).
 
 | Request | At the gateway |
 |---|---|
-| no token, foreign issuer, expired or bad signature | `401` |
+| no token, foreign issuer, wrong audience, expired or bad signature | `401` |
 | valid token without the identity claim | `403` |
 | valid token | passed through, `x-user-id` = the claim, `x-agent-name` and `x-user-groups` removed |
 
 `x-agent-name` and `x-user-groups` are the controller's agent-call headers: only an agent's runtime sends them, from inside the cluster and never through these routes. The identity contract through the routes is `x-user-id` alone. The same policy covers the in-cluster `kagent-mcp` route.
 
-No audience is required: every Dex client a person signs in with is accepted.
+The controller requires a trusted audience. Set `kagent.controller.auth.audiences` explicitly, or let the meta chart use `kagent.controllerRoute.jwtAuthentication.audiences`. With neither list set and the UI off, it derives the platform's login client ID for the same issuer. Enabling the UI requires an explicit list that includes its login client and the other trusted clients. The derived list reaches the native controller, the extensions controller's `KAGENT_EXTENSIONS_OIDC_ISSUERS` and the route's JWT providers; an explicit extensions environment entry remains the operator's configuration.
+
+For the native kagent upstream, the A2A exchange must request audiences accepted by both the controller and its route. This check keeps an external client's token from being exchanged successfully into a token that the next authenticated hop rejects. An explicit remote `klausGateway.a2a.url` keeps that upstream's own authentication contract.
 
 Before turning the route on, set `kagent.controllerRoute.parentRef` (its default names a Giant Swarm Gateway; clear `name` to fall back to the chart-owned edge or `global.gatewayApi.parentRefs`) and `kagent.controllerRoute.jwtAuthentication.jwks` with `gateway.jwksEgress` for your issuer ([4](#4-edge-jwt-validation-and-jwks)).
 
@@ -106,7 +108,7 @@ Outside A2A clients, such as an application's backend, reach agents through klau
 | `/.well-known/agent-card.json` | `klausgateway-a2a-card` | None: a client reads the card before it has a token |
 | `/a2a` | `klausgateway-a2a` | `AgentgatewayPolicy` `klausgateway-a2a` |
 
-Both routes go to the `AgentgatewayBackend` `klausgateway-a2a`, an A2A backend. agentgateway reports the JSON-RPC method in its A2A metrics and rewrites the card's interface URLs to the public address.
+JSON-RPC calls use the A2A backend `klausgateway-a2a`, so agentgateway records A2A protocol metrics and the JSON-RPC method in logs and traces. Card GETs use the static backend `klausgateway-a2a-cards`: klaus-gateway already advertises its configured public URLs, and a static backend preserves error responses such as 404. The per-agent GET rule remains on the authenticated `/a2a` route and receives the same JWT validation, client authorization and token exchange as POST requests.
 
 The `klausgateway-a2a` policy does the following:
 
@@ -123,9 +125,19 @@ The `klausgateway-a2a` policy does the following:
 - **No exchange cache.** The agent runtime keeps the exchanged token for a whole turn, so klaus-gateway refuses one with less than `a2aServer.minTokenLifetime` (25 minutes) left. agentgateway's cache serves an entry until 15 seconds before it expires and cannot require a minimum lifetime, so every request is exchanged.
 - **One token type.** agentgateway sends one `subject_token_type` per policy (`exchange.subjectTokenType`), so every issuer must send the same token type.
 
-The meta chart derives the klaus-gateway release's `a2aServer` block from the same entry: `publicUrl`, the issuers' card schemes, and the platform token's issuer, JWKS URL, audience (the first of `exchange.audiences`) and client (`exchange.clientId`). An own `klausGateway.a2aServer` value that differs fails the render. This needs the floor of `components.klaus-gateway.versionRange` at 4.20.0-rc.3 or later, compared with its prerelease (4.20.0-rc.1 and rc.2 refuse the block). A branch build of klaus-gateway (`X.Y.Z-r<hash>t<time>h<sha>`) carries the last release's version, so for it nothing is derived and the render does not fail: set `klausGateway.a2aServer` by hand.
+The meta chart derives the klaus-gateway release's `a2aServer` block from the same entry: `publicUrl`, the issuers' card schemes, and the platform token's issuer, JWKS URL, audience (the first of `exchange.audiences`) and client (`exchange.clientId`). It enables the A2A client and derives its target from the platform's agentgateway Service, including its name and namespace. Enable `components.kagent` and configure `kagent.controllerRoute.enabled`, or provide an explicit `klausGateway.a2a.url` for another authenticated upstream. An own `klausGateway.a2aServer` value that differs fails the render. This needs the floor of `components.klaus-gateway.versionRange` at 4.20.0-rc.6 or later, compared with its full prerelease; earlier release candidates lack part of the entry behavior. A branch build of klaus-gateway (`X.Y.Z-r<hash>t<time>h<sha>`) carries the last release's version, so for it nothing is derived and the render does not fail: set `klausGateway.a2aServer` by hand.
 
-With network policies on, the data plane gets egress to klaus-gateway on 8080. The agentgateway controller gets egress to every external JWKS host the issuers name.
+With network policies on, the data plane gets egress to klaus-gateway on 8080 and to the configured token endpoint. The agentgateway controller gets egress to every external JWKS host the issuers name. Independently of Slack OBO, klaus-gateway receives egress for its own Dex JWKS fetch, muster Session-start calls, Kubernetes organization lookup and the agentgateway gRPC client. Private external addresses on vanilla Kubernetes use `gateway.jwksEgress.external.cidrs`; Cilium policies select the configured hostnames and ports.
+
+An explicit `klausGateway.a2a.url` outside the platform's agentgateway Service needs an installation network policy permitting that upstream.
+
+Private identity providers retain TLS verification. The meta chart derives `a2aServer.caSecret` and `caSecretKey` from `global.identity.ca` unless the gateway has its own CA configuration. JWKS and token-exchange TLS references also preserve the inherited `global.identity.ca.key`. An explicit endpoint `tls.caSecretName` uses `ca.crt` unless `tls.caSecretKey` selects another key. Each Secret must exist in the consuming component's namespace.
+
+If the Go gateway's configured JWKS host resolves to a private address, list that exact host in `klausGateway.a2aServer.token.allowPrivateIpJwksHosts`. This opt-in remains required when the request uses an HTTP proxy.
+
+With vanilla Kubernetes network policies, enabling this entry requires `networkPolicy.kubernetes.apiServerCIDR` to name the installation's API-server address range explicitly. An unrestricted `0.0.0.0/0` or `::/0` would make its API allowance permit every destination, so the render refuses it. Cilium uses its `kube-apiserver` entity.
+
+For an installation HTTP proxy, set the native agentgateway tunnel on `exchange.endpoint.tunnel` and on each external issuer's `jwks.tunnel`, for example `{url: "http://proxy.proxy-system.svc.cluster.local:3128", mode: Connect}`. These objects render directly as `AgentgatewayBackend.spec.policies.tunnel`; target TLS and its CA remain configured separately. Omit the tunnel for destinations in the installation's `NO_PROXY` list. agentgateway does not read `HTTPS_PROXY`; the Go gateway's JWKS client continues to honor `HTTPS_PROXY` and `NO_PROXY`. The network policies allow explicitly named tunnel URLs, including for the Go gateway when its injected `HTTPS_PROXY` uses the same proxy. A different injected proxy, a short proxy hostname or a tunnel named by `backendRef` needs an installation policy permitting its destination; rendering cannot resolve those addresses.
 
 Dex needs the setup that klaus-gateway's `docs/a2a-server.md` lists under "Identity provider configuration":
 

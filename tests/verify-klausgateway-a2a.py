@@ -44,6 +44,9 @@ def connectivity(docs):
     backend = find(docs, "AgentgatewayBackend", "klausgateway-a2a")
     if not backend or backend["spec"].get("a2a") != {"host": "klaus-gateway.agent-platform.svc.cluster.local", "port": 8080}:
         fail(f"klausgateway-a2a must be an A2A backend at klaus-gateway:8080, got {backend and backend['spec']!r}")
+    cards = find(docs, "AgentgatewayBackend", "klausgateway-a2a-cards")
+    if not cards or cards["spec"].get("static") != backend["spec"]["a2a"]:
+        fail("card GETs must use the same destination without A2A response rewriting")
     for name, kind, path in (("klausgateway-a2a-card", "Exact", "/.well-known/agent-card.json"), ("klausgateway-a2a", "PathPrefix", "/a2a")):
         route = find(docs, "HTTPRoute", name)
         if not route:
@@ -53,6 +56,14 @@ def connectivity(docs):
             fail(f"HTTPRoute {name} matches {match!r} on {route['spec']['hostnames']!r}")
         if not find(docs, "HTTPRoute", f"agentgateway-{name}"):
             fail(f"no layer-1 HTTPRoute agentgateway-{name}")
+        rules = route["spec"]["rules"]
+        if name == "klausgateway-a2a":
+            if rules[0]["matches"][0].get("method") != "GET" or rules[0]["backendRefs"][0]["name"] != "klausgateway-a2a-cards":
+                fail("authenticated card GETs must use the static backend")
+            if len(rules) != 2 or "method" in rules[1]["matches"][0] or rules[1]["backendRefs"][0]["name"] != "klausgateway-a2a":
+                fail("JSON-RPC calls must keep the A2A backend")
+        elif rules[0]["backendRefs"][0]["name"] != "klausgateway-a2a-cards":
+            fail("the public card must use the static backend")
     targeted = [
         ref["name"]
         for d in docs
@@ -154,6 +165,19 @@ def off(docs):
     print("ok: nothing of the A2A entry renders while it is off")
 
 
+def connectivity_ca(docs):
+    name, key = sys.argv[3:5]
+    for backend_name in ("klausgateway-a2a-jwks-0", "klausgateway-a2a-dex-token"):
+        backend = find(docs, "AgentgatewayBackend", backend_name)
+        references = backend["spec"]["policies"]["tls"]["caCertificateRefs"]
+        if len(references) != 1 or references[0].get("name") != name or references[0].get("key", "ca.crt") != key:
+            fail(f"{backend_name} CA references {references!r}, want Secret {name!r} key {key!r}")
+    public = find(docs, "AgentgatewayBackend", "klausgateway-a2a-jwks-1")
+    if public["spec"]["policies"]["tls"] != {}:
+        fail("the outside issuer must retain system trust when only port 443 implies TLS")
+    print("ok: A2A JWKS and token endpoint preserve the selected CA Secret key")
+
+
 def gateway_values(docs):
     release = find(docs, "HelmRelease", "klaus-gateway")
     if not release:
@@ -161,8 +185,16 @@ def gateway_values(docs):
     return release["spec"].get("values", {})
 
 
-def meta(docs):
-    got = gateway_values(docs).get("a2aServer")
+def meta(docs, private_ca=False, trailing_slash=False, ca_key="issuer.pem"):
+    meta_namespace(docs)
+    values = gateway_values(docs)
+    got = values.get("a2aServer")
+    if values.get("a2a", {}).get("enabled") is not True:
+        fail("the A2A server entry must enable the gateway's A2A client")
+    muster = find(docs, "HelmRelease", "muster")
+    namespace = muster["spec"].get("targetNamespace") or muster["metadata"]["namespace"]
+    if values.get("obo", {}).get("musterUrl") != f"http://muster.{namespace}.svc.cluster.local:8090":
+        fail("A2A-only session starts need the platform's muster URL")
     want = {
         "enabled": True,
         "publicUrl": "https://a2a.ci.example.com",
@@ -177,6 +209,11 @@ def meta(docs):
             "allowedClients": ["klaus-gateway-exchange"],
         },
     }
+    if private_ca:
+        want["caSecret"] = "dex-ca"
+        want["caSecretKey"] = ca_key
+    if trailing_slash:
+        want["token"]["issuer"] += "/"
     if got != want:
         fail(f"a2aServer {got!r}, want {want!r}")
     print("ok: the klaus-gateway release's a2aServer is derived from the entry")
@@ -189,9 +226,32 @@ def meta_off(docs):
     print("ok: no a2aServer forwarded while the entry is off")
 
 
+def meta_namespace(docs, own_target=None):
+    gateway = find(docs, "HelmRelease", "klaus-gateway")
+    connectivity_release = find(docs, "HelmRelease", "agent-platform-connectivity")
+    gateway_namespace = gateway["spec"].get("targetNamespace") or gateway["metadata"]["namespace"]
+    connectivity_namespace = connectivity_release["spec"].get("targetNamespace") or connectivity_release["metadata"]["namespace"]
+    roster = connectivity_release["spec"]["values"]["components"]["klaus-gateway"]
+    if (roster.get("targetNamespace") or connectivity_namespace) != gateway_namespace:
+        fail("the connectivity roster does not name klaus-gateway's effective release namespace")
+    values = connectivity_release["spec"]["values"]
+    gateway_name = values["gateway"]["name"]
+    gateway_port = values["gateway"]["listeners"][0]["port"]
+    target = own_target or f"grpc://{gateway_name}.{connectivity_namespace}.svc.cluster.local:{gateway_port}"
+    if gateway["spec"]["values"]["a2a"]["url"] != target:
+        fail("the A2A client does not target the effective agentgateway Service")
+    print("ok: connectivity targets klaus-gateway's effective release namespace")
+
+
 def main():
     mode, path = sys.argv[1], sys.argv[2]
-    {"--connectivity": connectivity, "--connectivity-in-cluster": connectivity_in_cluster, "--off": off, "--meta": meta, "--meta-off": meta_off}[mode](load(path))
+    if mode == "--meta-own-ca-key":
+        meta(load(path), private_ca=True, ca_key="gateway.pem")
+        return
+    if mode == "--connectivity-ca":
+        connectivity_ca(load(path))
+        return
+    {"--connectivity": connectivity, "--connectivity-in-cluster": connectivity_in_cluster, "--off": off, "--meta": meta, "--meta-private-ca": lambda docs: meta(docs, private_ca=True), "--meta-trailing-slash": lambda docs: meta(docs, trailing_slash=True), "--meta-namespace": meta_namespace, "--meta-own-target": lambda docs: meta_namespace(docs, own_target="grpcs://gateway.private.example:8443"), "--meta-off": meta_off}[mode](load(path))
 
 
 if __name__ == "__main__":

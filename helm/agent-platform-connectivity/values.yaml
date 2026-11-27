@@ -1847,6 +1847,8 @@ kagent:  # @schema skipProperties: true; additionalProperties: true
       # dex issuer URL exactly as it appears in the token iss claim; empty
       # takes global.identity.issuerUrl. Example: https://dex.<cluster>.<base-domain>
       issuer: ""
+      # Empty uses kagent.controller.auth.audiences forwarded by the meta chart.
+      audiences: []
       # In-cluster JWKS source for the issuer, rendered as a static
       # AgentgatewayBackend in the release namespace.
       jwks:
@@ -2367,9 +2369,9 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
     #   /a2a                          A2A JSON-RPC, token checked and exchanged
     # Independent of `enabled` above and of slack.enabled. The meta chart
     # derives the klaus-gateway release's a2aServer block from this one
-    # (klaus-gateway >= 4.20.0-rc.3, agent-platform.klausGateway.a2aServerFloor;
+    # (klaus-gateway >= 4.20.0-rc.6, agent-platform.klausGateway.a2aServerFloor;
     # a branch build derives nothing: set klausGateway.a2aServer by hand).
-    # docs/klaus-gateway-a2a.md has the Dex setup it needs.
+    # docs/authentication.md has the Dex setup it needs.
     a2aServer:
       enabled: false
       # Public hostname of the A2A server. Empty means agentgatewayRoute.hostname.
@@ -2384,14 +2386,15 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
       #     token's azp, else its client_id, else its only aud.
       #   connectorId: the Dex connector that verifies this issuer's tokens in
       #     the exchange (connector_id).
-      #   jwks: {host, port, path, tls: {enabled, caSecretName}}, the same
-      #     shape and rules as kagent.controllerRoute.jwtAuthentication.jwks.
+      #   jwks: {host, port, path, tls: {enabled, caSecretName, caSecretKey}}.
+      #     An inherited CA Secret uses global.identity.ca.key; an explicit
+      #     Secret uses ca.crt unless caSecretKey selects another key.
       #   card: the Agent Card's scheme for the issuer, passed to
       #     klaus-gateway: {tokenUrl, metadataUrl, openIdConnectUrl}.
       issuers: []
       exchange:
         # Dex's token endpoint, the jwks shape: {host, port, path, tls:
-        # {enabled, caSecretName}}. TLS is required: the exchange sends the
+        # {enabled, caSecretName, caSecretKey}}. TLS is required: the exchange sends the
         # client secret and the client's token. An empty host means
         # global.identity.issuerUrl's host and port, its path + /token, TLS
         # verified against global.identity.ca.secretName, else the system
@@ -2404,6 +2407,10 @@ klausGateway:  # @schema skipProperties: true; additionalProperties: true
           tls:
             enabled: true
             caSecretName: ""
+            caSecretKey: ""
+          # Native agentgateway BackendTunnel. Set a URL or backendRef for
+          # an installation HTTP proxy; omit it for NO_PROXY destinations.
+          tunnel: {}  # @schema additionalProperties: true
         # The Dex client agentgateway exchanges as. It is the only client
         # klaus-gateway accepts platform tokens from.
         clientId: klaus-gateway-exchange

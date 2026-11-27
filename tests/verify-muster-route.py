@@ -130,7 +130,8 @@ def main() -> None:
         # A slice is layered over its installation's identity provider, as the
         # examples say (the kagent controller needs the people's issuer).
         meta = docs(helm("template", "t", META, *BASE, "-f", f"{META}/{s}",
-                         "--set", "global.identity.issuerUrl=https://dex.ci.example.com").stdout)
+                         "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+                         "--set", "kagent.controller.auth.audiences[0]=agent-platform").stdout)
         if find(meta, "HelmRelease", "agent-platform-mcps"):
             fail(f"{s}: a slice without muster renders an agent-platform-mcps release (it dependsOn muster)")
         print(f"ok: {s}: no muster, no agent-platform-mcps release")

@@ -309,6 +309,17 @@ plumbing and are dropped. */ -}}
 {{- $roster := dict -}}
 {{- range $key, $c := .Values.components -}}
 {{- $_ := set $roster $key (dict "enabled" (eq (include "agent-platform.componentEnabled" (dict "root" $root "name" $key)) "true")) -}}
+{{- if eq $key "klaus-gateway" -}}
+{{- $componentNamespace := include "agent-platform.klausGateway.namespace" $root -}}
+{{- $connectivity := index $root.Values.components "agent-platform-connectivity" | default dict -}}
+{{- $connectivityNamespace := $connectivity.targetNamespace | default $targetNs -}}
+{{- if $connectivity.inKagentNamespace -}}
+{{- $connectivityNamespace = include "agent-platform.kagent.namespace" $root -}}
+{{- end -}}
+{{- if ne $componentNamespace $connectivityNamespace -}}
+{{- $_ := set (index $roster $key) "targetNamespace" $componentNamespace -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 {{- /* The values every release is inlined from: one deep copy of the tree with
 every cluster-shape knob (kyvernoPolicies.enabled, networkPolicy.flavor,

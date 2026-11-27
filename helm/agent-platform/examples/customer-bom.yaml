@@ -37,12 +37,12 @@ gitops:
   interval: 30m
 
 components:
-  muster:                        { versionRange: "5.64.0-rc.2" }
+  muster:                        { versionRange: "5.67.0-rc.18" }
   agentgateway:                  { versionRange: "2.8.0" }
   valkey:                        { versionRange: "0.1.4" }
   agent-platform-mcps:         { versionRange: "0.9.0" }
-  kagent:                        { versionRange: "1.33.0" }
-  kagent-crds:                   { versionRange: "1.33.0" }
+  kagent:                        { versionRange: "1.34.0-rc.4" }
+  kagent-crds:                   { versionRange: "1.34.0-rc.4" }
   substrate:                     { versionRange: "1.18.0" }
   substrate-crds:                { versionRange: "1.18.0" }
   google-access-token-credential-provider: { versionRange: "0.3.0" }

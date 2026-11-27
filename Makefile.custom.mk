@@ -54,7 +54,7 @@ FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-ver
 NO_DATA_PLANE := --set components.muster.enabled=false --set components.agentgateway.enabled=false
 # The installation's Dex beside kagent: the kagent controller (the kagent-extensions
 # binary) identifies people by its tokens.
-KAGENT_IDENTITY := --set global.identity.issuerUrl=https://dex.ci.example.com
+KAGENT_IDENTITY := --set global.identity.issuerUrl=https://dex.ci.example.com --set global.identity.clientId=agent-platform
 VM := --set ingress.parentRefs[0].name=x --set kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents --set kagent.database.postgres.urlFile=/etc/kagent-db/uri $(FLEET_APIS)
 # Agent Substrate on, as the meta chart forwards it (the two Substrate entries
 # follow components.kagent there; the connectivity chart reads the roster).
@@ -1730,8 +1730,9 @@ verify-klausgateway-valkey: ## Assert the gateway's Valkey routing-store default
 KG_A2A_CONN := $(VM) --namespace agent-platform -f $(CONNECTIVITY_DIR)/ci/test-klausgateway-a2a-values.yaml
 KG_A2A_META := $(VM) -f $(CHART_DIR)/ci/test-klausgateway-a2a-values.yaml
 KG_A2A_IN_CLUSTER := --set klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.host=dex.giantswarm.svc.cluster.local --set klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.port=5556 --set klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.path=/token --set klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.caSecretName=dex-ca
-verify-klausgateway-a2a: ## Assert klaus-gateway's A2A server entry (klausGateway.agentgatewayRoute.a2aServer, giantswarm/giantswarm#39388): an A2A backend to klaus-gateway:8080; the Agent Card route on the A2A hostname without any policy; the /a2a route's AgentgatewayPolicy — Strict JWT keeping the token, one provider per issuer with its audience and JWKS backend, one Require rule matching each iss to its allowedClients by azp, else client_id, else the only aud, and the RFC 8693 exchange at Dex through the TLS backend klausgateway-a2a-dex-token (the issuer's host on 443 with the system trust by default; an in-cluster endpoint with its CA Secret and the data plane's egress to it) (IdToken in and out, the audiences as Dex cross-client scopes, connector_id chosen by iss, ClientSecretBasic from the Secret, cache off); the data plane's egress to klaus-gateway in both network policy flavours; nothing while off; the guards (no issuers, an issuer without allowedClients, the exchange client among them, no secretName, a token endpoint without TLS) fail naming the key. The meta chart derives the klaus-gateway release's a2aServer (card issuers, publicUrl, the platform token's issuer, JWKS, audience and client) from the same block, forwards nothing while it is off, fails below klaus-gateway 4.20.0-rc.3 compared with its prerelease (4.11.0 and 4.20.0-rc.2 fail), derives nothing for a branch build (X.Y.Z-r<hash>t<time>h<sha>) and on an own a2aServer.publicUrl that differs.
+verify-klausgateway-a2a: ## Assert klaus-gateway's A2A server entry (klausGateway.agentgatewayRoute.a2aServer, giantswarm/giantswarm#39388): an A2A backend to klaus-gateway:8080; the Agent Card route on the A2A hostname without any policy; the /a2a route's AgentgatewayPolicy, Strict JWT keeping the token, one provider per issuer with its audience and JWKS backend, one Require rule matching each iss to its allowedClients by azp, else client_id, else the only aud, and the RFC 8693 exchange at Dex through the TLS backend klausgateway-a2a-dex-token (the issuer's host on 443 with the system trust by default; an in-cluster endpoint with its CA Secret and the data plane's egress to it) (IdToken in and out, the audiences as Dex cross-client scopes, connector_id chosen by iss, ClientSecretBasic from the Secret, cache off); the data plane's egress to klaus-gateway in both network policy flavours; nothing while off; the guards (no issuers, an issuer without allowedClients, the exchange client among them, no secretName, a token endpoint without TLS) fail naming the key. The meta chart derives the klaus-gateway release's a2aServer (card issuers, publicUrl, the platform token's issuer, JWKS, audience and client) from the same block, forwards nothing while it is off, fails below klaus-gateway 4.20.0-rc.6 compared with its prerelease (4.11.0, 4.20.0-rc.2 and 4.20.0-rc.5 fail), derives nothing for a branch build (X.Y.Z-r<hash>t<time>h<sha>) and on an own a2aServer.publicUrl that differs.
 	@echo "====> $@"
+	@HELM="$(HELM)" python3 tests/verify-klausgateway-a2a-egress.py $(CONNECTIVITY_DIR)
 	@echo "--> connectivity: the entry's objects"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) >$(VERIFY_TMP)/kga-conn.out 2>&1 || { cat $(VERIFY_TMP)/kga-conn.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --connectivity $(VERIFY_TMP)/kga-conn.out
@@ -1742,6 +1743,13 @@ verify-klausgateway-a2a: ## Assert klaus-gateway's A2A server entry (klausGatewa
 	@python3 tests/verify-klausgateway-a2a.py --connectivity-in-cluster $(VERIFY_TMP)/kga-incl.out
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) $(KG_A2A_IN_CLUSTER) --set networkPolicy.flavor=cilium >$(VERIFY_TMP)/kga-incl-cilium.out 2>&1 || { cat $(VERIFY_TMP)/kga-incl-cilium.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --connectivity-in-cluster $(VERIFY_TMP)/kga-incl-cilium.out
+	@echo "--> connectivity: inherited and explicit CA Secret keys"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) --set global.identity.ca.secretName=dex-ca --set global.identity.ca.key=issuer.pem --set 'klausGateway.agentgatewayRoute.a2aServer.issuers[0].jwks.tls.enabled=true' >$(VERIFY_TMP)/kga-ca.out 2>&1 || { cat $(VERIFY_TMP)/kga-ca.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --connectivity-ca $(VERIFY_TMP)/kga-ca.out dex-ca issuer.pem
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) --set global.identity.ca.secretName=dex-ca --set global.identity.ca.key=issuer.pem --set 'klausGateway.agentgatewayRoute.a2aServer.issuers[0].jwks.tls.enabled=true' --set 'klausGateway.agentgatewayRoute.a2aServer.issuers[0].jwks.tls.caSecretName=own-ca' --set klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.caSecretName=own-ca >$(VERIFY_TMP)/kga-ca-own.out 2>&1 || { cat $(VERIFY_TMP)/kga-ca-own.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --connectivity-ca $(VERIFY_TMP)/kga-ca-own.out own-ca ca.crt
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) --set global.identity.ca.secretName=dex-ca --set global.identity.ca.key=issuer.pem --set 'klausGateway.agentgatewayRoute.a2aServer.issuers[0].jwks.tls.enabled=true' --set 'klausGateway.agentgatewayRoute.a2aServer.issuers[0].jwks.tls.caSecretName=own-ca' --set 'klausGateway.agentgatewayRoute.a2aServer.issuers[0].jwks.tls.caSecretKey=own.pem' --set klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.caSecretName=own-ca --set klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.caSecretKey=own.pem >$(VERIFY_TMP)/kga-ca-own-key.out 2>&1 || { cat $(VERIFY_TMP)/kga-ca-own-key.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --connectivity-ca $(VERIFY_TMP)/kga-ca-own-key.out own-ca own.pem
 	@echo "--> connectivity: nothing while off"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KG_A2A_CONN) --set klausGateway.agentgatewayRoute.a2aServer.enabled=false >$(VERIFY_TMP)/kga-off.out 2>&1 || { cat $(VERIFY_TMP)/kga-off.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --off $(VERIFY_TMP)/kga-off.out
@@ -1755,12 +1763,26 @@ verify-klausgateway-a2a: ## Assert klaus-gateway's A2A server entry (klausGatewa
 	@echo "--> meta: the klaus-gateway release's a2aServer"
 	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) >$(VERIFY_TMP)/kga-meta.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --meta $(VERIFY_TMP)/kga-meta.out
+	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set global.identity.ca.secretName=dex-ca --set global.identity.ca.key=issuer.pem >$(VERIFY_TMP)/kga-meta-private.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-private.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --meta-private-ca $(VERIFY_TMP)/kga-meta-private.out
+	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set global.identity.ca.secretName=dex-ca --set global.identity.ca.key=issuer.pem --set klausGateway.a2aServer.caSecretKey=gateway.pem >$(VERIFY_TMP)/kga-meta-own-key.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-own-key.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --meta-own-ca-key $(VERIFY_TMP)/kga-meta-own-key.out
+	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set global.identity.issuerUrl=https://dex.ci.example.com/ >$(VERIFY_TMP)/kga-meta-slash.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-slash.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --meta-trailing-slash $(VERIFY_TMP)/kga-meta-slash.out
+	@for placement in 'components.klaus-gateway.targetNamespace=agent-ingress' 'kagent.namespaceOverride=agent-runtime,components.klaus-gateway.inKagentNamespace=true' 'components.agent-platform-connectivity.targetNamespace=connectivity' 'kagent.namespaceOverride=agent-runtime,components.agent-platform-connectivity.inKagentNamespace=true' 'gateway.name=private-gateway'; do \
+		$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set "$$placement" >$(VERIFY_TMP)/kga-meta-namespace.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-namespace.out; exit 1; }; \
+		python3 tests/verify-klausgateway-a2a.py --meta-namespace $(VERIFY_TMP)/kga-meta-namespace.out || exit 1; \
+	done
+	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set klausGateway.a2a.url=grpcs://gateway.private.example:8443 >$(VERIFY_TMP)/kga-meta-own-target.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-own-target.out; exit 1; }
+	@python3 tests/verify-klausgateway-a2a.py --meta-own-target $(VERIFY_TMP)/kga-meta-own-target.out
+	@if $(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set kagent.controllerRoute.enabled=false >$(VERIFY_TMP)/kga-meta-no-upstream.out 2>&1; then echo "FAIL: A2A rendered without an upstream route"; exit 1; fi
+	@grep -q 'kagent.controllerRoute.enabled' $(VERIFY_TMP)/kga-meta-no-upstream.out || { cat $(VERIFY_TMP)/kga-meta-no-upstream.out; exit 1; }
 	@$(HELM) template t $(CHART_DIR) $(VM) --set components.klaus-gateway.enabled=true >$(VERIFY_TMP)/kga-meta-off.out 2>&1 || { cat $(VERIFY_TMP)/kga-meta-off.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --meta-off $(VERIFY_TMP)/kga-meta-off.out
-	@for range in ">=4.11.0 <5.0.0" ">=4.20.0-rc.2 <5.0.0"; do \
+	@for range in ">=4.11.0 <5.0.0" ">=4.20.0-rc.2 <5.0.0" ">=4.20.0-rc.5 <5.0.0"; do \
 		if $(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set "components.klaus-gateway.versionRange=$$range" >$(VERIFY_TMP)/kga-floor.out 2>&1; then echo "FAIL: klaus-gateway $$range rendered"; exit 1; fi; \
-		grep -q "raise the range's floor to 4.20.0-rc.3" $(VERIFY_TMP)/kga-floor.out || { cat $(VERIFY_TMP)/kga-floor.out; exit 1; }; \
-		echo "ok: klaus-gateway $$range fails naming the floor 4.20.0-rc.3"; \
+		grep -q "raise the range's floor to 4.20.0-rc.6" $(VERIFY_TMP)/kga-floor.out || { cat $(VERIFY_TMP)/kga-floor.out; exit 1; }; \
+		echo "ok: klaus-gateway $$range fails naming the floor 4.20.0-rc.6"; \
 	done
 	@$(HELM) template t $(CHART_DIR) $(KG_A2A_META) --set 'components.klaus-gateway.versionRange=>=4.19.1-r80b459c9t20261127101704ha83c9c8 <5.0.0' >$(VERIFY_TMP)/kga-dev.out 2>&1 || { cat $(VERIFY_TMP)/kga-dev.out; exit 1; }
 	@python3 tests/verify-klausgateway-a2a.py --meta-off $(VERIFY_TMP)/kga-dev.out
@@ -2425,7 +2447,7 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes and 
 	@grep -qE "matchPattern: ['\"]\*\.blob\.core\.windows\.net['\"]" $(VERIFY_TMP)/vmg-cilium.out || { echo "FAIL: agent-manager egress lost the registry blob front"; exit 1; }
 	@grep -q '10.0.0.1/32' $(VERIFY_TMP)/vmg-cilium.out || { echo "FAIL: model-manager egress does not pin the Ollama endpoint address"; exit 1; }
 	@grep -B2 -A2 'matchPattern: "\*"' $(VERIFY_TMP)/vmg-cilium.out | grep -q 'dns:' || { echo "FAIL: the FQDN policies carry no DNS proxy rule"; exit 1; }
-	@grep -q '\- remote-node' $(VERIFY_TMP)/vmg-cilium.out || { echo "FAIL: the ingress policies do not admit the kubelet probes"; exit 1; }
+	@grep -q -- '- remote-node' $(VERIFY_TMP)/vmg-cilium.out || { echo "FAIL: the ingress policies do not admit the kubelet probes"; exit 1; }
 	@if grep -q 'huggingface.co' $(VERIFY_TMP)/vmg-cilium.out; then echo "FAIL: Hugging Face egress rendered for the ollama backend"; exit 1; fi
 	@if grep -q 'matchName: .*google' $(VERIFY_TMP)/vmg-cilium.out; then echo "FAIL: Google endpoints rendered for the dex provider"; exit 1; fi
 	@echo "ok: cilium egress"
@@ -2442,7 +2464,7 @@ verify-managers: ## Assert the model-manager / agent-manager wiring (routes and 
 	@echo "--> modelManager.networkPolicy.egress: names and blocks on 443 (cilium), blocks (kubernetes), whatever the backend; the chart-wide additional egress renders for the ollama backend too"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set 'modelManager.networkPolicy.egress.fqdns[0].matchName=idp.example.internal' --set 'modelManager.networkPolicy.egress.fqdns[1].matchPattern=*.mirror.example.internal' --set 'modelManager.networkPolicy.egress.cidrs[0]=198.51.100.0/24' --set 'networkPolicy.additionalEgressFQDNs[0].matchName=extra.example.internal' --set 'networkPolicy.additionalEgressCIDRs[0]=203.0.113.0/24' >$(VERIFY_TMP)/vmg-mm-egress.out 2>&1 || { cat $(VERIFY_TMP)/vmg-mm-egress.out; exit 1; }
 	@awk '/^  name: agent-platform-connectivity-model-manager-egress$$/,/^---/' $(VERIFY_TMP)/vmg-mm-egress.out >$(VERIFY_TMP)/vmg-mm-egress-policy.out
-	@for pattern in 'matchName: idp.example.internal' "matchPattern: '\*.mirror.example.internal'" '\- 198.51.100.0/24' 'matchName: extra.example.internal' '\- 203.0.113.0/24' '\- 10.0.0.1/32'; do \
+	@for pattern in 'matchName: idp.example.internal' "matchPattern: '\*.mirror.example.internal'" '- 198.51.100.0/24' 'matchName: extra.example.internal' '- 203.0.113.0/24' '- 10.0.0.1/32'; do \
 		grep -q -e "$$pattern" $(VERIFY_TMP)/vmg-mm-egress-policy.out || { echo "FAIL: cilium model-manager egress lacks $$pattern"; exit 1; }; \
 	done
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(MANAGERS_ON) --set networkPolicy.flavor=kubernetes --set 'modelManager.networkPolicy.egress.cidrs[0]=198.51.100.0/24' --set 'networkPolicy.additionalEgressCIDRs[0]=203.0.113.0/24' >$(VERIFY_TMP)/vmg-mm-egress-k8s.out 2>&1 || { cat $(VERIFY_TMP)/vmg-mm-egress-k8s.out; exit 1; }
@@ -2784,7 +2806,7 @@ verify-postgres: ## Assert the postgres.backup wiring (plugin ObjectStore + Sche
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_ON) >$(VERIFY_TMP)/vp-off.out 2>&1 || { cat $(VERIFY_TMP)/vp-off.out; exit 1; }
 	@grep -q 'agent-platform.giantswarm.io/backup: none' $(VERIFY_TMP)/vp-off.out || { echo "FAIL: a Cluster without backup does not carry agent-platform.giantswarm.io/backup: none"; exit 1; }
 	@if grep -qE 'kind: (ObjectStore|ScheduledBackup)|^  plugins:|serviceAccountTemplate' $(VERIFY_TMP)/vp-off.out; then echo "FAIL: backup objects render with postgres.backup.enabled=false"; exit 1; fi
-	@if awk '/^  name: kagent-pg-cluster$$/,/^---/' $(VERIFY_TMP)/vp-off.out | grep -q '\- world'; then echo "FAIL: the CNPG policy opens world egress without a backup"; exit 1; fi
+	@if awk '/^  name: kagent-pg-cluster$$/,/^---/' $(VERIFY_TMP)/vp-off.out | grep -q -- '- world'; then echo "FAIL: the CNPG policy opens world egress without a backup"; exit 1; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_ON) --set postgres.backup.enabled=true --set postgres.enabled=false >$(VERIFY_TMP)/vp-nopg.out 2>&1 || { cat $(VERIFY_TMP)/vp-nopg.out; exit 1; }
 	@if grep -qE 'kind: (ObjectStore|ScheduledBackup|Cluster)$$' $(VERIFY_TMP)/vp-nopg.out; then echo "FAIL: backup objects render without a Cluster"; exit 1; fi
 	@echo "ok: no-backup signal"
@@ -2804,16 +2826,16 @@ verify-postgres: ## Assert the postgres.backup wiring (plugin ObjectStore + Sche
 	@grep -q 'method: plugin' $(VERIFY_TMP)/vp-minio.out || { echo "FAIL: ScheduledBackup method is not plugin"; exit 1; }
 	@if grep -q '^        serverName:' $(VERIFY_TMP)/vp-minio.out; then echo "FAIL: serverName rendered while unset (must default to the Cluster name)"; exit 1; fi
 	@awk '/^  name: kagent-pg-cluster$$/,/^---/' $(VERIFY_TMP)/vp-minio.out >$(VERIFY_TMP)/vp-minio-cnp.out
-	@grep -q '\- world' $(VERIFY_TMP)/vp-minio-cnp.out || { echo "FAIL: the CNPG policy has no world egress for the store"; exit 1; }
-	@grep -A6 'endpointSelector:' $(VERIFY_TMP)/vp-minio-cnp.out | grep -q '\- kagent-pg-restore$$' || { echo "FAIL: the CNPG policy does not select the <clusterName>-restore scratch Cluster"; exit 1; }
-	@grep -q '\- cluster' $(VERIFY_TMP)/vp-minio-cnp.out || { echo "FAIL: an in-cluster endpointURL did not add the cluster entity"; exit 1; }
+	@grep -q -- '- world' $(VERIFY_TMP)/vp-minio-cnp.out || { echo "FAIL: the CNPG policy has no world egress for the store"; exit 1; }
+	@grep -A6 'endpointSelector:' $(VERIFY_TMP)/vp-minio-cnp.out | grep -q -- '- kagent-pg-restore$$' || { echo "FAIL: the CNPG policy does not select the <clusterName>-restore scratch Cluster"; exit 1; }
+	@grep -q -- '- cluster' $(VERIFY_TMP)/vp-minio-cnp.out || { echo "FAIL: an in-cluster endpointURL did not add the cluster entity"; exit 1; }
 	@grep -q 'k8s-app: kube-dns' $(VERIFY_TMP)/vp-minio-cnp.out || { echo "FAIL: the CNPG policy has no DNS egress for the store"; exit 1; }
 	@grep -q 'port: "443"' $(VERIFY_TMP)/vp-minio-cnp.out || { echo "FAIL: the store egress does not open 443"; exit 1; }
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_MINIO) --set postgres.backup.serverName=kagent-pg-2 --set 'postgres.backup.networkPolicy.fqdns[0].matchName=minio.example.internal' --set 'postgres.backup.networkPolicy.cidrs[0]=198.51.100.0/24' --set-string 'postgres.backup.networkPolicy.ports[0]=9000' >$(VERIFY_TMP)/vp-minio2.out 2>&1 || { cat $(VERIFY_TMP)/vp-minio2.out; exit 1; }
 	@grep -q 'serverName: "kagent-pg-2"' $(VERIFY_TMP)/vp-minio2.out || { echo "FAIL: serverName override missing from the plugin entry"; exit 1; }
 	@grep -q 'matchName: minio.example.internal' $(VERIFY_TMP)/vp-minio2.out || { echo "FAIL: FQDN egress for the store missing"; exit 1; }
 	@grep -B2 -A2 'matchPattern: "\*"' $(VERIFY_TMP)/vp-minio2.out | grep -q 'dns:' || { echo "FAIL: FQDN egress without the DNS proxy rule"; exit 1; }
-	@grep -q '\- 198.51.100.0/24' $(VERIFY_TMP)/vp-minio2.out || { echo "FAIL: CIDR egress for the store missing"; exit 1; }
+	@grep -q -- '- 198.51.100.0/24' $(VERIFY_TMP)/vp-minio2.out || { echo "FAIL: CIDR egress for the store missing"; exit 1; }
 	@grep -q 'port: "9000"' $(VERIFY_TMP)/vp-minio2.out || { echo "FAIL: store port override missing"; exit 1; }
 	@echo "ok: plugin + static keys"
 	@echo "--> Crossplane AWS: bucket, lifecycle, public-access block, TLS policy, IRSA role; derived destinationPath and role annotation"
@@ -2838,7 +2860,7 @@ verify-postgres: ## Assert the postgres.backup wiring (plugin ObjectStore + Sche
 	@grep -q 'arn:aws-cn:iam::123456789012:role/giantswarm-ci-kagent-pg' $(VERIFY_TMP)/vp-aws-cn.out || { echo "FAIL: China partition ARN missing"; exit 1; }
 	@grep -q '"sts.amazonaws.com.cn"' $(VERIFY_TMP)/vp-aws-cn.out || { echo "FAIL: China STS audience missing"; exit 1; }
 	@if grep -A1 'managementPolicies:' $(VERIFY_TMP)/vp-aws-cn.out | grep -q '"\*"'; then echo "FAIL: observeOnly still renders a full management policy"; exit 1; fi
-	@grep -A1 'managementPolicies:' $(VERIFY_TMP)/vp-aws-cn.out | grep -q '\- Observe' || { echo "FAIL: observeOnly renders no Observe policy"; exit 1; }
+	@grep -A1 'managementPolicies:' $(VERIFY_TMP)/vp-aws-cn.out | grep -q -- '- Observe' || { echo "FAIL: observeOnly renders no Observe policy"; exit 1; }
 	@echo "ok: Crossplane AWS"
 	@echo "--> Crossplane Azure: Account, Container, ManagementPolicy, PrivateEndpoint when private; derived destinationPath and connection Secret"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(PG_XP_AZURE) >$(VERIFY_TMP)/vp-az.out 2>&1 || { cat $(VERIFY_TMP)/vp-az.out; exit 1; }
@@ -3603,7 +3625,7 @@ verify-substrate-store: ## Assert Agent Substrate's snapshot store (kagent.harne
 	@grep -A3 '^kind: Role$$' $(VERIFY_TMP)/vss-cn.out | grep -q '^  name: substrate-snapshots$$' || { echo "FAIL: aws.roleName does not name the role"; exit 1; }
 	@grep -q '"arn:aws-cn:s3:::giantswarm-ci-substrate"' $(VERIFY_TMP)/vss-cn.out || { echo "FAIL: the China partition is not derived from the region"; exit 1; }
 	@grep -q 'sts.amazonaws.com.cn' $(VERIFY_TMP)/vss-cn.out || { echo "FAIL: the China STS audience is missing"; exit 1; }
-	@if awk '/^kind: Bucket$$/,/^---/' $(VERIFY_TMP)/vss-cn.out | grep -q '\- Create'; then echo "FAIL: observeOnly still creates"; exit 1; fi
+	@if awk '/^kind: Bucket$$/,/^---/' $(VERIFY_TMP)/vss-cn.out | grep -q -- '- Create'; then echo "FAIL: observeOnly still creates"; exit 1; fi
 	@echo "ok: connectivity renders the store"
 	@echo "--> meta chart, block on: the derived location for kagent, the block held back, the role annotation on both substrate ServiceAccounts"
 	@$(SUBSTRATE_STORE_META) >$(VERIFY_TMP)/vss-meta.out 2>&1 || { cat $(VERIFY_TMP)/vss-meta.out; exit 1; }
@@ -4555,7 +4577,7 @@ verify-kagent-a2a-url: ## Assert the address the kagent controller's agent cards
 	@echo "ok: $@"
 
 .PHONY: verify-kagent-extensions
-verify-kagent-extensions: ## Assert the kagent controller run as the kagent-extensions binary (kagent.controller.image.repository giantswarm/kagent/controller-extensions, the default): with giantswarm/kagent/controller no variable of the binary and no guard; by default, controller.env sets the binary's KAGENT_EXTENSIONS_* variables from the controller's own settings (the issuer and key set of controller.auth, a token of any of its clients, the claims and prefixes, the namespace selector and included namespaces, the machine audience, workspace-manager's ServiceAccount while workspaces are on and agent-platform-operator's while agentPlatformOrganizations is on, klaus-gateway's ServiceAccount as the session reader while refusal notices are on), each a flag of the binary, an own env entry standing; the noop authorization mode, the insecure authentication mode and a kagent range below 1.25.2 fail; the kagent chart of the floor (until published, the newest release below it) runs controller-extensions of its own release with the binary's variables and IMAGE_TAG naming that release. Needs PyYAML. Network: gsoci.azurecr.io (the kagent chart). HELM selects the binary.
+verify-kagent-extensions: ## Assert the kagent controller run as the kagent-extensions binary (kagent.controller.image.repository giantswarm/kagent/controller-extensions, the default): with giantswarm/kagent/controller no variable of the binary and no guard; by default, controller.env sets the binary's KAGENT_EXTENSIONS_* variables from the controller's own settings (the issuer, key set and trusted client audiences of controller.auth, the claims and prefixes, the namespace selector and included namespaces, the machine audience, workspace-manager's ServiceAccount while workspaces are on and agent-platform-operator's while agentPlatformOrganizations is on, klaus-gateway's ServiceAccount as the session reader while refusal notices are on), each a flag of the binary, an own env entry standing; the noop authorization mode, the insecure authentication mode and a kagent range below 1.25.2 fail; the kagent chart of the floor (until published, the newest release below it) runs controller-extensions of its own release with the binary's variables and IMAGE_TAG naming that release. Needs PyYAML. Network: gsoci.azurecr.io (the kagent chart). HELM selects the binary.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 -c 'import yaml' 2>/dev/null || { echo "FAIL: PyYAML is not installed (apt: python3-yaml, pip: pyyaml)"; exit 1; }
 	@HELM="$(HELM)" python3 tests/verify-kagent-extensions.py $(CHART_DIR) $(CONNECTIVITY_DIR)
@@ -4765,3 +4787,6 @@ verify-credential-api:
 verify-all: ## Run every verify-* target, or one VERIFY_SHARD_INDEX of VERIFY_SHARD_TOTAL isolated CI shards, with wall-clock timings.
 	@python3 tests/run-verify.py --make "$(MAKE)" \
 		--shard-index "$(VERIFY_SHARD_INDEX)" --shard-total "$(VERIFY_SHARD_TOTAL)" $(VERIFY_TARGETS)
+.PHONY: verify-muster-encryption-key
+verify-muster-encryption-key: ## Assert muster's shared request-state encryption Secret and explicit Secret or inline overrides.
+	@HELM="$(HELM)" python3 tests/verify-muster-encryption-key.py $(CHART_DIR)

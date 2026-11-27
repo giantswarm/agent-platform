@@ -12,6 +12,11 @@ target is the platform's own Valkey (components.valkey, the valkey block), the
 way the meta chart fills routing.valkey from it.
 */}}
 
+{{/* The namespace of the klaus-gateway component's Helm release. */}}
+{{- define "agent-platform.klausGateway.namespace" -}}
+{{- dig "klaus-gateway" "targetNamespace" "" (.Values.components | default dict) | default .Release.Namespace -}}
+{{- end -}}
+
 {{/*
 The klaus-gateway pod's app.kubernetes.io/name label value: the chart's
 fullnameOverride, else its chart name. Every policy selecting the gateway pod
@@ -23,7 +28,8 @@ uses this, so a renamed release moves them all.
 
 {{/*
 Truthy (emits "true") when the gateway pod reads or writes the Kubernetes API,
-so its egress needs the kube-apiserver: the Secret link store
+so its egress needs the kube-apiserver: the A2A server's organization namespace
+lookup, the Secret link store
 (klausGateway.obo.store: secret with OBO on — the gateway's own gate,
 klaus-gateway's obo.secretStore helper), and the team-review endpoint
 (klausGateway.reviews.enabled; giantswarm/klaus-gateway#273), which verifies
@@ -34,13 +40,13 @@ without it every review times out at the API and the endpoint answers 503).
 The routing stores that reached the API (configmap, crd) and the embedded
 ChannelRoute controller are gone from klaus-gateway (giantswarm/klaus-gateway#271).
 Empty otherwise: the default shape — memory routing, the bolt link store, no
-reviews — never touches the API and gets no rule. The keys are the
+reviews or A2A server — never touches the API and gets no rule. The keys are the
 klaus-gateway chart's; when the block leaves one unset its chart default
 applies (bolt, memory, reviews off).
 */}}
 {{- define "agent-platform.klausGateway.apiServerEgress" -}}
 {{- $kg := .Values.klausGateway -}}
-{{- if or (dig "reviews" "enabled" false $kg) (and (dig "obo" "enabled" false $kg) (eq (dig "obo" "store" "bolt" $kg) "secret")) (include "agent-platform.klausGateway.refusalsOn" .) -}}true{{- end -}}
+{{- if or (dig "reviews" "enabled" false $kg) (and (dig "obo" "enabled" false $kg) (eq (dig "obo" "store" "bolt" $kg) "secret")) (include "agent-platform.klausGateway.refusalsOn" .) (include "agent-platform.klausGateway.a2aServerEgressOn" .) -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -95,6 +101,181 @@ klaus-gateway on and klausGateway.agentgatewayRoute.a2aServer.enabled.
 */}}
 {{- define "agent-platform.klausGateway.a2aServerOn" -}}
 {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) (dig "agentgatewayRoute" "a2aServer" "enabled" false (.Values.klausGateway | default dict)) -}}true{{- end -}}
+{{- end -}}
+
+{{/* The A2A server needs its own JWKS and muster regardless of Slack OBO. */}}
+{{- define "agent-platform.klausGateway.a2aServerEgressOn" -}}
+{{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "klaus-gateway")) (or (dig "a2aServer" "enabled" false (.Values.klausGateway | default dict)) (include "agent-platform.klausGateway.a2aServerOn" .)) -}}
+{{- if and .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes") -}}
+{{- $cidr := .Values.networkPolicy.kubernetes.apiServerCIDR | trim -}}
+{{- if or (not $cidr) (hasSuffix "/0" $cidr) -}}
+{{- fail "networkPolicy.kubernetes.apiServerCIDR must name the API server's explicit address range when klausGateway's A2A server is enabled: its organization lookup needs API access, and a /0 range would allow all egress" -}}
+{{- end -}}
+{{- end -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
+The A2A server's JWKS and muster endpoints, deduplicated by host and port.
+Service addresses carry their namespace for pod selectors; other addresses
+use FQDN or CIDR rules. URLs without a port use their HTTP scheme's default.
+*/}}
+{{- define "agent-platform.klausGateway.a2aServerEgressTargets" -}}
+{{- $gateway := .Values.klausGateway | default dict -}}
+{{- $token := dig "a2aServer" "token" dict $gateway -}}
+{{- $jwks := $token.jwksUrl | default "" -}}
+{{- if not $jwks -}}
+{{- with ($token.issuer | default .Values.global.identity.issuerUrl) -}}
+{{- $jwks = printf "%s/keys" (trimSuffix "/" .) -}}
+{{- end -}}
+{{- end -}}
+{{- $muster := dig "obo" "musterUrl" "" $gateway | default (dig "muster" "oauth" "server" "baseUrl" "" (.Values.muster | default dict)) -}}
+{{- $targets := include "agent-platform.klausGateway.urlEgressTargets" (list $jwks $muster) | fromJsonArray -}}
+{{- $targets = concat $targets (include "agent-platform.klausGateway.a2aProxyTargets" (dict "ctx" . "role" "gateway") | fromJsonArray) -}}
+{{- $targets | uniq | toJson -}}
+{{- end -}}
+
+{{/* HTTP endpoint targets for network policy, deduplicated by host and port. */}}
+{{- define "agent-platform.klausGateway.urlEgressTargets" -}}
+{{- $targets := list -}}
+{{- $seen := dict -}}
+{{- range $url := . -}}
+{{- if $url -}}
+{{- $parsed := urlParse $url -}}
+{{- $scheme := lower $parsed.scheme -}}
+{{- $host := include "agent-platform.jwks.normalizeHost" ($parsed.hostname | default "") -}}
+{{- if or (not $host) (not (has $scheme (list "http" "https"))) -}}
+{{- fail "klausGateway A2A egress targets require HTTP or HTTPS URLs" -}}
+{{- end -}}
+{{- $port := regexFind ":[0-9]+$" $parsed.host | trimPrefix ":" | default (ternary "80" "443" (eq $scheme "http")) | int -}}
+{{- $namespace := "" -}}
+{{- if include "agent-platform.jwks.inCluster" $host -}}
+{{- $namespace = index (splitList "." $host) 1 -}}
+{{- end -}}
+{{- $key := printf "%s:%d" $host $port -}}
+{{- if not (hasKey $seen $key) -}}
+{{- $_ := set $seen $key true -}}
+{{- $targets = append $targets (dict "host" $host "port" $port "namespace" $namespace) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $targets | toJson -}}
+{{- end -}}
+
+{{/* Native BackendTunnel URLs used by each A2A request hop. */}}
+{{- define "agent-platform.klausGateway.a2aProxyTargets" -}}
+{{- $urls := list -}}
+{{- if include "agent-platform.klausGateway.a2aServerOn" .ctx -}}
+{{- $entry := .ctx.Values.klausGateway.agentgatewayRoute.a2aServer -}}
+{{- if or (eq .role "controller") (eq .role "gateway") -}}
+{{- range $entry.issuers -}}
+{{- with dig "jwks" "tunnel" "url" "" . -}}{{- $urls = append $urls . -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if or (eq .role "dataplane") (eq .role "gateway") -}}
+{{- with dig "exchange" "endpoint" "tunnel" "url" "" $entry -}}{{- $urls = append $urls . -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- include "agent-platform.klausGateway.urlEgressTargets" $urls -}}
+{{- end -}}
+
+{{/* The data plane's Dex token endpoint and its configured CONNECT proxy. */}}
+{{- define "agent-platform.klausGateway.a2aExchangeTargets" -}}
+{{- $targets := list -}}
+{{- if include "agent-platform.klausGateway.a2aServerOn" . -}}
+{{- $endpoint := (include "agent-platform.klausGateway.a2aServer" . | fromJson).exchange.endpoint -}}
+{{- $namespace := "" -}}
+{{- if $endpoint.inCluster -}}{{- $namespace = index (splitList "." (include "agent-platform.jwks.normalizeHost" $endpoint.host)) 1 -}}{{- end -}}
+{{- $targets = append $targets (dict "host" (include "agent-platform.jwks.normalizeHost" $endpoint.host) "port" ($endpoint.port | int) "namespace" $namespace) -}}
+{{- $targets = concat $targets (include "agent-platform.klausGateway.a2aProxyTargets" (dict "ctx" . "role" "dataplane") | fromJsonArray) -}}
+{{- end -}}
+{{- $targets | uniq | toJson -}}
+{{- end -}}
+
+{{/* A CA key follows its Secret: inherited names use the global key. */}}
+{{- define "agent-platform.klausGateway.a2aCASecretKey" -}}
+{{- $tls := .jwks.tls | default dict -}}
+{{- $key := $tls.caSecretKey | default "" -}}
+{{- if and (not $key) (not $tls.caSecretName) -}}
+{{- $key = dig "identity" "ca" "key" "" .ctx.Values.global -}}
+{{- end -}}
+{{- $key | default "ca.crt" -}}
+{{- end -}}
+
+{{/* Cilium rules for known HTTP destinations, using their own TCP ports. */}}
+{{- define "agent-platform.klausGateway.egress.cilium" -}}
+{{- $externalPorts := list -}}
+{{- range .targets }}
+{{- if .namespace }}
+- toEndpoints:
+    - matchLabels:
+        io.kubernetes.pod.namespace: {{ .namespace | quote }}
+{{- else if include "agent-platform.jwks.addrLiteral" .host }}
+- toCIDR:
+    - {{ printf "%s/%d" .host (ternary 128 32 (contains ":" .host)) | quote }}
+{{- else }}
+- toFQDNs:
+    - matchName: {{ .host | quote }}
+{{- end }}
+  toPorts:
+    - ports:
+        - port: {{ .port | toString | quote }}
+          protocol: TCP
+{{- if not .namespace }}{{- $externalPorts = append $externalPorts (.port | int) }}{{- end }}
+{{- end }}
+{{- with .ctx.Values.gateway.jwksEgress.external.cidrs }}
+{{- if $externalPorts }}
+- toCIDR:
+    {{- toYaml . | nindent 4 }}
+  toPorts:
+    - ports:
+        {{- range (uniq $externalPorts) }}
+        - port: {{ . | toString | quote }}
+          protocol: TCP
+        {{- end }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/* Kubernetes rules for known HTTP destinations and configured private CIDRs. */}}
+{{- define "agent-platform.klausGateway.egress.kubernetes" -}}
+{{- $externalPorts := list -}}
+{{- range .targets }}
+{{- if .namespace }}
+- to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: {{ .namespace | quote }}
+{{- else if include "agent-platform.jwks.addrLiteral" .host }}
+- to:
+    - ipBlock:
+        cidr: {{ printf "%s/%d" .host (ternary 128 32 (contains ":" .host)) | quote }}
+{{- else }}
+- to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except: {{ toYaml $.ctx.Values.networkPolicy.kubernetes.worldExcludedCIDRs | nindent 10 }}
+{{- end }}
+  ports:
+    - port: {{ .port | int }}
+      protocol: TCP
+{{- if not .namespace }}{{- $externalPorts = append $externalPorts (.port | int) }}{{- end }}
+{{- end }}
+{{- with .ctx.Values.gateway.jwksEgress.external.cidrs }}
+{{- if $externalPorts }}
+- to:
+    {{- range . }}
+    - ipBlock:
+        cidr: {{ . | quote }}
+    {{- end }}
+  ports:
+    {{- range (uniq $externalPorts) }}
+    - port: {{ . | int }}
+      protocol: TCP
+    {{- end }}
+{{- end }}
+{{- end }}
 {{- end -}}
 
 {{/*

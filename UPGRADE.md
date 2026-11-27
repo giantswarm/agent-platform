@@ -2,6 +2,31 @@
 
 Operator action required between releases. CHANGELOG.md captures the diff; UPGRADE.md captures what an operator has to *do*.
 
+## \<current\> → \<next\> (kagent token audiences)
+
+The kagent and kagent-crds ranges select `>=1.34.0-rc.4 <1.35.0-0`, including reserved MCP metadata validation. The controller requires an explicit audience on people's tokens. The platform preserves `kagent.controller.auth.audiences`, otherwise uses the controller route's configured audience list, otherwise derives the same issuer's platform login client while the UI is off. The derived list also reaches the extensions controller and the route's JWT policy.
+
+### Operator action
+
+- Set `global.identity.clientId` for the configured issuer, or set `kagent.controller.auth.audiences` to the trusted login client IDs. With the UI enabled, provide an explicit audience list including its login client and the other trusted clients.
+- With the A2A entry enabled, request audiences accepted by both the controller and its route in `klausGateway.agentgatewayRoute.a2aServer.exchange.audiences`, and configure Dex's matching cross-client `trustedPeers`.
+- An explicit `KAGENT_EXTENSIONS_OIDC_ISSUERS` environment entry remains authoritative. Include the intended `audiences` in that configuration too.
+- A pinned BOM moves `kagent` and `kagent-crds` together to `1.34.0-rc.4` or later on that minor line.
+- An explicitly pinned native controller needs `1.34.0-rc.3` or later for audience verification. Earlier native pins fail the render; the extensions controller retains its existing audience support.
+- Enabling `klausGateway.agentgatewayRoute.a2aServer` requires a klaus-gateway range starting at `4.20.0-rc.6` or later and the Dex setup in [authentication.md](docs/authentication.md). Its existing stable default range remains available with the entry off.
+
+## \<current\> → \<next\> (shared muster request-state encryption)
+
+Muster's replicas share encrypted request state. The platform enables `muster.muster.oauth.server.encryptionKey` and uses `global.identity.existingSecret` when no native muster Secret, inline encryption key or inline login credentials are configured.
+
+With workspaces and the credential provider enabled, token encryption also satisfies the existing prerequisite for personal ChatGPT login. The platform keeps its ChatGPT provider App beside the workspace provider Apps.
+
+### Operator action
+
+- Keep a stable `oauth-encryption-key` in the configured Secret. It must exist in muster's namespace and survive upgrades.
+- Inline login credentials require `muster.muster.oauth.server.encryptionKeyValue`, or migration to a native `muster.muster.oauth.server.existingSecret` containing all login and encryption keys. A global Secret never overrides explicit inline credentials.
+- An unauthenticated single-replica local installation can explicitly set `muster.replicaCount: 1` and `muster.muster.oauth.server.encryptionKey: false`.
+
 ## CRDs on an upgrade, per install path
 
 Every component ships its own CRDs and upgrades them with its release; there is no CRD chart to upgrade first ([Reference: CRD lifecycle](docs/reference.md#crd-lifecycle)). Who applies a changed CRD, and what is left to the operator:

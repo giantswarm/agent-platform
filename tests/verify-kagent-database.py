@@ -21,7 +21,8 @@ import sys
 import yaml
 
 BASE = ["--set", "ingress.parentRefs[0].name=x", "--set", "kagent.harness.snapshotLocation=s3://ci-agent-snapshots/agents",
-        "--set", "components.kagent.enabled=true", "--set", "global.identity.issuerUrl=https://dex.ci.example.com"]
+        "--set", "components.kagent.enabled=true", "--set", "global.identity.issuerUrl=https://dex.ci.example.com",
+        "--set", "kagent.controller.auth.audiences[0]=agent-platform"]
 MESSAGE = "whose chart deploys no PostgreSQL: run kagent on the platform's CloudNativePG database, the supported shape"
 
 

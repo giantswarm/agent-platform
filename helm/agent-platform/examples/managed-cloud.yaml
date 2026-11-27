@@ -76,6 +76,8 @@ kagent:
       bundled:
         enabled: false
   controller:
+    auth:
+      audiences: [agent-platform, kagent]
     volumes:
       - name: kagent-postgres
         secret:
@@ -89,7 +91,7 @@ kagent:
         readOnly: true
   # The kagent UI on https://kagent.<domain>, behind oauth2-proxy: its OIDC
   # client's redirect URI is https://kagent.<domain>/oauth2/callback, its
-  # credentials in Secret kagent-oauth2-proxy (client-id, client-secret,
+  # credentials in Secret kagent-oauth2-proxy (client-id: kagent, client-secret,
   # cookie-secret) in the kagent namespace.
   uiRoute:
     enabled: true

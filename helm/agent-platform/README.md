@@ -457,7 +457,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.flux.enabled | bool | `true` |  |
 | components.muster.chart | string | `"muster"` |  |
 | components.muster.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.muster.versionRange | string | `">=5.64.0-rc.2 <6.0.0-0"` |  |
+| components.muster.versionRange | string | `">=5.67.0-rc.18 <6.0.0-0"` |  |
 | components.muster.valuesFrom | string | `"muster"` |  |
 | components.muster.crds | string | `"CreateReplace"` |  |
 | components.muster.dependsOn[0] | string | `"valkey"` |  |
@@ -487,7 +487,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.agent-platform-mcps.dependsOn[1] | string | `"agentgateway"` |  |
 | components.kagent.chart | string | `"kagent"` |  |
 | components.kagent.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent.versionRange | string | `">=1.33.0 <1.34.0"` |  |
+| components.kagent.versionRange | string | `">=1.34.0-rc.4 <1.35.0-0"` |  |
 | components.kagent.valuesFrom | string | `"kagent"` |  |
 | components.kagent.dependsOn[0] | string | `"kagent-crds"` |  |
 | components.kagent.dependsOn[1] | string | `"substrate-crds"` |  |
@@ -510,7 +510,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.kagent.enabled | bool | `false` |  |
 | components.kagent-crds.chart | string | `"kagent-crds"` |  |
 | components.kagent-crds.repository | string | `"oci://gsoci.azurecr.io/giantswarm/kagent/helm"` |  |
-| components.kagent-crds.versionRange | string | `">=1.33.0 <1.34.0"` |  |
+| components.kagent-crds.versionRange | string | `">=1.34.0-rc.4 <1.35.0-0"` |  |
 | components.kagent-crds.valuesFrom | string | `"kagent-crds"` |  |
 | components.kagent-crds.injectGlobal | bool | `false` |  |
 | components.kagent-crds.ownedCrds[0] | string | `"modelconfigs.api.kagent.dev"` |  |
@@ -923,6 +923,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | muster.podDisruptionBudget.minAvailable | int | `1` |  |
 | muster.gatewayAPI.enabled | bool | `false` |  |
 | muster.muster.oauth.server.enabled | bool | `true` |  |
+| muster.muster.oauth.server.encryptionKey | bool | `true` |  |
 | muster.muster.oauth.server.baseUrl | string | `""` |  |
 | muster.muster.oauth.server.dex.issuerUrl | string | `""` |  |
 | muster.muster.oauth.server.dex.clientId | string | `""` |  |
@@ -1175,6 +1176,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | kagent.controllerRoute.jwtAuthentication.enabled | bool | `true` |  |
 | kagent.controllerRoute.jwtAuthentication.mode | string | `"Strict"` |  |
 | kagent.controllerRoute.jwtAuthentication.issuer | string | `""` |  |
+| kagent.controllerRoute.jwtAuthentication.audiences | list | `[]` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.host | string | `"dex.giantswarm.svc.cluster.local"` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.port | int | `5556` |  |
 | kagent.controllerRoute.jwtAuthentication.jwks.path | string | `"/keys"` |  |
@@ -1327,7 +1329,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.obo.connectors.enabled | bool | `false` |  |
 | klausGateway.a2a.enabled | bool | `false` |  |
 | klausGateway.a2a.defaultAgent | string | `""` |  |
-| klausGateway.a2a.url | string | `"grpc://agentgateway.agent-platform.svc.cluster.local:8080"` |  |
+| klausGateway.a2a.url | string | `""` |  |
 | klausGateway.a2a.fallbackIconUrlTemplate | string | `""` |  |
 | klausGateway.refusals.enabled | string | `"auto"` |  |
 | klausGateway.agentgatewayRoute.enabled | bool | `false` |  |
@@ -1340,6 +1342,8 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.path | string | `""` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.enabled | bool | `true` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.caSecretName | string | `""` |  |
+| klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tls.caSecretKey | string | `""` |  |
+| klausGateway.agentgatewayRoute.a2aServer.exchange.endpoint.tunnel | object | `{}` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.clientId | string | `"klaus-gateway-exchange"` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.secretName | string | `""` |  |
 | klausGateway.agentgatewayRoute.a2aServer.exchange.secretKey | string | `"clientSecret"` |  |

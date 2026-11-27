@@ -1,4 +1,5 @@
 {{- if and (include "agent-platform.ingress.agentgateway" .) .Values.networkPolicy.enabled (eq (include "agent-platform.networkPolicyFlavor" .) "kubernetes") }}
+{{- $exchangeTargets := include "agent-platform.klausGateway.a2aExchangeTargets" . | fromJsonArray }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -99,24 +100,14 @@ spec:
     - to:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.klausGateway.namespaceOverride | default .Release.Namespace }}
+              kubernetes.io/metadata.name: {{ include "agent-platform.klausGateway.namespace" . }}
           podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ include "agent-platform.klausGateway.fullname" . }}
       ports:
         - port: 8080
           protocol: TCP
-    {{- $endpoint := (include "agent-platform.klausGateway.a2aServer" . | fromJson).exchange.endpoint }}
-    {{- if $endpoint.inCluster }}
-    # The exchange's in-cluster Dex token endpoint.
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ index (splitList "." (include "agent-platform.jwks.normalizeHost" $endpoint.host)) 1 }}
-      ports:
-        - port: {{ $endpoint.port }}
-          protocol: TCP
-    {{- end }}
+    {{- include "agent-platform.klausGateway.egress.kubernetes" (dict "ctx" . "targets" $exchangeTargets) | nindent 4 }}
     {{- end }}
     {{- $kubernetes := index .Values "mcp-kubernetes" | default dict }}
     {{- if and (include "agent-platform.componentEnabled" (dict "root" . "name" "mcp-kubernetes")) (dig "gatewayAPI" "enabled" (dig "mcpKubernetes" "oauth" "enabled" false $kubernetes) $kubernetes) }}
