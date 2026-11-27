@@ -55,7 +55,7 @@ components:
   default-agent:       { versionRange: "2.6.0" }
   vm-manager:                    { versionRange: "0.27.0-rc.1" }
   # The cluster write surface (components.cluster-manager, off by default).
-  cluster-manager:               { versionRange: "0.39.0-rc.1" }
+  cluster-manager:               { versionRange: "0.40.0-rc.1" }
   # The workspace surface (components.workspace-manager, follows
   # workspaces.enabled, off by default).
   workspace-manager:             { versionRange: "0.16.0-rc.1" }

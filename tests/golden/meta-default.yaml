@@ -1271,7 +1271,6 @@ spec:
         downstream:
           enabled: true
         enabled: true
-        provider: dex
       observability:
         otel:
           endpoint: http://otlp-gateway.kube-system.svc:4317
@@ -2028,7 +2027,6 @@ spec:
       downstream:
         enabled: true
       enabled: true
-      provider: dex
     observability:
       otel:
         endpoint: http://otlp-gateway.kube-system.svc:4317

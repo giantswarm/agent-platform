@@ -4404,7 +4404,10 @@ Usage: include "agent-platform.scheduling.apply" (dict "values" $shaped)
 The installation's login facts in the managers that call the Kubernetes API as
 the person (oauth.downstream): model-manager, agent-manager and
 cluster-manager. What a block leaves unset is filled from global.identity:
-oauth.provider from type, and muster.mcpServer.auth.requiredAudiences from
+oauth.provider from type (agent-manager only: model-manager and cluster-manager
+are on mcp-oauth's values layout, where oauth.provider is deprecated and their
+charts fall back to global.identity.type themselves), and
+muster.mcpServer.auth.requiredAudiences from
 kubernetes.audiences, the audiences muster requests at login so the forwarded
 ID token passes the API server (AuthenticationConfiguration
 jwt[].issuer.audiences). A value in the block wins, an empty list included.
@@ -4421,7 +4424,7 @@ Usage: include "agent-platform.identity.defaults" (dict "values" $shaped)
 {{- $block := index $v $name -}}
 {{- if kindIs "map" $block -}}
 {{- $oauth := index $block "oauth" -}}
-{{- if and $type (kindIs "map" $oauth) (not (hasKey $oauth "provider")) }}{{ $_ := set $oauth "provider" $type }}{{ end -}}
+{{- if and $type (kindIs "map" $oauth) (not (hasKey $oauth "provider")) (not (has $name (list "model-manager" "cluster-manager"))) }}{{ $_ := set $oauth "provider" $type }}{{ end -}}
 {{- if $audiences -}}
 {{- $node := $block -}}
 {{- range $key := list "muster" "mcpServer" "auth" -}}
@@ -4457,8 +4460,9 @@ is off: componentDerivedValues).
 oauth.baseURL of agent-manager is https://<host><pathPrefix>, the hostname
 and prefix of its route (agentManager.route.hostname, else
 agentgateway.<global.domain>); without a host it stays unset and the
-connectivity chart's guard names the key. model-manager is on mcp-oauth's
-values layout: agent-platform.identity.applyLayout fills its keys instead.
+connectivity chart's guard names the key. model-manager and cluster-manager
+are on mcp-oauth's values layout: agent-platform.identity.applyLayout fills
+their keys instead.
 Runs on the $shaped copy in components.yaml after scheduling.apply, so each
 manager release and the connectivity release — its guards, the managers'
 identity-provider egress — read the same filled block. Emits nothing.
@@ -4475,7 +4479,11 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 {{- if and (kindIs "map" $block) (kindIs "map" (index $block "oauth")) (dig "oauth" "enabled" false $block) -}}
 {{- $oauth := index $block "oauth" -}}
 {{- if eq $name "model-manager" -}}
-{{- include "agent-platform.identity.applyLayout" (dict "oauth" $oauth "identity" $identity "login" $login "domain" $domain) -}}
+{{- $issuer := "" -}}
+{{- if $domain }}{{ $issuer = printf "https://agentgateway.%s/model-manager" $domain }}{{ end -}}
+{{- include "agent-platform.identity.applyLayout" (dict "oauth" $oauth "identity" $identity "login" $login "issuer" $issuer) -}}
+{{- else if eq $name "cluster-manager" -}}
+{{- include "agent-platform.identity.applyLayout" (dict "oauth" $oauth "identity" $identity "login" $login "issuer" "") -}}
 {{- else -}}
 {{- if and $login (eq (toString (dig "provider" "dex" $oauth)) "dex") -}}
 {{- if not (kindIs "map" (index $oauth "dex")) }}{{ $_ := set $oauth "dex" dict }}{{ end -}}
@@ -4500,17 +4508,20 @@ Usage: include "agent-platform.identity.apply" (dict "values" $shaped)
 
 {{/*
 agent-platform.identity.apply for a manager on mcp-oauth's values layout
-(model-manager from 1.25.0-rc.1): the same defaults, written to
-oauth.authorizationServer instead of the deprecated keys —
+(model-manager from 1.25.0, cluster-manager from 0.40.0-rc.1): the same
+defaults, written to oauth.authorizationServer instead of the deprecated keys —
 upstream.issuer from muster's issuer, upstream.client.id from its client,
 upstream.client.secretKeyRef from its existingSecret (key dex-client-secret),
-and issuer https://agentgateway.<global.domain>/model-manager. A key is filled
+and authorizationServer.issuer from .issuer when it is not empty
+(model-manager: https://agentgateway.<global.domain>/model-manager, the
+resource URL it has always announced; cluster-manager passes none, its chart
+derives https://<fullname>.<global.domain>). A key is filled
 only when the new key, its deprecated key and global.identity all leave it
 unset, so an installation's own value in either layout stands. The client's
 audiences need no fill: the chart derives the trusted issuer's audiences from
 upstream.client.id. Only for the dex provider (upstream.type, else the
 deprecated provider, else global.identity.type, else dex). Emits nothing.
-Usage: include "agent-platform.identity.applyLayout" (dict "oauth" $oauth "identity" $identity "login" $login "domain" $domain)
+Usage: include "agent-platform.identity.applyLayout" (dict "oauth" $oauth "identity" $identity "login" $login "issuer" $issuer)
 */}}
 {{- define "agent-platform.identity.applyLayout" -}}
 {{- $oauth := .oauth -}}
@@ -4533,7 +4544,7 @@ Usage: include "agent-platform.identity.applyLayout" (dict "oauth" $oauth "ident
 {{- if not $client }}{{ $_ := unset $up "client" }}{{ end -}}
 {{- if not $up }}{{ $_ := unset $as "upstream" }}{{ end -}}
 {{- end -}}
-{{- if and .domain (not $as.issuer) (not $oauth.baseURL) }}{{ $_ := set $as "issuer" (printf "https://agentgateway.%s/model-manager" .domain) }}{{ end -}}
+{{- if and .issuer (not $as.issuer) (not $oauth.baseURL) }}{{ $_ := set $as "issuer" .issuer }}{{ end -}}
 {{- if not $as }}{{ $_ := unset $oauth "authorizationServer" }}{{ end -}}
 {{- end -}}
 

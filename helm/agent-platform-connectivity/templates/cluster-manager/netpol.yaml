@@ -83,7 +83,8 @@ spec:
 # clusters and pools, the Flux HelmReleases and OCIRepositories it writes,
 # model-manager's backend ConfigMap — as the caller), the identity provider
 # (cluster-manager.oauth: the discovery, JWKS, userinfo and token endpoints —
-# the Dex issuer by name, or the three Google hosts for the google provider),
+# the Dex issuer by name, or the three Google hosts for the google provider)
+# and the hosts of cluster-manager.oauth.resourceServer.trustedIssuers,
 # the workload clusters' API servers by name and address on their ports
 # (clusterManager.networkPolicy.workloadClusters: the detection of a cluster's
 # operator and serving layer, the pool's target) and the names and blocks of
@@ -111,6 +112,36 @@ spec:
         - kube-apiserver
     {{- if $oauthOn }}
     {{- include "agent-platform.idpEgress.cilium" (dict "ctx" $ "provider" (include "agent-platform.clusterManager.oauthProvider" .) "issuerUrl" (include "agent-platform.clusterManager.issuerUrl" .)) | trim | nindent 4 }}
+    {{- $trusted := include "agent-platform.clusterManager.trustedIssuerHosts" . | fromJsonArray }}
+    {{- $external := list }}
+    {{- range $trusted }}
+    {{- if include "agent-platform.jwks.inCluster" . }}
+    # A trusted issuer served in the cluster
+    # (cluster-manager.oauth.resourceServer.trustedIssuers): its Service's namespace.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: {{ index (splitList "." .) 1 }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- else }}
+    {{- $external = append $external . }}
+    {{- end }}
+    {{- end }}
+    {{- with $external }}
+    # The other issuers cluster-manager validates tokens of
+    # (cluster-manager.oauth.resourceServer.trustedIssuers): discovery and the
+    # key set, by name.
+    - toFQDNs:
+        {{- range . }}
+        - matchName: {{ . }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
     {{- end }}
     {{- with $wcFQDNs }}
     # The workload clusters' API servers by name.
