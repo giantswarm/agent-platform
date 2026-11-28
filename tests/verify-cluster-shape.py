@@ -2,7 +2,9 @@
 """Assert the cluster-shape knobs: `auto` resolves by served API group, once.
 
 The knobs that describe what a cluster can admit default to `auto`:
-kyvernoPolicies.enabled (kyverno.io/v1), networkPolicy.flavor (cilium.io/v2 ->
+kyvernoPolicies.enabled (kyverno.io/v1), kyvernoPolicyExceptions.cel.enabled
+(policies.kyverno.io/v1/PolicyException, while kyvernoPolicies.enabled is auto;
+an explicit kyvernoPolicies.enabled forces it), networkPolicy.flavor (cilium.io/v2 ->
 cilium, else kubernetes), global.observability.metrics.serviceMonitor.enabled
 (monitoring.coreos.com/v1), dicebear.route.enabled (gateway.envoyproxy.io/v1alpha1),
 agentSandbox.podSecurity.enabled and modelServing.policies.enabled (both follow
@@ -34,8 +36,12 @@ import re
 import subprocess
 import sys
 
+# The CEL API as discovery lists it: the group version and its PolicyException kind.
+CEL_APIS = ["policies.kyverno.io/v1", "policies.kyverno.io/v1/PolicyException"]
+
 FLEET_APIS = [
     "kyverno.io/v1",
+    *CEL_APIS,
     "cilium.io/v2",
     "monitoring.coreos.com/v1",
     "gateway.networking.k8s.io/v1",
@@ -48,6 +54,8 @@ SHAPES = {
     "fleet": FLEET_APIS,
     "cilium-only": ["cilium.io/v2"],
     "kyverno-only": ["kyverno.io/v1"],
+    "cel-only": CEL_APIS,
+    "kyverno-and-cel": ["kyverno.io/v1", *CEL_APIS],
     "monitoring-only": ["monitoring.coreos.com/v1"],
     "envoy-only": ["gateway.envoyproxy.io/v1alpha1"],
     "vpa-only": ["autoscaling.k8s.io/v1"],
@@ -87,6 +95,7 @@ KSERVE_MONITOR = ["kserve", "llmisvc", "controller", "serviceMonitor", "enabled"
 # The fleet's values, written out: what `auto` has to resolve to under FLEET_APIS.
 EXPLICIT_FLEET_KNOBS = [
     "--set", "kyvernoPolicies.enabled=true",
+    "--set", "kyvernoPolicyExceptions.cel.enabled=true",
     "--set", "networkPolicy.flavor=cilium",
     "--set", "global.observability.metrics.serviceMonitor.enabled=true",
     "--set", "agentSandbox.podSecurity.enabled=true",
@@ -112,6 +121,7 @@ EXPLICIT_FLEET_COPIES = [
 ]
 EXPLICIT_VANILLA_KNOBS = [
     "--set", "kyvernoPolicies.enabled=false",
+    "--set", "kyvernoPolicyExceptions.cel.enabled=false",
     "--set", "networkPolicy.flavor=kubernetes",
     "--set", "global.observability.metrics.serviceMonitor.enabled=false",
     "--set", "agentSandbox.podSecurity.enabled=false",
@@ -188,6 +198,17 @@ def kinds(manifest: str) -> dict[str, int]:
     return counts
 
 
+def exceptions(manifest: str) -> dict[str, int]:
+    """PolicyException count per apiVersion."""
+    counts: dict[str, int] = {}
+    for doc in manifest.split("\n---\n"):
+        lines = doc.split("\n")
+        if "kind: PolicyException" in lines:
+            api = next((l[len("apiVersion: "):] for l in lines if l.startswith("apiVersion: ")), "")
+            counts[api] = counts.get(api, 0) + 1
+    return counts
+
+
 def expect(condition: bool, message: str) -> None:
     if not condition:
         sys.exit(f"FAIL: {message}")
@@ -199,6 +220,7 @@ def yes(flag: bool) -> str:
 
 def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: list[str]) -> None:
     kyverno = "kyverno.io/v1" in served
+    cel = "policies.kyverno.io/v1/PolicyException" in served
     cilium = "cilium.io/v2" in served
     monitors = "monitoring.coreos.com/v1" in served
     envoy = "gateway.envoyproxy.io/v1alpha1" in served
@@ -213,6 +235,7 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
     conn = hr["agent-platform-connectivity"]
     for path, want in (
         (["kyvernoPolicies", "enabled"], yes(kyverno)),
+        (["kyvernoPolicyExceptions", "cel", "enabled"], yes(cel)),
         (["networkPolicy", "flavor"], flavor),
         (["global", "observability", "metrics", "serviceMonitor", "enabled"], yes(monitors)),
         (["agentSandbox", "podSecurity", "enabled"], yes(kyverno)),
@@ -279,8 +302,15 @@ def check_shape(meta: str, connectivity: str, ci: list[str], name: str, served: 
     expect(not (cnp and netpol), f"{where} connectivity renders both network-policy flavors")
     expect((cnp > 0) == cilium and (netpol > 0) == (not cilium),
            f"{where} connectivity flavor objects: CiliumNetworkPolicy={cnp} NetworkPolicy={netpol}")
-    for kind in ("ClusterPolicy", "PolicyException"):
-        expect((objects.get(kind, 0) > 0) == kyverno, f"{where} connectivity {kind} count={objects.get(kind, 0)}, kyverno served={kyverno}")
+    expect((objects.get("ClusterPolicy", 0) > 0) == kyverno,
+           f"{where} connectivity ClusterPolicy count={objects.get('ClusterPolicy', 0)}, kyverno served={kyverno}")
+    # Each PolicyException API group follows its own detection: kyverno.io/v2
+    # with kyverno.io/v1, policies.kyverno.io/v1 with its PolicyException kind.
+    polex = exceptions(rendered)
+    expect((polex.get("kyverno.io/v2", 0) > 0) == kyverno,
+           f"{where} connectivity kyverno.io/v2 PolicyException count={polex.get('kyverno.io/v2', 0)}, kyverno served={kyverno}")
+    expect((polex.get("policies.kyverno.io/v1", 0) > 0) == cel,
+           f"{where} connectivity policies.kyverno.io/v1 PolicyException count={polex.get('policies.kyverno.io/v1', 0)}, CEL API served={cel}")
     # kagent API v2: no Agent CR, per-agent Deployment or config Secret is left to
     # mutate, so the two kagent declarative-agent ClusterPolicies are gone from
     # every shape; the chart's ClusterPolicy is the agent-sandbox one.
@@ -324,6 +354,7 @@ def main(meta: str, connectivity: str) -> int:
 
     m = helm_releases(render(meta, [*ci, *ON, *fleet, "--set", "kyvernoPolicies.enabled=false"]))
     expect(leaf(m["agent-platform-connectivity"], ["kyvernoPolicies", "enabled"]) == "false"
+           and leaf(m["agent-platform-connectivity"], ["kyvernoPolicyExceptions", "cel", "enabled"]) == "false"
            and leaf(m["agent-platform-connectivity"], ["agentSandbox", "podSecurity", "enabled"]) == "false"
            and leaf(m["agent-platform-connectivity"], ["networkPolicy", "flavor"]) == "cilium",
            "kyvernoPolicies.enabled=false with Kyverno served did not switch podSecurity off with it (or touched the flavor)")
@@ -359,6 +390,7 @@ def main(meta: str, connectivity: str) -> int:
     m = helm_releases(render(meta, [*ci, *ON, "--set", "kyvernoPolicies.enabled=true", "--set", "networkPolicy.flavor=cilium",
                                      "--set", "global.observability.metrics.serviceMonitor.enabled=true"]))
     expect(leaf(m["agent-platform-connectivity"], ["kyvernoPolicies", "enabled"]) == "true"
+           and leaf(m["agent-platform-connectivity"], ["kyvernoPolicyExceptions", "cel", "enabled"]) == "true"
            and leaf(m["agent-platform-connectivity"], ["agentSandbox", "podSecurity", "enabled"]) == "true"
            and leaf(m["muster"], ["networkPolicy", "flavor"]) == "cilium"
            and leaf(m["valkey"], ["ciliumNetworkPolicy", "enabled"]) == "true"
@@ -369,6 +401,22 @@ def main(meta: str, connectivity: str) -> int:
     c = kinds(render(connectivity, [*PARENT_REF, *ON, "--set", "kyvernoPolicies.enabled=true", "--set", "networkPolicy.flavor=cilium"]))
     expect(c.get("ClusterPolicy", 0) > 0 and c.get("CiliumNetworkPolicy", 0) > 0 and c.get("NetworkPolicy", 0) == 0,
            "connectivity: explicit true values on a vanilla render did not render the objects")
+    polex = exceptions(render(connectivity, [*PARENT_REF, *ON, "--set", "kyvernoPolicies.enabled=true"]))
+    expect(polex.get("kyverno.io/v2", 0) > 0 and polex.get("policies.kyverno.io/v1", 0) > 0,
+           f"connectivity: kyvernoPolicies.enabled=true on a vanilla render did not force both PolicyException API groups ({polex})")
+
+    # ... and the CEL gate on its own: explicit cel.enabled wins over its detection
+    # either way, and leaves kyvernoPolicies alone.
+    m = helm_releases(render(meta, [*ci, *ON, *fleet, "--set", "kyvernoPolicyExceptions.cel.enabled=false"]))
+    expect(leaf(m["agent-platform-connectivity"], ["kyvernoPolicyExceptions", "cel", "enabled"]) == "false"
+           and leaf(m["agent-platform-connectivity"], ["kyvernoPolicies", "enabled"]) == "true",
+           "kyvernoPolicyExceptions.cel.enabled=false with the CEL API served did not reach connectivity (or touched kyvernoPolicies)")
+    polex = exceptions(render(connectivity, [*PARENT_REF, *ON, *fleet, "--set", "kyvernoPolicyExceptions.cel.enabled=false"]))
+    expect(polex.get("kyverno.io/v2", 0) > 0 and polex.get("policies.kyverno.io/v1", 0) == 0,
+           f"connectivity: kyvernoPolicyExceptions.cel.enabled=false with the CEL API served still renders policies.kyverno.io/v1 PolicyExceptions ({polex})")
+    m = helm_releases(render(meta, [*ci, *ON, *apis(["kyverno.io/v1"]), "--set", "kyvernoPolicyExceptions.cel.enabled=true"]))
+    expect(leaf(m["agent-platform-connectivity"], ["kyvernoPolicyExceptions", "cel", "enabled"]) == "true",
+           "kyvernoPolicyExceptions.cel.enabled=true without the CEL API served did not reach connectivity")
 
     # 4. The guard on an explicit disagreement still fires.
     render_fails(connectivity, [*PARENT_REF, *ON, *fleet, "--set", "kyvernoPolicies.enabled=false", "--set", "agentSandbox.podSecurity.enabled=true"],
@@ -380,6 +428,7 @@ def main(meta: str, connectivity: str) -> int:
         render_fails(chart, [*base, "--set", "networkPolicy.flavor=bogus"], "flavor", f"{chart}: bogus flavor")
         render_fails(chart, [*base, "--set", "kyvernoPolicies.enabled=maybe"], "kyvernoPolicies", f"{chart}: bogus kyvernoPolicies.enabled")
         render_fails(chart, [*base, "--set-string", "kyvernoPolicies.enabled=true"], "kyvernoPolicies", f"{chart}: string 'true' for kyvernoPolicies.enabled")
+        render_fails(chart, [*base, "--set", "kyvernoPolicyExceptions.cel.enabled=maybe"], "kyvernoPolicyExceptions", f"{chart}: bogus kyvernoPolicyExceptions.cel.enabled")
         render_fails(chart, [*base, "--set", "global.observability.metrics.serviceMonitor.enabled=maybe"], "serviceMonitor", f"{chart}: bogus serviceMonitor.enabled")
     return 0
 

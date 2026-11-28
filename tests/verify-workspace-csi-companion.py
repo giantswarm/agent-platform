@@ -89,7 +89,7 @@ import tempfile
 
 HELM = os.environ.get("HELM", "helm")
 NS = "agent-platform"
-POLEX_NS = "policy-exceptions"
+POLEX_NS = "kube-system"
 SUBSTRATE_NS = "ate-system"
 FIXTURES = {
     "efs": "tests/fixtures/workspaces-csi-companion-efs-values.yaml",
@@ -437,14 +437,25 @@ def meta_exceptions(name: str) -> None:
     kyverno = ["--namespace", NS, "-f", FIXTURES[name], "--set", "kyvernoPolicies.enabled=true", "--api-versions", "kyverno.io/v1"]
     for flags, release_ns in (([], NS), (["--set", "gitops.targetNamespace=agents"], "agents"),
                               (["--set", "components.agent-platform-connectivity.targetNamespace=wiring"], "wiring")):
-        docs = documents(helm(META, [*kyverno, *flags]))
+        render = helm(META, [*kyverno, *flags])
+        # Each kyverno.io/v2 exception has a policies.kyverno.io/v1 sibling of the same name (verify-kyverno holds its policies).
+        cel_docs = [d for d in render.split("\n---\n") if re.search(r"^apiVersion: policies\.kyverno\.io/", d, re.M)]
+        docs = documents("\n---\n".join(d for d in render.split("\n---\n") if d not in cel_docs))
+        cel = {k: d for k, d in documents("\n---\n".join(cel_docs)).items() if k[0] == "PolicyException"}
         found = {k: d for k, d in docs.items() if k[0] == "PolicyException"}
+        if set(cel) != set(found):
+            fail(f"{name}: the meta chart renders the policies.kyverno.io/v1 PolicyExceptions {sorted(cel)}, not the siblings of {sorted(found)}")
         if set(found) != {("PolicyException", CONTROLLER), ("PolicyException", NODE)}:
             fail(f"{name}: the meta chart renders the PolicyExceptions {sorted(found)}, not {CONTROLLER} and {NODE}")
         for obj, component in ((CONTROLLER, "controller"), (NODE, "node")):
             pe = found[("PolicyException", obj)]
             if not re.search(rf"^  namespace: {POLEX_NS}$", pe, re.M):
                 fail(f"{name}: PolicyException {obj} is not in {POLEX_NS}:\n{pe}")
+            sibling = cel.get(("PolicyException", obj), "")
+            if not re.search(rf"^  namespace: {POLEX_NS}$", sibling, re.M) or f"request.namespace == '{release_ns}'" not in sibling \
+                    or f"object.metadata.labels['app.kubernetes.io/component'] == '{component}'" not in sibling \
+                    or "object.metadata.labels['app.kubernetes.io/name'] == 'csi-companion'" not in sibling:
+                fail(f"{name}: the policies.kyverno.io/v1 PolicyException {obj} does not select the {component} by its labels in {release_ns}, in {POLEX_NS}:\n{sibling}")
             if f"        namespaces:\n        - {release_ns}\n        selector:\n          matchLabels:\n            app.kubernetes.io/name: csi-companion\n            app.kubernetes.io/component: {component}\n" not in pe:
                 fail(f"{name}: PolicyException {obj} does not select the {component} by its labels in {release_ns} ({' '.join(flags) or 'defaults'}):\n{pe}")
     if any(k[0] == "PolicyException" for k in documents(helm(META, [*kyverno, "--set", "kyvernoPolicies.enabled=false"]))):

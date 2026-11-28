@@ -49,6 +49,8 @@ import sys
 HELM = os.environ.get("HELM", "helm")
 FLEET_APIS = [
     "--api-versions", "kyverno.io/v1",
+    "--api-versions", "policies.kyverno.io/v1",
+    "--api-versions", "policies.kyverno.io/v1/PolicyException",
     "--api-versions", "cilium.io/v2",
     "--api-versions", "monitoring.coreos.com/v1",
     "--api-versions", "gateway.networking.k8s.io/v1",

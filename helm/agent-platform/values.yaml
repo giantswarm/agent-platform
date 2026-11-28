@@ -2686,7 +2686,7 @@ kyvernoPolicies:
   # `helm template` resolves to false unless the API is passed in); `true` /
   # `false` force them on or off.
   enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
-  policyExceptionNamespace: policy-exceptions
+  policyExceptionNamespace: kube-system
   # The Pod Security Standards policies the cluster's Kyverno enforces (Giant
   # Swarm: the upstream kyverno-policies chart with podSecurityStandard
   # restricted — the baseline and restricted ClusterPolicies under their
@@ -2711,6 +2711,26 @@ kyvernoPolicies:
     check-seccomp: restrict-seccomp
     check-seccomp-strict: restrict-seccomp-strict
     app-armor: restrict-apparmor-profiles
+
+# The chart's Kyverno PolicyExceptions come in two API groups: each
+# kyverno.io/v2 exception (which applies to ClusterPolicies only) has a
+# policies.kyverno.io/v1 sibling of the same name and match, which applies to
+# the CEL ValidatingPolicies of the same names and excepts each policy whole
+# (giantswarm/giantswarm#39201). Each API group renders where the cluster
+# serves it, in kyvernoPolicies.policyExceptionNamespace: the kyverno.io/v2
+# exceptions with kyvernoPolicies, the policies.kyverno.io/v1 ones with cel.enabled.
+kyvernoPolicyExceptions:
+  # -- Renders the PolicyExceptions, both API groups.
+  enabled: true
+  legacy:
+    # -- Renders the kyverno.io/v2 PolicyException, which applies to ClusterPolicies only. Will be used as a global switch in a future release.
+    enabled: true
+  cel:
+    # -- `auto` (default) follows kyvernoPolicies.enabled; left at `auto` there,
+    # renders the policies.kyverno.io/v1 PolicyExceptions when
+    # policies.kyverno.io/v1/PolicyException is served on the cluster, with or
+    # without kyverno.io/v1; `true` / `false` force them on or off.
+    enabled: auto  # @schema type: [boolean, string]; enum: [auto, true, false]
 
 # === Placement of the stateful singletons (giantswarm/agent-platform#439) ===
 # Where the platform's stateful pods run: muster (the MCP aggregator, two

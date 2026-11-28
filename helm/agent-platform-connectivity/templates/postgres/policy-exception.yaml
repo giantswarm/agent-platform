@@ -1,4 +1,4 @@
-{{- if and .Values.postgres.enabled (include "agent-platform.kyvernoPolicies" .) }}
+{{- if and .Values.postgres.enabled (include "agent-platform.kyvernoPolicies" .) .Values.kyvernoPolicyExceptions.enabled .Values.kyvernoPolicyExceptions.legacy.enabled }}
 {{- if and .Values.postgres.vector.enabled .Values.postgres.vector.extensionImage.reference }}
 {{- $ns := .Values.postgres.namespace | default .Release.Namespace }}
 {{- $clusterName := .Values.postgres.clusterName }}
@@ -25,6 +25,7 @@ metadata:
   namespace: {{ .Values.kyvernoPolicies.policyExceptionNamespace }}
   labels:
     {{- include "labels.common" . | nindent 4 }}
+    policy.giantswarm.io/migrated-to-cel: "true"
 spec:
   exceptions:
   {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "restricted-volumes")) | nindent 2 }}

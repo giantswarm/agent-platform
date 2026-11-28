@@ -727,7 +727,10 @@ platform needs:
   `substrate-podcertificate-controller` — naming
   exactly the restricted-PSS rules the workload violates, each with its
   `autogen-` copy, looked up in `kyvernoPolicies.rules` (rule → ClusterPolicy).
-  `make verify-kyverno` computes the violations and holds the lists.
+  `make verify-kyverno` computes the violations and holds the lists. Each has
+  a `policies.kyverno.io/v1` sibling (`templates/substrate/policy-exceptions-cel.yaml`)
+  with the same match, which excepts the same policies whole for their CEL
+  ValidatingPolicies.
 - **Network policies** (`templates/substrate/netpol.yaml`, both flavours):
   Substrate's hops and the actors' destinations on the egress gateway
   `atenet-egress`, where an actor's connections leave (muster, the kagent

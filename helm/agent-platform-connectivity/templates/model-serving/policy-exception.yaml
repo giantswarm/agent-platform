@@ -24,7 +24,7 @@ workers carry the same security context as a single-node model pod
 (giantswarm/model-manager#193): the first match below covers them, no
 capability is added.
 */ -}}
-{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.modelServing.policyException.enabled }}
+{{- if and (include "agent-platform.modelServing.enabled" .) (include "agent-platform.kyvernoPolicies" .) .Values.modelServing.policyException.enabled .Values.kyvernoPolicyExceptions.enabled .Values.kyvernoPolicyExceptions.legacy.enabled }}
 apiVersion: kyverno.io/v2
 kind: PolicyException
 metadata:
@@ -32,6 +32,7 @@ metadata:
   namespace: {{ .Values.kyvernoPolicies.policyExceptionNamespace }}
   labels:
     {{- include "agent-platform.modelServing.labels" . | nindent 4 }}
+    policy.giantswarm.io/migrated-to-cel: "true"
 spec:
   exceptions:
   {{- include "agent-platform.kyverno.exceptions" (dict "root" $ "rules" (list "require-drop-all" "privilege-escalation" "run-as-non-root" "check-seccomp-strict")) | nindent 2 }}

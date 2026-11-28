@@ -736,7 +736,10 @@ platform needs:
   `substrate-podcertificate-controller` — naming
   exactly the restricted-PSS rules the workload violates, each with its
   `autogen-` copy, looked up in `kyvernoPolicies.rules` (rule → ClusterPolicy).
-  `make verify-kyverno` computes the violations and holds the lists.
+  `make verify-kyverno` computes the violations and holds the lists. Each has
+  a `policies.kyverno.io/v1` sibling (`templates/substrate/policy-exceptions-cel.yaml`)
+  with the same match, which excepts the same policies whole for their CEL
+  ValidatingPolicies.
 - **Network policies** (`templates/substrate/netpol.yaml`, both flavours):
   Substrate's hops and the actors' destinations on the egress gateway
   `atenet-egress`, where an actor's connections leave (muster, the kagent
@@ -1292,7 +1295,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | networkPolicy.kubernetes.ipv6.enabled | bool | `false` |  |
 | networkPolicy.kubernetes.ipv6.excludedCIDRs | list | `[]` |  |
 | kyvernoPolicies.enabled | string | `"auto"` | `auto` (default) renders the Kyverno objects when kyverno.io/v1 is served on the cluster (an offline `helm template` resolves to false unless the API is passed in); `true` / `false` force them on or off. |
-| kyvernoPolicies.policyExceptionNamespace | string | `"policy-exceptions"` |  |
+| kyvernoPolicies.policyExceptionNamespace | string | `"kube-system"` |  |
 | kyvernoPolicies.rules.privileged-containers | string | `"disallow-privileged-containers"` |  |
 | kyvernoPolicies.rules.host-ports-none | string | `"disallow-host-ports"` |  |
 | kyvernoPolicies.rules.host-namespaces | string | `"disallow-host-namespaces"` |  |
@@ -1307,6 +1310,9 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kyvernoPolicies.rules.check-seccomp | string | `"restrict-seccomp"` |  |
 | kyvernoPolicies.rules.check-seccomp-strict | string | `"restrict-seccomp-strict"` |  |
 | kyvernoPolicies.rules.app-armor | string | `"restrict-apparmor-profiles"` |  |
+| kyvernoPolicyExceptions.enabled | bool | `true` | Renders the PolicyExceptions, both API groups. |
+| kyvernoPolicyExceptions.legacy.enabled | bool | `true` | Renders the kyverno.io/v2 PolicyException, which applies to ClusterPolicies only. Will be used as a global switch in a future release. |
+| kyvernoPolicyExceptions.cel.enabled | string | `"auto"` | `auto` (default) follows kyvernoPolicies.enabled; left at `auto` there, renders the policies.kyverno.io/v1 PolicyExceptions when policies.kyverno.io/v1/PolicyException is served on the cluster, with or without kyverno.io/v1; `true` / `false` force them on or off. |
 | hooks.kubectlImage.registry | string | `"gsoci.azurecr.io"` |  |
 | hooks.kubectlImage.repository | string | `"giantswarm/alpine-k8s"` |  |
 | hooks.kubectlImage.tag | string | `"1.37.2"` |  |

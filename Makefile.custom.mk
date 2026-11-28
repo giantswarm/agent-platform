@@ -35,11 +35,12 @@ VERIFY_TMP := $(patsubst %/,%,$(or $(TMPDIR),/tmp))
 # The API groups a Giant Swarm management cluster serves and the cluster-shape
 # knobs detect (kyvernoPolicies.enabled, networkPolicy.flavor,
 # global.observability.metrics.serviceMonitor.enabled, dicebear.route.enabled,
-# agentSandbox.podSecurity.enabled default to `auto`): Kyverno, Cilium,
+# agentSandbox.podSecurity.enabled, kyvernoPolicyExceptions.cel.enabled default
+# to `auto`): Kyverno (both its ClusterPolicy and its CEL API), Cilium,
 # prometheus-operator, Gateway API, Envoy Gateway. `helm template` alone serves
 # Helm's built-in set, i.e. renders the vanilla shape; the assertions below that
 # expect the fleet shape pass these. verify-auto covers the resolution itself.
-FLEET_APIS := --api-versions kyverno.io/v1 --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1 --api-versions autoscaling.k8s.io/v1
+FLEET_APIS := --api-versions kyverno.io/v1 --api-versions policies.kyverno.io/v1 --api-versions policies.kyverno.io/v1/PolicyException --api-versions cilium.io/v2 --api-versions monitoring.coreos.com/v1 --api-versions gateway.networking.k8s.io/v1 --api-versions gateway.envoyproxy.io/v1alpha1 --api-versions autoscaling.k8s.io/v1
 # parentRefs[0].name satisfies the ingress guard so a single guard is
 # isolated under test, and the fleet's API groups are served so the fleet shape
 # renders. Neither chart has subcharts anymore, so no `helm dependency build`
@@ -66,8 +67,8 @@ SUBSTRATE_ON := --set components.substrate.enabled=true --set components.substra
 # Agent CR, per-agent Deployment or config Secret is left to mutate) and no
 # PolicyException either (the v1alpha2 agent Deployments' seccomp exception went
 # with them; its successor is Substrate's substrate-workers). With Agent
-# Substrate on, its five PolicyExceptions join (verify-kyverno holds their rule
-# lists to the workloads).
+# Substrate on, its five PolicyExceptions join, each with its policies.kyverno.io/v1
+# sibling (verify-kyverno holds their rule lists to the workloads).
 KYVERNO_ALL := $(VM) --set components.kagent.enabled=true --set components.agent-sandbox.enabled=true
 # The golden render deliberately uses the kubernetes networkPolicy flavor: the
 # cilium flavor's CNPG section is now gated on postgres.enabled, the one intended
@@ -282,7 +283,7 @@ verify-modes: ## Assert the single ingress topology (agentgateway in front of mu
 	@if grep -q "kyverno.io" $(VERIFY_TMP)/vm-pe-none.out; then \
 		echo "FAIL: kyverno.io objects still render under kyvernoPolicies.enabled=false"; grep -n "kyverno.io" $(VERIFY_TMP)/vm-pe-none.out; exit 1; \
 	else echo "ok: no kyverno.io kinds"; fi
-	@echo "--> the default (kyverno) render carries one kyverno.io object — the agent-sandbox ClusterPolicy — no kagent Agent mutation and no app: kagent exception; Substrate on adds its five PolicyExceptions"
+	@echo "--> the default (kyverno) render carries one kyverno.io object — the agent-sandbox ClusterPolicy — no kagent Agent mutation and no app: kagent exception; Substrate on adds its five PolicyExceptions, each with its policies.kyverno.io/v1 sibling"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) >$(VERIFY_TMP)/vm-pe-kyverno.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-kyverno.out; exit 1; }
 	@if [ "$$(grep -c '^apiVersion: kyverno.io/' $(VERIFY_TMP)/vm-pe-kyverno.out)" != "1" ]; then \
 		echo "FAIL: expected 1 kyverno.io object, got $$(grep -c '^apiVersion: kyverno.io/' $(VERIFY_TMP)/vm-pe-kyverno.out)"; grep -n -A3 '^apiVersion: kyverno.io/' $(VERIFY_TMP)/vm-pe-kyverno.out; exit 1; \
@@ -294,9 +295,29 @@ verify-modes: ## Assert the single ingress topology (agentgateway in front of mu
 		echo "FAIL: the one ClusterPolicy must be the agent-sandbox pod-security policy"; exit 1; \
 	else echo "ok: 1 kyverno.io object, no Agent mutation, no app: kagent exception"; fi
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) $(SUBSTRATE_ON) >$(VERIFY_TMP)/vm-pe-substrate.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-substrate.out; exit 1; }
-	@if [ "$$(grep -c '^kind: PolicyException' $(VERIFY_TMP)/vm-pe-substrate.out)" != "5" ]; then \
-		echo "FAIL: expected the five Substrate PolicyExceptions, got $$(grep -c '^kind: PolicyException' $(VERIFY_TMP)/vm-pe-substrate.out)"; exit 1; \
-	else echo "ok: Substrate on renders substrate-atelet, substrate-workers, substrate-control-plane, substrate-podcertificate-controller, substrate-credential-provider"; fi
+	@if [ "$$(grep -c '^apiVersion: kyverno.io/v2$$' $(VERIFY_TMP)/vm-pe-substrate.out)" != "5" ] || [ "$$(grep -c '^apiVersion: policies.kyverno.io/v1$$' $(VERIFY_TMP)/vm-pe-substrate.out)" != "5" ] || [ "$$(grep -c '^kind: PolicyException' $(VERIFY_TMP)/vm-pe-substrate.out)" != "10" ]; then \
+		echo "FAIL: expected the five Substrate PolicyExceptions in kyverno.io/v2 and their five policies.kyverno.io/v1 siblings, got $$(grep -c '^kind: PolicyException' $(VERIFY_TMP)/vm-pe-substrate.out)"; exit 1; \
+	else echo "ok: Substrate on renders substrate-atelet, substrate-workers, substrate-control-plane, substrate-podcertificate-controller, substrate-credential-provider, each in kyverno.io/v2 and policies.kyverno.io/v1"; fi
+	@echo "--> kyvernoPolicyExceptions: legacy.enabled=false renders the policies.kyverno.io/v1 exceptions alone, enabled=false none; both in kyvernoPolicies.policyExceptionNamespace"
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) $(SUBSTRATE_ON) --set kyvernoPolicyExceptions.legacy.enabled=false >$(VERIFY_TMP)/vm-pe-cel.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-cel.out; exit 1; }
+	@$(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) $(SUBSTRATE_ON) --set kyvernoPolicyExceptions.enabled=false >$(VERIFY_TMP)/vm-pe-off.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-off.out; exit 1; }
+	@if [ "$$(grep -c '^apiVersion: kyverno.io/v2$$' $(VERIFY_TMP)/vm-pe-cel.out)" != "0" ] || [ "$$(grep -c '^apiVersion: policies.kyverno.io/v1$$' $(VERIFY_TMP)/vm-pe-cel.out)" != "5" ]; then \
+		echo "FAIL: legacy.enabled=false must render the five policies.kyverno.io/v1 exceptions and no kyverno.io/v2 one"; exit 1; \
+	elif grep -q '^kind: PolicyException' $(VERIFY_TMP)/vm-pe-off.out; then \
+		echo "FAIL: kyvernoPolicyExceptions.enabled=false still renders a PolicyException"; exit 1; \
+	elif [ "$$(grep -A3 '^kind: PolicyException' $(VERIFY_TMP)/vm-pe-substrate.out | grep -c '^  namespace: kube-system$$')" != "10" ]; then \
+		echo "FAIL: the PolicyExceptions are not all in kube-system, the default kyvernoPolicies.policyExceptionNamespace"; exit 1; \
+	else echo "ok: kyvernoPolicyExceptions toggles; every exception in kube-system"; fi
+	@echo "--> kyvernoPolicies.enabled=auto resolves per API group: the kyverno.io/v2 exceptions with kyverno.io/v1, the policies.kyverno.io/v1 ones with policies.kyverno.io/v1/PolicyException (connectivity: the five Substrate ones; meta: the CSI companion's two)"
+	@for case in "none::0:0" "kyverno:--api-versions kyverno.io/v1:1:0" "cel:--api-versions policies.kyverno.io/v1 --api-versions policies.kyverno.io/v1/PolicyException:0:1" "both:--api-versions kyverno.io/v1 --api-versions policies.kyverno.io/v1 --api-versions policies.kyverno.io/v1/PolicyException:1:1"; do \
+		name=$${case%%:*}; rest=$${case#*:}; apis=$${rest%%:*}; rest=$${rest#*:}; v2=$${rest%%:*}; cel=$${rest#*:}; \
+		$(HELM) template t $(CONNECTIVITY_DIR) $(filter-out $(FLEET_APIS),$(KYVERNO_ALL)) $(SUBSTRATE_ON) $$apis >$(VERIFY_TMP)/vm-pe-auto-$$name.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-auto-$$name.out; exit 1; }; \
+		$(HELM) template t $(CHART_DIR) -f $(CHART_DIR)/ci/ci-values.yaml --set components.flux.enabled=false --set muster.muster.credentialProvider.releasable.github=https://github.com/apps/ci-agents --namespace agent-platform -f tests/fixtures/workspaces-csi-companion-efs-values.yaml $$apis >$(VERIFY_TMP)/vm-pe-auto-meta-$$name.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-auto-meta-$$name.out; exit 1; }; \
+		got="$$(grep -c '^apiVersion: kyverno.io/v2$$' $(VERIFY_TMP)/vm-pe-auto-$$name.out) $$(grep -c '^apiVersion: policies.kyverno.io/v1$$' $(VERIFY_TMP)/vm-pe-auto-$$name.out) $$(grep -c '^apiVersion: kyverno.io/v2$$' $(VERIFY_TMP)/vm-pe-auto-meta-$$name.out) $$(grep -c '^apiVersion: policies.kyverno.io/v1$$' $(VERIFY_TMP)/vm-pe-auto-meta-$$name.out)"; \
+		want="$$((v2 * 5)) $$((cel * 5)) $$((v2 * 2)) $$((cel * 2))"; \
+		if [ "$$got" != "$$want" ]; then echo "FAIL: auto, $$name served: kyverno.io/v2, policies.kyverno.io/v1 exceptions (connectivity, meta) = $$got, want $$want"; exit 1; fi; \
+		echo "ok: auto, $$name served: $$got"; \
+	done
 	@echo "--> the CNPG ImageVolume exception renders only with an extension image"
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true >$(VERIFY_TMP)/vm-pe-noimg.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-noimg.out; exit 1; }
 	@if grep -q "image-volume" $(VERIFY_TMP)/vm-pe-noimg.out; then \
@@ -305,9 +326,11 @@ verify-modes: ## Assert the single ingress topology (agentgateway in front of mu
 	@$(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) >$(VERIFY_TMP)/vm-pe-img.out 2>&1 || { cat $(VERIFY_TMP)/vm-pe-img.out; exit 1; }
 	@if ! grep -q "name: kagent-pg-image-volume" $(VERIFY_TMP)/vm-pe-img.out; then \
 		echo "FAIL: no volume-types exception for the ImageVolume pgvector path; CNPG instance pods would be denied admission"; exit 1; \
-	elif [ "$$(python3 tests/pick-doc.py $(VERIFY_TMP)/vm-pe-img.out PolicyException kagent-pg-image-volume | sed -n '/matchExpressions:/,$$p' | tr -s ' \n' ' ')" != " matchExpressions: - key: cnpg.io/cluster operator: In values: - kagent-pg - kagent-pg-restore --- " ]; then \
+	elif [ "$$(python3 tests/pick-doc.py $(VERIFY_TMP)/vm-pe-img.out PolicyException kagent-pg-image-volume | awk 'BEGIN{RS="---\n"; ORS="---\n"} /(^|\n)apiVersion: kyverno.io\/v2\n/' | sed -n '/matchExpressions:/,$$p' | tr -s ' \n' ' ')" != " matchExpressions: - key: cnpg.io/cluster operator: In values: - kagent-pg - kagent-pg-restore --- " ]; then \
 		echo "FAIL: the exception does not select exactly cnpg.io/cluster in (kagent-pg, kagent-pg-restore), the Cluster and its documented restore Cluster"; exit 1; \
-	else echo "ok: ImageVolume exception selects cnpg.io/cluster kagent-pg and kagent-pg-restore"; fi
+	elif ! python3 tests/pick-doc.py $(VERIFY_TMP)/vm-pe-img.out PolicyException kagent-pg-image-volume | grep -qF "object.metadata.labels['cnpg.io/cluster'] in ['kagent-pg', 'kagent-pg-restore']"; then \
+		echo "FAIL: the policies.kyverno.io/v1 exception does not select exactly cnpg.io/cluster in (kagent-pg, kagent-pg-restore)"; exit 1; \
+	else echo "ok: ImageVolume exception (both API groups) selects cnpg.io/cluster kagent-pg and kagent-pg-restore"; fi
 	@echo "--> a rule with no ClusterPolicy in kyvernoPolicies.rules must fail (an exception naming no policy matches nothing)"
 	@if $(HELM) template t $(CONNECTIVITY_DIR) $(KYVERNO_ALL) --set postgres.enabled=true --set postgres.vector.enabled=true --set postgres.vector.extensionImage.reference=$(PGVECTOR_IMG) --set kyvernoPolicies.rules.restricted-volumes=null >$(VERIFY_TMP)/vm-pe-rule.out 2>&1; then \
 		echo "FAIL: the unknown-rule guard did not fire"; exit 1; \
@@ -2917,7 +2940,7 @@ verify-postgres: ## Assert the postgres.backup wiring (plugin ObjectStore + Sche
 	@echo "ok: $@"
 
 .PHONY: verify-kyverno
-verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every Substrate workload — the substrate chart's Deployments and DaemonSet at the pinned build, rendered with the values the meta chart forwards, and the worker pod ate-controller renders for a WorkerPool — is matched by an exception that names exactly the restricted-PSS rules its pod spec violates (computed here), each with its autogen copy; nothing else is excepted; no exception selects app: kagent; the workspaces' CSI companion (giantswarm/agent-platform#889), rendered per preset from its fixture, is held to csi-companion-controller and csi-companion-node the same way, none without the block. Network: gsoci.azurecr.io (the substrate chart); needs PyYAML.
+verify-kyverno: ## Assert the Kyverno PolicyExceptions of Agent Substrate: every Substrate workload — the substrate chart's Deployments and DaemonSet at the pinned build, rendered with the values the meta chart forwards, and the worker pod ate-controller renders for a WorkerPool — is matched by an exception that names exactly the restricted-PSS rules its pod spec violates (computed here), each with its autogen copy; nothing else is excepted; each has a policies.kyverno.io/v1 sibling of the same name referencing exactly its policies, and no CEL exception stands alone; no exception selects app: kagent; the workspaces' CSI companion (giantswarm/agent-platform#889), rendered per preset from its fixture, is held to csi-companion-controller and csi-companion-node the same way, none without the block. Network: gsoci.azurecr.io (the substrate chart); needs PyYAML.
 	@echo "====> $@ ($(CHART_DIR), $(CONNECTIVITY_DIR))"
 	@python3 tests/verify-kyverno.py $(CHART_DIR) $(CONNECTIVITY_DIR)
 	@echo "ok: $@"
