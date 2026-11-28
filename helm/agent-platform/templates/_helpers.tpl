@@ -5483,7 +5483,7 @@ client, backstage.signInHandoff is on and muster is at least
 agent-platform.muster.trustedClientsFloor, and none below it (an earlier
 muster issues handoff tickets without the workload review and the sign-in
 confirmation). An own list under either name (handoffClients, the earlier
-one) stands, but every entry must be the portal's dedicated
+one) stands from that floor (below it a non-empty one fails the render), and every entry must be the portal's dedicated
 client: one naming the platform's shared client (global.identity.clientId,
 else muster's login client) fails the render (every holder of such a token,
 muster, an agent's delegation, a CLI, could then approve without the page's
@@ -5504,6 +5504,9 @@ Usage: include "agent-platform.muster.approval" $root | fromJson
 {{- end -}}
 {{- end -}}
 {{- range $key := list "trustedClients" "handoffClients" -}}
+{{- if and (get $out $key | default list) (not (include "agent-platform.componentFloorAtLeast" (dict "root" $ "name" "muster" "version" (include "agent-platform.muster.trustedClientsFloor" $)))) -}}
+{{- fail (printf "muster.muster.approval.%s is set, but muster is below agent-platform.muster.trustedClientsFloor (or the floor is unset): an earlier muster issues handoff tickets without the workload review and the sign-in confirmation, so it must trust no client; raise components.muster.versionRange or drop the list" $key) -}}
+{{- end -}}
 {{- range $client := (get $out $key | default list) -}}
 {{- if and $portal.platformClientId (eq (toString $client) $portal.platformClientId) -}}
 {{- fail (printf "muster.muster.approval.%s lists %q, the platform's shared OAuth client: every holder of a token of that client (muster itself, agents acting for a person, CLIs) could approve a person's requests without muster's sign-in; list only the portal's own client (backstage.oidcClientId)" $key $portal.platformClientId) -}}

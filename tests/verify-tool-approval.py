@@ -1014,6 +1014,15 @@ def check_handoff_clients() -> None:
         err = render(META_DIR, META + ["--set", trusted, *PORTAL_CLIENT, *args], expect_fail=True)
         if f'{key} lists "{client}", which is not the portal\'s own OAuth client' not in err:
             fail(f"{args}: a {key} list naming {client} must fail the render:\n{err}")
+    # Below the floor an explicit list fails too (it would trust a client of a
+    # muster that issues handoff tickets without the workload review).
+    for key in ("trustedClients", "handoffClients"):
+        for floor in (handoff, FLOOR_RANGE):
+            err = render(META_DIR, META + ["--set", floor, *PORTAL_CLIENT, *dedicated, "--set", f"muster.muster.approval.{key}[0]=platform-portal"], expect_fail=True)
+            if f"muster.muster.approval.{key} is set, but muster is below agent-platform.muster.trustedClientsFloor" not in err:
+                fail(f"an explicit {key} list below the trusted-clients floor must fail the render:\n{err}")
+    if clients(dedicated + ["--set-json", "muster.muster.approval.trustedClients=[]"], handoff):
+        fail("an own empty trustedClients list below the floor must render no trusted client")
     rel = doc(render_meta(["--set", trusted, *PORTAL_CLIENT, *dedicated]), "HelmRelease", "backstage") or ""
     if "key: portal-dex-client-secret" not in rel or "optional: true" not in rel:
         fail("the backstage release must mount the portal's own client secret (portal-dex-client-secret, optional)")
