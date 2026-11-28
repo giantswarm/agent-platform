@@ -1403,7 +1403,7 @@ The kagent block is open in the schema, so the template refuses a key under `kag
 | kagent.harness.snapshotStore.crossplane.capz.workloadIdentity.providerKubernetes.serviceAccount.namespace | string | `"crossplane"` |  |
 | kagent.harness.snapshotStore.s3proxy.enabled | bool | `false` |  |
 | kagent.harness.snapshotStore.s3proxy.image.repository | string | `"gsoci.azurecr.io/giantswarm/s3proxy"` |  |
-| kagent.harness.snapshotStore.s3proxy.image.tag | string | `"4.1.1"` |  |
+| kagent.harness.snapshotStore.s3proxy.image.tag | string | `"4.2.0"` |  |
 | kagent.harness.snapshotStore.s3proxy.replicas | int | `2` |  |
 | kagent.harness.snapshotStore.s3proxy.javaOpts | string | `"-XX:MaxRAMPercentage=70"` |  |
 | kagent.harness.snapshotStore.s3proxy.resources.requests.cpu | string | `"250m"` |  |

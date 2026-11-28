@@ -789,7 +789,7 @@ spec:
             enabled: false
             image:
               repository: gsoci.azurecr.io/giantswarm/s3proxy
-              tag: 4.1.1
+              tag: 4.2.0
             javaOpts: -XX:MaxRAMPercentage=70
             replicas: 2
             resources:
