@@ -1045,7 +1045,12 @@ components:  # @schema additionalProperties: true
     # person, create-only and without a message (giantswarm/klaus-gateway#446),
     # which agent-manager's 1.13.0 floor serves, and takes
     # workspaces.toolsPrefix (agent-platform.klausGateway.workspacesFloor).
-    versionRange: ">=4.11.0 <5.0.0"
+    # The floor is 4.18.10: agent-manager 4 starts an organization's Session
+    # only by the organization's name, which klaus-gateway sends from 4.18.10
+    # on (giantswarm/klaus-gateway#616); an earlier gateway sends the
+    # organization namespace, and the first Slack message to an organization's
+    # agent is answered invalid_request.
+    versionRange: ">=4.18.10 <5.0.0"
     valuesFrom: klausGateway
     # klausGateway.observability.enabled is this chart's knob (auto | true |
     # false, resolved by agent-platform.shape.apply); the klaus-gateway chart's
@@ -5939,7 +5944,8 @@ musterMcpServerViewers: null  # @schema type: [array, null]; item: object; itemR
 # components.agent-manager.versionRange must be 2.20.0 or later). Credential
 # forms use an explicit agent-manager.credentials.uiURL template containing
 # {operation} and {namespace} ({namespace}, and no {parent} or {organization},
-# is required without this switch, with a manager floor of 3.1.0-rc.11);
+# is required without this switch, with a manager floor of 3.1.0-rc.11; with
+# it, {parent} is refused and {organization} or {namespace} names the target);
 # credentials and github.tokenExchange need a manager floor of
 # 2.22.0 or later. With components.muster on, muster serves
 # the MCPServers of the namespaces labelled

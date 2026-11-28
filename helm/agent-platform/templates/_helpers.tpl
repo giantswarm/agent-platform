@@ -4712,6 +4712,9 @@ Usage: include "agent-platform.agentManager.organizations" $root | fromJson
 {{- if and (not $on) (or (not (has "namespace" $variables)) (has "parent" $variables) (has "organization" $variables)) -}}
 {{- fail "agent-manager.credentials.uiURL needs a {namespace} expression and no {parent} or {organization} without agentPlatformOrganizations.enabled: installation model links name the kagent namespace, and agent-manager refuses any other template" -}}
 {{- end -}}
+{{- if and $on (has "parent" $variables) -}}
+{{- fail "agent-manager.credentials.uiURL must not have a {parent} expression with agentPlatformOrganizations.enabled: use {organization} or {namespace}. This chart's organizations have no parent namespace, and agent-manager 4 refuses {parent}" -}}
+{{- end -}}
 {{- end -}}
 {{- $own := dig "tenants" dict $am | default dict -}}
 {{- range $k, $_ := $own -}}

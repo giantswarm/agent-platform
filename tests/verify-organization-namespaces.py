@@ -267,9 +267,14 @@ def check_meta(chart):
     for template in ("https://portal.example.com/c/{operation}{?namespace}", "https://portal.example.com/c{/namespace,operation}"):
         r = meta(chart, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
         expect(r.returncode == 0, f"off, a credential form naming namespace in another RFC 6570 expression renders ({template})")
-    organization_only = "https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}"
+    organization_only = "https://portal.example.com/organizations/test/{organization}/credentials/{operation}"
     r = meta(chart, *ON, "--set-literal", f"agent-manager.credentials.uiURL={organization_only}")
     expect(r.returncode == 0, "on, an organization-only credential form without {namespace} renders")
+    for template in ("https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}",
+                     "https://portal.example.com/x/{namespace}/{operation}{?parent}"):
+        refused = meta(chart, *ON, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
+        expect(refused.returncode != 0 and "agent-manager.credentials.uiURL must not have a {parent} expression with agentPlatformOrganizations.enabled: use {organization} or {namespace}" in refused.stderr,
+               f"on, a credential form with {{parent}} is refused, naming {{organization}} and {{namespace}} ({template})")
     for range_ in (">=3.0.0 <4.0.0", "3.0.0", ">=3.1.0-rc.10 <4.0.0-0"):
         refused = meta(chart, *ON, *installation_forms, "--set", f"components.agent-manager.versionRange={range_}")
         expect(refused.returncode != 0 and "agent-manager.credentials.uiURL with a {namespace} expression needs components.agent-manager.versionRange with a floor of 3.1.0-rc.11" in refused.stderr,
@@ -281,7 +286,7 @@ def check_meta(chart):
     expect(r.returncode == 0, "on, an organization-only credential form keeps any agent-manager floor")
     for switch, template in (([], "https://portal.example.com/c/{namespace}/{operation}{#namespace}"),
                              ([], "https://portal.example.com/c/{namespace}/{operation}#form"),
-                             (ON, "https://portal.example.com/organizations/test/{parent}/{organization}/credentials/{operation}{#x}")):
+                             (ON, "https://portal.example.com/organizations/test/{organization}/credentials/{operation}{#x}")):
         refused = meta(chart, *switch, *installation_forms, "--set-literal", f"agent-manager.credentials.uiURL={template}")
         expect(refused.returncode != 0 and "agent-manager.credentials.uiURL must not contain #" in refused.stderr,
                f"a credential form with a fragment is refused ({template})")
