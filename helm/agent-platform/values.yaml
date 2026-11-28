@@ -1323,7 +1323,12 @@ components:  # @schema additionalProperties: true
     # From 0.26.10 the Dex client follows HTTPS_PROXY and NO_PROXY; the chart takes
     # observability.otel since 0.24.0 (giantswarm/giantswarm#36711).
     # mcp-oauth v1.15.0 permits private issuer JWKS without a blanket allowance.
-    versionRange: ">=0.27.0-rc.1 <0.28.0-0"
+    # 0.29.0's guest image runs only its own signed code under IPE (from 0.28.0)
+    # and pods only from container layers signed with a trusted key; vm-manager
+    # writes the image certificate the artifact carries into each VM's UEFI db,
+    # and create_vm's layer_certificates and cni_version are optional
+    # (giantswarm/vm-manager#266, #286). The chart's values are those of 0.27.
+    versionRange: ">=0.29.0 <0.30.0"
     valuesFrom: vm-manager
     enabled: false
     # Creates a muster.giantswarm.io/MCPServer CR (CRD owned by the muster
