@@ -53,7 +53,7 @@ components:
   agent-manager:                 { versionRange: "3.5.8" }
   # The default agent (components.default-agent): the agent chart.
   default-agent:       { versionRange: "2.6.0" }
-  vm-manager:                    { versionRange: "0.27.0-rc.1" }
+  vm-manager:                    { versionRange: "0.29.0" }
   # The cluster write surface (components.cluster-manager, off by default).
   cluster-manager:               { versionRange: "0.39.0-rc.1" }
   # The workspace surface (components.workspace-manager, follows

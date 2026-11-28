@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (vm-manager 0.29: guests run only signed code, pods only from signed layers)
+
+`components.vm-manager.versionRange` selects `>=0.29.0 <0.30.0` (the component is off by default). The chart's values are unchanged since 0.27. From 0.28.0 the guest image runs only code from its own signed dm-verity root and sysexts under IPE (giantswarm/vm-manager#266); vm-manager writes the image certificate the guest image artifact carries into each VM's UEFI db, so nothing is configured for it. From 0.29.0 a Kubernetes node runs pods only from container layers whose dm-verity root hash is signed with a trusted key (giantswarm/vm-manager#286). `create_vm` takes two optional arguments: `layer_certificates`, the installation's PEM certificates that layers may be signed with, and `cni_version`, the CNI sysext (default: the newest Cilium the image offers). Release guest images enroll no Giant Swarm layer certificate yet (giantswarm/architect-orb#1084), so a release node trusts only the certificates passed in `layer_certificates`.
+
+### Operator action
+
+- With vm-manager on: the upgrade rolls its pod, which stops the VMs in it; their records and disks stay on the state claim. A Kubernetes node created on 0.29 pulls only images whose layers are signed with a key in `layer_certificates`: sign the images it runs (`vm-manager layers sign`, giantswarm/vm-manager `docs/layer-signing.md`) and pass their certificates to `create_vm`.
+- An installation that pins the BOM: move `vm-manager` to `0.29.0`.
+
 ## \<current\> → \<next\> (no `{parent}` in the credential form URL, and klaus-gateway 4.18.10 as the floor)
 
 With `agentPlatformOrganizations.enabled`, the render refuses `agent-manager.credentials.uiURL` with a `{parent}` expression, as agent-manager 4 does (giantswarm/agent-manager#475). Without it, the render already refused `{parent}`. `components.klaus-gateway.versionRange` selects `>=4.18.10 <5.0.0`: agent-manager 4 starts an organization's Session only by the organization's name, which klaus-gateway sends from 4.18.10 (giantswarm/klaus-gateway#616). The BOM pins `klaus-gateway` 4.18.10.

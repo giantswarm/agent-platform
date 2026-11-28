@@ -594,7 +594,7 @@ The map is merged into each component's own `nodeSelector` (`muster.nodeSelector
 | components.default-agent.dependsOn[0] | string | `"kagent"` |  |
 | components.vm-manager.chart | string | `"vm-manager"` |  |
 | components.vm-manager.repository | string | `"oci://gsoci.azurecr.io/charts/giantswarm"` |  |
-| components.vm-manager.versionRange | string | `">=0.27.0-rc.1 <0.28.0-0"` |  |
+| components.vm-manager.versionRange | string | `">=0.29.0 <0.30.0"` |  |
 | components.vm-manager.valuesFrom | string | `"vm-manager"` |  |
 | components.vm-manager.enabled | bool | `false` |  |
 | components.vm-manager.dependsOn[0] | string | `"muster"` |  |

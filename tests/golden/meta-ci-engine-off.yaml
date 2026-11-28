@@ -3716,5 +3716,4 @@ spec:
     mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
     operation: copy
   ref:
-    semver: ">=0.27.0-rc.1 <0.28.0-0"
-    semverFilter: "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
+    semver: ">=0.29.0 <0.30.0"
