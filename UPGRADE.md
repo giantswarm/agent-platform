@@ -15,6 +15,15 @@ Every component ships its own CRDs and upgrades them with its release; there is 
 
 A CRD version change that needs more than an apply (a stored version dropped, as with kagent's `v1alpha2`) has its own entry below, with the hook that does it.
 
+## \<current\> → \<next\> (no `{parent}` in the credential form URL, and klaus-gateway 4.18.10 as the floor)
+
+With `agentPlatformOrganizations.enabled`, the render refuses `agent-manager.credentials.uiURL` with a `{parent}` expression, as agent-manager 4 does (giantswarm/agent-manager#475). Without it, the render already refused `{parent}`. `components.klaus-gateway.versionRange` selects `>=4.18.10 <5.0.0`: agent-manager 4 starts an organization's Session only by the organization's name, which klaus-gateway sends from 4.18.10 (giantswarm/klaus-gateway#616). The BOM pins `klaus-gateway` 4.18.10.
+
+### Operator action
+
+- With `agentPlatformOrganizations.enabled`, remove `{parent}` from `agent-manager.credentials.uiURL` and name the target with `{organization}` or `{namespace}`.
+- An installation that pins the BOM: move `klaus-gateway` to `4.18.10` or later.
+
 ## \<current\> → \<next\> (agent-platform-operator 0.5 and agent-manager 4 for the Organization kind)
 
 `components.agent-platform-operator.versionRange` selects `>=0.4.0 <0.6.0` and `components.agent-manager.versionRange` selects `>=3.5.8 <5.0.0`. agent-platform-operator 0.5 reconciles the `Organization` kind (giantswarm/agent-platform-operator#69) and ships no CRD. agent-manager 4 serves the organization tools by the organization's name (giantswarm/agent-manager#475). This chart's organization policies and skills are written for these two releases.
@@ -25,7 +34,7 @@ While 0.5.0 and 4.0.0 are release candidates, an installation with `gitops.prere
 
 - agent-manager 4 refuses `{parent}` in `agent-manager.credentials.uiURL`. Remove `{parent}` from the template before agent-manager 4 runs, or agent-manager's release fails to render.
 - With `agentPlatformOrganizations.enabled`, run agent-platform-operator 0.5.x, agent-manager 4.x and klaus-gateway 4.18.10 or later with this chart: agent-manager 4 starts an organization's Session only by the organization's name, which klaus-gateway sends from 4.18.10 (giantswarm/klaus-gateway#616). The Dev Portal's organization pages need the portal release of giantswarm/backstage#3651. On `gitops.prereleases: false`, wait for 0.5.0 and 4.0.0 before this chart release.
-- An installation that pins the BOM and has `agentPlatformOrganizations.enabled`: pin `agent-platform-operator` to a 0.5.x release, `agent-manager` to a 4.x release and `klaus-gateway` to 4.18.10 or later. The BOM's own pins stay at the floors (0.4.0, 3.5.8 and 4.11.0) until the floors move (giantswarm/agent-platform#1510).
+- An installation that pins the BOM and has `agentPlatformOrganizations.enabled`: pin `agent-platform-operator` to a 0.5.x release, `agent-manager` to a 4.x release and `klaus-gateway` to 4.18.10 or later. The BOM's own pins of the first two stay at the floors (0.4.0 and 3.5.8) until the floors move (giantswarm/agent-platform#1510).
 
 ## \<current\> → \<next\> (agent-manager follows stable releases by default)
 
