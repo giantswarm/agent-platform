@@ -162,6 +162,10 @@ for r in ["~3.2", "3.1.x", ">=3.1.0 <3.6.0", "3.x", V3]:
         refused(f"{r} below the floors", "admits a release below", "--set", f"agent-manager.agentChart.semver={r}")
 refused("a pre-release alone", "admits no release version", "--set", "agent-manager.agentChart.semver=3.0.0-rc.6")
 refused(">=3.0.0 spans majors as for migrate", "admits agent chart majors 3, 4, 5, 6, 7, …", "--set", "agent-manager.agentChart.semver=>=3.0.0")
+# QB-07: majors past the probes (99) are refused as unsupported, as
+# agent-manager's migrate and the operator refuse them, never read short.
+for r in [">=100.0.0 <102.0.0", "100.x", ">=99.5.0", "^2.0.0 || 150.0.0"]:
+    refused(f"{r} past major 99", "admits an agent chart major of 100 or more", "--set", f"agent-manager.agentChart.semver={r}")
 refused("range spanning 2.x and 3.x", "admits agent chart majors 2, 3", "--set", "agent-manager.agentChart.semver=>=2.6.0")
 refused("3.x with agent-manager off: the operator still gets the range", "keep the 2.x line" if unset else "admits a release below",
         "--set", "components.agent-manager.enabled=false", "--set", f"agent-manager.agentChart.semver={V3}")

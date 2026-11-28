@@ -2285,6 +2285,13 @@ x-ranges, carets, tildes and bounds all count. A probe counts only when the
 range admits it. A range that admits only pre-releases admits no major.
 Release versions only, as Flux's semver admits them without a pre-release
 comparator.
+Supported grammar, the same in agent-manager's migrate and the
+agent-platform-operator: a Masterminds semver range as Flux reads it
+(x-ranges, carets, tildes, comparisons, hyphen ranges, `||` alternatives)
+over release majors 0-99. A range that admits a version of major 100 or more
+is unsupported (agent-platform.agentChart.beyondProbes) and refused by
+agent-platform.validateAgentChartLine: the probes stop at 99. These are
+finite probes, not a general semver intersection.
 Usage: include "agent-platform.agentChart.majors" "<range>" | fromJsonArray
 */}}
 {{- define "agent-platform.agentChart.majors" -}}
@@ -2310,6 +2317,35 @@ Usage: include "agent-platform.agentChart.majors" "<range>" | fromJsonArray
 {{- if $hit -}}{{- $out = append $out (toString $m) -}}{{- end -}}
 {{- end -}}
 {{- $out | toJson -}}
+{{- end -}}
+
+{{/*
+"true" when a range admits a version of a major past the probes of
+agent-platform.agentChart.majors (99): a version of major 100 or more it names
+(with its next patch and minor), or any version of major 100 (first and late
+version of minors 0-199, and a late minor); empty otherwise. Read as
+agent-manager's migrate and the agent-platform-operator read it (beyondProbes).
+Usage: include "agent-platform.agentChart.beyondProbes" "<range>"
+*/}}
+{{- define "agent-platform.agentChart.beyondProbes" -}}
+{{- $range := toString . -}}
+{{- $hit := false -}}
+{{- range $lit := regexFindAll "[0-9]+(\\.[0-9]+)?(\\.[0-9]+)?" $range -1 -}}
+{{- $p := splitList "." $lit -}}
+{{- $maj := atoi (index $p 0) -}}
+{{- if gt $maj 99 -}}
+{{- $min := 0 -}}{{- if gt (len $p) 1 -}}{{- $min = atoi (index $p 1) -}}{{- end -}}
+{{- $pat := 0 -}}{{- if gt (len $p) 2 -}}{{- $pat = atoi (index $p 2) -}}{{- end -}}
+{{- range $v := list (printf "%d.%d.%d" $maj $min $pat) (printf "%d.%d.%d" $maj $min (add1 $pat)) (printf "%d.%d.0" $maj (add1 $min)) -}}
+{{- if semverCompare $range $v -}}{{- $hit = true -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if or (semverCompare $range "100.0.0") (semverCompare $range "100.999999.999999") -}}{{- $hit = true -}}{{- end -}}
+{{- range $n := until 200 -}}
+{{- if and (not $hit) (or (semverCompare $range (printf "100.%d.0" $n)) (semverCompare $range (printf "100.%d.999999" $n))) -}}{{- $hit = true -}}{{- end -}}
+{{- end -}}
+{{- if $hit -}}true{{- end -}}
 {{- end -}}
 
 {{/*
@@ -2356,6 +2392,9 @@ the key and the fix.
 {{- fail (printf "agent-manager.agentChart.semver %q is not a semver range: name the line as a range of one major (\">=2.6.0 <3.0.0\")" $range) -}}
 {{- end -}}
 {{- $majors := include "agent-platform.agentChart.majors" $range | fromJsonArray -}}
+{{- if and (le (len $majors) 1) (include "agent-platform.agentChart.beyondProbes" $range) -}}
+{{- fail (printf "agent-manager.agentChart.semver %q admits an agent chart major of 100 or more, which this chart, agent-manager's migrate and the agent-platform-operator do not read: name the line as a range of one major below 100 (\">=3.0.0 <4.0.0\")" $range) -}}
+{{- end -}}
 {{- if not $majors -}}
 {{- fail (printf "agent-manager.agentChart.semver %q admits no release version of the agent chart: name the line as a range of one major (\">=2.6.0 <3.0.0\"; \">=3.0.0 <4.0.0\" once it may move), never a pre-release alone" $range) -}}
 {{- end -}}
